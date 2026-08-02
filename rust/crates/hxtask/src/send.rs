@@ -52,8 +52,8 @@ extern "C" {
     fn proto_trace_send_chunk(ty: u16, len: u16, data: *const u8);
     fn proto_trace_send_end();
     /// hxnet_bridge.c — the new-path send gate + frame enqueue.
-    fn hx_bridge_is_installed() -> glib::ffi::gboolean;
-    fn hx_bridge_send_frame(data: *const u8, len: u32) -> c_int;
+    fn hx_bridge_is_installed(htlc: *const HtlcConn) -> glib::ffi::gboolean;
+    fn hx_bridge_send_frame(htlc: *mut HtlcConn, data: *const u8, len: u32) -> c_int;
     /// gtkhx_log.c — status line, used to report a send failure before closing.
     fn hx_printf_prefix(
         htlc: *mut HtlcConn,
@@ -169,8 +169,10 @@ pub unsafe extern "C" fn hlwrite_chunks(
 
     // When the bridge is installed, hxnet's transform stack handles the
     // negotiated cipher / compression, so we ship PLAINTEXT bytes.
-    if hx_bridge_is_installed() != 0 {
-        let rc = hx_bridge_send_frame(frame.as_ptr(), frame.len() as u32);
+    // Per-connection: the transport handle lives on the connection, so this
+    // asks whether *this* one can send rather than whether any connection can.
+    if hx_bridge_is_installed(htlc) != 0 {
+        let rc = hx_bridge_send_frame(htlc, frame.as_ptr(), frame.len() as u32);
         if rc != 0 {
             // hxnet refused the send (channel full / actor exited / bug /
             // uninstalled mid-call). In every case the connection is
@@ -222,6 +224,10 @@ mod doubles {
         pub trace_chunks: usize,
         pub send_calls: u32,
         pub last_send_len: u32,
+        /// Which connection the send was routed to. The transport handle is
+        /// per-connection now, so "did it reach the bridge" is only half the
+        /// question — the other half is whether it reached the right one.
+        pub last_send_htlc: *mut HtlcConn,
         pub close_calls: u32,
     }
 
@@ -262,14 +268,15 @@ mod doubles {
         ENV.with(|e| e.borrow_mut().trace_chunks += 1);
     }
     pub unsafe fn proto_trace_send_end() {}
-    pub unsafe fn hx_bridge_is_installed() -> glib::ffi::gboolean {
+    pub unsafe fn hx_bridge_is_installed(_htlc: *const HtlcConn) -> glib::ffi::gboolean {
         ENV.with(|e| if e.borrow().installed { 1 } else { 0 })
     }
-    pub unsafe fn hx_bridge_send_frame(_data: *const u8, len: u32) -> c_int {
+    pub unsafe fn hx_bridge_send_frame(htlc: *mut HtlcConn, _data: *const u8, len: u32) -> c_int {
         ENV.with(|e| {
             let mut env = e.borrow_mut();
             env.send_calls += 1;
             env.last_send_len = len;
+            env.last_send_htlc = htlc;
             env.send_rc
         })
     }
@@ -382,6 +389,9 @@ mod tests {
             assert_eq!(env.send_calls, 1);
             // real pack produced a non-empty frame (22-byte hdr + chunk)
             assert!(env.last_send_len > 22);
+            // and it went out on the connection it was asked for, not
+            // whichever one happened to be installed last
+            assert_eq!(env.last_send_htlc, fake_htlc());
             assert_eq!(env.close_calls, 0);
             // counter advanced by exactly one
             assert_eq!(env.trans, 43);

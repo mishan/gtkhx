@@ -159,21 +159,25 @@ extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
     guint16 caps, guint32 trans);
 
 /*
- * TRUE when an hxnet connection is currently installed.
- * Production code uses this as the gate between the new
- * (hxnet) and legacy (GIOStream) read / write paths.
+ * TRUE when `htlc` has a transport installed.
+ *
+ * Per-connection, because every caller is asking about a specific
+ * connection: "may I send on this one", "is this one's transport still up".
+ * It used to take no argument and answer for the process, which at one
+ * connection was the same question and at two would not be.
  */
-extern gboolean hx_bridge_is_installed (void);
+extern gboolean hx_bridge_is_installed (const struct htlc_conn *htlc);
 
 /*
  * Opaque HOPE AEAD material handle for the installed orchestrated
- * connection, or NULL (no connection, or no ChaCha20-Poly1305
- * negotiated). Caller owns it and frees with hxnet_hope_aead_free.
+ * connection `htlc`, or NULL (no transport installed on it, or no
+ * ChaCha20-Poly1305 negotiated). Caller owns it and frees with hxnet_hope_aead_free.
  * HxnetHopeAead is declared in htxf_io.h. See the definition in
  * hxnet_bridge.c for the lifecycle contract (call after login).
  */
 struct HxnetHopeAead;
-extern struct HxnetHopeAead *hx_bridge_orchestrated_hope_aead (void);
+extern struct HxnetHopeAead *
+hx_bridge_orchestrated_hope_aead (const struct htlc_conn *htlc);
 
 /*
  * Ask GProxyResolver whether (host, port) is reached through a SOCKS
@@ -214,16 +218,16 @@ extern char *hx_bridge_lookup_socks_proxy (const char *host, guint16 port);
  * HXNET_SEND_* constants in rust/crates/hxnet/src/ffi.rs for
  * the FFI-level reasons.
  */
-extern int hx_bridge_send_frame (const guint8 *data, guint32 len);
+extern int hx_bridge_send_frame (struct htlc_conn *htlc, const guint8 *data,
+                                 guint32 len);
 
 /*
- * Tear down the installed hxnet handle. Drops the
- * ConnectionHandle, which signals the actor to flush pending
- * writes and exit; the wrapped TcpStream's Drop closes the
- * fd. Safe to call multiple times — second + subsequent calls
- * are silent no-ops.
+ * Tear down `htlc`'s hxnet handle. Drops the ConnectionHandle, which
+ * signals the actor to flush pending writes and exit; the wrapped
+ * TcpStream's Drop closes the fd. Safe to call multiple times — second +
+ * subsequent calls are silent no-ops. Other connections are untouched.
  */
-extern void hx_bridge_uninstall (void);
+extern void hx_bridge_uninstall (struct htlc_conn *htlc);
 
 G_END_DECLS
 

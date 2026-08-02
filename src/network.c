@@ -231,7 +231,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * ConnectionHandle, which the actor sees as HandleDropped;
      * the wrapped TcpStream's Drop closes the duped fd. Safe
      * to call whether or not the bridge was active. */
-    hx_bridge_uninstall ();
+    hx_bridge_uninstall (htlc);
 
     hx_conn_set_ip_addr (htlc, "");
 
@@ -584,10 +584,10 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
 
     /* 4-6. Hand off to the bridge, which calls
      * hxnet_connection_open_plaintext with the bridge's event /
-     * shutdown / state callbacks and stores the returned handle in
-     * the global slot synchronously, BEFORE returning. That ordering
-     * is load-bearing: hx_bridge_dispatch_frame gates on
-     * hx_bridge_is_installed(), and the orchestrator emits the
+     * shutdown / state callbacks and stores the returned handle on
+     * this connection synchronously, BEFORE returning. That ordering
+     * is load-bearing: hx_bridge_dispatch_frame gates on the
+     * connection being installed, and the orchestrator emits the
      * replayed LOGIN-reply frame before HandshakeDone. The forwarder
      * delivers events on the GLib main loop, which we don't re-enter
      * until this function returns — so installing synchronously here

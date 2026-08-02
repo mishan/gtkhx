@@ -358,8 +358,9 @@ struct hx_chunk;
 extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type,
                               guint32 flag, const struct hx_chunk *chunks,
                               int hc, gsize *out_len);
-extern gboolean hx_bridge_is_installed (void);
-extern int hx_bridge_send_frame (const guint8 *data, guint32 len);
+extern gboolean hx_bridge_is_installed (const struct htlc_conn *htlc);
+extern int hx_bridge_send_frame (struct htlc_conn *htlc, const guint8 *data,
+                                 guint32 len);
 
 extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                             const struct hx_chunk *chunks, int hc);
@@ -372,11 +373,11 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     if (!buf) {
         return;
     }
-    if (hx_bridge_is_installed ()) {
+    if (hx_bridge_is_installed (htlc)) {
         /* Fail loudly if the bridge refuses the send (FULL/CLOSED/…) rather than
          * continue with a half-initialised connection that fails obscurely
          * later. `len` casts to the guint32 the FFI takes. */
-        int rc = hx_bridge_send_frame (buf, (guint32)len);
+        int rc = hx_bridge_send_frame (htlc, buf, (guint32)len);
         g_assert_cmpint (rc, ==, 0);
     }
     g_free (buf);

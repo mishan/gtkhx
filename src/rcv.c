@@ -1291,7 +1291,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         if (hx_conn_hope_aead (htlc)) {
             hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
         }
-        hx_conn_set_hope_aead (htlc, hx_bridge_orchestrated_hope_aead ());
+        hx_conn_set_hope_aead (htlc, hx_bridge_orchestrated_hope_aead (htlc));
 
         /* Reset post-login fetch state before scheduling so
          * a reconnection during this process state starts clean.

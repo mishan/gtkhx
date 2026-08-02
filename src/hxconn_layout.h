@@ -123,6 +123,7 @@ struct htlc_conn {
      * in-process via hxnet_htxf_connect without the session key crossing back
      * to C. Freed with hxnet_hope_aead_free on connection teardown. */
     void *hope_aead;
+    void *bridge_handle;
     /* The legacy per-direction C cipher and compression state (session key,
      * the cipher and compress union members, their keys, type and keylen
      * fields, cipher_mode, the AEAD plaintext accumulator, and the gzip
@@ -194,7 +195,7 @@ struct htlc_conn {
     guint32 gif_icons_probe_trans;
 };
 
-_Static_assert (sizeof (struct htlc_conn) == 760,
+_Static_assert (sizeof (struct htlc_conn) == 768,
                 "struct htlc_conn layout drifted from Rust HtlcConn "
                 "(rust/crates/gtkhx-core/src/conn.rs)");
 

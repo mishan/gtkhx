@@ -84,7 +84,7 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
      * of close is set;
      * the in-flight frame is information the C side no longer
      * cares about. */
-    if (hx_conn_fd (htlc) == 0 || !hx_bridge_is_installed ()) {
+    if (hx_conn_fd (htlc) == 0 || !hx_bridge_is_installed (htlc)) {
         return;
     }
 
@@ -198,10 +198,10 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
      * The re-entry guard is `htlc->fd == 0`: hx_htlc_close sets fd to
      * 0 as its last act, so a second shutdown for the same connection
      * sees fd==0 and bails. We deliberately do NOT also gate on
-     * `!hx_bridge_is_installed()` — bridge_on_shutdown_cb dispatches
+     * `!hx_bridge_is_installed (htlc)` — bridge_on_shutdown_cb dispatches
      * *before* it tears the handle down, precisely so this path can
      * call hx_htlc_close (which then uninstalls). Gating on
-     * is_installed() here was the bug behind connect-refused (and any
+     * being-installed here was the bug behind connect-refused (and any
      * server-initiated shutdown) leaving the UI stuck: the handle was
      * cleared first, so this early-returned and hx_htlc_close never
      * ran. fd is -1 on the orchestrator path (no C-visible fd) and the
@@ -334,25 +334,39 @@ hxnet_connection_hope_aead_material (hxnet_connection_opaque *conn);
  * in network.h, included above. */
 
 /*
- * Single-connection state. gtkhx is single-conn today (the
- * MAX_CONN > 1 scaffolding in hx.h is a lie — see CLAUDE.md);
- * a global suffices. R3.5+'s multi-conn UI will move this into
- * htlc_conn alongside the existing cipher / compress state.
+ * There is no module-level connection state in this file.
+ *
+ * The transport handle lives on the connection it belongs to, reached
+ * through hx_conn_bridge_handle / hx_conn_set_bridge_handle. It was a
+ * file-static until the transport had to be per-connection: a single slot
+ * meant every outbound frame went to whichever connection installed last,
+ * the install entry points had to refuse a second connect outright, and the
+ * stale-actor guards below — which compare an event's handle against the
+ * slot — could not tell a second live connection's events from stale ones.
+ *
+ * Small helpers rather than open-coded accessor calls, because that identity
+ * comparison is the whole of the stale-actor defence and should read the
+ * same way at each of its sites.
  */
-static hxnet_connection_opaque *bridge_handle;
-/* Reserved for R3.5+'s multi-conn rework where the bridge globals
- * become a per-htlc field; today it's set on install / cleared on
- * teardown but never read elsewhere in this file. Marked
- * G_GNUC_UNUSED so single-conn builds don't emit a dead-store
- * warning under -Wunused-but-set-variable. Same fate as
- * hx.h's MAX_CONN scaffold — it lives until multi-conn does. */
-static struct htlc_conn *bridge_htlc G_GNUC_UNUSED;
+static hxnet_connection_opaque *
+conn_handle (const struct htlc_conn *htlc)
+{
+    return htlc ? hx_conn_bridge_handle (htlc) : NULL;
+}
+
+static void
+set_conn_handle (struct htlc_conn *htlc, hxnet_connection_opaque *h)
+{
+    if (htlc) {
+        hx_conn_set_bridge_handle (htlc, h);
+    }
+}
 
 /* C-side trampolines hxnet calls on the GLib main thread per
  * Event::Frame / Event::Shutdown. They translate the FFI
  * shapes into the bridge's existing dispatch helpers, free the
  * frame body (per the on_event ownership contract), and clear
- * the global on shutdown so the install gate flips off. */
+ * the connection's handle on shutdown so the install gate flips off. */
 static void
 bridge_on_event_cb (hxnet_connection_opaque *conn, hxnet_frame_t *frame,
                     void *user_data)
@@ -362,12 +376,14 @@ bridge_on_event_cb (hxnet_connection_opaque *conn, hxnet_frame_t *frame,
      * uninstall+reinstall cycle, an event the GLib forwarder had
      * already queued from the OLD actor could otherwise be injected
      * into the NEW connection's rcv state machine and corrupt it
-     * (hx_bridge_is_installed() is true again, so a downstream gate
+     * (the connection is installed again, so a downstream gate
      * wouldn't catch it). `conn` is the same handle pointer install
-     * stored in bridge_handle, so this comparison is exact. The
-     * frame is still freed below regardless, honouring the ownership
-     * contract even when the event is dropped as stale. */
-    if (conn == bridge_handle && frame && htlc) {
+     * stored on the connection, so this comparison is exact — and
+     * because it is per-connection, a second live connection's events
+     * are no longer indistinguishable from stale ones. The frame is
+     * still freed below regardless, honouring the ownership contract
+     * even when the event is dropped as stale. */
+    if (htlc && conn == conn_handle (htlc) && frame) {
         hx_bridge_dispatch_frame (htlc, frame->type_, frame->trans, frame->flag,
                                   frame->hc, frame->body_ptr, frame->body_len);
     }
@@ -388,11 +404,12 @@ bridge_on_shutdown_cb (hxnet_connection_opaque *conn, int reason,
     /* Ignore a shutdown delivered by a stale actor. If an old
      * actor's shutdown was queued on the main loop and only runs
      * after a reconnect installed a new handle, `conn` no longer
-     * matches bridge_handle; proceeding would clear/destroy the NEW
+     * matches the handle stored on the connection; proceeding would
+     * clear/destroy the NEW
      * handle and tear down the live connection. The stale actor was
      * already destroyed when it was uninstalled, so there's nothing
      * to free here — just return. */
-    if (conn != bridge_handle) {
+    if (!htlc || conn != conn_handle (htlc)) {
         return;
     }
 
@@ -409,10 +426,10 @@ bridge_on_shutdown_cb (hxnet_connection_opaque *conn, int reason,
      * `htlc->fd != 0`; when that holds it runs hx_htlc_close, which
      * emits DISCONNECTED, clears the pending tasks, and calls
      * hx_bridge_uninstall — and uninstall is what destroys + clears
-     * bridge_handle. So after dispatch the handle is normally already
+     * the connection's handle. So after dispatch it is normally already
      * gone.
      *
-     * (Earlier this cleared bridge_handle first and then dispatched,
+     * (Earlier this cleared the handle first and then dispatched,
      * which combined with dispatch_shutdown's old !is_installed()
      * guard to skip hx_htlc_close entirely — that left connect-refused
      * and other server-initiated shutdowns stuck with a spinning
@@ -421,19 +438,16 @@ bridge_on_shutdown_cb (hxnet_connection_opaque *conn, int reason,
      * Destroying the handle from inside hx_htlc_close runs within this
      * forwarder closure — the same depth the previous explicit destroy
      * ran at. */
-    if (htlc) {
-        hx_bridge_dispatch_shutdown (htlc, reason);
-    }
+    hx_bridge_dispatch_shutdown (htlc, reason);
 
-    /* Defensive: if dispatch didn't tear the handle down (htlc was
-     * NULL, or fd was already 0 from a prior close so dispatch bailed)
-     * release the actor's resources here so they're freed exactly
-     * once. Normal server-initiated shutdowns already cleared it via
-     * hx_htlc_close → hx_bridge_uninstall above. */
-    if (bridge_handle) {
-        hxnet_connection_opaque *to_destroy = bridge_handle;
-        bridge_handle = NULL;
-        bridge_htlc = NULL;
+    /* Defensive: if dispatch didn't tear the handle down — fd was already
+     * 0 from a prior close, so dispatch bailed — release the actor's
+     * resources here so they're freed exactly once. Normal
+     * server-initiated shutdowns already cleared it via hx_htlc_close →
+     * hx_bridge_uninstall above. */
+    hxnet_connection_opaque *to_destroy = conn_handle (htlc);
+    if (to_destroy) {
+        set_conn_handle (htlc, NULL);
         hxnet_connection_destroy (to_destroy);
     }
 }
@@ -509,7 +523,7 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
  * executes a PAC script / WPAD could block the UI here; making the install
  * path async (g_proxy_resolver_lookup_async, with the open_* FFI call
  * deferred into the completion callback) is the fix if that ever matters,
- * but it restructures the synchronous "bridge_handle set before return"
+ * but it restructures the synchronous "handle set before return"
  * install contract, so it's deliberately deferred.
  */
 /* Return a g_strdup'd copy of a proxy URI with any `user:pass@` userinfo
@@ -595,9 +609,13 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
 
-    if (bridge_handle) {
-        g_critical ("hxnet_bridge: orchestrated install attempted while a "
-                    "connection is already installed; refusing");
+    /* Refuse only a second install over the *same* connection — that would
+     * orphan the first actor and its socket with nothing left pointing at
+     * them. A second install on a *different* connection is the whole point
+     * of moving the handle onto the connection, and is no longer refused. */
+    if (conn_handle (htlc)) {
+        g_critical ("hxnet_bridge: plaintext install attempted on a "
+                    "connection that already has a transport; refusing");
         return FALSE;
     }
 
@@ -607,9 +625,9 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
 
     /* open_plaintext spawns the lifecycle task and wires the
      * forwarder synchronously; events don't fire until we return to
-     * the GLib main loop. Storing bridge_handle before that return
-     * is what makes the orchestrator's replayed LOGIN-reply frame
-     * pass hx_bridge_dispatch_frame's hx_bridge_is_installed() gate.
+     * the GLib main loop. Storing the handle on the connection before
+     * that return is what makes the orchestrator's replayed LOGIN-reply
+     * frame pass hx_bridge_dispatch_frame's installed gate.
      * user_data is the htlc for all three callbacks. */
     /* open_plaintext parses proxy_uri synchronously (before spawning the
      * lifecycle task), so this g_autofree URI is safe to free on return. */
@@ -626,8 +644,7 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
          * panic). Leave the bridge uninstalled. */
         return FALSE;
     }
-    bridge_handle = h;
-    bridge_htlc = htlc;
+    set_conn_handle (htlc, h);
     return TRUE;
 }
 
@@ -646,9 +663,10 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
      * non-cipher_only mode). The FFI treats len==0 as "no cipher". */
     g_return_val_if_fail (cipher_alg != NULL, FALSE);
 
-    if (bridge_handle) {
-        g_critical ("hxnet_bridge: orchestrated HOPE install attempted while "
-                    "a connection is already installed; refusing");
+    /* See the plaintext install for why this refuses. */
+    if (conn_handle (htlc)) {
+        g_critical ("hxnet_bridge: HOPE install attempted on a "
+                    "connection that already has a transport; refusing");
         return FALSE;
     }
 
@@ -670,13 +688,12 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
     if (!h) {
         return FALSE;
     }
-    bridge_handle = h;
-    bridge_htlc = htlc;
+    set_conn_handle (htlc, h);
     return TRUE;
 }
 
 /* Return an opaque HOPE AEAD material handle for the currently installed
- * orchestrated connection, or NULL when none is installed or the control
+ * connection, or NULL when it has no transport installed or the control
  * channel did not negotiate ChaCha20-Poly1305 (plaintext / Blowfish /
  * no-cipher leave the retained slot empty). The caller owns the handle
  * and must free it with hxnet_hope_aead_free. Called at login completion
@@ -684,12 +701,13 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
  * their per-transfer keys in-process — by which point the handshake is
  * done and the material slot is populated. */
 HxnetHopeAead *
-hx_bridge_orchestrated_hope_aead (void)
+hx_bridge_orchestrated_hope_aead (const struct htlc_conn *htlc)
 {
-    if (!bridge_handle) {
+    hxnet_connection_opaque *h = conn_handle (htlc);
+    if (!h) {
         return NULL;
     }
-    return hxnet_connection_hope_aead_material (bridge_handle);
+    return hxnet_connection_hope_aead_material (h);
 }
 
 /* TLS TOFU trampoline: hxnet calls this on the lifecycle task with the
@@ -717,9 +735,10 @@ hx_bridge_install_orchestrated_plaintext_tls (
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
 
-    if (bridge_handle) {
-        g_critical ("hxnet_bridge: orchestrated TLS install attempted while a "
-                    "connection is already installed; refusing");
+    /* See the plaintext install for why this refuses. */
+    if (conn_handle (htlc)) {
+        g_critical ("hxnet_bridge: TLS install attempted on a "
+                    "connection that already has a transport; refusing");
         return FALSE;
     }
 
@@ -738,21 +757,21 @@ hx_bridge_install_orchestrated_plaintext_tls (
     if (!h) {
         return FALSE;
     }
-    bridge_handle = h;
-    bridge_htlc = htlc;
+    set_conn_handle (htlc, h);
     return TRUE;
 }
 
 gboolean
-hx_bridge_is_installed (void)
+hx_bridge_is_installed (const struct htlc_conn *htlc)
 {
-    return bridge_handle != NULL;
+    return conn_handle (htlc) != NULL;
 }
 
 int
-hx_bridge_send_frame (const guint8 *data, guint32 len)
+hx_bridge_send_frame (struct htlc_conn *htlc, const guint8 *data, guint32 len)
 {
-    if (!bridge_handle) {
+    hxnet_connection_opaque *h = conn_handle (htlc);
+    if (!h) {
         g_critical ("hxnet_bridge: send_frame called with no installed "
                     "connection");
         /* Distinct sentinel — production hxnet returns the
@@ -762,7 +781,7 @@ hx_bridge_send_frame (const guint8 *data, guint32 len)
          * channel. */
         return HX_BRIDGE_SEND_NOT_INSTALLED;
     }
-    int rc = hxnet_connection_send_frame (bridge_handle, data, len);
+    int rc = hxnet_connection_send_frame (h, data, len);
     if (rc != 0) {
         g_critical ("hxnet_bridge: hxnet_connection_send_frame returned %d",
                     rc);
@@ -771,13 +790,12 @@ hx_bridge_send_frame (const guint8 *data, guint32 len)
 }
 
 void
-hx_bridge_uninstall (void)
+hx_bridge_uninstall (struct htlc_conn *htlc)
 {
-    if (!bridge_handle) {
+    hxnet_connection_opaque *h = conn_handle (htlc);
+    if (!h) {
         return;
     }
-    hxnet_connection_opaque *h = bridge_handle;
-    bridge_handle = NULL;
-    bridge_htlc = NULL;
+    set_conn_handle (htlc, NULL);
     hxnet_connection_destroy (h);
 }

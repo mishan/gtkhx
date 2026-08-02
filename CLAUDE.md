@@ -169,7 +169,9 @@ signal-routed: `hx_printf` / `hx_printf_prefix`, `hx_clear_chat`.
   the always-present public chat at cid 0.
 - `htlc` — the connection. **Heap-allocated and opaque**, reached through the `hxconn.h`
   accessors. `sess_from_htlc()` is a real back-pointer read — not a `container_of`, and not
-  the old `&sessions[0]` fiction. `MAX_CONN` and `sessions[]` no longer exist.
+  the old `&sessions[0]` fiction. `MAX_CONN` and `sessions[]` no longer exist. It also
+  owns its transport handle now (`hx_conn_bridge_handle`), so `hxnet_bridge.c` holds no
+  connection state of its own and two connections can have live transports at once.
 
 Two routing accessors, and the distinction matters for the eventual multi-connection work:
 `sess_from_htlc(htlc)` is "the session that owns this connection" — use it in model code,

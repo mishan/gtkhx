@@ -96,20 +96,36 @@ layout persistence are all in place.
 
 ## What is actually in the way
 
-### The hard stop: the transport bridge is a process singleton
+### ~~The hard stop: the transport bridge is a process singleton~~ — fixed
 
-`src/hxnet_bridge.c` holds a file-static connection handle, and
-`hx_bridge_send_frame` takes no connection at all — every outbound frame from
-every connection would go to whichever was installed last. More immediately, all
-three install entry points **hard-refuse when a handle already exists**, so a
-second simultaneous connect is rejected outright today. The stale-actor guards
-that compare against the single handle become wrong once two live handles
-legitimately coexist, silently dropping the non-focused connection's frames.
+`src/hxnet_bridge.c` used to hold a file-static connection handle, and
+`hx_bridge_send_frame` took no connection at all, so every outbound frame from
+every connection would have gone to whichever was installed last. All three
+install entry points hard-refused when a handle already existed, so a second
+simultaneous connect was rejected outright; and the stale-actor guards, which
+compare an event's handle against the installed one, could not tell a second
+live connection's events from a dead actor's.
 
-Nothing else on this list can even be exercised until the handle moves onto
-`htlc_conn` and the send primitive takes a connection. The file already
-anticipates this: a set-but-never-read `bridge_htlc` static sits next to the
-handle, reserved for exactly this change.
+The handle now lives on `htlc_conn` (`hx_conn_bridge_handle` /
+`hx_conn_set_bridge_handle`), and `hx_bridge_send_frame`,
+`hx_bridge_is_installed`, `hx_bridge_uninstall` and
+`hx_bridge_orchestrated_hope_aead` all take the connection they act on. The
+install refusal narrowed to what is still a real error — installing twice over
+the *same* connection, which would orphan the first actor. Two connections can
+now hold transports at once, which is what unblocks everything else here.
+
+What this does *not* do is make a second connection reachable. Nothing in
+production constructs a second `htlc_conn` yet — M2 removed the bridge's
+objection, not the last obstacle. The rest of this document is still ahead:
+signals without connection identity, the flat cid/uid namespaces,
+`hx_active_session()`, and the single-slot state in `network.c` below.
+
+One hazard the move introduces, harmless today and worth knowing before
+connections get a teardown path: the bridge's callbacks now dereference the
+`htlc` they were handed *before* deciding anything, to read its stored
+handle. A queued event whose connection has been freed is therefore a read of
+freed memory where it previously was not, and uninstalling before the free is
+not enough — the already-queued event still carries the pointer.
 
 ### Signals without connection identity
 
@@ -634,6 +650,10 @@ modes. Probably the eventual destination, but more than a v1.
   survives disconnect and reconnect, so panels, the transfer queue and the voice
   arbiter can refer to it. The connection collection supplies this; what is still
   missing is any teardown path at all, since disconnect is currently a reset.
+  Note `hx_conn_reset` zeroes the whole struct, transport handle included —
+  safe only because the one caller uninstalls first. A second caller would leak
+  an actor and its socket, so runtime destruction of connections has to keep
+  that ordering.
 - **Bookmarks to tabs.** An "open in new tab" affordance. The toolbar's
   connect-with-bookmark split button needs a "new tab vs. replace current"
   decision.
@@ -663,7 +683,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 |-------|-------|-----------|
 | M0 | Session-routing seam: `sess_from_htlc()` and `hx_active_session()` replace direct global access. Model code routes received events by connection; UI code routes by focused session. No behaviour change at N == 1. | — |
 | ~~M1~~ | **Done.** Connection collection: bookmarks are Settings → Connections; identity is decoupled from connection storage and resolved as override-else-global at connect; the preferences binder is deleted. The identity half rode in with the preferences rewrite (P5); the collection half retired the standalone Bookmarks window and added the per-connection icon override with an explicit clear-to-inherit for both fields. | — |
-| M2 | Transport bridge handle moves onto the connection; the send primitive takes a connection. Two connections can coexist. | — |
+| ~~M2~~ | **Done.** The transport handle moved onto the connection and the send primitive takes one; the install refusal narrowed to a second install over the same connection. Two connections can hold transports at once. | — |
 | M3 | Connection identity on the untagged signals; the two discard-the-htlc handlers fixed; connection tags on the flat cid/uid indexes and notification ids. | M2 |
 | M4 | Reify the connection/session as a heap object behind a collection and factory; connection tab strip; pick layout Model A or B; per-Chat-panel tab view; per-connection factory replaces eager panel construction. | M1, M3 |
 | M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |
@@ -674,14 +694,18 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 describes. It was safe to do ahead of every open decision precisely because it
 changes no behaviour at N == 1.
 
-**M1 has landed.** It was a net simplification at one connection, and the
+**M1 and M2 have both landed**, independently of each other and of everything
+else here. M1 was a net simplification at one connection, and the
 `/nick`-clobbers-your-global bug went with it by construction, exactly as
 predicted below — once identity storage stopped being the connection's wire
-buffer, there was nothing left for the command to clobber.
+buffer, there was nothing left for the command to clobber. M2 was the hard
+stop: with the transport handle per-connection, the bridge no longer refuses
+a second connect, so the rest of this document can be built against something
+that will not reject it out of hand. Reaching a second connection still needs
+M3 and M4.
 
-**M2 is the hard stop**, and is independent of everything else here: until it
-lands, nothing in this document can be tested, because a second connect is
-refused outright.
+**M3 is the next one that matters**, because the signals that carry no
+connection identity are what would misroute first.
 
 ---
 
