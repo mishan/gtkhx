@@ -791,7 +791,22 @@ fn open_editor(anchor: &gtk::Widget, name: Option<&str>) {
         });
     });
 
-    dialog.connect_closed(|_| {
+    // Only tear down the state if this dialog is still the one it belongs to.
+    //
+    // `open_editor` closes a stale editor and immediately publishes a new one,
+    // and AdwDialog::closed is not guaranteed to have run by then — it fires
+    // after the close animation. An unconditional teardown would let the old
+    // dialog's late signal wipe the *new* editor's widgets and its
+    // original-name, leaving a visible form whose Save would take the
+    // create-new branch and write a duplicate entry.
+    dialog.connect_closed(|closing| {
+        let is_current = EDITOR.with_borrow(|slot| {
+            slot.as_ref()
+                .is_some_and(|e| e.dialog.as_ptr() == closing.as_ptr())
+        });
+        if !is_current {
+            return;
+        }
         EDITOR.with_borrow_mut(|slot| *slot = None);
         set_original_name(None);
         set_icon_override(None);
