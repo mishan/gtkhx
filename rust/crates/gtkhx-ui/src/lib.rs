@@ -28,15 +28,20 @@ pub mod bookmarks;
 pub mod chat_find;
 pub mod cipher_vocab;
 pub mod connect;
-// the Settings form. Every page is Rust, wired live via the
-// gtkhx_options_rs_page_* exports (options.c's create_options_window +
-// settings_entries[] call them); only that shell is still C.
+// the Settings form: the window and its page table (options_window), the
+// shared row builders and the pages themselves (options), and the two pages
+// custom enough to want their own module.
 pub mod options;
 mod options_identity;
+/// Link-time stubs for the C symbols the Settings pages call, so the page
+/// table can be exercised in a `cargo test` binary. Test builds only.
+#[cfg(test)]
+mod options_test_stubs;
 /// The Voice settings page. Feature-gated to match the page itself — see the
 /// module docs for why the preferences are not.
 #[cfg(feature = "voice")]
 mod options_voice;
+mod options_window;
 pub mod rc4_dialog;
 pub mod tls_trust_dialog;
 pub mod tracker;

@@ -68,9 +68,8 @@ extern "C" {
     fn gtkhx_active_htlc() -> *mut c_void;
     fn hx_conn_gif_icons_state(htlc: *mut c_void) -> c_int;
 
-    // toolbar.c / gtkutil.c
+    // toolbar.c
     fn toolbar_show_toast(text: *const std::ffi::c_char);
-    fn gtkhx_dialog_add_close_shortcuts(dialog: *mut gtk::ffi::GtkWidget);
 }
 
 /// `GIF_ICONS_SUPPORTED` from `gif_icons.h` — an `ICON_GETLIST`/`GET` reply
@@ -230,7 +229,7 @@ fn open_icon_picker(anchor: &gtk::Widget, row: &adw::SpinRow) -> adw::Dialog {
     dialog.set_content_width(420);
     dialog.set_content_height(520);
     dialog.set_size_request(300, 360);
-    unsafe { gtkhx_dialog_add_close_shortcuts(dialog.as_ptr() as *mut gtk::ffi::GtkWidget) };
+    unsafe { crate::ffi::gtkhx_dialog_add_close_shortcuts(dialog.as_ptr() as *mut _) };
 
     let narrow = picker_flowbox(false);
     let wide = picker_flowbox(true);

@@ -28,25 +28,17 @@
 #include "hx.h"
 #include "hxconn.h"
 #include "gtkhx.h"
-#include "news.h"
 #include "chat_view.h"
-#include "cicn.h"
-#include "sound.h"
 #include "users.h"
 #include "chat.h"
 #include "chat_members.h" /* hx_member_model_get_info, struct hx_member_info */
-#include "files.h"
 #include "network.h"
 #include "tray.h"
-#include "gtkutil.h"
 #include "cfgkeys.h"
 #include "gtkhx_theme.h"
 #include "prefs_mirror.h"
 #include "options.h"
-#include "gif_icons.h"  /* hx_icon_save / _set / _clear + GIF_ICONS_* state */
 #include "gif_avatar.h" /* gtkhx_avatar_set_animation_enabled (10.D pref) */
-#include "toolbar.h"    /* toolbar_show_toast */
-#include "hotline_proto.h" /* gtkhx_proto_gif_icon_is_gif */
 #include "text_util.h"
 #include "tracker.h"
 #include "panel_registry.h" /* hx_panel_was_constructed */
@@ -55,10 +47,6 @@
  * Rust runtime. The page that edits them is Rust now; the hooks are not. */
 #include "voice_runtime.h"
 #endif
-
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-
-GtkWidget *options_window = NULL;
 
 /* The Tracker settings page moved to Rust (gtkhx-ui options.rs); it owns its
  * own GListStore + GtkColumnView and serialises back through
@@ -873,19 +861,6 @@ gtkhx_prefs_set_bool (const char *name, int value)
     }
 }
 
-/* ------------------------------------------------------------------- *
- * The Settings window
- *
- * Every page is Rust now; what remains here is the shell — the window, the
- * sidebar, and the table mapping a page to its builder. The AdwPreferencesRow
- * helpers that used to head this section went with the last page that used
- * them (they live in `rust/crates/gtkhx-ui/src/options.rs`), and the table's
- * `.draw` pointers are the last thing keeping this a C-side framework.
- *
- * No Cancel button — the dialog is live-apply. Closing it is the equivalent of
- * "OK", and each change is saved shortly after it happens, so a crash
- * mid-Settings doesn't lose the last toggle. */
-
 /* Runtime state that isn't a preference and so has no schema entry. Runs
  * before prefs_read, which then overwrites nothing here.
  *
@@ -975,7 +950,7 @@ prefs_read (void)
 
     /* No settings file anywhere — first run. Pop Settings, as before. */
     if (hxconfig_is_first_run ()) {
-        create_options_window (NULL, NULL);
+        gtkhx_create_options_window ();
     }
 }
 
@@ -1027,337 +1002,3 @@ hx_prefs_save_now (void)
     }
     prefs_flush ();
 }
-
-/* bookkeeping that runs on every dialog teardown path. Wired to
- * AdwDialog::closed (see create_options_window), which AdwDialog emits
- * once the dialog is actually closed — whether by Esc, the header-bar
- * close button, adw_dialog_close(), or the parent window going away.
- * That's the single teardown chokepoint for an AdwDialog (there's no
- * separate confirm-vs-destroy split like GtkWindow's close-request vs
- * destroy), so hooking it catches every path and guarantees
- * options_window never points at a freed GObject the next time
- * create_options_window runs. */
-static void
-close_options_bookkeeping (GtkWidget *widget, gpointer data)
-{
-    (void)widget;
-    (void)data;
-    options_window = 0;
-
-    /* Nothing else to unwind. Every page is Rust now, and each owns whatever
-     * state it has; it all drops with the dialog's widget tree. This used to
-     * flush the entry-row debounce timers and tear down the live-row registry,
-     * both of which went with the last C page. */
-}
-
-/* No Interface page anymore — the new files browser is always a single
- * window. The retired FILE_SAMEWINDOW / NEWS_SAMEWINDOW keys are named in
- * hxconfig's migration map only so an old profile carrying them doesn't trip
- * the unknown-key diagnostic. */
-
-/* Sidebar-driven Settings navigation.
- *
- * Settings was previously an AdwPreferencesDialog, whose built-in
- * navigation is a top AdwViewSwitcher (icon tabs across the header,
- * adaptively collapsing to a bottom bar). This rebuilds it as a plain
- * AdwDialog wrapping an AdwNavigationSplitView: a left GtkListBox
- * sidebar of categories — grouped under section headers via the
- * list-box header func — and a right content pane that swaps
- * AdwPreferencesPage children in a GtkStack. The settings_page_*()
- * draw functions are unchanged: each still fills an AdwPreferencesPage,
- * only the outer container differs. (Note: dropping AdwPreferencesDialog
- * also drops its built-in search entry — the sidebar is the navigation
- * affordance now.)
- *
- * AdwNavigationSplitView is available since libadwaita 1.4 and the
- * sidebar is a plain GtkListBox with the .navigation-sidebar style
- * class, so this needs no bump of the meson libadwaita pin. */
-
-#ifndef N_
-#define N_(s) (s)
-#endif
-
-struct settings_entry {
-    const char *section; /* section header, or NULL to continue previous */
-    const char *name;    /* stable GtkStack child name */
-    const char *title;   /* sidebar + content-header display title */
-    const char *icon;    /* symbolic icon name */
-    void (*draw) (AdwPreferencesPage *);
-};
-
-/* Flat sidebar list, grouped under section headers. Order here is the
- * order rows appear; a non-NULL .section starts a new header group. */
-/* Rust page builders (gtkhx-ui options.rs) — build the ported
- * pages' content into a C-created AdwPreferencesPage. The two custom-widget
- * pages (Identity + Voice) stay C for now and keep their C draw functions
- * below. */
-extern void gtkhx_options_rs_page_general (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_file_transfers (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_chat_appearance (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_chat_behavior (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_chat_history (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_chat_emoji (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_notify_events (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_notify_behavior (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_sound (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_tracker (AdwPreferencesPage *);
-extern void gtkhx_options_rs_page_identity (AdwPreferencesPage *);
-#ifdef HAVE_VOICE
-extern void gtkhx_options_rs_page_voice (AdwPreferencesPage *);
-#endif
-
-static const struct settings_entry settings_entries[] = {
-    { N_ ("General"), "general", N_ ("General"), "preferences-system-symbolic",
-      gtkhx_options_rs_page_general },
-    { NULL, "identity", N_ ("Identity"), "user-info-symbolic",
-      gtkhx_options_rs_page_identity },
-    { NULL, "filexfer", N_ ("File Transfers"), "folder-download-symbolic",
-      gtkhx_options_rs_page_file_transfers },
-    { N_ ("Chat"), "chat_appearance", N_ ("Appearance"),
-      "user-available-symbolic", gtkhx_options_rs_page_chat_appearance },
-    { NULL, "chat_behavior", N_ ("Behavior"), "preferences-other-symbolic",
-      gtkhx_options_rs_page_chat_behavior },
-    { NULL, "chat_history", N_ ("History"), "document-open-recent-symbolic",
-      gtkhx_options_rs_page_chat_history },
-    { NULL, "chat_emoji", N_ ("Emoji"), "face-smile-symbolic",
-      gtkhx_options_rs_page_chat_emoji },
-    { N_ ("Notifications"), "notify_events", N_ ("Events"),
-      "preferences-system-notifications-symbolic",
-      gtkhx_options_rs_page_notify_events },
-    { NULL, "notify_behavior", N_ ("Behavior"), "preferences-other-symbolic",
-      gtkhx_options_rs_page_notify_behavior },
-    { N_ ("Audio"), "sound", N_ ("Sound"), "audio-speakers-symbolic",
-      gtkhx_options_rs_page_sound },
-#ifdef HAVE_VOICE
-    { NULL, "voice", N_ ("Voice"), "audio-input-microphone-symbolic",
-      gtkhx_options_rs_page_voice },
-#endif
-    { N_ ("Network"), "trackers", N_ ("Trackers"), "network-server-symbolic",
-      gtkhx_options_rs_page_tracker },
-};
-
-/* GtkListBox header func: draw a section label above the first row of
- * each section. Every row carries its (already-translated) section text
- * in "section" qdata, so a header is inserted whenever a row's section
- * differs from the row above it. */
-static void
-settings_sidebar_header (GtkListBoxRow *row, GtkListBoxRow *before,
-                         gpointer data)
-{
-    const char *section = g_object_get_data (G_OBJECT (row), "section");
-    const char *prev
-        = before ? g_object_get_data (G_OBJECT (before), "section") : NULL;
-    GtkWidget *label;
-    (void)data;
-
-    if (!section || (before && g_strcmp0 (section, prev) == 0)) {
-        gtk_list_box_row_set_header (row, NULL);
-        return;
-    }
-
-    label = gtk_label_new (section);
-    gtk_widget_add_css_class (label, "heading");
-    gtk_widget_add_css_class (label, "dim-label");
-    gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
-    gtk_widget_set_margin_start (label, 12);
-    gtk_widget_set_margin_end (label, 12);
-    gtk_widget_set_margin_top (label, before ? 12 : 6);
-    gtk_widget_set_margin_bottom (label, 3);
-    gtk_list_box_row_set_header (row, label);
-}
-
-/* Sidebar selection → swap the content stack, retitle the content
- * header, and (when collapsed) navigate to the content pane. The
- * split view / stack / content page are stashed as qdata on the
- * list box so this handler needs no module-static state. */
-static void
-settings_row_selected (GtkListBox *box, GtkListBoxRow *row, gpointer data)
-{
-    GtkStack *stack;
-    AdwNavigationSplitView *split;
-    AdwNavigationPage *content;
-    const char *name, *title;
-    (void)data;
-
-    if (!row) {
-        return;
-    }
-    stack = g_object_get_data (G_OBJECT (box), "stack");
-    split = g_object_get_data (G_OBJECT (box), "split");
-    content = g_object_get_data (G_OBJECT (box), "content-page");
-    name = g_object_get_data (G_OBJECT (row), "page-name");
-    title = g_object_get_data (G_OBJECT (row), "page-title");
-
-    if (stack && name) {
-        gtk_stack_set_visible_child_name (stack, name);
-    }
-    if (content && title) {
-        adw_navigation_page_set_title (content, title);
-    }
-    if (split) {
-        adw_navigation_split_view_set_show_content (split, TRUE);
-    }
-}
-
-void
-create_options_window (GtkWidget *widget, gpointer data)
-{
-    AdwDialog *dlg;
-    AdwNavigationSplitView *split;
-    AdwNavigationPage *sidebar_page, *content_page;
-    AdwToolbarView *sidebar_tv, *content_tv;
-    AdwBreakpoint *bp;
-    GtkWidget *listbox, *sidebar_scroll, *stack;
-    GtkWidget *parent;
-    GtkListBoxRow *first_row = NULL;
-    GValue collapsed = G_VALUE_INIT;
-    const char *cur_section = NULL;
-    size_t i;
-    session *sess = data;
-
-    (void)widget;
-
-    parent = GTK_WIDGET (gtkhx_active_window ());
-
-    if (options_window) {
-        adw_dialog_present (ADW_DIALOG (options_window), parent);
-        return;
-    }
-
-    /* Outer container is a plain AdwDialog (the project's meson floor is
-     * libadwaita >= 1.6): it
-     * auto-handles transient_for / modal-against-parent / adaptive
-     * sizing. content_width is the *preferred* size and must be wide
-     * enough for the sidebar + a preferences page side-by-side, or Adw
-     * warns "AdwNavigationSplitView exceeds AdwDialog width". The
-     * width/height-request set the collapsed *minimum* — without them
-     * Adw warns "AdwDialog does not have a minimum size". Below the
-     * breakpoint the split view collapses to a single navigable pane,
-     * so the minimum only needs to fit one pane. */
-    dlg = ADW_DIALOG (adw_dialog_new ());
-    adw_dialog_set_title (dlg, _ ("GtkHx Preferences"));
-    adw_dialog_set_content_width (dlg, 920);
-    adw_dialog_set_content_height (dlg, 680);
-    gtk_widget_set_size_request (GTK_WIDGET (dlg), 360, 480);
-
-    /* Esc closes via AdwDialog's built-in close_response; wire Ctrl+W
-     * (close) and Ctrl+Q (app.quit) for keyboard parity. */
-    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
-
-    g_object_set_data (G_OBJECT (dlg), "sess", sess);
-    g_signal_connect (dlg, "closed", G_CALLBACK (close_options_bookkeeping),
-                      NULL);
-
-    options_window = GTK_WIDGET (dlg);
-
-    /* Content stack: one AdwPreferencesPage per settings_entry. */
-    stack = gtk_stack_new ();
-    gtk_widget_set_hexpand (stack, TRUE);
-    gtk_widget_set_vexpand (stack, TRUE);
-
-    /* Sidebar category list. */
-    listbox = gtk_list_box_new ();
-    gtk_list_box_set_selection_mode (GTK_LIST_BOX (listbox),
-                                     GTK_SELECTION_SINGLE);
-    gtk_widget_add_css_class (listbox, "navigation-sidebar");
-    gtk_list_box_set_header_func (GTK_LIST_BOX (listbox),
-                                  settings_sidebar_header, NULL, NULL);
-
-    for (i = 0; i < sizeof (settings_entries) / sizeof (settings_entries[0]);
-         i++) {
-        const struct settings_entry *e = &settings_entries[i];
-        AdwPreferencesPage *page
-            = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
-        GtkWidget *row, *rbox, *img, *lbl;
-        const char *title = _ (e->title);
-
-        if (e->section) {
-            cur_section = _ (e->section);
-        }
-
-        adw_preferences_page_set_title (page, title);
-        if (e->draw) {
-            e->draw (page);
-        }
-        gtk_stack_add_named (GTK_STACK (stack), GTK_WIDGET (page), e->name);
-
-        row = gtk_list_box_row_new ();
-        rbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
-        gtk_widget_set_margin_start (rbox, 6);
-        gtk_widget_set_margin_end (rbox, 6);
-        gtk_widget_set_margin_top (rbox, 8);
-        gtk_widget_set_margin_bottom (rbox, 8);
-        img = gtk_image_new_from_icon_name (e->icon);
-        lbl = gtk_label_new (title);
-        gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
-        gtk_box_append (GTK_BOX (rbox), img);
-        gtk_box_append (GTK_BOX (rbox), lbl);
-        gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), rbox);
-
-        /* qdata drives the header func + selection handler. name is a
-         * static literal (no dup); section/title are gettext returns
-         * (stable, but dup'd for lifetime safety across teardown). */
-        g_object_set_data_full (G_OBJECT (row), "section",
-                                g_strdup (cur_section), g_free);
-        g_object_set_data (G_OBJECT (row), "page-name", (gpointer)e->name);
-        g_object_set_data_full (G_OBJECT (row), "page-title", g_strdup (title),
-                                g_free);
-        gtk_list_box_append (GTK_LIST_BOX (listbox), row);
-        if (!first_row) {
-            first_row = GTK_LIST_BOX_ROW (row);
-        }
-    }
-
-    sidebar_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sidebar_scroll),
-                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sidebar_scroll),
-                                   listbox);
-    gtk_widget_set_vexpand (sidebar_scroll, TRUE);
-
-    /* Sidebar pane: header bar + scrolled category list. */
-    sidebar_tv = ADW_TOOLBAR_VIEW (adw_toolbar_view_new ());
-    adw_toolbar_view_add_top_bar (sidebar_tv, adw_header_bar_new ());
-    adw_toolbar_view_set_content (sidebar_tv, sidebar_scroll);
-    sidebar_page = ADW_NAVIGATION_PAGE (
-        adw_navigation_page_new (GTK_WIDGET (sidebar_tv), _ ("Preferences")));
-
-    /* Content pane: header bar (title tracks the selected page) + stack. */
-    content_tv = ADW_TOOLBAR_VIEW (adw_toolbar_view_new ());
-    adw_toolbar_view_add_top_bar (content_tv, adw_header_bar_new ());
-    adw_toolbar_view_set_content (content_tv, stack);
-    content_page = ADW_NAVIGATION_PAGE (
-        adw_navigation_page_new (GTK_WIDGET (content_tv), _ ("General")));
-
-    split = ADW_NAVIGATION_SPLIT_VIEW (adw_navigation_split_view_new ());
-    adw_navigation_split_view_set_sidebar (split, sidebar_page);
-    adw_navigation_split_view_set_content (split, content_page);
-    adw_navigation_split_view_set_max_sidebar_width (split, 240);
-
-    g_object_set_data (G_OBJECT (listbox), "stack", stack);
-    g_object_set_data (G_OBJECT (listbox), "split", split);
-    g_object_set_data (G_OBJECT (listbox), "content-page", content_page);
-    g_signal_connect (listbox, "row-selected",
-                      G_CALLBACK (settings_row_selected), NULL);
-
-    adw_dialog_set_child (dlg, GTK_WIDGET (split));
-
-    /* Adaptive: collapse to a single navigable pane on narrow widths. */
-    bp = adw_breakpoint_new (
-        adw_breakpoint_condition_parse ("max-width: 500sp"));
-    g_value_init (&collapsed, G_TYPE_BOOLEAN);
-    g_value_set_boolean (&collapsed, TRUE);
-    adw_breakpoint_add_setter (bp, G_OBJECT (split), "collapsed", &collapsed);
-    g_value_unset (&collapsed);
-    adw_dialog_add_breakpoint (dlg, bp);
-
-    /* Select the first category so the content pane isn't blank. */
-    if (first_row) {
-        gtk_list_box_select_row (GTK_LIST_BOX (listbox), first_row);
-    }
-
-    adw_dialog_present (dlg, parent);
-}
-
-G_GNUC_END_IGNORE_DEPRECATIONS
-/* end of file-level deprecation suppression — see top of file. */

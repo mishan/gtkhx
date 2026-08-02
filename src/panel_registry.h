@@ -22,7 +22,6 @@
  *   - The file-static window globals:
  *     tracker_window      (tracker.c)
  *     post_window         (news.c)
- *     options_window      (options.c)
  *     about_window        (about.c)
  *     connect_window      (connect.c)
  *     the_browser         (news_browser.c)

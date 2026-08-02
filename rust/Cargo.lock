@@ -1813,6 +1813,7 @@ dependencies = [
  "hx-image-decode",
  "hxbookmarks",
  "hxchat-layout",
+ "hxconfig",
  "hxhandlers",
  "hxmodel",
  "hxtext",

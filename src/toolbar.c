@@ -314,17 +314,20 @@ disconnect_clicked (void)
  * accelerators for free if we ever wire any (gtk_application_set_accels_for_action).
  *
  * The action callbacks defer their real work to g_idle_add — when the
- * action fires from a hamburger menu item, the popover is mid-dismiss
- * and the GdkSurface for it is still alive on the click stack. Building
- * a new top-level dialog (especially the AdwPreferencesWindow with
- * its 9 pages and the icon-picker FlowBox that walks main-loop
- * iterations) inside that callstack hit a Heisenbug — segfault on bare run, no
- * crash under gdb. Letting the click chain unwind first via the idle
- * source side-steps it cleanly. */
+ * action fires from a hamburger menu item, the popover is mid-dismiss and
+ * the GdkSurface for it is still alive on the click stack. Building a new
+ * top-level dialog inside that callstack hit a Heisenbug: segfault on a
+ * bare run, no crash under gdb. Letting the click chain unwind first via
+ * the idle source side-steps it cleanly. (Settings was the window that
+ * surfaced this, back when it built its pages inline and pumped the main
+ * loop while doing it. It no longer does either — but the deferral is
+ * about the popover's teardown, not about what the dialog costs to
+ * build, so it stays.) */
 static gboolean
 defer_open_settings (gpointer data)
 {
-    create_options_window (NULL, data);
+    (void)data;
+    gtkhx_create_options_window ();
     return G_SOURCE_REMOVE;
 }
 

@@ -1,7 +1,9 @@
 #ifndef HX_OPTIONS_H
 #define HX_OPTIONS_H
 
-extern void create_options_window (GtkWidget *widget, gpointer data);
+/* Open the Settings window (gtkhx-ui options_window.rs). Re-presents the
+ * existing one if it is already up, so this is safe to call repeatedly. */
+extern void gtkhx_create_options_window (void);
 extern void init_variables (void);
 /* Load the settings through hxconfig (importing an old gtkhxrc if there is no
  * gtkhx.toml yet), refresh the C mirror, seed the connection's identity, and

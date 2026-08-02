@@ -62,6 +62,14 @@ hotline-proto = { path = "../hotline-proto" }
 # and Bookmarks dialogs call it directly (no C bookmark code remains).
 hxbookmarks = { path = "../hxbookmarks" }
 
+[dev-dependencies]
+# The `gtkhx_prefs_type` test stub delegates to the real schema lookup, so
+# every row builder takes its live path instead of the insensitive early
+# return a hardcoded "no such key" would give. Pure and file-free —
+# hxconfig_type is a `path_of` + `kind_of` pair with no loaded config behind
+# it. See options_test_stubs.rs.
+hxconfig = { path = "../hxconfig" }
+
 [features]
 # `voice` gates the user-list voice-indicator column (users_voice_col) and
 # the per-chat voice toolbar (voice_panel), which reach the voice model /
