@@ -65,7 +65,7 @@ fn pref_get_bool(name: &str) -> bool {
 fn pref_set_bool(name: &str, v: bool) {
     unsafe { gtkhx_prefs_set_bool(cs(name).as_ptr(), v as c_int) }
 }
-fn pref_get_int(name: &str) -> i32 {
+pub(crate) fn pref_get_int(name: &str) -> i32 {
     unsafe { gtkhx_prefs_get_int(cs(name).as_ptr()) }
 }
 fn pref_set_int(name: &str, v: i32) {
@@ -890,4 +890,9 @@ pub(crate) fn page_voice(page: &adw::PreferencesPage) {
 /// The Identity page, from `options_identity`.
 pub(crate) fn page_identity(page: &adw::PreferencesPage) {
     crate::options_identity::build(page);
+}
+
+/// The Connections page, from `options_connections`.
+pub(crate) fn page_connections(page: &adw::PreferencesPage) {
+    crate::options_connections::build(page);
 }

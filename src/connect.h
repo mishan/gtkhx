@@ -11,7 +11,7 @@ extern void create_connect_window (GtkWidget *btn, gpointer data);
 
 /* The cipher / compression picker vocabulary lives in the gtkhx-ui Rust
  * crate now (cipher_vocab.rs), shared between the Connect dialog and the
- * Bookmarks dialog (both ported to Rust in R5.3). No C consumer of it
+ * Connections settings page. No C consumer of it
  * remains, so connect.h no longer re-exports it. The stable on-disk
  * cipher byte ↔ name mapping now lives in the hxbookmarks Rust crate. */
 
@@ -47,7 +47,7 @@ extern void connect_reconnect_last (void);
  * connection runs plain Hotline — no HOPE / no TLS / no compression /
  * no cipher — because the URL form doesn't carry those parameters.
  * The user can bookmark the URL first (connect_save_hotline_url_as_
- * bookmark) and edit transport security in the Bookmarks dialog if
+ * bookmark) and edit transport security in Settings → Connections if
  * they want HOPE / TLS for that server. Returns TRUE on a launched
  * connect, FALSE on a malformed URL. */
 extern gboolean connect_open_hotline_url (const char *url);
@@ -55,8 +55,8 @@ extern gboolean connect_open_hotline_url (const char *url);
 /* Parse a hotline:// URL and persist it as a bookmark in the TOML store.
  * The bookmark name is the URL host; if a bookmark with that name already
  * exists this returns FALSE with err set to a translated "already exists"
- * message — the caller surfaces it via toast so the user can rename /
- * delete the existing entry from the Bookmarks dialog.
+ * message — the caller surfaces it via toast so the user can rename or
+ * delete the existing entry in Settings → Connections.
  *
  * `out_name` (optional) receives the chosen bookmark name on success;
  * caller frees with g_free. NULL on failure. */

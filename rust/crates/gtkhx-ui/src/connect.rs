@@ -141,6 +141,71 @@ fn active_window() -> Option<gtk::Window> {
 // bridge hands over (server/port/login/pass + the four transport flags);
 // bundling them into a struct here would just re-split at every call site.
 #[allow(clippy::too_many_arguments)]
+/// Where a connect's identity comes from.
+///
+/// Every path into [`connect_with_args`] has to say which it is, because the
+/// two are not distinguishable from the arguments: "connect to hlserver.com"
+/// and "connect to my hlserver.com entry" produce the same host and port but
+/// not necessarily the same nickname.
+enum Identity<'a> {
+    /// The user chose this saved connection by name. Authoritative — it wins
+    /// even if another entry points at the same address.
+    Entry(&'a Bookmark),
+    /// The user named a server, not an entry: a typed address, a
+    /// `hotline://` link, a tracker row, a reconnect. If a saved connection
+    /// matches the endpoint it supplies the identity, because it *is* that
+    /// server; otherwise this is a transient and gets the global default.
+    ByEndpoint,
+}
+
+/// Whether a saved entry describes the endpoint being connected to.
+///
+/// Hostname comparison is case-insensitive because DNS is, and a saved
+/// `HLserver.com` silently losing its nickname to a typed `hlserver.com` is
+/// exactly the kind of invisible difference this resolution must not have.
+/// The port is compared after resolution, so a blank field and an explicit
+/// 5500 are one port.
+fn entry_matches(bm: &Bookmark, server: &str, port: u16) -> bool {
+    let bm_port = if bm.port.trim().is_empty() {
+        5500
+    } else {
+        atoi_port(bm.port.trim())
+    };
+    bm.server.trim().eq_ignore_ascii_case(server.trim()) && bm_port == port
+}
+
+/// Resolve and arm the identity override for this connect.
+///
+/// Called from the one funnel every connect path passes through, immediately
+/// before the connect itself — `hx_identity_apply` consumes the override in
+/// the connect preamble, so arming here cannot leak onto a later attempt the
+/// way arming at a call site that then bails would.
+///
+/// Arming with an empty nick and `-1` is not a no-op: it is how a transient
+/// connect *clears* any override left armed by an earlier path, so the global
+/// default applies.
+fn arm_identity(identity: Identity, server: &str, port: u16) {
+    let resolved: Option<Bookmark> = match identity {
+        Identity::Entry(bm) => Some(bm.clone()),
+        // A read-only lookup, so an unreadable store degrades to "no saved
+        // connection matches" — the global default — rather than refusing to
+        // connect over a settings-file problem.
+        Identity::ByEndpoint => bookmark_store::load()
+            .bookmarks
+            .into_iter()
+            .find(|bm| entry_matches(bm, server, port)),
+    };
+    let (nick, icon) = match &resolved {
+        Some(bm) => (
+            bm.nick.clone().unwrap_or_default(),
+            bm.icon.map(|i| i as c_int).unwrap_or(-1),
+        ),
+        None => (String::new(), -1),
+    };
+    unsafe { hx_identity_set_pending_override(cs(&nick).as_ptr(), icon) };
+}
+
+#[allow(clippy::too_many_arguments)]
 fn connect_with_args(
     sess: *mut c_void,
     server: &str,
@@ -151,6 +216,7 @@ fn connect_with_args(
     compress: u8,
     cipher: u8,
     tls: u8,
+    identity: Identity,
 ) {
     let (mut secure, mut compress, mut cipher) = (secure, compress, cipher);
     if tls != 0 {
@@ -199,6 +265,8 @@ fn connect_with_args(
         });
     });
 
+    arm_identity(identity, server, port);
+
     let cserver = cs(server);
     let clogin = cs(login);
     let cpass = cs(pass);
@@ -235,6 +303,9 @@ pub extern "C" fn connect_reconnect_last() {
                 lc.compress,
                 lc.cipher,
                 lc.tls,
+                // Reconnecting to a saved server should look the same as
+                // connecting to it did, nickname included.
+                Identity::ByEndpoint,
             );
         }
         _ => unsafe {
@@ -486,7 +557,16 @@ fn server_connect(sess: *mut c_void) {
     };
 
     connect_with_args(
-        sess, &server, port, &login, &pass, secure, compress, cipher, tls,
+        sess,
+        &server,
+        port,
+        &login,
+        &pass,
+        secure,
+        compress,
+        cipher,
+        tls,
+        Identity::ByEndpoint,
     );
 
     if let Some(dlg) = w.window {
@@ -829,17 +909,6 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
     let Some(cipher_byte) = rc4_migrate(&name, bm.hope, bm.cipher) else {
         return;
     };
-    // A bookmark is the only thing that carries an override; every other way
-    // in is a transient and gets the global. Armed immediately before the
-    // connect so it cannot leak onto a later one.
-    let override_nick = bm.nick.clone().unwrap_or_default();
-    unsafe {
-        hx_identity_set_pending_override(
-            cs(&override_nick).as_ptr(),
-            bm.icon.map(|i| i as c_int).unwrap_or(-1),
-        );
-    }
-
     let sess = cffi::hx_active_session();
     connect_with_args(
         sess,
@@ -851,6 +920,9 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
         bm.compress,
         cipher_byte,
         bm.tls as u8,
+        // The user picked this entry by name, so it is authoritative even if
+        // another entry happens to point at the same address.
+        Identity::Entry(&bm),
     );
 }
 
@@ -956,6 +1028,10 @@ pub unsafe extern "C" fn connect_open_hotline_url(url: *const c_char) -> glib::f
         0,
         0,
         0,
+        // A link is an address, not an entry — but if the address happens to
+        // be one this client has saved, it is that server and keeps its
+        // nickname.
+        Identity::ByEndpoint,
     );
     glib::ffi::GTRUE
 }
@@ -1012,7 +1088,8 @@ pub unsafe extern "C" fn connect_save_hotline_url_as_bookmark(
             err,
             glib::ffi::G_FILE_ERROR_EXIST,
             &tr1(
-                "Bookmark \"%s\" already exists. Manage it from the Bookmarks dialog.",
+                "There is already a connection named \"%s\". Edit it in \
+                 Settings → Connections.",
                 &name,
             ),
         );
@@ -1077,4 +1154,88 @@ fn atoi_port(s: &str) -> u16 {
 /// err->code (INVAL vs EXIST vs NOMEM) keep working.
 unsafe fn set_file_error(err: *mut *mut glib::ffi::GError, code: c_int, msg: &str) {
     glib::ffi::g_set_error_literal(err, glib::ffi::g_file_error_quark(), code, cs(msg).as_ptr());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::entry_matches;
+    use hxbookmarks::Bookmark;
+
+    fn entry(server: &str, port: &str) -> Bookmark {
+        Bookmark {
+            server: server.to_string(),
+            port: port.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// The ordinary case: a saved connection reached by typing its address,
+    /// or by reconnecting to it. Its port field is blank whenever the entry
+    /// stored no port, so blank-vs-5500 must match or the identity is
+    /// silently dropped for every connection on the default port — which is
+    /// most of them.
+    #[test]
+    fn default_port_spellings_are_one_port() {
+        assert!(entry_matches(
+            &entry("hlserver.com", ""),
+            "hlserver.com",
+            5500
+        ));
+        assert!(entry_matches(
+            &entry("hlserver.com", "5500"),
+            "hlserver.com",
+            5500
+        ));
+        assert!(entry_matches(
+            &entry("hlserver.com", " 5500 "),
+            "hlserver.com",
+            5500
+        ));
+    }
+
+    /// A different server is a different server, and this connection's
+    /// nickname does not apply there.
+    #[test]
+    fn a_different_endpoint_does_not_match() {
+        assert!(!entry_matches(
+            &entry("hlserver.com", ""),
+            "example.org",
+            5500
+        ));
+        assert!(!entry_matches(
+            &entry("hlserver.com", ""),
+            "hlserver.com",
+            5501
+        ));
+        assert!(!entry_matches(
+            &entry("hlserver.com", "5600"),
+            "hlserver.com",
+            5500
+        ));
+    }
+
+    /// A TLS entry's 5600 is not the default port, so it is compared as
+    /// itself — the normalisation is only about blank meaning 5500.
+    #[test]
+    fn non_default_ports_compare_literally() {
+        assert!(entry_matches(&entry("badmoon", "5600"), "badmoon", 5600));
+        assert!(!entry_matches(&entry("badmoon", "5600"), "badmoon", 5601));
+    }
+
+    /// DNS is case-insensitive, so the resolution must be too — a saved
+    /// `HLserver.com` losing its nickname to a typed `hlserver.com` is
+    /// exactly the invisible difference this must not have.
+    #[test]
+    fn hostnames_compare_case_insensitively() {
+        assert!(entry_matches(
+            &entry("HLserver.com", ""),
+            "hlserver.com",
+            5500
+        ));
+        assert!(entry_matches(
+            &entry("hlserver.com", ""),
+            "HLSERVER.COM",
+            5500
+        ));
+    }
 }

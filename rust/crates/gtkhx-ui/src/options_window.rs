@@ -133,6 +133,13 @@ fn entries() -> Vec<Entry> {
 
     v.push(Entry {
         section: Some("Network"),
+        name: "connections",
+        title: "Connections",
+        icon: "user-bookmarks-symbolic",
+        draw: crate::options::page_connections,
+    });
+    v.push(Entry {
+        section: None,
         name: "trackers",
         title: "Trackers",
         icon: "network-server-symbolic",
@@ -156,6 +163,10 @@ thread_local! {
     /// than a reopened window. The C global was nulled from the `closed`
     /// handler regardless of refcount; this keeps that guarantee.
     static WINDOW: RefCell<Option<glib::WeakRef<adw::Dialog>>> = const { RefCell::new(None) };
+    /// The live sidebar, so a page request against an already-open window can
+    /// move the selection. Weak for the same reason as `WINDOW`, and dropped
+    /// with it.
+    static SIDEBAR: RefCell<Option<glib::WeakRef<gtk::ListBox>>> = const { RefCell::new(None) };
 }
 
 fn existing() -> Option<adw::Dialog> {
@@ -194,8 +205,33 @@ fn section_header(row: &gtk::ListBoxRow, before: Option<&gtk::ListBoxRow>, entri
     row.set_header(Some(&label));
 }
 
+/// Select the sidebar row whose entry has this stack name.
+///
+/// The lookup is by name rather than by index because the caller is C passing
+/// a string constant, and because the table's order is not something a call
+/// site should have to know.
+fn select_page(listbox: &gtk::ListBox, entries: &[Entry], name: &str) {
+    // An unknown name falls back to the first page rather than selecting
+    // nothing: GtkStack shows its first child regardless, so leaving the
+    // sidebar unselected would put the window in a state where the highlight
+    // and the content disagree.
+    let idx = entries
+        .iter()
+        .position(|e| e.name == name)
+        .unwrap_or_else(|| {
+            glib::g_warning!("gtkhx", "no settings page named {name:?}");
+            0
+        });
+    if let Some(row) = listbox.row_at_index(idx as i32) {
+        listbox.select_row(Some(&row));
+    }
+}
+
 /// Open Settings, or re-present it if it is already up.
-fn present() {
+///
+/// `page` names a stack child to select instead of the first one — how a
+/// menu item can point straight at one page.
+fn present(page: Option<&str>) {
     // GTK is initialised from C, so gtk4-rs's own init flag isn't set;
     // building adw widgets without this trips libadwaita-rs's
     // assert_initialized_main_thread!. One call here covers every page,
@@ -207,6 +243,14 @@ fn present() {
         (!parent.is_null()).then(|| unsafe { glib::translate::from_glib_none(parent) });
 
     if let Some(dialog) = existing() {
+        // Already up: still honour the requested page, so a second menu item
+        // aimed at a different one doesn't just raise whatever was showing.
+        if let Some(name) = page {
+            if let Some(listbox) = SIDEBAR.with_borrow(|s| s.as_ref().and_then(|w| w.upgrade())) {
+                let entries = entries();
+                select_page(&listbox, &entries, name);
+            }
+        }
         dialog.present(parent.as_ref());
         return;
     }
@@ -335,12 +379,22 @@ fn present() {
         Err(e) => glib::g_critical!("gtkhx", "settings breakpoint condition: {e}"),
     }
 
-    // Select the first category so the content pane isn't blank.
-    if let Some(first) = listbox.row_at_index(0) {
-        listbox.select_row(Some(&first));
+    // Select a category so the content pane isn't blank — the requested one
+    // if the caller named one, else the first.
+    match page {
+        Some(name) => select_page(&listbox, &entries, name),
+        None => {
+            if let Some(first) = listbox.row_at_index(0) {
+                listbox.select_row(Some(&first));
+            }
+        }
     }
+    SIDEBAR.with_borrow_mut(|s| *s = Some(listbox.downgrade()));
 
-    dialog.connect_closed(|_| WINDOW.with(|w| *w.borrow_mut() = None));
+    dialog.connect_closed(|_| {
+        WINDOW.with(|w| *w.borrow_mut() = None);
+        SIDEBAR.with_borrow_mut(|s| *s = None);
+    });
     dialog.present(parent.as_ref());
 }
 
@@ -350,7 +404,18 @@ fn present() {
 /// Must be called on the main thread, after GTK is up.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_create_options_window() {
-    present();
+    present(None);
+}
+
+/// Open Settings with `page` selected. `page` is a stack child name from the
+/// table above; an unknown one warns and opens on the first page.
+///
+/// # Safety
+/// `page` is a valid NUL-terminated C string. Main thread, after GTK is up.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_open_settings_page(page: *const std::ffi::c_char) {
+    let name = crate::cstr(page);
+    present((!name.is_empty()).then_some(name.as_str()));
 }
 
 #[cfg(test)]

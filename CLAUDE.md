@@ -194,8 +194,9 @@ session the user is looking at" — use it in UI code. Today N == 1 and they coi
 - **Don't use `g_assert` for invariants that matter in release builds** — it compiles out
   under `G_DISABLE_ASSERT`. Use `g_error` (always fatal) or `g_critical` plus a graceful
   skip. The `g_assert_*` test macros are fine in tests.
-- **`g_autoptr` / `g_autofree`** are used opportunistically, not universally. `bookmarks*.c`
-  is the in-tree pattern to copy. Not worth a sweep; convert when you touch a function.
+- **`g_autoptr` / `g_autofree`** are used opportunistically, not universally. `tasks.c`
+  and `hxnet_bridge.c` are the in-tree pattern to copy — the `bookmarks*.c` this used to
+  point at went to Rust. Not worth a sweep; convert when you touch a function.
 - **`GtkTreeListModel`**: attach children to a node *before* appending the node.
   `create_child_model` fires once and the leaf-vs-expandable verdict sticks.
 - **No phase labels in source comments.** Describe the reason, not the project-management

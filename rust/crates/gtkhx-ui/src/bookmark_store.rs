@@ -2,7 +2,8 @@
 //!
 //! Resolves the config directory (via the C `gtkhx_config_dir`) and the
 //! legacy import locations, then exposes the load/mutate/save operations the
-//! Connect and Bookmarks dialogs need. Each mutation loads the whole store,
+//! Connect dialog and the Connections settings page need. Each mutation
+//! loads the whole store,
 //! changes it, and writes it back — the file is tiny, so there's no shared
 //! mutable state to keep in sync.
 //!

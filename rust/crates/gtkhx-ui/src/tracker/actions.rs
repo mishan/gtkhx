@@ -210,7 +210,7 @@ fn save_bookmark_for_row(row: &HxTrackerRow) {
     if bookmark_store::exists(&name) {
         toast(&format!(
             "{} \"{}\"",
-            tr("Bookmark already exists; manage it from the Bookmarks dialog:"),
+            tr("There is already a connection with that name; edit it in Settings → Connections:"),
             name
         ));
         return;

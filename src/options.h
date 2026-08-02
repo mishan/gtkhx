@@ -4,6 +4,11 @@
 /* Open the Settings window (gtkhx-ui options_window.rs). Re-presents the
  * existing one if it is already up, so this is safe to call repeatedly. */
 extern void gtkhx_create_options_window (void);
+
+/* Same, but with one page pre-selected — `page` is a stack child name from
+ * the table in options_window.rs (e.g. "connections"). An unknown name warns
+ * and falls back to the first page. */
+extern void gtkhx_open_settings_page (const char *page);
 extern void init_variables (void);
 /* Load the settings through hxconfig (importing an old gtkhxrc if there is no
  * gtkhx.toml yet), refresh the C mirror, seed the connection's identity, and
