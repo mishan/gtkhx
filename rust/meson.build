@@ -104,6 +104,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/cipher_vocab.rs',
   'crates/gtkhx-ui/src/connect.rs',
   'crates/gtkhx-ui/src/options.rs',
+  'crates/gtkhx-ui/src/options_identity.rs',
   'crates/gtkhx-ui/src/options_voice.rs',
   'crates/gtkhx-ui/src/rc4_dialog.rs',
   'crates/gtkhx-ui/src/tls_trust_dialog.rs',

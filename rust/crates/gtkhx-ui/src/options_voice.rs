@@ -162,8 +162,14 @@ fn open_capture_dialog(row: &adw::ActionRow) {
             return gtk::glib::Propagation::Proceed;
         };
 
-        // Escape cancels — but only bare Escape, since Ctrl+Escape and friends
-        // are legitimate binds.
+        // Escape cancels, unless it's held with Ctrl/Alt/Super — those are
+        // legitimate binds and have to reach the capture below.
+        //
+        // Deliberately only those three: they are exactly the modifiers
+        // `hx_voice_ptt_keyspec_allowed` accepts as a bind prefix. Shift,
+        // Lock and the NumLock-style mode bits therefore fall through to the
+        // cancel, which is right — Shift+Escape can't be bound, so treating
+        // it as anything but Escape would leave the dialog with no way out.
         let modified = state.intersects(
             gtk::gdk::ModifierType::CONTROL_MASK
                 | gtk::gdk::ModifierType::ALT_MASK
@@ -177,9 +183,14 @@ fn open_capture_dialog(row: &adw::ActionRow) {
         let raw_state = state.bits();
         if unsafe { hx_voice_ptt_keyspec_allowed(keyval.into_glib(), raw_state) } == 0 {
             if let Some(err) = err_weak.upgrade() {
+                // Lists the same three modifiers the dialog body does, which
+                // are the three `hx_voice_ptt_keyspec_allowed` accepts —
+                // naming a narrower set here sends people hunting for a
+                // combination that would in fact have worked.
                 err.set_text(&tr(
                     "That key would conflict with chat typing. Try a function \
-                     key (F1–F24), Pause, or a Ctrl/Alt-modified combination.",
+                     key (F1–F24), Pause, or a Ctrl/Alt/Super-modified \
+                     combination.",
                 ));
                 err.set_visible(true);
             }

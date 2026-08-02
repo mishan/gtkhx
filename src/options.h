@@ -43,9 +43,9 @@ extern void reinit_gtktexts (session *sess);
  * UINT16), 0 for a name the schema doesn't have. gtkhx_prefs_get_string
  * returns a g_malloc'd copy (free with g_free), never NULL.
  *
- * gtkhx_prefs_set_bool additionally drives the live AdwSwitchRow when the
- * Settings dialog happens to be showing one for that key, so a toggle flipped
- * elsewhere stays in lockstep with what the user is looking at. */
+ * gtkhx_prefs_set_bool writes through hxconfig like any other setter; the
+ * Settings rows are Rust now and read their value when built, so there is no
+ * live widget for it to drive. */
 extern int gtkhx_prefs_type (const char *name);
 extern int gtkhx_prefs_get_bool (const char *name);
 extern int gtkhx_prefs_get_int (const char *name);
