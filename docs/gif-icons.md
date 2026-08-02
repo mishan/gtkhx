@@ -142,14 +142,18 @@ They reach the view through two `GtkhxSession` signals:
 `gif-icon-changed (htlc, uid)` for the broadcast (which triggers a
 re-fetch) and `gif-icon-data (htlc, uid, gif, len)` for fetched bytes.
 
-`src/gif_avatar.c` owns the per-UID cache. **Decoding goes through the
+`src/gif_avatar.c` owns the avatar cache, keyed on `(connection, uid)` — a
+uid is only unique within a connection, so two servers can each have a user 5
+with a different face. **Decoding goes through the
 shared bounded, sandboxed image decoder** (see
 [image decoding](image-decoding.md)) under the strict JPEG/PNG/GIF
 policy, with avatar-specific caps: 64 KiB input, 256 px per axis, up to
-256 frames and 30 s of cumulative animation. At most one decode per UID
-is in flight; a newer update for the same UID cancels the previous one.
-The cache is cleared on disconnect, since icons are session-scoped
-server-side and a fresh connection re-probes from scratch.
+256 frames and 30 s of cumulative animation. At most one decode per key
+is in flight; a newer update for the same key cancels the previous one.
+A connection's entries are dropped when its user list is cleared
+(`gtkhx_avatar_clear_conn`), since icons are session-scoped server-side and a
+fresh connection re-probes from scratch — only that connection's, so a
+disconnect doesn't take every other server's faces with it.
 
 Avatars route through the **same** user-list cell path as cicn sprites —
 intrinsic pixels × theme scale, with the wide-banner left-shift for
@@ -163,7 +167,7 @@ about which icon a user "has".
 
 Animated avatars are decoded to all their frames and played by **a
 single shared frame timer** — the whole cache advances on one 60 ms
-tick, and `gtkhx_avatar_get(uid)` simply returns whichever frame is
+tick, and `gtkhx_avatar_get(htlc, uid)` simply returns whichever frame is
 current, so a cell needs no animation state of its own. The timer runs
 only while at least one animated, unpaused avatar exists and the global
 preference is on.

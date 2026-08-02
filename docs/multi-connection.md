@@ -174,16 +174,44 @@ tables are keyed on those with no connection dimension:
   map of private chats and a uid-keyed map of private messages. Every exported
   entry point takes a bare cid or uid with no session. The dock documentation's
   claim that the tab view becomes a per-panel field and "the API stays the same"
-  is wrong in one specific way: the key namespace is also wrong, and that is
-  true under either layout model.
-- **The GIF avatar caches** in `gif_avatar.c`, keyed on bare uid, with a
-  clear-all that wipes every connection's avatars on any disconnect.
-- **Notification IDs** — `"msg-%u"`, `"chat-%u"`, `"pchat-%u"` and friends.
-  `g_application_send_notification` replaces by id, so server B's message from
-  uid 5 silently replaces server A's.
+  is wrong in one specific way: the key namespace is also wrong.
+
+  **Still open, deliberately, and it is the one item here whose answer depends
+  on the layout model.** Under Model B each connection gets its own Chat panel
+  and its own tab view, so cids are unique within one and the collision
+  dissolves without a key change. Under Model A one tab view serves every
+  connection in turn, and the keys genuinely have to be qualified. Doing it now
+  means either throwing the work away or pre-committing to A, so it waits for
+  that decision — which is M4's to make.
+- **The GIF avatar caches** — *keys* fixed. Both tables key on
+  `(connection serial, uid)` now, and the clear-all became
+  `gtkhx_avatar_clear_conn`: one server's user list going away no longer takes
+  every other server's faces with it. The **readers** are not fixed:
+  `gtkhx_avatar_get` and the animation predicates are called from user-list
+  cell drawing, which resolves its connection through `hx_active_session()`.
+  So a background connection's rows would look up the *focused* connection's
+  face for a colliding uid — showing the wrong image, which is worse than
+  showing none. That is the `hx_active_session()` sweep below, not a gap in
+  the keying.
+- ~~**Notification IDs**~~ — fixed. The four connection-scoped classes carry
+  the serial, so `msg-3-5` and `msg-7-5` are two notifications rather than one
+  replacing the other. `news`, `xfer` and `broadcast` keep constant ids on
+  purpose: they are genuinely app-level, and collapsing several into one is
+  the intended behaviour. The omit-when-focused check and the mention test
+  also route by connection now — you can appear under different names on
+  different servers, so matching mentions against the focused connection's
+  nickname both missed real ones and invented others.
 
 By contrast `sess->chats`, `sess->tasks`, `sess->msg_windows` and the voice
 model are already per-session and need nothing. It is only the flat indexes.
+
+**What supplies the connection dimension.** `hx_conn_serial()` — a small
+integer assigned once at allocation, unique within the process run, preserved
+across `hx_conn_reset`. The connection pointer would work as a key but is
+reusable after a free, and a serial never repeats. It is deliberately *not*
+the durable identity Model B needs for saved layouts: that has to survive a
+restart, and this doesn't. It fits in what was tail padding on `htlc_conn`,
+so the struct is the same size and neither layout pin moved.
 
 ### The `hx_active_session()` idiom
 
@@ -698,7 +726,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | ~~M1~~ | **Done.** Connection collection: bookmarks are Settings → Connections; identity is decoupled from connection storage and resolved as override-else-global at connect; the preferences binder is deleted. The identity half rode in with the preferences rewrite (P5); the collection half retired the standalone Bookmarks window and added the per-connection icon override with an explicit clear-to-inherit for both fields. | — |
 | ~~M2~~ | **Done.** The transport handle moved onto the connection and the send primitive takes one; the install refusal narrowed to a second install over the same connection. Two connections can hold transports at once. | — |
 | ~~M3a~~ | **Done.** Connection identity on all eight untagged signals; the two discard-the-htlc handlers fixed; the PM window routed by the message's connection. | M2 |
-| M3b | Connection tags on the flat cid/uid indexes and notification ids. Three unrelated clusters: notification ids, the GIF avatar caches, and the chat tab strip — the last of which M4 reworks anyway, so it may be cheaper to do there. | M3a |
+| ~~M3b~~ | **Done**, less the chat tab strip. `hx_conn_serial` supplies a process-unique connection identity; notification ids and both GIF avatar caches are keyed on it. The tab strip's cid/uid keys are deferred into M4, because whether they need qualifying at all depends on the layout model. | M3a |
 | M4 | Reify the connection/session as a heap object behind a collection and factory; connection tab strip; pick layout Model A or B; per-Chat-panel tab view; per-connection factory replaces eager panel construction. | M1, M3 |
 | M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |
 | M6 | Global transfer queue with per-connection tags and a disconnect sweep; per-connection loss banner, status bar, titles and tray; bookmarks "open in new tab". | M4 |
@@ -718,10 +746,15 @@ a second connect, so the rest of this document can be built against something
 that will not reject it out of hand. Reaching a second connection still needs
 M3 and M4.
 
-**M3a has landed**: every signal now says which connection it belongs to, so
-the model side can no longer misroute an event to the focused session by
-default. What is left of M3 is the flat key namespaces, which are three
-independent clusters rather than one job.
+**M3 has landed**, less one piece. Every signal says which connection it
+belongs to, so the model side can no longer misroute an event to the focused
+session by default; and the notification ids and avatar caches carry a
+connection, so two servers' user 5 are two users. The chat tab strip's flat
+cid/uid keys are the exception, folded into M4 because whether they need
+qualifying depends on which layout model wins.
+
+**M4 is next, and it is where the open decisions are** — the layout model
+above all, which now gates the tab strip's keys as well as the panel work.
 
 ---
 

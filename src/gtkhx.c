@@ -43,7 +43,7 @@
 #include "files_remote_provider.h"
 #include "users.h"
 #include "gif_icons.h"  /* hx_icon_get — re-fetch on ICON_CHANGE */
-#include "gif_avatar.h" /* gtkhx_avatar_update / _clear_all */
+#include "gif_avatar.h" /* gtkhx_avatar_update / _clear_conn */
 #include "files.h"
 #include "tasks.h"
 #include "htxf_accessors.h"
@@ -1280,7 +1280,7 @@ on_chat_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
         return;
     }
     output_chat_from_event (htlc, event);
-    gtkhx_notify_chat (event);
+    gtkhx_notify_chat (htlc, event);
 }
 
 static void
@@ -1310,7 +1310,7 @@ on_chat_invitation_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)emitter;
     (void)user_data;
     output_chat_invitation (htlc, (guint32)cid, (char *)name);
-    gtkhx_notify_pchat_invite ((guint32)cid, (const char *)name);
+    gtkhx_notify_pchat_invite (htlc, (guint32)cid, (const char *)name);
 }
 
 static void
@@ -1328,7 +1328,7 @@ on_msg_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
      * never shown would leave a desktop notification pointing at a
      * conversation the user cannot open. */
     msg_output_from_event (htlc, event);
-    gtkhx_notify_msg (event);
+    gtkhx_notify_msg (htlc, event);
 }
 
 /* "logged-in" — the LOGIN task reply came back successful and the reply
@@ -1511,11 +1511,13 @@ on_users_clear_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)user_data;
     users_clear (htlc, chat);
     /* Clearing the public user list is the view-side disconnect
-     * boundary. GIF avatars are per-session server-side, so drop the
-     * whole cache (and cancel any in-flight decodes) — a reconnect
-     * re-probes and re-fetches from scratch. */
+     * boundary. Drop this connection's avatars (and cancel any of its
+     * in-flight decodes) — a reconnect re-probes and re-fetches from
+     * scratch. Only this connection's: the cache is app-global and used to
+     * be wiped wholesale here, which took every other server's faces with
+     * it. */
     if (chat && hx_chat_cid (chat) == 0) {
-        gtkhx_avatar_clear_all ();
+        gtkhx_avatar_clear_conn (htlc);
     }
 }
 
@@ -1527,9 +1529,8 @@ on_gif_icon_data_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                          guint uid, gpointer gif, guint len, gpointer user_data)
 {
     (void)emitter;
-    (void)htlc;
     (void)user_data;
-    gtkhx_avatar_update ((guint16)uid, (const guint8 *)gif, (gsize)len);
+    gtkhx_avatar_update (htlc, (guint16)uid, (const guint8 *)gif, (gsize)len);
 }
 
 /* gif-icon-changed carries only a uid (the ICON_CHANGE broadcast). Pull

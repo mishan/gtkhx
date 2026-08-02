@@ -31,11 +31,37 @@ typedef struct {
     gboolean paused;     /* per-user freeze override */
 } Avatar;
 
-/* uid (guint) -> Avatar *. Value destroy frees the Avatar. */
+/* avatar key (guint) -> Avatar *. Value destroy frees the Avatar. */
 static GHashTable *avatar_cache;
-/* uid (guint) -> in-flight decode cancel token. At most one decode per
- * uid is live; a new update for the same uid cancels the previous. */
+/* avatar key (guint) -> in-flight decode cancel token. At most one decode
+ * per key is live; a new update for the same key cancels the previous. */
 static GHashTable *avatar_pending;
+
+/* Both tables are app-global, but a uid is only unique *within* a
+ * connection: two servers can each have a user 5 with a different face, and
+ * keying on the bare uid made them one entry that whichever server updated
+ * last would win. The key pairs the uid with the connection's serial.
+ *
+ * Packed into a single guint rather than a heap key so the tables stay
+ * g_direct_hash and every call site stays a one-liner: a guint16 serial and
+ * a guint16 uid are exactly the 32 bits a guint has. A NULL connection
+ * gives serial 0, so uid-only keys from a connectionless caller can never
+ * collide with a real connection's. */
+static guint
+avatar_key (const struct htlc_conn *htlc, guint16 uid)
+{
+    return ((guint)hx_conn_serial (htlc) << 16) | (guint)uid;
+}
+
+/* The uid half of a key. Spelled out rather than open-coding the mask at
+ * each site: `users_refresh_avatar` takes a guint16, so passing a whole key
+ * happens to work today by implicit narrowing — and would keep compiling,
+ * silently wrong, the moment that function is widened to take a pair. */
+static guint16
+avatar_key_uid (guint key)
+{
+    return (guint16)(key & 0xffffu);
+}
 
 /* Global "animate avatars" pref (CFG_ANIMATE_AVATARS). When FALSE every
  * avatar shows its still first frame. Default TRUE; options.c pushes the
@@ -87,13 +113,13 @@ avatar_is_animated (const Avatar *a)
 }
 
 GdkTexture *
-gtkhx_avatar_get (guint16 uid)
+gtkhx_avatar_get (struct htlc_conn *htlc, guint16 uid)
 {
     if (!avatar_cache || uid == 0) {
         return NULL;
     }
-    Avatar *a
-        = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid));
+    Avatar *a = g_hash_table_lookup (avatar_cache,
+                                     GUINT_TO_POINTER (avatar_key (htlc, uid)));
     if (!a) {
         return NULL;
     }
@@ -163,7 +189,7 @@ anim_tick (gpointer data)
         }
         a->cur = (a->cur + 1) % a->frames->len;
         a->cur_since_us = now;
-        users_refresh_avatar (GPOINTER_TO_UINT (key));
+        users_refresh_avatar (avatar_key_uid (GPOINTER_TO_UINT (key)));
     }
     /* If a pref/pause change left nothing to animate, stop. Returning
      * G_SOURCE_REMOVE here would race anim_timer_sync's bookkeeping, so
@@ -250,25 +276,29 @@ avatar_from_result (HxInlineMediaDecoded *result)
 static void
 on_avatar_decoded (HxInlineMediaDecoded *result, gpointer user_data)
 {
-    /* The uid rides through user_data (GUINT_TO_POINTER) — no heap ctx.
-     * A heap ctx would leak whenever a decode is cancelled (supersede /
-     * clear-all), because inline_media_decode_cancel suppresses this
-     * callback, which is the only place a ctx would be freed. */
-    guint16 uid = (guint16)GPOINTER_TO_UINT (user_data);
+    /* The whole avatar key rides through user_data (GUINT_TO_POINTER) — no
+     * heap ctx. A heap ctx would leak whenever a decode is cancelled
+     * (supersede / clear-all), because inline_media_decode_cancel suppresses
+     * this callback, which is the only place a ctx would be freed. It is the
+     * key rather than the uid because the connection is what makes the uid
+     * addressable, and a raw pointer to the connection could dangle by the
+     * time a decode lands. */
+    guint key = GPOINTER_TO_UINT (user_data);
+    guint16 uid = avatar_key_uid (key);
 
-    /* The token for this uid has resolved — drop the pending entry.
+    /* The token for this key has resolved — drop the pending entry.
      * Removing it runs the value-destroy (inline_media_decode_cancel),
      * the canonical free for the token: cancel-after-completion is a
      * documented no-op that still releases our token ref. */
     if (avatar_pending) {
-        g_hash_table_remove (avatar_pending, GUINT_TO_POINTER ((guint)uid));
+        g_hash_table_remove (avatar_pending, GUINT_TO_POINTER (key));
     }
 
     Avatar *a = avatar_from_result (result);
     if (a) {
         ensure_tables ();
-        /* Insert replaces (and frees) any prior Avatar for this uid. */
-        g_hash_table_insert (avatar_cache, GUINT_TO_POINTER ((guint)uid), a);
+        /* Insert replaces (and frees) any prior Avatar for this key. */
+        g_hash_table_insert (avatar_cache, GUINT_TO_POINTER (key), a);
         debug_log ("icon", "avatar decoded for uid=%u (%u frame%s)",
                    (unsigned)uid, a->frames->len,
                    a->frames->len == 1 ? "" : "s");
@@ -276,7 +306,7 @@ on_avatar_decoded (HxInlineMediaDecoded *result, gpointer user_data)
         /* Decode failed (non-GIF, oversize, corrupt). Drop any stale
          * avatar so the cell falls back to the standard icon. */
         if (avatar_cache) {
-            g_hash_table_remove (avatar_cache, GUINT_TO_POINTER ((guint)uid));
+            g_hash_table_remove (avatar_cache, GUINT_TO_POINTER (key));
         }
         debug_log ("icon", "avatar decode failed for uid=%u (code=%u)",
                    (unsigned)uid, result ? result->error_code : 0);
@@ -288,7 +318,8 @@ on_avatar_decoded (HxInlineMediaDecoded *result, gpointer user_data)
 }
 
 void
-gtkhx_avatar_update (guint16 uid, const guint8 *gif, gsize len)
+gtkhx_avatar_update (struct htlc_conn *htlc, guint16 uid, const guint8 *gif,
+                     gsize len)
 {
     if (uid == 0) {
         return;
@@ -297,11 +328,13 @@ gtkhx_avatar_update (guint16 uid, const guint8 *gif, gsize len)
 
     /* Cancel any in-flight decode for this uid (removing the entry
      * invokes inline_media_decode_cancel via the value-destroy). */
-    g_hash_table_remove (avatar_pending, GUINT_TO_POINTER ((guint)uid));
+    g_hash_table_remove (avatar_pending,
+                         GUINT_TO_POINTER (avatar_key (htlc, uid)));
 
     if (!gif || len == 0) {
         /* Clear: the user dropped their avatar. */
-        g_hash_table_remove (avatar_cache, GUINT_TO_POINTER ((guint)uid));
+        g_hash_table_remove (avatar_cache,
+                             GUINT_TO_POINTER (avatar_key (htlc, uid)));
         anim_timer_sync ();
         users_refresh_avatar (uid);
         return;
@@ -309,27 +342,49 @@ gtkhx_avatar_update (guint16 uid, const guint8 *gif, gsize len)
 
     gpointer token
         = inline_media_decode_async (gif, len, &avatar_caps, on_avatar_decoded,
-                                     GUINT_TO_POINTER ((guint)uid));
+                                     GUINT_TO_POINTER (avatar_key (htlc, uid)));
     /* token == NULL means the decode synchronously rejected (and the
      * callback already fired). Only track a live token. */
     if (token) {
-        g_hash_table_insert (avatar_pending, GUINT_TO_POINTER ((guint)uid),
-                             token);
+        g_hash_table_insert (avatar_pending,
+                             GUINT_TO_POINTER (avatar_key (htlc, uid)), token);
+    }
+}
+
+/* Drop every entry whose key belongs to `htlc`. */
+static void
+drop_conn_entries (GHashTable *table, struct htlc_conn *htlc)
+{
+    GHashTableIter iter;
+    gpointer k;
+    guint want;
+
+    if (!table) {
+        return;
+    }
+    want = (guint)hx_conn_serial (htlc) << 16;
+    g_hash_table_iter_init (&iter, table);
+    while (g_hash_table_iter_next (&iter, &k, NULL)) {
+        if ((GPOINTER_TO_UINT (k) & 0xffff0000u) == want) {
+            /* iter_remove runs the value-destroy, which is the token cancel
+             * for the pending table and the Avatar free for the cache. */
+            g_hash_table_iter_remove (&iter);
+        }
     }
 }
 
 void
-gtkhx_avatar_clear_all (void)
+gtkhx_avatar_clear_conn (struct htlc_conn *htlc)
 {
-    /* Cancel in-flight decodes first (value-destroy cancels each token),
-     * so no late callback writes into a just-cleared cache. */
-    if (avatar_pending) {
-        g_hash_table_remove_all (avatar_pending);
-    }
-    if (avatar_cache) {
-        g_hash_table_remove_all (avatar_cache);
-    }
-    anim_timer_sync (); /* nothing left to animate → stop the timer */
+    /* One connection's avatars, not every connection's. This runs when a
+     * user list is torn down, and that belongs to one server — wiping the
+     * whole table took every other connection's faces with it.
+     *
+     * Cancel in-flight decodes first (value-destroy cancels each token), so
+     * no late callback writes into a just-cleared cache. */
+    drop_conn_entries (avatar_pending, htlc);
+    drop_conn_entries (avatar_cache, htlc);
+    anim_timer_sync (); /* maybe nothing left to animate → stop the timer */
 }
 
 /* ---- Pref + per-user pause (Phase 10.D) ----------------------------- */
@@ -359,14 +414,14 @@ gtkhx_avatar_set_animation_enabled (gboolean enabled)
                 if (anim_enabled && !a->paused) {
                     a->cur_since_us = now;
                 }
-                users_refresh_avatar (GPOINTER_TO_UINT (key));
+                users_refresh_avatar (avatar_key_uid (GPOINTER_TO_UINT (key)));
             }
         }
     }
 }
 
 gboolean
-gtkhx_avatar_is_animated (guint16 uid)
+gtkhx_avatar_is_animated (struct htlc_conn *htlc, guint16 uid)
 {
     /* UI-facing: when animation is globally off, treat avatars as stills
      * so the click-to-pause gesture doesn't claim and the right-click
@@ -376,29 +431,29 @@ gtkhx_avatar_is_animated (guint16 uid)
     if (!anim_enabled || !avatar_cache || uid == 0) {
         return FALSE;
     }
-    return avatar_is_animated (
-        g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid)));
+    return avatar_is_animated (g_hash_table_lookup (
+        avatar_cache, GUINT_TO_POINTER (avatar_key (htlc, uid))));
 }
 
 gboolean
-gtkhx_avatar_is_paused (guint16 uid)
+gtkhx_avatar_is_paused (struct htlc_conn *htlc, guint16 uid)
 {
     if (!avatar_cache || uid == 0) {
         return FALSE;
     }
-    Avatar *a
-        = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid));
+    Avatar *a = g_hash_table_lookup (avatar_cache,
+                                     GUINT_TO_POINTER (avatar_key (htlc, uid)));
     return a ? a->paused : FALSE;
 }
 
 void
-gtkhx_avatar_set_paused (guint16 uid, gboolean paused)
+gtkhx_avatar_set_paused (struct htlc_conn *htlc, guint16 uid, gboolean paused)
 {
     if (!avatar_cache || uid == 0) {
         return;
     }
-    Avatar *a
-        = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid));
+    Avatar *a = g_hash_table_lookup (avatar_cache,
+                                     GUINT_TO_POINTER (avatar_key (htlc, uid)));
     if (!a || a->paused == (paused != FALSE)) {
         return;
     }

@@ -27,15 +27,18 @@ typedef struct _session session;
 
 /* ---- Lifecycle -----------------------------------------------------------
  *
- * hx_conn_reset zeroes every field, the transport handle included, without
- * destroying what it pointed at. Callers must therefore uninstall the bridge
- * before resetting, or an hxnet actor and its socket are stranded with
- * nothing pointing at them.
+ * hx_conn_reset clears every field except `serial`, which is identity rather
+ * than state and has to survive so the connection keeps its key in every
+ * table that holds one. The transport handle *is* cleared, without destroying
+ * what it pointed at, so callers must uninstall the bridge before resetting
+ * or an hxnet actor and its socket are stranded with nothing pointing at
+ * them.
  *
  * Disconnect does not come through here: hx_htlc_close clears fields
  * individually and uninstalls explicitly.
  *
- * hx_conn_new allocates a fresh, zeroed connection (the Rust owner Box-boxes
+ * hx_conn_new allocates a fresh connection, zeroed but for its serial (the
+ * Rust owner Box-boxes
  * it); hx_conn_reset returns an existing one to the just-allocated state (the
  * reconnect path); hx_conn_free releases a hx_conn_new allocation. Production
  * keeps exactly one connection for the process lifetime and never frees it. */
@@ -231,6 +234,16 @@ extern void hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
  * every connection's frames to whichever installed last. */
 extern void *hx_conn_bridge_handle (const struct htlc_conn *h);
 extern void hx_conn_set_bridge_handle (struct htlc_conn *h, void *p);
+
+/* A small per-connection identity, unique within this process run, assigned
+ * at allocation and preserved across hx_conn_reset. 0 means "no connection"
+ * (a NULL h reads as 0), so it can be encoded into a composite key.
+ *
+ * It exists because several app-global tables key on values that are only
+ * unique within a connection — a uid, a chat id — and need a connection
+ * dimension so two servers don't collide. Not durable across restarts; see
+ * the field comment in gtkhx-core's conn.rs. */
+extern guint16 hx_conn_serial (const struct htlc_conn *h);
 
 /* ---- Outgoing transaction counter ----------------------------------------
  *

@@ -65,7 +65,7 @@ hx_chat_avatar_for_uid (GtkWidget *anchor, guint16 uid)
     /* Same precedence as users_cell.c: the GIF avatar wins. Re-fetched
      * every call because it advances on a shared frame timer, so a
      * cached texture would freeze the animation. */
-    avatar = gtkhx_avatar_get (uid);
+    avatar = gtkhx_avatar_get (hx_active_session ()->htlc, uid);
     if (avatar) {
         return avatar;
     }

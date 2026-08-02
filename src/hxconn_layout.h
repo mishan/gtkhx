@@ -193,6 +193,7 @@ struct htlc_conn {
      * legacy server silently drops the unknown opcode, so the task
      * would otherwise linger forever). */
     guint32 gif_icons_probe_trans;
+    guint16 serial;
 };
 
 _Static_assert (sizeof (struct htlc_conn) == 768,
