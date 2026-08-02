@@ -274,6 +274,18 @@ test('htxf_cancel', test_htxf_cancel,
 # the production refactor that R3.3.e-4b will land. Links the
 # bridge source + proto_helpers.c (for hl_hdr_decode round-trip
 # verification) without dragging the GUI tree.
+# A dock panel's content as a set of named pages (dock_pages.c). Pure
+# GtkStack manipulation — no libpanel, no dock — which is what makes it
+# unit-testable at all. Needs a display, so the suite runs under xvfb.
+test_dock_pages = executable('test_dock_pages',
+  'unit/test_dock_pages.c',
+  '../src/dock_pages.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('dock_pages', test_dock_pages,
+     suite : 'unit')
+
 # The C mirror of struct htlc_conn against the Rust struct that owns the
 # storage. Both sides pin sizeof; this pins positions, which is the half
 # sizeof cannot check once a field lands in padding.

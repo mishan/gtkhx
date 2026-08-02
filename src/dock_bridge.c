@@ -30,6 +30,7 @@
 #include "panel_registry.h"
 #include "toolbar.h" /* toolbar_*_frame globals */
 #include "dock_bridge.h"
+#include "dock_pages.h"
 
 /* Map a bridge area to its libpanel PanelArea + home PanelFrame. The
  * area→frame pairing lived, duplicated, in every create_X_window; it now
@@ -108,7 +109,8 @@ gtkhx_dock_set_needs_attention (const char *id, gboolean state)
  * strong ref) or NULL if the dock wasn't built. */
 static HxPanel *
 dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
-                   const char *title, const char *icon_name, GtkWidget *content)
+                   const char *title, const char *icon_name, const char *page,
+                   GtkWidget *content)
 {
     HxPanel *panel;
     GtkWidget *home_frame = NULL;
@@ -134,7 +136,11 @@ dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
     if (icon_name != NULL) {
         panel_widget_set_icon_name (PANEL_WIDGET (panel), icon_name);
     }
-    panel_widget_set_child (PANEL_WIDGET (panel), content);
+    /* The panel's child is a page stack, not the content directly — see
+     * dock_pages.h. At one connection it holds exactly one page and behaves
+     * as the old single child did. */
+    panel_widget_set_child (PANEL_WIDGET (panel),
+                            hx_dock_pages_new (page, content));
 
     panel_frame_add (PANEL_FRAME (home_frame), PANEL_WIDGET (panel));
     hx_panel_set_home_frame (panel, home_frame);
@@ -154,7 +160,8 @@ gtkhx_dock_embed (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
     g_return_val_if_fail (id != NULL, FALSE);
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
-    return dock_embed_common (id, kind, area, title, icon_name, content)
+    return dock_embed_common (id, kind, area, title, icon_name,
+                              HX_DOCK_PAGE_DEFAULT, content)
            != NULL;
 }
 
@@ -203,7 +210,7 @@ gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area, const char *title,
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
     panel = dock_embed_common (id, GTKHX_DOCK_KIND_DYNAMIC, area, title,
-                               icon_name, content);
+                               icon_name, HX_DOCK_PAGE_DEFAULT, content);
     if (panel == NULL) {
         /* Embed failed (content already destroyed by dock_embed_common).
          * The close callback was never installed, so run the caller's
@@ -225,4 +232,69 @@ gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area, const char *title,
                             dock_dyn_close_free);
     hx_panel_set_close_handler (panel, dock_dyn_close_trampoline, c);
     return TRUE;
+}
+
+/* ---- Per-connection content pages ------------------------------------ *
+ *
+ * The panel-level API above answers "does this role have a panel?". These
+ * answer "does this connection have content in it?", which is the question
+ * the tab-switched layout actually asks. See dock_pages.h.
+ *
+ * Each resolves the id through the registry and delegates; an id with no
+ * panel reads as "no pages", which is the same do-nothing answer the
+ * panel-level calls give. */
+
+static GtkWidget *
+panel_content (const char *id)
+{
+    HxPanel *panel;
+
+    if (id == NULL) {
+        return NULL;
+    }
+    panel = hx_panel_registry_lookup (id);
+    if (panel == NULL) {
+        return NULL;
+    }
+    return panel_widget_get_child (PANEL_WIDGET (panel));
+}
+
+gboolean
+gtkhx_dock_add_page (const char *id, const char *page, GtkWidget *content)
+{
+    g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
+
+    if (!hx_dock_pages_add (panel_content (id), page, content)) {
+        /* Consume `content` on the failure path, the same contract
+         * gtkhx_dock_embed has: the caller never has to reason about a
+         * still-floating widget it handed us. */
+        g_object_ref_sink (content);
+        g_object_unref (content);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+gboolean
+gtkhx_dock_has_page (const char *id, const char *page)
+{
+    return hx_dock_pages_has (panel_content (id), page);
+}
+
+gboolean
+gtkhx_dock_show_page (const char *id, const char *page)
+{
+    return hx_dock_pages_show (panel_content (id), page);
+}
+
+gboolean
+gtkhx_dock_remove_page (const char *id, const char *page)
+{
+    return hx_dock_pages_remove (panel_content (id), page);
+}
+
+guint
+gtkhx_dock_page_count (const char *id)
+{
+    return hx_dock_pages_count (panel_content (id));
 }

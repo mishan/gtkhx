@@ -114,6 +114,10 @@ gtkhx_sources = files(
   # dock_bridge.c — generic libpanel dock-embed shim for the docked Rust
   # window ports (Users first). See docs/docking.md.
   'dock_bridge.c',
+  # dock_pages.c — a panel's content as a set of named pages. Split out of
+  # dock_bridge.c because it is pure GtkStack manipulation with no libpanel
+  # and no dock, which is what lets it be unit-tested.
+  'dock_pages.c',
   # users_bridge.c — C content leaves (HxUserListView + action buttons +
   # voice panel) for the Rust Users window shell (gtkhx-ui `users`).
   'users_bridge.c',

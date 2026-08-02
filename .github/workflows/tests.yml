@@ -164,8 +164,14 @@ jobs:
               meson setup build-novoice -Dvoice=disabled \
                 -Dcargo_target_dir=/src/rust-cargo-target
               meson compile -C build-novoice
-              meson test -C build-novoice --suite unit --suite proto \
-                --print-errorlogs
+              # xvfb-run for the meson suites too: the C unit tests now include
+              # one that builds real widgets (dock_pages), and GTK 4 has no
+              # headless backend, so without a display it fails rather than
+              # skipping — which is the behaviour we want, but only once CI
+              # supplies the display.
+              GDK_BACKEND=x11 xvfb-run -a \
+                meson test -C build-novoice --suite unit --suite proto \
+                  --print-errorlogs
               # xvfb-run so the widget tests actually construct widgets rather
               # than skipping. GDK_BACKEND=x11 pins the backend: the container
               # has no Wayland socket, and letting GDK fall through its backend
@@ -182,8 +188,9 @@ jobs:
               meson setup build \
                 -Dcargo_target_dir=/src/rust-cargo-target
               meson compile -C build
-              meson test -C build --suite unit --suite proto \
-                --print-errorlogs
+              GDK_BACKEND=x11 xvfb-run -a \
+                meson test -C build --suite unit --suite proto \
+                  --print-errorlogs
               ( cd rust \
                 && GDK_BACKEND=x11 xvfb-run -a cargo test --workspace \
                      --ignore-rust-version \
