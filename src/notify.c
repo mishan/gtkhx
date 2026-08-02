@@ -111,7 +111,7 @@ chat_window_for_cid (guint32 cid)
 static GtkWidget *
 msg_window_for_uid (guint16 uid)
 {
-    struct msgwin *m = msgwin_with_uid (uid);
+    struct msgwin *m = msgwin_with_uid (hx_active_session (), uid);
     return m ? m->window : NULL;
 }
 

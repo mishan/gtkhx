@@ -10,22 +10,26 @@ extern void msg_windows_init (session *sess);
  * around the model + leaf widgets create_msg makes, then adds the tab. The
  * accessors/setters below are the seam it uses (create_msg is C, the layout
  * assembly is Rust). */
-extern struct msgwin *create_msgwin (guint16 uid, char *name);
-extern struct msgwin *create_msg (guint16 uid, char *name);
+extern struct msgwin *create_msgwin (session *sess, guint16 uid, char *name);
+extern struct msgwin *create_msg (session *sess, guint16 uid, char *name);
 extern GtkWidget *hx_msgwin_outputbuf (struct msgwin *msg);
 extern GtkWidget *hx_msgwin_vscroll (struct msgwin *msg);
 extern GtkWidget *hx_msgwin_inputbuf (struct msgwin *msg);
 extern void hx_msgwin_set_window (struct msgwin *msg, GtkWidget *w);
 extern void hx_msgwin_set_info_image (struct msgwin *msg, GtkWidget *w);
 extern void hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w);
-extern struct msgwin *msgwin_with_uid (guint16 uid);
-extern void msg_output (const char *name, guint16 uid, char *buf);
+/* Look up a PM window in `sess`. The uid alone is not a key: it is only
+ * unique within a connection, so the session picks which table to search. */
+extern struct msgwin *msgwin_with_uid (session *sess, guint16 uid);
+extern void msg_output (session *sess, const char *name, guint16 uid,
+                        char *buf);
 
 /* msg-signal renderer. Same as msg_output but reads from
  * a pre-parsed HxMsgEvent (uid + UTF-8-validated name/body +
  * is_self flag from hx_msg_event_new). */
 struct _HxMsgEvent;
-extern void msg_output_from_event (struct _HxMsgEvent *event);
+extern void msg_output_from_event (struct htlc_conn *htlc,
+                                   struct _HxMsgEvent *event);
 
 /* Render a received HTLS_HDR_MSG_BROADCAST. sender_name + sender_color
  * are from the wire chunk (NULL/0 when the server didn't include

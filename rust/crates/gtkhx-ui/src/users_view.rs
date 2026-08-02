@@ -83,8 +83,8 @@ extern "C" {
     );
 
     // msg.c / chat_tabs.c — open or raise the PM window.
-    fn msgwin_with_uid(uid: u16) -> *mut c_void;
-    fn create_msgwin(uid: u16, name: *mut c_char) -> *mut c_void;
+    fn msgwin_with_uid(sess: *mut c_void, uid: u16) -> *mut c_void;
+    fn create_msgwin(sess: *mut c_void, uid: u16, name: *mut c_char) -> *mut c_void;
     fn gtkhx_chat_tabs_raise_msg(uid: u16);
 
     // gtkhx_theme.c — the theming singleton (a GObject) for live rescale.
@@ -335,10 +335,13 @@ impl HxUserListView {
         if uid == 0 {
             return;
         }
-        if unsafe { msgwin_with_uid(uid) }.is_null() {
+        // The user list the click came from belongs to the focused session,
+        // so that is the session the PM window belongs to as well.
+        let sess = unsafe { crate::ffi::hx_active_session() };
+        if unsafe { msgwin_with_uid(sess, uid) }.is_null() {
             // The row's cached name; create_msgwin copies it, so a borrowed
             // pointer valid for the call is enough (no hx_user* deref).
-            row.with_name_ptr(|name| unsafe { create_msgwin(uid, name as *mut c_char) });
+            row.with_name_ptr(|name| unsafe { create_msgwin(sess, uid, name as *mut c_char) });
         } else {
             unsafe { gtkhx_chat_tabs_raise_msg(uid) };
         }

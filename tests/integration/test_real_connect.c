@@ -130,11 +130,15 @@ typedef struct {
 } test_observer;
 
 static void
-on_connection_state (GtkhxSession *self, GtkhxConnectionState state,
-                     gpointer user_data)
+on_connection_state (GtkhxSession *self, struct htlc_conn *htlc,
+                     GtkhxConnectionState state, gpointer user_data)
 {
     test_observer *obs = user_data;
     (void)self;
+    /* One connection under test, so every state belongs to it. Recording the
+     * connection would let this assert isolation once a second one is
+     * reachable — see docs/multi-connection.md. */
+    (void)htlc;
     g_array_append_val (obs->states, state);
     if (state == obs->wait_for) {
         obs->wait_arrived = TRUE;

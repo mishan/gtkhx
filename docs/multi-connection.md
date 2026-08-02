@@ -127,33 +127,43 @@ handle. A queued event whose connection has been freed is therefore a read of
 freed memory where it previously was not, and uninstalling before the free is
 not enough — the already-queued event still carries the pointer.
 
-### Signals without connection identity
+### ~~Signals without connection identity~~ — every signal is tagged now
 
-Most session signals already carry `htlc*` or `session*` as their first
-argument — chat, chat subject, chat invitation, chat history, the user
-create/change/delete/clear family, gif icons, login, self-update, agreement,
-news file and post, file update, the transfer signals, task update, the log line
-and the user notice. A minority carry no connection identity at all, and those
-are the work:
+**Every session signal now identifies where it came from.** Most already
+carried an `htlc*` or a `session*`; the eight that carried neither —
+`connection-state-changed`, `msg`, `user-info`, `file-info`, `file-list`,
+`news-folder`, `news-catalog`, `news-thread` — each gained a leading `htlc*`,
+and the two handlers that received one and discarded it for
+`hx_active_session()` (login and self-updated in `gtkhx.c`) now resolve through
+`sess_from_htlc`. The two tracker signals stay untagged, correctly: a tracker
+listing belongs to no connection.
 
-| Signal | Carries | Consequence |
-|---|---|---|
-| `connection-state-changed` | a state integer | The C handler routes it through `hx_active_session()`. Server B dropping greys out server A's toolbar, retitles its window and clears the tray. **The sharpest one.** |
-| `msg` | a boxed `HxMsgEvent` | PM windows are keyed by uid, and uid is only unique *within* a connection. This is a cross-delivery bug, not just plumbing. |
-| `user-info`, `file-info`, `file-list` | payload only | No server attribution in the Get Info / file dialogs. |
-| `news-folder`, `news-catalog`, `news-thread` | a bare carrier pointer | The threaded news browser binds to the active session. |
+Almost every emit site already had the connection in hand — several were
+holding it in a parameter named `_htlc`. Only two needed widening
+(`hx_msg_recv` and `hx_user_info_recv`), which is the measure of how close the
+model side already was.
 
-Two handlers already *receive* an htlc and explicitly discard it before calling
-`hx_active_session()` — the login and self-updated handlers in `gtkhx.c`. Those
-are one-line fixes and should be made regardless.
+**The choice this settled.** Tagging one hub was taken over reifying N
+`GtkhxSession` objects, on the cost asymmetry noted here before: most signals
+were already tagged, so the per-connection object would have meant rewiring
+every emit *and* every subscribe site for no behaviour that tagging doesn't
+deliver. That door isn't closed — the emit ABI still takes an explicit session
+pointer, so a later split can happen without touching the signal shapes again.
 
-**A design choice falls out of this.** Because most signals are already tagged,
-"keep one hub and add identity to the untagged signals" is materially cheaper
-than "reify N `GtkhxSession` objects", which means rewiring every emit site
-across the handler crates plus every subscribe site in `gtkhx_connect_signals`.
-The emit ABI supports both. The per-connection object is the cleaner long-term
-shape and the one this document leans toward, but the cost asymmetry is real and
-should be weighed rather than assumed away.
+**What tagging alone does not fix**, and is deliberately still open:
+
+- Handlers that legitimately act on *app-global* chrome. The
+  `connection-state-changed` handler now routes its per-session calls by
+  connection, but `set_status_bar`, `gtkhx_tray_set_connected` and
+  `toolbar_clear_toasts` take no session at all. See "App-global chrome"
+  below.
+- Singletons that take any connection's event because they are bound to none:
+  the files browser and the news browser. Both now *receive* the connection;
+  neither can use it until it becomes a per-connection panel.
+- The flat cid/uid key namespaces below. `msg` is the one where tagging
+  changed behaviour rather than carrying a pointer — the PM window lookup now
+  resolves through the message's own connection — but the chat tab strip still
+  keys tabs on a bare uid, so closing a tab still asks the focused session.
 
 ### Flat key namespaces that collide across servers
 
@@ -191,9 +201,12 @@ site-by-site:
   pointer in hand.
 - **The file browser** is a file-static singleton with no session binding at all;
   every send resolves through the active session, including task creation.
-- **The private-message path** is unrouted end to end: the window lookup takes a
-  bare uid, and the signal that drives it carries no connection, so there is
-  currently nothing to route *by*. This one needs the signal fixed first.
+- ~~**The private-message path**~~ — fixed. The `msg` signal carries its
+  connection, `msgwin_with_uid` takes the session to search, and a `msgwin`
+  remembers which session's table owns it, so a close routes there rather than
+  to whatever is focused. What remains is the tab strip's bare-uid key: the
+  close dispatcher receives a uid and nothing else, so it still has to ask the
+  active session.
 - **The Rust UI reaches for a connection through C shims** —
   `gtkhx_active_htlc()` and friends in `gtkhx_ui_bridge.c` and
   `tracker_bridge.c`. Consumers are the news dialogs and browser, the user
@@ -684,7 +697,8 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | M0 | Session-routing seam: `sess_from_htlc()` and `hx_active_session()` replace direct global access. Model code routes received events by connection; UI code routes by focused session. No behaviour change at N == 1. | — |
 | ~~M1~~ | **Done.** Connection collection: bookmarks are Settings → Connections; identity is decoupled from connection storage and resolved as override-else-global at connect; the preferences binder is deleted. The identity half rode in with the preferences rewrite (P5); the collection half retired the standalone Bookmarks window and added the per-connection icon override with an explicit clear-to-inherit for both fields. | — |
 | ~~M2~~ | **Done.** The transport handle moved onto the connection and the send primitive takes one; the install refusal narrowed to a second install over the same connection. Two connections can hold transports at once. | — |
-| M3 | Connection identity on the untagged signals; the two discard-the-htlc handlers fixed; connection tags on the flat cid/uid indexes and notification ids. | M2 |
+| ~~M3a~~ | **Done.** Connection identity on all eight untagged signals; the two discard-the-htlc handlers fixed; the PM window routed by the message's connection. | M2 |
+| M3b | Connection tags on the flat cid/uid indexes and notification ids. Three unrelated clusters: notification ids, the GIF avatar caches, and the chat tab strip — the last of which M4 reworks anyway, so it may be cheaper to do there. | M3a |
 | M4 | Reify the connection/session as a heap object behind a collection and factory; connection tab strip; pick layout Model A or B; per-Chat-panel tab view; per-connection factory replaces eager panel construction. | M1, M3 |
 | M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |
 | M6 | Global transfer queue with per-connection tags and a disconnect sweep; per-connection loss banner, status bar, titles and tray; bookmarks "open in new tab". | M4 |
@@ -704,8 +718,10 @@ a second connect, so the rest of this document can be built against something
 that will not reject it out of hand. Reaching a second connection still needs
 M3 and M4.
 
-**M3 is the next one that matters**, because the signals that carry no
-connection identity are what would misroute first.
+**M3a has landed**: every signal now says which connection it belongs to, so
+the model side can no longer misroute an event to the focused session by
+default. What is left of M3 is the flat key namespaces, which are three
+independent clusters rather than one job.
 
 ---
 

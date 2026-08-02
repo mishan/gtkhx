@@ -450,7 +450,7 @@ pub unsafe extern "C" fn hx_rcv_user_part(htlc: *mut c_void, frame: *const u8, f
     }
 }
 
-/// `void hx_user_info_recv (uid, name, info, len)` — emit the `user-info`
+/// `void hx_user_info_recv (htlc, uid, name, info, len)` — emit the `user-info`
 /// signal for a USER_INFO reply. The C handler keeps the parse (already Rust,
 /// via `gtkhx_proto_parse_user_info`) and the `name_len && info_len` gate that
 /// filters unanswered server frames; this publishes the parsed pair.
@@ -459,12 +459,13 @@ pub unsafe extern "C" fn hx_rcv_user_part(htlc: *mut c_void, frame: *const u8, f
 /// `name` / `info` are valid C strings (`info` valid for at least `len` bytes).
 #[no_mangle]
 pub unsafe extern "C" fn hx_user_info_recv(
+    htlc: *mut c_void,
     uid: u16,
     name: *const c_char,
     info: *const c_char,
     len: u16,
 ) {
-    gtkhx_session_emit_user_info(gtkhx_session_get_default(), uid, name, info, len);
+    gtkhx_session_emit_user_info(gtkhx_session_get_default(), htlc, uid, name, info, len);
 }
 
 /// `void hx_selfinfo_recv (htlc)` — emit the `self-updated` signal after a
@@ -643,7 +644,7 @@ pub unsafe extern "C" fn rcv_task_news_users(
 /// live `guint16 *` from the send wrapper (freed here).
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_user_info(
-    _htlc: *mut c_void,
+    htlc: *mut c_void,
     frame: *const u8,
     frame_len: usize,
     uid_ptr: *mut c_void,
@@ -676,7 +677,7 @@ pub unsafe extern "C" fn rcv_task_user_info(
     // in both directions now — short of the decoded bytes for a Mac Roman
     // name, and past the allocation for a NUL-truncated one.
     let info_len = info_c.as_bytes().len() as u16;
-    hx_user_info_recv(uid, name_c.as_ptr(), info_c.as_ptr(), info_len);
+    hx_user_info_recv(htlc, uid, name_c.as_ptr(), info_c.as_ptr(), info_len);
 }
 
 // ---- test doubles for the C environment ------------------------------------
@@ -896,6 +897,7 @@ unsafe fn gtkhx_session_emit_user_delete(
 #[cfg(test)]
 unsafe fn gtkhx_session_emit_user_info(
     _self_: *mut c_void,
+    _htlc: *mut c_void,
     uid: u16,
     nam: *const c_char,
     info: *const c_char,

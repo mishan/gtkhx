@@ -223,7 +223,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     }
 
     connected = 0;
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+    gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_DISCONNECTED);
     close_connected_windows (sess);
 
@@ -542,7 +542,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
 
     hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
                       server_addr);
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+    gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_CONNECTING);
 
     /* 2. Pin the LOGIN trans. The replayed reply dispatches to
@@ -631,7 +631,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
          * until the LOGIN_SENDING state, which a refused spawn never
          * reaches. */
         hx_conn_set_fd (htlc, 0);
-        gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+        gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                              GTKHX_CONNECTION_DISCONNECTED);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
                           _ ("could not start connection to %s\n"),

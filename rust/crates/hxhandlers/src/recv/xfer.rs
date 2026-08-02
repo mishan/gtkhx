@@ -412,7 +412,7 @@ fn cstr_lossy(bytes: &[u8]) -> std::ffi::CString {
 /// The signal emit is synchronous, so the parsed buffers outlive the view handler.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_file_getinfo(
-    _htlc: *mut c_void,
+    htlc: *mut c_void,
     frame: *const c_void,
     frame_len: usize,
     ptr: *mut c_void,
@@ -439,6 +439,7 @@ pub unsafe extern "C" fn rcv_task_file_getinfo(
     let comment = cstr_lossy(&f.comment);
     gtkhx_session_emit_file_info(
         gtkhx_session_get_default(),
+        htlc,
         ptr as *const c_char,
         name.as_ptr(),
         creator.as_ptr(),

@@ -257,7 +257,13 @@ pub unsafe extern "C" fn rcv_task_file_list(
     // Emit only when a provider carrier is present (the old cfl_print gate). The
     // provider reads hx_cfl_fh(cfl) itself, so the fh signal arg stays NULL.
     if !data.is_null() {
-        gtkhx_session_emit_file_list(gtkhx_session_get_default(), ptr, std::ptr::null_mut(), data);
+        gtkhx_session_emit_file_list(
+            gtkhx_session_get_default(),
+            htlc,
+            ptr,
+            std::ptr::null_mut(),
+            data,
+        );
     }
 }
 

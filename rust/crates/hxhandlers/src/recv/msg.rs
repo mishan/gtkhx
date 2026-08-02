@@ -29,7 +29,7 @@ pub const HX_MSG_EMITTED: c_int = 1;
 /// A broadcast (or a bare server note): the C side runs `broadcastmsg`.
 pub const HX_MSG_BROADCAST: c_int = 2;
 
-/// `int hx_msg_recv (member_model, uid, is_pm, event)` — the MSG / MSG_BROADCAST
+/// `int hx_msg_recv (htlc, member_model, uid, is_pm, event)` — the MSG / MSG_BROADCAST
 /// ignore-gate + private-message emit. Drops the message when `uid` is ignored
 /// ([`HX_MSG_DROPPED`]); otherwise emits the boxed `msg` signal for a private
 /// message ([`HX_MSG_EMITTED`]) or reports [`HX_MSG_BROADCAST`] so the C side
@@ -41,10 +41,13 @@ pub const HX_MSG_BROADCAST: c_int = 2;
 /// this returns.
 ///
 /// # Safety
+/// `htlc` is the connection the message arrived on — it is what makes the
+/// event's uid resolvable, since a uid is only unique within a connection.
 /// `member_model` is a valid `HxMemberModel *`; `event` is a valid boxed
 /// `HxMsgEvent *` when `is_pm` is set (else unused).
 #[no_mangle]
 pub unsafe extern "C" fn hx_msg_recv(
+    htlc: *mut c_void,
     member_model: *mut c_void,
     uid: u16,
     is_pm: c_int,
@@ -64,7 +67,7 @@ pub unsafe extern "C" fn hx_msg_recv(
         if event.is_null() {
             return HX_MSG_DROPPED;
         }
-        gtkhx_session_emit_msg(gtkhx_session_get_default(), event);
+        gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, event);
         return HX_MSG_EMITTED;
     }
     HX_MSG_BROADCAST
@@ -81,11 +84,17 @@ pub(crate) mod test_env {
         pub static IGNORE: Cell<bool> = const { Cell::new(false) };
         /// Records the boxed-event pointer of the last emitted `msg`, or None.
         pub static EMITTED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
+        /// The connection the last emit carried. Recorded because the uid in
+        /// the event is only unique within a connection, so the pairing is
+        /// the part worth asserting.
+        pub static EMITTED_HTLC: Cell<*mut std::os::raw::c_void> =
+            const { Cell::new(std::ptr::null_mut()) };
     }
 
     pub fn reset() {
         IGNORE.with(|c| c.set(false));
         EMITTED.with(|c| c.set(None));
+        EMITTED_HTLC.with(|c| c.set(std::ptr::null_mut()));
     }
 }
 
@@ -95,8 +104,9 @@ unsafe fn gtkhx_session_get_default() -> *mut c_void {
 }
 
 #[cfg(test)]
-unsafe fn gtkhx_session_emit_msg(_self_: *mut c_void, event: *mut c_void) {
+unsafe fn gtkhx_session_emit_msg(_self_: *mut c_void, htlc: *mut c_void, event: *mut c_void) {
     test_env::EMITTED.with(|c| c.set(Some(event)));
+    test_env::EMITTED_HTLC.with(|c| c.set(htlc));
 }
 
 #[cfg(test)]

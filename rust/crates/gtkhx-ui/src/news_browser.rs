@@ -990,7 +990,11 @@ fn build_content() -> gtk::Widget {
     let session_obj: glib::Object =
         unsafe { from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject) };
     let id = session_obj.connect_local("connection-state-changed", false, |vals| {
-        let state = vals.get(1).and_then(|v| v.get::<u32>().ok()).unwrap_or(0);
+        // vals[1] is the connection, vals[2] the state. The browser is a
+        // singleton bound to no connection in particular, so it takes any
+        // state change; the connection is there for when it becomes a
+        // per-connection panel.
+        let state = vals.get(2).and_then(|v| v.get::<u32>().ok()).unwrap_or(0);
         on_connection_state(state);
         None
     });

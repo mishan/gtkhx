@@ -240,13 +240,13 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
 
-    if ((msg = msgwin_with_uid (mi.uid))) {
+    if ((msg = msgwin_with_uid (hx_active_session (), mi.uid))) {
         /* Existing msgwin — just raise its tab inside the Chat
          * panel. The Chat panel itself gets attached / raised by
          * gtkhx_chat_tabs_raise_msg if it's hidden. */
         gtkhx_chat_tabs_raise_msg (mi.uid);
     } else {
-        create_msgwin (mi.uid, mi.name);
+        create_msgwin (hx_active_session (), mi.uid, mi.name);
     }
 }
 
@@ -904,11 +904,11 @@ view_msg_btn (GtkWidget *w, gpointer data)
     if (!view_selected_member (data, &mi)) {
         return;
     }
-    mw = msgwin_with_uid (mi.uid);
+    mw = msgwin_with_uid (hx_active_session (), mi.uid);
     if (mw) {
         gtkhx_chat_tabs_raise_msg (mi.uid);
     } else {
-        create_msgwin (mi.uid, mi.name);
+        create_msgwin (hx_active_session (), mi.uid, mi.name);
     }
 }
 
@@ -1238,7 +1238,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
      * the old name vs nam after we return), so a cache-lookup
      * refresh would paint the OLD identity. */
     {
-        struct msgwin *mw = msgwin_with_uid (uid);
+        struct msgwin *mw = msgwin_with_uid (sess, uid);
         if (mw) {
             msgwin_apply_user_change (mw, nam, icon, color);
         }
