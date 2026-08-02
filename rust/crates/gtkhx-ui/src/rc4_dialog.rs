@@ -59,7 +59,7 @@ pub unsafe fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
          less secure than Blowfish or ChaCha20-Poly1305, but at least you'll know the \
          connection isn't protected. The server has to support whichever cipher you \
          pick; if the negotiation fails you can change the bookmark's cipher from the \
-         Bookmarks dialog and try again.",
+         connection's cipher in Settings → Connections and try again.",
     ));
 
     let dialog = adw::AlertDialog::new(Some(&tr("Replace RC4 cipher")), Some(&body));

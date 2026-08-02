@@ -64,8 +64,8 @@ servers, and a long mechanical tail of UI code that asks "which connection?" of 
 Two decisions remain genuinely open: **when** this lands relative to the Rust port, and
 **how** per-connection panels relate to the docking layout.
 
-Two things are now settled. The bookmarks list becomes the **connection collection** —
-a Connection Manager under Settings → Connections — because once several servers can be
+Two things are now settled, and both have shipped. The bookmarks list **is** the
+connection collection, under Settings → Connections — because once several servers can be
 open at once, the list of servers is configuration. And identity becomes a global default
 with per-connection overrides, resolved live so that changing the global still reaches
 every server you have not specialised; `/nick` and `/icon` change the running connection

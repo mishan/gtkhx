@@ -51,7 +51,6 @@
 #include "usermod.h"
 #include "about.h"
 #include "banner.h"
-#include "bookmarks.h"
 #include "toolbar.h"
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
@@ -339,11 +338,15 @@ defer_open_about (gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* The connection collection lives in Settings now — see
+ * docs/multi-connection.md for why "the list of servers" is configuration
+ * rather than an accessory. This menu item is a shortcut straight to that
+ * page, not a separate window. */
 static gboolean
-defer_open_bookmarks (gpointer data)
+defer_open_connections (gpointer data)
 {
     (void)data;
-    create_bookmarks_window ();
+    gtkhx_open_settings_page ("connections");
     return G_SOURCE_REMOVE;
 }
 
@@ -373,12 +376,12 @@ on_action_about (GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static void
-on_action_bookmarks (GSimpleAction *action, GVariant *param, gpointer user_data)
+on_action_connections (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
     (void)action;
     (void)param;
     (void)user_data;
-    g_idle_add (defer_open_bookmarks, NULL);
+    g_idle_add (defer_open_connections, NULL);
 }
 
 static void
@@ -476,7 +479,7 @@ on_action_clear_input (GSimpleAction *action, GVariant *param, gpointer data)
 static const GActionEntry app_actions[] = {
     { .name = "clear-input", .activate = on_action_clear_input },
     { .name = "settings", .activate = on_action_settings },
-    { .name = "bookmarks", .activate = on_action_bookmarks },
+    { .name = "connections", .activate = on_action_connections },
     { .name = "about", .activate = on_action_about },
     { .name = "user_new", .activate = on_action_user_new },
     { .name = "user_edit", .activate = on_action_user_edit },
@@ -650,7 +653,7 @@ build_hamburger (void)
 
     menu = g_menu_new ();
     g_menu_append (menu, _ ("Settings"), "app.settings");
-    g_menu_append (menu, _ ("Bookmarks…"), "app.bookmarks");
+    g_menu_append (menu, _ ("Connections…"), "app.connections");
     g_menu_append (menu, _ ("About GtkHx"), "app.about");
     g_menu_append (menu, _ ("Reset Layout"), "app.reset_layout");
     g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));

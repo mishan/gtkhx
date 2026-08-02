@@ -24,14 +24,17 @@ mod dock;
 pub mod about;
 pub mod agreement;
 pub mod bookmark_store;
-pub mod bookmarks;
 pub mod chat_find;
 pub mod cipher_vocab;
 pub mod connect;
 // the Settings form: the window and its page table (options_window), the
 // shared row builders and the pages themselves (options), and the two pages
 // custom enough to want their own module.
+/// The Hotline icon catalogue and its picker dialog, shared by the Identity
+/// and Connections settings pages.
+mod icon_picker;
 pub mod options;
+mod options_connections;
 mod options_identity;
 /// Link-time stubs for the C symbols the Settings pages call, so the page
 /// table can be exercised in a `cargo test` binary. Test builds only.

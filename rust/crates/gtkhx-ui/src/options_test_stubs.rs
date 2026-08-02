@@ -102,6 +102,34 @@ pub unsafe extern "C" fn gtkhx_theme_names_end() {}
 pub unsafe extern "C" fn gtkhx_dialog_add_close_shortcuts(_dialog: *mut c_void) {}
 #[no_mangle]
 pub unsafe extern "C" fn toolbar_show_toast(_text: *const c_char) {}
+#[no_mangle]
+pub unsafe extern "C" fn toolbar_refresh_bookmarks() {}
+
+// ---- the config directory (gtkhx.c) -------------------------------------
+
+/// A scratch directory, **not** the developer's real config.
+///
+/// This one has to lie rather than be blank. The Connections page reads the
+/// connection collection while it builds, and the collection is a file
+/// resolved from here — pointing a test at the real one would have it
+/// bootstrap, and potentially rewrite, whatever connections the person
+/// running the suite actually has.
+///
+/// Per-process so a parallel run can't collide, created eagerly so the store
+/// takes its ordinary path rather than its can't-write one, and leaked
+/// deliberately: the C contract is a borrowed pointer that stays valid, and
+/// there is nowhere to hang a lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_config_dir() -> *const c_char {
+    use std::sync::OnceLock;
+    static DIR: OnceLock<std::ffi::CString> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let path = std::env::temp_dir().join(format!("gtkhx-ui-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&path);
+        std::ffi::CString::new(path.to_string_lossy().as_ref()).expect("temp path has no NUL")
+    })
+    .as_ptr()
+}
 
 // ---- the live connection (gtkhx_ui_bridge.c) ----------------------------
 

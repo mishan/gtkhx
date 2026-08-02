@@ -486,13 +486,19 @@ stored", so choosing the blank icon in Settings silently did nothing. It is set
 unconditionally now, and the per-connection override is an `Option` rather than
 a sentinel for the same reason.
 
-**The UI is one row, and only for the nickname.** `AdwEntryRow` has no
-placeholder — the title *is* the placeholder — so the inherited value goes in
-the title, and an empty field reads as "you will appear as this". Clearing it
-goes back to inheriting, because empty is stored as absent rather than as an
-empty string. The icon override is storage-only for now: zero is a legal icon
-so it cannot double as "unset" in a spin row, and the picker is still the C
-settings page.
+**Both overrides have a row, and both can be reverted.** `AdwEntryRow` has no
+placeholder — the title *is* the placeholder — so the inherited nickname goes
+in the title, and an empty field reads as "you will appear as this". Empty is
+stored as absent rather than as an empty string, so clearing the field is what
+returns it to inheriting.
+
+The icon can't work that way: zero is a legal (blank) icon, so no value in a
+spin row is free to mean "unset". It gets an action row instead — a preview of
+the *effective* icon, a subtitle naming which of the two states you are in, and
+a revert button that is sensitive only when the connection has its own. Both
+rows carry that button, because an override you cannot undo is a trap, and for
+the icon there would otherwise be no way back at all. The picker itself is
+shared with Settings → Identity (`gtkhx-ui/icon_picker.rs`).
 
 ---
 
