@@ -28,9 +28,12 @@ typedef struct _session session;
 /* ---- Lifecycle -----------------------------------------------------------
  *
  * hx_conn_reset zeroes every field, the transport handle included, without
- * destroying what it pointed at. That is correct only because its one caller
- * (hx_htlc_close) uninstalls the bridge first; a reset that could outrun the
- * uninstall would leak an hxnet actor and its socket.
+ * destroying what it pointed at. Callers must therefore uninstall the bridge
+ * before resetting, or an hxnet actor and its socket are stranded with
+ * nothing pointing at them.
+ *
+ * Disconnect does not come through here: hx_htlc_close clears fields
+ * individually and uninstalls explicitly.
  *
  * hx_conn_new allocates a fresh, zeroed connection (the Rust owner Box-boxes
  * it); hx_conn_reset returns an existing one to the just-allocated state (the

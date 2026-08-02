@@ -157,11 +157,16 @@ pub unsafe extern "C" fn hx_conn_reset(h: *mut HtlcConn) {
     if h.is_null() {
         return;
     }
-    // Nulls `bridge_handle` along with everything else, without destroying
-    // what it pointed at. That is correct only because the one caller
-    // (`hx_htlc_close`) uninstalls the bridge first; a reset that could
-    // outrun the uninstall would leak an actor and its socket. If another
-    // caller ever appears, it has to uninstall first too.
+    // Nulls `bridge_handle` along with everything else, *without* destroying
+    // what it pointed at.
+    //
+    // So the requirement on every caller is: uninstall the bridge first, or
+    // this strands an hxnet actor and its socket with nothing left pointing
+    // at them. Stated as a rule rather than justified by who calls it today,
+    // because the call graph is the thing most likely to change.
+    //
+    // (Disconnect is not a caller: `hx_htlc_close` clears fields
+    // individually and uninstalls explicitly. It never reaches here.)
     *h = zeroed();
 }
 

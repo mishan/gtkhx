@@ -83,9 +83,9 @@ void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 /* Recording, not fatal: the stale-actor guard tests below are precisely
  * about whether a frame reaches dispatch, so the stub has to report that
  * rather than abort. */
-int dispatch_calls;
-struct htlc_conn *last_dispatch_htlc;
-guint32 last_dispatch_type;
+static int dispatch_calls;
+static struct htlc_conn *last_dispatch_htlc;
+static guint32 last_dispatch_type;
 
 void
 hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
@@ -182,10 +182,10 @@ void hxnet_frame_free (struct hxnet_frame_t *f);
  * about *which* handle the bridge reaches for, so the stub has to report it
  * instead of refusing to be called. Everything else in this file still never
  * touches the transport. */
-struct hxnet_connection_opaque *last_send_handle;
-guint32 last_send_len;
-struct hxnet_connection_opaque *last_destroyed_handle;
-int destroy_calls;
+static struct hxnet_connection_opaque *last_send_handle;
+static guint32 last_send_len;
+static struct hxnet_connection_opaque *last_destroyed_handle;
+static int destroy_calls;
 
 int
 hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
@@ -207,13 +207,17 @@ hxnet_connection_destroy (struct hxnet_connection_opaque *handle)
 /* The bridge frees every frame it is handed, stale or not — that is the
  * ownership contract, and the guard tests assert it holds on the drop path
  * too. Recording rather than fatal for the same reason as the others. */
-int frame_free_calls;
+static int frame_free_calls;
 
 void
 hxnet_frame_free (struct hxnet_frame_t *f)
 {
-    (void)f;
     frame_free_calls++;
+    /* Actually free it. The contract this stub models is that the callee owns
+     * the frame, and the guard tests assert the bridge honours that even on
+     * the drop path — a stub that only counted would make those assertions
+     * pass while leaking every frame they allocate. */
+    g_free (f);
 }
 
 /* Phase G HTXF-AEAD: hx_bridge_orchestrated_hope_aead() calls the Rust
@@ -304,9 +308,10 @@ hxnet_connection_open_plaintext (
     (void)proxy_uri;
     (void)proxy_uri_len;
     (void)on_state;
-    /* Hand back a distinct fake handle per call and capture the callbacks,
-     * so the install path can be driven without a socket. `open_result` is
-     * how a test forces the open-failed branch. */
+    /* Capture the callbacks and hand back whatever the test asked for, so
+     * the install path can be driven without a socket. A test that wants two
+     * connections distinguishable sets `open_result` between calls; setting
+     * it to NULL forces the open-failed branch. */
     open_calls++;
     last_open_event_cb = on_event;
     last_open_shutdown_cb = on_shutdown;
