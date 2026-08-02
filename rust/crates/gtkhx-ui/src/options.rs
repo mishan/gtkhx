@@ -10,10 +10,9 @@
 //! refreshes the C mirror, runs the key's apply hook and arms the save timer on
 //! every write, so apply semantics match the C rows exactly.
 //!
-//! 10 of 11 pages are ported and live. Identity (icon + GIF-avatar pickers)
-//! and Voice (device combos + PTT capture) keep their C draw functions for
-//! now — porting them just swaps their `settings_entries[]` pointer for a Rust
-//! export like the others.
+//! Every page is ported and live. What is left on the C side is the shell that
+//! calls them — the window, the sidebar and the `settings_entries[]` table —
+//! and retiring the `.draw` indirection is the last step.
 
 use crate::tr::tr;
 use crate::{cs, cstr};
@@ -115,7 +114,7 @@ pub(crate) fn switch_row(cfg: &str, title: &str, subtitle: Option<&str>) -> adw:
 }
 
 /// AdwSpinRow bound to an INT / UINT16 pref.
-fn spin_row(
+pub(crate) fn spin_row(
     cfg: &str,
     title: &str,
     subtitle: Option<&str>,
@@ -151,7 +150,7 @@ fn spin_row(
 
 /// AdwEntryRow bound to a STRING pref, with the 750 ms apply debounce (a
 /// per-row timer captured in the change closure).
-fn entry_row(cfg: &str, title: &str) -> adw::EntryRow {
+pub(crate) fn entry_row(cfg: &str, title: &str) -> adw::EntryRow {
     let row = adw::EntryRow::new();
     row.set_title(title);
     if pref_type(cfg) != T_STRING {
@@ -241,11 +240,8 @@ pub(crate) fn combo_row(cfg: &str, title: &str, values: &[&str], labels: &[&str]
 }
 
 /// AdwActionRow with a GtkColorDialogButton + Clear, bound to an INT pref
-/// packed as 0x00RRGGBB (−1 = unset). Mirrors pref_nick_color_row.
-// Used only by the Identity page, which is still C — unused until that page
-// is ported to Rust.
-#[allow(dead_code)]
-fn nick_color_row(cfg: &str) -> adw::ActionRow {
+/// packed as 0x00RRGGBB (−1 = unset). Used by the Identity page.
+pub(crate) fn nick_color_row(cfg: &str) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&tr("Nickname color"));
     row.set_subtitle(&tr(
@@ -320,6 +316,9 @@ pub(crate) mod cfg {
     /// The global default nickname. Read by the bookmark form, which shows it
     /// as the inherited value behind a per-connection override.
     pub const NICK: &str = "NICK";
+    pub const NICK_COLOR: &str = "NICKCOLOR";
+    pub const ICON: &str = "ICON";
+    pub const ANIMATE_AVATARS: &str = "ANIMATEAVATARS";
     // Chat output / appearance
     pub const TIMESTAMP: &str = "TIMESTAMP";
     pub const CHAT_AVATARS: &str = "CHATAVATARS";
@@ -908,6 +907,11 @@ fn page_voice(page: &adw::PreferencesPage) {
 }
 #[cfg(feature = "voice")]
 rs_page_export!(gtkhx_options_rs_page_voice => page_voice);
+
+fn page_identity(page: &adw::PreferencesPage) {
+    crate::options_identity::build(page);
+}
+rs_page_export!(gtkhx_options_rs_page_identity => page_identity);
 
 rs_page_export!(gtkhx_options_rs_page_general => page_general);
 rs_page_export!(gtkhx_options_rs_page_file_transfers => page_file_transfers);

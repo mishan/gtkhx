@@ -28,10 +28,11 @@ pub mod bookmarks;
 pub mod chat_find;
 pub mod cipher_vocab;
 pub mod connect;
-// the Settings form. 10 of 11 pages are Rust and wired live via the
+// the Settings form. Every page is Rust, wired live via the
 // gtkhx_options_rs_page_* exports (options.c's create_options_window +
-// settings_entries[] call them). Identity + Voice remain C.
+// settings_entries[] call them); only that shell is still C.
 pub mod options;
+mod options_identity;
 /// The Voice settings page. Feature-gated to match the page itself — see the
 /// module docs for why the preferences are not.
 #[cfg(feature = "voice")]
