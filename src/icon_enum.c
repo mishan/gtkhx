@@ -68,7 +68,11 @@ hx_icon_ids_begin (void)
     seen = g_hash_table_new (g_direct_hash, g_direct_equal);
 
     for (i = 0; i < icon_files.n; i++) {
-        guint16 nres;
+        /* guint32, matching macres_file_num_res_of_type's return. Narrowing
+         * to guint16 would silently drop every resource past the 65535th —
+         * the count is a resource-fork property, not a resource *ID*, so it
+         * has no reason to share the ID's width. */
+        guint32 nres;
         guint32 n;
 
         if (!icon_files.cicns[i]) {
