@@ -556,11 +556,30 @@ This remains the least risky of the four axes.
 
 ---
 
-## The layout model — two directions, both open
+## The layout model — decided: Model A
 
 Per-connection panels have to relate somehow to the *single* dock tree and its
 panel registry, which is keyed today by a stable string id (`"chat"`,
-`"users"`, …). Two models, deliberately not decided here.
+`"users"`, …). Two models were weighed; **Model A, the tab-switched panel set,
+is the one being built.** Both are described below because the comparison is
+what makes A's costs legible, and because the hybrid at the end is still a
+plausible destination.
+
+What the decision buys and what it costs is unchanged from the analysis below:
+persistence does not move at all — same panel ids, one dock tree, one layout
+file — and in exchange the dock layer grows a content-swap mechanism, the
+build-once tests have to stop early-returning for connection two, swapped-out
+content trees need an owner, badges need demultiplexing onto the connection
+tab, and an undocked panel follows the active connection rather than the one it
+was detached from. Those are bounded and mechanical; Model B's costs were open
+questions in persistence semantics.
+
+One consequence worth naming because it was previously conditional: **the chat
+tab strip's cid/uid keys genuinely do have to be qualified.** Under Model B one
+tab view per connection would have made the collision dissolve. Under A a
+single tab view serves every connection in turn, so a cid or a uid is not a
+key. That work was deferred out of M3b pending this decision and is now
+unblocked.
 
 **Shared cost first**, because it dominates and is identical under both: the
 content modules that are process singletons (file browser, threaded news
@@ -662,18 +681,18 @@ unified tree.
   - **Proliferation.** Four servers times four per-connection panels is sixteen
     panels to place, persist and undock.
 
-### Where this leaves the choice
+### Where this left the choice
 
-On the evidence, the honest summary is the reverse of the earlier framing.
+On the evidence, the honest summary was the reverse of the earlier framing.
 **Model B is cheaper in the dock layer** — no content-swap machinery, no stack
 of inactive trees, no badge demux — and **Model A is cheaper in persistence and
 identity**, since nothing in the layout file changes and the dock stays six
 panels no matter how many servers.
 
-The recommendation, weakly held: **A as the shipped default**, because its costs
-are bounded, mechanical and local, whereas B's are open design problems in
-persistence semantics. But the old justification ("B is expensive because of the
-registry") should not be used to make that call, because it is wrong.
+**A was chosen**, on the reasoning that its costs are bounded, mechanical and
+local, whereas B's are open design problems in persistence semantics. The old
+justification ("B is expensive because of the registry") did not enter into it,
+because it is wrong.
 
 ### A hybrid worth noting
 
@@ -727,7 +746,14 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | ~~M2~~ | **Done.** The transport handle moved onto the connection and the send primitive takes one; the install refusal narrowed to a second install over the same connection. Two connections can hold transports at once. | — |
 | ~~M3a~~ | **Done.** Connection identity on all eight untagged signals; the two discard-the-htlc handlers fixed; the PM window routed by the message's connection. | M2 |
 | ~~M3b~~ | **Done**, less the chat tab strip. `hx_conn_serial` supplies a process-unique connection identity; notification ids and both GIF avatar caches are keyed on it. The tab strip's cid/uid keys are deferred into M4, because whether they need qualifying at all depends on the layout model. | M3a |
-| M4 | Reify the connection/session as a heap object behind a collection and factory; connection tab strip; pick layout Model A or B; per-Chat-panel tab view; per-connection factory replaces eager panel construction. | M1, M3 |
+| M4 | Model A, in seven slices — see below. The layout model is decided; the rest is the work. | M1, M3 |
+| M4a | The dock's content-swap mechanism: a panel holds a stack of named content pages instead of one child. Touches nothing outside `dock_bridge.c` and its six embed call sites; no behaviour change at one connection. | — |
+| M4b | The single-slot connection state in `network.c` / `rcv.c` — server address and port, the connected flag, the connect cancellable, the keepalive timer id, the login-reply transaction, the post-login timer — moves onto the connection. A correctness fix in its own right: connection two never gets a keepalive today. | — |
+| M4c | Bind the files browser to a session. The largest single `hx_active_session()` cluster (~33 sites across four files) and the only content module with no session binding at all. Independent of the layout work. | — |
+| M4d | Qualify the chat tab strip's cid/uid keys by connection, and the two close dispatchers with them. Unblocked by the Model A decision. | M3b |
+| M4e | The session collection and factory: `the_session` becomes one of N, `hx_active_session()` returns the focused one, and `fe_init`'s per-session block becomes a factory — separating out the three app-global calls that must not run N times. | M4a |
+| M4f | The connection tab strip, the build-once tests, and the badge demux. These are mutually dependent and land together: a tab strip needs something to switch between, the build-once tests need a connection to key on, and the badge needs a tab to land on. | M4e |
+| M4g | De-singletonise the remaining content modules (news browser, the users action buttons) and give inactive content trees an owner. The riskiest slice: the destroy handlers *are* the model-side teardown, so a naive reparent-and-drop nulls the state of the connection just switched away from. | M4f |
 | M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |
 | M6 | Global transfer queue with per-connection tags and a disconnect sweep; per-connection loss banner, status bar, titles and tray; bookmarks "open in new tab". | M4 |
 | M7 | Layout persistence across connections; two-server isolation test. | M4 |
@@ -761,9 +787,9 @@ above all, which now gates the tab strip's keys as well as the panel work.
 ## Open questions
 
 1. **Sequencing.** Now, later, or the middle path?
-2. **Layout model.** A, B, or the hybrid? Both are documented above without a
-   pick, and the cost comparison above corrects an earlier one that got it
-   backwards.
+2. ~~**Layout model.**~~ **Decided: Model A**, the tab-switched panel set. The
+   hybrid — pinning a panel out of the active set to compare two servers — is
+   still plausible later, and is more than a v1.
 3. **Signal routing.** Per-connection `GtkhxSession` objects, or one hub with
    connection-tagged payloads?
 4. **Per-connection avatar.** Nick and icon are settled; the GIF avatar is a

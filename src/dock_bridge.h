@@ -99,6 +99,46 @@ gboolean gtkhx_dock_embed (const char *id, GtkhxDockKind kind,
  * (always consumed — embedded on success, destroyed on failure). On
  * failure the close callback is never installed and `destroy` is run on
  * `user_data` immediately so the caller's teardown still fires. */
+/* ---- Per-connection content pages ------------------------------------ *
+ *
+ * A panel holds a *set* of named content pages rather than one child, so the
+ * tab-switched layout can swap every per-connection panel at once when the
+ * user changes connection. See dock_pages.h for the shape and for why
+ * switching must not remove pages.
+ *
+ * `page` names the connection the content belongs to. Until connections are
+ * plural, everything embeds under HX_DOCK_PAGE_DEFAULT and a panel holds
+ * exactly one page, behaving as the old single child did.
+ *
+ * An id with no panel reads as "no pages" throughout, matching what the
+ * panel-level calls above do with an unknown id. */
+
+/* The page name used while there is one connection. */
+#define HX_DOCK_PAGE_DEFAULT "default"
+
+/* Add content as a new page of an already-embedded panel. Takes ownership of
+ * `content` exactly as gtkhx_dock_embed does, on the failure path too.
+ * FALSE if the panel isn't embedded or the page name is taken. */
+gboolean gtkhx_dock_add_page (const char *id, const char *page,
+                              GtkWidget *content);
+
+/* Whether this connection already has content in this panel — the
+ * per-connection form of the panel-level "is it open?" test. */
+gboolean gtkhx_dock_has_page (const char *id, const char *page);
+
+/* Make this connection's content the visible one. FALSE if there is no such
+ * page, which is a no-op: a caller switching every panel at once shouldn't
+ * have to know which roles a connection has content for. */
+gboolean gtkhx_dock_show_page (const char *id, const char *page);
+
+/* Remove a page and destroy its content tree. A real teardown — the content
+ * modules' destroy handlers are their model-side teardown — so this is for
+ * closing a connection, never for switching one. */
+gboolean gtkhx_dock_remove_page (const char *id, const char *page);
+
+/* How many content pages the panel holds. */
+guint gtkhx_dock_page_count (const char *id);
+
 gboolean gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area,
                                    const char *title, const char *icon_name,
                                    GtkWidget *content,
