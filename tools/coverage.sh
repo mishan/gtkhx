@@ -178,7 +178,10 @@ echo "==> meson test -C $BUILD_DIR ${SUITE_ARGS[*]}"
 # coverage data, and the report itself is the point. The exit code
 # from meson test is recorded so the script can echo it at the end.
 TEST_RC=0
-meson test -C "$BUILD_DIR" "${SUITE_ARGS[@]}" || TEST_RC=$?
+# xvfb-run: the unit suite builds real widgets (dock_pages) and GTK 4 has no
+# headless backend, so a missing display is a hard failure rather than a skip.
+GDK_BACKEND=x11 xvfb-run -a \
+    meson test -C "$BUILD_DIR" "${SUITE_ARGS[@]}" || TEST_RC=$?
 
 # Generate the report.
 rm -rf "$REPORT_DIR"
