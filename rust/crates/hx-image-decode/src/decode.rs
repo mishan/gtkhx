@@ -547,7 +547,9 @@ async fn run_decode(
         detail: Some(format!("{ctx}")),
     })?;
     let first_delay = first.delay();
-    let first_tex = first.texture();
+    // `adopt_texture` is the identity under glycin-v3 and bridges the 0.20
+    // texture to the public 0.21 family under glycin-v2 (see below).
+    let first_tex = adopt_texture(first.texture());
 
     let Some(first_delay) = first_delay else {
         // Static image — single frame, no animation.
@@ -586,7 +588,7 @@ async fn run_decode(
             // last frame.
             None => break,
         };
-        push(&mut frames, &mut total_ms, frame.texture(), delay);
+        push(&mut frames, &mut total_ms, adopt_texture(frame.texture()), delay);
     }
 
     Ok(DecodeOk::Animation(frames))
@@ -783,6 +785,35 @@ fn clamp_delay_ms(d: Duration) -> u32 {
     }
 }
 
+/// Adopt a glycin frame's texture into the crate's public 0.21 `gdk::Texture`.
+///
+/// Under glycin-v3 the frame texture is already the public 0.21 family, so this
+/// is the identity. Under glycin-v2 (gtk-rs 0.20) it bridges by raw
+/// `GdkTexture*`: the pointer is ABI-identical across gtk-rs versions, so we
+/// consume the 0.20 wrapper into a transfer-full pointer and adopt it as a 0.21
+/// `Texture`. This keeps every gtk-rs value the crate hands out on the public
+/// family regardless of backend.
+#[cfg(all(target_os = "linux", feature = "glycin-v3"))]
+#[inline]
+fn adopt_texture(t: gdk::Texture) -> gdk::Texture {
+    t
+}
+
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
+#[inline]
+fn adopt_texture(t: crate::compat::gdk2::Texture) -> gdk::Texture {
+    use crate::compat::glib::translate::FromGlibPtrFull;
+    use crate::compat::glib2::translate::IntoGlibPtr;
+    // into_glib_ptr is `unsafe fn` under glib 0.20; it transfers ownership of
+    // the single strong ref out of the 0.20 wrapper as a raw `*mut GdkTexture`
+    // (the 0.9 sys type).
+    let raw: *mut crate::compat::gdk2::ffi::GdkTexture = unsafe { t.into_glib_ptr() };
+    // Adopt that same ref as a 0.21 `gdk::Texture`. The sys `GdkTexture` structs
+    // are opaque and layout-identical across gtk-rs versions, so the pointer
+    // cast is sound; from_glib_full takes the transferred ref (no leak/double).
+    unsafe { gdk::Texture::from_glib_full(raw as *mut gdk::ffi::GdkTexture) }
+}
+
 /// Map a glycin ErrorCtx onto a static error-message category.
 /// We avoid leaking the detailed message across the FFI (the
 /// caller would receive a borrowed pointer with an undefined
@@ -863,8 +894,10 @@ impl TempImageFile {
         }))
     }
 
-    fn gfile(&self) -> crate::compat::gio::File {
-        crate::compat::gio::File::for_path(&self.path)
+    // glycin 2.x's `Loader::new` takes a gtk-rs 0.20 `gio::File`, so this
+    // returns the 0.20 family's File (not the public 0.21 gio).
+    fn gfile(&self) -> crate::compat::gio2::File {
+        crate::compat::gio2::File::for_path(&self.path)
     }
 }
 
@@ -909,8 +942,9 @@ mod tests {
         }
 
         // The gio::File handle points at the same path. (`path()` is a
-        // GFile trait method, so the prelude has to be in scope.)
-        use crate::compat::gio::prelude::FileExt;
+        // GFile trait method, so the prelude has to be in scope. gfile()
+        // returns the 0.20 gio::File, so use the 0.20 prelude.)
+        use crate::compat::gio2::prelude::FileExt;
         assert_eq!(guard.gfile().path().as_deref(), Some(path.as_path()));
 
         // Drop unlinks it.

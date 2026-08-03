@@ -48,28 +48,36 @@ crate-type = ["staticlib", "rlib"]
 # compatible. glycin `default-features = false` + `async-io` keeps us off
 # the tokio interop helpers; `gdk4` gives `Frame::texture() -> gdk::Texture`.
 
-# The gtk-rs families (glib/gio/gdk) stay cross-platform — gtk-rs builds fine
-# on Windows/macOS and the texture FFI (ffi_result.rs) needs gdk everywhere.
-# glycin itself is Linux-only (see the [target.*.dependencies] tables below).
-# --- gtk-rs 0.21 family (glycin-v3 / 2+ loaders; default; GNOME 48+, Flatpak) ---
-glib3   = { package = "glib",  version = "0.21", optional = true }
-gio3    = { package = "gio",   version = "0.21", optional = true }
-gdk3    = { package = "gdk4",  version = "0.10", optional = true }
+# --- Public gtk-rs family: ALWAYS the workspace 0.21 line -------------------
+# Every gtk-rs value this crate hands out — the C FFI `*mut GdkTexture`
+# (ffi_result.rs) AND the Rust `gdk::Texture` returned by
+# `decode_first_frame_async` to in-tree callers like gtkhx-ui's banner — uses
+# this family. Keeping it fixed (not backend-selected) is what lets the crate
+# be linked from gtkhx-ui / gtkhx-ffi, which are pinned to 0.21, regardless of
+# which glycin backend is active. Cross-platform: gtk-rs builds on
+# Windows/macOS, and the non-Linux `image` path below produces the same
+# `gdk::Texture`.
+glib = { workspace = true }
+gdk  = { package = "gdk4", version = "0.10" }
 
-# --- gtk-rs 0.20 family (glycin-v2 / 1+ loaders; Debian stable + older) ---
-glib2   = { package = "glib",  version = "0.20", optional = true }
-gio2    = { package = "gio",   version = "0.20", optional = true }
-gdk2    = { package = "gdk4",  version = "0.9",  optional = true }
+# --- glycin-v2's gtk-rs 0.20 family (Linux + glycin-v2 only) ----------------
+# glycin 2.x depends on gtk-rs 0.20, so its `Loader`/`Frame` produce gdk4-0.9
+# values. These are used ONLY to talk to glycin 2.x; decode.rs's
+# `adopt_texture` bridges the resulting 0.20 `Texture` to the 0.21 public
+# `gdk::Texture` by raw `GdkTexture*` (ABI-identical across gtk-rs versions),
+# so no 0.20 type ever escapes this crate. gio2 backs the temp-file `Loader`
+# input (glycin 2.1.x has no `Loader::new_bytes`; see decode.rs `TempImageFile`).
+glib2 = { package = "glib", version = "0.20", optional = true }
+gio2  = { package = "gio",  version = "0.20", optional = true }
+gdk2  = { package = "gdk4", version = "0.9",  optional = true }
 
 # glycin is Linux-only: glycin-common uses the Linux `memfd_create` syscall for
 # the shared memory it hands decoded frames back through, plus a seccomp
 # sandbox — neither exists on macOS/Windows. So the actual glycin crates only
-# build on Linux; the `glycin-v{2,3}` features still select the gtk-rs family
-# above cross-platform, and `dep:glycin{2,3}` is simply inert off-Linux.
-# 2.1.x is the last 2.x line; it has no `Loader::new_bytes`, so the v2 backend
-# streams the payload through a short-lived temp file (see decode.rs
-# `TempImageFile`). gtk-rs 0.20 here coexists with the workspace's 0.21 only
-# inside this crate.
+# build on Linux; off-Linux the `image`-crate path below runs and `dep:glycin*`
+# is simply inert. glycin-v3 reuses the public 0.21 family above (glycin 3.x is
+# already on gtk-rs 0.21); glycin-v2 additionally pulls the 0.20 family for the
+# bridge. gtk-rs 0.20 coexists with the workspace's 0.21 only inside this crate.
 [target.'cfg(target_os = "linux")'.dependencies]
 glycin3 = { package = "glycin", version = "~3.0", default-features = false, features = ["async-io", "gdk4"], optional = true }
 glycin2 = { package = "glycin", version = "~2.1", default-features = false, features = ["async-io", "gdk4"], optional = true }
@@ -100,6 +108,9 @@ image = { version = ">=0.25.5, <0.25.10", default-features = false, features = [
 # `--no-default-features --features hx-image-decode/glycin-v2` (plus a
 # re-supply of the other members' defaults) to compile the v2 backend
 # instead. Enabling both at once is a hard error (see src/compat.rs).
+#
+# glycin-v3 needs no extra gtk-rs deps — glycin 3.x is on the public 0.21
+# family already. glycin-v2 pulls the 0.20 family for the texture bridge.
 default   = ["glycin-v3"]
-glycin-v3 = ["dep:glycin3", "dep:glib3", "dep:gio3", "dep:gdk3"]
+glycin-v3 = ["dep:glycin3"]
 glycin-v2 = ["dep:glycin2", "dep:glib2", "dep:gio2", "dep:gdk2"]

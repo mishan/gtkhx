@@ -1944,7 +1944,6 @@ dependencies = [
  "gdk4 0.10.3",
  "gdk4 0.9.6",
  "gio 0.20.12",
- "gio 0.21.5",
  "glib 0.20.12",
  "glib 0.21.5",
  "glycin 2.1.4",
