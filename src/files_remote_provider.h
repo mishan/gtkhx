@@ -18,11 +18,31 @@
 
 G_BEGIN_DECLS
 
+/* Declared rather than included: this header needs the name, not the layout,
+ * and session.h drags in the whole GTK-bearing session surface. A consumer
+ * that dereferences one includes session.h itself. */
+typedef struct _session session;
+
 #define HX_TYPE_REMOTE_FILES_PROVIDER (hx_remote_files_provider_get_type ())
 G_DECLARE_FINAL_TYPE (HxRemoteFilesProvider, hx_remote_files_provider, HX,
                       REMOTE_FILES_PROVIDER, GObject)
 
-extern HxRemoteFilesProvider *hx_remote_files_provider_new (void);
+/* `sess` is the session whose server this pane lists — the provider keeps it
+ * for the life of the pane, borrowed rather than reffed.
+ *
+ * Non-NULL, and the contract is load-bearing rather than tidiness: every send,
+ * task and access check below routes through `sess->htlc`, and the `hx_conn_*`
+ * accessors dereference unconditionally — there is no NULL-reads-as-zero
+ * behaviour to fall back on. "Not connected" is already representable without
+ * a NULL session, as fd == 0, which is what the unavailable-reason path
+ * actually tests. */
+extern HxRemoteFilesProvider *hx_remote_files_provider_new (session *sess);
+
+/* The session a remote pane lists, or NULL. Takes any provider — a local one
+ * (or NULL) reads as NULL — so callers holding an HxFilesProvider * can ask
+ * without a type check of their own. This is how code that operates on a
+ * *pair* of panes finds the connection: whichever side is remote knows it. */
+extern session *hx_remote_files_provider_session (gpointer provider);
 
 /* Reply-routing hook. Called from gtkhx.c::on_file_list_signal
  * before the legacy output_file_list path. Returns TRUE if the

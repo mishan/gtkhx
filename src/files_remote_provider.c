@@ -69,6 +69,12 @@ extern void gtkhx_files_populate_from_reply (GListStore *store,
 
 struct _HxRemoteFilesProvider {
     GObject parent_instance;
+    /* The session whose server this pane lists. Every send, task and
+     * access check below routes through it rather than through
+     * hx_active_session(): a remote pane belongs to one server, and asking
+     * which one the user is *looking at* is the wrong question the moment
+     * there are two. Never NULL — see hx_remote_files_provider_new. */
+    session *sess;
     GListStore *listing;
     /* Path-navigation state (current path + sticky listing-error flag).
      * The current path is Hotline-style ("/" at root); the error flag
@@ -158,10 +164,63 @@ hx_remote_files_provider_init (HxRemoteFilesProvider *self)
     self->model = gtkhx_files_listing_new ();
 }
 
-HxRemoteFilesProvider *
-hx_remote_files_provider_new (void)
+/* The session behind a provider. Never NULL: hx_remote_files_provider_new
+ * refuses a NULL session, and `provider` here is always this object —
+ * gpointer only because the interface methods below are handed an
+ * HxFilesProvider * while the concrete ones hold an HxRemoteFilesProvider *.
+ *
+ * Not to be confused with hx_remote_files_provider_session, which takes *any*
+ * provider and answers NULL for a local one. That is a different question. */
+static session *
+hx_sess_of (gpointer provider)
 {
-    return g_object_new (HX_TYPE_REMOTE_FILES_PROVIDER, NULL);
+    return HX_REMOTE_FILES_PROVIDER (provider)->sess;
+}
+
+/* This pane's connection. Also never NULL — a session owns its connection for
+ * its whole life.
+ *
+ * Worth stating rather than assuming, because the hx_conn_* accessors read
+ * through the pointer without checking it: there is no NULL-reads-as-zero to
+ * lean on, and the calls below that look like NULL guards
+ * (`if (!hx_conn_fd (...))`) are testing the socket, not the pointer.
+ * Disconnected is fd == 0. */
+static struct htlc_conn *
+hx_conn_of (gpointer provider)
+{
+    return hx_sess_of (provider)->htlc;
+}
+
+session *
+hx_remote_files_provider_session (gpointer provider)
+{
+    /* The public form, and the one that has to tolerate anything: callers
+     * hold an HxFilesProvider * that may be the local provider — or nothing
+     * at all, for a pane that hasn't been given one — and read a NULL answer
+     * as "that side isn't a server". The explicit NULL test is so that
+     * contract stands on its own rather than on what the GType cast macro
+     * happens to do with a NULL. */
+    if (provider == NULL || !HX_IS_REMOTE_FILES_PROVIDER (provider)) {
+        return NULL;
+    }
+    return HX_REMOTE_FILES_PROVIDER (provider)->sess;
+}
+
+HxRemoteFilesProvider *
+hx_remote_files_provider_new (session *sess)
+{
+    HxRemoteFilesProvider *self;
+
+    /* See the header: the provider dereferences this on every operation, and
+     * disconnected is fd == 0 rather than a missing session, so there is
+     * nothing for NULL to mean. */
+    g_return_val_if_fail (sess != NULL, NULL);
+
+    self = g_object_new (HX_TYPE_REMOTE_FILES_PROVIDER, NULL);
+
+    /* Borrowed, not reffed: a session outlives the panes that list it. */
+    self->sess = sess;
+    return self;
 }
 
 /* ---- Connection-state hooks ----
@@ -174,8 +233,7 @@ hx_remote_files_provider_new (void)
 static const char *
 remote_get_unavailable_reason (HxFilesProvider *self)
 {
-    (void)self;
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!hx_conn_fd (hx_conn_of (self))) {
         return _ ("Not connected to a server.");
     }
     /* htlc->fd is set as soon as the TCP socket comes up — well
@@ -187,7 +245,7 @@ remote_get_unavailable_reason (HxFilesProvider *self)
      * joined" disconnect on stricter 1.5+ servers. The flag is
      * raised in rcv.c::hx_post_login_fetches and reset in
      * hx_htlc_close. */
-    if (!hx_conn_post_login_fetched (hx_active_session ()->htlc)) {
+    if (!hx_conn_post_login_fetched (hx_conn_of (self))) {
         return _ ("Logging in…");
     }
     return NULL;
@@ -201,9 +259,9 @@ remote_list_drop_task (HxRemoteFilesProvider *self)
 {
     if (self->list_task_trans) {
         struct task *tsk
-            = task_with_trans (hx_active_session (), self->list_task_trans);
+            = task_with_trans (hx_sess_of (self), self->list_task_trans);
         if (tsk) {
-            task_delete (hx_active_session (), tsk);
+            task_delete (hx_sess_of (self), tsk);
         }
         self->list_task_trans = 0;
     }
@@ -253,7 +311,7 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     guint16 hldirlen;
     guint8 *hldir;
 
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!hx_conn_fd (hx_conn_of (self))) {
         return;
     }
 
@@ -283,13 +341,12 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
                                                       G_N_ELEMENTS (chunks));
     if (hc > 0) {
         struct task *tsk
-            = task_new (hx_active_session ()->htlc,
-                        RCV_TASK_FN (rcv_task_file_list), cfl, self, "ls");
+            = task_new (hx_conn_of (self), RCV_TASK_FN (rcv_task_file_list),
+                        cfl, self, "ls");
         /* Remember the trans so the watchdog can delete this task if the
          * server never replies (task_new keyed it on htlc->trans). */
         self->list_task_trans = tsk->trans;
-        hlwrite_chunks (hx_active_session ()->htlc, HTLC_HDR_FILE_LIST, 0,
-                        chunks, hc);
+        hlwrite_chunks (hx_conn_of (self), HTLC_HDR_FILE_LIST, 0, chunks, hc);
         /* Arm the no-reply watchdog (see remote_list_timeout). */
         self->list_timeout_id = g_timeout_add_seconds (
             REMOTE_FILE_LIST_TIMEOUT_S, remote_list_timeout, self);
@@ -546,11 +603,11 @@ remote_mkdir (HxFilesProvider *self, const char *name, GError **err)
     if (!name || !*name) {
         return FALSE;
     }
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!hx_conn_fd (hx_conn_of (self))) {
         return FALSE;
     }
     path = remote_child_path (r, name);
-    hx_make_dir (hx_active_session ()->htlc, path);
+    hx_make_dir (hx_conn_of (self), path);
     g_free (path);
 
     /* Settle with a re-list of the current directory. The wire
@@ -571,11 +628,11 @@ remote_delete_entry (HxFilesProvider *self, const char *name, GError **err)
     if (!name || !*name) {
         return FALSE;
     }
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!hx_conn_fd (hx_conn_of (self))) {
         return FALSE;
     }
     path = remote_child_path (r, name);
-    hx_file_delete (hx_active_session ()->htlc, path);
+    hx_file_delete (hx_conn_of (self), path);
     g_free (path);
     remote_send_file_list (r, gtkhx_files_listing_current_path (r->model));
     return TRUE;
@@ -592,12 +649,12 @@ remote_rename (HxFilesProvider *self, const char *old_name,
     if (!old_name || !new_name) {
         return FALSE;
     }
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!hx_conn_fd (hx_conn_of (self))) {
         return FALSE;
     }
     src = remote_child_path (r, old_name);
     dst = remote_child_path (r, new_name);
-    hx_file_move (hx_active_session ()->htlc, src, dst);
+    hx_file_move (hx_conn_of (self), src, dst);
     g_free (src);
     g_free (dst);
     remote_send_file_list (r, gtkhx_files_listing_current_path (r->model));
@@ -619,11 +676,10 @@ remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
     if (!e || hx_file_entry_is_dir (e)) {
         return;
     }
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!hx_conn_fd (hx_conn_of (self))) {
         return;
     }
-    if (!hx_conn_access_has (hx_active_session ()->htlc,
-                             HL_ACCESS_DOWNLOAD_FILES)) {
+    if (!hx_conn_access_has (hx_conn_of (self), HL_ACCESS_DOWNLOAD_FILES)) {
         return;
     }
 
@@ -659,8 +715,8 @@ remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
     {
         const char *name = hx_file_entry_get_name (e);
         gsize name_len = name ? strlen (name) : 0;
-        htxf = xfer_new (lpath, dir ? dir : "", name, name_len, XFER_GET,
-                         preview, 0);
+        htxf = xfer_new (hx_conn_of (self), lpath, dir ? dir : "", name,
+                         name_len, XFER_GET, preview, 0);
     }
     if (htxf) {
         htxf->filter_argv = 0;

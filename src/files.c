@@ -238,7 +238,7 @@ hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
              * format. */
             nm_utf8
                 = gtkhx_text_to_utf8 ((const char *)fname, fnlen, &nm_utf8_len);
-            htxf = xfer_new (lpath + 1, cfl_path,
+            htxf = xfer_new (htlc, lpath + 1, cfl_path,
                              nm_utf8 ? nm_utf8 : (const char *)fname,
                              nm_utf8 ? nm_utf8_len : fnlen, XFER_GET, 0, fsize);
             g_free (nm_utf8);
@@ -443,7 +443,7 @@ hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)
 
     /* Uploads don't use srv_data_size — that's a download-side
      * heuristic for resume vs rename. */
-    htxf = xfer_new (lpath, rdir, base, strlen (base), XFER_PUT, 0, 0);
+    htxf = xfer_new (htlc, lpath, rdir, base, strlen (base), XFER_PUT, 0, 0);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
 }
@@ -490,7 +490,7 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
     memcpy (rdir_buf, rdir ? rdir : "", rdir_len);
     rdir_buf[rdir_len] = 0;
 
-    htxf = xfer_new_folder (lpath, rdir_buf, name, name_len, XFER_GET);
+    htxf = xfer_new_folder (htlc, lpath, rdir_buf, name, name_len, XFER_GET);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
 
@@ -587,7 +587,7 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
     memcpy (rdir_buf, rdir ? rdir : "", rdir_len);
     rdir_buf[rdir_len] = 0;
 
-    htxf = xfer_new_folder (lpath, rdir_buf, name, name_len, XFER_PUT);
+    htxf = xfer_new_folder (htlc, lpath, rdir_buf, name, name_len, XFER_PUT);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
     /* Stash the aggregate up front; folder_put_thread fills

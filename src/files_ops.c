@@ -91,10 +91,40 @@ join_path (const char *dir, const char *name)
     return g_strdup_printf ("%s/%s", dir, name);
 }
 
-static gboolean
-has_access (int bit)
+/* The connection behind a copy, taken from whichever of the two panes is the
+ * remote one. A copy always has exactly one remote side — local→local never
+ * reaches here — so this is unambiguous, and it means an upload goes to the
+ * server whose pane it was dropped on rather than to whichever connection is
+ * focused.
+ *
+ * NULL if neither side is remote. That is the caller-can't-happen case rather
+ * than a state, but the signature can't say so, so the two predicates below
+ * absorb it as "not connected" — which is also the right answer if it ever
+ * does happen. */
+static struct htlc_conn *
+ops_conn (HxFilesProvider *a, HxFilesProvider *b)
 {
-    return hx_conn_access_has (hx_active_session ()->htlc, bit);
+    session *sess = hx_remote_files_provider_session (a);
+
+    if (!sess) {
+        sess = hx_remote_files_provider_session (b);
+    }
+    return sess ? sess->htlc : NULL;
+}
+
+/* The two accessor guards. Both check the pointer before the accessor,
+ * because the hx_conn_* family reads through it without checking — so
+ * `hx_conn_fd (ops_conn (...))` looks like a NULL test and is not one. */
+static gboolean
+ops_connected (struct htlc_conn *htlc)
+{
+    return htlc && hx_conn_fd (htlc);
+}
+
+static gboolean
+has_access (struct htlc_conn *htlc, int bit)
+{
+    return htlc && hx_conn_access_has (htlc, bit);
 }
 
 /* ---- Per-direction handlers ---- */
@@ -110,10 +140,10 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     const char *src_dir, *dst_dir;
     char *lpath, *rpath;
 
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!ops_connected (ops_conn (src, dst))) {
         return HX_OPS_ERR_NOT_CONNECTED;
     }
-    if (!has_access (HL_ACCESS_UPLOAD_FILES)) {
+    if (!has_access (ops_conn (src, dst), HL_ACCESS_UPLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
 
@@ -128,12 +158,12 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
         const char *nm = hx_file_entry_get_name (e);
         gsize nm_len = nm ? strlen (nm) : 0;
         char *src_full;
-        if (!has_access (HL_ACCESS_UPLOAD_FOLDERS)) {
+        if (!has_access (ops_conn (src, dst), HL_ACCESS_UPLOAD_FOLDERS)) {
             return HX_OPS_ERR_NO_PERMISSION;
         }
         src_full = join_path (src_dir, nm);
-        hx_put_folder (hx_active_session ()->htlc, src_full,
-                       dst_dir ? dst_dir : "", nm, nm_len);
+        hx_put_folder (ops_conn (src, dst), src_full, dst_dir ? dst_dir : "",
+                       nm, nm_len);
         g_free (src_full);
         return HX_OPS_OK;
     }
@@ -141,7 +171,7 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     lpath = join_path (src_dir, hx_file_entry_get_name (e));
     rpath = join_path (dst_dir, hx_file_entry_get_name (e));
 
-    hx_put_file (hx_active_session ()->htlc, lpath, rpath);
+    hx_put_file (ops_conn (src, dst), lpath, rpath);
 
     g_free (lpath);
     g_free (rpath);
@@ -163,10 +193,10 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     struct htxf_conn *htxf;
     guint64 size;
 
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!ops_connected (ops_conn (src, dst))) {
         return HX_OPS_ERR_NOT_CONNECTED;
     }
-    if (!has_access (HL_ACCESS_DOWNLOAD_FILES)) {
+    if (!has_access (ops_conn (src, dst), HL_ACCESS_DOWNLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
     src_dir = hx_files_provider_get_current_path (src);
@@ -179,10 +209,10 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
          * in xfers.c drives the FILE_NEXT state machine. */
         const char *nm = hx_file_entry_get_name (e);
         gsize nm_len = nm ? strlen (nm) : 0;
-        if (!has_access (HL_ACCESS_DOWNLOAD_FOLDERS)) {
+        if (!has_access (ops_conn (src, dst), HL_ACCESS_DOWNLOAD_FOLDERS)) {
             return HX_OPS_ERR_NO_PERMISSION;
         }
-        hx_get_folder (hx_active_session ()->htlc, dst_dir ? dst_dir : "",
+        hx_get_folder (ops_conn (src, dst), dst_dir ? dst_dir : "",
                        src_dir ? src_dir : "", nm, nm_len);
         return HX_OPS_OK;
     }
@@ -207,8 +237,8 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     {
         const char *nm = hx_file_entry_get_name (e);
         gsize nm_len = nm ? strlen (nm) : 0;
-        htxf = xfer_new (lpath, src_dir ? src_dir : "", nm, nm_len, XFER_GET, 0,
-                         (guint32)size);
+        htxf = xfer_new (ops_conn (src, dst), lpath, src_dir ? src_dir : "", nm,
+                         nm_len, XFER_GET, 0, (guint32)size);
     }
     if (htxf) {
         htxf->filter_argv = 0;

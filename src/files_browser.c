@@ -130,9 +130,54 @@ struct browser {
      * Copy action to surface "no permission" / "not connected" /
      * etc. results without an interrupting dialog. */
     AdwToastOverlay *toast;
+
+    /* The session this browser was built for. Never hx_active_session(): a
+     * browser shows one server's files, and asking which server the user is
+     * *looking at* is the wrong question the moment there are two. Borrowed —
+     * a session outlives its browser.
+     *
+     * For an operation scoped to one pane, prefer panel_conn() below; see the
+     * note there for why the two aren't the same question. */
+    session *sess;
 };
 
 static struct browser *the_browser = NULL;
+
+/* ---- Per-pane connection ----
+ *
+ * The connection a *pane* lists, which its provider knows. NULL when the pane
+ * is the local one.
+ *
+ * Deliberately not `br->sess->htlc`. The browser's session is what it was
+ * *built for*; a pane's provider is what it is *listing*. An operation scoped
+ * to one pane — Get Info, a move, a rename — should ask the pane. The two
+ * coincide while one browser lists one server, which is exactly why getting it
+ * wrong here would stay invisible until it wasn't.
+ *
+ * The predicates below check the pointer before the accessor, because the
+ * hx_conn_* family reads through it unchecked — so `hx_conn_fd (panel_conn
+ * (p))` would look like a NULL test without being one. A local pane answers
+ * "not connected", which is the right answer to "can this go to a server?". */
+static struct htlc_conn *
+panel_conn (files_panel *p)
+{
+    session *sess
+        = hx_remote_files_provider_session (files_panel_get_provider (p));
+
+    return sess ? sess->htlc : NULL;
+}
+
+static gboolean
+conn_connected (struct htlc_conn *htlc)
+{
+    return htlc && hx_conn_fd (htlc);
+}
+
+static gboolean
+conn_access (struct htlc_conn *htlc, int bit)
+{
+    return htlc && hx_conn_access_has (htlc, bit);
+}
 
 /* ---- Active-panel tracking ---- */
 
@@ -267,7 +312,7 @@ on_panel_swap_request (files_panel *p, gboolean want_local, gpointer user_data)
     if (want_local) {
         new_prov = HX_FILES_PROVIDER (hx_local_files_provider_new (NULL));
     } else {
-        new_prov = HX_FILES_PROVIDER (hx_remote_files_provider_new ());
+        new_prov = HX_FILES_PROVIDER (hx_remote_files_provider_new (br->sess));
     }
     if (!new_prov) {
         return;
@@ -359,7 +404,7 @@ on_get_info_clicked (GtkButton *btn, gpointer user_data)
         show_toast (br, _ ("Get Info is only available for remote files."));
         return;
     }
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    if (!conn_connected (panel_conn (br->active))) {
         show_toast (br, _ ("Not connected."));
         return;
     }
@@ -371,7 +416,7 @@ on_get_info_clicked (GtkButton *btn, gpointer user_data)
 
     dir = hx_files_provider_get_current_path (prov);
     name = hx_file_entry_get_name (e);
-    hx_file_info (hx_active_session ()->htlc, dir ? dir : "/", name,
+    hx_file_info (panel_conn (br->active), dir ? dir : "/", name,
                   name ? strlen (name) : 0);
 }
 
@@ -583,6 +628,16 @@ struct move_ctx {
                                  * on_move_response's cleanup tail. */
 };
 
+/* The connection behind a move context: the one the pane the move started
+ * from is listing. NULL on the local-source path, where the callers below have
+ * already branched away — but they go through the checking predicates anyway,
+ * so a wrong branch is a refusal rather than a deref. */
+static struct htlc_conn *
+ctx_conn (struct move_ctx *ctx)
+{
+    return panel_conn (ctx->panel);
+}
+
 static void
 on_move_response (AdwAlertDialog *dialog, const char *response,
                   gpointer user_data)
@@ -647,18 +702,17 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
             g_object_unref (sf);
             g_object_unref (df);
         } else if (HX_IS_REMOTE_FILES_PROVIDER (prov)) {
-            if (!hx_conn_fd (hx_active_session ()->htlc)) {
+            if (!conn_connected (ctx_conn (ctx))) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("Not connected to a server."));
-            } else if (!hx_conn_access_has (hx_active_session ()->htlc,
-                                            HL_ACCESS_MOVE_FILES)) {
+            } else if (!conn_access (ctx_conn (ctx), HL_ACCESS_MOVE_FILES)) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("You don't have permission to move files "
                                       "on the server."));
             } else {
-                hx_file_move (hx_active_session ()->htlc, src_abs, new_path);
+                hx_file_move (ctx_conn (ctx), src_abs, new_path);
                 ok = TRUE; /* fire-and-forget — server task
                               * error would surface via the
                               * existing task-error toast */
@@ -1100,12 +1154,14 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         return;
     }
 
-    if (!hx_conn_fd (hx_active_session ()->htlc)) {
+    /* Both panes are remote here (the caller's precondition), so either would
+     * answer — take the source's, since that is where the files are and what
+     * the destination path is resolved against. */
+    if (!conn_connected (panel_conn (src))) {
         show_toast (br, _ ("Not connected to a server."));
         return;
     }
-    if (!hx_conn_access_has (hx_active_session ()->htlc,
-                             HL_ACCESS_MOVE_FILES)) {
+    if (!conn_access (panel_conn (src), HL_ACCESS_MOVE_FILES)) {
         show_toast (br, _ ("You don't have permission to move files on the "
                            "server."));
         return;
@@ -1121,7 +1177,7 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         const char *name = hx_file_entry_get_name (e);
         char *src_abs = g_build_filename (src_dir ? src_dir : "/", name, NULL);
         char *dst_abs = g_build_filename (dst_dir ? dst_dir : "/", name, NULL);
-        hx_file_move (hx_active_session ()->htlc, src_abs, dst_abs);
+        hx_file_move (panel_conn (src), src_abs, dst_abs);
         g_free (src_abs);
         g_free (dst_abs);
     }
@@ -1913,10 +1969,13 @@ on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
  * content box (a widget in the panel's tree once embedded) so the
  * adw_dialog_present parenting, gtk_widget_get_root walks, the shortcut
  * controller, and init_keyaccel all keep working — the Rust shell owns the
- * dock panel. Returns NULL if the browser already exists (the shell's
- * raise-if-open handles that case). */
+ * dock panel.
+ *
+ * Returns NULL when there is nothing to embed, which covers two cases the
+ * caller treats identically: a browser already exists (the shell's
+ * raise-if-open handles that), or `sess` was NULL, which also logs. */
 GtkWidget *
-gtkhx_files_build_content (void)
+gtkhx_files_build_content (session *sess)
 {
     struct browser *br;
     GtkWidget *button_bar, *content_vbox;
@@ -1926,11 +1985,25 @@ gtkhx_files_build_content (void)
     GtkEventController *shortcuts;
     GtkShortcut *sh;
 
+    /* Nothing to build for: the shell already has a panel to raise. Checked
+     * before the session, so a second call doesn't complain about an argument
+     * it was never going to use — the browser is a singleton (M4g's problem)
+     * and quietly keeps the session it was built with. */
     if (the_browser) {
         return NULL;
     }
 
+    /* Every operation the browser offers routes through this session, and
+     * both the hx_conn_* accessors and the wire senders read straight through
+     * its connection pointer. A NULL session has nothing to fall back to and
+     * no meaning of its own — disconnected is fd == 0 on a session that
+     * exists — so refuse it here rather than deref it several frames down.
+     * It arrives across FFI from the Rust shell, which is where a
+     * silently-wrong argument is hardest to trace back to. */
+    g_return_val_if_fail (sess != NULL, NULL);
+
     br = g_new0 (struct browser, 1);
+    br->sess = sess;
 
     install_css (br);
 
@@ -2047,7 +2120,7 @@ gtkhx_files_build_content (void)
         HxLocalFilesProvider *local;
         HxRemoteFilesProvider *remote;
         local = hx_local_files_provider_new (NULL);
-        remote = hx_remote_files_provider_new ();
+        remote = hx_remote_files_provider_new (br->sess);
         br->left_provider = HX_FILES_PROVIDER (local);
         br->right_provider = HX_FILES_PROVIDER (remote);
     }
