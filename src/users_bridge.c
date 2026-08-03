@@ -24,6 +24,7 @@
 #include <gtk/gtk.h>
 
 #include "hx.h"
+#include "hxconn.h"
 #include "users.h"
 #include "users_view.h"
 #include "gtkhx_theme.h"
@@ -86,31 +87,31 @@ build_button_bar (session *sess)
      * view_*_btn handlers read its current single-selection and its
      * borrowed session pointer. Same handlers drive the chat.c pchat
      * sidebars. */
-    msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/message.png",
-                                  _ ("Msg"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                  G_CALLBACK (view_msg_btn), view);
-    kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
-                                   _ ("Kick"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_kick_btn), view);
-    infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
-                                   _ ("User Info"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_info_btn), view);
-    banbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png",
-                                  _ ("Ban"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                  G_CALLBACK (view_ban_btn), view);
-    chatbtn = gtkhx_pixmap_button (
+    sess->user_btns.msg = gtkhx_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/message.png", _ ("Msg"),
+        GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_msg_btn), view);
+    sess->user_btns.kick = gtkhx_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/kick.png", _ ("Kick"),
+        GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_kick_btn), view);
+    sess->user_btns.info = gtkhx_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/info.png", _ ("User Info"),
+        GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_info_btn), view);
+    sess->user_btns.ban = gtkhx_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/ban.png", _ ("Ban"),
+        GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_ban_btn), view);
+    sess->user_btns.chat = gtkhx_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/chat.png", _ ("Private Chat"),
         GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_chat_btn), view);
-    ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.png",
-                                   _ ("Ignore"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_igno_btn), view);
+    sess->user_btns.ignore = gtkhx_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/ignore.png", _ ("Ignore"),
+        GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_igno_btn), view);
 
-    gtk_widget_set_sensitive (msgbtn, FALSE);
-    gtk_widget_set_sensitive (kickbtn, FALSE);
-    gtk_widget_set_sensitive (infobtn, FALSE);
-    gtk_widget_set_sensitive (banbtn, FALSE);
-    gtk_widget_set_sensitive (chatbtn, FALSE);
-    gtk_widget_set_sensitive (ignobtn, FALSE);
+    gtk_widget_set_sensitive (sess->user_btns.msg, FALSE);
+    gtk_widget_set_sensitive (sess->user_btns.kick, FALSE);
+    gtk_widget_set_sensitive (sess->user_btns.info, FALSE);
+    gtk_widget_set_sensitive (sess->user_btns.ban, FALSE);
+    gtk_widget_set_sensitive (sess->user_btns.chat, FALSE);
+    gtk_widget_set_sensitive (sess->user_btns.ignore, FALSE);
 
     /* The old standalone Users headerbar held Msg / Chat on the start
      * and Ignore / Ban / Kick / Info on the end. A PanelWidget's tab
@@ -122,8 +123,8 @@ build_button_bar (session *sess)
     gtk_widget_set_margin_end (button_bar, 6);
     gtk_widget_set_margin_top (button_bar, 6);
     gtk_widget_set_margin_bottom (button_bar, 4);
-    gtk_box_append (GTK_BOX (button_bar), msgbtn);
-    gtk_box_append (GTK_BOX (button_bar), chatbtn);
+    gtk_box_append (GTK_BOX (button_bar), sess->user_btns.msg);
+    gtk_box_append (GTK_BOX (button_bar), sess->user_btns.chat);
 #ifdef HAVE_VOICE
     /* Public-room (cid 0) voice Join/Leave + Mute icon controls. The
      * controls live with the user list rather than the chat window;
@@ -136,10 +137,10 @@ build_button_bar (session *sess)
         gtk_widget_set_hexpand (spacer, TRUE);
         gtk_box_append (GTK_BOX (button_bar), spacer);
     }
-    gtk_box_append (GTK_BOX (button_bar), infobtn);
-    gtk_box_append (GTK_BOX (button_bar), kickbtn);
-    gtk_box_append (GTK_BOX (button_bar), banbtn);
-    gtk_box_append (GTK_BOX (button_bar), ignobtn);
+    gtk_box_append (GTK_BOX (button_bar), sess->user_btns.info);
+    gtk_box_append (GTK_BOX (button_bar), sess->user_btns.kick);
+    gtk_box_append (GTK_BOX (button_bar), sess->user_btns.ban);
+    gtk_box_append (GTK_BOX (button_bar), sess->user_btns.ignore);
 
     return button_bar;
 }
@@ -174,13 +175,23 @@ gtkhx_users_bridge_after_embed (session *sess)
      * default. */
     hx_panel_mark_constructed (HX_PANEL_ID_USERS);
 
-    if (connected == 1) {
-        gtk_widget_set_sensitive (msgbtn, TRUE);
-        gtk_widget_set_sensitive (banbtn, TRUE);
-        gtk_widget_set_sensitive (infobtn, TRUE);
-        gtk_widget_set_sensitive (kickbtn, TRUE);
-        gtk_widget_set_sensitive (chatbtn, TRUE);
-        gtk_widget_set_sensitive (ignobtn, TRUE);
+    /* This connection's post-login state, not the process-global `connected`
+     * flag — which is one connection's state under a name that reads like the
+     * application's, and would have a second connection's button bar come up
+     * live because the first one happened to be.
+     *
+     * post-login rather than merely socket-up, because that is what `connected`
+     * meant: it is set after the LOGIN reply. hx_conn_fd would be true from TCP
+     * connect onward — and again during teardown, where -1 is parked
+     * deliberately — so sensitizing on it would put a USER_LIST on the wire
+     * mid-handshake. */
+    if (hx_conn_post_login_fetched (sess->htlc)) {
+        gtk_widget_set_sensitive (sess->user_btns.msg, TRUE);
+        gtk_widget_set_sensitive (sess->user_btns.ban, TRUE);
+        gtk_widget_set_sensitive (sess->user_btns.info, TRUE);
+        gtk_widget_set_sensitive (sess->user_btns.kick, TRUE);
+        gtk_widget_set_sensitive (sess->user_btns.chat, TRUE);
+        gtk_widget_set_sensitive (sess->user_btns.ignore, TRUE);
         user_list (sess);
     }
 }

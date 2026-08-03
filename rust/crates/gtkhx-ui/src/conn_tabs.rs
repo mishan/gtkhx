@@ -29,13 +29,12 @@
 //! `dock::show_page` is a no-op for a panel that has no page for the incoming
 //! connection, which leaves the *outgoing* connection's content on screen.
 //!
-//! That is every panel, today. All six content modules still keep their state
-//! in one process-global slot, so `dock::claim_singleton` hands each role to
-//! the first connection that asks and refuses the rest — which means a second
-//! connection has no pages to switch to and the dock does not visibly change
-//! when you select its tab. Undoing that, module by module, is all of M4g. The
-//! switch logs each refusal under `GTKHX_DEBUG=dock` rather than papering over
-//! it.
+//! That is no longer the normal case — every content module owns its state per
+//! connection now, so a connection that has opened a role has a page there.
+//! What remains is the ordinary one: a role the incoming connection has never
+//! opened, or a panel the user has closed. Both are logged under
+//! `GTKHX_DEBUG=dock`, because a panel that doesn't change when you switch
+//! reads like a switching bug rather than an absence.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -47,13 +46,15 @@ use gtk4 as gtk;
 use libadwaita as adw;
 
 use crate::dock;
+use crate::dock::ConnKey;
 use crate::tr::tr;
 
 extern "C" {
-    /// `gtkhx_ui_bridge.c` — the connection a session owns.
+    /// `gtkhx_ui_bridge.c` — the connection a session owns. Only for the
+    /// tests, which use a connection as its own session; the module reaches
+    /// the key through `dock` like everything else.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
-    /// `gtkhx-core` — that connection's process-unique serial. NULL reads as 0.
-    fn hx_conn_serial(htlc: *const c_void) -> u16;
     /// `session_registry.c` — move the focus. FALSE if the session isn't in
     /// the collection, which leaves the focus alone.
     fn hx_session_set_active(sess: *mut c_void) -> glib::ffi::gboolean;
@@ -67,12 +68,8 @@ fn debug(msg: &str) {
     unsafe { debug_log_str(cat.as_ptr(), m.as_ptr()) };
 }
 
-/// A connection's serial — the key everything here is indexed by, and the same
-/// one the dock uses for its page names.
-type ConnKey = u16;
-
 fn serial_of(sess: *mut c_void) -> ConnKey {
-    unsafe { hx_conn_serial(gtkhx_session_htlc(sess)) }
+    dock::key_for_session(sess)
 }
 
 #[derive(Default)]
@@ -317,7 +314,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_select(sess: *mut c_void) {
 /// `htlc` is a live connection; `title` is NULL or a valid C string.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_conn_tabs_set_title(htlc: *mut c_void, title: *const c_char) {
-    if let Some(page) = tab_for(hx_conn_serial(htlc)) {
+    if let Some(page) = tab_for(dock::conn_key(htlc)) {
         let t = crate::cstr(title);
         if !t.is_empty() {
             page.set_title(&t);
@@ -340,7 +337,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_set_attention(
     state: glib::ffi::gboolean,
 ) {
     let on = state != glib::ffi::GFALSE;
-    let Some(page) = tab_for(hx_conn_serial(htlc)) else {
+    let Some(page) = tab_for(dock::conn_key(htlc)) else {
         return;
     };
     if on && view().and_then(|v| v.selected_page()).as_ref() == Some(&page) {

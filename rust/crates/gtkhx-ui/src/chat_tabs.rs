@@ -1,13 +1,16 @@
 //! `chat_tabs` — the Chat panel's internal tab strip (was `chat_tabs.c`).
 //!
-//! A singleton `AdwTabView` whose tabs are: a pinned public-chat tab at
-//! position 0, one tab per private chat keyed on `(connection, cid)`, and one
-//! tab per PM conversation keyed on `(connection, uid)`. The connection is
-//! half of each key because a cid or a uid is only unique *within* one, and
-//! one tab view serves every connection in turn. This module owns the tab
-//! view, the two index maps, and the close-page dispatch; `chat.c` / `msg.c`
-//! call in to add / find / raise / close tabs through the `gtkhx_chat_tabs_*`
-//! C ABI, each passing the connection its tab belongs to.
+//! One `AdwTabView` per connection, each with a pinned public-chat tab at
+//! position 0, one tab per private chat, and one tab per PM conversation.
+//! Under the tab-switched layout every connection has its own Chat content
+//! page, so it has its own strip of conversations.
+//!
+//! The two index maps behind those views are shared, and so stay keyed on
+//! `(connection, cid)` / `(connection, uid)`: a cid or a uid is only unique
+//! *within* a connection. This module owns the views, the maps, and the
+//! close-page dispatch; `chat.c` / `msg.c` call in to add / find / raise /
+//! close tabs through the `gtkhx_chat_tabs_*` C ABI, each passing the
+//! connection its tab belongs to.
 //!
 //! The libpanel side (flag / raise the Chat dock panel) stays C behind
 //! `dock_bridge` — this module only names GTK / libadwaita types. State lives
@@ -34,12 +37,9 @@ const KIND_PUBLIC: u8 = 1;
 const KIND_PCHAT: u8 = 2;
 const KIND_MSG: u8 = 3;
 
-/// The connection a tab belongs to, as its serial.
-///
-/// A cid or a uid is only unique *within* a connection, so neither is a key
-/// on its own: two servers can both have a private chat at cid 7 and a user
-/// at uid 5. Under the tab-switched layout one tab view serves every
-/// connection in turn, so the pair is the key.
+/// The connection a tab belongs to, as its serial. Also the key its view is
+/// held under, and half of the key its index entry is held under — a cid or a
+/// uid is only unique *within* a connection.
 type ConnKey = u16;
 
 extern "C" {
@@ -87,7 +87,19 @@ fn meta(page: &adw::TabPage) -> Option<TabMeta> {
 
 #[derive(Default)]
 struct ChatTabs {
-    view: Option<adw::TabView>,
+    /// One tab view per connection.
+    ///
+    /// It used to be one for the whole process, which is what forced the
+    /// composite keys below — and what made the Chat panel unbuildable twice,
+    /// since a second connection's content build would have re-parented the
+    /// first connection's tab view into its own box. Under the tab-switched
+    /// layout each connection has its own Chat page, so each has its own strip
+    /// of conversations.
+    ///
+    /// The index maps stay composite-keyed. They are still one table serving
+    /// every connection, so a cid or a uid is still not a key on its own; only
+    /// the view is per-connection.
+    views: HashMap<ConnKey, adw::TabView>,
     pchat: HashMap<(ConnKey, u32), adw::TabPage>,
     msg: HashMap<(ConnKey, u16), adw::TabPage>,
     on_close_pchat: Option<extern "C" fn(*mut c_void, u32)>,
@@ -98,11 +110,17 @@ thread_local! {
     static STATE: RefCell<ChatTabs> = RefCell::new(ChatTabs::default());
 }
 
-/// Clone the tab view out of the cell (a ref bump), holding the borrow only
-/// for the clone — so the returned handle can drive adw calls that re-enter
-/// our signal handlers without a borrow conflict.
-fn view() -> Option<adw::TabView> {
-    STATE.with(|s| s.borrow().view.clone())
+/// Clone `conn`'s tab view out of the cell (a ref bump), holding the borrow
+/// only for the clone — so the returned handle can drive adw calls that
+/// re-enter our signal handlers without a borrow conflict.
+fn view(conn: ConnKey) -> Option<adw::TabView> {
+    STATE.with(|s| s.borrow().views.get(&conn).cloned())
+}
+
+/// The view a page belongs to, for the handlers that are given a page and no
+/// connection.
+fn view_of(page: &adw::TabPage) -> Option<adw::TabView> {
+    meta(page).and_then(|m| view(m.conn))
 }
 
 /// The close-page dispatcher. Removes the page's index entry, fires the
@@ -165,13 +183,15 @@ fn on_selected_page_changed(view: &adw::TabView) {
     dock::set_needs_attention(dock::ID_CHAT, false);
 }
 
-/// Initialize (once) and return the shared tab view as a borrowed
-/// `GtkWidget*` (transfer none — the module keeps the owning ref). Idempotent.
+/// Build (once per connection) and return `htlc`'s tab view as a borrowed
+/// `GtkWidget*` (transfer none — the module keeps the owning ref). Idempotent
+/// for a given connection.
 #[no_mangle]
-pub extern "C" fn gtkhx_chat_tabs_init() -> *mut gtk::ffi::GtkWidget {
+pub extern "C" fn gtkhx_chat_tabs_init(htlc: *mut c_void) -> *mut gtk::ffi::GtkWidget {
     crate::ensure_gtk_init();
 
-    if let Some(v) = view() {
+    let conn = conn_key(htlc);
+    if let Some(v) = view(conn) {
         return v.as_ptr() as *mut gtk::ffi::GtkWidget;
     }
 
@@ -180,8 +200,30 @@ pub extern "C" fn gtkhx_chat_tabs_init() -> *mut gtk::ffi::GtkWidget {
     view.connect_selected_page_notify(on_selected_page_changed);
 
     let ptr = view.as_ptr() as *mut gtk::ffi::GtkWidget;
-    STATE.with(|s| s.borrow_mut().view = Some(view));
+    STATE.with(|s| {
+        s.borrow_mut().views.insert(conn, view);
+    });
     ptr
+}
+
+/// Forget `htlc`'s view and every tab indexed under it.
+///
+/// Called when a connection's Chat page is destroyed. Without it
+/// `gtkhx_chat_tabs_init` would hand a rebuilt page the *old* view — which
+/// still holds the old pinned public tab, so `add_public` would append a
+/// second one and the panel would show two "Chat" tabs, the first empty.
+///
+/// # Safety
+/// `htlc` is NULL or a live connection. GTK main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_chat_tabs_forget(htlc: *mut c_void) {
+    let conn = conn_key(htlc);
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.views.remove(&conn);
+        st.pchat.retain(|(c, _), _| *c != conn);
+        st.msg.retain(|(c, _), _| *c != conn);
+    });
 }
 
 #[no_mangle]
@@ -202,10 +244,12 @@ pub extern "C" fn gtkhx_chat_tabs_set_close_msg_handler(
 /// `content` is a valid `GtkWidget*`; `title` is NULL or a valid C string.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
+    htlc: *mut c_void,
     content: *mut gtk::ffi::GtkWidget,
     title: *const c_char,
 ) {
-    let Some(view) = view() else { return };
+    let conn = conn_key(htlc);
+    let Some(view) = view(conn) else { return };
     let w: gtk::Widget = from_glib_none(content);
 
     let page = view.append_pinned(&w);
@@ -216,11 +260,10 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
         TabMeta {
             kind: KIND_PUBLIC,
             id: 0,
-            // The public tab is pinned, never indexed and never closed
-            // through the strip, so it needs no connection of its own. 0 is
-            // the serial no connection is ever assigned.
-            htlc: std::ptr::null_mut(),
-            conn: 0,
+            // Never indexed and never closed through the strip, so the
+            // pointer is only here for `view_of` to find the right view.
+            htlc,
+            conn,
         },
     );
     view.set_selected_page(&page);
@@ -235,7 +278,8 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
     cid: u32,
     title: *const c_char,
 ) -> *mut adw::ffi::AdwTabPage {
-    let Some(view) = view() else {
+    let conn = conn_key(htlc);
+    let Some(view) = view(conn) else {
         return std::ptr::null_mut();
     };
     let w: gtk::Widget = from_glib_none(content);
@@ -244,7 +288,6 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
     let t = crate::cstr(title);
     page.set_title(if t.is_empty() { "Private Chat" } else { &t });
 
-    let conn = conn_key(htlc);
     set_meta(
         &page,
         TabMeta {
@@ -271,7 +314,8 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_msg(
     uid: u16,
     title: *const c_char,
 ) -> *mut adw::ffi::AdwTabPage {
-    let Some(view) = view() else {
+    let conn = conn_key(htlc);
+    let Some(view) = view(conn) else {
         return std::ptr::null_mut();
     };
     let w: gtk::Widget = from_glib_none(content);
@@ -280,7 +324,6 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_msg(
     let t = crate::cstr(title);
     page.set_title(if t.is_empty() { "PM" } else { &t });
 
-    let conn = conn_key(htlc);
     set_meta(
         &page,
         TabMeta {
@@ -330,8 +373,16 @@ pub extern "C" fn gtkhx_chat_tabs_find_msg(
 /// `page`. Both calls run with no `STATE` borrow held.
 fn raise_and_select(page: Option<adw::TabPage>) {
     let Some(page) = page else { return };
+    // Show the tab's *connection* page first. Each connection has its own view
+    // now, so raising the Chat panel alone can leave the selected tab inside a
+    // page the dock isn't showing — which is what an incoming PM on a
+    // background connection would do: raise Chat onto the foreground
+    // connection and select an invisible tab.
+    if let Some(m) = meta(&page) {
+        dock::show_page(dock::ID_CHAT, &m.conn.to_string());
+    }
     dock::raise_if_open(dock::ID_CHAT);
-    if let Some(view) = view() {
+    if let Some(view) = view_of(&page) {
         view.set_selected_page(&page);
     }
 }
@@ -346,9 +397,11 @@ pub extern "C" fn gtkhx_chat_tabs_raise_msg(htlc: *mut c_void, uid: u16) {
     raise_and_select(find_msg(htlc, uid));
 }
 
+/// Raise the public-chat tab of the connection the user is looking at. The
+/// pinned tab is always at position 0.
 #[no_mangle]
 pub extern "C" fn gtkhx_chat_tabs_raise_public() {
-    let page = view().map(|v| v.nth_page(0));
+    let page = view(dock::active_key()).map(|v| v.nth_page(0));
     raise_and_select(page);
 }
 
@@ -434,14 +487,14 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_msg(
 /// registered teardown.
 #[no_mangle]
 pub extern "C" fn gtkhx_chat_tabs_close_pchat(htlc: *mut c_void, cid: u32) {
-    if let (Some(view), Some(page)) = (view(), find_pchat(htlc, cid)) {
+    if let (Some(view), Some(page)) = (view(conn_key(htlc)), find_pchat(htlc, cid)) {
         view.close_page(&page);
     }
 }
 
 #[no_mangle]
 pub extern "C" fn gtkhx_chat_tabs_close_msg(htlc: *mut c_void, uid: u16) {
-    if let (Some(view), Some(page)) = (view(), find_msg(htlc, uid)) {
+    if let (Some(view), Some(page)) = (view(conn_key(htlc)), find_msg(htlc, uid)) {
         view.close_page(&page);
     }
 }

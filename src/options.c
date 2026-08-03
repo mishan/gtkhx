@@ -85,7 +85,11 @@ extern void hxconfig_free_string (char *s);
 void
 reinit_gtktexts (session *sess)
 {
-    if (hx_panel_was_constructed (HX_PANEL_ID_NEWS)) {
+    /* This session's own news view, if it has one — not the process-wide
+     * "was a News panel ever built?" latch, which said yes on behalf of every
+     * connection as soon as one of them had one, and would have re-styled a
+     * NULL widget for the rest. */
+    if (sess->news_text) {
         gtkhx_apply_text_style (sess->news_text);
     }
     {

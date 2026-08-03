@@ -185,6 +185,26 @@ typedef struct _session {
      * inside the toplevel users_window. */
     struct _HxUserListView *users_view;
 
+    /* The Users panel's six action buttons.
+     *
+     * Per-session because each connection has its own Users content page, so
+     * each has its own button bar — and because their sensitivity is a
+     * statement about one connection: whether it is up, and whether its
+     * account holds HL_ACCESS_DISCONNECT_USERS. They were six file-globals in
+     * users.c, which was the same thing while there was one connection and
+     * became a fight between them the moment there were two.
+     *
+     * NULL until this session's Users content is built. `setbtns` reads them
+     * and tolerates that. */
+    struct {
+        GtkWidget *msg;
+        GtkWidget *chat;
+        GtkWidget *info;
+        GtkWidget *kick;
+        GtkWidget *ban;
+        GtkWidget *ignore;
+    } user_btns;
+
     /* Phase 8.D runtime wiring: opaque per-session voice runtime
      * handle (Box<VoiceRuntime> on the Rust side). NULL until the
      * first voice interaction (Join Voice click); the lazy-create
@@ -216,10 +236,9 @@ typedef struct _session {
 
     struct gnews_folder *gfnews_list;
 
-    /* per-session gfile_list pointer retired with the
-     * legacy files browser. The new orthodox-FM browser
-     * (files_browser.c) is a singleton owned by its own static
-     * `the_browser` variable. */
+    /* per-session gfile_list pointer retired with the legacy files browser.
+     * The orthodox-FM browser (files_browser.c) keeps one browser per
+     * session, in a table of its own keyed on the session. */
 
     /* open PM windows keyed on the recipient's uid.
      * Replaces the file-scope `msg_list` global in msg.c and the

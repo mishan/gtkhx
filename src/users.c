@@ -62,8 +62,6 @@ PangoFontDescription *users_font_desc;
 GdkRGBA user_colors[8];
 GdkRGBA gdk_user_colors[4];
 
-GtkWidget *msgbtn, *kickbtn, *infobtn, *banbtn, *chatbtn, *ignobtn;
-
 void
 hx_change_name_icon (struct htlc_conn *htlc)
 {

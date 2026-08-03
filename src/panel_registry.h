@@ -24,8 +24,8 @@
  *     post_window         (news.c)
  *     about_window        (about.c)
  *     connect_window      (connect.c)
- *     the_browser         (news_browser.c)
- *     the_browser         (files_browser.c)
+ *     the_browser         (news_browser.c, since deleted)
+ *     the_browser         (files_browser.c, now a per-session table)
  *
  * Lookup is by stable string id (the same one stored on HxPanel).
  * The registry holds a strong reference to each registered panel

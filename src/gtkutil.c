@@ -269,11 +269,17 @@ set_app_action_enabled (const char *name, gboolean enabled)
 void
 setbtns (session *sess, int stat)
 {
-    if (hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
-        gtk_widget_set_sensitive (msgbtn, stat);
-        gtk_widget_set_sensitive (infobtn, stat);
-        gtk_widget_set_sensitive (chatbtn, stat);
-        gtk_widget_set_sensitive (ignobtn, stat);
+    /* This session's own buttons, and the test is whether *it* has a Users
+     * page — not the process-wide "was a Users panel ever built?" latch that
+     * used to gate this. The latch answered yes for every connection as soon
+     * as any one of them had a page, which was the same thing until there
+     * were two of them. NULL means this connection has no Users content yet;
+     * its buttons get their state when it does. */
+    if (sess->user_btns.msg) {
+        gtk_widget_set_sensitive (sess->user_btns.msg, stat);
+        gtk_widget_set_sensitive (sess->user_btns.info, stat);
+        gtk_widget_set_sensitive (sess->user_btns.chat, stat);
+        gtk_widget_set_sensitive (sess->user_btns.ignore, stat);
         /* kick / ban get visibility gating in the Users
          * window — hide them entirely when the account doesn't
          * have HL_ACCESS_DISCONNECT_USERS. (One bit gates both per
@@ -287,18 +293,20 @@ setbtns (session *sess, int stat)
          * available. */
         if (stat
             && hx_conn_access_has (sess->htlc, HL_ACCESS_DISCONNECT_USERS)) {
-            gtk_widget_set_visible (kickbtn, TRUE);
-            gtk_widget_set_sensitive (kickbtn, TRUE);
-            gtk_widget_set_visible (banbtn, TRUE);
-            gtk_widget_set_sensitive (banbtn, TRUE);
+            gtk_widget_set_visible (sess->user_btns.kick, TRUE);
+            gtk_widget_set_sensitive (sess->user_btns.kick, TRUE);
+            gtk_widget_set_visible (sess->user_btns.ban, TRUE);
+            gtk_widget_set_sensitive (sess->user_btns.ban, TRUE);
         } else {
-            gtk_widget_set_visible (kickbtn, FALSE);
-            gtk_widget_set_visible (banbtn, FALSE);
+            gtk_widget_set_visible (sess->user_btns.kick, FALSE);
+            gtk_widget_set_visible (sess->user_btns.ban, FALSE);
         }
     }
-    if (hx_panel_was_constructed (HX_PANEL_ID_NEWS)) {
+    /* Same shape as the Users buttons above: this session's own widgets, and
+     * the test is whether it has News content rather than whether anyone
+     * does. */
+    if (sess->postButton) {
         gtk_widget_set_sensitive (sess->postButton, stat);
-
         gtk_widget_set_sensitive (sess->reloadButton, stat);
     }
 
@@ -534,10 +542,10 @@ close_connected_windows (session *sess)
         gtkhx_widget_destroy (sess->agreementwin);
         sess->agreementwin = NULL;
     }
-    /* legacy gfile_list cleanup is gone with the legacy
-     * files browser. The new browser (files_browser.c) is a
-     * singleton owned by its open_files_browser entry point and
-     * cleans itself up via the close-request handler. */
+    /* legacy gfile_list cleanup is gone with the legacy files browser. The
+     * orthodox-FM browser keeps one browser per session and tears each down
+     * when its content page is destroyed (files_browser.c::browser_teardown),
+     * so there is nothing to do from here. */
 
     /* walk sess->chats, closing the view of every non-public
      * pchat tab via the chat_tabs API. The public chat (cid=0) UI

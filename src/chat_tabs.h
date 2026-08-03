@@ -10,15 +10,15 @@
 /*
  * chat_tabs.h — internal tab strip inside the Chat panel.
  *
- * The Chat panel hosts an AdwTabView whose tabs are: a pinned public-chat tab
- * at position 0; one tab per private chat, keyed on (connection, cid); one tab
- * per private message conversation, keyed on (connection, uid). The connection
- * is half of each key because a cid or a uid is only unique *within* one —
- * two servers can each have a chat at cid 7 — and one tab view serves every
- * connection in turn. This file owns the AdwTabView widget + indices + close
- * routing; chat.c (public chat construction), chat.c (pchat construction) and
- * msg.c (msg construction) call in to add / find / raise / close tabs, each
- * passing the connection its tab belongs to.
+ * Each connection's Chat page hosts its own AdwTabView, whose tabs are: a
+ * pinned public-chat tab at position 0; one tab per private chat; one tab per
+ * private message conversation.
+ *
+ * Every entry point takes the connection its tab belongs to. The views are
+ * per-connection, but the indices behind them are one table each, so a cid or
+ * a uid is still not a key on its own — two servers can each have a chat at
+ * cid 7. chat.c (public and private chat construction) and msg.c (PM
+ * construction) call in to add / find / raise / close.
  *
  * Why a separate module: the AdwTabView ownership and close-page
  * dispatch is a small piece of policy that's easier to read in
@@ -27,11 +27,12 @@
  * machinery (create_pchat_window); msg.c has the PM machinery.
  * chat_tabs.c just hosts the tabs and dispatches.
  *
- * Per-connection thinking (multi-conn, future): the AdwTabView is
- * a singleton today because there's a single Chat panel. When
- * multi-conn lands, each session gets its own Chat panel and its
- * own tab view; the singleton pointer here turns into a per-Chat
- * panel field. The API stays the same.
+ * The AdwTabView used to be a process singleton, on the reasoning that there
+ * was a single Chat panel. There still is — but under the tab-switched layout
+ * it holds one content page per connection, and a shared view would mean the
+ * second connection's page re-parenting the first connection's strip into its
+ * own tree. So the views are per-connection now, built on demand by
+ * gtkhx_chat_tabs_init.
  */
 
 #ifndef GTKHX_CHAT_TABS_H
@@ -48,20 +49,21 @@ G_BEGIN_DECLS
  * a different incomplete type from everyone else's. */
 struct htlc_conn;
 
-/* Initialize the tab view. Returns the AdwTabView widget so the
- * Chat panel construction can embed it. Idempotent: subsequent
- * calls return the existing widget. */
-GtkWidget *gtkhx_chat_tabs_init (void);
+/* This connection's tab view, built on first ask. Returns the AdwTabView
+ * widget so the connection's Chat page can embed it. Idempotent per
+ * connection: a second call for the same one returns the same widget. */
+GtkWidget *gtkhx_chat_tabs_init (struct htlc_conn *htlc);
 
-/* Add the pinned public-chat tab. Called once during
- * create_chat_window after the public-chat content widgets are
- * built. The tab is non-closeable and locked to position 0. */
-void gtkhx_chat_tabs_add_public (GtkWidget *content, const char *title);
+/* Add the pinned public-chat tab to `htlc`'s view. Called once per connection
+ * during create_chat_window, after that connection's public-chat content
+ * widgets are built. The tab is non-closeable and locked to position 0. */
+void gtkhx_chat_tabs_add_public (struct htlc_conn *htlc, GtkWidget *content,
+                                 const char *title);
 
-/* Add a private-chat tab for `htlc`'s chat `cid`. The pair is the tab's
- * identity: a cid is only unique within a connection, so two servers can each
- * have a chat at cid 7 and one tab view serves both. Returns the AdwTabPage so
- * the caller can stash extra data or query position. */
+/* Add a private-chat tab for `htlc`'s chat `cid`, in that connection's view.
+ * The pair is the tab's identity in the shared index — a cid is only unique
+ * within a connection. Returns the AdwTabPage so the caller can stash extra
+ * data or query position. */
 AdwTabPage *gtkhx_chat_tabs_add_pchat (struct htlc_conn *htlc,
                                        GtkWidget *content, guint32 cid,
                                        const char *title);
@@ -83,6 +85,8 @@ AdwTabPage *gtkhx_chat_tabs_find_msg (struct htlc_conn *htlc, guint16 uid);
  * the "subtle" indicator). */
 void gtkhx_chat_tabs_raise_pchat (struct htlc_conn *htlc, guint32 cid);
 void gtkhx_chat_tabs_raise_msg (struct htlc_conn *htlc, guint16 uid);
+/* The focused connection's public-chat tab: no argument, because the only
+ * caller is a user action and a user can only act on what is on screen. */
 void gtkhx_chat_tabs_raise_public (void);
 
 /* Set / clear the needs-attention indicator on a tab. Also flags
