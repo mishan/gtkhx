@@ -52,10 +52,11 @@ the nickname's hook puts a `USER_CHANGE` on the wire, and one packet per
 keystroke was broadcasting partial nicknames.
 
 The Settings dialog is a sidebar plus a stack, one `AdwPreferencesPage` per
-entry, each built by a `draw` function pointer. Every page is a Rust builder
-called through that pointer, including the three custom-widget ones (the Mac
-resource-fork icon picker, the GIF avatar chooser, the key-capture dialog);
-what is still C is the shell that owns the pointers. Rust pages reach
+entry, each built by a `draw` function pointer. Dialog, sidebar, table and
+pages are all Rust (`gtkhx-ui/options_window.rs` and `options.rs`), and
+`draw` is an ordinary Rust fn pointer rather than an FFI export. C still
+supplies what sits *under* the pages — preferences, themes, icon resources,
+toasts — but nothing calls into them. Rust pages reach
 preferences through a typed by-name bridge — `gtkhx_prefs_get_bool("MARKDOWN")`
 and friends — with the key strings hand-mirrored into a Rust `mod cfg`.
 
@@ -485,13 +486,19 @@ stored", so choosing the blank icon in Settings silently did nothing. It is set
 unconditionally now, and the per-connection override is an `Option` rather than
 a sentinel for the same reason.
 
-**The UI is one row, and only for the nickname.** `AdwEntryRow` has no
-placeholder — the title *is* the placeholder — so the inherited value goes in
-the title, and an empty field reads as "you will appear as this". Clearing it
-goes back to inheriting, because empty is stored as absent rather than as an
-empty string. The icon override is storage-only for now: zero is a legal icon
-so it cannot double as "unset" in a spin row, and the picker is still the C
-settings page.
+**Both overrides have a row, and both can be reverted.** `AdwEntryRow` has no
+placeholder — the title *is* the placeholder — so the inherited nickname goes
+in the title, and an empty field reads as "you will appear as this". Empty is
+stored as absent rather than as an empty string, so clearing the field is what
+returns it to inheriting.
+
+The icon can't work that way: zero is a legal (blank) icon, so no value in a
+spin row is free to mean "unset". It gets an action row instead — a preview of
+the *effective* icon, a subtitle naming which of the two states you are in, and
+a revert button that is sensitive only when the connection has its own. Both
+rows carry that button, because an override you cannot undo is a trap, and for
+the icon there would otherwise be no way back at all. The picker itself is
+shared with Settings → Identity (`gtkhx-ui/icon_picker.rs`).
 
 ---
 
@@ -649,7 +656,7 @@ Illustrative, not committed. Each step ships on its own.
 | ~~P3~~ | **Done.** The C mirror and the read/write ABI. `hxconfig` owns the values from startup; the settings table, the `allocated` bit and the identity binder are deleted; the mirror is refreshed after every change. The panel-open latches went with their keys, and the two toolbar-size writes are setter calls. The by-name bridge is reimplemented on `hxconfig`, so both the C and the Rust Settings pages work unchanged. Change hooks are applied uniformly after load, which absorbed most of P4. | P2 |
 | ~~P4~~ | **Done.** Change notification: hooks split into view / global / connection flavours, with the connection chosen once at the dispatch site. The "applied uniformly after load" half landed with P3. | P3 |
 | ~~P5~~ | **Done.** Identity: global default plus per-connection overrides, resolved and copied in the connect preamble. Delivers M1's identity half. | P3 |
-| P6 | Port the Identity and Voice settings pages to Rust; retire the `draw` pointer framework. Split three ways: ~~P6a Voice~~ (done), ~~P6b Identity~~ (done), P6c the framework itself. | P3 |
+| ~~P6~~ | **Done.** Identity and Voice ported to Rust and the `draw` pointer framework retired: the window, the sidebar and the page table are Rust, so `draw` is an ordinary fn pointer and the per-page FFI exports are gone. Shipped as P6a (Voice), P6b (Identity), P6c (the framework). | P3 |
 | P7 | Drop the mirror per file as each C reader is ported. Ongoing, not a milestone. | P3 |
 
 P1 and P2 were self-contained and landed with no risk to a running build —

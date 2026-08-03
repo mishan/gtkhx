@@ -251,8 +251,13 @@ This is not a rename. It is the recognition that once you can be connected to
 several servers at once, "the list of servers" is configuration, and per-server
 settings need somewhere to live that outlives any particular connection.
 
-Whether the standalone dialog survives as a shortcut from the toolbar's
-split button is a UI call, not an architectural one.
+**The standalone dialog is retired.** Two editors over one store is two
+sync problems, and the old dialog already had to re-read the global nickname
+on every form load because Settings could be open beside it. The hamburger
+item survives as a shortcut that opens Settings on the Connections page. The
+toolbar's split-button dropdown of server names is untouched — that is
+*connecting*, not managing, and it is the one place the distinction is
+already clear.
 
 ### Identity: global default, per-connection override
 
@@ -266,9 +271,10 @@ The identity model follows directly:
   not just newly created ones. A new connection simply starts with no override,
   and its settings row displays the inherited value as its placeholder.
 - **Setting an override pins that connection.** From then on it is managed there
-  and stops tracking the global. There should be an explicit "Use default"
-  affordance to clear an override and return to inheriting, or the decision is
-  one-way and users will be annoyed.
+  and stops tracking the global. Both rows carry an explicit revert control
+  that clears the override and returns to inheriting — without one the
+  decision is one-way, and for the icon there would have been no way back at
+  all, since 0 is a real (blank) icon and so cannot double as "unset".
 
 Note the deliberate choice between two readings of "inherit". *Copy on create*
 snapshots the global into each new connection; *live fallback* stores nothing
@@ -378,7 +384,9 @@ identity it was otherwise missing.
   thought about whether the page reads coherently.
 - **Promoting a live identity.** If `/nick` is deliberately ephemeral, is there
   an affordance to keep it — and does the connection settings row surface the
-  fact that the live identity currently differs from the configured one?
+  fact that the live identity currently differs from the configured one? Still
+  open: the page shows the *configured* identity in each row's subtitle, and
+  says nothing about what a live connection is currently using.
 
 ---
 
@@ -654,7 +662,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | Phase | Scope | Depends on |
 |-------|-------|-----------|
 | M0 | Session-routing seam: `sess_from_htlc()` and `hx_active_session()` replace direct global access. Model code routes received events by connection; UI code routes by focused session. No behaviour change at N == 1. | — |
-| M1 | Connection collection: bookmarks become Settings → Connections; identity decoupled from connection storage and resolved as override-else-global at connect; the preferences binder deleted. Rides on the preferences rewrite — see [preferences.md](preferences.md). Stands alone and improves N == 1. | — |
+| ~~M1~~ | **Done.** Connection collection: bookmarks are Settings → Connections; identity is decoupled from connection storage and resolved as override-else-global at connect; the preferences binder is deleted. The identity half rode in with the preferences rewrite (P5); the collection half retired the standalone Bookmarks window and added the per-connection icon override with an explicit clear-to-inherit for both fields. | — |
 | M2 | Transport bridge handle moves onto the connection; the send primitive takes a connection. Two connections can coexist. | — |
 | M3 | Connection identity on the untagged signals; the two discard-the-htlc handlers fixed; connection tags on the flat cid/uid indexes and notification ids. | M2 |
 | M4 | Reify the connection/session as a heap object behind a collection and factory; connection tab strip; pick layout Model A or B; per-Chat-panel tab view; per-connection factory replaces eager panel construction. | M1, M3 |
@@ -666,10 +674,14 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 describes. It was safe to do ahead of every open decision precisely because it
 changes no behaviour at N == 1.
 
-**M1 and M2 are both independent and both worth doing early.** M1 is a net
-simplification today and fixes the `/nick`-clobbers-your-global bug. M2 is the
-hard stop: until it lands, nothing else in this document can be tested, because
-a second connect is refused.
+**M1 has landed.** It was a net simplification at one connection, and the
+`/nick`-clobbers-your-global bug went with it by construction, exactly as
+predicted below — once identity storage stopped being the connection's wire
+buffer, there was nothing left for the command to clobber.
+
+**M2 is the hard stop**, and is independent of everything else here: until it
+lands, nothing in this document can be tested, because a second connect is
+refused outright.
 
 ---
 

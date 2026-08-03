@@ -1,9 +1,12 @@
 ## 1.3.0-dev
 
-- Bookmarks
+- Connections (formerly Bookmarks)
+  - Bookmarks are now Settings → Connections; the separate Bookmarks window is gone
+  - Each connection can override your nickname and icon for that server, or
+    inherit the defaults from Settings → Identity
   - Bookmarks are now kept in a single TOML file
   - Legacy bookmark files are imported if the TOML file does not exist
-  - Bookmarks dialog supports exporting bookmarks to legacy Hotline bookmark files
+  - Connections can be exported to legacy Hotline bookmark files
   - Built-in bookmarks can now be deleted
 - Build
   - GtkHx is now available for macOS and Windows

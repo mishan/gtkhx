@@ -56,9 +56,10 @@ looking for code in the wrong place.
   a growing set of windows and dialogs (`gtkhx-ui`).
 - **C owns**: the libpanel dock and layout persistence, the toolbar, the file browser, the
   tray, notifications, previews, theming, and the receive handlers still left in `rcv.c`.
-  Settings is a split: C keeps the `cfgvars[]` table, the change hooks and the prefs
-  parser, while most of the preference *pages* are Rust builders called through the C
-  framework's draw pointers.
+  Settings is now almost entirely Rust — the values live in `hxconfig`, and the window,
+  sidebar, page table and every page live in `gtkhx-ui`. What C keeps is the change
+  hooks that re-apply a preference across live widgets, the prefs parser, and the
+  by-name bridge the Rust rows read and write through.
 - **The seam** is a set of thin bridge files (`*_bridge.c`, `htxf_accessors.c`) plus
   hand-declared `extern` blocks. There is no cbindgen.
 
@@ -72,7 +73,7 @@ looking for code in the wrong place.
 |---|---|
 | **Entry point** | `gtkhx.c` (`main()`, GtkApplication, signal-handler wiring) |
 | **Dock / layout** | `hx_panel.c`, `hx_panel_frame.c`, `hx_split.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `dock_bridge.c`, `toolbar.c` |
-| **Settings** | `options.c` (the `cfgvars[]` table, change hooks, GKeyFile persistence, and the framework the Rust page builders plug into), `prefs_parser.c` |
+| **Settings** | `options.c` (change hooks, identity resolution, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `prefs_parser.c`, `icon_enum.c` (icon IDs for the Rust picker) |
 | **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c`, `chat_bench.c` |
 | **Files** | `files_browser.c`, `files_panel.c`, `files.c`, `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_complete.c`, `files_ops.c`, `files_entry.c` |
 | **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the frame-dispatch switch, the transaction correlator), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
@@ -118,7 +119,7 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window), `hxchat-view` (the GTK4 chat widget), `hxchat-layout` (its layout engine — **dependency-free**: no gtk, glib, or pango) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
 | **Media / files** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn), `hxhfs` (resource-fork sidecars), `hxfiles-xfer` (fork-header codec) |
-| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and TOML file — built and tested, but nothing links it yet; the running client still reads `cfgvars[]`), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
+| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and the TOML file — the owner of every preference value at runtime), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
 | **Link façade** | `gtkhx-ffi` — bundles every FFI-exporting crate into a single `libgtkhx_ffi.a`, so the binary links exactly one archive instead of a hand-ordered list. Several crates also build a standalone `staticlib` on the side, purely so the test suite can link one crate at a time. See `docs/rust/crate-layout.md`. |
 
 ### Other directories
@@ -193,8 +194,9 @@ session the user is looking at" — use it in UI code. Today N == 1 and they coi
 - **Don't use `g_assert` for invariants that matter in release builds** — it compiles out
   under `G_DISABLE_ASSERT`. Use `g_error` (always fatal) or `g_critical` plus a graceful
   skip. The `g_assert_*` test macros are fine in tests.
-- **`g_autoptr` / `g_autofree`** are used opportunistically, not universally. `bookmarks*.c`
-  is the in-tree pattern to copy. Not worth a sweep; convert when you touch a function.
+- **`g_autoptr` / `g_autofree`** are used opportunistically, not universally. `tasks.c`
+  and `hxnet_bridge.c` are the in-tree pattern to copy — the `bookmarks*.c` this used to
+  point at went to Rust. Not worth a sweep; convert when you touch a function.
 - **`GtkTreeListModel`**: attach children to a node *before* appending the node.
   `create_child_model` fires once and the leaf-vs-expandable verdict sticks.
 - **No phase labels in source comments.** Describe the reason, not the project-management

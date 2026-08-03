@@ -1,9 +1,4 @@
-src/about.c
-src/banner.c
-src/bookmarks.c
 src/chat.c
-src/connect.c
-src/emoji.c
 src/files.c
 src/files_browser.c
 src/files_entry.c
@@ -16,14 +11,9 @@ src/gtkurl.c
 src/gtkutil.c
 src/msg.c
 src/network.c
-src/news.c
-src/news_browser.c
 src/options.c
-src/plugin.c
 src/rcv.c
 src/tasks.c
-src/tls_trust_dialog.c
 src/toolbar.c
-src/tracker.c
 src/usermod.c
 src/users.c

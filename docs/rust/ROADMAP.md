@@ -445,12 +445,12 @@ genuinely-C leaves behind FFI. This is the big remaining category.
   (`inline_media*.c`). The view dialog is Rust, and the decode itself is the
   `hx-image-decode` crate behind a thin C shim (`inline_media_decode.c`, which
   also carries the `_Static_assert`s pinning the Rust enum discriminants).
-- **Settings** — `options.c` keeps the change hooks that re-apply prefs across
-  live widgets, the prefs parser, and the dialog shell: the window, the sidebar
-  and the `settings_entries[]` table. Every *page* is a Rust builder called
-  through that table's `.draw` pointers; retiring the indirection is what is
-  left. The values themselves moved to the `hxconfig` crate — the `cfgvars[]`
-  registry is gone.
+- **Settings** — the whole dialog is Rust: the window, the sidebar, the page
+  table and every page (`gtkhx-ui/options_window.rs`, `options.rs`). The
+  values live in the `hxconfig` crate; `options.c` is down to the change hooks
+  that re-apply prefs across live widgets, the prefs parser and the by-name
+  bridge the Rust rows read and write through. Both the `cfgvars[]` registry
+  and the per-page FFI exports are gone.
 
 ### C. Shared infrastructure
 

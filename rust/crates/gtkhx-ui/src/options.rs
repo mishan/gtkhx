@@ -2,17 +2,15 @@
 //! Rust, Phase R5.6).
 //!
 //! The values and the file belong to the `hxconfig` crate; the `changed_*`
-//! apply hooks and the split-view `create_options_window` framework are still
-//! C. This module builds the page *content* in Rust. Its
-//! `gtkhx_options_rs_page_*` exports are the `settings_entries[].draw` pointers
-//! the C framework calls per page; the row builders read/write preferences
-//! through the typed by-name bridge (`gtkhx_prefs_*` in options.c), which
-//! refreshes the C mirror, runs the key's apply hook and arms the save timer on
-//! every write, so apply semantics match the C rows exactly.
+//! apply hooks are still C. This module holds the shared row builders and the
+//! page bodies; `options_window` holds the window and the table that calls
+//! them. The row builders read and write preferences through the typed
+//! by-name bridge (`gtkhx_prefs_*` in options.c), which refreshes the C
+//! mirror, runs the key's apply hook and arms the save timer on every write.
 //!
-//! Every page is ported and live. What is left on the C side is the shell that
-//! calls them — the window, the sidebar and the `settings_entries[]` table —
-//! and retiring the `.draw` indirection is the last step.
+//! Nothing here crosses the FFI in the other direction any more: the pages
+//! used to be reached from a C table through `#[no_mangle]` exports, and are
+//! now plain functions called from `options_window`.
 
 use crate::tr::tr;
 use crate::{cs, cstr};
@@ -67,7 +65,7 @@ fn pref_get_bool(name: &str) -> bool {
 fn pref_set_bool(name: &str, v: bool) {
     unsafe { gtkhx_prefs_set_bool(cs(name).as_ptr(), v as c_int) }
 }
-fn pref_get_int(name: &str) -> i32 {
+pub(crate) fn pref_get_int(name: &str) -> i32 {
     unsafe { gtkhx_prefs_get_int(cs(name).as_ptr()) }
 }
 fn pref_set_int(name: &str, v: i32) {
@@ -398,9 +396,8 @@ pub(crate) fn group(title: &str) -> adw::PreferencesGroup {
 
 // ---- pages (pure builder sequences) ------------------------------------
 //
-// Each mirrors the matching settings_page_* draw function in options.c.
-// Signature matches the C `void (*draw)(AdwPreferencesPage *)` so the page
-// table can call them uniformly once create_options_window lands.
+// One function per sidebar entry, all sharing the signature the page table in
+// `options_window` calls them through.
 
 /// Open a font chooser seeded from the FONT pref and write the picked font
 /// description back into `entry` (which applies via the debounce).
@@ -444,7 +441,7 @@ fn gtkhx_theme_combo() -> adw::ComboRow {
 }
 
 /// General (Appearance theme combos + tray).
-fn page_general(page: &adw::PreferencesPage) {
+pub(crate) fn page_general(page: &adw::PreferencesPage) {
     let appearance = group(&tr("Appearance"));
     appearance.set_description(Some(&tr(
         "Color scheme. \"Follow system\" tracks the desktop's light/dark preference.",
@@ -476,7 +473,7 @@ fn page_general(page: &adw::PreferencesPage) {
 }
 
 /// Chat → Appearance (output toggles + scrollback + timestamp format + font).
-fn page_chat_appearance(page: &adw::PreferencesPage) {
+pub(crate) fn page_chat_appearance(page: &adw::PreferencesPage) {
     let output = group(&tr("Chat output"));
     output.add(&switch_row(cfg::TIMESTAMP, &tr("Show timestamps"), None));
     output.add(&switch_row(
@@ -528,7 +525,7 @@ fn page_chat_appearance(page: &adw::PreferencesPage) {
 }
 
 /// Audio → Sound.
-fn page_sound(page: &adw::PreferencesPage) {
+pub(crate) fn page_sound(page: &adw::PreferencesPage) {
     let master = group(&tr("Sounds"));
     master.add(&switch_row(
         cfg::SOUNDS_ON,
@@ -568,7 +565,7 @@ fn page_sound(page: &adw::PreferencesPage) {
 }
 
 /// Chat → Behavior.
-fn page_chat_behavior(page: &adw::PreferencesPage) {
+pub(crate) fn page_chat_behavior(page: &adw::PreferencesPage) {
     let behavior = group(&tr("Behavior"));
     behavior.add(&switch_row(
         cfg::SHOWJOIN,
@@ -616,7 +613,7 @@ fn page_chat_behavior(page: &adw::PreferencesPage) {
 }
 
 /// Chat → History.
-fn page_chat_history(page: &adw::PreferencesPage) {
+pub(crate) fn page_chat_history(page: &adw::PreferencesPage) {
     let hist = group(&tr("Chat history"));
     hist.set_description(Some(&tr(
         "Servers that implement the chat-history extension (e.g. Janus) replay \
@@ -637,7 +634,7 @@ fn page_chat_history(page: &adw::PreferencesPage) {
 }
 
 /// Chat → Emoji.
-fn page_chat_emoji(page: &adw::PreferencesPage) {
+pub(crate) fn page_chat_emoji(page: &adw::PreferencesPage) {
     let emoji = group(&tr("Emoji"));
     emoji.set_description(Some(&tr(
         "When conversion is on, emoji you send on servers that don't support \
@@ -658,7 +655,7 @@ fn page_chat_emoji(page: &adw::PreferencesPage) {
 }
 
 /// Notifications → Events.
-fn page_notify_events(page: &adw::PreferencesPage) {
+pub(crate) fn page_notify_events(page: &adw::PreferencesPage) {
     let events = group(&tr("Events"));
     events.set_description(Some(&tr(
         "Show a desktop notification when these events happen.",
@@ -712,7 +709,7 @@ fn page_notify_events(page: &adw::PreferencesPage) {
 }
 
 /// General → File Transfers.
-fn page_file_transfers(page: &adw::PreferencesPage) {
+pub(crate) fn page_file_transfers(page: &adw::PreferencesPage) {
     let grp = group(&tr("Downloads"));
     grp.add(&entry_row(cfg::DOWNLOAD, &tr("Download directory")));
     grp.add(&switch_row(
@@ -739,7 +736,7 @@ fn persist_trackers(store: &gtk::gio::ListStore) {
 
 /// Network → Trackers: an editable list of tracker URLs (GtkColumnView over a
 /// GListStore) + Add/Remove + the case-sensitive-search switch.
-fn page_tracker(page: &adw::PreferencesPage) {
+pub(crate) fn page_tracker(page: &adw::PreferencesPage) {
     let grp = group(&tr("Trackers"));
     grp.set_description(Some(&tr("Servers polled when the Tracker window opens")));
 
@@ -856,7 +853,7 @@ fn page_tracker(page: &adw::PreferencesPage) {
 }
 
 /// Notifications → Behavior.
-fn page_notify_behavior(page: &adw::PreferencesPage) {
+pub(crate) fn page_notify_behavior(page: &adw::PreferencesPage) {
     let behavior = group(&tr("Behavior"));
     behavior.add(&switch_row(
         cfg::NOTIFY_OMIT_FOCUSED,
@@ -874,52 +871,28 @@ fn page_notify_behavior(page: &adw::PreferencesPage) {
     page.add(&mentions);
 }
 
-// ---- C ABI page exports ------------------------------------------------
+// ---- module-local page adapters ---------------------------------------
 //
-// options.c's create_options_window creates each AdwPreferencesPage and calls
-// its settings_entries[].draw; for the ported pages that pointer is one of
-// these exports, which build the page content in Rust. The page is C-owned
-// (still floating at draw time), so from_glib_borrow — dropping the wrapper
-// must not touch its refcount.
+// Every page builder above is reached from the table in `options_window.rs`
+// as a plain `fn(&adw::PreferencesPage)`. This block used to hold a
+// `rs_page_export!` macro and one `#[no_mangle]` shim per page, because the
+// table was C and each page arrived as a raw C-owned pointer that had to be
+// borrowed without touching its refcount. With the table on this side none of
+// that is needed — only these two adapters, which give the pages that live in
+// their own modules the same shape as the ones defined here.
 
-macro_rules! rs_page_export {
-    ($export:ident => $inner:ident) => {
-        /// # Safety
-        /// `page` is a valid AdwPreferencesPage owned by the caller.
-        #[no_mangle]
-        pub unsafe extern "C" fn $export(page: *mut adw::ffi::AdwPreferencesPage) {
-            // GTK is initialised from C, so gtk4-rs's own init flag isn't set;
-            // building adw widgets without this trips libadwaita-rs's
-            // assert_initialized_main_thread! (this is a C→Rust entry point,
-            // and Settings may be the first Rust window opened).
-            crate::ensure_gtk_init();
-            let page = glib::translate::from_glib_borrow::<_, adw::PreferencesPage>(page);
-            $inner(&page);
-        }
-    };
-}
-
-/// The Voice page lives in its own module; the macro takes an ident, so this
-/// is the local name it exports.
+/// The Voice page, from `options_voice`.
 #[cfg(feature = "voice")]
-fn page_voice(page: &adw::PreferencesPage) {
+pub(crate) fn page_voice(page: &adw::PreferencesPage) {
     crate::options_voice::build(page);
 }
-#[cfg(feature = "voice")]
-rs_page_export!(gtkhx_options_rs_page_voice => page_voice);
 
-fn page_identity(page: &adw::PreferencesPage) {
+/// The Identity page, from `options_identity`.
+pub(crate) fn page_identity(page: &adw::PreferencesPage) {
     crate::options_identity::build(page);
 }
-rs_page_export!(gtkhx_options_rs_page_identity => page_identity);
 
-rs_page_export!(gtkhx_options_rs_page_general => page_general);
-rs_page_export!(gtkhx_options_rs_page_file_transfers => page_file_transfers);
-rs_page_export!(gtkhx_options_rs_page_chat_appearance => page_chat_appearance);
-rs_page_export!(gtkhx_options_rs_page_chat_behavior => page_chat_behavior);
-rs_page_export!(gtkhx_options_rs_page_chat_history => page_chat_history);
-rs_page_export!(gtkhx_options_rs_page_chat_emoji => page_chat_emoji);
-rs_page_export!(gtkhx_options_rs_page_notify_events => page_notify_events);
-rs_page_export!(gtkhx_options_rs_page_notify_behavior => page_notify_behavior);
-rs_page_export!(gtkhx_options_rs_page_sound => page_sound);
-rs_page_export!(gtkhx_options_rs_page_tracker => page_tracker);
+/// The Connections page, from `options_connections`.
+pub(crate) fn page_connections(page: &adw::PreferencesPage) {
+    crate::options_connections::build(page);
+}

@@ -4,10 +4,11 @@ gtkhx_sources = files(
   # banner.h keeps the C ABI decls the toolbar / rcv / network call sites use.
   # bookmark_cipher.c + bookmarks_io.c retired — bookmark storage (TOML model,
   # legacy HTsc import/export, cipher vocab) is the hxbookmarks Rust crate,
-  # reached directly from the Rust Connect + Bookmarks dialogs. bookmarks.h
-  # keeps only the create_bookmarks_window decl the toolbar calls.
+  # reached directly from the Rust Connect dialog and Settings page.
   # bookmark_rc4_dialog.c ported to Rust (gtkhx-ui rc4_dialog.rs).
-  # bookmarks.c (management dialog) ported to Rust (gtkhx-ui bookmarks.rs).
+  # bookmarks.c, and then bookmarks.h with it: the management dialog became
+  # Settings → Connections (gtkhx-ui options_connections.rs), so there is no
+  # separate window and no C entry point to declare.
   # cipher_vocab.c folded into the Rust gtkhx-ui crate (cipher_vocab.rs) when
   # the Bookmarks dialog joined the Connect dialog in Rust (R5.3).
   'chat.c',
@@ -30,7 +31,8 @@ gtkhx_sources = files(
   'commands.c',
   # connect.c ported to Rust (gtkhx-ui connect.rs); connect.h keeps the C ABI
   # decls. The shared cipher/compress vocab is in the Rust crate too
-  # (cipher_vocab.rs), as is the Bookmarks dialog (bookmarks.rs).
+  # (cipher_vocab.rs); the bookmarks dialog became the Connections settings
+  # page (options_connections.rs).
   'debug.c',
   # filelist_walker.c retired — the FILE_LIST walk + per-entry decode moved
   # into the hxmodel::files_entry Rust crate (gtkhx_files_populate_from_reply).

@@ -59,8 +59,17 @@ hotline-proto = { path = "../hotline-proto" }
 # (membership as a gio::ListModel) built from hxchat_model::Member data. Pure
 # Rust (glib/gio only, no extra C surface) — rides in gtkhx-ui's archive.
 # Bookmark model + TOML persistence + legacy HTsc import/export. The Connect
-# and Bookmarks dialogs call it directly (no C bookmark code remains).
+# dialog and the Connections settings page call it directly (no C bookmark
+# code remains).
 hxbookmarks = { path = "../hxbookmarks" }
+
+[dev-dependencies]
+# The `gtkhx_prefs_type` test stub delegates to the real schema lookup, so
+# every row builder takes its live path instead of the insensitive early
+# return a hardcoded "no such key" would give. Pure and file-free —
+# hxconfig_type is a `path_of` + `kind_of` pair with no loaded config behind
+# it. See options_test_stubs.rs.
+hxconfig = { path = "../hxconfig" }
 
 [features]
 # `voice` gates the user-list voice-indicator column (users_voice_col) and
