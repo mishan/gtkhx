@@ -291,26 +291,35 @@ disconnect_clicked (void)
      * could take the not-logged-in branch for a connection that was live. */
     session *sess = hx_active_session ();
 
-    if (!hx_conn_logged_in (sess->htlc)) {
+    /* Empty registry — nothing to disconnect, and the accessors below would
+     * dereference a NULL connection rather than reading zero from one. */
+    if (sess == NULL) {
+        return;
+    }
+
+    /* Anything holding a socket gets closed — connecting, mid-handshake and
+     * logged in alike. The test here used to be "is it logged in?", which left
+     * Disconnect doing nothing to a connection that was still coming up: the
+     * button is live from the moment an attempt starts, so the whole connect
+     * and handshake window was a stretch where pressing it printed "connection
+     * closed" and left the attempt running underneath. */
+    if (hx_conn_fd (sess->htlc)) {
+        hx_htlc_close (sess->htlc, 1);
+    }
+
+    else {
         char *addr = hx_session_label (sess);
 
+        /* Already down — nothing to close, so this is a button whose state was
+         * stale. Settle the chrome and say so. */
         kill_threads ();
         setbtns (sess, 0);
         set_status_bar (sess, 0);
         set_disconnect_btn (sess, 0);
         conn_task_update (sess, 2);
-        /* hx_htlc_close already detached the GPollable sources and released
-         * current_conn, so the legacy hxd_fd_clr + close(fd) cleanup here
-         * would either be a no-op or worse — close(fd) would target a fd
-         * already owned (and possibly closed) by the released
-         * GSocketConnection. Just emit the user-visible notice. */
         hx_printf_prefix (sess->htlc, 0, INFOPREFIX, "%s: %s\n", addr,
                           _ ("connection closed"));
         g_free (addr);
-    }
-
-    else if (hx_conn_fd (sess->htlc)) {
-        hx_htlc_close (sess->htlc, 1);
     }
 }
 

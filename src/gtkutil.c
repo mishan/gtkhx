@@ -44,6 +44,7 @@
 #include "hxconn.h"
 #include "host_port.h"
 #include "tray.h"
+#include "banner.h"
 #ifdef HAVE_VOICE
 #include "voice_panel.h"
 #endif
@@ -559,6 +560,7 @@ hx_chrome_refresh (void)
         status_bar_set (sess, 0, FALSE);
         changetitlesdisconnected (sess);
     }
+    banner_show_active ();
     gtkhx_tray_set_connected (hx_conn_logged_in (sess->htlc));
     set_disconnect_btn (sess, hx_conn_fd (sess->htlc) ? 1 : 0);
     setbtns (sess, hx_conn_logged_in (sess->htlc) ? 1 : 0);

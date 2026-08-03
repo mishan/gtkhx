@@ -154,7 +154,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     ping_stop (htlc);
     rcv_login_reset (htlc);
-    banner_clear ();
+    banner_clear (htlc);
 
     /* Reset the per-session login flag so the next connect starts
      * fresh. concurrence() reads this to decide whether to send
@@ -527,6 +527,20 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
         hx_htlc_close (htlc, 1);
     }
     hx_clear_chat (htlc, 0, 1);
+
+    /* Forget what the last server called itself. The name is only learned from
+     * a 1.5+ login reply, and everything that labels this session — the window
+     * title, the tab, the status bar — prefers it over the address. Left
+     * standing, a reconnect elsewhere in the same tab would keep flying the
+     * previous server's flag over the new address until (and only if) this one
+     * volunteers a name of its own. */
+    {
+        session *sess = sess_from_htlc (htlc);
+
+        if (sess) {
+            g_clear_pointer (&sess->server_name, g_free);
+        }
+    }
 
     server_port = port;
 

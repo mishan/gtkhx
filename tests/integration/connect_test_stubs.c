@@ -155,8 +155,9 @@ error_dialog (char *title, char *msg)
 }
 
 void
-banner_clear (void)
+banner_clear (struct htlc_conn *htlc)
 {
+    (void)htlc;
 }
 
 void

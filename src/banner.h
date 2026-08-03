@@ -21,8 +21,11 @@
  *     returns the widget to embed.
  *   - banner_handle_message() — called from rcv.c::hx_rcv_banner after parsing;
  *     routes to URL or HTXF path based on TYPE.
- *   - banner_clear() — called on disconnect; cancels any in-flight fetch and
- *     hides the widget.
+ *   - banner_clear() — called on disconnect and on closing a connection;
+ *     forgets that connection's banner and cancels any fetch still running
+ *     for it.
+ *   - banner_show_active() — called from hx_chrome_refresh on a connection-tab
+ *     switch; repaints the row for whichever connection is now focused.
  *   - banner_handle_htxf_reply() — called from rcv_task_banner_get (hxhandlers)
  *     with the file-mode reply's ref + size.
  */
@@ -42,10 +45,19 @@ struct htlc_conn;
 extern void banner_handle_message (struct htlc_conn *htlc, const char *type,
                                    gboolean has_url, const char *url);
 
-/* Hide the banner + cancel any in-flight fetch. Called on
- * hx_htlc_close so a stale banner from one server doesn't linger
- * after we connect to another. */
-extern void banner_clear (void);
+/* Forget `htlc`'s banner and cancel any fetch still running for it. Called on
+ * hx_htlc_close so a stale banner from one server doesn't linger after we
+ * connect to another.
+ *
+ * Per connection: there is one banner row, but disconnecting one server must
+ * not blank the banner of another that is still up — and the connection
+ * closing need not be the one on screen. */
+extern void banner_clear (struct htlc_conn *htlc);
+
+/* Repaint the banner row for the connection the user is now looking at.
+ * The banner follows the focus, like the status bar and the window title;
+ * hx_chrome_refresh calls this on a connection-tab switch. */
+extern void banner_show_active (void);
 
 /* Continuation of the file-mode banner flow: the server's reply
  * to our HTLC_HDR_DOWNLOAD_BANNER carries a transfer refnum +

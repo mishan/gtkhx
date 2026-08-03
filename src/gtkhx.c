@@ -56,6 +56,7 @@
 #include "gtkhx_theme.h" /* gtkhx_theme_get_color, GTKHX_PAL_* */
 #include "debug.h"
 #include "toolbar.h"
+#include "banner.h"
 #include "dock_layout.h"
 #include "chat.h"
 #include "msg.h"
@@ -985,6 +986,13 @@ hx_session_close (session *sess)
     if (hx_conn_fd (sess->htlc)) {
         hx_htlc_close (sess->htlc, 1);
     }
+
+    /* The banner is held per connection but shown in one shared row, so it is
+     * not a page and the sweep below doesn't reach it. Unconditional, because
+     * the disconnect above only runs for a connection that is up: closing a
+     * tab that had already dropped would otherwise leave its banner behind,
+     * keyed to a serial that never comes round again. */
+    banner_clear (sess->htlc);
 
     /* Then the content. Removing a page destroys its widget tree, and every
      * content module's destroy handler is its model-side teardown — that is
