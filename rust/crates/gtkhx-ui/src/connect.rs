@@ -56,6 +56,15 @@ extern "C" {
     /// Zero cannot: zero is a real, blank icon.
     fn hx_identity_set_pending_override(nick: *const c_char, icon: c_int);
 
+    /// gtkhx_ui_bridge.c — the connection a session owns.
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// gtkhx-core — this connection's socket. Non-zero means it is in use, so
+    /// a connect aimed at it wants a new tab instead.
+    fn hx_conn_fd(h: *const c_void) -> c_int;
+    /// gtkhx.c — open a connection: a session, its panels and its tab, with
+    /// that tab selected. Never NULL.
+    fn hx_session_open(title: *const c_char) -> *mut c_void;
+
     fn gtkhx_connect_apply(
         sess: *mut c_void,
         server: *const c_char,
@@ -206,6 +215,18 @@ fn arm_identity(identity: Identity, server: &str, port: u16) {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Which connection a connect request is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Target {
+    /// This session, whatever state it is in. Replaces the connection if it
+    /// has one — the reconnect path, where that is the intent.
+    This,
+    /// This session if it is idle, a new connection in a new tab if it is
+    /// already connected. What every user-initiated connect wants.
+    NewTabIfBusy,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn connect_with_args(
     sess: *mut c_void,
     server: &str,
@@ -217,6 +238,7 @@ fn connect_with_args(
     cipher: u8,
     tls: u8,
     identity: Identity,
+    target: Target,
 ) {
     let (mut secure, mut compress, mut cipher) = (secure, compress, cipher);
     if tls != 0 {
@@ -267,6 +289,27 @@ fn connect_with_args(
 
     arm_identity(identity, server, port);
 
+    // Connecting while already connected opens a *new* connection rather than
+    // replacing this one. `hx_connect` would otherwise disconnect first —
+    // which is what "replace" means, and is what Disconnect-then-Connect
+    // already gives anyone who wants it.
+    //
+    // Here rather than in `hx_connect`, because it is policy about windows and
+    // tabs, not about the wire: network.c should keep knowing nothing about
+    // either. A reconnect is the exception and passes `Target::This`, since
+    // replacing the connection that just dropped is the whole point.
+    let sess = match target {
+        Target::This => sess,
+        Target::NewTabIfBusy if unsafe { hx_conn_fd(gtkhx_session_htlc(sess)) } != 0 => unsafe {
+            // Titled for where it is going: the connection-state handler
+            // renames it to the host as soon as the connect starts, but a tab
+            // that appears blank for even a moment reads like a bug.
+            let title = cs(server);
+            hx_session_open(title.as_ptr())
+        },
+        Target::NewTabIfBusy => sess,
+    };
+
     let cserver = cs(server);
     let clogin = cs(login);
     let cpass = cs(pass);
@@ -306,6 +349,11 @@ pub extern "C" fn connect_reconnect_last() {
                 // Reconnecting to a saved server should look the same as
                 // connecting to it did, nickname included.
                 Identity::ByEndpoint,
+                // The one path that means *this* connection: the banner
+                // belongs to the connection that just dropped, and putting its
+                // server back in a new tab beside the dead one would be a
+                // strange reading of "Reconnect".
+                Target::This,
             );
         }
         _ => unsafe {
@@ -567,6 +615,7 @@ fn server_connect(sess: *mut c_void) {
         cipher,
         tls,
         Identity::ByEndpoint,
+        Target::NewTabIfBusy,
     );
 
     if let Some(dlg) = w.window {
@@ -923,6 +972,7 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
         // The user picked this entry by name, so it is authoritative even if
         // another entry happens to point at the same address.
         Identity::Entry(&bm),
+        Target::NewTabIfBusy,
     );
 }
 
@@ -1032,6 +1082,7 @@ pub unsafe extern "C" fn connect_open_hotline_url(url: *const c_char) -> glib::f
         // be one this client has saved, it is that server and keeps its
         // nickname.
         Identity::ByEndpoint,
+        Target::NewTabIfBusy,
     );
     glib::ffi::GTRUE
 }

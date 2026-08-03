@@ -34,6 +34,7 @@
 #include <getopt.h>
 #include "hx.h"
 #include "conn_tabs.h"
+#include "dock_bridge.h"
 #include "files_browser.h"
 #include "session_registry.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
@@ -55,6 +56,7 @@
 #include "gtkhx_theme.h" /* gtkhx_theme_get_color, GTKHX_PAL_* */
 #include "debug.h"
 #include "toolbar.h"
+#include "banner.h"
 #include "dock_layout.h"
 #include "chat.h"
 #include "msg.h"
@@ -934,6 +936,72 @@ init_icons (void)
 /* Defined below fe_init, next to the explanation of what it is for. */
 static void hx_debug_second_session (void);
 
+session *
+hx_session_open (const char *title)
+{
+    session *sess = hx_session_new ();
+
+    /* There is one toolbar window and every session points at it. It is only
+     * `create_toolbar_window` that sets this, and that runs once, for the
+     * first session — so every connection after the first would have a NULL
+     * here and the chrome that writes through it would fail its
+     * GTK_IS_WINDOW assertion. */
+    sess->toolbar_window = toolbar_window;
+
+    /* Two steps, in this order. The model-side per-session state first —
+     * create_chat seeds the public conversation's view, create_tasks its task
+     * list — then the panel content that reads it. Skipping the first half
+     * leaves the content builders with no conversation to render.
+     *
+     * This is what `fe_init` does for the first connection, and what every
+     * connection after the first needs too, which is the whole reason it is a
+     * function. */
+    create_chat (sess);
+    create_tasks (sess);
+
+    create_chat_window (toolbar_window, sess);
+    create_news_window (toolbar_window, sess);
+    create_users_window (toolbar_window, sess);
+    create_tasks_window (toolbar_window, sess);
+    open_files_browser (sess);
+    open_news_browser (NULL, sess);
+
+    /* Adding the tab selects it, so the new connection is the one the user is
+     * looking at — which is what they asked for by opening it, and what every
+     * panel's content build assumes about the session it was handed. */
+    gtkhx_conn_tabs_add (sess, title);
+    return sess;
+}
+
+void
+hx_session_close (session *sess)
+{
+    if (sess == NULL) {
+        return;
+    }
+
+    /* Disconnect first, if it is up. This is where the wire-side teardown
+     * lives — the transfer sweep, the voice token, the task table — and it
+     * has to run while the session's collections are still intact. */
+    if (hx_conn_fd (sess->htlc)) {
+        hx_htlc_close (sess->htlc, 1);
+    }
+
+    /* The banner is held per connection but shown in one shared row, so it is
+     * not a page and the sweep below doesn't reach it. Unconditional, because
+     * the disconnect above only runs for a connection that is up: closing a
+     * tab that had already dropped would otherwise leave its banner behind,
+     * keyed to a serial that never comes round again. */
+    banner_clear (sess->htlc);
+
+    /* Then the content. Removing a page destroys its widget tree, and every
+     * content module's destroy handler is its model-side teardown — that is
+     * why this is a *remove* and not the switch-away a tab change does. */
+    gtkhx_dock_remove_session_pages (sess);
+
+    hx_session_remove (sess);
+}
+
 static void
 fe_init (void)
 {
@@ -1055,33 +1123,26 @@ hx_debug_second_session (void)
         return;
     }
 
-    sess = hx_session_new ();
-
-    /* The same two-step fe_init does: the model-side per-session state first
-     * (create_chat seeds the public conversation's view, create_tasks its task
-     * list), then the panel content that reads it. Skipping the first half
-     * would have the content builders find no conversation to render. */
-    create_chat (sess);
-    create_tasks (sess);
-
-    create_chat_window (toolbar_window, sess);
-    create_news_window (toolbar_window, sess);
-    create_users_window (toolbar_window, sess);
-    create_tasks_window (toolbar_window, sess);
-    open_files_browser (sess);
-    open_news_browser (NULL, sess);
-
-    gtkhx_conn_tabs_add (sess, "Debug connection 2");
+    sess = hx_session_open (_ ("Not connected"));
     debug_log ("secondconn",
                "built a second session (serial %u) with its own "
                "page in every per-connection panel",
                hx_conn_serial (sess->htlc));
 
-    /* Adding a tab selects it, which would leave the app focused on a
-     * connection that has nothing in it. Hand the focus back to the real one
-     * so startup looks normal and switching over is something the user
-     * chooses to do. */
+    /* Opening a connection selects its tab, which would leave the app focused
+     * on one that has nothing in it. Hand the focus back to the real one so
+     * startup looks normal and switching over is something the user chooses to
+     * do. Not something hx_session_open should do for everyone: a connection
+     * the *user* opens is one they want to be looking at. */
     gtkhx_conn_tabs_select (hx_session_at (0));
+
+    /* With `closesecond` as well, close it straight back — the close path is
+     * otherwise only reachable by clicking, which a headless run can't do. */
+    if (debug_category_enabled ("closesecond")) {
+        gtkhx_conn_tabs_close (sess);
+        debug_log ("secondconn", "closed it again; %u session(s) left",
+                   hx_session_count ());
+    }
 }
 
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
@@ -1426,8 +1487,16 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
         return;
     }
     changetitlesconnected (sess);
+    /* Retitle the tab now that the server has said what it is called.
+     * `hx_session_label` prefers that over the host — the tab was named for
+     * where we were going, and can now be named for where we are. */
+    {
+        char *label = hx_session_label (sess);
+        gtkhx_conn_tabs_set_title (htlc, label);
+        g_free (label);
+    }
     setbtns (sess, 1);
-    set_status_bar (2);
+    set_status_bar (sess, 2);
 }
 
 /* "self-updated" — our own access bits / uid were (re)parsed from a
@@ -1780,34 +1849,41 @@ on_connection_state_changed_signal (GtkhxSession *emitter,
      * focused session instead meant a background server dropping would grey
      * out and retitle whichever one you were looking at.
      *
-     * The app-global calls (set_status_bar, gtkhx_tray_set_connected,
-     * toolbar_clear_toasts) take no session and are not fixed by this: they
-     * are single-window chrome that has to become per-connection separately.
-     * See "App-global chrome that becomes per-connection" in
-     * docs/multi-connection.md. They run *before* the session guard below,
-     * deliberately: they used to be unconditional, and a connection whose
-     * back-pointer somehow didn't resolve should not leave the tray stuck
-     * reading "connected". */
+     * There is one status bar, one tray icon and one toast overlay, so that
+     * chrome *follows the focus* rather than becoming per-connection: it shows
+     * the state of the connection the user is looking at. Each call takes the
+     * session now and drops itself when that session isn't the focused one. */
     session *sess = sess_from_htlc (htlc);
+    gboolean focused = sess != NULL && sess == hx_active_session ();
     (void)emitter;
     (void)user_data;
 
     switch (state) {
     case GTKHX_CONNECTION_DISCONNECTED:
-        set_status_bar (0);
-        gtkhx_tray_set_connected (FALSE);
+        set_status_bar (sess, 0);
+        if (focused) {
+            gtkhx_tray_set_connected (FALSE);
+        }
         break;
     case GTKHX_CONNECTION_CONNECTING:
-        set_status_bar (-1);
+        set_status_bar (sess, -1);
         /* Wipe any toasts left over from the previous server (task
          * errors, broadcasts, "Logged in"). Without this the user
          * can be looking at a stale toast from server A while
-         * already connecting to server B. */
-        toolbar_clear_toasts ();
+         * already connecting to server B.
+         *
+         * Only for the focused connection: the overlay shows its toasts, and
+         * a background server reconnecting must not wipe what the user is
+         * currently reading. */
+        if (focused) {
+            toolbar_clear_toasts ();
+        }
         break;
     case GTKHX_CONNECTION_TCP_CONNECTED:
-        set_status_bar (1);
-        gtkhx_tray_set_connected (TRUE);
+        set_status_bar (sess, 1);
+        if (focused) {
+            gtkhx_tray_set_connected (TRUE);
+        }
         break;
     default:
         break;

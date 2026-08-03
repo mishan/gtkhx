@@ -45,6 +45,32 @@ G_BEGIN_DECLS
  * wrong rather than merely wasteful. */
 session *hx_session_new (void);
 
+/* Open a connection: build a session, its model-side state, its content page
+ * in every per-connection panel, and its tab — and select that tab, so the new
+ * connection is the one the user is looking at.
+ *
+ * `hx_session_new` above is the model half of this; everything a *usable*
+ * connection additionally needs is here. The split matters because startup
+ * wants them separately: `fe_init` builds the first session before the
+ * preferences are read (a change hook needs a connection) and its panels well
+ * after (they need the toolbar window). Every connection after the first
+ * wants both at once.
+ *
+ * Lives in gtkhx.c rather than session_registry.c, because it names the whole
+ * window layer — the panel factories and the toolbar window — and the registry
+ * deliberately names none of it. Never NULL. */
+session *hx_session_open (const char *title);
+
+/* Close a connection: disconnect it, destroy its content page in every
+ * per-connection panel, and drop it from the collection.
+ *
+ * The inverse of hx_session_open, and the same reason it lives in gtkhx.c: it
+ * names the panel layer. The caller moves the focus off it first — the tab
+ * strip does, by selecting a neighbour before closing.
+ *
+ * Does not free the session; see hx_session_remove. */
+void hx_session_close (session *sess);
+
 /* The session the user is looking at, or NULL before the first one exists.
  *
  * It used to be impossible for this to be NULL, and most callers still don't
@@ -67,6 +93,16 @@ session *hx_session_at (guint i);
 
 /* Where `sess` sits, or HX_SESSION_NOT_FOUND. */
 guint hx_session_index (session *sess);
+
+/* Drop `sess` from the collection. FALSE if it wasn't in it.
+ *
+ * Does *not* free the session: raw `session *` pointers are held by things
+ * with no way to learn one has gone (the tab strip's index, the voice token),
+ * all written against sessions being immortal. See the note on the definition.
+ *
+ * The caller is expected to have moved the focus off it first, and to have
+ * disconnected and torn down its panels — hx_session_close does all of that. */
+gboolean hx_session_remove (session *sess);
 
 G_END_DECLS
 

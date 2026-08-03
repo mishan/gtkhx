@@ -42,12 +42,14 @@ extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
  * inside hx_bridge_dispatch_shutdown. */
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 
-/* network.c's "session is fully logged in" flag. Used here only to
- * pick the shutdown log level: a failure before the session came up
- * (connect refused / handshake / login reject) is routine and gets a
- * user-facing error dialog, so it logs at g_message; a mid-session
- * drop after login is the noteworthy case. */
-extern int connected;
+/* Whether this connection got as far as a login. Used here only to pick the
+ * shutdown log level: a failure before the session came up (connect refused /
+ * handshake / login reject) is routine and gets a user-facing error dialog, so
+ * it logs at g_message; a mid-session drop after login is the noteworthy case.
+ *
+ * Read off the connection now — it used to be a `connected` global that named
+ * whichever connection had most recently logged in, so with two open the log
+ * level could come from the wrong one. */
 
 /* Mirror of the hxnet FFI's shutdown-reason constants
  * (rust/crates/hxnet/src/ffi.rs::HXNET_SHUTDOWN_*). The C side
@@ -173,9 +175,10 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
      * hx_htlc_close, so keep them at g_message rather than reading
      * like a bug (a routine "connection refused" shouldn't spam an
      * alarming warning to the console). Only a STREAM_ERROR /
-     * FRAME_TOO_LARGE *after* a working login (connected == 1) is the
-     * noteworthy mid-session-drop signal — promote that to g_warning. */
-    gboolean noteworthy = connected != 0 && reason != HXNET_SHUTDOWN_EOF
+     * FRAME_TOO_LARGE *after* a working login is the noteworthy
+     * mid-session-drop signal — promote that to g_warning. */
+    gboolean noteworthy = hx_conn_logged_in (htlc)
+                          && reason != HXNET_SHUTDOWN_EOF
                           && reason != HXNET_SHUTDOWN_HANDLE_DROPPED;
     if (noteworthy) {
         g_warning ("hxnet_bridge: actor exited mid-session with reason=%d "
@@ -184,8 +187,9 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
                    reason, reason_str, hx_conn_fd (htlc));
     } else {
         g_message ("hxnet_bridge: actor exited with reason=%d %s "
-                   "(htlc->fd=%d connected=%d)",
-                   reason, reason_str, hx_conn_fd (htlc), connected);
+                   "(htlc->fd=%d logged_in=%d)",
+                   reason, reason_str, hx_conn_fd (htlc),
+                   hx_conn_logged_in (htlc));
     }
 
     /* Drop in-flight shutdowns that the GLib idle queue dispatched

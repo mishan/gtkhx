@@ -25,10 +25,11 @@
 #include <string.h>
 #include <glib.h>
 
-#include "session.h"   /* hx_active_session, hx_connect */
-#include "hxconn.h"    /* hx_conn_set_cipheralg / _compressalg */
-#include "prefs.h"     /* gtkhx_prefs */
-#include "gtkhx_log.h" /* hx_printf_prefix, INFOPREFIX */
+#include "session.h"          /* hx_active_session, hx_connect */
+#include "session_registry.h" /* hx_session_open */
+#include "hxconn.h"           /* hx_conn_set_cipheralg / _compressalg */
+#include "prefs.h"            /* gtkhx_prefs */
+#include "gtkhx_log.h"        /* hx_printf_prefix, INFOPREFIX */
 #include "tracker_bridge.h"
 
 /* These are UI-side actions — a tracker double-click, a connect, a status
@@ -48,6 +49,14 @@ gtkhx_tracker_connect_apply (const char *address, guint16 port, char secure,
                              char tls, const char *cipher_name)
 {
     session *sess = hx_active_session ();
+
+    /* A tracker double-click is a connect like any other, so it opens a new
+     * tab rather than dropping whatever the focused connection is doing. The
+     * tracker is a *browser* of servers — picking one from a list is the last
+     * moment you would expect to lose the server you are on. */
+    if (hx_conn_fd (sess->htlc)) {
+        sess = hx_session_open (address ? address : "");
+    }
 
     hx_conn_set_compressalg (sess->htlc, NULL);
     hx_conn_set_cipheralg (sess->htlc, cipher_name);

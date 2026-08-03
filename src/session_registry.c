@@ -158,6 +158,43 @@ hx_session_at (guint i)
     return g_ptr_array_index (sessions, i);
 }
 
+gboolean
+hx_session_remove (session *sess)
+{
+    guint i;
+
+    if (sessions == NULL || sess == NULL) {
+        return FALSE;
+    }
+    i = hx_session_index (sess);
+    if (i == HX_SESSION_NOT_FOUND) {
+        return FALSE;
+    }
+    g_ptr_array_remove_index (sessions, i);
+
+    /* Keep the focus in range. A caller is expected to have moved it
+     * somewhere sensible already — closing the tab you are looking at should
+     * select a neighbour first — but clamping here means a caller that
+     * forgets gets a wrong-but-live session rather than a read past the end. */
+    if (focused >= sessions->len && sessions->len > 0) {
+        focused = sessions->len - 1;
+    }
+
+    /* The struct itself is deliberately not freed.
+     *
+     * Raw `session *` pointers are held in places that have no way to learn
+     * one has gone: the connection tab strip's index, the voice arbiter's
+     * token, a dialog captured mid-answer. Every one of them is written
+     * against "sessions are immortal", which has been true since the registry
+     * was built and is what makes those pointers safe to hold at all.
+     *
+     * So closing a connection leaks one session struct and its collections.
+     * That is the honest trade until those holders can be told — an audit
+     * worth doing on its own, not on the way past. It is bounded by how many
+     * connections a user opens and closes in one run. */
+    return TRUE;
+}
+
 guint
 hx_session_index (session *sess)
 {

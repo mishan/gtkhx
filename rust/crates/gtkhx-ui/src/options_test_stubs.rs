@@ -201,6 +201,21 @@ pub unsafe extern "C" fn hx_session_set_active(_sess: *mut c_void) -> glib::ffi:
     SET_ACTIVE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     glib::ffi::GTRUE
 }
+/// Counted for the same reason as its neighbour above: tearing a connection
+/// down has no observable effect inside a test binary — the session it is
+/// handed is a bare connection with no registry behind it — so whether the
+/// close button reaches it at all is the only thing a test can see, and "the
+/// close button did nothing" is exactly the bug this once had.
+pub static SESSION_CLOSE_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+#[no_mangle]
+pub unsafe extern "C" fn hx_session_close(_sess: *mut c_void) {
+    SESSION_CLOSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+/// The focus-following chrome (status bar, titles, tray, banner) — all of it C
+/// or behind C state a test binary doesn't link. Inert.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chrome_refresh() {}
 #[no_mangle]
 pub unsafe extern "C" fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
 

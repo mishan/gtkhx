@@ -163,6 +163,15 @@ gboolean gtkhx_dock_remove_page (const char *id, const char *page);
 /* How many content pages the panel holds. */
 guint gtkhx_dock_page_count (const char *id);
 
+/* Destroy a session's content page in every per-connection panel — the whole
+ * of what closing a connection has to unwind on the view side. Implemented in
+ * gtkhx-ui (dock.rs), which is where the list of per-connection panels lives.
+ *
+ * A remove, not a switch-away: each content module's destroy handler is its
+ * model-side teardown. */
+struct _session;
+extern void gtkhx_dock_remove_session_pages (struct _session *sess);
+
 gboolean gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area,
                                    const char *title, const char *icon_name,
                                    GtkWidget *content,

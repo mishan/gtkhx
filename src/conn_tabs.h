@@ -50,6 +50,11 @@ void gtkhx_conn_tabs_add (struct _session *sess, const char *title);
  * session with no tab. */
 void gtkhx_conn_tabs_select (struct _session *sess);
 
+/* Close a connection's tab, as if the user had clicked its close button —
+ * disconnect, tear down its content pages, drop the tab. No-op for a session
+ * with no tab. */
+void gtkhx_conn_tabs_close (struct _session *sess);
+
 /* Retitle a connection's tab. No-op for a connection with no tab. */
 void gtkhx_conn_tabs_set_title (struct htlc_conn *htlc, const char *title);
 

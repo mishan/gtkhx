@@ -67,6 +67,7 @@ extern "C" {
     ) -> glib::ffi::gboolean;
     fn gtkhx_dock_has_page(id: *const c_char, page: *const c_char) -> glib::ffi::gboolean;
     fn gtkhx_dock_show_page(id: *const c_char, page: *const c_char) -> glib::ffi::gboolean;
+    fn gtkhx_dock_remove_page(id: *const c_char, page: *const c_char) -> glib::ffi::gboolean;
 
     /// `gtkhx_ui_bridge.c` — the connection a session owns.
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
@@ -241,6 +242,25 @@ pub fn place(
             cpage.as_ptr(),
             content,
         ) != glib::ffi::GFALSE
+    }
+}
+
+/// `void gtkhx_dock_remove_session_pages (session *sess)` — destroy this
+/// connection's content page in every per-connection panel.
+///
+/// A remove, not the switch-away a tab change does: every content module's
+/// destroy handler *is* its model-side teardown, so this is what unwinds the
+/// connection's view state. A panel that has no page for it is skipped.
+///
+/// # Safety
+/// `sess` is a `session *` or NULL. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_dock_remove_session_pages(sess: *mut c_void) {
+    let page = page_for_session(sess);
+    let cpage = crate::cs(&page);
+    for id in PER_CONNECTION {
+        let cid = crate::cs(id);
+        gtkhx_dock_remove_page(cid.as_ptr(), cpage.as_ptr());
     }
 }
 

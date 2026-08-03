@@ -50,6 +50,15 @@ extern int xfer_num (struct htxf_conn *htxf);
 extern void xfer_tasks_update (struct htlc_conn *htlc);
 extern void xfers_delete_all (void);
 extern void xfer_delete (struct htxf_conn *htxf);
+
+/* Cancel every in-flight transfer on `htlc`. For disconnect: the transfers ride
+ * their own HTXF subchannels, so closing the control connection does not stop
+ * them — they would carry on against a server that has forgotten the session,
+ * and the queued ones would wait forever for a turn that never comes.
+ *
+ * Per connection rather than xfers_delete_all: disconnecting one server leaves
+ * another's downloads running. */
+extern void xfers_delete_on_conn (struct htlc_conn *htlc);
 extern struct htxf_conn *htxf_with_ref (guint32 ref);
 
 #endif

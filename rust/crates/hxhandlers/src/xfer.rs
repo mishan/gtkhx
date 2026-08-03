@@ -328,6 +328,34 @@ pub unsafe extern "C" fn xfers_delete_all() {
     }
 }
 
+/// `void xfers_delete_on_conn(struct htlc_conn *htlc)` — cancel every in-flight
+/// transfer belonging to `htlc`, for the disconnect path.
+///
+/// The transfers run over their own HTXF subchannels, so nothing about closing
+/// the control connection stops them: without this they carry on against a
+/// server that has forgotten the session, and the ones that were merely queued
+/// wait forever for a turn that will never come. Their rows sit in the tasks
+/// list looking live.
+///
+/// Per connection, not `xfers_delete_all`: disconnecting one server must leave
+/// another's downloads running. That is the whole reason the queue is one
+/// global list *tagged* by connection rather than a list per connection —
+/// there is one place to watch every transfer, and one place to sweep from.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfers_delete_on_conn(htlc: *mut c_void) {
+    // Collect first, then cancel: `xfer_delete` unlinks from the list, and
+    // walking a list something is removing from under you is the classic way
+    // to miss half of it.
+    let doomed: Vec<*mut HtxfHandle> =
+        with_list(|xs| xs.iter().copied().filter(|&e| (*e).htlc == htlc).collect());
+    for htxf in doomed {
+        xfer_delete(htxf);
+    }
+}
+
 /// `void xfer_tasks_update(struct htlc_conn *htlc)` — re-emit `file-update` for
 /// every transfer on `htlc` (called when a session becomes current, so the tasks
 /// window repaints its rows).
