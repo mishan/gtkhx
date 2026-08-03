@@ -109,8 +109,13 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=0:print_summary=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
         run: |
-          meson test -C build-asan --suite unit --suite proto \
-            --print-errorlogs
+          # xvfb-run because the unit suite includes widget tests (dock_pages)
+          # and GTK 4 has no headless backend — without a display they fail
+          # rather than skip, which is the behaviour we want but only once CI
+          # supplies one. Same reasoning as tests.yml.
+          GDK_BACKEND=x11 xvfb-run -a \
+            meson test -C build-asan --suite unit --suite proto \
+              --print-errorlogs
 
       - name: upload sanitize logs
         if: always()

@@ -245,6 +245,23 @@ extern void hx_conn_set_bridge_handle (struct htlc_conn *h, void *p);
  * the field comment in gtkhx-core's conn.rs. */
 extern guint16 hx_conn_serial (const struct htlc_conn *h);
 
+/* ---- Per-connection connect / login state --------------------------------
+ *
+ * These were file-statics in network.c and rcv.c, which meant one value for
+ * the whole process. The keepalive one was an outright bug: ping_start
+ * early-returns when the timer id is already set, so a second connection
+ * never got a keepalive at all.
+ *
+ * ping_timer and post_login_timer are GLib source ids, 0 when not armed.
+ * login_reply_trans is the transaction the orchestrator's replayed LOGIN
+ * reply carries, which the login task has to be registered under. */
+extern guint hx_conn_ping_timer (const struct htlc_conn *h);
+extern void hx_conn_set_ping_timer (struct htlc_conn *h, guint v);
+extern guint hx_conn_post_login_timer (const struct htlc_conn *h);
+extern void hx_conn_set_post_login_timer (struct htlc_conn *h, guint v);
+extern guint32 hx_conn_login_reply_trans (const struct htlc_conn *h);
+extern void hx_conn_set_login_reply_trans (struct htlc_conn *h, guint32 v);
+
 /* ---- Outgoing transaction counter ----------------------------------------
  *
  * The monotonically-increasing trans id stamped on each outgoing request. A

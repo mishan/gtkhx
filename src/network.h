@@ -93,7 +93,7 @@ extern void hl_code (void *__dst, const void *__src, size_t len);
  * called from inside hx_htlc_close, so callers never need to pair
  * a stop with a start. */
 extern void ping_start (struct htlc_conn *htlc);
-extern void ping_stop (void);
+extern void ping_stop (struct htlc_conn *htlc);
 
 /* send HTLC_HDR_AGREEMENTAGREE carrying NAME + ICON. The
  * legacy Hotline two-stage login flow defers identity disclosure

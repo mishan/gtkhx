@@ -71,9 +71,13 @@
 char *server_addr;
 guint16 server_port;
 
-/* The connect + magic-exchange flow runs on the main loop via
- * GSocketClient's async API; cancellation goes through current_cancel. */
-static GCancellable *current_cancel;
+/* Cancelling an in-flight connect is the orchestrator's job, not ours. There
+ * used to be a `current_cancel` GCancellable here, set by the legacy
+ * GSocketClient connect path; that path was deleted and nothing has assigned
+ * it since, so every "cancel the in-flight connect" call site had quietly
+ * been a no-op. What actually cancels now is hx_bridge_uninstall →
+ * hxnet_connection_destroy, which aborts the lifecycle task so a
+ * mid-handshake actor releases its socket. */
 
 int connected;
 
@@ -94,15 +98,15 @@ int connected;
 
 #define PING_INTERVAL_SEC 60
 
-static guint ping_timer_id = 0;
-
 static gboolean
 ping_tick (gpointer data)
 {
     struct htlc_conn *htlc = data;
 
     if (!htlc || !hx_conn_fd (htlc)) {
-        ping_timer_id = 0;
+        if (htlc) {
+            hx_conn_set_ping_timer (htlc, 0);
+        }
         return G_SOURCE_REMOVE;
     }
     /* PING is a zero-chunk opcode. Send directly through
@@ -115,18 +119,24 @@ ping_tick (gpointer data)
 void
 ping_start (struct htlc_conn *htlc)
 {
-    if (ping_timer_id || !htlc || !hx_conn_fd (htlc)) {
+    /* The already-armed check is per-connection. It used to read a
+     * file-static, so once any connection had a keepalive running every
+     * other connection silently went without one. */
+    if (!htlc || hx_conn_ping_timer (htlc) || !hx_conn_fd (htlc)) {
         return;
     }
-    ping_timer_id = g_timeout_add_seconds (PING_INTERVAL_SEC, ping_tick, htlc);
+    hx_conn_set_ping_timer (
+        htlc, g_timeout_add_seconds (PING_INTERVAL_SEC, ping_tick, htlc));
 }
 
 void
-ping_stop (void)
+ping_stop (struct htlc_conn *htlc)
 {
-    if (ping_timer_id) {
-        g_source_remove (ping_timer_id);
-        ping_timer_id = 0;
+    guint id = htlc ? hx_conn_ping_timer (htlc) : 0;
+
+    if (id) {
+        g_source_remove (id);
+        hx_conn_set_ping_timer (htlc, 0);
     }
 }
 
@@ -137,8 +147,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     session *sess = sess_from_htlc (htlc);
 
-    ping_stop ();
-    rcv_login_reset ();
+    ping_stop (htlc);
+    rcv_login_reset (htlc);
     banner_clear ();
 
     /* Reset the per-session login flag so the next connect starts
@@ -208,10 +218,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
      * exchange). Safe to call whether or not one's running. */
-    if (current_cancel) {
-        g_cancellable_cancel (current_cancel);
-        g_clear_object (&current_cancel);
-    }
     g_strlcpy (buf, hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
                sizeof (buf));
     hx_printf_prefix (htlc, 0, INFOPREFIX, "%s: %s\n", buf,
@@ -442,11 +448,12 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
  * docs/rust/networking.md. */
 #define HX_LOGIN_TRANS 1u
 
-/* Trans the replayed LOGIN (or HOPE step-2) reply will carry, stashed
- * by hx_connect_via_orchestrator and consumed by
- * hx_orchestrator_register_login_task when the bridge's LOGIN_SENDING
- * state fires. Single-connection scope (see sess_from_htlc). */
-static guint32 orchestrator_login_reply_trans = HX_LOGIN_TRANS;
+/* The trans of the replayed LOGIN (or HOPE step-2) reply lives on the
+ * connection (hx_conn_login_reply_trans): stashed by
+ * hx_connect_via_orchestrator, consumed by
+ * hx_orchestrator_register_login_task when the bridge's LOGIN_SENDING state
+ * fires. Per-connection because two connects can be mid-handshake at once,
+ * and because the task it keys is looked up in that connection's session. */
 
 /* Register the orchestrator's "login" protocol task. Called from the
  * bridge's LOGIN_SENDING state callback — i.e. after magic completes
@@ -456,7 +463,7 @@ static guint32 orchestrator_login_reply_trans = HX_LOGIN_TRANS;
  * "Connecting" task the way an up-front registration did).
  *
  * The replayed reply dispatches here via hx_rcv_hdr -> task_with_trans,
- * so the task must be keyed on orchestrator_login_reply_trans. The
+ * so the task must be keyed on the connection's login_reply_trans. The
  * NULL ptr arg selects rcv_task_login's post-login (else) branch.
  * htlc->trans is currently the post-login send counter
  * (reply_trans + 1); set it to reply_trans for the task_new key, then
@@ -470,11 +477,11 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
     /* Idempotent: never double-register (LOGIN_SENDING fires once, but
      * guard anyway so a stray repeat can't strand a duplicate row). */
     if (task_with_trans (sess_from_htlc (htlc),
-                         orchestrator_login_reply_trans)) {
+                         hx_conn_login_reply_trans (htlc))) {
         return;
     }
     guint32 saved = hx_conn_trans (htlc);
-    hx_conn_set_trans (htlc, orchestrator_login_reply_trans);
+    hx_conn_set_trans (htlc, hx_conn_login_reply_trans (htlc));
     task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
     hx_conn_set_trans (htlc, saved);
 }
@@ -499,10 +506,6 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
                              gboolean secure, gboolean tls)
 {
     /* 1. Preamble — mirrors hx_connect's non-socket setup. */
-    if (current_cancel) {
-        g_cancellable_cancel (current_cancel);
-        g_clear_object (&current_cancel);
-    }
     if (hx_conn_fd (htlc)) {
         hx_htlc_close (htlc, 1);
     }
@@ -568,9 +571,9 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
      * replays the step-2 reply, which carries HX_LOGIN_TRANS+1 (the
      * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
-    orchestrator_login_reply_trans
-        = secure ? (HX_LOGIN_TRANS + 1) : HX_LOGIN_TRANS;
-    hx_conn_set_trans (htlc, orchestrator_login_reply_trans + 1);
+    hx_conn_set_login_reply_trans (htlc, secure ? (HX_LOGIN_TRANS + 1)
+                                                : HX_LOGIN_TRANS);
+    hx_conn_set_trans (htlc, hx_conn_login_reply_trans (htlc) + 1);
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
@@ -665,10 +668,6 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     {
         gboolean want_tls = tls || hx_tls_test_force_tls ();
         if (secure && want_tls) {
-            if (current_cancel) {
-                g_cancellable_cancel (current_cancel);
-                g_clear_object (&current_cancel);
-            }
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               _ ("HOPE-secure login over TLS is not "
                                  "supported; use one or the other\n"));
@@ -1117,14 +1116,11 @@ tracker_kill_threads (void)
 void
 kill_threads (void)
 {
-    /* cancel the async connect chain. Safe whether or not
-     * one's in flight. */
-    if (current_cancel) {
-        g_cancellable_cancel (current_cancel);
-        g_clear_object (&current_cancel);
-    }
-    /* And the async tracker fetch, which has its own cancellation
-     * inside current_tracker_fetch. */
+    /* The async tracker fetch, which has its own cancellation inside
+     * current_tracker_fetch. The connect chain used to be cancelled here
+     * too; the orchestrator owns that now — see the note at the top of this
+     * file, where the cancellable used to live — and the teardown that
+     * matters runs through hx_bridge_uninstall. */
     tracker_kill_threads ();
 }
 

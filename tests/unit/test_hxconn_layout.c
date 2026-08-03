@@ -47,6 +47,7 @@ extern size_t hx_conn_offsetof_hope_aead (void);
 extern size_t hx_conn_offsetof_bridge_handle (void);
 extern size_t hx_conn_offsetof_caps (void);
 extern size_t hx_conn_offsetof_serial (void);
+extern size_t hx_conn_offsetof_ping_timer (void);
 
 static void
 test_size_and_alignment_match (void)
@@ -74,11 +75,15 @@ test_field_offsets_match (void)
                       offsetof (struct htlc_conn, caps));
     g_assert_cmpuint (hx_conn_offsetof_serial (), ==,
                       offsetof (struct htlc_conn, serial));
+    g_assert_cmpuint (hx_conn_offsetof_ping_timer (), ==,
+                      offsetof (struct htlc_conn, ping_timer));
 }
 
-/* The field this test was written for. It sits in what used to be tail
- * padding, so it is the one field whose position `sizeof` provably cannot
- * pin: the struct is 768 bytes with it and would be 768 without it. */
+/* The field this test was written for. It went into what was then tail
+ * padding, so adding it did not change `sizeof` — which is precisely the case
+ * a size assertion cannot catch, and the reason the offsets above exist. The
+ * fields after it have since claimed that space, so the property this asserts
+ * is now just "it is still where the mirror thinks it is, at the tail". */
 static void
 test_serial_is_in_the_tail_padding (void)
 {

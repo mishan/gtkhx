@@ -33,8 +33,11 @@ run_sanitize() {
             -Dbuildtype=debug
     fi
     meson compile -C build-asan
+    # xvfb-run: the unit suite builds real widgets (dock_pages) and GTK 4
+    # has no headless backend, so a missing display is a hard failure.
     ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:print_summary=1 \
     UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0 \
+    GDK_BACKEND=x11 xvfb-run -a \
         meson test -C build-asan --suite unit --suite proto \
             --print-errorlogs
 }

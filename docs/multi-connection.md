@@ -255,14 +255,23 @@ bookmarks, about, and the settings pages.
 
 ### Single-slot connection state and timers
 
-Several pieces of per-connection state live as file-statics in `network.c` and
-`rcv.c` and would be clobbered by a second connection: the server address and
-port (which drive every window title, the status bar and the disconnect banner),
-the connected flag, the in-flight connect cancellable, the keepalive timer id
-(whose start function early-returns if already set, so connection two would
-never get a keepalive), the orchestrated login-reply transaction, and the
-post-login fallback timer. The post-login *flag* was correctly moved onto the
-connection; the timer id was not.
+Mostly fixed. The keepalive timer id, the post-login fallback timer and the
+orchestrated login-reply transaction now live on the connection. The keepalive
+one was a real bug rather than latent: `ping_start` early-returns when the id
+is already set, and the id was process-wide, so once *any* connection had a
+keepalive running every other connection silently went without one.
+
+The in-flight connect cancellable turned out to be dead — the legacy
+GSocketClient connect path was the only thing that ever assigned it, and that
+path was deleted, so every "cancel the in-flight connect" site had quietly
+been a no-op. Deleted rather than relocated; what actually cancels a
+mid-handshake connect is `hx_bridge_uninstall` → `hxnet_connection_destroy`,
+which aborts the lifecycle task so the actor releases its socket.
+
+Still single-slot, and deliberately deferred to the app-global chrome work:
+the server address and port, and the `connected` flag. All three are read by
+*view* code — window titles, the status bar, the disconnect notice — so they
+move when that chrome becomes per-connection, not before.
 
 Note also that **there is no connection-teardown path in the tree at all.**
 `hx_conn_free` has no callers; disconnect is a *reset* that leaves the
@@ -748,7 +757,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | ~~M3b~~ | **Done**, less the chat tab strip. `hx_conn_serial` supplies a process-unique connection identity; notification ids and both GIF avatar caches are keyed on it. The tab strip's cid/uid keys are deferred into M4, because whether they need qualifying at all depends on the layout model. | M3a |
 | M4 | Model A, in seven slices — see below. The layout model is decided; the rest is the work. | M1, M3 |
 | M4a | The dock's content-swap mechanism: a panel holds a stack of named content pages instead of one child. Touches nothing outside `dock_bridge.c` and its six embed call sites; no behaviour change at one connection. | — |
-| M4b | The single-slot connection state in `network.c` / `rcv.c` — server address and port, the connected flag, the connect cancellable, the keepalive timer id, the login-reply transaction, the post-login timer — moves onto the connection. A correctness fix in its own right: connection two never gets a keepalive today. | — |
+| ~~M4b~~ | **Done.** The keepalive timer, the post-login fallback timer and the login-reply transaction moved onto the connection, fixing the keepalive bug. The connect cancellable turned out to be dead and was deleted rather than relocated. Left for M6: the server address and port, and the `connected` flag — all three are read by view code (window titles, the status bar, the disconnect notice) and belong with the app-global chrome. | — |
 | M4c | Bind the files browser to a session. The largest single `hx_active_session()` cluster (~33 sites across four files) and the only content module with no session binding at all. Independent of the layout work. | — |
 | M4d | Qualify the chat tab strip's cid/uid keys by connection, and the two close dispatchers with them. Unblocked by the Model A decision. | M3b |
 | M4e | The session collection and factory: `the_session` becomes one of N, `hx_active_session()` returns the focused one, and `fe_init`'s per-session block becomes a factory — separating out the three app-global calls that must not run N times. | M4a |
