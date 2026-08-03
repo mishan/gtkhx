@@ -1291,7 +1291,10 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
          * chime are driven off the "logged-in" signal, emitted below once
          * the LOGIN reply has been fully walked — see the emit site after
          * dh_end(). */
-        connected = 1;
+        /* On the connection, not a global. `connected` named whichever
+         * connection had most recently logged in — the same thing at one and a
+         * race at two, with the toolbar's Disconnect button reading it. */
+        hx_conn_set_logged_in (htlc, 1);
 
         /* Seed the opaque HOPE AEAD material handle (if the orchestrated
          * control channel negotiated ChaCha20-Poly1305). The handshake
@@ -1362,17 +1365,23 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
             hx_conn_set_version (htlc, li.version);
         }
         if (login_seen & HX_LOGIN_SEEN_SERVERNAME) { /* Hotline 1.5+ only */
-            if (server_addr) {
-                g_free (server_addr);
+            /* On the session this reply arrived for, not a global — the name
+             * belongs to one server, and a second connection logging in used
+             * to overwrite the first's.
+             *
+             * Server names from old Hotline servers are 8-bit Mac Roman text,
+             * not UTF-8 — and gtk_window_set_title et al. assert UTF-8.
+             * gtkhx_text_to_utf8 handles the already-UTF-8 / Mac-Roman /
+             * fall-back-to-substitute cascade. The window title picks it up
+             * when the "logged-in" signal is emitted after this walk. */
+            {
+                session *ss = sess_from_htlc (htlc);
+                if (ss) {
+                    g_free (ss->server_name);
+                    ss->server_name = gtkhx_text_to_utf8 (
+                        servername, strlen (servername), NULL);
+                }
             }
-            /* server names from old Hotline servers are 8-bit Mac Roman
-             * text, not UTF-8 — and gtk_window_set_title et al. assert
-             * UTF-8. gtkhx_text_to_utf8 handles the already-UTF-8 /
-             * Mac-Roman / fall-back-to-substitute cascade. The window
-             * titles pick server_addr up when the "logged-in" signal is
-             * emitted after this walk completes. */
-            server_addr
-                = gtkhx_text_to_utf8 (servername, strlen (servername), NULL);
         }
         if (login_seen & HX_LOGIN_SEEN_CAPS) {
             /* DATA_CAPABILITIES echo — the bits the server agreed to

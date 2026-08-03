@@ -60,6 +60,9 @@ extern "C" {
     fn hx_session_set_active(sess: *mut c_void) -> glib::ffi::gboolean;
     /// `debug.c` — one `GTKHX_DEBUG` category line.
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
+    /// `gtkutil.c` — repaint the focus-following chrome for whichever
+    /// connection is now selected.
+    fn hx_chrome_refresh();
 }
 
 fn debug(msg: &str) {
@@ -192,6 +195,12 @@ fn on_selected_page_changed(view: &adw::TabView) {
     // must already see the connection it is being switched to.
     unsafe { hx_session_set_active(sess) };
     swap_panels(conn);
+    // The status bar, window title, tray flag and toolbar buttons are one set
+    // shared by every connection, so they show whichever one is selected —
+    // which means a switch has to repaint them. Nothing else will: they are
+    // written by connection-state changes, and switching tabs changes which
+    // connection they are *about* without any connection changing state.
+    unsafe { hx_chrome_refresh() };
 }
 
 /// Build the strip once and return the widget the toolbar embeds. Idempotent —

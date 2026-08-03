@@ -442,6 +442,17 @@ gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
     (void)rt;
 }
 
+/* network.c logs the server it is connecting to, and the label comes from
+ * gtkutil.c — which these binaries don't link, for the usual reason (it drags
+ * the GTK widget tree). The connect tests don't read the log line. */
+extern char *hx_session_label (const session *sess);
+char *
+hx_session_label (const session *sess)
+{
+    (void)sess;
+    return g_strdup ("");
+}
+
 /* Voice-arbiter stub, same rationale: hx_htlc_close gives up the microphone
  * token on disconnect, and the token lives in gtkhx-ui, which these binaries
  * don't link. Nothing here ever holds it. */

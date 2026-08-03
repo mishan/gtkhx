@@ -185,6 +185,18 @@ typedef struct _session {
      * inside the toplevel users_window. */
     struct _HxUserListView *users_view;
 
+    /* The server's own advertised name, from the 1.5+ LOGIN reply's
+     * SERVERNAME, or NULL. Display only — hx_session_label prefers it over the
+     * host:port the user typed, because it is what the server calls itself.
+     *
+     * On the session rather than the connection because it is chrome, and
+     * because putting it on the connection would mean growing the Rust-owned
+     * struct and re-pinning its layout for a string nothing on the wire side
+     * reads. It was a `server_addr` global, which named whichever connection
+     * had most recently logged in. g_malloc'd; freed and re-set on each
+     * login. */
+    char *server_name;
+
     /* The Users panel's six action buttons.
      *
      * Per-session because each connection has its own Users content page, so

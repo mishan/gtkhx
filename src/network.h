@@ -6,8 +6,6 @@
 extern char *server_addr;
 extern guint16 server_port;
 
-extern int connected;
-
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 
 /* Orchestrator (hxnet) TOFU certificate verify. Called from the

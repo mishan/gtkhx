@@ -68,7 +68,13 @@
 #include "tracker_v3.h"
 #include "tracker_event.h"
 
-char *server_addr;
+/* `server_addr` and `connected` are gone. Both were one slot for the whole
+ * application: the first named whichever connection most recently connected,
+ * the second whichever most recently logged in, and the view code that read
+ * them had no way to ask about any other. The endpoint lives on the connection
+ * (hx_conn_serverhost / _serverport), the server's advertised name on the
+ * session (hx_session_label), and the login state on the connection
+ * (hx_conn_logged_in). */
 guint16 server_port;
 
 /* Cancelling an in-flight connect is the orchestrator's job, not ours. There
@@ -78,8 +84,6 @@ guint16 server_port;
  * been a no-op. What actually cancels now is hx_bridge_uninstall →
  * hxnet_connection_destroy, which aborts the lifecycle task so a
  * mid-handshake actor releases its socket. */
-
-int connected;
 
 /* PING keepalive. Some servers (hlserver.com is the known
  * case) drop idle connections after a few minutes of silence. mhxd
@@ -234,7 +238,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         error_dialog ("Error", "You have been disconnected.");
     }
 
-    connected = 0;
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_DISCONNECTED);
     close_connected_windows (sess);
@@ -344,9 +347,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
         hx_conn_set_hope_aead (htlc, NULL);
     }
-
-    g_free (server_addr);
-    server_addr = NULL;
 }
 
 /* The post_* marshal helpers (post_prog / post_ts / post_log) lived
@@ -517,8 +517,6 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     }
     hx_clear_chat (htlc, 0, 1);
 
-    g_free (server_addr);
-    server_addr = g_strdup_printf ("%s:%u", serverstr, port);
     server_port = port;
 
     hx_conn_set_chat_history_last_msgid (htlc, 0);
@@ -549,8 +547,11 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * numeric-IP display exactly. */
     hx_conn_set_ip_addr (htlc, serverstr);
 
-    hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
-                      server_addr);
+    {
+        char *addr = hx_session_label (sess_from_htlc (htlc));
+        hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"), addr);
+        g_free (addr);
+    }
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_CONNECTING);
 
@@ -642,9 +643,12 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
         hx_conn_set_fd (htlc, 0);
         gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                              GTKHX_CONNECTION_DISCONNECTED);
-        hx_printf_prefix (htlc, 0, INFOPREFIX,
-                          _ ("could not start connection to %s\n"),
-                          server_addr);
+        {
+            char *addr = hx_session_label (sess_from_htlc (htlc));
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              _ ("could not start connection to %s\n"), addr);
+            g_free (addr);
+        }
     }
 }
 

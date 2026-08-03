@@ -42,6 +42,8 @@
 #include "gtkutil.h"
 #include "hl_access.h"
 #include "hxconn.h"
+#include "host_port.h"
+#include "tray.h"
 #ifdef HAVE_VOICE
 #include "voice_panel.h"
 #endif
@@ -431,21 +433,55 @@ setbtns (session *sess, int stat)
  * label-only because they're either expected (you just clicked
  * Connect) or short-lived (TCP-connected almost always becomes
  * Logged-in within milliseconds). */
+char *
+hx_session_label (const session *sess)
+{
+    const char *host;
+
+    if (sess == NULL) {
+        return g_strdup ("");
+    }
+    /* What the server calls itself, if it has said — that is the name the user
+     * recognises. Otherwise the endpoint they typed. */
+    if (sess->server_name && *sess->server_name) {
+        return g_strdup (sess->server_name);
+    }
+    host = hx_conn_serverhost (sess->htlc);
+    if (host == NULL || *host == 0) {
+        return g_strdup ("");
+    }
+    return gtkhx_join_host_port (host, hx_conn_serverport (sess->htlc));
+}
+
 void
-set_status_bar (int status)
+set_status_bar (session *sess, int status)
 {
     static int last_status = 0;
     const char *fixed = NULL;
     char *fmt = NULL;
     char *toast = NULL;
+    char *addr;
 
     if (!status_bar) {
         return;
     }
 
+    /* One status bar, one title, one tray icon — so this chrome *follows the
+     * focus* rather than becoming per-connection: it shows the state of the
+     * connection the user is looking at, and a background connection changing
+     * state must not repaint it.
+     *
+     * It used to read a `server_addr` global that the most recent connect
+     * overwrote, which is the same thing at one connection and a race between
+     * them at two. The address comes off the connection now. */
+    if (sess == NULL || sess != hx_active_session ()) {
+        return;
+    }
+    addr = hx_session_label (sess);
+
     switch (status) {
     case -1:
-        fmt = g_strdup_printf ("%s %s", _ ("Connecting to"), server_addr);
+        fmt = g_strdup_printf ("%s %s", _ ("Connecting to"), addr);
         /* Hide any leftover "lost connection" banner — the user
          * is actively trying to reconnect. */
         toolbar_hide_banner ();
@@ -456,21 +492,21 @@ set_status_bar (int status)
          * state change of 0 -> 0 shouldn't surface a notification,
          * and neither should a Connect-canceled (last_status == -1). */
         if (last_status == 1 || last_status == 2) {
-            toast = g_strdup_printf ("%s %s", _ ("Disconnected from"),
-                                     server_addr);
-            toolbar_show_connection_lost (server_addr);
+            toast = g_strdup_printf ("%s %s", _ ("Disconnected from"), addr);
+            toolbar_show_connection_lost (addr);
         }
         break;
     case 1:
-        fmt = g_strdup_printf ("%s %s", _ ("Connected to"), server_addr);
+        fmt = g_strdup_printf ("%s %s", _ ("Connected to"), addr);
         toolbar_hide_banner ();
         break;
     case 2:
-        fmt = g_strdup_printf ("%s %s", _ ("Logged in to"), server_addr);
+        fmt = g_strdup_printf ("%s %s", _ ("Logged in to"), addr);
         toast = g_strdup (fmt);
         toolbar_hide_banner ();
         break;
     default:
+        g_free (addr);
         return;
     }
 
@@ -478,18 +514,53 @@ set_status_bar (int status)
     if (toast) {
         toolbar_show_toast (toast);
     }
+    g_free (addr);
     g_free (fmt);
     g_free (toast);
     last_status = status;
 }
 
 void
+hx_chrome_refresh (void)
+{
+    session *sess = hx_active_session ();
+
+    if (sess == NULL) {
+        return;
+    }
+    /* Derived from the connection rather than remembered, so this is correct
+     * however the user got here — including a tab switch onto a connection
+     * whose state last changed long ago. */
+    if (hx_conn_logged_in (sess->htlc)) {
+        set_status_bar (sess, 2);
+        changetitlesconnected (sess);
+    } else if (hx_conn_fd (sess->htlc)) {
+        set_status_bar (sess, 1);
+    } else {
+        set_status_bar (sess, 0);
+        changetitlesdisconnected (sess);
+    }
+    gtkhx_tray_set_connected (hx_conn_logged_in (sess->htlc));
+    set_disconnect_btn (sess, hx_conn_fd (sess->htlc) ? 1 : 0);
+    setbtns (sess, hx_conn_logged_in (sess->htlc) ? 1 : 0);
+}
+
+void
 changetitlesconnected (session *sess)
 {
     char *tooltitle;
+    char *addr;
 
-    tooltitle = g_strdup_printf ("%s (%s)", _ ("GtkHx"), server_addr);
+    /* One window, so its title follows the focus like the rest of the chrome:
+     * a background connection logging in must not retitle the window to a
+     * server the user isn't looking at. */
+    if (sess != hx_active_session () || !GTK_IS_WINDOW (sess->toolbar_window)) {
+        return;
+    }
+    addr = hx_session_label (sess);
+    tooltitle = g_strdup_printf ("%s (%s)", _ ("GtkHx"), addr);
     gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), tooltitle);
+    g_free (addr);
     g_free (tooltitle);
 
     /* the per-window title-setting
@@ -503,35 +574,30 @@ void
 changetitlespecific (GtkWidget *widget, char *name)
 {
     char *futuretitle;
-    /* When opened pre-connect (or during a brief reconnect window
-     * where server_addr has been cleared but the window stays up),
-     * skip the " (server)" suffix rather than printing "(null)" or
-     * "()". The window will get re-titled by the rcv path's
-     * changetitlesconnected once SERVERNAME arrives — for managed
-     * windows; on-demand windows like Threaded News and Files
-     * Browser get the right title on first open since they call
-     * this from inside the toolbar action, well after connect. */
-    if (server_addr && *server_addr) {
-        futuretitle = g_strdup_printf ("%s (%s)", name, server_addr);
+    char *addr = hx_session_label (hx_active_session ());
+
+    /* Pre-connect (or during a reconnect, where the focused connection has no
+     * label yet), skip the " (server)" suffix rather than printing "()". The
+     * window gets re-titled by changetitlesconnected once the login lands. */
+    if (*addr) {
+        futuretitle = g_strdup_printf ("%s (%s)", name, addr);
     } else {
         futuretitle = g_strdup (name);
     }
     gtk_window_set_title (GTK_WINDOW (widget), futuretitle);
+    g_free (addr);
     g_free (futuretitle);
 }
 
 void
 changetitlesdisconnected (session *sess)
 {
-    /* see News note in
-     * changetitlesconnected. */
-    /* see Chat note in
-     * changetitlesconnected. */
-    /* Users panel title — see the
-     * matching note in changetitlesconnected. */
-    /* see Tasks note in
-     * changetitlesconnected. */
-
+    /* One window, so this follows the focus too — see changetitlesconnected.
+     * The per-panel titles it used to also set are gone: panels live inside
+     * the toolbar window now, and their title is the tab label. */
+    if (sess != hx_active_session () || !GTK_IS_WINDOW (sess->toolbar_window)) {
+        return;
+    }
     gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), _ ("GtkHx"));
 }
 

@@ -45,6 +45,22 @@ G_BEGIN_DECLS
  * wrong rather than merely wasteful. */
 session *hx_session_new (void);
 
+/* Open a connection: build a session, its model-side state, its content page
+ * in every per-connection panel, and its tab — and select that tab, so the new
+ * connection is the one the user is looking at.
+ *
+ * `hx_session_new` above is the model half of this; everything a *usable*
+ * connection additionally needs is here. The split matters because startup
+ * wants them separately: `fe_init` builds the first session before the
+ * preferences are read (a change hook needs a connection) and its panels well
+ * after (they need the toolbar window). Every connection after the first
+ * wants both at once.
+ *
+ * Lives in gtkhx.c rather than session_registry.c, because it names the whole
+ * window layer — the panel factories and the toolbar window — and the registry
+ * deliberately names none of it. Never NULL. */
+session *hx_session_open (const char *title);
+
 /* The session the user is looking at, or NULL before the first one exists.
  *
  * It used to be impossible for this to be NULL, and most callers still don't

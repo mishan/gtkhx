@@ -9,7 +9,31 @@ extern void init_keyaccel_full (GtkWidget *widget, gboolean esc_closes);
 extern void gtkhx_dialog_add_close_shortcuts (GtkWidget *dialog);
 extern void set_disconnect_btn (session *sess, int stat);
 extern void setbtns (session *sess, int stat);
-extern void set_status_bar (int status);
+/* What to call this connection's server: its advertised name if it has given
+ * one, else `host:port` (`[host]:port` for an IPv6 literal). A g_malloc'd
+ * string the caller frees; empty, not NULL, for a session with no endpoint.
+ *
+ * The chrome's replacement for the `server_addr` global, which named whichever
+ * connection had most recently connected and so named the wrong one the moment
+ * there were two. */
+extern char *hx_session_label (const session *sess);
+
+/* Repaint the status bar for `sess`, in state `status` (-1 connecting, 0 not
+ * connected, 1 connected, 2 logged in).
+ *
+ * There is one status bar, so it follows the focus: a call for a connection
+ * the user is not looking at is dropped. Same for the toast and the
+ * connection-lost banner this drives. */
+extern void set_status_bar (session *sess, int status);
+
+/* Repaint the focus-following chrome — status bar, window title, tray flag,
+ * Disconnect button — for whichever connection is now selected.
+ *
+ * The chrome is written by connection-state changes, which only happen when a
+ * connection's state actually changes; switching tabs changes which connection
+ * the chrome is *about* without any of them changing state, so the switch has
+ * to ask for the repaint. */
+extern void hx_chrome_refresh (void);
 extern void changetitlesconnected (session *sess);
 extern void changetitlespecific (GtkWidget *widget, char *name);
 extern void changetitlesdisconnected (session *sess);
