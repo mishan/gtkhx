@@ -11,7 +11,7 @@
 
 #include <gtk/gtk.h>
 
-#include "hx.h"         /* session + hx_active_session () */
+#include "hx.h"         /* session */
 #include "gtkhx.h"      /* gtkhx_apply_listview_style */
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "debug.h" /* debug_log — GTKHX_DEBUG=files for inline-rename trace */
@@ -1031,12 +1031,23 @@ update_status (files_panel *p)
     if (p->provider && HX_IS_REMOTE_FILES_PROVIDER (p->provider)
         && hx_remote_files_provider_has_listing_error (
             HX_REMOTE_FILES_PROVIDER (p->provider))) {
-        gboolean can_upload = hx_conn_access_has (hx_active_session ()->htlc,
-                                                  HL_ACCESS_UPLOAD_FILES);
-        gboolean can_view_dropbox = hx_conn_access_has (
-            hx_active_session ()->htlc, HL_ACCESS_VIEW_DROP_BOXES);
-        if (hx_conn_fd (hx_active_session ()->htlc) && can_upload
-            && !can_view_dropbox) {
+        /* The access bits that decide between "upload-only" and "can't list"
+         * belong to the server this pane is listing, which its provider
+         * knows — not to whichever connection is focused.
+         *
+         * Both non-NULL, and it has to be established rather than hoped for:
+         * the hx_conn_* accessors below read straight through the pointer.
+         * hx_remote_files_provider_session answers NULL for a *local*
+         * provider, but the branch condition has already ruled that out, and
+         * a remote one is built with a session that owns a connection for
+         * life. */
+        session *psess = hx_remote_files_provider_session (p->provider);
+        struct htlc_conn *pconn = psess->htlc;
+        gboolean can_upload
+            = hx_conn_access_has (pconn, HL_ACCESS_UPLOAD_FILES);
+        gboolean can_view_dropbox
+            = hx_conn_access_has (pconn, HL_ACCESS_VIEW_DROP_BOXES);
+        if (hx_conn_fd (pconn) && can_upload && !can_view_dropbox) {
             text = g_strdup (
                 _ ("Folder is upload-only — drop files here to upload"));
         } else {

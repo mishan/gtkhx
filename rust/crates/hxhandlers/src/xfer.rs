@@ -102,8 +102,6 @@ use gtkhx_core::session::{
 extern "C" {
     /// The session owning this htlc (tasks_bridge.c).
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
-    /// gtkhx_ui_bridge.c — the active connection's htlc (xfer_init stamps it).
-    fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx_ui_bridge.c — the queue-downloads pref (xfer_new's inline-vs-queue).
     fn hx_prefs_queuedl() -> c_int;
     /// preview.c — drop the per-htxf ref on the preview window (NULL-safe; a
@@ -388,7 +386,13 @@ unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
 /// to the registry, and emit the initial `file-update`. Does NOT drive the wire
 /// request — the caller decides (xfer_new → xfer_go, xfer_new_folder → its own
 /// GETFOLDER/PUTFOLDER later).
+///
+/// `htlc` is the connection the transfer runs on, and it is the caller's to
+/// choose. This used to read the *focused* connection instead, which made the
+/// pane a file was dropped on irrelevant to where it actually went — invisible
+/// at one connection, wrong at two.
 unsafe fn xfer_init(
+    htlc: *mut c_void,
     path: &[u8],
     remotedir: &[u8],
     remotename: &[u8],
@@ -429,7 +433,7 @@ unsafe fn xfer_init(
     hx_htxf_ref(htxf);
     xfer_registry_add(htxf);
 
-    h.htlc = gtkhx_active_htlc();
+    h.htlc = htlc;
     h.total_size = 1;
     gtkhx_session_emit_file_update(
         gtkhx_session_get_default(),
@@ -439,17 +443,19 @@ unsafe fn xfer_init(
     htxf
 }
 
-/// `struct htxf_conn *xfer_new(const char *path, const char *remotedir, const
-/// char *remotename, gsize remotename_len, guint16 type, int preview, guint32
-/// srv_data_size)` — create a download/upload transfer. Sets preview +
-/// srv_data_size (which xfer_go gates its resume/rename on) BEFORE possibly
-/// driving the wire request inline (only transfer, or queueing off).
+/// `struct htxf_conn *xfer_new(struct htlc_conn *htlc, const char *path, const
+/// char *remotedir, const char *remotename, gsize remotename_len, guint16 type,
+/// int preview, guint32 srv_data_size)` — create a download/upload transfer on
+/// `htlc`. Sets preview + srv_data_size (which xfer_go gates its resume/rename
+/// on) BEFORE possibly driving the wire request inline (only transfer, or
+/// queueing off).
 ///
 /// # Safety
-/// `path` / `remotedir` are NUL-terminated C strings (or NULL); `remotename` is
-/// `remotename_len` bytes. Main thread only.
+/// `htlc` is a live connection; `path` / `remotedir` are NUL-terminated C
+/// strings (or NULL); `remotename` is `remotename_len` bytes. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_new(
+    htlc: *mut c_void,
     path: *const c_char,
     remotedir: *const c_char,
     remotename: *const c_char,
@@ -459,6 +465,7 @@ pub unsafe extern "C" fn xfer_new(
     srv_data_size: u32,
 ) -> *mut HtxfHandle {
     let htxf = xfer_init(
+        htlc,
         cstr_bytes(path),
         cstr_bytes(remotedir),
         slice_bytes(remotename, remotename_len),
@@ -473,16 +480,18 @@ pub unsafe extern "C" fn xfer_new(
     htxf
 }
 
-/// `struct htxf_conn *xfer_new_folder(const char *path, const char *remotedir,
-/// const char *remotename, gsize remotename_len, guint16 type)` — create a folder
-/// transfer. Flags `opt.folder` (so the worker dispatcher picks the folder
-/// thread) and leaves the wire request to the caller (hx_get_folder /
-/// hx_put_folder send GETFOLDER/PUTFOLDER themselves).
+/// `struct htxf_conn *xfer_new_folder(struct htlc_conn *htlc, const char *path,
+/// const char *remotedir, const char *remotename, gsize remotename_len, guint16
+/// type)` — create a folder transfer on `htlc`. Flags `opt.folder` (so the
+/// worker dispatcher picks the folder thread) and leaves the wire request to
+/// the caller (hx_get_folder / hx_put_folder send GETFOLDER/PUTFOLDER
+/// themselves) — which is why the two must agree on the connection.
 ///
 /// # Safety
 /// Same contract as [`xfer_new`]. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_new_folder(
+    htlc: *mut c_void,
     path: *const c_char,
     remotedir: *const c_char,
     remotename: *const c_char,
@@ -490,6 +499,7 @@ pub unsafe extern "C" fn xfer_new_folder(
     type_: u16,
 ) -> *mut HtxfHandle {
     let htxf = xfer_init(
+        htlc,
         cstr_bytes(path),
         cstr_bytes(remotedir),
         slice_bytes(remotename, remotename_len),
@@ -1009,10 +1019,6 @@ unsafe fn gtkhx_session_emit_file_update(_s: *mut c_void, _sess: *mut c_void, _h
 unsafe fn gtkhx_session_emit_xfer_destroyed(_s: *mut c_void, _sess: *mut c_void, _h: *mut c_void) {}
 #[cfg(test)]
 unsafe fn hx_sess_from_htlc(_htlc: *mut c_void) -> *mut c_void {
-    std::ptr::null_mut()
-}
-#[cfg(test)]
-unsafe fn gtkhx_active_htlc() -> *mut c_void {
     std::ptr::null_mut()
 }
 // The xfer_go wire-build collaborators (xfer_go compiles under test but isn't invoked by

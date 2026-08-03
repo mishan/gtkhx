@@ -14,12 +14,18 @@
  * callers and don't appear here. */
 
 extern void xfer_go (struct htxf_conn *htxf);
-/* Construct a transfer. The remote location is given as a (dir,
+/* Construct a transfer on `htlc`. The remote location is given as a (dir,
  * name, name_len) triple rather than a single joined path so that
  * names containing `/` (the default dir_char) survive untouched on
  * the wire — see protocol.h's comment on struct htxf_conn for the
- * full reasoning. */
-extern struct htxf_conn *xfer_new (const char *path, const char *remotedir,
+ * full reasoning.
+ *
+ * `htlc` is the connection the transfer runs on, and the caller picks it. It
+ * used to be read from the focused connection inside the constructor, which
+ * meant a download started from a background server's pane went to the
+ * foreground one — invisible while there was only ever one. */
+extern struct htxf_conn *xfer_new (struct htlc_conn *htlc, const char *path,
+                                   const char *remotedir,
                                    const char *remotename, gsize remotename_len,
                                    guint16 type, int preview,
                                    guint32 srv_data_size);
@@ -28,8 +34,12 @@ extern struct htxf_conn *xfer_new (const char *path, const char *remotedir,
  * entirely — the caller (hx_get_folder / hx_put_folder) drives the
  * GETFOLDER / PUTFOLDER wire request itself, since those opcodes
  * don't share xfer_go's resume + rename heuristics. Sets opt.folder
- * so the worker picks the folder thread. */
-extern struct htxf_conn *xfer_new_folder (const char *path,
+ * so the worker picks the folder thread.
+ *
+ * Pass the same `htlc` the caller sends GETFOLDER / PUTFOLDER on: the request
+ * and the transfer it opens have to be the same connection. */
+extern struct htxf_conn *xfer_new_folder (struct htlc_conn *htlc,
+                                          const char *path,
                                           const char *remotedir,
                                           const char *remotename,
                                           gsize remotename_len, guint16 type);

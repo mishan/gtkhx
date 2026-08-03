@@ -227,8 +227,12 @@ site-by-site:
   uses `sess_from_htlc`) but the renderers beneath it reach for the active
   session to resolve self-identity for the highlight-me test. Each has a view
   pointer in hand.
-- **The file browser** is a file-static singleton with no session binding at all;
-  every send resolves through the active session, including task creation.
+- ~~**The file browser**~~ — bound. The browser carries the session it lists,
+  the remote provider carries its own, and every send, task and access check
+  routes through them. A copy takes its connection from whichever of the two
+  panes is remote, which is unambiguous because a copy always has exactly one
+  remote side. Still a file-static singleton — one browser at a time — but the
+  routing no longer asks which connection is focused.
 - ~~**The private-message path**~~ — fixed. The `msg` signal carries its
   connection, `msgwin_with_uid` takes the session to search, and a `msgwin`
   remembers which session's table owns it, so a close routes there rather than
@@ -758,7 +762,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | M4 | Model A, in seven slices — see below. The layout model is decided; the rest is the work. | M1, M3 |
 | M4a | The dock's content-swap mechanism: a panel holds a stack of named content pages instead of one child. Touches nothing outside `dock_bridge.c` and its six embed call sites; no behaviour change at one connection. | — |
 | ~~M4b~~ | **Done.** The keepalive timer, the post-login fallback timer and the login-reply transaction moved onto the connection, fixing the keepalive bug. The connect cancellable turned out to be dead and was deleted rather than relocated. Left for M6: the server address and port, and the `connected` flag — all three are read by view code (window titles, the status bar, the disconnect notice) and belong with the app-global chrome. | — |
-| M4c | Bind the files browser to a session. The largest single `hx_active_session()` cluster (~33 sites across four files) and the only content module with no session binding at all. Independent of the layout work. | — |
+| ~~M4c~~ | **Done.** The files browser and the remote provider each carry the session they list; all ~33 `hx_active_session()` sites across the four files are gone. A copy routes by whichever pane is the remote one, so an upload goes to the server it was dropped on. | — |
 | M4d | Qualify the chat tab strip's cid/uid keys by connection, and the two close dispatchers with them. Unblocked by the Model A decision. | M3b |
 | M4e | The session collection and factory: `the_session` becomes one of N, `hx_active_session()` returns the focused one, and `fe_init`'s per-session block becomes a factory — separating out the three app-global calls that must not run N times. | M4a |
 | M4f | The connection tab strip, the build-once tests, and the badge demux. These are mutually dependent and land together: a tab strip needs something to switch between, the build-once tests need a connection to key on, and the badge needs a tab to land on. | M4e |

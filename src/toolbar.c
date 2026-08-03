@@ -1264,14 +1264,11 @@ create_toolbar_window (session *sess)
     create_tasks_window (toolbar_window, sess);
     create_news_window (toolbar_window, sess);
     create_chat_window (toolbar_window, sess);
-    /* open_files_browser doesn't take a (parent, sess) signature;
-     * it reads the active session directly. Eager-construct so the Files
-     * toolbar button's toolbar_show_panel lookup always hits. */
-    open_files_browser ();
-    /* Same shape as open_files_browser: no (parent, sess) — the
-     * news (1.5+) entry point ignores its (widget, sess) args
-     * since the browser is a singleton, but eager-construct so
-     * the toolbar button's toolbar_show_panel lookup hits the
-     * registry on first click. */
+    /* Eager-construct so the Files toolbar button's toolbar_show_panel
+     * lookup always hits. */
+    open_files_browser (sess);
+    /* The news browser is still a singleton and ignores both of its args,
+     * hence the NULL parent — but eager-construct it too, so the toolbar
+     * button's toolbar_show_panel lookup hits the registry on first click. */
     open_news_browser (NULL, sess);
 }
