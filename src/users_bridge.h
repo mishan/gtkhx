@@ -37,15 +37,16 @@ G_BEGIN_DECLS
 
 /* Build the Users panel content: a vertical GtkBox of the action-button
  * bar (Msg / Chat / [voice] / Info / Kick / Ban / Ignore, wired to the C
- * view_*_btn handlers and publishing the msgbtn/… sensitivity globals
- * gtkutil.c drives) over the scrolled HxUserListView. Stashes the view on
- * sess->users_view and refreshes the user-list CSS/font. Returns the
+ * view_*_btn handlers, and stashed on sess->user_btns for the sensitivity
+ * gating gtkutil.c drives) over the scrolled HxUserListView. Stashes the view
+ * on sess->users_view and refreshes the user-list CSS/font. Returns the
  * container (a single still-floating widget) for the Rust shell to hand
  * to dock_bridge as the panel child. */
 GtkWidget *gtkhx_users_bridge_build_content (session *sess);
 
-/* Post-embed lifecycle: mark the panel open in prefs and, if already
- * connected, sensitize the action buttons and populate the list. */
+/* Post-embed lifecycle: mark the panel open in prefs and, if this session's
+ * connection is already up, sensitize its action buttons and populate the
+ * list. */
 void gtkhx_users_bridge_after_embed (session *sess);
 
 G_END_DECLS

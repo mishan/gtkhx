@@ -122,10 +122,6 @@ struct browser {
      * new file appears without the user needing to hit Reload. */
     gulong file_update_handler;
 
-    /* CSS provider that paints the .files-panel-active border.
-     * Lives for the window's lifetime; unrefed in on_close. */
-    GtkCssProvider *css;
-
     /* AdwToastOverlay wrapping the window content — used by the
      * Copy action to surface "no permission" / "not connected" /
      * etc. results without an interrupting dialog. */
@@ -141,7 +137,54 @@ struct browser {
     session *sess;
 };
 
-static struct browser *the_browser = NULL;
+/* Every live browser, keyed on the session it lists.
+ *
+ * This was a single `static struct browser *the_browser`, which is the same
+ * thing while there is one connection and the wrong thing the moment there are
+ * two: the second build overwrote it, orphaning the first browser's panels,
+ * providers and session signal handlers while its in-flight FILE_LIST replies
+ * were still on their way to it.
+ *
+ * Keyed on the session rather than the connection because everything here
+ * already holds a `session *` — `br->sess`, the build entry point, the panel
+ * providers — and the connection is one dereference away when a caller needs
+ * it. NULL until the first browser, so a lookup before then reads as absent
+ * rather than crashing. */
+static GHashTable *browsers; /* session* → struct browser* (unowned) */
+
+static struct browser *
+browser_for (session *sess)
+{
+    if (browsers == NULL || sess == NULL) {
+        return NULL;
+    }
+    return g_hash_table_lookup (browsers, sess);
+}
+
+/* The browser one of whose panels is `p`.
+ *
+ * A scan, and deliberately so: there are two panels per browser and a browser
+ * per connection, so this is a handful of pointer compares on a drag — against
+ * the alternative of a back-pointer on every panel that would then have to be
+ * kept in step with the browser's lifetime. */
+static struct browser *
+browser_of_panel (files_panel *p)
+{
+    GHashTableIter iter;
+    gpointer val;
+
+    if (browsers == NULL || p == NULL) {
+        return NULL;
+    }
+    g_hash_table_iter_init (&iter, browsers);
+    while (g_hash_table_iter_next (&iter, NULL, &val)) {
+        struct browser *br = val;
+        if (br->left == p || br->right == p) {
+            return br;
+        }
+    }
+    return NULL;
+}
 
 /* ---- Per-pane connection ----
  *
@@ -1307,9 +1350,9 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
      * see the comment on the remote branch below. */
         files_panel *other_panel = NULL;
         gboolean other_is_local = FALSE;
-        if (the_browser) {
-            other_panel = (p == the_browser->left) ? the_browser->right
-                                                   : the_browser->left;
+        struct browser *br = browser_of_panel (p);
+        if (br) {
+            other_panel = (p == br->left) ? br->right : br->left;
             if (other_panel) {
                 other_is_local = HX_IS_LOCAL_FILES_PROVIDER (
                     files_panel_get_provider (other_panel));
@@ -1813,31 +1856,46 @@ static const char *active_css
       "}\n";
 
 static void
-install_css (struct browser *br)
+install_css (void)
 {
+    /* Display-wide and identical for every browser, so once per process. It
+     * used to hang off the browser, which was the same thing while there was
+     * one — and with two connections would have stacked a second identical
+     * provider on the display, removed only when both went away. */
+    static GtkCssProvider *css;
     GdkDisplay *display;
 
-    br->css = gtk_css_provider_new ();
-    gtk_css_provider_load_from_string (br->css, active_css);
+    if (css != NULL) {
+        return;
+    }
+    css = gtk_css_provider_new ();
+    gtk_css_provider_load_from_string (css, active_css);
     display = gdk_display_get_default ();
     if (display) {
         gtk_style_context_add_provider_for_display (
-            display, GTK_STYLE_PROVIDER (br->css),
+            display, GTK_STYLE_PROVIDER (css),
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
 }
 
 /* ---- Lifecycle ---- */
 
-static gboolean
-on_close (GtkWindow *window, gpointer user_data)
+/* Tear down one connection's browser.
+ *
+ * Reached from the content box's "destroy", which is what fires when the dock
+ * removes this connection's Files page. It used to be a GtkWindow
+ * close-request handler that nothing connected — `(void)on_close;` with a
+ * comment explaining that the case never arose — so none of this ran and the
+ * browser, its providers and its two session subscriptions leaked. With a page
+ * per connection there is now a real teardown point, and it is this one. */
+static void
+browser_teardown (GtkWidget *content, gpointer user_data)
 {
     struct browser *br = user_data;
-    GdkDisplay *display;
-    (void)window;
+    (void)content;
 
-    if (the_browser == br) {
-        the_browser = NULL;
+    if (browsers) {
+        g_hash_table_remove (browsers, br->sess);
     }
 
     if (br->conn_state_handler) {
@@ -1851,21 +1909,11 @@ on_close (GtkWindow *window, gpointer user_data)
         br->file_update_handler = 0;
     }
 
-    if (br->css) {
-        display = gdk_display_get_default ();
-        if (display) {
-            gtk_style_context_remove_provider_for_display (
-                display, GTK_STYLE_PROVIDER (br->css));
-        }
-        g_clear_object (&br->css);
-    }
-
     files_panel_free (br->left);
     files_panel_free (br->right);
     g_clear_object (&br->left_provider);
     g_clear_object (&br->right_provider);
     g_free (br);
-    return FALSE;
 }
 
 /* GtkhxSession fires this when the connection state pivots.
@@ -1882,11 +1930,14 @@ on_connection_state (GtkhxSession *sess, struct htlc_conn *htlc, guint state,
 {
     struct browser *br = user_data;
     (void)sess;
-    /* The browser is a file-static singleton with no session binding, so it
-     * still reacts to any connection's state. Once it becomes a
-     * per-connection panel this is where it filters — the connection is
-     * already here waiting for it. */
-    (void)htlc;
+
+    /* Every browser subscribes to the one signal hub, so each of them sees
+     * every connection's state changes. This one only cares about its own:
+     * without the filter, a background server disconnecting would reset the
+     * foreground browser's remote panel to root and repaint it as offline. */
+    if (sess_from_htlc (htlc) != br->sess) {
+        return;
+    }
 
     /* Only DISCONNECTED (panel needs to paint the not-connected
      * state) and LOGIN_READY (panel can safely fire its initial
@@ -1946,8 +1997,13 @@ on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
     struct browser *br = user_data;
     struct htxf_conn *x = htxf_p;
     (void)sess;
-    (void)sess_p;
 
+    /* Same filter as on_connection_state: one hub, every browser subscribed.
+     * A transfer finishing on another connection is no reason to re-list this
+     * one's directories — and the signal already carries whose it was. */
+    if (sess_p != br->sess) {
+        return;
+    }
     if (!x) {
         return;
     }
@@ -1985,14 +2041,6 @@ gtkhx_files_build_content (session *sess)
     GtkEventController *shortcuts;
     GtkShortcut *sh;
 
-    /* Nothing to build for: the shell already has a panel to raise. Checked
-     * before the session, so a second call doesn't complain about an argument
-     * it was never going to use — the browser is a singleton (M4g's problem)
-     * and quietly keeps the session it was built with. */
-    if (the_browser) {
-        return NULL;
-    }
-
     /* Every operation the browser offers routes through this session, and
      * both the hx_conn_* accessors and the wire senders read straight through
      * its connection pointer. A NULL session has nothing to fall back to and
@@ -2002,10 +2050,17 @@ gtkhx_files_build_content (session *sess)
      * silently-wrong argument is hardest to trace back to. */
     g_return_val_if_fail (sess != NULL, NULL);
 
+    /* Nothing to build for: this session already has a browser, and the
+     * shell has a page to show. A different session asking is a different
+     * browser, which is the whole of what changed here. */
+    if (browser_for (sess)) {
+        return NULL;
+    }
+
     br = g_new0 (struct browser, 1);
     br->sess = sess;
 
-    install_css (br);
+    install_css ();
 
     /* Headerbar:
      *   pack_start: Refresh, New Folder, Preview, Get Info
@@ -2380,15 +2435,17 @@ gtkhx_files_build_content (session *sess)
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 
-    /* close-request belongs to
-     * GtkWindow; the panel persists and uses libpanel's own
-     * close-page machinery (the X on the tab). on_close stays
-     * defined for the once-and-only case where the panel widget
-     * is destroyed wholesale — currently never; a future layout-
-     * restore path may grow a real teardown. */
-    (void)on_close;
+    /* The teardown point is the content box's destruction — which is what the
+     * dock does when this connection's Files page is removed. (Not a
+     * close-request: that belongs to GtkWindow, and the panel itself persists
+     * and uses libpanel's own close-page machinery.) */
+    g_signal_connect (content_vbox, "destroy", G_CALLBACK (browser_teardown),
+                      br);
 
-    the_browser = br;
+    if (browsers == NULL) {
+        browsers = g_hash_table_new (g_direct_hash, g_direct_equal);
+    }
+    g_hash_table_insert (browsers, sess, br);
 
     /* Standard window accelerators — Ctrl+W close, Ctrl+Q quit,
      * Ctrl+K connect, Ctrl+T tracker. Same set every other

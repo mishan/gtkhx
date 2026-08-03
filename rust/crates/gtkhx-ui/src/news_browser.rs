@@ -30,6 +30,7 @@ use gtk4 as gtk;
 use libadwaita as adw;
 
 use crate::dock;
+use crate::dock::ConnKey;
 use crate::tr::tr;
 
 /// Node kinds (mirror the `NB_KIND_*` enum in the hxmodel::news module).
@@ -79,8 +80,13 @@ extern "C" {
     // (over gtkhx_active_htlc), rather than through news-specific C wrappers ----
     fn hx_conn_version(htlc: *mut c_void) -> u16;
     // ---- news_recv_bridge.c: session / carrier / leaf helpers ----
-    fn gtkhx_active_connected() -> glib::ffi::gboolean;
     fn gtkhx_active_htlc() -> *mut c_void;
+    /// gtkhx_ui_bridge.c — the connection a session owns.
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// gtkhx-core — has this connection passed the post-login boundary? The
+    /// gate for anything that puts a post-login RPC on the wire; see hxconn.h
+    /// for why the socket being up is not the same question.
+    fn hx_conn_post_login_fetched(h: *const c_void) -> glib::ffi::gboolean;
     /// Load a chrome icon resource through the theme resolver (gtkhx_icon.c),
     /// transfer-full GdkPixbuf.
     fn gtkhx_icon_load(resource: *const c_char) -> *mut gtk::gdk_pixbuf::ffi::GdkPixbuf;
@@ -94,17 +100,28 @@ extern "C" {
     fn hx_panel_registry_lookup(id: *const c_char) -> *mut c_void;
 }
 
-// The one live browser (`None` while no News panel exists) + the in-flight
-// fetch tables.
+// One browser per connection, plus the in-flight fetch tables.
+//
+// This was a single `Option<NewsBrowser>`. A second connection's build
+// overwrote it, dropping the first browser's whole widget tree while its
+// signal handler stayed connected and its in-flight fetches stayed pending —
+// so replies arrived for a browser that no longer existed and the first
+// connection's news silently stopped working.
 thread_local! {
-    static NEWS_BROWSER: RefCell<Option<NewsBrowser>> = const { RefCell::new(None) };
-    // In-flight DIRLIST / CATLIST fetches: carrier-stub ptr → the reffed target
-    // node whose children store receives the entries (None = root fetch,
-    // populate root_store). The held glib::Object keeps the target alive until
-    // the reply lands, exactly like the C g_object_ref.
-    static PENDING_DIRLISTS: RefCell<HashMap<usize, Option<glib::Object>>> =
+    static NEWS_BROWSER: RefCell<HashMap<ConnKey, NewsBrowser>> =
         RefCell::new(HashMap::new());
-    static PENDING_CATLISTS: RefCell<HashMap<usize, Option<glib::Object>>> =
+    // In-flight DIRLIST / CATLIST fetches: carrier-stub ptr → the connection
+    // that asked, and the reffed target node whose children store receives the
+    // entries (None = root fetch, populate root_store). The held glib::Object
+    // keeps the target alive until the reply lands, exactly like the C
+    // g_object_ref.
+    //
+    // The connection is recorded at *send* time and not looked up at receive
+    // time, which is the whole point: a reply belongs to whoever asked for it,
+    // and the user may well have switched tabs while it was in flight.
+    static PENDING_DIRLISTS: RefCell<HashMap<usize, (ConnKey, Option<glib::Object>)>> =
+        RefCell::new(HashMap::new());
+    static PENDING_CATLISTS: RefCell<HashMap<usize, (ConnKey, Option<glib::Object>)>> =
         RefCell::new(HashMap::new());
 }
 
@@ -136,9 +153,19 @@ struct NewsBrowser {
     conn_handler: RefCell<Option<glib::SignalHandlerId>>,
 }
 
-/// Run `f` against the live browser, if any.
+/// Run `f` against `conn`'s browser, if it has one.
+fn with_browser_on<R>(conn: ConnKey, f: impl FnOnce(&NewsBrowser) -> R) -> Option<R> {
+    NEWS_BROWSER.with(|b| b.borrow().get(&conn).map(f))
+}
+
+/// Run `f` against the browser the user is looking at, if any.
+///
+/// The right resolution for everything driven by the user — a button, a tree
+/// expansion, a selection — because only the visible page's widgets can
+/// receive input. Wire-driven paths must not use it: see the note on the
+/// pending tables.
 fn with_browser<R>(f: impl FnOnce(&NewsBrowser) -> R) -> Option<R> {
-    NEWS_BROWSER.with(|b| b.borrow().as_ref().map(f))
+    with_browser_on(dock::active_key(), f)
 }
 
 // ---------- Icons ----------
@@ -262,16 +289,23 @@ fn sync_action_buttons(br: &NewsBrowser) {
 /// at least 150 AND read-news permission (an empty legacy access map is
 /// permitted; the version gate is what excludes 1.0/1.2 servers that reject
 /// NEWSDIRLIST).
-unsafe fn threaded_news_available() -> bool {
-    let htlc = gtkhx_active_htlc();
+unsafe fn threaded_news_available(htlc: *mut c_void) -> bool {
     hx_conn_version(htlc.cast()) >= 150
         && hx_conn_access_permits(htlc.cast(), HL_ACCESS_READ_NEWS) != 0
 }
 
-/// Fire NEWSDIRLIST. `target` NULL = root fetch (populate `root_store`).
-fn fetch_dirlist(target: *mut c_void) {
+/// Fire NEWSDIRLIST on `htlc`. `target` NULL = root fetch (populate that
+/// connection's `root_store`).
+///
+/// The connection is a parameter rather than `gtkhx_active_htlc()`, and that
+/// is the whole point: a fetch triggered by a *wire* event — a background
+/// server reaching LOGIN_READY — belongs to that server, not to whichever one
+/// the user happens to be looking at. Sending it on the focused connection
+/// would have asked the wrong server for a tree and filed the reply under the
+/// wrong browser, leaving the background one empty and re-firing forever.
+fn fetch_dirlist(htlc: *mut c_void, target: *mut c_void) {
     unsafe {
-        if !threaded_news_available() {
+        if !threaded_news_available(htlc) {
             return;
         }
         // Pass the node's path pointer straight through — HxNewsNode paths are
@@ -289,19 +323,23 @@ fn fetch_dirlist(target: *mut c_void) {
         } else {
             Some(from_glib_none(target as *mut glib::gobject_ffi::GObject))
         };
-        PENDING_DIRLISTS.with(|t| t.borrow_mut().insert(stub as usize, val));
+        PENDING_DIRLISTS.with(|t| {
+            t.borrow_mut()
+                .insert(stub as usize, (dock::conn_key(htlc), val))
+        });
 
         // Mark loaded before the wire call so a quick collapse+reexpand doesn't
         // re-fire; the reply appends into the existing store.
         if !target.is_null() {
             hx_news_node_set_loaded(target.cast(), glib::ffi::GTRUE);
         }
-        hx_news15_fldr_list(gtkhx_active_htlc(), stub);
+        hx_news15_fldr_list(htlc, stub);
     }
 }
 
-/// Fire NEWSCATLIST for a category node whose children store receives the posts.
-fn fetch_catlist(target: *mut c_void) {
+/// Fire NEWSCATLIST on `htlc` for a category node whose children store
+/// receives the posts. Same connection contract as `fetch_dirlist`.
+fn fetch_catlist(htlc: *mut c_void, target: *mut c_void) {
     unsafe {
         if target.is_null() || hx_news_node_path(target.cast()).is_null() {
             return;
@@ -311,15 +349,18 @@ fn fetch_catlist(target: *mut c_void) {
         let stub = gnews_catalog_new(hx_news_node_path(target.cast()));
         let val: Option<glib::Object> =
             Some(from_glib_none(target as *mut glib::gobject_ffi::GObject));
-        PENDING_CATLISTS.with(|t| t.borrow_mut().insert(stub as usize, val));
+        PENDING_CATLISTS.with(|t| {
+            t.borrow_mut()
+                .insert(stub as usize, (dock::conn_key(htlc), val))
+        });
         hx_news_node_set_loaded(target.cast(), glib::ffi::GTRUE);
-        hx_news15_cat_list(gtkhx_active_htlc(), stub);
+        hx_news15_cat_list(htlc, stub);
     }
 }
 
 /// Issue GETTHREAD for `target`. A transfer-full ref rides the reply task
 /// straight to `gnews_browser_handle_thread`.
-fn fetch_thread(target: *mut c_void) {
+fn fetch_thread(htlc: *mut c_void, target: *mut c_void) {
     unsafe {
         if target.is_null()
             || hx_news_node_kind(target.cast()) != NB_KIND_POST
@@ -342,7 +383,7 @@ fn fetch_thread(target: *mut c_void) {
 
         glib::gobject_ffi::g_object_ref(target as *mut glib::gobject_ffi::GObject);
         hx_news15_get_post(
-            gtkhx_active_htlc(),
+            htlc,
             hx_news_node_path(target.cast()),
             hx_news_node_postid(target.cast()),
             mt_arg,
@@ -370,9 +411,11 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(
 
     // Build only when the reply matches a pending fetch and the browser is
     // still alive; otherwise fall through to the free below so nothing leaks.
-    if let Some(target) = entry {
-        NEWS_BROWSER.with(|b| {
-            if let Some(br) = b.borrow().as_ref() {
+    if let Some((conn, target)) = entry {
+        // `conn` is who asked, recorded when the fetch went out — not whoever
+        // is on screen now.
+        with_browser_on(conn, |br| {
+            {
                 match &target {
                     None => {
                         hx_news_build_dirlist_from_dirlist(
@@ -419,11 +462,11 @@ pub unsafe extern "C" fn gnews_browser_handle_catlist(
 
     // Build only when found (with a target node) and the browser is alive; free
     // below regardless.
-    if let Some(Some(node)) = entry {
+    if let Some((conn, Some(node))) = entry {
         let np = node.as_ptr() as *mut c_void;
         let ch = hx_news_node_children(np.cast());
-        NEWS_BROWSER.with(|b| {
-            if b.borrow().as_ref().is_some() && !ch.is_null() {
+        with_browser_on(conn, |_br| {
+            if !ch.is_null() {
                 // Raw byte-oriented path pointer (no lossy cstr()/cs() round-trip).
                 hx_news_build_category_tree_from_catlist(
                     ch,
@@ -485,7 +528,7 @@ fn refresh_node(br: &NewsBrowser, node: *mut c_void) {
     unsafe {
         if node.is_null() {
             br.root_store.remove_all();
-            fetch_dirlist(std::ptr::null_mut());
+            fetch_dirlist(gtkhx_active_htlc(), std::ptr::null_mut());
             return;
         }
         let ch = hx_news_node_children(node.cast());
@@ -495,8 +538,8 @@ fn refresh_node(br: &NewsBrowser, node: *mut c_void) {
         }
         hx_news_node_set_loaded(node.cast(), glib::ffi::GFALSE);
         match hx_news_node_kind(node.cast()) {
-            NB_KIND_FOLDER => fetch_dirlist(node),
-            NB_KIND_CATEGORY => fetch_catlist(node),
+            NB_KIND_FOLDER => fetch_dirlist(gtkhx_active_htlc(), node),
+            NB_KIND_CATEGORY => fetch_catlist(gtkhx_active_htlc(), node),
             _ => {}
         }
     }
@@ -543,8 +586,8 @@ fn reset_browser_state(br: &NewsBrowser) {
     sync_action_buttons(br);
 }
 
-fn on_connection_state(state: u32) {
-    with_browser(|br| match state {
+fn on_connection_state(htlc: *mut c_void, state: u32) {
+    with_browser_on(dock::conn_key(htlc), |br| match state {
         GTKHX_CONNECTION_DISCONNECTED => {
             reset_browser_state(br);
             br.disconnected_banner.set_revealed(true);
@@ -552,7 +595,7 @@ fn on_connection_state(state: u32) {
         GTKHX_CONNECTION_LOGIN_READY => {
             br.disconnected_banner.set_revealed(false);
             if br.root_store.n_items() == 0 {
-                fetch_dirlist(std::ptr::null_mut());
+                fetch_dirlist(htlc, std::ptr::null_mut());
             }
         }
         _ => {}
@@ -560,12 +603,19 @@ fn on_connection_state(state: u32) {
 }
 
 fn on_panel_presented() {
-    if unsafe { gtkhx_active_connected() } == 0 {
+    // Post-login, not socket-up: a NEWSDIRLIST between TCP-connect and the
+    // "fully joined" boundary is the same mid-handshake RPC the files
+    // browser's remote provider refuses to send, and stricter 1.5+ servers
+    // answer it with a disconnect. See hxconn.h.
+    let htlc = unsafe { gtkhx_active_htlc() };
+    if unsafe { hx_conn_post_login_fetched(htlc) } == 0 {
         return;
     }
+    // The panel reveals whichever connection's page is visible, so this is a
+    // user-driven path: the active browser and the active connection.
     with_browser(|br| {
         if br.root_store.n_items() == 0 {
-            fetch_dirlist(std::ptr::null_mut());
+            fetch_dirlist(htlc, std::ptr::null_mut());
         }
     });
 }
@@ -669,7 +719,7 @@ unsafe extern "C" fn on_reply_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c
 
         // Make sure the original body is loading before the context card renders.
         if hx_news_node_body(sel.cast()).is_null() && hx_news_node_body_fetching(sel.cast()) == 0 {
-            fetch_thread(sel);
+            fetch_thread(gtkhx_active_htlc(), sel);
         }
 
         let subj_c = crate::cs(&subj);
@@ -731,8 +781,8 @@ pub unsafe extern "C" fn gtkhx_news_fetch_for_expanded(_browser: *mut c_void, no
         return;
     }
     match hx_news_node_kind(node.cast()) {
-        NB_KIND_FOLDER => fetch_dirlist(node),
-        NB_KIND_CATEGORY => fetch_catlist(node),
+        NB_KIND_FOLDER => fetch_dirlist(gtkhx_active_htlc(), node),
+        NB_KIND_CATEGORY => fetch_catlist(gtkhx_active_htlc(), node),
         _ => {}
     }
 }
@@ -743,7 +793,7 @@ pub unsafe extern "C" fn gtkhx_news_fetch_for_expanded(_browser: *mut c_void, no
 /// C-ABI entry on the GTK main thread; `node` is an `HxNewsNode *`.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_news_fetch_thread(_browser: *mut c_void, node: *mut c_void) {
-    fetch_thread(node);
+    fetch_thread(gtkhx_active_htlc(), node);
 }
 
 /// Re-fetch a listing after a create / delete (no server push). NULL = root.
@@ -794,7 +844,9 @@ unsafe fn pixmap_button(
 
 /// Build the whole browser + content tree, register it as the process
 /// singleton, and return the content box (transfer to the dock).
-fn build_content() -> gtk::Widget {
+/// Build one connection's browser. `conn` is the connection it belongs to, and
+/// the key it is indexed, signal-routed and torn down under.
+fn build_content(conn: ConnKey) -> gtk::Widget {
     crate::ensure_gtk_init();
 
     // ---- Cached row icons ----
@@ -944,7 +996,11 @@ fn build_content() -> gtk::Widget {
     paned.set_end_child(Some(&right_box));
 
     // ---- Disconnected banner + content assembly ----
-    let connected = unsafe { gtkhx_active_connected() } != 0;
+    // Post-login, to match what actually clears this banner: the
+    // connection-state handler reveals it on DISCONNECTED and hides it on
+    // LOGIN_READY, so seeding it from the socket would have a panel built
+    // mid-handshake come up claiming a connection it doesn't have yet.
+    let connected = unsafe { hx_conn_post_login_fetched(gtkhx_active_htlc()) } != 0;
     let disconnected_banner = adw::Banner::new(&tr("Not connected to a server."));
     disconnected_banner.set_revealed(!connected);
 
@@ -978,29 +1034,42 @@ fn build_content() -> gtk::Widget {
         selected_post: Cell::new(std::ptr::null_mut()),
         conn_handler: RefCell::new(None),
     };
-    NEWS_BROWSER.with(|b| *b.borrow_mut() = Some(browser));
+    NEWS_BROWSER.with(|b| {
+        b.borrow_mut().insert(conn, browser);
+    });
 
     // Initial button state (no selection → New Folder + New Category visible).
-    with_browser(sync_action_buttons);
+    with_browser_on(conn, sync_action_buttons);
 
     // Connection-state changes drive the banner + LOGIN_READY auto-fetch.
     let session_obj: glib::Object =
         unsafe { from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject) };
-    let id = session_obj.connect_local("connection-state-changed", false, |vals| {
-        // vals[1] is the connection, vals[2] the state. The browser is a
-        // singleton bound to no connection in particular, so it takes any
-        // state change; the connection is there for when it becomes a
-        // per-connection panel.
+    // vals[1] is the connection, vals[2] the state.
+    //
+    // Filtered on the connection this browser was built for, not merely routed
+    // by the signal's: every browser subscribes to the one signal hub, so a
+    // handler that dispatched by the signal's connection would still *run*
+    // once per browser — and each run would find the same target and fire its
+    // own duplicate NEWSDIRLIST. `conn` is captured; the signal's htlc has to
+    // agree with it for this handler to do anything.
+    let id = session_obj.connect_local("connection-state-changed", false, move |vals| {
+        let htlc = vals
+            .get(1)
+            .and_then(|v| v.get::<*mut c_void>().ok())
+            .unwrap_or(std::ptr::null_mut());
+        if dock::conn_key(htlc) != conn {
+            return None;
+        }
         let state = vals.get(2).and_then(|v| v.get::<u32>().ok()).unwrap_or(0);
-        on_connection_state(state);
+        on_connection_state(htlc, state);
         None
     });
-    with_browser(|br| *br.conn_handler.borrow_mut() = Some(id));
+    with_browser_on(conn, |br| *br.conn_handler.borrow_mut() = Some(id));
 
     // Teardown on content destroy (embed failure / app exit): drop the session
     // handler + the singleton so no stale callback fires into a dead browser.
-    content_vbox.connect_destroy(|_w| {
-        with_browser(|br| {
+    content_vbox.connect_destroy(move |_w| {
+        with_browser_on(conn, |br| {
             if let Some(id) = br.conn_handler.borrow_mut().take() {
                 let s: glib::Object = unsafe {
                     from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
@@ -1008,7 +1077,17 @@ fn build_content() -> gtk::Widget {
                 s.disconnect(id);
             }
         });
-        NEWS_BROWSER.with(|b| *b.borrow_mut() = None);
+        // Only this connection's entry: another connection's browser is a
+        // different tree with its own handler, and clearing the map wholesale
+        // would leave those handlers connected to nothing.
+        NEWS_BROWSER.with(|b| {
+            b.borrow_mut().remove(&conn);
+        });
+        // Drop its in-flight fetches too. The carriers are freed by whoever
+        // owns them; what has to go is this browser's claim on the replies, or
+        // a later one for the same connection inherits them.
+        PENDING_DIRLISTS.with(|t| t.borrow_mut().retain(|_, (c, _)| *c != conn));
+        PENDING_CATLISTS.with(|t| t.borrow_mut().retain(|_, (c, _)| *c != conn));
     });
 
     window
@@ -1016,10 +1095,22 @@ fn build_content() -> gtk::Widget {
 
 /// Wire the one panel-level hook (`PanelWidget::presented`) once the dock has
 /// embedded us — a tab switch onto News while connected + empty auto-fetches.
+///
+/// Once for the *panel*, not once per browser. There is one News panel holding
+/// a content page per connection, so a per-browser subscription would add a
+/// second copy of the same handler for the second connection and double every
+/// auto-fetch. The handler itself resolves the active browser, which is the
+/// right question: "presented" means the user is looking at it.
 fn after_embed() {
+    thread_local! {
+        static WIRED: Cell<bool> = const { Cell::new(false) };
+    }
+    if WIRED.with(|w| w.get()) {
+        return;
+    }
     let id = crate::cs(dock::ID_NEWS15);
     let panel = unsafe { hx_panel_registry_lookup(id.as_ptr()) };
-    if panel.is_null() || with_browser(|_| ()).is_none() {
+    if panel.is_null() {
         return;
     }
     let panel_obj: glib::Object =
@@ -1028,6 +1119,7 @@ fn after_embed() {
         on_panel_presented();
         None
     });
+    WIRED.with(|w| w.set(true));
 }
 
 /// Open (or raise) the News-browser panel: build + dock the content, or
@@ -1040,16 +1132,11 @@ fn after_embed() {
 pub unsafe extern "C" fn create_news_browser_window(_widget: *mut c_void, sess: *mut c_void) {
     crate::ensure_gtk_init();
 
-    // The browser is a process singleton: its one page belongs to whichever
-    // connection opened it, and dock::open refuses a second — building would
-    // overwrite the first connection's state rather than give the second its
-    // own. Keyed on the connection regardless, so the day M4g makes the
-    // browser per-connection, dropping the claim is the whole change here.
     let dock::Open::Build(page) = dock::open(dock::ID_NEWS15, sess) else {
         return;
     };
 
-    let content = build_content();
+    let content = build_content(dock::key_for_session(sess));
     if dock::place(
         dock::ID_NEWS15,
         &page,
@@ -1070,22 +1157,28 @@ pub unsafe extern "C" fn create_news_browser_window(_widget: *mut c_void, sess: 
 /// C-ABI entry on the GTK main thread.
 #[no_mangle]
 pub unsafe extern "C" fn open_news_browser(widget: *mut c_void, sess: *mut c_void) {
-    let id = crate::cs(dock::ID_NEWS15);
-    let was_open = !hx_panel_registry_lookup(id.as_ptr()).is_null();
+    let conn = dock::key_for_session(sess);
+    let htlc = gtkhx_session_htlc(sess);
+    let had_page = dock::has_page(dock::ID_NEWS15, &conn.to_string());
 
     create_news_browser_window(widget, sess);
 
-    if !was_open {
+    // Everything below is about *this session's* browser, not the active one.
+    // `was_open` used to ask whether the panel existed, which is true as soon
+    // as any connection has a page in it — so opening a second connection's
+    // news browser wiped and refetched the first connection's tree.
+    if !had_page {
         // Freshly built: Ctrl+Q / Ctrl+K / Ctrl+T on the content box.
-        with_browser(|br| crate::ffi::init_keyaccel(br.window.as_ptr()));
+        with_browser_on(conn, |br| crate::ffi::init_keyaccel(br.window.as_ptr()));
     }
 
-    if gtkhx_active_connected() != 0 {
-        with_browser(|br| {
-            if was_open {
+    // Post-login, not socket-up — see on_panel_presented.
+    if hx_conn_post_login_fetched(htlc) != 0 {
+        with_browser_on(conn, |br| {
+            if had_page {
                 br.root_store.remove_all();
             }
-            fetch_dirlist(std::ptr::null_mut());
+            fetch_dirlist(htlc, std::ptr::null_mut());
         });
     }
 }

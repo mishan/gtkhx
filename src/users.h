@@ -3,12 +3,9 @@
 
 #include "session.h"
 
-extern GtkWidget *msgbtn;
-extern GtkWidget *kickbtn;
-extern GtkWidget *infobtn;
-extern GtkWidget *banbtn;
-extern GtkWidget *chatbtn;
-extern GtkWidget *ignobtn;
+/* The Users action buttons moved onto `session` (session.h, `user_btns`):
+ * each connection has its own Users page and its own bar, and their
+ * sensitivity is a statement about one connection's state and access bits. */
 
 extern GdkRGBA user_colors[8];
 extern GdkRGBA gdk_user_colors[4];

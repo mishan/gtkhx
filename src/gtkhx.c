@@ -34,6 +34,7 @@
 #include <getopt.h>
 #include "hx.h"
 #include "conn_tabs.h"
+#include "files_browser.h"
 #include "session_registry.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
 #include "hxconn.h"
@@ -1033,17 +1034,14 @@ fe_init (void)
  * two connections and watch what the switch does, but it is *not* a working
  * second connection.
  *
- * Nothing connects it, and every one of the six per-connection panels still
- * keeps its content in process-global state — chat in a shared tab view, users
- * in file-static button handles, news and the 1.5 browser and the files
- * browser each in a singleton. So `dock::claim_singleton` refuses all six for
- * the second connection, it gets no pages, and switching to it leaves the
- * first connection's content up. That is the whole of what M4g has to undo,
- * and being able to see it from the outside is the point of this hook.
+ * Nothing connects it. What it does have is its own content page in every
+ * per-connection panel, built here the same way `fe_init` builds the first
+ * connection's — which is what makes the switch worth looking at: select the
+ * other tab and all six panels swap to a second, empty set.
  *
  * One consequence to be aware of while the debug tab is selected:
- * `hx_active_session()` returns a session with no windows and no views, so
- * anything acted on from the toolbar is aimed at it.
+ * `hx_active_session()` returns a session that is not connected to anything,
+ * so anything acted on from the toolbar is aimed at it and will do nothing.
  *
  * It exists because the alternative is shipping the switching path with no way
  * to run it: M6 is what opens a second connection for real, and that is a long
@@ -1058,10 +1056,25 @@ hx_debug_second_session (void)
     }
 
     sess = hx_session_new ();
+
+    /* The same two-step fe_init does: the model-side per-session state first
+     * (create_chat seeds the public conversation's view, create_tasks its task
+     * list), then the panel content that reads it. Skipping the first half
+     * would have the content builders find no conversation to render. */
+    create_chat (sess);
+    create_tasks (sess);
+
+    create_chat_window (toolbar_window, sess);
+    create_news_window (toolbar_window, sess);
+    create_users_window (toolbar_window, sess);
+    create_tasks_window (toolbar_window, sess);
+    open_files_browser (sess);
+    open_news_browser (NULL, sess);
+
     gtkhx_conn_tabs_add (sess, "Debug connection 2");
     debug_log ("secondconn",
-               "built a second session (serial %u) — panels without a page "
-               "for it will stay on the first connection's content",
+               "built a second session (serial %u) with its own "
+               "page in every per-connection panel",
                hx_conn_serial (sess->htlc));
 
     /* Adding a tab selects it, which would leave the app focused on a

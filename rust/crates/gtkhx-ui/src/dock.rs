@@ -77,20 +77,48 @@ extern "C" {
     fn hx_active_session() -> *mut c_void;
 }
 
-/// The dock page name for a session's content: its connection's serial.
+/// Which connection a thing belongs to.
 ///
-/// The serial is process-unique and fixed for the connection's life, which is
-/// what a page name has to be — a page outlives any particular server address
-/// or nickname, and reusing a name across two connections would silently make
-/// one connection's content unreachable.
+/// A connection's serial: process-unique, fixed for its life, and 0 for "no
+/// connection". Every per-connection index in this crate is keyed on it — the
+/// dock's page names, the chat tab strip's conversation maps, the connection
+/// tab strip, and each content module's own state — so they all agree on what
+/// "the same connection" means without any of them holding a session pointer
+/// they would then have to keep valid.
+pub type ConnKey = u16;
+
+/// The connection's key. NULL reads as 0.
+pub fn conn_key(htlc: *mut c_void) -> ConnKey {
+    unsafe { hx_conn_serial(htlc) }
+}
+
+/// The key of the connection a session owns. NULL reads as 0.
+pub fn key_for_session(sess: *mut c_void) -> ConnKey {
+    unsafe { hx_conn_serial(gtkhx_session_htlc(sess)) }
+}
+
+/// The key of the connection the user is looking at.
 ///
-/// A NULL session reads as `"0"`, the serial no connection is assigned. That
-/// is a real answer rather than a failure: the caller ends up building a page
-/// nothing will ever switch to, which is visible and inert, where a panic or a
-/// NULL deref would be neither.
+/// The right question for anything driven by the *user*: only the visible
+/// page's widgets can receive input, so a button click or a tree expansion
+/// always belongs to the focused connection. It is the wrong question for
+/// anything driven by the *wire* — a reply belongs to the connection that
+/// asked, which may not be the one on screen by the time it lands.
+pub fn active_key() -> ConnKey {
+    key_for_session(unsafe { hx_active_session() })
+}
+
+/// The dock page name for a session's content: its connection's key.
+///
+/// A page name has to be stable for the connection's life — a page outlives
+/// any particular server address or nickname, and reusing a name across two
+/// connections would silently make one connection's content unreachable.
+///
+/// A NULL session reads as `"0"`. That is a real answer rather than a failure:
+/// the caller ends up building a page nothing will ever switch to, which is
+/// visible and inert, where a panic or a NULL deref would be neither.
 pub fn page_for_session(sess: *mut c_void) -> String {
-    let serial = unsafe { hx_conn_serial(gtkhx_session_htlc(sess)) };
-    serial.to_string()
+    key_for_session(sess).to_string()
 }
 
 /// TRUE iff a panel with `id` was already registered (re-attached + raised,
@@ -122,9 +150,8 @@ pub fn set_needs_attention(id: &str, state: bool) {
 
 /// What a window entry point should do about opening role `id` for `sess`.
 pub enum Open {
-    /// Nothing. Either this connection's content is already up — now the
-    /// visible page, panel raised — or the role is spoken for by another
-    /// connection and this one can't have it yet.
+    /// Nothing to do: this connection's content is already up, now the visible
+    /// page with the panel raised.
     Done,
     /// Build content and hand it to [`place`] under this page name.
     Build(String),
@@ -132,20 +159,20 @@ pub enum Open {
 
 /// The head of all six window entry points: decide whether to build.
 ///
-/// Three answers folded into two, because the caller does the same thing with
-/// two of them:
-///
-/// 1. This connection already has a page here → show it, raise the panel, done.
-/// 2. Another connection owns the role's still-singleton content module →
-///    raise the panel so the click does *something*, and don't build. See
-///    [`claim_singleton`].
-/// 3. Otherwise → build.
+/// Two answers: this connection already has a page here — in which case it is
+/// now the visible one and the panel is raised — or it doesn't and the caller
+/// should build.
 ///
 /// The build-once test used to be panel-level, and asking "is this *panel*
 /// open?" answered yes as soon as any connection had content in it — so a
 /// second connection returned early here and never built a page of its own.
 /// That was a build-order bug rather than a UI decision, which is why the fix
 /// belongs at the head of every entry point rather than in one of them.
+///
+/// It briefly had a third answer — a refusal, for a role whose content module
+/// was still a process singleton. Removing the panel-level test had also
+/// removed the accident that kept a second connection out of those, and all
+/// six needed making per-connection before the refusal could go.
 pub fn open(id: &str, sess: *mut c_void) -> Open {
     let page = page_for_session(sess);
     let cid = crate::cs(id);
@@ -154,15 +181,6 @@ pub fn open(id: &str, sess: *mut c_void) -> Open {
     unsafe {
         if gtkhx_dock_has_page(cid.as_ptr(), cpage.as_ptr()) != glib::ffi::GFALSE {
             gtkhx_dock_show_page(cid.as_ptr(), cpage.as_ptr());
-            gtkhx_dock_raise_if_open(cid.as_ptr());
-            return Open::Done;
-        }
-        if !claim_singleton(id, &page) {
-            // Raise anyway: the panel exists, it just belongs to someone else.
-            // Doing nothing at all would make the toolbar button look broken,
-            // which is a worse way to discover a missing feature than seeing
-            // the wrong connection's content with the connection tab to
-            // explain it.
             gtkhx_dock_raise_if_open(cid.as_ptr());
             return Open::Done;
         }
@@ -226,50 +244,13 @@ pub fn place(
     }
 }
 
-/// May `page` build content for role `id`, given that the module behind it is
-/// still a process singleton?
-///
-/// TRUE for the first connection to ask, FALSE for every other one, for as
-/// long as the first is around.
-///
-/// This is a guard against a hazard the per-connection build-once test
-/// *created*. The old panel-level test answered "already built" as soon as any
-/// connection had content, which incidentally stopped a second connection
-/// reaching a content module at all. Keying on the connection removed that
-/// accident — correctly, since it was also what stopped a second connection
-/// having its own page — and what it exposed is that four of the six modules
-/// keep their state in one process-global slot. Reaching them twice does not
-/// produce two independent views; it overwrites the first connection's, leaks
-/// its signal handlers, and leaves whichever page is destroyed first nulling
-/// the other's state.
-///
-/// So a refusal here is the behaviour the doc already described: a second
-/// connection gets no page in that panel and switching to it leaves the first
-/// connection's content up. Visibly incomplete, rather than quietly corrupt.
-///
-/// **Every entry in the table below is M4g's worklist.** As each module grows
-/// per-connection state, its call to this goes away — and when the last one
-/// does, so does this function.
-pub fn claim_singleton(id: &str, page: &str) -> bool {
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-
-    thread_local! {
-        /// role → the connection page that owns it.
-        static OWNER: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-    }
-
-    OWNER.with(|o| {
-        let mut owner = o.borrow_mut();
-        match owner.get(id) {
-            Some(held) if held != page => false,
-            Some(_) => true,
-            None => {
-                owner.insert(id.to_owned(), page.to_owned());
-                true
-            }
-        }
-    })
+/// Whether `id` already holds a page for this connection. The per-connection
+/// form of "is this open?", for callers that want to know without changing
+/// what is on screen.
+pub fn has_page(id: &str, page: &str) -> bool {
+    let cid = crate::cs(id);
+    let cpage = crate::cs(page);
+    unsafe { gtkhx_dock_has_page(cid.as_ptr(), cpage.as_ptr()) != glib::ffi::GFALSE }
 }
 
 /// Make `page` the visible one in panel `id`, for a caller switching every
@@ -280,33 +261,4 @@ pub fn show_page(id: &str, page: &str) -> bool {
     let cid = crate::cs(id);
     let cpage = crate::cs(page);
     unsafe { gtkhx_dock_show_page(cid.as_ptr(), cpage.as_ptr()) != glib::ffi::GFALSE }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The singleton claim is first-come, and idempotent for the holder.
-    ///
-    /// No display needed — it is a plain map — so this is an ordinary
-    /// `#[test]`, unlike the widget checks in `crate::gtk_tests`.
-    #[test]
-    fn a_role_belongs_to_the_first_connection_that_asks() {
-        // Role names local to this test: the thread_local is per-test-thread,
-        // but using the real ids would still couple this to whatever order
-        // another test in the same thread ran in.
-        assert!(claim_singleton("role-a", "1"), "first claim refused");
-        assert!(
-            claim_singleton("role-a", "1"),
-            "the holder was refused its own role — a rebuild would be blocked"
-        );
-        assert!(
-            !claim_singleton("role-a", "2"),
-            "a second connection was let into a singleton module"
-        );
-
-        // Roles are independent: losing one doesn't lose the rest.
-        assert!(claim_singleton("role-b", "2"), "unrelated role refused");
-        assert!(!claim_singleton("role-b", "1"));
-    }
 }

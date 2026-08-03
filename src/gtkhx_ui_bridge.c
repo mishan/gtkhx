@@ -122,9 +122,12 @@ gtkhx_connect_apply (session *sess, const char *server, guint16 port,
  * The flat 1.0/1.2 News content moved to Rust (news.rs). The three widget
  * handles still live on the C `session` so the two remaining C consumers —
  * gtkutil.c's setbtns (Post/Reload sensitivity on connect) and options.c's
- * theme re-apply (news_text) — reach them unchanged. The Rust content build
- * populates them via gtkhx_news_set_widgets; the rest of the flat-news view
- * state (search context) lives Rust-side. */
+ * theme re-apply (news_text) — reach them unchanged, and reach the *right*
+ * ones: both used to gate on a process-wide "has a News panel ever been
+ * built?" latch and now test the session's own widget for NULL. The Rust
+ * content build populates them via gtkhx_news_set_widgets; the rest of the
+ * flat-news view state (the search context) lives Rust-side, keyed on the
+ * connection. */
 
 void
 gtkhx_news_set_widgets (session *sess, GtkWidget *text, GtkWidget *post,
@@ -145,18 +148,6 @@ struct htlc_conn *
 gtkhx_session_htlc (session *sess)
 {
     return sess ? sess->htlc : NULL;
-}
-
-gboolean
-gtkhx_news_is_open (void)
-{
-    return hx_panel_was_constructed (HX_PANEL_ID_NEWS) ? TRUE : FALSE;
-}
-
-void
-gtkhx_news_mark_open (void)
-{
-    hx_panel_mark_constructed (HX_PANEL_ID_NEWS);
 }
 
 /* Mirror reload_news's pre-fetch access gate: the server told us at SELFINFO

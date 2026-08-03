@@ -13,7 +13,8 @@
 //! button; the xtext output + scrollbar were made by `create_chat` at session
 //! init. Rust reads every leaf via the `hx_gchat_*` accessors, assembles the
 //! frame/box/tab skeleton, and writes the window back via a setter. The tab
-//! view itself is `chat_tabs.c`'s singleton (`gtkhx_chat_tabs_init`).
+//! view itself comes from `chat_tabs.rs`, one per connection
+//! (`gtkhx_chat_tabs_init`).
 //!
 //! Private chats and private messages are tabs *inside* this one panel
 //! (`chat_tabs.c` / AdwTabView), not separate dock panels — so there is a
@@ -54,12 +55,15 @@ extern "C" {
     fn hx_emoji_button_new(target: *mut gtk::ffi::GtkWidget) -> *mut gtk::ffi::GtkWidget;
     fn hx_emoji_typeahead_attach(target: *mut gtk::ffi::GtkWidget);
 
-    /// chat_tabs.c — the singleton AdwTabView + the pinned public-chat tab.
-    fn gtkhx_chat_tabs_init() -> *mut gtk::ffi::GtkWidget;
+    /// chat_tabs.rs — this connection's AdwTabView + its pinned public tab.
+    fn gtkhx_chat_tabs_init(htlc: *mut c_void) -> *mut gtk::ffi::GtkWidget;
     fn gtkhx_chat_tabs_add_public(
+        htlc: *mut c_void,
         content: *mut gtk::ffi::GtkWidget,
         title: *const std::ffi::c_char,
     );
+    /// gtkhx_ui_bridge.c — the connection a session owns.
+    fn gtkhx_session_htlc(sess: *mut Session) -> *mut c_void;
 }
 
 /// `*mut GtkWidget` for a gtk-rs widget.
@@ -148,10 +152,15 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     vstack.set_vexpand(true);
     vbox.append(&vstack);
 
-    // The public chat goes into a pinned tab at position 0 of the shared
-    // AdwTabView; per-conversation tabs (pchat / PM) append alongside it. A
-    // small autohiding AdwTabBar sits above the view.
-    let tab_view: gtk::Widget = from_glib_none(gtkhx_chat_tabs_init());
+    // The public chat goes into a pinned tab at position 0 of *this
+    // connection's* AdwTabView; per-conversation tabs (pchat / PM) append
+    // alongside it. A small autohiding AdwTabBar sits above the view.
+    //
+    // Per connection, not per process: this box is one connection's Chat page,
+    // and a shared view would mean the second connection's build re-parenting
+    // the first connection's strip into its own tree.
+    let htlc = gtkhx_session_htlc(sess);
+    let tab_view: gtk::Widget = from_glib_none(gtkhx_chat_tabs_init(htlc));
     let tab_bar = adw::TabBar::new();
     if let Some(tv) = tab_view.downcast_ref::<adw::TabView>() {
         tab_bar.set_view(Some(tv));
@@ -159,7 +168,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     tab_bar.set_autohide(true);
 
     let ctitle = crate::cs(&tr("Chat"));
-    gtkhx_chat_tabs_add_public(wptr(&vbox), ctitle.as_ptr());
+    gtkhx_chat_tabs_add_public(htlc, wptr(&vbox), ctitle.as_ptr());
 
     let panel_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     panel_box.append(&tab_bar);
@@ -176,6 +185,10 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     // strict-provenance and make the later deref UB (see hxbridge's notes).
     panel_box.connect_destroy(move |_| unsafe {
         gtkhx_chat_clear_content_ptrs(gchat);
+        // Drop this connection's tab view with the page that held it. Keeping
+        // it would have a rebuild of the same connection's Chat page get the
+        // old view back, pinned public tab and all, and append a second one.
+        crate::chat_tabs::gtkhx_chat_tabs_forget(htlc);
     });
 
     into_floating_ptr(panel_box)

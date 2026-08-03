@@ -16,19 +16,18 @@
 use crate::dock;
 
 extern "C" {
-    /// Build the whole browser + two-panel content for `sess` (stashing it in
-    /// the C `the_browser` global) and return the content box, or NULL when
-    /// there is nothing to embed — a browser already exists, or `sess` was
-    /// NULL, which C logs.
+    /// Build the whole browser + two-panel content for `sess` (registering it
+    /// in the C browser table, keyed on the session) and return the content
+    /// box, or NULL when there is nothing to embed — this session already has
+    /// a browser, or `sess` was NULL, which C logs.
     fn gtkhx_files_build_content(sess: *mut std::ffi::c_void) -> *mut gtk4::ffi::GtkWidget;
 }
 
 /// Open (or raise) the Files panel for `sess` — the session whose files it
 /// lists. C ABI replacement for the old `files_browser.c::open_files_browser`.
 ///
-/// `sess` binds the browser on the *first* open only: the browser is still a
-/// singleton, so a later call raises the existing panel and never sees the
-/// session it was passed. De-singletonising it is M4g.
+/// One browser per connection: `sess` names whose files these are, and a
+/// second connection gets its own browser in its own page of the same panel.
 ///
 /// # Safety
 /// Called on the GTK main thread.
@@ -41,10 +40,9 @@ pub unsafe extern "C" fn open_files_browser(sess: *mut std::ffi::c_void) {
         return;
     };
 
-    // NULL means `sess` was NULL and C refused. The other historical cause —
-    // a browser already existing — is now caught a step earlier by
-    // dock::open's singleton claim, which is where every role handles it the
-    // same way instead of each one improvising.
+    // NULL means `sess` was NULL and C refused, or this session somehow
+    // already has a browser without a page to show it in — which dock::open
+    // above rules out on the normal path.
     let content = gtkhx_files_build_content(sess);
     if content.is_null() {
         return;

@@ -17,6 +17,7 @@
 //! connection). The wire senders `hx_get_news` / `hx_post_news` stay C.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::ptr;
 use std::rc::Rc;
@@ -28,6 +29,7 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 
 use crate::dock;
+use crate::dock::ConnKey;
 use crate::ffi as cffi;
 use crate::tr::tr;
 
@@ -46,19 +48,39 @@ extern "C" {
         reload: *mut gtk::ffi::GtkWidget,
     );
     fn gtkhx_session_htlc(sess: *mut Session) -> *mut c_void;
-    fn gtkhx_news_is_open() -> glib::ffi::gboolean;
-    fn gtkhx_news_mark_open();
     fn gtkhx_news_can_read(htlc: *mut c_void) -> glib::ffi::gboolean;
-    fn gtkhx_active_connected() -> glib::ffi::gboolean;
+    /// `gtkhx-core` — has this connection passed the post-login boundary?
+    /// The gate for anything that puts a post-login RPC on the wire; see
+    /// hxconn.h for why the socket being up is not the same question.
+    fn hx_conn_post_login_fetched(h: *const c_void) -> glib::ffi::gboolean;
 
     // URL tagging (`gtkurl.c`) + Mac-Roman→UTF-8 (`text_util.c`).
     fn gtkurl_textview_install(tv: *mut gtk::ffi::GtkTextView);
     fn gtkurl_textview_apply_tags(tv: *mut gtk::ffi::GtkTextView);
 }
 
-// Single-connection flat-news view state. Lives on the GTK main thread only.
+// Flat-news view state, one entry per connection. Main thread only.
+//
+// Was a single `Option<NewsView>`, which is the same thing while there is one
+// connection and silently the wrong thing once there are two: a second build
+// overwrote the first connection's entry, leaving its Find context holding
+// widget references into a buffer nothing pointed at any more, and sending
+// every subsequent news line to the wrong panel.
+//
+// Keyed on the connection rather than the session, so the entry points that
+// arrive with an `htlc` and no session (the two `output_news_*` exports, which
+// are called from the receive path) can find their own view.
 thread_local! {
-    static NEWS: RefCell<Option<NewsView>> = const { RefCell::new(None) };
+    static NEWS: RefCell<HashMap<ConnKey, NewsView>> = RefCell::new(HashMap::new());
+}
+
+/// Run `f` against `conn`'s news view, if it has one.
+///
+/// The borrow is held for the call. Everything reached through it is GTK on
+/// the same thread and none of it calls back into this module, so there is no
+/// re-entrancy to avoid — unlike the tab strips, whose teardown handlers do.
+fn with_news<R>(conn: ConnKey, f: impl FnOnce(&NewsView) -> R) -> Option<R> {
+    NEWS.with(|n| n.borrow().get(&conn).map(f))
 }
 
 struct NewsView {
@@ -391,12 +413,27 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
         post_btn.as_ptr(),
         reload_btn.as_ptr(),
     );
-    NEWS.with(|n| {
-        *n.borrow_mut() = Some(NewsView {
-            post_btn: post_btn.clone(),
-            reload_btn: reload_btn.clone(),
-            search: ctx.clone(),
+    // Forget this connection's view when its page goes. Without it the
+    // NewsView keeps its buttons and its Find context alive against a
+    // destroyed buffer, and news_output happily keeps appending into it.
+    {
+        let conn = dock::key_for_session(sess);
+        content_vbox.connect_destroy(move |_| {
+            NEWS.with(|n| {
+                n.borrow_mut().remove(&conn);
+            });
         });
+    }
+
+    NEWS.with(|n| {
+        n.borrow_mut().insert(
+            dock::key_for_session(sess),
+            NewsView {
+                post_btn: post_btn.clone(),
+                reload_btn: reload_btn.clone(),
+                search: ctx.clone(),
+            },
+        );
     });
 
     into_floating_ptr(content_vbox)
@@ -411,13 +448,21 @@ unsafe fn news_after_embed(sess: *mut Session) {
     if sess.is_null() {
         return;
     }
-    gtkhx_news_mark_open();
-    if gtkhx_active_connected() != glib::ffi::GFALSE {
-        NEWS.with(|n| {
-            if let Some(v) = n.borrow().as_ref() {
-                v.post_btn.set_sensitive(true);
-                v.reload_btn.set_sensitive(true);
-            }
+    // This session's connection, not the focused one: building connection
+    // two's News page while connection one happens to be up should not come
+    // up with live Post and Reload buttons.
+    //
+    // And post-login, not socket-up. `fd` is set as soon as the TCP connect
+    // lands — well before the "fully joined" boundary the server gates
+    // post-login RPCs on — so a live Reload button between those two points
+    // would put a NEWS_GETFILE on the wire mid-handshake, which stricter 1.5+
+    // servers answer with a disconnect. It is also -1 during teardown, which
+    // is non-zero. See hxconn.h; the files browser's remote provider gates the
+    // same way for the same reason.
+    if hx_conn_post_login_fetched(gtkhx_session_htlc(sess)) != 0 {
+        with_news(dock::key_for_session(sess), |v| {
+            v.post_btn.set_sensitive(true);
+            v.reload_btn.set_sensitive(true);
         });
     }
 }
@@ -432,18 +477,22 @@ unsafe fn news_reload(sess: *mut Session) {
     if sess.is_null() {
         return;
     }
-    if gtkhx_news_is_open() == glib::ffi::GFALSE {
-        return;
-    }
     let htlc = gtkhx_session_htlc(sess);
     if gtkhx_news_can_read(htlc) == glib::ffi::GFALSE {
         return;
     }
-    NEWS.with(|n| {
-        if let Some(v) = n.borrow().as_ref() {
-            v.search.text_view.buffer().set_text("");
-        }
-    });
+    // Clearing the buffer *is* the has-a-view test: no view for this
+    // connection means there is nothing to reload into, and no reason to put a
+    // NEWS_GETFILE on its wire. Replaces a process-wide "has a News panel ever
+    // been built?" latch, which answered yes on behalf of every connection as
+    // soon as one of them had one.
+    if with_news(dock::conn_key(htlc), |v| {
+        v.search.text_view.buffer().set_text("");
+    })
+    .is_none()
+    {
+        return;
+    }
     hx_get_news(htlc);
 }
 
@@ -467,16 +516,14 @@ unsafe fn news_bytes_to_utf8(news: *const c_char, len: u16) -> String {
 /// Append `text` to the news buffer (`at_start` = prepend, else append), re-tag
 /// URLs, and re-run any active Find query. Shared body of `output_news_post`
 /// (prepend) and `output_news_file` (append).
-unsafe fn news_output(news: *const c_char, len: u16, at_start: bool) {
-    if gtkhx_news_is_open() == glib::ffi::GFALSE {
-        return;
-    }
+unsafe fn news_output(htlc: *mut c_void, news: *const c_char, len: u16, at_start: bool) {
     let text = news_bytes_to_utf8(news, len);
-    NEWS.with(|n| {
-        let borrow = n.borrow();
-        let Some(v) = borrow.as_ref() else {
-            return;
-        };
+    // No open-panel gate any more: having a view for this connection *is* the
+    // gate, and it is the per-connection one. The old `gtkhx_news_is_open`
+    // asked whether a News panel had ever been built by anyone, which would
+    // have let one connection's news arrive while another's panel was the only
+    // one that existed.
+    with_news(dock::conn_key(htlc), |v| {
         let tv = &v.search.text_view;
         let buf = tv.buffer();
         let mut iter = if at_start {
@@ -549,8 +596,11 @@ pub unsafe extern "C" fn create_news_window(_toolbar_window: *mut c_void, sess: 
 #[no_mangle]
 pub unsafe extern "C" fn open_news(widget: *mut gtk::ffi::GtkWidget, data: *mut c_void) {
     create_news_window(widget as *mut c_void, data);
-    if gtkhx_active_connected() != glib::ffi::GFALSE {
-        let htlc = gtkhx_session_htlc(data as *mut Session);
+    // `data`'s connection, not the focused one — the fetch goes down this
+    // session's wire, so this session's state is what decides whether to send
+    // it. Post-login rather than socket-up: see news_after_embed.
+    let htlc = gtkhx_session_htlc(data as *mut Session);
+    if hx_conn_post_login_fetched(htlc) != 0 {
         hx_get_news(htlc);
     }
 }
@@ -571,8 +621,8 @@ pub unsafe extern "C" fn reload_news(_widget: *mut gtk::ffi::GtkWidget, data: *m
 /// # Safety
 /// `news` is NULL or valid for `len` bytes; GTK main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn output_news_post(_htlc: *mut c_void, news: *mut c_char, len: u16) {
-    news_output(news, len, /*at_start=*/ true);
+pub unsafe extern "C" fn output_news_post(htlc: *mut c_void, news: *mut c_char, len: u16) {
+    news_output(htlc, news, len, /*at_start=*/ true);
 }
 
 /// `void output_news_file(struct htlc_conn *htlc, char *news, guint16 len)` —
@@ -581,6 +631,6 @@ pub unsafe extern "C" fn output_news_post(_htlc: *mut c_void, news: *mut c_char,
 /// # Safety
 /// `news` is NULL or valid for `len` bytes; GTK main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn output_news_file(_htlc: *mut c_void, news: *mut c_char, len: u16) {
-    news_output(news, len, /*at_start=*/ false);
+pub unsafe extern "C" fn output_news_file(htlc: *mut c_void, news: *mut c_char, len: u16) {
+    news_output(htlc, news, len, /*at_start=*/ false);
 }
