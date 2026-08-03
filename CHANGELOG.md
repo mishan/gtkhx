@@ -19,6 +19,8 @@
 - Hotline Protocol
   - Fixed old bug with resumable file transfers
   - Ensure that multi-byte names > 32 bytes get truncated at a character boundary
+- Multiple Connections
+  - Users may now be connected to more than one server at a time, and switch between connections with tabs
 - Sound
   - Replaced libcanberra with rodio for notification sound playback
 - User Interface

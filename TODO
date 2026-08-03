@@ -11,10 +11,6 @@ Docs:
 Tracker:
 - Ship with some more built in trackers configured
 
-Code Modernization:
-- Better modules with more code reuse
-- Define string / resource consts instead of repeating them (or having them littered throughout the code)
-
 Plugins:
 - New plugin ABI using GIRepository
 
