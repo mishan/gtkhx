@@ -463,7 +463,7 @@ gtask_new (session *sess, guint32 trans, struct htxf_conn *htxf)
     return gtsk;
 }
 
-static void
+void
 gtask_delete (session *sess, struct gtask *gtsk)
 {
     if (sess->gtklist) {

@@ -2088,17 +2088,18 @@ void
 gtkhx_chat_after_embed (session *sess)
 {
     struct gtkhx_chat *gchat;
-    HxPanel *panel;
 
     g_return_if_fail (sess != NULL);
 
-    /* Carry the session on the dock panel for the panel-level handlers
-     * (the chat_tabs close dispatcher reads it back). The panel is
-     * available from the registry once dock_bridge embedded us. */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_CHAT);
-    if (panel != NULL) {
-        g_object_set_data (G_OBJECT (panel), "sess", sess);
-    }
+    /* The Chat panel used to carry a "sess" qdata here, for panel-level
+     * handlers said to read it back. Nothing ever did — one write, no reads
+     * anywhere in the tree — and the panel is one process-wide object while
+     * the pointer was per connection, so the last connection to embed won and
+     * the entry outlived whatever it named. Now that closing a tab frees the
+     * session it was a dangling pointer waiting to be dereferenced by the
+     * first handler that believed the comment. Anything that does need the
+     * session from a panel should take the connection's serial and ask
+     * hx_session_with_serial. */
 
     hx_panel_mark_constructed (HX_PANEL_ID_CHAT);
 

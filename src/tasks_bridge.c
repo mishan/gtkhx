@@ -27,6 +27,13 @@ hx_sess_from_htlc (struct htlc_conn *htlc)
 GHashTable *
 hx_session_tasks (session *sess)
 {
+    /* NULL for a session being torn down, and callers hand the result
+     * straight to g_hash_table_lookup / _remove — which is why the check is
+     * here rather than at each of them. Matches chat_with_cid, which returns
+     * NULL once the chat registry has been cleared for the same reason. */
+    if (sess == NULL || sess->tasks == NULL) {
+        return NULL;
+    }
     return sess->tasks;
 }
 

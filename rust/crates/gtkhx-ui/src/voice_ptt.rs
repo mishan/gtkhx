@@ -89,7 +89,13 @@ fn voice_holder() -> Option<(*mut c_void, u32)> {
     // says who *claimed* the microphone, the runtime says which room it is
     // actually in, and a mute sent for the wrong room would be silently
     // ignored by the server.
-    session_in_voice(held.sess).map(|cid| (held.sess, cid))
+    // NULL when the token outlived the connection holding it — a close that
+    // got in ahead of the release. Nobody is in voice, so the key isn't ours.
+    let sess = held.session();
+    if sess.is_null() {
+        return None;
+    }
+    session_in_voice(sess).map(|cid| (sess, cid))
 }
 
 /// The live PTT bind from prefs, or None when disabled / unset. Returns

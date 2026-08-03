@@ -561,7 +561,13 @@ hx_chrome_refresh (void)
         changetitlesdisconnected (sess);
     }
     banner_show_active ();
-    gtkhx_tray_set_connected (hx_conn_logged_in (sess->htlc));
+    /* Whatever the signal handler last decided for *this* connection, which
+     * is what the tray is showing for the one in front. Reading a connection
+     * flag instead gets it wrong in both directions: logged-in leaves a tab
+     * that is still handshaking looking disconnected, and having-a-socket
+     * lights the tray from the moment a connect is spawned, well before the
+     * handler would. The recorded status is the only thing that matches. */
+    gtkhx_tray_set_connected (sess->last_status >= 1);
     set_disconnect_btn (sess, hx_conn_fd (sess->htlc) ? 1 : 0);
     setbtns (sess, hx_conn_logged_in (sess->htlc) ? 1 : 0);
 }

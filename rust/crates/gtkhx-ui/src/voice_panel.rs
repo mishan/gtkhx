@@ -33,6 +33,7 @@ use libadwaita as adw;
 // Re-exports gtk4's prelude, so this is the only one needed.
 use libadwaita::prelude::*;
 
+use crate::dock;
 use crate::ffi::gtkhx_dialog_add_close_shortcuts;
 use crate::tr::{tr, tr1};
 use crate::voice_arbiter;
@@ -117,6 +118,9 @@ extern "C" {
     fn hx_session_voice_runtime(sess: *mut c_void) -> *mut c_void;
     fn hx_session_set_voice_runtime(sess: *mut c_void, rt: *mut c_void);
     fn hx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// `session_registry.c` — the live session on this connection, or NULL
+    /// once it has been closed.
+    fn hx_session_with_serial(serial: u16) -> *mut c_void;
     /// gtkhx-core — the host this connection was opened to (may be empty).
     fn hx_conn_serverhost(htlc: *mut c_void) -> *const c_char;
     fn hx_htlc_voice_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
@@ -135,8 +139,12 @@ extern "C" {
 // ---------------------------------------------------------------------
 
 struct PanelInner {
-    /// Borrowed session pointer (stable for the session lifetime).
-    sess: *mut c_void,
+    /// The connection this panel belongs to, by serial. Not a `session *`:
+    /// the panel is reachable from a dialog answered after its tab was
+    /// closed, and closing a tab frees the session. A serial can't dangle,
+    /// and [`PanelInner::sess`] resolves it — to NULL once the connection has
+    /// gone, which every use below already treats as "do nothing".
+    conn: dock::ConnKey,
     cid: u32,
     join_btn: gtk::ToggleButton,
     mute_btn: gtk::ToggleButton,
@@ -315,18 +323,19 @@ unsafe extern "C" fn state_changed_cb(user_data: *mut c_void, state: c_int) {
     if !rt.is_null() {
         has_active = gtkhx_voice_runtime_active_cid(rt, &mut active_cid);
     }
+    let conn = dock::key_for_session(sess);
 
     for_each_panel(|_w, inner| {
         // This session's panels only: `cid` is unique within a connection, so
         // without the session test a room id shared with another server would
         // have one connection's state change retitle the other's buttons.
-        let is_active = has_active != 0 && inner.cid == active_cid && inner.sess == sess;
+        let is_active = has_active != 0 && inner.cid == active_cid && inner.conn == conn;
         if is_active {
             inner.joined.set(joined_now);
         }
         // Clear stale muted on a now-inactive / left panel so a later Join
         // doesn't inherit a stale muted icon.
-        if inner.sess == sess && (!joined_now || !is_active) {
+        if inner.conn == conn && (!joined_now || !is_active) {
             inner.muted.set(false);
             inner.joined.set(false);
         }
@@ -368,8 +377,9 @@ unsafe extern "C" fn mute_changed_cb(user_data: *mut c_void, muted: c_int) {
     if gtkhx_voice_runtime_active_cid(rt, &mut active_cid) == 0 {
         return;
     }
+    let conn = dock::key_for_session(sess);
     for_each_panel(|_w, inner| {
-        if inner.cid == active_cid && inner.sess == sess {
+        if inner.cid == active_cid && inner.conn == conn {
             inner.muted.set(muted != 0);
             update_button_labels(inner);
         }
@@ -399,11 +409,18 @@ unsafe extern "C" fn error_cb(_user_data: *mut c_void, text: *const c_char) {
 // Button label / state application.
 // ---------------------------------------------------------------------
 
+impl PanelInner {
+    /// The session this panel belongs to, or NULL once its connection has
+    /// been closed.
+    fn sess(&self) -> *mut c_void {
+        unsafe { hx_session_with_serial(self.conn) }
+    }
+}
+
 fn update_button_labels(inner: &PanelInner) {
     let joined = inner.joined.get();
     let muted = inner.muted.get();
-    let access_ok =
-        !inner.sess.is_null() && unsafe { hx_htlc_voice_access(hx_session_htlc(inner.sess)) != 0 };
+    let access_ok = unsafe { hx_htlc_voice_access(hx_session_htlc(inner.sess())) != 0 };
 
     // Join ↔ Leave (icon-only; the tooltip carries the words).
     inner.join_btn.set_icon_name(if joined {
@@ -474,7 +491,7 @@ fn on_join_toggled(inner: &Rc<PanelInner>) {
     if inner.suppress.get() {
         return;
     }
-    let sess = inner.sess;
+    let sess = inner.sess();
     if sess.is_null() {
         return;
     }
@@ -508,11 +525,12 @@ fn confirm_preempt(inner: &Rc<PanelInner>, held: voice_arbiter::Holder) {
     // another connection it is the server. On the *same* connection, naming
     // the server would tell the user something they can already see, so say
     // what is true instead: the other chat is on this one.
-    let body = if held.sess == inner.sess {
+    let held_sess = held.session();
+    let body = if held.conn == inner.conn {
         tr("Voice is already in use in another chat on this connection.")
     } else {
         tr1("Voice is already in use on %s.", &unsafe {
-            connection_label(held.sess)
+            connection_label(held_sess)
         })
     };
     let dialog = adw::AlertDialog::new(Some(&tr("Leave the other voice chat?")), Some(&body));
@@ -540,9 +558,9 @@ fn confirm_preempt(inner: &Rc<PanelInner>, held: voice_arbiter::Holder) {
         // or disconnected. Acting on the stale answer would leave the old room
         // streaming while the token moved on, which is the one thing the
         // arbiter exists to prevent.
-        match voice_arbiter::acquire(inner.sess, inner.cid) {
+        match voice_arbiter::acquire(inner.sess(), inner.cid) {
             voice_arbiter::Acquire::Free => {}
-            voice_arbiter::Acquire::Preempts(now) => leave_holder(now, inner.sess),
+            voice_arbiter::Acquire::Preempts(now) => leave_holder(now, inner.conn),
         }
 
         // Re-drive the toggle rather than calling join_now directly, so the
@@ -560,6 +578,13 @@ fn confirm_preempt(inner: &Rc<PanelInner>, held: voice_arbiter::Holder) {
 /// interrupted. Falls back to a generic phrase rather than an empty string, so
 /// the sentence still reads when a connection has no host yet.
 unsafe fn connection_label(sess: *mut c_void) -> String {
+    // NULL when the token outlived its connection — the holder's tab was
+    // closed with the token still out. There is no name left to give, and
+    // `hx_conn_serverhost` dereferences unconditionally, so this guard is
+    // load-bearing rather than defensive.
+    if sess.is_null() {
+        return tr("another connection");
+    }
     let host = crate::cstr(hx_conn_serverhost(hx_session_htlc(sess)));
     if host.is_empty() {
         tr("another connection")
@@ -583,19 +608,25 @@ unsafe fn connection_label(sess: *mut c_void) -> String {
 /// first would be a byte sequence no server has seen from this client, which
 /// is not a thing to change for tidiness. So just drop the claim and let the
 /// join carry it.
-fn leave_holder(held: voice_arbiter::Holder, joiner: *mut c_void) {
-    if held.sess != joiner {
-        unsafe {
-            let rt = hx_session_voice_runtime(held.sess);
-            if !rt.is_null() {
-                gtkhx_voice_runtime_leave(rt, held.cid);
+fn leave_holder(held: voice_arbiter::Holder, joiner: dock::ConnKey) {
+    let held_sess = held.session();
+    if held.conn != joiner {
+        // NULL when that connection was closed while its token was still
+        // held — there is no runtime left to leave, and releasing below is
+        // all that is wanted.
+        if !held_sess.is_null() {
+            unsafe {
+                let rt = hx_session_voice_runtime(held_sess);
+                if !rt.is_null() {
+                    gtkhx_voice_runtime_leave(rt, held.cid);
+                }
             }
         }
         // That connection's own panel is updated by its runtime's
         // state-changed callback, which routes by connection — so there is
         // nothing to reach across and set here.
     }
-    voice_arbiter::release(held.sess, held.cid);
+    voice_arbiter::release_conn(held.conn, held.cid);
 }
 
 fn revert_toggle(inner: &PanelInner) {
@@ -607,7 +638,7 @@ fn revert_toggle(inner: &PanelInner) {
 
 /// Leave the room this panel is in.
 fn leave_now(inner: &PanelInner) {
-    let sess = inner.sess;
+    let sess = inner.sess();
     let cid = inner.cid;
     // Runtime-driven LEAVE: the state machine's LeaveRequested arm emits
     // the 601 wire frame through send_wire_frame_cb. Defensive NULL guard.
@@ -615,12 +646,12 @@ fn leave_now(inner: &PanelInner) {
     if !rt.is_null() {
         unsafe { gtkhx_voice_runtime_leave(rt, cid) };
     }
-    voice_arbiter::release(sess, cid);
+    voice_arbiter::release_conn(inner.conn, cid);
 }
 
 /// Join the room this panel is in. The arbiter is already satisfied.
 fn join_now(inner: &PanelInner) {
-    let sess = inner.sess;
+    let sess = inner.sess();
     let cid = inner.cid;
     let htlc = unsafe { hx_session_htlc(sess) };
 
@@ -669,7 +700,7 @@ fn on_mute_toggled(inner: &PanelInner) {
     if inner.suppress.get() {
         return;
     }
-    let sess = inner.sess;
+    let sess = inner.sess();
     if sess.is_null() {
         return;
     }
@@ -700,10 +731,10 @@ fn autojoin_unmute(w: &Weak<PanelInner>) -> glib::ControlFlow {
         // NOT remove the source) so destroy won't later .remove() a
         // GLib-recycled id.
         *inner.autojoin_unmute.borrow_mut() = None;
-        if !inner.sess.is_null() {
-            let rt = unsafe { hx_session_voice_runtime(inner.sess) };
+        if !inner.sess().is_null() {
+            let rt = unsafe { hx_session_voice_runtime(inner.sess()) };
             if !rt.is_null() {
-                let htlc = unsafe { hx_session_htlc(inner.sess) };
+                let htlc = unsafe { hx_session_htlc(inner.sess()) };
                 unsafe {
                     hx_send_voice_mute(htlc, inner.cid, glib::ffi::GFALSE);
                     gtkhx_voice_runtime_mute(rt, 0);
@@ -723,11 +754,11 @@ fn autojoin_poll(w: &Weak<PanelInner>) -> glib::ControlFlow {
         *inner.autojoin_poll.borrow_mut() = None;
         return glib::ControlFlow::Break;
     }
-    if inner.sess.is_null() {
+    if inner.sess().is_null() {
         return glib::ControlFlow::Continue;
     }
     // Hold until the server echoed voice support + the Join button is live.
-    let htlc = unsafe { hx_session_htlc(inner.sess) };
+    let htlc = unsafe { hx_session_htlc(inner.sess()) };
     if unsafe { hx_htlc_voice_access(htlc) == 0 } || !inner.join_btn.is_sensitive() {
         return glib::ControlFlow::Continue;
     }
@@ -774,7 +805,7 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
     panel.append(&mute_btn);
 
     let inner = Rc::new(PanelInner {
-        sess,
+        conn: dock::key_for_session(sess),
         cid,
         join_btn: join_btn.clone(),
         mute_btn: mute_btn.clone(),
@@ -888,8 +919,9 @@ pub unsafe extern "C" fn voice_panel_refresh_all_chats(sess: *mut c_void) {
     if sess.is_null() {
         return;
     }
+    let conn = dock::key_for_session(sess);
     for_each_panel(|w, inner| {
-        if inner.sess == sess {
+        if inner.conn == conn {
             do_refresh(w, inner, sess);
         }
     });

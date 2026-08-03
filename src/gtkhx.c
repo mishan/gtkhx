@@ -1139,7 +1139,19 @@ hx_debug_second_session (void)
     /* With `closesecond` as well, close it straight back — the close path is
      * otherwise only reachable by clicking, which a headless run can't do. */
     if (debug_category_enabled ("closesecond")) {
+        guint16 serial = hx_conn_serial (sess->htlc);
+
         gtkhx_conn_tabs_close (sess);
+        /* `sess` is freed from here on — don't read it. The serial is all that
+         * still names the connection, and it has to resolve to nothing now: a
+         * serial that still finds a session means the close didn't remove it,
+         * and everything that holds a serial across the main loop would be
+         * handed a pointer into freed memory. Fatal rather than a complaint,
+         * because this hook exists to be run under a memory checker and a
+         * warning in the log is what gets scrolled past. */
+        if (hx_session_with_serial (serial) != NULL) {
+            g_error ("closed connection %u is still in the registry", serial);
+        }
         debug_log ("secondconn", "closed it again; %u session(s) left",
                    hx_session_count ());
     }

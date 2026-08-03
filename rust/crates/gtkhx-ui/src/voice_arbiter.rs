@@ -31,15 +31,35 @@
 use std::cell::RefCell;
 use std::ffi::c_void;
 
+use crate::dock::{self, ConnKey};
+
+extern "C" {
+    /// `session_registry.c` — the live session on this connection, or NULL if
+    /// it has been closed.
+    fn hx_session_with_serial(serial: u16) -> *mut c_void;
+}
+
 /// Who holds the microphone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Holder {
-    /// The session whose runtime is joined. Raw and unowned — see the note on
-    /// [`acquire`] about why that is safe here and what would change it.
-    pub sess: *mut c_void,
+    /// The connection whose runtime is joined, by serial rather than by
+    /// session pointer. The token outlives any particular turn of the main
+    /// loop — that is the whole point of it — and a session does not: closing
+    /// a tab frees one. A serial names a connection without being able to
+    /// dangle, and [`Holder::session`] resolves it when it is actually needed.
+    pub conn: ConnKey,
     /// The room it is joined to. Only unique within the connection, which is
     /// why the pair is the token rather than the cid alone.
     pub cid: u32,
+}
+
+impl Holder {
+    /// The session holding voice, or NULL if that connection has since been
+    /// closed. Callers must check — this is the point at which a stale token
+    /// becomes visible.
+    pub fn session(&self) -> *mut c_void {
+        unsafe { hx_session_with_serial(self.conn) }
+    }
 }
 
 thread_local! {
@@ -66,14 +86,14 @@ pub enum Acquire {
 /// the panel can re-drive a join on reconnect, and making that ask the user
 /// whether to leave the room they are in would be nonsense.
 ///
-/// The session pointer is raw and unowned, and that is safe for the same
-/// reason it is safe in the connection tab strip: sessions are immortal, since
-/// `session_registry.c` has no remove. What it *does* need is for a session
-/// that stops holding voice to say so — [`release`] — and every path that
-/// tears a runtime down calls it.
+/// Every path that tears a runtime down calls [`release`] or
+/// [`release_session`], so a connection that stops holding voice says so. A
+/// token that outlives its connection anyway — a close that got there first —
+/// resolves to a NULL session rather than a stale one.
 pub fn acquire(sess: *mut c_void, cid: u32) -> Acquire {
+    let conn = dock::key_for_session(sess);
     match holder() {
-        Some(h) if h.sess == sess && h.cid == cid => Acquire::Free,
+        Some(h) if h.conn == conn && h.cid == cid => Acquire::Free,
         Some(h) => Acquire::Preempts(h),
         None => Acquire::Free,
     }
@@ -83,7 +103,8 @@ pub fn acquire(sess: *mut c_void, cid: u32) -> Acquire {
 /// out, so a failed join doesn't leave the token pointing at a room nobody is
 /// in.
 pub fn take(sess: *mut c_void, cid: u32) {
-    HOLDER.with(|h| *h.borrow_mut() = Some(Holder { sess, cid }));
+    let conn = dock::key_for_session(sess);
+    HOLDER.with(|h| *h.borrow_mut() = Some(Holder { conn, cid }));
     show_holder();
 }
 
@@ -94,9 +115,19 @@ pub fn take(sess: *mut c_void, cid: u32) {
 /// connection can genuinely be in — the panels live in several toplevels and
 /// nothing stops a user acting on two of them.
 pub fn release(sess: *mut c_void, cid: u32) {
+    release_conn(dock::key_for_session(sess), cid);
+}
+
+/// [`release`] for a caller that has the connection rather than the session.
+///
+/// The form to use when giving up a token that may have outlived its
+/// connection: resolving a closed connection back to a session yields NULL,
+/// and NULL resolves *forward* to serial 0, which matches no token — so
+/// releasing through the session would silently fail to release anything.
+pub fn release_conn(conn: ConnKey, cid: u32) {
     HOLDER.with(|h| {
         let mut slot = h.borrow_mut();
-        if *slot == Some(Holder { sess, cid }) {
+        if *slot == Some(Holder { conn, cid }) {
             *slot = None;
         }
     });
@@ -110,9 +141,13 @@ pub fn release(sess: *mut c_void, cid: u32) {
 /// on the session, because this runs for connections that never had voice and
 /// a disconnect on server B must not release server A's claim.
 pub fn release_session(sess: *mut c_void) {
+    let conn = dock::key_for_session(sess);
+    if conn == 0 {
+        return;
+    }
     HOLDER.with(|h| {
         let mut slot = h.borrow_mut();
-        if slot.map(|held| held.sess) == Some(sess) {
+        if slot.map(|held| held.conn) == Some(conn) {
             *slot = None;
         }
     });
@@ -131,7 +166,7 @@ pub fn release_session(sess: *mut c_void) {
 /// have disabled it for the crate's *display-backed* test too, which is the
 /// one place it could be covered.
 fn show_holder() {
-    crate::conn_tabs::set_voice_indicator(holder().map(|h| crate::dock::key_for_session(h.sess)));
+    crate::conn_tabs::set_voice_indicator(holder().map(|h| h.conn));
 }
 
 /// Who holds it, if anyone.
@@ -159,7 +194,7 @@ pub unsafe extern "C" fn gtkhx_voice_arbiter_release(sess: *mut c_void) {
 /// for the C chrome that will want it.
 #[no_mangle]
 pub extern "C" fn gtkhx_voice_arbiter_holder() -> *mut c_void {
-    holder().map_or(std::ptr::null_mut(), |h| h.sess)
+    holder().map_or(std::ptr::null_mut(), |h| h.session())
 }
 
 #[cfg(test)]
@@ -179,7 +214,11 @@ mod tests {
     /// own session here, the same arrangement the tab-strip test uses. Leaked
     /// on purpose; nothing frees a connection.
     fn new_session() -> *mut c_void {
-        unsafe { hx_conn_new() }
+        let sess = unsafe { hx_conn_new() };
+        // The token holds a serial, so anything that resolves it back to a
+        // session goes through the registry.
+        crate::options_test_stubs::register_session(sess);
+        sess
     }
 
     /// The token is free, taken, preempted and released — including the three
@@ -206,12 +245,18 @@ mod tests {
         );
         assert_eq!(
             acquire(a, 7),
-            Acquire::Preempts(Holder { sess: a, cid: 0 }),
+            Acquire::Preempts(Holder {
+                conn: dock::key_for_session(a),
+                cid: 0
+            }),
             "another room on the same connection went unnoticed"
         );
         assert_eq!(
             acquire(b, 0),
-            Acquire::Preempts(Holder { sess: a, cid: 0 }),
+            Acquire::Preempts(Holder {
+                conn: dock::key_for_session(a),
+                cid: 0
+            }),
             "the same room id on another connection went unnoticed"
         );
 
@@ -223,7 +268,7 @@ mod tests {
         // Nor a release from a connection that doesn't hold it — disconnecting
         // server B must not drop server A's claim.
         release_session(b);
-        assert_eq!(holder().map(|h| h.sess), Some(a));
+        assert_eq!(holder().map(|h| h.session()), Some(a));
 
         release(a, 0);
         assert_eq!(holder(), None);

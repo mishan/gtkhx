@@ -201,16 +201,54 @@ pub unsafe extern "C" fn hx_session_set_active(_sess: *mut c_void) -> glib::ffi:
     SET_ACTIVE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     glib::ffi::GTRUE
 }
-/// Counted for the same reason as its neighbour above: tearing a connection
-/// down has no observable effect inside a test binary — the session it is
-/// handed is a bare connection with no registry behind it — so whether the
-/// close button reaches it at all is the only thing a test can see, and "the
+/// A stand-in session registry.
+///
+/// Not inert, unlike its neighbours, because the thing under test *is* the
+/// registry's behaviour: the tab strip stopped keeping `session *` pointers
+/// precisely so that a closed connection resolves to NULL instead of to freed
+/// memory, and a stub that always answered would hide exactly the bug the
+/// change exists to prevent. So this models the real contract — a session is
+/// findable by its connection's serial until it is closed, and not after.
+///
+/// Tests register what they create through [`register_session`].
+pub fn registry() -> &'static std::sync::Mutex<Vec<(u16, usize)>> {
+    static REG: std::sync::OnceLock<std::sync::Mutex<Vec<(u16, usize)>>> =
+        std::sync::OnceLock::new();
+    REG.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Put a session in the stand-in registry, keyed on its connection's serial —
+/// read through the real accessor, so the test can't drift from production's
+/// idea of which connection is which.
+pub fn register_session(sess: *mut c_void) {
+    let serial = crate::dock::key_for_session(sess);
+    registry().lock().unwrap().push((serial, sess as usize));
+}
+
+/// Counted for the same reason `hx_session_set_active` is: tearing a
+/// connection down has no other observable effect in a test binary, and "the
 /// close button did nothing" is exactly the bug this once had.
 pub static SESSION_CLOSE_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 #[no_mangle]
-pub unsafe extern "C" fn hx_session_close(_sess: *mut c_void) {
+pub unsafe extern "C" fn hx_session_close(sess: *mut c_void) {
     SESSION_CLOSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // What production does: the session leaves the registry, so from here on
+    // its serial resolves to nothing.
+    registry()
+        .lock()
+        .unwrap()
+        .retain(|(_, p)| *p != sess as usize);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hx_session_with_serial(serial: u16) -> *mut c_void {
+    registry()
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(s, _)| *s == serial)
+        .map_or(std::ptr::null_mut(), |(_, p)| *p as *mut c_void)
 }
 /// The focus-following chrome (status bar, titles, tray, banner) — all of it C
 /// or behind C state a test binary doesn't link. Inert.

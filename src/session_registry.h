@@ -68,7 +68,7 @@ session *hx_session_open (const char *title);
  * names the panel layer. The caller moves the focus off it first — the tab
  * strip does, by selecting a neighbour before closing.
  *
- * Does not free the session; see hx_session_remove. */
+ * Frees the session on the way out, through hx_session_remove. */
 void hx_session_close (session *sess);
 
 /* The session the user is looking at, or NULL before the first one exists.
@@ -78,6 +78,18 @@ void hx_session_close (session *sess);
  * *still* safe in practice because startup creates a session before any UI
  * can run, but new code should not rely on it. */
 session *hx_active_session (void);
+
+/* The live session on the connection with this serial, or NULL when there is
+ * none — because it was closed, or because the serial was never a connection's.
+ *
+ * The safe way to *keep* a reference to a session. A serial is a plain number
+ * that outlives the thing it names without becoming a dangling pointer, so
+ * anything holding on across a turn of the main loop — the tab strip's index,
+ * the voice token, a dialog waiting on an answer — stores one of these and
+ * asks here, rather than storing a `session *` that nothing can invalidate.
+ *
+ * Serial 0 means "no connection" and always answers NULL. */
+session *hx_session_with_serial (guint16 serial);
 
 /* Move the focus. FALSE if `sess` isn't in the collection, which leaves the
  * focus alone — a failed switch should not blank the UI. */
@@ -94,11 +106,11 @@ session *hx_session_at (guint i);
 /* Where `sess` sits, or HX_SESSION_NOT_FOUND. */
 guint hx_session_index (session *sess);
 
-/* Drop `sess` from the collection. FALSE if it wasn't in it.
+/* Drop `sess` from the collection and free it. FALSE if it wasn't in it.
  *
- * Does *not* free the session: raw `session *` pointers are held by things
- * with no way to learn one has gone (the tab strip's index, the voice token),
- * all written against sessions being immortal. See the note on the definition.
+ * `sess` is invalid on return. Nothing should be holding a pointer to it:
+ * long-lived references are serials resolved through hx_session_with_serial,
+ * which answers NULL from here on.
  *
  * The caller is expected to have moved the focus off it first, and to have
  * disconnected and torn down its panels — hx_session_close does all of that. */

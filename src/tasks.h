@@ -3,6 +3,11 @@
 
 extern void create_tasks (session *sess);
 extern void output_xfer_queue (session *sess, struct htxf_conn *htxf);
+/* Drop one task row: unparent its widget and unlink it from sess->gtask_list.
+ * The list is hand-rolled and separate from the sess->tasks hash table, so
+ * destroying that table does not free these — hx_session_free walks the list
+ * with this. */
+extern void gtask_delete (session *sess, struct gtask *gtsk);
 extern void gtask_delete_tsk (session *sess, guint32 trans);
 extern void gtask_delete_htxf (session *sess, struct htxf_conn *htxf);
 /* Sever the gtask's pointer to htxf without removing the UI row.

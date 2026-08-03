@@ -53,6 +53,7 @@
 #include "tracker.h"
 #include "network.h"
 #include "hxconn.h"
+#include "session_registry.h"
 #include "banner.h"
 #include "debug.h"
 #include "xfers.h"
@@ -76,8 +77,6 @@
  * (hx_conn_serverhost / _serverport), the server's advertised name on the
  * session (hx_session_label), and the login state on the connection
  * (hx_conn_logged_in). */
-guint16 server_port;
-
 /* Cancelling an in-flight connect is the orchestrator's job, not ours. There
  * used to be a `current_cancel` GCancellable here, set by the legacy
  * GSocketClient connect path; that path was deleted and nothing has assigned
@@ -541,8 +540,6 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
             g_clear_pointer (&sess->server_name, g_free);
         }
     }
-
-    server_port = port;
 
     hx_conn_set_chat_history_last_msgid (htlc, 0);
     hx_conn_set_serverhost (htlc, serverstr);
@@ -1059,8 +1056,22 @@ tracker_fetch_cleanup (void)
 static gboolean
 tracker_fetch_drain (gpointer user_data)
 {
-    session *sess = user_data;
+    /* The connection that asked, by serial rather than by pointer: the walk
+     * takes seconds and the user can close its tab mid-way, which frees the
+     * session. A serial resolves to NULL from that moment instead of to freed
+     * memory, and there is nobody left to deliver results to — so stop. */
+    session *sess
+        = hx_session_with_serial ((guint16)GPOINTER_TO_UINT (user_data));
     HxnetTrackerEvent ev;
+
+    if (sess == NULL) {
+        /* Drop the id before closing the handle: this source is removing
+         * itself by returning below, so tracker_kill_threads would be asking
+         * GLib to remove an id it is already retiring. */
+        tracker_drain_source_id = 0;
+        tracker_fetch_cleanup ();
+        return G_SOURCE_REMOVE;
+    }
 
     for (;;) {
         /* tracker_fetch_dispatch_event emits view signals, and a
@@ -1135,7 +1146,9 @@ hx_tracker_list_async (session *sess)
     tracker_batch_server_i = 1;
     /* Drain on the main loop. 50 ms keeps the list lively without
      * busy-spinning; each tick re-emits whatever the walk produced. */
-    tracker_drain_source_id = g_timeout_add (50, tracker_fetch_drain, sess);
+    tracker_drain_source_id
+        = g_timeout_add (50, tracker_fetch_drain,
+                         GUINT_TO_POINTER ((guint)hx_conn_serial (sess->htlc)));
 }
 
 void
