@@ -57,6 +57,7 @@
 #include "hx_split.h"
 #include "dock_layout.h"
 #include "panel_registry.h"
+#include "conn_tabs.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
@@ -415,6 +416,36 @@ on_action_reset_layout (GSimpleAction *action, GVariant *param,
  * helper directly; for the first click on Files (when the panel
  * doesn't exist yet) the panel factory runs at toolbar build
  * time, so the registry lookup always succeeds. */
+
+/* The two News buttons act on the connection the user is *looking at*, which
+ * is why neither captures a session.
+ *
+ * They used to be handed the session create_toolbar_window was built with,
+ * and that was invisible while there was one of them. It stopped being
+ * invisible when the panels grew per-connection content pages: the entry
+ * points now resolve a page name from the session they are given and *show*
+ * it, so a stale session doesn't merely act on the wrong connection — it
+ * yanks the panel back to that connection's news while the connection tab
+ * still reads the other one.
+ *
+ * The remaining captured-session callbacks in this file — connect,
+ * disconnect, broadcast, the reconnect banner, push-to-talk — have the same
+ * staleness and not the same consequence, since none of them touches a page.
+ * They are listed in docs/multi-connection.md under the app-global chrome
+ * that still has to be made per-connection. */
+static void
+on_news_clicked (GtkButton *btn, gpointer data)
+{
+    (void)data;
+    open_news (GTK_WIDGET (btn), hx_active_session ());
+}
+
+static void
+on_news15_clicked (GtkButton *btn, gpointer data)
+{
+    (void)data;
+    open_news_browser (GTK_WIDGET (btn), hx_active_session ());
+}
 
 /* Ctrl+U — clear whatever text input has focus, anywhere in the app.
  *
@@ -951,8 +982,9 @@ create_toolbar_window (session *sess)
      * points keep their own factories which build-or-raise AND
      * kick off a server fetch when connected — that's the bit
      * the bare show-panel helper can't do. */
-    news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
-                                   _ ("News"), G_CALLBACK (open_news), sess);
+    news_btn
+        = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
+                              _ ("News"), G_CALLBACK (on_news_clicked), NULL);
     gtk_box_append (GTK_BOX (hbox), news_btn);
     /* News (1.5+): same shape — the entry point raises the
      * existing panel via the registry AND triggers a NEWSDIRLIST
@@ -960,7 +992,7 @@ create_toolbar_window (session *sess)
      * instead of having to hit Refresh after the first build. */
     news15_btn = make_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/news_folder.png", _ ("News (1.5+)"),
-        G_CALLBACK (open_news_browser), sess);
+        G_CALLBACK (on_news15_clicked), NULL);
     gtk_box_append (GTK_BOX (hbox), news15_btn);
     files_btn = make_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/files.png", _ ("Files"),
@@ -1182,6 +1214,17 @@ create_toolbar_window (session *sess)
         gtk_box_append (GTK_BOX (toprow), banner_row);
         adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), toprow);
     }
+
+    /* The connection tab strip, directly above the dock it switches. Last of
+     * the top bars so it sits closest to the panels whose content it swaps,
+     * which is also where a browser puts its tabs.
+     *
+     * Invisible until there are two connections — the strip autohides — so
+     * this adds no chrome to the single-connection window it ships as today.
+     * Transfer none: gtkhx-ui keeps the owning reference. */
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
+                                  gtkhx_conn_tabs_new ());
+
     adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view),
                                   toolbar_dock);
     adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view),

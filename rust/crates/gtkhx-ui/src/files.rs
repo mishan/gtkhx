@@ -15,9 +15,6 @@
 
 use crate::dock;
 
-/// Stable panel id — matches `HX_PANEL_ID_FILES` (`panel_registry.h`).
-const HX_ID_FILES: &str = "files";
-
 extern "C" {
     /// Build the whole browser + two-panel content for `sess` (stashing it in
     /// the C `the_browser` global) and return the content box, or NULL when
@@ -40,20 +37,22 @@ pub unsafe extern "C" fn open_files_browser(sess: *mut std::ffi::c_void) {
     crate::ensure_gtk_init();
 
     // Re-open of an existing panel → re-attach + raise, don't rebuild.
-    if dock::raise_if_open(HX_ID_FILES) {
+    let dock::Open::Build(page) = dock::open(dock::ID_FILES, sess) else {
         return;
-    }
+    };
 
-    // NULL means nothing to embed: either the browser exists without its
-    // panel being registered (should-never-happen, since raise_if_open above
-    // covers the normal case), or `sess` was NULL and C refused.
+    // NULL means `sess` was NULL and C refused. The other historical cause —
+    // a browser already existing — is now caught a step earlier by
+    // dock::open's singleton claim, which is where every role handles it the
+    // same way instead of each one improvising.
     let content = gtkhx_files_build_content(sess);
     if content.is_null() {
         return;
     }
 
-    dock::embed(
-        HX_ID_FILES,
+    dock::place(
+        dock::ID_FILES,
+        &page,
         dock::KIND_CENTER,
         dock::AREA_CENTER,
         "Files",

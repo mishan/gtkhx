@@ -32,9 +32,6 @@ use libadwaita as adw;
 use crate::dock;
 use crate::tr::tr;
 
-/// Stable panel id — matches `HX_PANEL_ID_NEWS15` (`panel_registry.h`).
-const HX_ID_NEWS15: &str = "news15";
-
 /// Node kinds (mirror the `NB_KIND_*` enum in the hxmodel::news module).
 const NB_KIND_FOLDER: i32 = 1;
 const NB_KIND_CATEGORY: i32 = 2;
@@ -1020,7 +1017,7 @@ fn build_content() -> gtk::Widget {
 /// Wire the one panel-level hook (`PanelWidget::presented`) once the dock has
 /// embedded us — a tab switch onto News while connected + empty auto-fetches.
 fn after_embed() {
-    let id = crate::cs(HX_ID_NEWS15);
+    let id = crate::cs(dock::ID_NEWS15);
     let panel = unsafe { hx_panel_registry_lookup(id.as_ptr()) };
     if panel.is_null() || with_browser(|_| ()).is_none() {
         return;
@@ -1037,19 +1034,25 @@ fn after_embed() {
 /// re-attach if already open.
 ///
 /// # Safety
-/// C-ABI entry on the GTK main thread. `_widget` / `_sess` are vestigial (the
-/// browser is a process singleton).
+/// C-ABI entry on the GTK main thread. `_widget` is vestigial; `sess` names
+/// the connection whose page this would be.
 #[no_mangle]
-pub unsafe extern "C" fn create_news_browser_window(_widget: *mut c_void, _sess: *mut c_void) {
+pub unsafe extern "C" fn create_news_browser_window(_widget: *mut c_void, sess: *mut c_void) {
     crate::ensure_gtk_init();
 
-    if dock::raise_if_open(HX_ID_NEWS15) {
+    // The browser is a process singleton: its one page belongs to whichever
+    // connection opened it, and dock::open refuses a second — building would
+    // overwrite the first connection's state rather than give the second its
+    // own. Keyed on the connection regardless, so the day M4g makes the
+    // browser per-connection, dropping the claim is the whole change here.
+    let dock::Open::Build(page) = dock::open(dock::ID_NEWS15, sess) else {
         return;
-    }
+    };
 
     let content = build_content();
-    if dock::embed(
-        HX_ID_NEWS15,
+    if dock::place(
+        dock::ID_NEWS15,
+        &page,
         dock::KIND_CENTER,
         dock::AREA_CENTER,
         "News (1.5+)",
@@ -1067,7 +1070,7 @@ pub unsafe extern "C" fn create_news_browser_window(_widget: *mut c_void, _sess:
 /// C-ABI entry on the GTK main thread.
 #[no_mangle]
 pub unsafe extern "C" fn open_news_browser(widget: *mut c_void, sess: *mut c_void) {
-    let id = crate::cs(HX_ID_NEWS15);
+    let id = crate::cs(dock::ID_NEWS15);
     let was_open = !hx_panel_registry_lookup(id.as_ptr()).is_null();
 
     create_news_browser_window(widget, sess);

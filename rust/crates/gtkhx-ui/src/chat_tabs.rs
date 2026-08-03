@@ -28,10 +28,6 @@ use libadwaita as adw;
 
 use crate::dock;
 
-/// The Chat dock panel id — matches `HX_PANEL_ID_CHAT` (`panel_registry.h`)
-/// and what `chat.rs` passes.
-const HX_ID_CHAT: &str = "chat";
-
 // Per-page kind, stored as qdata so the close-page dispatch recovers it in
 // O(1) (mirrors the C `g_object_set_data` "chat-tab-kind" / "chat-tab-id").
 const KIND_PUBLIC: u8 = 1;
@@ -157,11 +153,16 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
 /// Selecting any tab acknowledges attention: clear the new page's flag and the
 /// Chat panel's flag. A slight over-clear in the multi-flagged case, but the
 /// alternative (scan every tab on each selection) would re-fire constantly.
+///
+/// The *connection* tab is not cleared here, and that asymmetry is deliberate:
+/// this strip only ever shows the focused connection's conversations, so
+/// reading one of them says nothing about what another server has been up to.
+/// The connection tab clears when the user selects it.
 fn on_selected_page_changed(view: &adw::TabView) {
     if let Some(page) = view.selected_page() {
         page.set_needs_attention(false);
     }
-    dock::set_needs_attention(HX_ID_CHAT, false);
+    dock::set_needs_attention(dock::ID_CHAT, false);
 }
 
 /// Initialize (once) and return the shared tab view as a borrowed
@@ -329,7 +330,7 @@ pub extern "C" fn gtkhx_chat_tabs_find_msg(
 /// `page`. Both calls run with no `STATE` borrow held.
 fn raise_and_select(page: Option<adw::TabPage>) {
     let Some(page) = page else { return };
-    dock::raise_if_open(HX_ID_CHAT);
+    dock::raise_if_open(dock::ID_CHAT);
     if let Some(view) = view() {
         view.set_selected_page(&page);
     }
@@ -351,11 +352,35 @@ pub extern "C" fn gtkhx_chat_tabs_raise_public() {
     raise_and_select(page);
 }
 
-/// Set / clear needs-attention on `page` and mirror it onto the Chat panel.
-fn set_page_attention(page: Option<adw::TabPage>, state: bool) {
+/// Set / clear needs-attention on `page`, and mirror it up the two levels
+/// that sit above the tab: the Chat panel, and `htlc`'s connection tab.
+///
+/// Three levels, because a background conversation can be hidden three ways
+/// and the user has to be able to find it from wherever they are: behind
+/// another chat tab, behind another dock panel, or behind another connection.
+/// Each mirror is a no-op when its level isn't there — no connection tab
+/// before there are two connections, no panel flag if Chat isn't docked.
+///
+/// The connection tab is only ever *set* from here, never cleared, and the
+/// asymmetry is the point. This function knows one conversation was
+/// acknowledged; it does not know whether that connection has others still
+/// waiting, and clearing on the strength of one of them would drop the badge
+/// while a second unread chat on the same server was still outstanding. The
+/// connection tab clears when the user selects it, which is the moment they
+/// have actually looked.
+///
+/// A set is in turn ignored for the connection already selected — see
+/// `gtkhx_conn_tabs_set_attention` — so this doesn't badge the server the
+/// user is looking at because one of its own background chats spoke.
+fn set_page_attention(htlc: *mut c_void, page: Option<adw::TabPage>, state: bool) {
     let Some(page) = page else { return };
     page.set_needs_attention(state);
-    dock::set_needs_attention(HX_ID_CHAT, state);
+    dock::set_needs_attention(dock::ID_CHAT, state);
+    if state {
+        // Safety: `htlc` came in from C as the connection this tab belongs to
+        // and is live for the call; the callee only reads its serial.
+        unsafe { crate::conn_tabs::gtkhx_conn_tabs_set_attention(htlc, glib::ffi::GTRUE) };
+    }
 }
 
 #[no_mangle]
@@ -364,7 +389,7 @@ pub extern "C" fn gtkhx_chat_tabs_set_attention_pchat(
     cid: u32,
     state: glib::ffi::gboolean,
 ) {
-    set_page_attention(find_pchat(htlc, cid), state != glib::ffi::GFALSE);
+    set_page_attention(htlc, find_pchat(htlc, cid), state != glib::ffi::GFALSE);
 }
 
 #[no_mangle]
@@ -373,7 +398,7 @@ pub extern "C" fn gtkhx_chat_tabs_set_attention_msg(
     uid: u16,
     state: glib::ffi::gboolean,
 ) {
-    set_page_attention(find_msg(htlc, uid), state != glib::ffi::GFALSE);
+    set_page_attention(htlc, find_msg(htlc, uid), state != glib::ffi::GFALSE);
 }
 
 /// # Safety

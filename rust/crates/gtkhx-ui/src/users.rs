@@ -21,9 +21,6 @@ use crate::dock;
 /// Opaque C `session *`.
 type Session = c_void;
 
-/// Stable panel id — matches `HX_PANEL_ID_USERS` (`panel_registry.h`).
-const HX_ID_USERS: &str = "users";
-
 extern "C" {
     /// Build the Users panel content (button bar over the scrolled view),
     /// stashing the view on `sess->users_view`. Returns a still-floating
@@ -47,11 +44,11 @@ pub unsafe extern "C" fn create_users_window(_parent: *mut c_void, data: *mut c_
 
     // A registered panel means the user re-clicked the toolbar button;
     // re-attach + raise instead of rebuilding a second content tree.
-    if dock::raise_if_open(HX_ID_USERS) {
-        return;
-    }
-
     let sess = data as *mut Session;
+    let dock::Open::Build(page) = dock::open(dock::ID_USERS, data) else {
+        return;
+    };
+
     let content = gtkhx_users_bridge_build_content(sess);
     if content.is_null() {
         return;
@@ -59,8 +56,9 @@ pub unsafe extern "C" fn create_users_window(_parent: *mut c_void, data: *mut c_
 
     // On failure the bridge has already destroyed `content`; skip the
     // post-embed lifecycle so we don't mark a non-existent panel open.
-    if dock::embed(
-        HX_ID_USERS,
+    if dock::place(
+        dock::ID_USERS,
+        &page,
         dock::KIND_SIDEBAR,
         dock::AREA_END,
         "Users",

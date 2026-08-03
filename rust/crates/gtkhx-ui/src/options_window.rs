@@ -419,7 +419,7 @@ pub unsafe extern "C" fn gtkhx_open_settings_page(page: *const std::ffi::c_char)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// `GtkStack` child names have to be distinct: `add_named` with a name
@@ -484,21 +484,10 @@ mod tests {
     /// mismatch, so a stubbed-out schema would mean almost none of this code
     /// ran. With the real one, the rows take their live path.
     ///
-    /// Needs a display: GTK 4 has no headless backend, so CI runs the suite
-    /// under `xvfb-run`. Failing to open one is a failure, never a skip — a
-    /// skip here would look exactly like a pass.
-    ///
-    /// `gtk::init()` here is fine while this is the crate's only GTK test;
-    /// a second one would need them serialised, since cargo runs tests on
-    /// parallel threads and GTK's initialisation is main-thread state.
-    #[test]
-    fn every_page_builds() {
-        assert!(
-            gtk::init().is_ok(),
-            "no display: run under xvfb-run with GDK_BACKEND=x11"
-        );
-        adw::init().expect("libadwaita init");
-
+    /// Needs a display, and so is driven by `crate::gtk_tests` rather than
+    /// being a `#[test]` of its own — see there for why the crate gets
+    /// exactly one.
+    pub(crate) fn check_every_page_builds() {
         for entry in &entries() {
             let page = adw::PreferencesPage::new();
             page.set_title(entry.title);
