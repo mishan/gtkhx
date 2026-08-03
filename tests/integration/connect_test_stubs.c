@@ -442,6 +442,16 @@ gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
     (void)rt;
 }
 
+/* hx_htlc_close sweeps this connection's in-flight transfers on disconnect.
+ * The registry lives in hxhandlers, which these binaries don't link — and they
+ * start no transfers, so there is nothing to sweep. */
+extern void xfers_delete_on_conn (struct htlc_conn *htlc);
+void
+xfers_delete_on_conn (struct htlc_conn *htlc)
+{
+    (void)htlc;
+}
+
 /* network.c logs the server it is connecting to, and the label comes from
  * gtkutil.c — which these binaries don't link, for the usual reason (it drags
  * the GTK widget tree). The connect tests don't read the log line. */

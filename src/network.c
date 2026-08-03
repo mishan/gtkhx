@@ -55,6 +55,7 @@
 #include "hxconn.h"
 #include "banner.h"
 #include "debug.h"
+#include "xfers.h"
 #include "hxnet_htxf.h" /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
@@ -241,6 +242,16 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_DISCONNECTED);
     close_connected_windows (sess);
+
+    /* Cancel this connection's in-flight transfers.
+     *
+     * They ride their own HTXF subchannels, so none of the control-connection
+     * teardown above reaches them: without this they carry on against a server
+     * that has forgotten the session, and the queued ones wait forever for a
+     * turn that never comes — with rows in the tasks list that still look
+     * live. Per connection, so disconnecting one server leaves another's
+     * downloads running. */
+    xfers_delete_on_conn (htlc);
 
     /* Tear down the hxnet handle if it was installed. Drops the
      * ConnectionHandle, which the actor sees as HandleDropped;
