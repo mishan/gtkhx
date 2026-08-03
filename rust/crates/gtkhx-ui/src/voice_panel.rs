@@ -28,10 +28,14 @@ use std::time::Duration;
 
 use glib::translate::{from_glib_borrow, IntoGlibPtr};
 use gtk::glib;
-use gtk::prelude::*;
 use gtk4 as gtk;
+use libadwaita as adw;
+// Re-exports gtk4's prelude, so this is the only one needed.
+use libadwaita::prelude::*;
 
-use crate::tr::tr;
+use crate::ffi::gtkhx_dialog_add_close_shortcuts;
+use crate::tr::{tr, tr1};
+use crate::voice_arbiter;
 
 // ---------------------------------------------------------------------
 // Wire opcodes / state enum / caps (mirror hotline.h + voice_runtime.h).
@@ -113,12 +117,16 @@ extern "C" {
     fn hx_session_voice_runtime(sess: *mut c_void) -> *mut c_void;
     fn hx_session_set_voice_runtime(sess: *mut c_void, rt: *mut c_void);
     fn hx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// gtkhx-core — the host this connection was opened to (may be empty).
+    fn hx_conn_serverhost(htlc: *mut c_void) -> *const c_char;
     fn hx_htlc_voice_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
     fn hx_htlc_voice_access(htlc: *mut c_void) -> glib::ffi::gboolean;
     fn hx_htlc_uid(htlc: *mut c_void) -> u16;
 
     // existing app symbols.
-    fn hx_active_session() -> *mut c_void;
+    /// tasks_bridge.c — the session that owns this connection. NULL in,
+    /// NULL out.
+    fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     fn toolbar_show_toast(text: *const c_char);
 }
 
@@ -201,8 +209,12 @@ unsafe fn ensure_voice_runtime(sess: *mut c_void) -> *mut c_void {
             speaker_changed: Some(speaker_changed_cb),
             error: Some(error_cb),
         };
-        // user_data = &sess->htlc; the signal handlers reach sess back via
-        // hx_active_session().
+        // user_data is this session's connection. The wire-frame bridge sends
+        // on it, and three of the four signal handlers resolve their session
+        // back through it — none may reach for the focused session, since a
+        // runtime belongs to one connection and keeps talking while the user
+        // looks elsewhere. The fourth, `error_cb`, ignores it on purpose: a
+        // toast is app-global chrome with nowhere per-connection to go.
         rt = gtkhx_voice_runtime_new_v2(hx_session_htlc(sess), send_wire_frame_cb, &signals);
         hx_session_set_voice_runtime(sess, rt);
     }
@@ -276,8 +288,25 @@ fn state_is_joined(state: c_int) -> bool {
     )
 }
 
-unsafe extern "C" fn state_changed_cb(_user_data: *mut c_void, state: c_int) {
-    let sess = hx_active_session();
+/// The session a runtime callback belongs to: the one owning the connection
+/// the runtime was built with, never the focused one.
+///
+/// These fire from a *runtime*, and a runtime is per-connection. Resolving
+/// through `hx_active_session()` meant a background connection's voice state
+/// updated whichever connection the user happened to be looking at — its
+/// panels, and its speaker model.
+unsafe fn cb_session(user_data: *mut c_void) -> *mut c_void {
+    if user_data.is_null() {
+        return std::ptr::null_mut();
+    }
+    hx_sess_from_htlc(user_data)
+}
+
+unsafe extern "C" fn state_changed_cb(user_data: *mut c_void, state: c_int) {
+    let sess = cb_session(user_data);
+    if sess.is_null() {
+        return;
+    }
     let joined_now = state_is_joined(state);
 
     let mut active_cid = 0u32;
@@ -288,15 +317,33 @@ unsafe extern "C" fn state_changed_cb(_user_data: *mut c_void, state: c_int) {
     }
 
     for_each_panel(|_w, inner| {
-        let is_active = has_active != 0 && inner.cid == active_cid;
-        inner.joined.set(joined_now && is_active);
+        // This session's panels only: `cid` is unique within a connection, so
+        // without the session test a room id shared with another server would
+        // have one connection's state change retitle the other's buttons.
+        let is_active = has_active != 0 && inner.cid == active_cid && inner.sess == sess;
+        if is_active {
+            inner.joined.set(joined_now);
+        }
         // Clear stale muted on a now-inactive / left panel so a later Join
         // doesn't inherit a stale muted icon.
-        if !joined_now || !is_active {
+        if inner.sess == sess && (!joined_now || !is_active) {
             inner.muted.set(false);
+            inner.joined.set(false);
         }
         update_button_labels(inner);
     });
+
+    // Left the room, by any route — and that includes the ones the user
+    // didn't ask for: a server task error on the join, a WebRTC failure, the
+    // wedge deadline. Each walks the state machine out of joined without
+    // going anywhere near the panel's leave path, so this is the only place
+    // that sees all of them. Without it the token would keep naming a
+    // connection that is not in voice, the microphone mark would sit on its
+    // tab, and the next join elsewhere would offer to end a voice chat that
+    // had already ended.
+    if !joined_now {
+        voice_arbiter::release_session(sess);
+    }
 
     // Left the room → the speaker indicators we've been showing are now
     // lying (no more 605 updates). Blank the model synchronously.
@@ -308,8 +355,11 @@ unsafe extern "C" fn state_changed_cb(_user_data: *mut c_void, state: c_int) {
     }
 }
 
-unsafe extern "C" fn mute_changed_cb(_user_data: *mut c_void, muted: c_int) {
-    let sess = hx_active_session();
+unsafe extern "C" fn mute_changed_cb(user_data: *mut c_void, muted: c_int) {
+    let sess = cb_session(user_data);
+    if sess.is_null() {
+        return;
+    }
     let rt = hx_session_voice_runtime(sess);
     if rt.is_null() {
         return;
@@ -319,15 +369,18 @@ unsafe extern "C" fn mute_changed_cb(_user_data: *mut c_void, muted: c_int) {
         return;
     }
     for_each_panel(|_w, inner| {
-        if inner.cid == active_cid {
+        if inner.cid == active_cid && inner.sess == sess {
             inner.muted.set(muted != 0);
             update_button_labels(inner);
         }
     });
 }
 
-unsafe extern "C" fn speaker_changed_cb(_user_data: *mut c_void, uid: u16, is_speaking: c_int) {
-    let sess = hx_active_session();
+unsafe extern "C" fn speaker_changed_cb(user_data: *mut c_void, uid: u16, is_speaking: c_int) {
+    let sess = cb_session(user_data);
+    if sess.is_null() {
+        return;
+    }
     let model = hx_session_voice_model(sess);
     if model.is_null() {
         return;
@@ -414,7 +467,10 @@ fn do_refresh(widget: &gtk::Widget, inner: &PanelInner, sess: *mut c_void) {
 // Toggle handlers.
 // ---------------------------------------------------------------------
 
-fn on_join_toggled(inner: &PanelInner) {
+/// Takes the `Rc` rather than a borrow: the preempt path opens a dialog and
+/// answers it later, so it needs a handle that can outlive this call — held
+/// weakly, since the panel can be destroyed while the question is open.
+fn on_join_toggled(inner: &Rc<PanelInner>) {
     if inner.suppress.get() {
         return;
     }
@@ -424,10 +480,152 @@ fn on_join_toggled(inner: &PanelInner) {
     }
     let cid = inner.cid;
     let want_joined = inner.join_btn.is_active();
+
+    // Joining is the exclusive act — there is one microphone — so it goes
+    // through the arbiter. Leaving never does.
+    if want_joined {
+        match voice_arbiter::acquire(sess, cid) {
+            voice_arbiter::Acquire::Free => join_now(inner),
+            voice_arbiter::Acquire::Preempts(held) => confirm_preempt(inner, held),
+        }
+    } else {
+        leave_now(inner);
+    }
+}
+
+/// Ask before taking the microphone off whoever has it.
+///
+/// The toggle is put back to "not joined" while the question is open and only
+/// moves if the user says yes — an unanswered dialog must not leave a button
+/// claiming a room nobody joined. Declining is therefore a plain revert.
+fn confirm_preempt(inner: &Rc<PanelInner>, held: voice_arbiter::Holder) {
+    revert_toggle(inner);
+
+    // One msgid with the argument inside it rather than two fragments joined,
+    // so the sentence stays orderable in translation — see tr1.
+    //
+    // Which argument depends on what actually distinguishes the two rooms. On
+    // another connection it is the server. On the *same* connection, naming
+    // the server would tell the user something they can already see, so say
+    // what is true instead: the other chat is on this one.
+    let body = if held.sess == inner.sess {
+        tr("Voice is already in use in another chat on this connection.")
+    } else {
+        tr1("Voice is already in use on %s.", &unsafe {
+            connection_label(held.sess)
+        })
+    };
+    let dialog = adw::AlertDialog::new(Some(&tr("Leave the other voice chat?")), Some(&body));
+    dialog.add_response("cancel", &tr("_Cancel"));
+    dialog.add_response("switch", &tr("_Leave and Join"));
+    dialog.set_response_appearance("switch", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    unsafe { gtkhx_dialog_add_close_shortcuts(dialog.as_ptr() as *mut gtk::ffi::GtkWidget) };
+
+    // The panel outlives the dialog in every ordinary case, but a connection
+    // switch can destroy it while the question is open — so hold it weakly and
+    // do nothing if it has gone.
+    let weak = Rc::downgrade(inner);
+    dialog.connect_response(None, move |_dlg, response| {
+        if response != "switch" {
+            return;
+        }
+        let Some(inner) = weak.upgrade() else { return };
+
+        // Ask again rather than acting on `held`. The dialog is modal to its
+        // own toplevel and voice panels live in several — the Users window,
+        // every pchat sidebar, any undocked panel — so between presenting this
+        // question and answering it the holder can have left, changed rooms,
+        // or disconnected. Acting on the stale answer would leave the old room
+        // streaming while the token moved on, which is the one thing the
+        // arbiter exists to prevent.
+        match voice_arbiter::acquire(inner.sess, inner.cid) {
+            voice_arbiter::Acquire::Free => {}
+            voice_arbiter::Acquire::Preempts(now) => leave_holder(now, inner.sess),
+        }
+
+        // Re-drive the toggle rather than calling join_now directly, so the
+        // button and the join stay in step through one path.
+        inner.suppress.set(true);
+        inner.join_btn.set_active(true);
+        inner.suppress.set(false);
+        join_now(&inner);
+    });
+
+    dialog.present(Some(&inner.join_btn));
+}
+
+/// A connection's server name, for telling the user which one is being
+/// interrupted. Falls back to a generic phrase rather than an empty string, so
+/// the sentence still reads when a connection has no host yet.
+unsafe fn connection_label(sess: *mut c_void) -> String {
+    let host = crate::cstr(hx_conn_serverhost(hx_session_htlc(sess)));
+    if host.is_empty() {
+        tr("another connection")
+    } else {
+        host
+    }
+}
+
+/// Free the microphone that `held` has, so the caller can join.
+///
+/// Two shapes, and the difference is the wire.
+///
+/// **Another connection**: drive its state machine's leave, which puts a 601
+/// on *its* wire. Not `gtkhx_voice_runtime_free` — freeing would strand the
+/// server still sending media and the other participants still seeing us in
+/// the room.
+///
+/// **The same connection, another room**: send nothing. The protocol's own
+/// rule is that joining a second room implicitly leaves the first, and the
+/// state machine has a room-switch arm that relies on it. An explicit 601
+/// first would be a byte sequence no server has seen from this client, which
+/// is not a thing to change for tidiness. So just drop the claim and let the
+/// join carry it.
+fn leave_holder(held: voice_arbiter::Holder, joiner: *mut c_void) {
+    if held.sess != joiner {
+        unsafe {
+            let rt = hx_session_voice_runtime(held.sess);
+            if !rt.is_null() {
+                gtkhx_voice_runtime_leave(rt, held.cid);
+            }
+        }
+        // That connection's own panel is updated by its runtime's
+        // state-changed callback, which routes by connection — so there is
+        // nothing to reach across and set here.
+    }
+    voice_arbiter::release(held.sess, held.cid);
+}
+
+fn revert_toggle(inner: &PanelInner) {
+    inner.suppress.set(true);
+    inner.join_btn.set_active(!inner.join_btn.is_active());
+    inner.suppress.set(false);
+    update_button_labels(inner);
+}
+
+/// Leave the room this panel is in.
+fn leave_now(inner: &PanelInner) {
+    let sess = inner.sess;
+    let cid = inner.cid;
+    // Runtime-driven LEAVE: the state machine's LeaveRequested arm emits
+    // the 601 wire frame through send_wire_frame_cb. Defensive NULL guard.
+    let rt = unsafe { hx_session_voice_runtime(sess) };
+    if !rt.is_null() {
+        unsafe { gtkhx_voice_runtime_leave(rt, cid) };
+    }
+    voice_arbiter::release(sess, cid);
+}
+
+/// Join the room this panel is in. The arbiter is already satisfied.
+fn join_now(inner: &PanelInner) {
+    let sess = inner.sess;
+    let cid = inner.cid;
     let htlc = unsafe { hx_session_htlc(sess) };
 
     let mut sent;
-    if want_joined {
+    {
         sent = unsafe { hx_send_voice_join(htlc, cid) != 0 };
         if sent {
             let rt = unsafe { ensure_voice_runtime(sess) };
@@ -454,22 +652,16 @@ fn on_join_toggled(inner: &PanelInner) {
                 sent = false;
             }
         }
-    } else {
-        // Runtime-driven LEAVE: the state machine's LeaveRequested arm emits
-        // the 601 wire frame through send_wire_frame_cb. Defensive NULL guard.
-        let rt = unsafe { hx_session_voice_runtime(sess) };
-        if !rt.is_null() {
-            unsafe { gtkhx_voice_runtime_leave(rt, cid) };
-        }
-        sent = true;
     }
 
-    if !sent {
+    if sent {
+        // Only now: a token taken before the join went out would name a room
+        // nobody is in, and the next connection to ask would be told to
+        // preempt a chat that never started.
+        voice_arbiter::take(sess, cid);
+    } else {
         // Wire-out skipped — revert the toggle to match the underlying state.
-        inner.suppress.set(true);
-        inner.join_btn.set_active(!want_joined);
-        inner.suppress.set(false);
-        update_button_labels(inner);
+        revert_toggle(inner);
     }
 }
 

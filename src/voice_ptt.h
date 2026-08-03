@@ -53,15 +53,16 @@
 G_BEGIN_DECLS
 
 /*
- * Attach the PTT key controller to `window`. Idempotent within a
- * single session — call once per toplevel window per session. The
- * controller's lifetime is the window's; no cleanup API needed.
+ * Attach the PTT key controller to `window`. Idempotent — a second call is a
+ * no-op. The controller's lifetime is the window's; no cleanup API needed.
  *
- * The session pointer is stashed on the controller so the key
- * handler can reach `sess->voice_runtime` for the wire-out / state-
- * machine drive.
+ * Takes no session. There is one microphone, so the key acts on whichever
+ * connection currently holds voice — which the arbiter answers
+ * (voice_arbiter.rs). It used to stash the session it was attached with, which
+ * was the same thing while there was one connection and silently did nothing
+ * once voice moved to another.
  */
-extern void hx_voice_ptt_attach (GtkWidget *window, session *sess);
+extern void hx_voice_ptt_attach (GtkWidget *window);
 
 G_END_DECLS
 

@@ -206,6 +206,12 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         gtkhx_voice_runtime_free (sess->voice_runtime);
         sess->voice_runtime = NULL;
     }
+    /* Give up the microphone, if this connection held it. Keyed on the
+     * session, so disconnecting a server that wasn't in voice leaves the one
+     * that is alone. Without this the token would name a torn-down runtime and
+     * the next connection to join would be asked to confirm leaving a voice
+     * chat that no longer exists. */
+    gtkhx_voice_arbiter_release (sess);
     /* Clear the voice indicator model so a reconnect starts with
      * an empty user list (no lingering speaker indicators from a
      * dropped session). The model object itself stays alive — it's

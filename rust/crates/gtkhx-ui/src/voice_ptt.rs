@@ -68,9 +68,28 @@ extern "C" {
 /// Per-controller state. `pressed_keyval` latches the keyval that owns the
 /// current press (0 = none) so the release re-mutes on the originally-pressed
 /// key even if the user rebinds PTT mid-press.
+///
+/// Deliberately no session: the controller is attached once to the one
+/// toolbar window, with whichever session existed at the time, and latching
+/// that would have push-to-talk act on a connection that may not be the one
+/// in voice. There is one microphone, so the question "whose mute does this
+/// key toggle?" has exactly one answer — the connection holding it — and the
+/// arbiter is where that is written down.
 struct PttState {
-    sess: *mut c_void,
     pressed_keyval: Cell<u32>,
+}
+
+/// The connection currently in voice, and the room it is in.
+///
+/// `None` when nobody is, in which case the key is not ours and propagates as
+/// an ordinary shortcut.
+fn voice_holder() -> Option<(*mut c_void, u32)> {
+    let held = crate::voice_arbiter::holder()?;
+    // Cross-check the runtime rather than trusting the token alone: the token
+    // says who *claimed* the microphone, the runtime says which room it is
+    // actually in, and a mute sent for the wrong room would be silently
+    // ignored by the server.
+    session_in_voice(held.sess).map(|cid| (held.sess, cid))
 }
 
 /// The live PTT bind from prefs, or None when disabled / unset. Returns
@@ -151,7 +170,7 @@ fn on_key_pressed(
         return glib::Propagation::Proceed;
     }
     // Dormant outside voice: let the bound key work as a normal shortcut.
-    let Some(active_cid) = session_in_voice(state.sess) else {
+    let Some((sess, active_cid)) = voice_holder() else {
         return glib::Propagation::Proceed;
     };
     // Edge-detect: auto-repeat fires this repeatedly while held — one
@@ -159,7 +178,7 @@ fn on_key_pressed(
     if state.pressed_keyval.get() != 0 {
         return glib::Propagation::Stop;
     }
-    if drive_mute(state.sess, active_cid, false) {
+    if drive_mute(sess, active_cid, false) {
         // Latch the specific keyval so the release re-mutes on it even if the
         // user rebinds PTT mid-press.
         state.pressed_keyval.set(kv);
@@ -181,21 +200,26 @@ fn on_key_released(state: &PttState, keyval: gtk::gdk::Key) {
     // Re-derive the active cid — the user may have switched rooms between
     // press and release; re-mute the room they're CURRENTLY in (skip if
     // they've left voice entirely — runtime teardown already muted them).
-    if let Some(active_cid) = session_in_voice(state.sess) {
-        drive_mute(state.sess, active_cid, true);
+    if let Some((sess, active_cid)) = voice_holder() {
+        drive_mute(sess, active_cid, true);
     }
     state.pressed_keyval.set(0);
 }
 
-/// `void hx_voice_ptt_attach(GtkWidget *window, session *sess)` — attach the
-/// PTT key controller to `window`. Idempotent (a second call is a no-op).
+/// `void hx_voice_ptt_attach(GtkWidget *window)` — attach the PTT key
+/// controller to `window`. Idempotent (a second call is a no-op).
+///
+/// Takes no session, and that is the change: there is one microphone and one
+/// toolbar window, so a controller latched to whichever session existed at
+/// attach time would have gone on toggling that connection's mute while the
+/// microphone was somewhere else. The key acts on whoever holds voice, which
+/// the arbiter answers.
 ///
 /// # Safety
-/// `window` is a valid `GtkWidget *`; `sess` a valid session pointer. Main
-/// thread only.
+/// `window` is a valid `GtkWidget *`. Main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn hx_voice_ptt_attach(window: *mut gtk::ffi::GtkWidget, sess: *mut c_void) {
-    if window.is_null() || sess.is_null() {
+pub unsafe extern "C" fn hx_voice_ptt_attach(window: *mut gtk::ffi::GtkWidget) {
+    if window.is_null() {
         return;
     }
     crate::ensure_gtk_init();
@@ -218,7 +242,6 @@ pub unsafe extern "C" fn hx_voice_ptt_attach(window: *mut gtk::ffi::GtkWidget, s
     ctrl.set_propagation_phase(gtk::PropagationPhase::Capture);
 
     let state = Rc::new(PttState {
-        sess,
         pressed_keyval: Cell::new(0),
     });
 

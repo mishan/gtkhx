@@ -337,6 +337,25 @@ gtkhx_voice_runtime_rtp_buffers_received (gtkhx_voice_runtime *rt);
  */
 extern void gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt);
 
+/* ---- The voice arbiter (gtkhx-ui voice_arbiter.rs) -------------------
+ *
+ * There is one microphone, so one voice chat at a time anywhere: joining on
+ * another connection — or another room on the same one — leaves the current
+ * one first. The arbiter is the token that says who has it.
+ *
+ * The acquire side lives in Rust, where the join is; these two are what C
+ * needs. */
+
+struct _session;
+
+/* Give up the token, if `sess` holds it. For the disconnect path, which frees
+ * the runtime the token would otherwise still be naming. Keyed on the session,
+ * so a disconnect elsewhere leaves the holder alone. */
+extern void gtkhx_voice_arbiter_release (struct _session *sess);
+
+/* The session holding voice, or NULL. */
+extern struct _session *gtkhx_voice_arbiter_holder (void);
+
 /* Event-injection shims. Each translates from C-flavoured
  * parameters into the typed hxvoice::Event variant and feeds it
  * through VoiceRuntime::handle_event. All are NULL-safe on the

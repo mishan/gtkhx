@@ -110,6 +110,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/options_voice.rs',
   'crates/gtkhx-ui/src/options_window.rs',
   'crates/gtkhx-ui/src/gtk_tests.rs',
+  'crates/gtkhx-ui/src/voice_arbiter.rs',
   'crates/gtkhx-ui/src/rc4_dialog.rs',
   'crates/gtkhx-ui/src/tls_trust_dialog.rs',
   'crates/gtkhx-ui/src/useredit.rs',

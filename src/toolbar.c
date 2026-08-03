@@ -1292,7 +1292,7 @@ create_toolbar_window (session *sess)
      * guarantees no plain typing key can land in this binding.
      * Idempotent — safe to call again on reconnect-after-disconnect
      * if that ever wires through here. */
-    hx_voice_ptt_attach (toolbar_window, sess);
+    hx_voice_ptt_attach (toolbar_window);
 #endif
 
     /* eager-construct the sidebar
