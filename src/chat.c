@@ -456,7 +456,7 @@ word_check (GtkWidget *xtext, char *word)
  * attached view via gchat_free, and chats_init installs pchat_close as
  * the tab-close handler. Both are defined further down. */
 static void gchat_free (gpointer p);
-static void pchat_close (guint32 cid);
+static void pchat_close (struct htlc_conn *htlc, guint32 cid);
 
 static void
 chat_free (gpointer p)
@@ -1204,7 +1204,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
      * don't want the constant attention flag from a busy public
      * room. Self-echoes also skip. */
     if (e->cid != 0 && !e->is_self) {
-        gtkhx_chat_tabs_set_attention_pchat (e->cid, TRUE);
+        gtkhx_chat_tabs_set_attention_pchat (htlc, e->cid, TRUE);
     }
 }
 
@@ -2195,10 +2195,15 @@ pchat_new (session *sess, struct chat *chat)
  * struct (which removes it from the hashtable via gchat_delete's
  * value-destroy notify). */
 static void
-pchat_close (guint32 cid)
+pchat_close (struct htlc_conn *htlc, guint32 cid)
 {
-    session *sess = hx_active_session ();
-    struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
+    /* The tab strip hands back the connection the tab belonged to, so the
+     * leave goes to that server and the teardown finds the right
+     * conversation. It used to get a bare cid and resolve through the
+     * focused session, which at two connections would have left the wrong
+     * private chat — or sent a leave to a server that was never in it. */
+    session *sess = sess_from_htlc (htlc);
+    struct gtkhx_chat *gchat = sess ? gchat_with_cid (sess, cid) : NULL;
 
     if (gchat == NULL) {
         return;

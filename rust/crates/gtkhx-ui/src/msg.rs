@@ -36,11 +36,13 @@ extern "C" {
     fn hx_emoji_typeahead_attach(target: *mut gtk::ffi::GtkWidget);
     fn msgwin_refresh_user_info(msg: *mut Msgwin);
     fn gtkhx_chat_tabs_add_msg(
+        htlc: *mut c_void,
         content: *mut gtk::ffi::GtkWidget,
         uid: u16,
         title: *const c_char,
     ) -> *mut c_void;
-    fn gtkhx_chat_tabs_raise_msg(uid: u16);
+    fn gtkhx_chat_tabs_raise_msg(htlc: *mut c_void, uid: u16);
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
     fn init_keyaccel(widget: *mut gtk::ffi::GtkWidget);
 }
 
@@ -153,10 +155,13 @@ pub unsafe extern "C" fn create_msgwin(
     // Add the tab, populate the info pane, surface it, wire accelerators.
     let title = format!("{} ({})", crate::cstr(name as *const c_char), uid);
     let ctitle = crate::cs(&title);
-    gtkhx_chat_tabs_add_msg(wptr(&outer_vbox), uid, ctitle.as_ptr());
+    // The window belongs to `sess`, so its tab is keyed on that session's
+    // connection rather than on whichever one is focused.
+    let htlc = gtkhx_session_htlc(sess);
+    gtkhx_chat_tabs_add_msg(htlc, wptr(&outer_vbox), uid, ctitle.as_ptr());
 
     msgwin_refresh_user_info(msg);
-    gtkhx_chat_tabs_raise_msg(uid);
+    gtkhx_chat_tabs_raise_msg(htlc, uid);
     init_keyaccel(wptr(&outer_vbox));
     input.grab_focus();
 
