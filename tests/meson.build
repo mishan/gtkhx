@@ -274,6 +274,17 @@ test('htxf_cancel', test_htxf_cancel,
 # the production refactor that R3.3.e-4b will land. Links the
 # bridge source + proto_helpers.c (for hl_hdr_decode round-trip
 # verification) without dragging the GUI tree.
+# The C mirror of struct htlc_conn against the Rust struct that owns the
+# storage. Both sides pin sizeof; this pins positions, which is the half
+# sizeof cannot check once a field lands in padding.
+test_hxconn_layout = executable('test_hxconn_layout',
+  'unit/test_hxconn_layout.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hxconn_layout', test_hxconn_layout,
+     suite : 'unit')
+
 test_hxnet_bridge = executable('test_hxnet_bridge',
   'unit/test_hxnet_bridge.c',
   '../src/hxnet_bridge.c',

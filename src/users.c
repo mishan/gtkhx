@@ -240,13 +240,13 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
 
-    if ((msg = msgwin_with_uid (mi.uid))) {
+    if ((msg = msgwin_with_uid (hx_active_session (), mi.uid))) {
         /* Existing msgwin — just raise its tab inside the Chat
          * panel. The Chat panel itself gets attached / raised by
          * gtkhx_chat_tabs_raise_msg if it's hidden. */
         gtkhx_chat_tabs_raise_msg (mi.uid);
     } else {
-        create_msgwin (mi.uid, mi.name);
+        create_msgwin (hx_active_session (), mi.uid, mi.name);
     }
 }
 
@@ -292,7 +292,9 @@ on_user_toggle_anim (GSimpleAction *action, GVariant *param, gpointer user_data)
     if (!ctx) {
         return;
     }
-    gtkhx_avatar_set_paused (ctx->uid, !gtkhx_avatar_is_paused (ctx->uid));
+    gtkhx_avatar_set_paused (
+        hx_active_session ()->htlc, ctx->uid,
+        !gtkhx_avatar_is_paused (hx_active_session ()->htlc, ctx->uid));
 }
 
 /* Tthe GActionEntry table that drove the old GtkPopoverMenu
@@ -593,14 +595,15 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
     /* GIF-icons (Phase 10.D): pause / resume this user's animated
      * avatar. Only shown when they actually have an animated one — the
      * discoverable counterpart to clicking the avatar directly. */
-    if (gtkhx_avatar_is_animated (uid)) {
+    if (gtkhx_avatar_is_animated (hx_active_session ()->htlc, uid)) {
         gtk_box_append (GTK_BOX (vbox),
                         gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
-        user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
-                                  gtkhx_avatar_is_paused (uid)
-                                      ? _ ("Resume Animation")
-                                      : _ ("Pause Animation"),
-                                  on_user_toggle_anim);
+        user_popup_append_button (
+            GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
+            gtkhx_avatar_is_paused (hx_active_session ()->htlc, uid)
+                ? _ ("Resume Animation")
+                : _ ("Pause Animation"),
+            on_user_toggle_anim);
     }
 
 #ifdef HAVE_VOICE
@@ -904,11 +907,11 @@ view_msg_btn (GtkWidget *w, gpointer data)
     if (!view_selected_member (data, &mi)) {
         return;
     }
-    mw = msgwin_with_uid (mi.uid);
+    mw = msgwin_with_uid (hx_active_session (), mi.uid);
     if (mw) {
         gtkhx_chat_tabs_raise_msg (mi.uid);
     } else {
-        create_msgwin (mi.uid, mi.name);
+        create_msgwin (hx_active_session (), mi.uid, mi.name);
     }
 }
 
@@ -1238,7 +1241,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
      * the old name vs nam after we return), so a cache-lookup
      * refresh would paint the OLD identity. */
     {
-        struct msgwin *mw = msgwin_with_uid (uid);
+        struct msgwin *mw = msgwin_with_uid (sess, uid);
         if (mw) {
             msgwin_apply_user_change (mw, nam, icon, color);
         }

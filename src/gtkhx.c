@@ -43,7 +43,7 @@
 #include "files_remote_provider.h"
 #include "users.h"
 #include "gif_icons.h"  /* hx_icon_get — re-fetch on ICON_CHANGE */
-#include "gif_avatar.h" /* gtkhx_avatar_update / _clear_all */
+#include "gif_avatar.h" /* gtkhx_avatar_update / _clear_conn */
 #include "files.h"
 #include "tasks.h"
 #include "htxf_accessors.h"
@@ -1280,7 +1280,7 @@ on_chat_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
         return;
     }
     output_chat_from_event (htlc, event);
-    gtkhx_notify_chat (event);
+    gtkhx_notify_chat (htlc, event);
 }
 
 static void
@@ -1310,20 +1310,25 @@ on_chat_invitation_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)emitter;
     (void)user_data;
     output_chat_invitation (htlc, (guint32)cid, (char *)name);
-    gtkhx_notify_pchat_invite ((guint32)cid, (const char *)name);
+    gtkhx_notify_pchat_invite (htlc, (guint32)cid, (const char *)name);
 }
 
 static void
-on_msg_signal (GtkhxSession *emitter, gpointer event_p, gpointer user_data)
+on_msg_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
+               gpointer user_data)
 {
     HxMsgEvent *event = event_p;
     (void)emitter;
     (void)user_data;
-    if (!event) {
+    if (!event || !sess_from_htlc (htlc)) {
         return;
     }
-    msg_output_from_event (event);
-    gtkhx_notify_msg (event);
+    /* Render and notify are gated together on purpose. msg_output_from_event
+     * drops a message it cannot route, and notifying about one that was
+     * never shown would leave a desktop notification pointing at a
+     * conversation the user cannot open. */
+    msg_output_from_event (htlc, event);
+    gtkhx_notify_msg (htlc, event);
 }
 
 /* "logged-in" — the LOGIN task reply came back successful and the reply
@@ -1337,10 +1342,16 @@ static void
 on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                      gpointer user_data)
 {
-    session *sess = hx_active_session ();
+    /* Route by the connection that logged in, not by the one the user is
+     * looking at. Identical while there is one connection; at two, the
+     * active session is simply the wrong answer — a background server
+     * finishing its login would retitle and re-enable the focused one. */
+    session *sess = sess_from_htlc (htlc);
     (void)emitter;
-    (void)htlc;
     (void)user_data;
+    if (!sess) {
+        return;
+    }
     changetitlesconnected (sess);
     setbtns (sess, 1);
     set_status_bar (2);
@@ -1354,10 +1365,14 @@ static void
 on_self_updated_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                         gpointer user_data)
 {
+    /* The access bitmap that gates these buttons belongs to the connection
+     * whose SELFINFO this was, so resolve from it rather than from focus. */
+    session *sess = sess_from_htlc (htlc);
     (void)emitter;
-    (void)htlc;
     (void)user_data;
-    setbtns (hx_active_session (), 1);
+    if (sess) {
+        setbtns (sess, 1);
+    }
 }
 
 static void
@@ -1417,28 +1432,38 @@ on_news_post_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
  * one-shot 4 kB allocations on a now-defunct window aren't worth
  * tracking. */
 static void
-on_news_folder_signal (GtkhxSession *emitter, gpointer gfnews,
-                       gpointer user_data)
+on_news_folder_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                       gpointer gfnews, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    /* The browser is a singleton bound to the active session; the
+     * connection rides through so it can bind per-connection instead. */
+    (void)htlc;
     gnews_browser_handle_dirlist (gfnews);
 }
 
 static void
-on_news_catalog_signal (GtkhxSession *emitter, gpointer gcnews,
-                        gpointer user_data)
+on_news_catalog_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                        gpointer gcnews, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    /* The browser is a singleton bound to the active session; the
+     * connection rides through so it can bind per-connection instead. */
+    (void)htlc;
     gnews_browser_handle_catlist (gcnews);
 }
 
 static void
-on_news_thread_signal (GtkhxSession *emitter, gpointer post, gpointer user_data)
+on_news_thread_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                       gpointer post, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    /* The browser is a singleton bound to the active session; the
+     * connection rides through so it can bind per-connection instead. */
+    (void)htlc;
     gnews_browser_handle_thread (post);
 }
 
@@ -1486,11 +1511,13 @@ on_users_clear_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)user_data;
     users_clear (htlc, chat);
     /* Clearing the public user list is the view-side disconnect
-     * boundary. GIF avatars are per-session server-side, so drop the
-     * whole cache (and cancel any in-flight decodes) — a reconnect
-     * re-probes and re-fetches from scratch. */
+     * boundary. Drop this connection's avatars (and cancel any of its
+     * in-flight decodes) — a reconnect re-probes and re-fetches from
+     * scratch. Only this connection's: the cache is app-global and used to
+     * be wiped wholesale here, which took every other server's faces with
+     * it. */
     if (chat && hx_chat_cid (chat) == 0) {
-        gtkhx_avatar_clear_all ();
+        gtkhx_avatar_clear_conn (htlc);
     }
 }
 
@@ -1502,9 +1529,8 @@ on_gif_icon_data_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                          guint uid, gpointer gif, guint len, gpointer user_data)
 {
     (void)emitter;
-    (void)htlc;
     (void)user_data;
-    gtkhx_avatar_update ((guint16)uid, (const guint8 *)gif, (gsize)len);
+    gtkhx_avatar_update (htlc, (guint16)uid, (const guint8 *)gif, (gsize)len);
 }
 
 /* gif-icon-changed carries only a uid (the ICON_CHANGE broadcast). Pull
@@ -1520,23 +1546,27 @@ on_gif_icon_changed_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 }
 
 static void
-on_user_info_signal (GtkhxSession *emitter, guint uid, gpointer nam,
-                     gpointer info, guint len, gpointer user_data)
+on_user_info_signal (GtkhxSession *emitter, struct htlc_conn *htlc, guint uid,
+                     gpointer nam, gpointer info, guint len, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    /* The Get Info dialog is app-level and shows no server attribution yet;
+     * the connection rides through so it can. */
+    (void)htlc;
     output_user_info ((guint16)uid, (const char *)nam, (const char *)info,
                       (guint16)len);
 }
 
 static void
-on_file_info_signal (GtkhxSession *emitter, gpointer path, gpointer name,
-                     gpointer creator, gpointer type, gpointer comments,
-                     gpointer date_modify, gpointer date_create, guint64 size,
-                     gpointer user_data)
+on_file_info_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                     gpointer path, gpointer name, gpointer creator,
+                     gpointer type, gpointer comments, gpointer date_modify,
+                     gpointer date_create, guint64 size, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    (void)htlc;
     /* date_modify / date_create are raw 8-byte Hotline date stamps; the view
      * (output_file_info) decodes + formats them. */
     output_file_info ((char *)path, (char *)name, (char *)creator, (char *)type,
@@ -1545,11 +1575,16 @@ on_file_info_signal (GtkhxSession *emitter, gpointer path, gpointer name,
 }
 
 static void
-on_file_list_signal (GtkhxSession *emitter, gpointer cfl, gpointer fh,
-                     gpointer data, gpointer user_data)
+on_file_list_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                     gpointer cfl, gpointer fh, gpointer data,
+                     gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    /* The provider carrier inside `cfl` already identifies which browser
+     * pane asked; the connection rides through for when that pane becomes
+     * per-connection. */
+    (void)htlc;
     /* only the new files browser remains; route the
      * response to its remote-files-provider. The legacy
      * output_file_list fallback is gone with the rest of the
@@ -1662,26 +1697,35 @@ on_task_update_signal (GtkhxSession *emitter, gpointer sess, gpointer tsk,
  * helpers callable on their own; this just routes the state-change
  * notifications through the same signal mechanism as everything else. */
 static void
-on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
+on_connection_state_changed_signal (GtkhxSession *emitter,
+                                    struct htlc_conn *htlc, guint state,
                                     gpointer user_data)
 {
-    session *sess = hx_active_session ();
+    /* Route by the connection whose state changed. The per-session calls
+     * here — setbtns, set_disconnect_btn, conn_task_update, the title
+     * changers — all act on one session's widgets, and handing them the
+     * focused session instead meant a background server dropping would grey
+     * out and retitle whichever one you were looking at.
+     *
+     * The app-global calls (set_status_bar, gtkhx_tray_set_connected,
+     * toolbar_clear_toasts) take no session and are not fixed by this: they
+     * are single-window chrome that has to become per-connection separately.
+     * See "App-global chrome that becomes per-connection" in
+     * docs/multi-connection.md. They run *before* the session guard below,
+     * deliberately: they used to be unconditional, and a connection whose
+     * back-pointer somehow didn't resolve should not leave the tray stuck
+     * reading "connected". */
+    session *sess = sess_from_htlc (htlc);
     (void)emitter;
     (void)user_data;
 
     switch (state) {
     case GTKHX_CONNECTION_DISCONNECTED:
-        setbtns (sess, 0);
         set_status_bar (0);
-        set_disconnect_btn (sess, 0);
-        conn_task_update (sess, 2);
-        changetitlesdisconnected (sess);
         gtkhx_tray_set_connected (FALSE);
         break;
     case GTKHX_CONNECTION_CONNECTING:
         set_status_bar (-1);
-        set_disconnect_btn (sess, 1);
-        conn_task_update (sess, 0);
         /* Wipe any toasts left over from the previous server (task
          * errors, broadcasts, "Logged in"). Without this the user
          * can be looking at a stale toast from server A while
@@ -1690,8 +1734,29 @@ on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
         break;
     case GTKHX_CONNECTION_TCP_CONNECTED:
         set_status_bar (1);
-        conn_task_update (sess, 1);
         gtkhx_tray_set_connected (TRUE);
+        break;
+    default:
+        break;
+    }
+
+    if (!sess) {
+        return;
+    }
+
+    switch (state) {
+    case GTKHX_CONNECTION_DISCONNECTED:
+        setbtns (sess, 0);
+        set_disconnect_btn (sess, 0);
+        conn_task_update (sess, 2);
+        changetitlesdisconnected (sess);
+        break;
+    case GTKHX_CONNECTION_CONNECTING:
+        set_disconnect_btn (sess, 1);
+        conn_task_update (sess, 0);
+        break;
+    case GTKHX_CONNECTION_TCP_CONNECTED:
+        conn_task_update (sess, 1);
         break;
     case GTKHX_CONNECTION_HANDSHAKE_DONE:
         conn_task_update (sess, 2);

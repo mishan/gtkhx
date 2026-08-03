@@ -164,7 +164,8 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
      * avatar is sized identically — intrinsic px * theme scale, with the
      * wide-banner left-shift for banner-width art. */
     guint16 uid = cell->row ? hx_user_row_get_uid (cell->row) : 0;
-    GdkTexture *avatar = uid ? gtkhx_avatar_get (uid) : NULL;
+    GdkTexture *avatar
+        = uid ? gtkhx_avatar_get (hx_active_session ()->htlc, uid) : NULL;
     if (avatar) {
         GdkPaintable *ap = GDK_PAINTABLE (avatar);
         if (cell->using_avatar && cell->icon == ap) {
@@ -474,8 +475,11 @@ pause_click_fire (gpointer user_data)
 
     cell->pause_click_source = 0;
     cell->pause_click_uid = 0;
-    if (uid != 0 && gtkhx_avatar_is_animated (uid)) {
-        gtkhx_avatar_set_paused (uid, !gtkhx_avatar_is_paused (uid));
+    if (uid != 0
+        && gtkhx_avatar_is_animated (hx_active_session ()->htlc, uid)) {
+        gtkhx_avatar_set_paused (
+            hx_active_session ()->htlc, uid,
+            !gtkhx_avatar_is_paused (hx_active_session ()->htlc, uid));
     }
     return G_SOURCE_REMOVE;
 }
@@ -522,7 +526,8 @@ on_cell_icon_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
         return;
     }
     guint16 uid = hx_user_row_get_uid (cell->row);
-    if (uid == 0 || !gtkhx_avatar_is_animated (uid)) {
+    if (uid == 0
+        || !gtkhx_avatar_is_animated (hx_active_session ()->htlc, uid)) {
         return;
     }
     /* Hit-test the icon column (icon renders from the start edge up to

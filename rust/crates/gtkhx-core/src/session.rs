@@ -166,8 +166,13 @@ mod imp {
                         .param_types([Type::POINTER, Type::U32, Type::POINTER, Type::U32])
                         .build(),
                     // msg: (HxMsgEvent* boxed)
+                    // msg: (htlc*, HxMsgEvent). The connection is not a
+                    // convenience here — the event's uid is only unique
+                    // *within* a connection, so without it two servers'
+                    // user 5 are the same person and their private messages
+                    // land in one window.
                     Signal::builder("msg")
-                        .param_types([msg_event_type()])
+                        .param_types([Type::POINTER, msg_event_type()])
                         .build(),
                     // logged-in: (htlc*) — login task reply came back
                     // successful; the login chime and any future
@@ -194,17 +199,17 @@ mod imp {
                     Signal::builder("news-post")
                         .param_types([Type::POINTER, Type::POINTER, Type::U32])
                         .build(),
-                    // news-folder: (gnews_folder*)
+                    // news-folder: (htlc*, gnews_folder*)
                     Signal::builder("news-folder")
-                        .param_types([Type::POINTER])
+                        .param_types([Type::POINTER, Type::POINTER])
                         .build(),
-                    // news-catalog: (gnews_catalog*)
+                    // news-catalog: (htlc*, gnews_catalog*)
                     Signal::builder("news-catalog")
-                        .param_types([Type::POINTER])
+                        .param_types([Type::POINTER, Type::POINTER])
                         .build(),
-                    // news-thread: (news_post*)
+                    // news-thread: (htlc*, news_post*)
                     Signal::builder("news-thread")
-                        .param_types([Type::POINTER])
+                        .param_types([Type::POINTER, Type::POINTER])
                         .build(),
                     // user-create: (htlc*, chat*, uid, nick_color, nam*, icon,
                     // color, incremental). `incremental` is TRUE for a genuine
@@ -246,11 +251,17 @@ mod imp {
                     Signal::builder("users-clear")
                         .param_types([Type::POINTER, Type::POINTER])
                         .build(),
-                    // user-info: (uid, nam*, info*, len)
+                    // user-info: (htlc*, uid, nam*, info*, len)
                     Signal::builder("user-info")
-                        .param_types([Type::U32, Type::POINTER, Type::POINTER, Type::U32])
+                        .param_types([
+                            Type::POINTER,
+                            Type::U32,
+                            Type::POINTER,
+                            Type::POINTER,
+                            Type::U32,
+                        ])
                         .build(),
-                    // file-info: (path*, name*, creator*, type*, comments*,
+                    // file-info: (htlc*, path*, name*, creator*, type*, comments*,
                     //             date_modify* (8 raw wire bytes), date_create*
                     //             (8 raw wire bytes), size:u64). The date stamps
                     //             ride raw so the view formats them for display
@@ -264,12 +275,13 @@ mod imp {
                             Type::POINTER,
                             Type::POINTER,
                             Type::POINTER,
+                            Type::POINTER,
                             Type::U64,
                         ])
                         .build(),
-                    // file-list: (cfl*, fh*, data*)
+                    // file-list: (htlc*, cfl*, fh*, data*)
                     Signal::builder("file-list")
-                        .param_types([Type::POINTER, Type::POINTER, Type::POINTER])
+                        .param_types([Type::POINTER, Type::POINTER, Type::POINTER, Type::POINTER])
                         .build(),
                     // file-update: (session*, htxf*)
                     Signal::builder("file-update")
@@ -323,9 +335,9 @@ mod imp {
                             Type::POINTER,
                         ])
                         .build(),
-                    // connection-state-changed: (state:u32)
+                    // connection-state-changed: (htlc*, state:u32)
                     Signal::builder("connection-state-changed")
-                        .param_types([Type::U32])
+                        .param_types([Type::POINTER, Type::U32])
                         .build(),
                 ]
             })
@@ -584,8 +596,12 @@ pub unsafe extern "C" fn gtkhx_session_emit_gif_icon_data(
 /// # Safety
 /// `self_` valid; `event` a valid `HxMsgEvent*` (or NULL).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_msg(self_: *mut c_void, event: *mut c_void) {
-    let v = [boxed_value(hx_msg_event_get_type(), event)];
+pub unsafe extern "C" fn gtkhx_session_emit_msg(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    event: *mut c_void,
+) {
+    let v = [ptr_value(htlc), boxed_value(hx_msg_event_get_type(), event)];
     emit(self_, "msg", &v);
 }
 
@@ -659,24 +675,36 @@ pub unsafe extern "C" fn gtkhx_session_emit_news_post(
 /// # Safety
 /// `self_`/`gfnews` valid pointers.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_news_folder(self_: *mut c_void, gfnews: *mut c_void) {
-    let v = [ptr_value(gfnews)];
+pub unsafe extern "C" fn gtkhx_session_emit_news_folder(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    gfnews: *mut c_void,
+) {
+    let v = [ptr_value(htlc), ptr_value(gfnews)];
     emit(self_, "news-folder", &v);
 }
 
 /// # Safety
 /// `self_`/`gcnews` valid pointers.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void) {
-    let v = [ptr_value(gcnews)];
+pub unsafe extern "C" fn gtkhx_session_emit_news_catalog(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    gcnews: *mut c_void,
+) {
+    let v = [ptr_value(htlc), ptr_value(gcnews)];
     emit(self_, "news-catalog", &v);
 }
 
 /// # Safety
 /// `self_`/`post` valid pointers.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_news_thread(self_: *mut c_void, post: *mut c_void) {
-    let v = [ptr_value(post)];
+pub unsafe extern "C" fn gtkhx_session_emit_news_thread(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    post: *mut c_void,
+) {
+    let v = [ptr_value(htlc), ptr_value(post)];
     emit(self_, "news-thread", &v);
 }
 
@@ -768,12 +796,14 @@ pub unsafe extern "C" fn gtkhx_session_emit_users_clear(
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_user_info(
     self_: *mut c_void,
+    htlc: *mut c_void,
     uid: u16,
     nam: *const c_char,
     info: *const c_char,
     len: u16,
 ) {
     let v = [
+        ptr_value(htlc),
         glib::Value::from(uid as u32),
         ptr_value(nam as *const c_void),
         ptr_value(info as *const c_void),
@@ -790,6 +820,7 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_info(
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn gtkhx_session_emit_file_info(
     self_: *mut c_void,
+    htlc: *mut c_void,
     path: *const c_char,
     name: *const c_char,
     creator: *const c_char,
@@ -800,6 +831,7 @@ pub unsafe extern "C" fn gtkhx_session_emit_file_info(
     size: u64,
 ) {
     let v = [
+        ptr_value(htlc),
         ptr_value(path as *const c_void),
         ptr_value(name as *const c_void),
         ptr_value(creator as *const c_void),
@@ -817,11 +849,17 @@ pub unsafe extern "C" fn gtkhx_session_emit_file_info(
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_file_list(
     self_: *mut c_void,
+    htlc: *mut c_void,
     cfl: *mut c_void,
     fh: *mut c_void,
     data: *mut c_void,
 ) {
-    let v = [ptr_value(cfl), ptr_value(fh), ptr_value(data)];
+    let v = [
+        ptr_value(htlc),
+        ptr_value(cfl),
+        ptr_value(fh),
+        ptr_value(data),
+    ];
     emit(self_, "file-list", &v);
 }
 
@@ -956,10 +994,14 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_notice(
 }
 
 /// # Safety
-/// `self_` valid. `state` is a `GtkhxConnectionState` (C enum = int).
+/// `self_`/`htlc` valid. `state` is a `GtkhxConnectionState` (C enum = int).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_connection_state(self_: *mut c_void, state: c_int) {
-    let v = [glib::Value::from(state as u32)];
+pub unsafe extern "C" fn gtkhx_session_emit_connection_state(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    state: c_int,
+) {
+    let v = [ptr_value(htlc), glib::Value::from(state as u32)];
     emit(self_, "connection-state-changed", &v);
 }
 
@@ -1169,20 +1211,106 @@ mod tests {
         assert_eq!(got.get(), (0x1234, 42, 0xBEEF, 7));
     }
 
+    /// The state change has to say *which* connection changed. Without it a
+    /// handler can only ask what the user is looking at, so a background
+    /// server dropping greys out and retitles the focused one.
     #[test]
     fn connection_state_round_trips() {
         let s = new_session();
-        let got: Rc<Cell<u32>> = Rc::new(Cell::new(99));
+        let got: Rc<Cell<(usize, u32)>> = Rc::new(Cell::new((0, 99)));
         let got2 = got.clone();
         s.connect_local("connection-state-changed", false, move |args| {
-            got2.set(args[1].get::<u32>().unwrap());
+            got2.set((pval(&args[1]), args[2].get::<u32>().unwrap()));
             None
         });
         let raw = s.as_ptr() as *mut c_void;
         unsafe {
-            gtkhx_session_emit_connection_state(raw, 3);
+            gtkhx_session_emit_connection_state(raw, 0xC0DE as *mut c_void, 3);
         }
-        assert_eq!(got.get(), 3);
+        assert_eq!(got.get(), (0xC0DE, 3));
+    }
+
+    /// The `msg` emit pairs a connection with the event. The uid inside the
+    /// event is only unique within a connection, so the pair is the key and
+    /// the event alone is not.
+    #[test]
+    fn msg_carries_the_connection() {
+        let s = new_session();
+        let got: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+        let got2 = got.clone();
+        s.connect_local("msg", false, move |args| {
+            got2.set(pval(&args[1]));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        // A NULL boxed payload is fine here: g_value_set_boxed on NULL stays
+        // NULL, and what this pins is the leading connection argument.
+        unsafe {
+            gtkhx_session_emit_msg(raw, 0xBEEF as *mut c_void, std::ptr::null_mut());
+        }
+        assert_eq!(got.get(), 0xBEEF);
+    }
+
+    /// Nine parameters, and the one where a `Value[]`-vs-`param_types`
+    /// mismatch would surface as a runtime `g_critical` from `g_signal_emitv`
+    /// rather than a compile error — so the arity is worth pinning rather
+    /// than eyeballing.
+    #[test]
+    fn file_info_carries_the_connection_and_keeps_its_arity() {
+        let s = new_session();
+        let got: Rc<Cell<(usize, usize, u64)>> = Rc::new(Cell::new((0, 0, 0)));
+        let got2 = got.clone();
+        s.connect_local("file-info", false, move |args| {
+            assert_eq!(args.len(), 10, "instance + 9 params");
+            got2.set((
+                pval(&args[1]),
+                pval(&args[2]),
+                args[9].get::<u64>().unwrap(),
+            ));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        let path = c"/f";
+        unsafe {
+            gtkhx_session_emit_file_info(
+                raw,
+                0xF00D as *mut c_void,
+                path.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                4242,
+            );
+        }
+        assert_eq!(got.get(), (0xF00D, path.as_ptr() as usize, 4242));
+    }
+
+    /// The remaining retagged signals, spot-checked at the seam that matters:
+    /// argument 1 is the connection and the old leading payload shifted right.
+    #[test]
+    fn user_info_carries_the_connection() {
+        let s = new_session();
+        let got: Rc<Cell<(usize, u32)>> = Rc::new(Cell::new((0, 0)));
+        let got2 = got.clone();
+        s.connect_local("user-info", false, move |args| {
+            got2.set((pval(&args[1]), args[2].get::<u32>().unwrap()));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        unsafe {
+            gtkhx_session_emit_user_info(
+                raw,
+                0xFEED as *mut c_void,
+                9,
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+            );
+        }
+        assert_eq!(got.get(), (0xFEED, 9));
     }
 
     #[test]
@@ -1197,7 +1325,7 @@ mod tests {
     fn null_session_is_handled_gracefully() {
         // Must g_critical + return, not crash.
         unsafe {
-            gtkhx_session_emit_connection_state(std::ptr::null_mut(), 1);
+            gtkhx_session_emit_connection_state(std::ptr::null_mut(), std::ptr::null_mut(), 1);
         }
     }
 }

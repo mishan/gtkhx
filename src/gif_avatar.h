@@ -31,6 +31,10 @@
 
 #include <glib.h>
 
+/* Opaque here — the avatar tables key on (connection, uid) and only ever
+ * pass the pointer to hx_conn_serial. */
+struct htlc_conn;
+
 typedef struct _GdkTexture GdkTexture;
 
 /* The frame of `uid`'s avatar to display *right now*, or NULL if none
@@ -38,7 +42,7 @@ typedef struct _GdkTexture GdkTexture;
  * animated avatar this is the current frame (advanced by the shared
  * timer); when animation is globally off it's always the first frame.
  * Borrowed — the cell refs it for the lifetime of the binding. */
-GdkTexture *gtkhx_avatar_get (guint16 uid);
+GdkTexture *gtkhx_avatar_get (struct htlc_conn *htlc, guint16 uid);
 
 /* Ingest a raw GIF payload for `uid`. `len == 0` (or NULL `gif`) is a
  * clear — the cached avatar is dropped immediately. A non-empty
@@ -46,12 +50,16 @@ GdkTexture *gtkhx_avatar_get (guint16 uid);
  * any cached one. Either way the affected user-list rows are refreshed
  * (synchronously for a clear, on decode completion otherwise). A
  * second call for the same uid cancels an in-flight decode. */
-void gtkhx_avatar_update (guint16 uid, const guint8 *gif, gsize len);
+void gtkhx_avatar_update (struct htlc_conn *htlc, guint16 uid,
+                          const guint8 *gif, gsize len);
 
-/* Drop every cached avatar and cancel all in-flight decodes. Called
- * when the public user list is cleared (disconnect) — avatars are
- * per-session server-side, so a reconnect re-probes from scratch. */
-void gtkhx_avatar_clear_all (void);
+/* Drop one connection's avatars — its cache entries and any decode still in
+ * flight for it. Other connections are untouched.
+ *
+ * A uid is only unique within a connection, so the tables are keyed on the
+ * pair. This used to be a clear-all, which meant one server's user list going
+ * away wiped every server's faces. */
+void gtkhx_avatar_clear_conn (struct htlc_conn *htlc);
 
 /* ---- Animation control (Phase 10.D) -------------------------------- */
 
@@ -62,12 +70,13 @@ void gtkhx_avatar_set_animation_enabled (gboolean enabled);
 
 /* True if `uid` has a cached *animated* (multi-frame) avatar. Drives
  * the click-to-pause affordance + the right-click menu item visibility. */
-gboolean gtkhx_avatar_is_animated (guint16 uid);
+gboolean gtkhx_avatar_is_animated (struct htlc_conn *htlc, guint16 uid);
 
 /* Per-user pause override. Independent of the global pref: a paused
  * avatar freezes on its current frame even when animation is enabled.
  * Set from the click-to-toggle gesture and the right-click menu. */
-gboolean gtkhx_avatar_is_paused (guint16 uid);
-void gtkhx_avatar_set_paused (guint16 uid, gboolean paused);
+gboolean gtkhx_avatar_is_paused (struct htlc_conn *htlc, guint16 uid);
+void gtkhx_avatar_set_paused (struct htlc_conn *htlc, guint16 uid,
+                              gboolean paused);
 
 #endif /* GTKHX_GIF_AVATAR_H */

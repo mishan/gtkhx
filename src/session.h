@@ -68,6 +68,11 @@ typedef gpointer GdkDrawable;
  * it (name + uid heap pointer + struct itself) via msgwin_free when
  * the user closes the window. */
 struct msgwin {
+    /* The session whose msg_windows table owns this window. Stored rather
+     * than resolved through hx_active_session() at use, because a private
+     * message is addressed to a uid that is only unique within its
+     * connection — the window has to remember which one it belongs to. */
+    session *sess;
     guint16 *uid;
     char *name;
     GtkWidget *outputbuf;

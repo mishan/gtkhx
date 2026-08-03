@@ -195,7 +195,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
      * has accepted our AGREEMENTAGREE — sending one before that
      * trips "action attributed to not-yet-joined session" errors on
      * 1.5+ servers and outright disconnects on the stricter ones. */
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+    gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_LOGIN_READY);
 }
 
@@ -265,8 +265,8 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 #define HX_MSG_DROPPED 0
 #define HX_MSG_EMITTED 1
 #define HX_MSG_BROADCAST 2
-extern int hx_msg_recv (void *member_model, guint16 uid, int is_pm,
-                        void *event);
+extern int hx_msg_recv (struct htlc_conn *htlc, void *member_model, guint16 uid,
+                        int is_pm, void *event);
 
 void
 hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -332,7 +332,7 @@ hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
             hx_conn_name (htlc)[0] ? hx_conn_name (htlc) : NULL);
     }
 
-    int r = hx_msg_recv (hx_chat_member_model (chat), pm.uid, is_pm, ev);
+    int r = hx_msg_recv (htlc, hx_chat_member_model (chat), pm.uid, is_pm, ev);
     if (ev) {
         hx_msg_event_free (ev);
     }
@@ -558,8 +558,8 @@ extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
                                int skip_self_create, int incremental);
 /* USER_INFO reply emit — Rust hxhandlers::recv::user module. (The SELFINFO self-updated
  * emit is now internal to hxhandlers::recv::user's hx_rcv_user_selfinfo.) */
-extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
-                               guint16 len);
+extern void hx_user_info_recv (struct htlc_conn *htlc, guint16 uid,
+                               const char *name, const char *info, guint16 len);
 
 /* hx_rcv_user_change (HTLS_HDR_USER_CHANGE) is a #[no_mangle] fn in the
  * hxhandlers::recv::user module (rust/crates/hxhandlers/src/recv/user.rs): it parses the frame natively,

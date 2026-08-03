@@ -469,9 +469,10 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
                     void *user_data)
 {
     GtkhxSession *sess = gtkhx_session_get_default ();
+    struct htlc_conn *htlc = user_data;
     switch (state) {
     case HXNET_BRIDGE_STATE_CONNECTED:
-        gtkhx_session_emit_connection_state (sess,
+        gtkhx_session_emit_connection_state (sess, htlc,
                                              GTKHX_CONNECTION_TCP_CONNECTED);
         break;
     case HXNET_BRIDGE_STATE_LOGIN_SENDING:
@@ -484,9 +485,9 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
          * LOGIN/step-2 reply frame arrives to dispatch to it; that
          * frame is emitted strictly after this state on the same
          * ordered event channel, so registering here is in time. */
-        gtkhx_session_emit_connection_state (sess,
+        gtkhx_session_emit_connection_state (sess, htlc,
                                              GTKHX_CONNECTION_HANDSHAKE_DONE);
-        hx_orchestrator_register_login_task ((struct htlc_conn *)user_data);
+        hx_orchestrator_register_login_task (htlc);
         break;
     case HXNET_BRIDGE_STATE_HANDSHAKE_DONE:
         /* Rust's end-of-handshake state. No view transition here: the

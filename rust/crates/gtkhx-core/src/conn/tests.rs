@@ -204,3 +204,40 @@ fn a_long_name_is_cut_on_a_character_boundary() {
 
     unsafe { hx_conn_free(conn) };
 }
+
+/// Serials identify connections, so two of them must never be the same, and
+/// the value has to survive the reset a reconnect used to do — otherwise a
+/// connection would change identity underneath every table keyed on it.
+#[test]
+fn serials_are_distinct_and_survive_a_reset() {
+    unsafe {
+        let a = hx_conn_new();
+        let b = hx_conn_new();
+        let sa = hx_conn_serial(a);
+        let sb = hx_conn_serial(b);
+
+        assert_ne!(sa, 0, "0 is reserved for \"no connection\"");
+        assert_ne!(sa, sb);
+
+        // Dirty a field first, or "the reset cleared it" passes on a
+        // freshly-zeroed struct even if the reset did nothing — which would
+        // make the interesting half, that the serial survived, pass for the
+        // wrong reason too.
+        hx_conn_set_uid(a, 0x1234);
+        assert_eq!(hx_conn_uid(a), 0x1234);
+
+        hx_conn_reset(a);
+        assert_eq!(hx_conn_uid(a), 0, "reset must clear ordinary state");
+        assert_eq!(hx_conn_serial(a), sa, "reset must not change identity");
+
+        hx_conn_free(a);
+        hx_conn_free(b);
+    }
+}
+
+/// A NULL connection reads as serial 0, which is what lets a composite key
+/// encode "no connection" without a separate branch at every call site.
+#[test]
+fn a_null_connection_has_serial_zero() {
+    assert_eq!(unsafe { hx_conn_serial(std::ptr::null()) }, 0);
+}

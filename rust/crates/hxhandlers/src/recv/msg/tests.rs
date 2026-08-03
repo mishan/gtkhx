@@ -8,8 +8,21 @@ fn fake_event() -> *mut std::os::raw::c_void {
     0x5A5A_usize as *mut std::os::raw::c_void
 }
 
+/// A sentinel connection pointer (never dereferenced by the crate).
+fn fake_htlc() -> *mut std::os::raw::c_void {
+    0xC0DE_usize as *mut std::os::raw::c_void
+}
+
 fn recv(uid: u16, is_pm: bool, event: *mut std::os::raw::c_void) -> c_int {
-    unsafe { hx_msg_recv(std::ptr::null_mut(), uid, c_int::from(is_pm), event) }
+    unsafe {
+        hx_msg_recv(
+            fake_htlc(),
+            std::ptr::null_mut(),
+            uid,
+            c_int::from(is_pm),
+            event,
+        )
+    }
 }
 
 #[test]
@@ -49,4 +62,15 @@ fn ignored_broadcast_is_dropped() {
         HX_MSG_DROPPED
     );
     assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
+}
+
+/// The emit has to carry the connection, not just the event. A uid is only
+/// unique within a connection, so an event that arrives without one cannot be
+/// resolved to a conversation — server B's user 5 is indistinguishable from
+/// server A's, and the private message lands in the wrong window.
+#[test]
+fn the_emit_carries_the_connection() {
+    test_env::reset();
+    assert_eq!(recv(5, /*is_pm=*/ true, fake_event()), HX_MSG_EMITTED);
+    assert_eq!(test_env::EMITTED_HTLC.with(|c| c.get()), fake_htlc());
 }

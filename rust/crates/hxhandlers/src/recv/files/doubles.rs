@@ -31,6 +31,7 @@ pub(crate) unsafe fn gtkhx_session_get_default() -> *mut c_void {
 
 pub(crate) unsafe fn gtkhx_session_emit_file_list(
     _self_: *mut c_void,
+    _htlc: *mut c_void,
     _cfl: *mut c_void,
     _fh: *mut c_void,
     _data: *mut c_void,

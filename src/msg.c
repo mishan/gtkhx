@@ -138,8 +138,10 @@ msg_windows_init (session *sess)
 static void
 msgwin_delete (struct msgwin *msg)
 {
-    session *sess = hx_active_session ();
-    if (!msg || !sess->msg_windows) {
+    /* The window remembers which session's table it was filed in, so a
+     * close routes to that one rather than to whatever is focused now. */
+    session *sess = msg ? msg->sess : NULL;
+    if (!sess || !sess->msg_windows) {
         return;
     }
     g_hash_table_remove (sess->msg_windows,
@@ -147,10 +149,9 @@ msgwin_delete (struct msgwin *msg)
 }
 
 struct msgwin *
-msgwin_with_uid (guint16 uid)
+msgwin_with_uid (session *sess, guint16 uid)
 {
-    session *sess = hx_active_session ();
-    if (!sess->msg_windows) {
+    if (!sess || !sess->msg_windows) {
         return NULL;
     }
     return g_hash_table_lookup (sess->msg_windows,
@@ -270,9 +271,18 @@ msg_input_activate (GtkWidget *widget, gpointer data)
     }
 
     len = strlen (termed_buf);
-    msg_output (hx_conn_name (hx_active_session ()->htlc), *uid, termed_buf);
-    LF2CR (termed_buf, len);
-    hx_send_msg (hx_active_session ()->htlc, *uid, termed_buf, len, 0);
+    /* The echo and the send both belong to the window being typed in, which
+     * knows its own session — not to whatever is focused. The window is
+     * already on the input widget (create_msg stashes it), so read it from
+     * there: looking it up by uid would have to pick a table first, which is
+     * the question being answered. */
+    {
+        struct msgwin *mw = g_object_get_data (G_OBJECT (widget), "msg");
+        session *sess = mw && mw->sess ? mw->sess : hx_active_session ();
+        msg_output (sess, hx_conn_name (sess->htlc), *uid, termed_buf);
+        LF2CR (termed_buf, len);
+        hx_send_msg (sess->htlc, *uid, termed_buf, len, 0);
+    }
     g_free (termed_buf);
 }
 
@@ -396,7 +406,7 @@ msgwin_refresh_user_info (struct msgwin *msg)
      * server-wide membership we want here. chat_with_cid is the canonical
      * "global user list" lookup; the pubchat + member_model NULL checks
      * below cover the mid-disconnect case. */
-    pubchat = chat_with_cid (hx_active_session (), 0);
+    pubchat = chat_with_cid (msg->sess ? msg->sess : hx_active_session (), 0);
 
     if (pubchat
         && hx_member_model_get_info (hx_chat_member_model (pubchat), *msg->uid,
@@ -423,10 +433,16 @@ msgwin_apply_user_change (struct msgwin *msg, const char *nam, guint16 icon,
 /* Non-static since the Rust create_msgwin (gtkhx-ui `msg`) calls it to build
  * the model + leaf widgets before assembling the PM tab layout. */
 struct msgwin *
-create_msg (guint16 _uid, char *name)
+create_msg (session *sess, guint16 _uid, char *name)
 {
     struct msgwin *msg;
-    guint16 *uid = g_malloc (sizeof (guint16));
+    guint16 *uid;
+
+    /* Guarded because `sess` now crosses the FFI from the Rust shell, where
+     * the old hx_active_session() could never be NULL. */
+    g_return_val_if_fail (sess != NULL && sess->msg_windows != NULL, NULL);
+
+    uid = g_malloc (sizeof (guint16));
     *uid = _uid;
 
     /* g_malloc0: see chat.c, same reason — history_draft must be
@@ -485,7 +501,6 @@ create_msg (guint16 _uid, char *name)
     gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (msg->inputbuf), 4);
 
     g_object_set_data (G_OBJECT (msg->inputbuf), "msg", msg);
-    g_object_set_data (G_OBJECT (msg->inputbuf), "sess", hx_active_session ());
     /* Note: GtkTextView has no "activate" signal — Return is dispatched
      * from msg_input_key_pressed, which calls msg_input_activate().
      * key-press-event is gone in GTK 4; install a
@@ -500,8 +515,9 @@ create_msg (guint16 _uid, char *name)
     /* stash the msgwin in the session's PM-windows table
      * keyed on uid. msg_windows_init() at startup guarantees the
      * table exists by the time we land here. */
-    g_hash_table_insert (hx_active_session ()->msg_windows,
-                         GUINT_TO_POINTER ((guint)_uid), msg);
+    msg->sess = sess;
+    g_hash_table_insert (sess->msg_windows, GUINT_TO_POINTER ((guint)_uid),
+                         msg);
     return msg;
 }
 
@@ -516,7 +532,12 @@ create_msg (guint16 _uid, char *name)
 static void
 msg_tab_on_close (guint16 uid)
 {
-    struct msgwin *msg = msgwin_with_uid (uid);
+    /* The chat-tab strip keys tabs on a bare uid with no connection
+     * dimension, so this can only ask the focused session. That is the flat
+     * key namespace docs/multi-connection.md parks with the tab view itself;
+     * until it is qualified, closing a tab while a different connection is
+     * focused would look up the wrong window. */
+    struct msgwin *msg = msgwin_with_uid (hx_active_session (), uid);
     if (msg != NULL) {
         /* Unparent the emoji typeahead popover from the input before
          * AdwTabView disposes the content tree — otherwise
@@ -591,8 +612,8 @@ hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w)
  * local echo, msg_output_from_event is the received message. So it is
  * passed rather than inferred. */
 static void
-msg_output_render (const char *name, guint16 uid, const char *body,
-                   gboolean is_self, gboolean outgoing)
+msg_output_render (session *sess, const char *name, guint16 uid,
+                   const char *body, gboolean is_self, gboolean outgoing)
 {
     struct msgwin *msg;
     gint16 brack_col;
@@ -601,9 +622,12 @@ msg_output_render (const char *name, guint16 uid, const char *body,
     const char *cur;
     const char *end;
 
-    msg = msgwin_with_uid (uid);
+    if (!sess) {
+        return;
+    }
+    msg = msgwin_with_uid (sess, uid);
     if (!msg) {
-        msg = create_msgwin (uid, (char *)name);
+        msg = create_msgwin (sess, uid, (char *)name);
     }
 
     /* Pink for our own messages, light blue for incoming. Keyed on
@@ -655,9 +679,8 @@ msg_output_render (const char *name, guint16 uid, const char *body,
              * stays 0, which is a miss rather than a guess. */
             /* `nam` is NUL-terminated here (it is the window's name),
              * so -1 is honest rather than a shortcut. */
-            HxChatSpeaker sp
-                = { outgoing ? hx_conn_uid (hx_active_session ()->htlc) : uid,
-                    nam, -1, outgoing };
+            HxChatSpeaker sp = { outgoing ? hx_conn_uid (sess->htlc) : uid, nam,
+                                 -1, outgoing };
             hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
                                       1, 0);
             first = FALSE;
@@ -682,27 +705,30 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 }
 
 void
-msg_output (const char *name, guint16 uid, char *buf)
+msg_output (session *sess, const char *name, guint16 uid, char *buf)
 {
-    gboolean is_self
-        = name && hx_conn_name (hx_active_session ()->htlc)[0]
-          && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;
+    gboolean is_self = name && hx_conn_name (sess->htlc)[0]
+                       && strcmp (name, hx_conn_name (sess->htlc)) == 0;
     /* The local echo of a message we just sent — the one caller is
      * send_msg's input handler. Outgoing by construction, which is
      * exactly the fact is_self cannot recover when you PM yourself. */
-    msg_output_render (name, uid, buf, is_self, TRUE);
+    msg_output_render (sess, name, uid, buf, is_self, TRUE);
 }
 
 void
-msg_output_from_event (HxMsgEvent *event)
+msg_output_from_event (struct htlc_conn *htlc, HxMsgEvent *event)
 {
     if (!event) {
         return;
     }
-    /* Received from the server: incoming, even when the sender is us
-     * (messaging yourself echoes back through the same path). */
-    msg_output_render (event->name, event->uid, event->body, event->is_self,
-                       FALSE);
+    /* Route by the connection the message arrived on. The event's uid is
+     * only unique *within* a connection, so resolving the window through
+     * the focused session — as this used to — delivers server B's message
+     * into the conversation you have open with server A's user of the same
+     * id, rendered with A's identity. That is the one place in this file
+     * where the connection is load-bearing rather than tidy. */
+    msg_output_render (sess_from_htlc (htlc), event->name, event->uid,
+                       event->body, event->is_self, FALSE);
 }
 
 /* short broadcasts go through toolbar_show_toast, long ones

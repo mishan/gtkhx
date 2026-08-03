@@ -35,10 +35,10 @@
 #include <string.h>
 #include <glib.h>
 
-/* Layout-compatible stub for struct msgwin: only the fields the
- * destroy notify actually frees. Real struct msgwin has GtkWidget*
- * fields after these — irrelevant here because the destroy notify
- * never touches them. */
+/* A stand-in for struct msgwin carrying only the fields the destroy notify
+ * actually frees. Deliberately *not* layout-compatible — the real struct has
+ * a leading `session *` and trailing GtkWidget* fields, and this test owns
+ * both its struct and its own free function, so it never has to match. */
 struct msgwin_stub {
     guint16 *uid;
     char *name;

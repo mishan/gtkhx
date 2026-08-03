@@ -121,7 +121,7 @@ pub unsafe extern "C" fn rcv_task_news_file(
 /// bytes; `gcnews` is the `struct gnews_catalog *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_newscat_list(
-    _htlc: *mut c_void,
+    htlc: *mut c_void,
     frame: *const c_void,
     frame_len: usize,
     gcnews: *mut c_void,
@@ -140,7 +140,7 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
         }
     };
     gnews_catalog_set_parsed(gcnews, parsed);
-    gtkhx_session_emit_news_catalog(gtkhx_session_get_default(), gcnews);
+    gtkhx_session_emit_news_catalog(gtkhx_session_get_default(), htlc, gcnews);
 }
 
 /// `void rcv_task_newsfolder_list(struct htlc_conn *htlc, void *gfnews, void *data)`
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
 /// bytes; `gfnews` is the `struct gnews_folder *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_newsfolder_list(
-    _htlc: *mut c_void,
+    htlc: *mut c_void,
     frame: *const c_void,
     frame_len: usize,
     gfnews: *mut c_void,
@@ -174,7 +174,7 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
         Box::into_raw(Box::new(hotline_proto::parse::parse_dirlist(s, frame_len))) as *mut c_void
     };
     gnews_folder_set_parsed(gfnews, parsed);
-    gtkhx_session_emit_news_folder(gtkhx_session_get_default(), gfnews);
+    gtkhx_session_emit_news_folder(gtkhx_session_get_default(), htlc, gfnews);
 }
 
 /// `void rcv_task_news_post(struct htlc_conn *htlc, void *target, void *data)` —
@@ -198,7 +198,7 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
 /// bytes; `target` is the `HxNewsNode *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_news_post(
-    _htlc: *mut c_void,
+    htlc: *mut c_void,
     frame: *const c_void,
     frame_len: usize,
     target: *mut c_void,
@@ -220,5 +220,5 @@ pub unsafe extern "C" fn rcv_task_news_post(
         }
     };
     let post = news_post_new(target, body.as_ptr(), body.len());
-    gtkhx_session_emit_news_thread(gtkhx_session_get_default(), post);
+    gtkhx_session_emit_news_thread(gtkhx_session_get_default(), htlc, post);
 }

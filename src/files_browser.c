@@ -1821,10 +1821,16 @@ on_close (GtkWindow *window, gpointer user_data)
  * the local-provider case is a no-op since its
  * get_unavailable_reason always returns NULL. */
 static void
-on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
+on_connection_state (GtkhxSession *sess, struct htlc_conn *htlc, guint state,
+                     gpointer user_data)
 {
     struct browser *br = user_data;
     (void)sess;
+    /* The browser is a file-static singleton with no session binding, so it
+     * still reacts to any connection's state. Once it becomes a
+     * per-connection panel this is where it filters — the connection is
+     * already here waiting for it. */
+    (void)htlc;
 
     /* Only DISCONNECTED (panel needs to paint the not-connected
      * state) and LOGIN_READY (panel can safely fire its initial

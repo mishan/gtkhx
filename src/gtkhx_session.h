@@ -133,7 +133,8 @@ void gtkhx_session_emit_gif_icon_data (GtkhxSession *self,
  * for the same reason "chat" carries an HxChatEvent: every
  * subscriber gets the same UTF-8-sanitised, self-classified view
  * of the message. */
-void gtkhx_session_emit_msg (GtkhxSession *self, HxMsgEvent *event);
+void gtkhx_session_emit_msg (GtkhxSession *self, struct htlc_conn *htlc,
+                             HxMsgEvent *event);
 
 /* "logged-in" (htlc *) — the login task reply came back successful
  * (rcv_task_login, non-error branch). This is the exact point the login
@@ -158,11 +159,12 @@ void gtkhx_session_emit_news_file (GtkhxSession *self, struct htlc_conn *htlc,
                                    const char *news, guint16 len);
 void gtkhx_session_emit_news_post (GtkhxSession *self, struct htlc_conn *htlc,
                                    const char *news, guint16 len);
-void gtkhx_session_emit_news_folder (GtkhxSession *self,
+void gtkhx_session_emit_news_folder (GtkhxSession *self, struct htlc_conn *htlc,
                                      struct gnews_folder *gfnews);
 void gtkhx_session_emit_news_catalog (GtkhxSession *self,
+                                      struct htlc_conn *htlc,
                                       struct gnews_catalog *gcnews);
-void gtkhx_session_emit_news_thread (GtkhxSession *self,
+void gtkhx_session_emit_news_thread (GtkhxSession *self, struct htlc_conn *htlc,
                                      struct news_post *post);
 
 /* Per-chat user-list mutations. user-changed carries the NEW values
@@ -187,19 +189,20 @@ void gtkhx_session_emit_user_change (GtkhxSession *self, struct htlc_conn *htlc,
                                      guint16 icon, guint16 color);
 void gtkhx_session_emit_users_clear (GtkhxSession *self, struct htlc_conn *htlc,
                                      struct chat *chat);
-void gtkhx_session_emit_user_info (GtkhxSession *self, guint16 uid,
-                                   const char *nam, const char *info,
-                                   guint16 len);
+void gtkhx_session_emit_user_info (GtkhxSession *self, struct htlc_conn *htlc,
+                                   guint16 uid, const char *nam,
+                                   const char *info, guint16 len);
 
 /* Files / transfers / tracker / tasks. */
 /* date_modify / date_create carry the raw 8-byte Hotline date stamps; the view
  * (output_file_info) decodes + formats them for display. */
-void gtkhx_session_emit_file_info (GtkhxSession *self, const char *path,
-                                   const char *name, const char *creator,
-                                   const char *type, const char *comments,
+void gtkhx_session_emit_file_info (GtkhxSession *self, struct htlc_conn *htlc,
+                                   const char *path, const char *name,
+                                   const char *creator, const char *type,
+                                   const char *comments,
                                    const guint8 *date_modify,
                                    const guint8 *date_create, guint64 size);
-void gtkhx_session_emit_file_list (GtkhxSession *self,
+void gtkhx_session_emit_file_list (GtkhxSession *self, struct htlc_conn *htlc,
                                    struct cached_filelist *cfl,
                                    struct hl_filelist_hdr *fh, void *data);
 void gtkhx_session_emit_file_update (GtkhxSession *self, session *sess,
@@ -300,6 +303,7 @@ typedef enum {
 } GtkhxConnectionState;
 
 void gtkhx_session_emit_connection_state (GtkhxSession *self,
+                                          struct htlc_conn *htlc,
                                           GtkhxConnectionState state);
 
 /* Connects every Phase 3 signal handler to the supplied emitter.

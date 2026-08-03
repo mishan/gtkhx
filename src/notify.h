@@ -28,14 +28,26 @@ extern void gtkhx_notify_init (GtkApplication *app);
 /* One entry point per event class. Each consults gtkhx_prefs and
  * the focus state of the relevant window before posting.
  *
+ * news / xfer / broadcast keep a constant id and take no connection: they are
+ * genuinely app-level ("something finished downloading"), and collapsing
+ * several into one notification is the intended behaviour.
+ *
  * Chat-side entry points (chat / pchat) take an HxChatEvent so the
  * notification title can be the actual sender's name. The other
  * event classes still take plain strings — they don't have the
  * sender embedded in a chat-line format. */
-extern void gtkhx_notify_chat (HxChatEvent *event);
-extern void gtkhx_notify_msg (HxMsgEvent *event);
-extern void gtkhx_notify_pchat (HxChatEvent *event);
-extern void gtkhx_notify_pchat_invite (guint32 cid, const char *inviter);
+/* The four connection-scoped classes take the connection the event arrived
+ * on. It is not decoration: a chat id and a uid are only unique *within* a
+ * connection, and the notification id is app-global — g_application_send_
+ * notification replaces by id, so without a connection dimension server B's
+ * message from uid 5 silently replaces server A's. The connection also picks
+ * which session's windows the omit-when-focused check consults, and whose
+ * nickname counts as a mention. */
+extern void gtkhx_notify_chat (struct htlc_conn *htlc, HxChatEvent *event);
+extern void gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event);
+extern void gtkhx_notify_pchat (struct htlc_conn *htlc, HxChatEvent *event);
+extern void gtkhx_notify_pchat_invite (struct htlc_conn *htlc, guint32 cid,
+                                       const char *inviter);
 extern void gtkhx_notify_news (const char *headline);
 extern void gtkhx_notify_xfer_done (const char *filename);
 extern void gtkhx_notify_broadcast (const char *text);

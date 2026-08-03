@@ -54,9 +54,12 @@ static GtkApplication *notify_app;
  * uses for the inline ATTR_BOLD+ATTR_COLOR highlight so visual
  * highlight and notification trigger always agree. */
 static gboolean
-body_mentions_us (const char *body)
+body_mentions_us (struct htlc_conn *htlc, const char *body)
 {
-    const char *self_nick = hx_conn_name (hx_active_session ()->htlc);
+    /* Our nick on *this* server. We can appear under different names on
+     * different servers, so matching against the focused connection's would
+     * both miss mentions and invent them. */
+    const char *self_nick = htlc ? hx_conn_name (htlc) : NULL;
     gboolean matched = FALSE;
     GPtrArray *words;
     gchar **extras = NULL;
@@ -102,18 +105,26 @@ window_is_active (GtkWidget *w)
  * public chat. Returns NULL if no UI window has been created yet —
  * which counts as "not focused" for the purposes of omit-focused. */
 static GtkWidget *
-chat_window_for_cid (guint32 cid)
+chat_window_for_cid (session *sess, guint32 cid)
 {
-    struct gtkhx_chat *gc = gchat_with_cid (hx_active_session (), cid);
+    struct gtkhx_chat *gc = sess ? gchat_with_cid (sess, cid) : NULL;
     return hx_gchat_window (gc);
 }
 
 static GtkWidget *
-msg_window_for_uid (guint16 uid)
+msg_window_for_uid (session *sess, guint16 uid)
 {
-    struct msgwin *m = msgwin_with_uid (uid);
+    struct msgwin *m = msgwin_with_uid (sess, uid);
     return m ? m->window : NULL;
 }
+
+/* Notification ids are app-global: g_application_send_notification replaces
+ * any earlier notification with the same id. A cid or a uid is only unique
+ * within a connection, so "msg-5" from two servers is one notification and
+ * the second silently replaces the first. The connection's serial supplies
+ * the missing dimension. */
+#define NOTIFY_ID_FMT(kind) kind "-%u-%u"
+#define NOTIFY_CONN_ID(htlc) ((unsigned)hx_conn_serial (htlc))
 
 /* Truncate a body to a sensible notification length. GNOME / KDE
  * tend to wrap long notifications anyway, but a 200-char cap keeps
@@ -194,7 +205,7 @@ event_slices (HxChatEvent *e, char **sender_out, char **body_out)
 }
 
 void
-gtkhx_notify_chat (HxChatEvent *event)
+gtkhx_notify_chat (struct htlc_conn *htlc, HxChatEvent *event)
 {
     gboolean is_mention;
     gboolean want;
@@ -210,12 +221,12 @@ gtkhx_notify_chat (HxChatEvent *event)
      * handles those. This entry point is for the public chat
      * (cid == 0). */
     if (event->cid != 0) {
-        gtkhx_notify_pchat (event);
+        gtkhx_notify_pchat (htlc, event);
         return;
     }
 
     event_slices (event, &sender, &body);
-    is_mention = body_mentions_us (body);
+    is_mention = body_mentions_us (htlc, body);
 
     want = is_mention ? gtkhx_prefs.notify_chat_highlight
                       : gtkhx_prefs.notify_chat;
@@ -228,11 +239,13 @@ gtkhx_notify_chat (HxChatEvent *event)
     }
 
     if (gtkhx_prefs.notify_omit_focused
-        && window_is_active (chat_window_for_cid (event->cid))) {
+        && window_is_active (
+            chat_window_for_cid (sess_from_htlc (htlc), event->cid))) {
         goto out;
     }
 
-    g_snprintf (id, sizeof (id), "chat-%u", event->cid);
+    g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("chat"), NOTIFY_CONN_ID (htlc),
+                event->cid);
 
     if (*sender) {
         title
@@ -250,7 +263,7 @@ out:
 }
 
 void
-gtkhx_notify_msg (HxMsgEvent *event)
+gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event)
 {
     char *title;
     char id[64];
@@ -270,11 +283,13 @@ gtkhx_notify_msg (HxMsgEvent *event)
     }
 
     if (gtkhx_prefs.notify_omit_focused
-        && window_is_active (msg_window_for_uid (event->uid))) {
+        && window_is_active (
+            msg_window_for_uid (sess_from_htlc (htlc), event->uid))) {
         return;
     }
 
-    g_snprintf (id, sizeof (id), "msg-%u", event->uid);
+    g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("msg"), NOTIFY_CONN_ID (htlc),
+                event->uid);
     title = g_strdup_printf ("%s (private message)",
                              (event->name && *event->name) ? event->name : "?");
     send_notify (id, title, event->body);
@@ -282,7 +297,7 @@ gtkhx_notify_msg (HxMsgEvent *event)
 }
 
 void
-gtkhx_notify_pchat (HxChatEvent *event)
+gtkhx_notify_pchat (struct htlc_conn *htlc, HxChatEvent *event)
 {
     gboolean is_mention;
     gboolean want;
@@ -295,7 +310,7 @@ gtkhx_notify_pchat (HxChatEvent *event)
     }
 
     event_slices (event, &sender, &body);
-    is_mention = body_mentions_us (body);
+    is_mention = body_mentions_us (htlc, body);
 
     want = is_mention ? gtkhx_prefs.notify_pchat_highlight
                       : gtkhx_prefs.notify_pchat;
@@ -308,11 +323,13 @@ gtkhx_notify_pchat (HxChatEvent *event)
     }
 
     if (gtkhx_prefs.notify_omit_focused
-        && window_is_active (chat_window_for_cid (event->cid))) {
+        && window_is_active (
+            chat_window_for_cid (sess_from_htlc (htlc), event->cid))) {
         goto out;
     }
 
-    g_snprintf (id, sizeof (id), "pchat-%u", event->cid);
+    g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("pchat"), NOTIFY_CONN_ID (htlc),
+                event->cid);
 
     if (*sender) {
         title = g_strdup_printf (is_mention ? "%s mentioned you (private chat)"
@@ -331,7 +348,8 @@ out:
 }
 
 void
-gtkhx_notify_pchat_invite (guint32 cid, const char *inviter)
+gtkhx_notify_pchat_invite (struct htlc_conn *htlc, guint32 cid,
+                           const char *inviter)
 {
     char *title;
     char id[64];
@@ -340,7 +358,8 @@ gtkhx_notify_pchat_invite (guint32 cid, const char *inviter)
         return;
     }
 
-    g_snprintf (id, sizeof (id), "pchat-invite-%u", cid);
+    g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("pchat-invite"),
+                NOTIFY_CONN_ID (htlc), cid);
     title
         = g_strdup_printf ("Chat invitation from %s", inviter ? inviter : "?");
     send_notify (id, title, NULL);

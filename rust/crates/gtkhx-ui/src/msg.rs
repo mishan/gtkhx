@@ -24,7 +24,7 @@ use gtk4 as gtk;
 type Msgwin = c_void;
 
 extern "C" {
-    fn create_msg(uid: u16, name: *mut c_char) -> *mut Msgwin;
+    fn create_msg(sess: *mut c_void, uid: u16, name: *mut c_char) -> *mut Msgwin;
     fn hx_msgwin_outputbuf(msg: *mut Msgwin) -> *mut gtk::ffi::GtkWidget;
     fn hx_msgwin_vscroll(msg: *mut Msgwin) -> *mut gtk::ffi::GtkWidget;
     fn hx_msgwin_inputbuf(msg: *mut Msgwin) -> *mut gtk::ffi::GtkWidget;
@@ -52,13 +52,20 @@ fn wptr<W: IsA<gtk::Widget>>(w: &W) -> *mut gtk::ffi::GtkWidget {
 /// Build a Private Message tab. C ABI replacement for the old
 /// `msg.c::create_msgwin`; returns the `struct msgwin *` (from `create_msg`).
 ///
+/// `sess` picks which session's PM-window table the new window is filed in.
+/// A uid is only unique within a connection, so it cannot be the whole key.
+///
 /// # Safety
 /// `name` is a valid C string; called on the GTK main thread.
 #[no_mangle]
-pub unsafe extern "C" fn create_msgwin(uid: u16, name: *mut c_char) -> *mut c_void {
+pub unsafe extern "C" fn create_msgwin(
+    sess: *mut c_void,
+    uid: u16,
+    name: *mut c_char,
+) -> *mut c_void {
     crate::ensure_gtk_init();
 
-    let msg = create_msg(uid, name);
+    let msg = create_msg(sess, uid, name);
     if msg.is_null() {
         return std::ptr::null_mut();
     }

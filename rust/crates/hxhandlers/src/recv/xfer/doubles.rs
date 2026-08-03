@@ -106,6 +106,7 @@ pub(crate) unsafe fn xfer_ready_write(_htxf: *mut c_void) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn gtkhx_session_emit_file_info(
     _self_: *mut c_void,
+    _htlc: *mut c_void,
     _path: *const c_char,
     name: *const c_char,
     _creator: *const c_char,

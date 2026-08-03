@@ -389,7 +389,7 @@ fn user_info_publishes_the_pair() {
     test_env::reset();
     let name = CString::new("Bob").unwrap();
     let info = CString::new("hello there").unwrap();
-    unsafe { hx_user_info_recv(11, name.as_ptr(), info.as_ptr(), 11) };
+    unsafe { hx_user_info_recv(std::ptr::null_mut(), 11, name.as_ptr(), info.as_ptr(), 11) };
     assert_eq!(
         test_env::take(),
         Some(Emit::Info {

@@ -78,6 +78,21 @@ pub struct HtlcConn {
     gif_icons_state: c_int,
     gif_icons_probe_timer: c_uint,
     gif_icons_probe_trans: u32,
+    /// A small per-connection identity, unique within this process run and
+    /// assigned once at allocation.
+    ///
+    /// It exists because several app-global tables are keyed on values that
+    /// are only unique *within* a connection — a uid, a chat id — and need a
+    /// connection dimension to stop two servers colliding. The connection
+    /// pointer would work as a key but is reusable after a free; a serial
+    /// never repeats.
+    ///
+    /// Deliberately *not* the durable identity M4 needs for saved layouts:
+    /// that has to survive a restart, and this doesn't. This is only ever a
+    /// runtime disambiguator.
+    ///
+    /// It lands in what was tail padding, so the struct is the same size.
+    serial: u16,
 }
 
 /// All fields are POD (integers, byte arrays, and null-valid raw pointers), so a
@@ -139,12 +154,37 @@ unsafe fn set_zeroed_str(dst: &mut [c_char], src: *const c_char) {
 
 // ---- Lifecycle ------------------------------------------------------------
 
-/// Allocate a fresh, zeroed connection. Production keeps exactly one for the
+/// Allocate a fresh connection: zeroed, but for the serial it is given here
+/// and keeps for life. Production keeps exactly one for the
 /// process lifetime (the single session), so it is intentionally never freed —
 /// `hx_conn_free` exists for symmetry / future multi-conn.
 #[no_mangle]
 pub extern "C" fn hx_conn_new() -> *mut HtlcConn {
-    Box::into_raw(Box::new(unsafe { zeroed() }))
+    let mut c: HtlcConn = unsafe { zeroed() };
+    c.serial = next_serial();
+    Box::into_raw(Box::new(c))
+}
+
+/// Hand out the next connection serial.
+///
+/// Starts at 1 so 0 reads as "no connection" for anything that has to encode
+/// the serial into a composite key. Saturates rather than wrapping: at
+/// 65535 live-and-dead connections in one process something else has gone
+/// wrong, and repeating a serial would silently alias two connections'
+/// entries in every table keyed on one.
+fn next_serial() -> u16 {
+    use std::sync::atomic::{AtomicU16, Ordering};
+    static NEXT: AtomicU16 = AtomicU16::new(1);
+    // A real saturating update, not a clamped fetch_add: the latter keeps
+    // counting past the clamp and eventually wraps through 0 — the reserved
+    // "no connection" value — and then back into serials that are still
+    // live. Absurdly remote at 65535 connections in one process, but the
+    // failure mode is two connections silently sharing every keyed entry,
+    // which is the one thing the serial exists to prevent.
+    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+        Some(n.saturating_add(1))
+    })
+    .unwrap_or(u16::MAX)
 }
 
 /// Reset to the just-allocated state (the old reconnect `memset(0)`). The caller
@@ -157,6 +197,10 @@ pub unsafe extern "C" fn hx_conn_reset(h: *mut HtlcConn) {
     if h.is_null() {
         return;
     }
+    // The serial is identity, not state: it survives the reset so a
+    // connection keeps the same key in every table across it.
+    let serial = (*h).serial;
+
     // Nulls `bridge_handle` along with everything else, *without* destroying
     // what it pointed at.
     //
@@ -168,6 +212,7 @@ pub unsafe extern "C" fn hx_conn_reset(h: *mut HtlcConn) {
     // (Disconnect is not a caller: `hx_htlc_close` clears fields
     // individually and uninstalls explicitly. It never reaches here.)
     *h = zeroed();
+    (*h).serial = serial;
 }
 
 /// Free a connection allocated by `hx_conn_new`.
@@ -538,6 +583,19 @@ pub unsafe extern "C" fn hx_conn_set_hope_aead(h: *mut HtlcConn, p: *mut c_void)
     (*h).hope_aead = p;
 }
 
+/// The connection's process-unique serial. See the field for what it is for.
+///
+/// # Safety
+/// `h` is a valid `*const HtlcConn`, or NULL (which reads as 0 — no
+/// connection, which is what a composite key wants for "none").
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_serial(h: *const HtlcConn) -> u16 {
+    if h.is_null() {
+        return 0;
+    }
+    (*h).serial
+}
+
 /// # Safety
 /// See the module note above the opaque-pointer accessors.
 #[no_mangle]
@@ -549,6 +607,48 @@ pub unsafe extern "C" fn hx_conn_bridge_handle(h: *const HtlcConn) -> *mut c_voi
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_bridge_handle(h: *mut HtlcConn, p: *mut c_void) {
     (*h).bridge_handle = p;
+}
+
+/// Field offsets, for the C side to compare against its mirror's `offsetof`.
+///
+/// The size assertion below is necessary but *not* sufficient: a field placed
+/// into existing padding leaves `sizeof` unchanged while the two layouts
+/// disagree about where it lives. `serial` is exactly such a field — it was
+/// added into the tail padding — so the pins have to check positions too.
+/// See `tests/unit/test_hxconn_layout.c`, which is the half of this that
+/// knows what C thinks.
+macro_rules! offsetof_export {
+    ($($name:ident => $field:ident),+ $(,)?) => {
+        $(
+            #[no_mangle]
+            pub extern "C" fn $name() -> usize {
+                std::mem::offset_of!(HtlcConn, $field)
+            }
+        )+
+    };
+}
+
+offsetof_export! {
+    hx_conn_offsetof_sess => sess,
+    hx_conn_offsetof_fd => fd,
+    hx_conn_offsetof_access => access,
+    hx_conn_offsetof_name => name,
+    hx_conn_offsetof_hope_aead => hope_aead,
+    hx_conn_offsetof_bridge_handle => bridge_handle,
+    hx_conn_offsetof_caps => caps,
+    hx_conn_offsetof_serial => serial,
+}
+
+/// The size Rust believes the struct is, for the same comparison.
+#[no_mangle]
+pub extern "C" fn hx_conn_sizeof() -> usize {
+    std::mem::size_of::<HtlcConn>()
+}
+
+/// The alignment Rust believes the struct has.
+#[no_mangle]
+pub extern "C" fn hx_conn_alignof() -> usize {
+    std::mem::align_of::<HtlcConn>()
 }
 
 /// Pin the layout: if this fires, `HtlcConn` and the C mirror in
