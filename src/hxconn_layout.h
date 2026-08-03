@@ -194,8 +194,8 @@ struct htlc_conn {
      * would otherwise linger forever). */
     guint32 gif_icons_probe_trans;
     guint16 serial;
-    guint32 ping_timer;
-    guint32 post_login_timer;
+    guint ping_timer;
+    guint post_login_timer;
     guint32 login_reply_trans;
 };
 

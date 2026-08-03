@@ -1117,9 +1117,10 @@ void
 kill_threads (void)
 {
     /* The async tracker fetch, which has its own cancellation inside
-     * current_tracker_fetch. The connect chain used to be cancelled here too;
-     * the orchestrator owns that now (see the note by ping_tick), and the
-     * teardown that matters runs through hx_bridge_uninstall. */
+     * current_tracker_fetch. The connect chain used to be cancelled here
+     * too; the orchestrator owns that now — see the note at the top of this
+     * file, where the cancellable used to live — and the teardown that
+     * matters runs through hx_bridge_uninstall. */
     tracker_kill_threads ();
 }
 

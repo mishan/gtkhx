@@ -1315,8 +1315,9 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
          * to keep — it's a no-op when the flag is FALSE, which is
          * the new common case. The fetched-bit itself lives on
          * hx_conn_post_login_fetched (htlc) now (so the files browser
-         * can read it); the running timer id is still our local
-         * static. */
+         * can read it), and so is the running timer id — two connections
+         * can be mid-login at once, and a shared slot meant the second
+         * one's arming overwrote the first's. */
         gboolean already_fetched = hx_conn_post_login_fetched (htlc);
         if (!already_fetched) {
             hx_conn_set_post_login_fetched (htlc, 0);

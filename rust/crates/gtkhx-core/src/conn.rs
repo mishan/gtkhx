@@ -91,16 +91,20 @@ pub struct HtlcConn {
     /// that has to survive a restart, and this doesn't. This is only ever a
     /// runtime disambiguator.
     ///
-    /// It lands in what was tail padding, so the struct is the same size.
+    /// It went into what was then tail padding, so adding it alone did not
+    /// grow the struct. That is history rather than a live property — the
+    /// fields below it have since taken that space — and it is the reason
+    /// `test_hxconn_layout` compares offsets: a field placed in padding is
+    /// exactly the case `sizeof` cannot pin.
     serial: u16,
     /// GLib source id for the PING keepalive, or 0.
     ///
     /// A file-static until now, which is why a second connection never got a
     /// keepalive at all: `ping_start` early-returns when the id is already
     /// set, and the first connection had set it.
-    ping_timer: u32,
+    ping_timer: c_uint,
     /// GLib source id for the post-login fallback fetch, or 0.
-    post_login_timer: u32,
+    post_login_timer: c_uint,
     /// The transaction id the orchestrator's replayed LOGIN reply will carry.
     /// The login task has to be registered under it, so it is per-connection
     /// for the same reason the transaction counter beside it is.
