@@ -65,6 +65,10 @@ pub mod users_voice_col;
 // #ifdef HAVE_VOICE, so no voice-off stub is needed. Exports voice_panel_*.
 #[cfg(feature = "voice")]
 pub mod voice_panel;
+// Who owns the microphone. One voice chat at a time anywhere, so the token is
+// process-global even though the runtimes it arbitrates are per-connection.
+#[cfg(feature = "voice")]
+pub mod voice_arbiter;
 // the push-to-talk key controller (was voice_ptt.c). Wholly behind the
 // `voice` feature — its C caller (toolbar.c) is #ifdef HAVE_VOICE. The pure
 // key-spec vocabulary stays C (voice_ptt_keyspec.c). Exports hx_voice_ptt_attach.

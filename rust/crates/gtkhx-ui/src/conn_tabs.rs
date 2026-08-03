@@ -351,6 +351,47 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_set_attention(
     page.set_needs_attention(on);
 }
 
+/// Mark `conn`'s tab as the one holding the microphone, clearing the mark from
+/// every other tab. `None` clears it everywhere.
+///
+/// Deliberately not voice-aware: this module knows nothing about rooms or
+/// runtimes, only that one connection is flagged at a time. The voice arbiter
+/// is what decides which, and calls this when the answer changes — so a build
+/// without voice simply never calls it.
+///
+/// The mark matters because voice is exclusive. Without it, "why did my
+/// microphone stop?" has no answer on screen, and finding your way back to the
+/// conversation you were in means clicking through every tab.
+pub fn set_voice_indicator(conn: Option<ConnKey>) {
+    // Snapshot before touching any of them, like every other accessor here:
+    // the adw setters below emit property notifies, and a handler that reached
+    // back into this module would find the cell already borrowed.
+    let tabs: Vec<(ConnKey, adw::TabPage)> = STATE.with(|s| {
+        s.borrow()
+            .tabs
+            .iter()
+            .map(|(k, p)| (*k, p.clone()))
+            .collect()
+    });
+    if tabs.is_empty() {
+        // Nothing to mark, and nothing GLib-flavoured attempted — which is
+        // what lets the arbiter call this unconditionally, including from a
+        // unit test with no display and no type system initialised.
+        return;
+    }
+
+    let icon = gtk::gio::ThemedIcon::new("audio-input-microphone-symbolic");
+    for (key, page) in tabs {
+        if Some(key) == conn {
+            page.set_indicator_icon(Some(&icon));
+            page.set_indicator_tooltip(&tr("Voice chat is active on this connection"));
+        } else {
+            page.set_indicator_icon(gtk::gio::Icon::NONE);
+            page.set_indicator_tooltip("");
+        }
+    }
+}
+
 /// How many connections the strip is showing. For the tests, and for callers
 /// that want to know whether the strip is doing anything at all.
 #[no_mangle]

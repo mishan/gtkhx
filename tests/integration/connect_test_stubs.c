@@ -442,6 +442,16 @@ gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
     (void)rt;
 }
 
+/* Voice-arbiter stub, same rationale: hx_htlc_close gives up the microphone
+ * token on disconnect, and the token lives in gtkhx-ui, which these binaries
+ * don't link. Nothing here ever holds it. */
+extern void gtkhx_voice_arbiter_release (session *sess);
+void
+gtkhx_voice_arbiter_release (session *sess)
+{
+    (void)sess;
+}
+
 /* Speaker-indicator model stub. Same rationale as the runtime stub
  * above: network.c::hx_htlc_close calls hx_voice_model_clear on
  * disconnect to drop stale presence state. the_session.voice_model

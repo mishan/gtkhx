@@ -565,15 +565,36 @@ place and the design holds:
   here?" — plus a clear indication in the tab strip of which connection holds
   voice.
 
-**What is missing is only the arbiter itself.** Nothing today prevents two
-runtimes opening the mic simultaneously; the audio backend would decide the
-outcome. There is a single clean choke point to add it — the runtime's join
-entry point — so this is a contained addition rather than a refactor. The one
-loose end is the voice panel's C callbacks, which receive no session context and
-resolve through the active session; the runtime already knows its own id, so
-threading it through the callback user data is the fix.
+**Built.** The arbiter is `voice_arbiter.rs`; the choke point is the join, in
+`voice_panel::on_join_toggled`.
 
-This remains the least risky of the four axes.
+Two things this section got wrong before it was built, worth recording because
+both are easy to repeat:
+
+- The choke point is *not* the runtime's construction. A runtime is built once
+  per connection and then reused for every room on it, so a token taken there
+  would never see a room change on the connection already holding voice —
+  which the constraint above names explicitly.
+- The panel's callbacks did not "receive no session context". They were handed
+  the connection as `user_data` all along and ignored it in favour of
+  `hx_active_session()`, which is a plain bug rather than a missing seam: a
+  background connection's voice state landed on the focused connection's panels
+  and speaker model.
+
+One thing the section had right and it would have been easy to skip: push-to-talk
+really is one of the singular resources, and it was latched to whichever session
+existed when the toolbar was built. It asks the arbiter now, which is what the
+"one microphone" framing implies and what makes the key work at all once voice
+is held anywhere but the first connection.
+
+Preemption is deliberately *not* an implicit leave on the wire when the room
+being left is on the same connection. The protocol's own rule is that joining a
+second room implicitly leaves the first, and the state machine has a room-switch
+arm that relies on it — so the arbiter drops its claim and lets the join carry
+it, rather than inventing a 601-then-600 sequence no server has seen from this
+client.
+
+It was still the least risky of the four axes.
 
 ---
 
@@ -775,7 +796,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | ~~M4e~~ | **Done.** The session is a heap object in `session_registry.c`, `hx_active_session()` reads which one has focus, and `hx_session_new()` is the factory — so a second connection is one call. The three app-global calls that were interleaved with it in `fe_init` are now visibly outside it, and the `the_session` global is out of `session.h` so nothing can reach for it again. | M4a |
 | ~~M4f~~ | **Done.** The build-once test is per-connection now — `dock::open` at the head of all six window entry points, keyed on the connection's serial. The connection tab strip exists (`conn_tabs.rs`: an `AdwTabBar` over a never-drawn `AdwTabView`, autohiding below two connections, so a single-connection window is pixel-identical to before). Chat attention badges the connection tab as well as the panel and the chat tab, skipping the connection already selected and never clearing from there. `GTKHX_DEBUG=secondconn` builds a second session so the switch can be driven by hand. **The catch, and it is the whole of M4g:** keying the build-once test on the connection removed the accident that had been keeping a second connection *out* of the content modules, and all six of them still keep their state in one process-global slot — so reaching one twice overwrites the first connection's rather than giving the second its own. `dock::claim_singleton` hands each role to the first connection that asks and refuses the rest, which restores the intended behaviour (no page, panel unchanged, logged under `GTKHX_DEBUG=dock`) instead of silent corruption. Every entry in that table is a module M4g has to make per-connection. | M4e |
 | ~~M4g~~ | **Done.** All six content modules own their state per connection: the Users action buttons moved onto `session`, the flat-News view and the 1.5 news browser became maps keyed on the connection, the files browser's `the_browser` static became a table keyed on the session, and each connection's Chat page gets its own `AdwTabView` — that last one being the actual blocker for Chat, since `sess->chats` was already per-session and the shared tab view was what a second content build would have re-parented. Three process-wide "was this panel ever built?" latches went with them, each replaced by a test on the session's own widget. Every session signal handler that fires per browser now filters on the connection it was handed, so a background server disconnecting no longer resets the foreground one. `dock::claim_singleton` is gone. `GTKHX_DEBUG=secondconn` builds a second connection with its own page in all six panels, and switching between them swaps every panel with nothing logged. | M4f |
-| M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |
+| ~~M5~~ | **Done.** `voice_arbiter.rs` holds a process-global `(connection, room)` token. It is taken at the **join**, not where a runtime is built — a runtime serves every room on its connection, so gating construction would let a connection hop rooms without asking, which is half of what "one voice chat anywhere" means. Acquiring reports what would have to be given up; the panel confirms with the user, drives the holder's graceful leave (601 on its own wire, not a runtime free), then joins. The token is taken only after the join actually goes out, and released by `hx_htlc_close` so a disconnect can't leave it naming a torn-down runtime. The connection tab carries a microphone mark, driven from `take` / `release` so the mark and the token cannot drift apart — and voice ending by *failure* (a server task error on the join, a WebRTC failure, the wedge deadline) releases too, through `state_changed_cb`, which is the only place that sees all of those. Per-session voice models retained. Two things fixed alongside: the three runtime signal callbacks resolved through `hx_active_session()` despite being handed their own connection as `user_data`, so a background connection's voice state updated the focused connection's panels and speaker model; and push-to-talk latched the session the toolbar was built with, so it silently did nothing once voice moved elsewhere. It asks the arbiter now. | M4 |
 | M6 | Global transfer queue with per-connection tags and a disconnect sweep; per-connection loss banner, status bar, titles and tray; bookmarks "open in new tab". | M4 |
 | M7 | Layout persistence across connections; two-server isolation test. | M4 |
 
