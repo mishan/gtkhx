@@ -250,6 +250,12 @@ static session test_session;
  * test_htlc stays the embedded VALUE so the existing `.field` / `&test_htlc`
  * uses are unchanged; the per-test memset re-zeroes it, so the sess back-pointer
  * (read by sess_from_htlc) is re-armed after each reset via test_htlc_rearm(). */
+/* The pre-connect `g_assert_false (hx_bridge_is_installed (&test_htlc))`
+ * checks below are hygiene, not leak detection. They used to interrogate the
+ * bridge's module-wide slot and so would catch a handle a previous subtest
+ * had leaked; now that the handle lives on the connection and each subtest
+ * memsets this storage first, they can only ever pass. The post-close ones
+ * still mean what they say. */
 static struct htlc_conn test_htlc_storage;
 #define test_htlc test_htlc_storage
 static inline void
@@ -289,7 +295,7 @@ test_orchestrator_login (void)
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
 
     /* Sanity: bridge starts uninstalled. */
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     hx_connect (&test_htlc, host, (guint16)port, "guest", "",
                 /*secure=*/0, /*tls=*/0);
@@ -312,7 +318,7 @@ test_orchestrator_login (void)
     g_assert_cmpint (idx_handshake, >, idx_tcp);
 
     /* The orchestrator installed the bridge. */
-    g_assert_true (hx_bridge_is_installed ());
+    g_assert_true (hx_bridge_is_installed (&test_htlc));
 
     /* The LOGIN reply was replayed to the C dispatch (Option B). The
      * recording hx_rcv_hdr in connect_test_stubs.c captured it. We
@@ -338,7 +344,7 @@ test_orchestrator_login (void)
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
     /* hx_htlc_close uninstalls the bridge. */
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 }
 
 /* Increment 1: prove the orchestrator advertises capabilities
@@ -444,14 +450,14 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
                 /*secure=*/1, /*tls=*/0);
     drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
-    g_assert_true (hx_bridge_is_installed ());
+    g_assert_true (hx_bridge_is_installed (&test_htlc));
 
     /* HOPE replays the step-2 reply, which carries HX_LOGIN_TRANS+1
      * (step 1 = HX_LOGIN_TRANS, step 2 = +1). */
@@ -465,7 +471,7 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
     g_ptr_array_unref (cand);
 }
 
@@ -523,14 +529,14 @@ test_orchestrator_hope_no_cipher (void)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
                 /*secure=*/1, /*tls=*/0);
     drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
-    g_assert_true (hx_bridge_is_installed ());
+    g_assert_true (hx_bridge_is_installed (&test_htlc));
 
     /* HOPE replays the step-2 reply (HX_LOGIN_TRANS+1); mhxd accepted
      * the no-cipher secure login (error bit clear). */
@@ -544,7 +550,7 @@ test_orchestrator_hope_no_cipher (void)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
     g_ptr_array_unref (cand);
 }
 
@@ -605,14 +611,14 @@ test_orchestrator_tls_login (void)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
                 /*secure=*/0, /*tls=*/1);
     drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
-    g_assert_true (hx_bridge_is_installed ());
+    g_assert_true (hx_bridge_is_installed (&test_htlc));
 
     /* TLS carries a plaintext LOGIN, so the replayed reply is the
      * LOGIN reply (trans HX_LOGIN_TRANS), like the non-TLS plaintext
@@ -639,7 +645,7 @@ test_orchestrator_tls_login (void)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     /* Second connect with AUTO_ACCEPT OFF: the cert is now pinned, so
      * the decide must resolve TRUSTED and accept silently — no prompt.
@@ -657,12 +663,12 @@ test_orchestrator_tls_login (void)
                 /*secure=*/0, /*tls=*/1);
     drive_until_rcv (obs2, 10000);
     g_assert_true (obs2->wait_arrived);
-    g_assert_true (hx_bridge_is_installed ());
+    g_assert_true (hx_bridge_is_installed (&test_htlc));
     observer_free (obs2, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
     hx_tls_test_set_known_hosts (NULL);
     g_unlink (known_hosts);
     g_rmdir (tmpdir);
@@ -768,7 +774,7 @@ test_orchestrator_connect_refused (void)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     hx_connect (&test_htlc, "127.0.0.1", 1, "guest", "",
                 /*secure=*/0, /*tls=*/0);
@@ -778,7 +784,7 @@ test_orchestrator_connect_refused (void)
      * (hx_htlc_close ran) — not a stuck throbber. */
     g_assert_true (obs->wait_arrived);
     /* hx_htlc_close tore the bridge handle down and reset fd. */
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
     observer_free (obs, gtkhx);
@@ -798,13 +804,13 @@ test_hope_tls_rejected (void)
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_htlc_rearm ();
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
 
     hx_connect (&test_htlc, "127.0.0.1", 5610, "guest", "",
                 /*secure=*/1, /*tls=*/1);
 
     /* Rejected up front: no bridge, no fd, nothing started. */
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
     /* Same via the GTKHX_TLS env override (bookmarks/power-user path). */
@@ -814,7 +820,7 @@ test_hope_tls_rejected (void)
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
     hx_connect (&test_htlc, "127.0.0.1", 5500, "guest", "",
                 /*secure=*/1, /*tls=*/0);
-    g_assert_false (hx_bridge_is_installed ());
+    g_assert_false (hx_bridge_is_installed (&test_htlc));
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
     hx_tls_test_set_force_tls (0);

@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "hxconn.h"
 #include "hxnet_bridge.h"
 #include "hotline_proto.h" /* gtkhx_proto_pack_header (wire header encode) */
 #include "proto_helpers.h"
@@ -79,18 +80,25 @@ void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
 void debug_log (const char *cat, const char *fmt, ...);
 void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
+/* Recording, not fatal: the stale-actor guard tests below are precisely
+ * about whether a frame reaches dispatch, so the stub has to report that
+ * rather than abort. */
+static int dispatch_calls;
+static struct htlc_conn *last_dispatch_htlc;
+static guint32 last_dispatch_type;
+
 void
 hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                    guint32 type, guint32 trans, guint32 flag, guint32 body_len)
 {
-    (void)htlc;
     (void)frame;
     (void)frame_len;
-    (void)type;
     (void)trans;
     (void)flag;
     (void)body_len;
-    g_assert_not_reached ();
+    dispatch_calls++;
+    last_dispatch_htlc = htlc;
+    last_dispatch_type = type;
 }
 
 /* Stub: bridge_on_state_cb calls this on LOGIN_SENDING, but these
@@ -135,11 +143,23 @@ debug_log (const char *cat, const char *fmt, ...)
  * staticlib + tokio runtime into a smoke test). The lifecycle helpers
  * themselves are covered by the production network.c hookups + Tier 3.
  *
- * The stubs are g_assert_not_reached: Tier 1 never installs a
- * connection, so none of them run — they exist only to satisfy the
- * link. */
+ * Most stubs are g_assert_not_reached and exist only to satisfy the link.
+ * The handful the per-connection tests below actually drive — open_plaintext,
+ * send_frame, destroy, frame_free, dispatch_frame — record instead, because
+ * what those tests assert is *which* connection the bridge reached for. */
 struct hxnet_connection_opaque;
-struct hxnet_frame_t;
+/* The frame struct the event callback receives. Field-for-field the same as
+ * hxnet_bridge.c's local mirror of hxnet's `hxnet_frame_t`; declared again
+ * here because that one is file-local to the bridge. */
+struct hxnet_frame_t {
+    guint32 type_;
+    guint32 trans;
+    guint32 flag;
+    guint16 hc;
+    guint16 _pad;
+    guint32 body_len;
+    guint8 *body_ptr;
+};
 
 /* Callback function-pointer types shared by the connect-entry stubs
  * below (open_plaintext / open_hope / open_plaintext_tls). Match the
@@ -158,29 +178,46 @@ int hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
 void hxnet_connection_destroy (struct hxnet_connection_opaque *handle);
 void hxnet_frame_free (struct hxnet_frame_t *f);
 
+/* Recording rather than fatal: the per-connection routing tests below are
+ * about *which* handle the bridge reaches for, so the stub has to report it
+ * instead of refusing to be called. Everything else in this file still never
+ * touches the transport. */
+static struct hxnet_connection_opaque *last_send_handle;
+static guint32 last_send_len;
+static struct hxnet_connection_opaque *last_destroyed_handle;
+static int destroy_calls;
+
 int
 hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
                              const guint8 *data, guint32 len)
 {
-    (void)handle;
     (void)data;
-    (void)len;
-    g_assert_not_reached ();
-    return -1;
+    last_send_handle = handle;
+    last_send_len = len;
+    return 0;
 }
 
 void
 hxnet_connection_destroy (struct hxnet_connection_opaque *handle)
 {
-    (void)handle;
-    g_assert_not_reached ();
+    last_destroyed_handle = handle;
+    destroy_calls++;
 }
+
+/* The bridge frees every frame it is handed, stale or not — that is the
+ * ownership contract, and the guard tests assert it holds on the drop path
+ * too. Recording rather than fatal for the same reason as the others. */
+static int frame_free_calls;
 
 void
 hxnet_frame_free (struct hxnet_frame_t *f)
 {
-    (void)f;
-    g_assert_not_reached ();
+    frame_free_calls++;
+    /* Actually free it. The contract this stub models is that the callee owns
+     * the frame, and the guard tests assert the bridge honours that even on
+     * the drop path — a stub that only counted would make those assertions
+     * pass while leaking every frame they allocate. */
+    g_free (f);
 }
 
 /* Phase G HTXF-AEAD: hx_bridge_orchestrated_hope_aead() calls the Rust
@@ -227,6 +264,16 @@ gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
  * which is fine for linking. */
 typedef void (*test_stub_state_cb) (struct hxnet_connection_opaque *conn,
                                     guint32 state, void *user_data);
+
+/* What the open_plaintext stub records and returns. Driving a real install
+ * is what makes the refusal and the stale-actor guards testable at Tier 1;
+ * everything the bridge does with a handle is pointer identity, so a fake
+ * address is indistinguishable from a real one to the code under test. */
+static struct hxnet_connection_opaque *open_result;
+static int open_calls;
+static test_stub_event_cb last_open_event_cb;
+static test_stub_shutdown_cb last_open_shutdown_cb;
+static void *last_open_user_data;
 typedef int (*test_stub_verify_cb) (const guint8 *fp, gsize fp_len,
                                     void *user_data);
 struct hxnet_connection_opaque *hxnet_connection_open_plaintext (
@@ -260,12 +307,16 @@ hxnet_connection_open_plaintext (
     (void)trans;
     (void)proxy_uri;
     (void)proxy_uri_len;
-    (void)on_event;
-    (void)on_shutdown;
     (void)on_state;
-    (void)user_data;
-    g_assert_not_reached ();
-    return NULL;
+    /* Capture the callbacks and hand back whatever the test asked for, so
+     * the install path can be driven without a socket. A test that wants two
+     * connections distinguishable sets `open_result` between calls; setting
+     * it to NULL forces the open-failed branch. */
+    open_calls++;
+    last_open_event_cb = on_event;
+    last_open_shutdown_cb = on_shutdown;
+    last_open_user_data = user_data;
+    return open_result;
 }
 
 struct hxnet_connection_opaque *hxnet_connection_open_hope (
@@ -490,6 +541,335 @@ test_pack_header_byte_layout (void)
     g_assert_cmpmem (hdr, sizeof (hdr), expected, sizeof (expected));
 }
 
+/* ---- the transport handle is per-connection ---------------------------- *
+ *
+ * These are what M2 bought. The handle used to be a file-static, so all four
+ * of these questions had one process-wide answer: a second connection's
+ * frames went to whichever installed last, and asking "is this one up" or
+ * tearing one down hit whatever was in the slot.
+ *
+ * No real transport is stood up. The bridge stores whatever pointer it is
+ * given and compares it by identity, so two distinct non-NULL addresses are
+ * enough to tell the connections apart — and using fakes keeps this a Tier 1
+ * test with no socket, no actor and no server. */
+
+/* Two sentinel addresses standing in for hxnet handles. Never dereferenced. */
+static int fake_transport_a;
+static int fake_transport_b;
+
+#define FAKE_A ((struct hxnet_connection_opaque *)&fake_transport_a)
+#define FAKE_B ((struct hxnet_connection_opaque *)&fake_transport_b)
+
+static void
+test_installed_is_per_connection (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *b = hx_conn_new ();
+
+    g_assert_false (hx_bridge_is_installed (a));
+    g_assert_false (hx_bridge_is_installed (b));
+
+    hx_conn_set_bridge_handle (a, FAKE_A);
+    g_assert_true (hx_bridge_is_installed (a));
+    /* The whole point: b is unaffected by a's install. */
+    g_assert_false (hx_bridge_is_installed (b));
+
+    hx_conn_set_bridge_handle (b, FAKE_B);
+    g_assert_true (hx_bridge_is_installed (a));
+    g_assert_true (hx_bridge_is_installed (b));
+
+    hx_conn_set_bridge_handle (a, NULL);
+    hx_conn_set_bridge_handle (b, NULL);
+    hx_conn_free (a);
+    hx_conn_free (b);
+}
+
+/* A NULL connection has no transport. Not a reachable production state —
+ * every install refuses a NULL htlc before registering it as user_data — but
+ * the helper is written to tolerate it and the shutdown guard leans on the
+ * same tolerance, so pin it rather than leave it to inspection. */
+static void
+test_installed_null_connection (void)
+{
+    g_assert_false (hx_bridge_is_installed (NULL));
+}
+
+/* ---- install ---------------------------------------------------------- */
+
+static void
+reset_stub_state (void)
+{
+    open_calls = 0;
+    open_result = FAKE_A;
+    last_open_event_cb = NULL;
+    last_open_shutdown_cb = NULL;
+    last_open_user_data = NULL;
+    dispatch_calls = 0;
+    last_dispatch_htlc = NULL;
+    frame_free_calls = 0;
+    destroy_calls = 0;
+    last_destroyed_handle = NULL;
+    last_send_handle = NULL;
+}
+
+static gboolean
+install_plaintext (struct htlc_conn *htlc)
+{
+    /* -1 is the orchestrator's "connected, but hxnet owns the socket"
+     * sentinel (see hx_conn_set_fd in network.c). It matters here because
+     * hx_bridge_dispatch_frame treats fd == 0 as closed and drops the frame
+     * before the stale-actor guard is reached — a fresh connection is zeroed,
+     * so without this the dispatch tests would pass for the wrong reason. */
+    hx_conn_set_fd (htlc, -1);
+    return hx_bridge_install_orchestrated_plaintext (
+        htlc, "example.invalid", 5500, "login", "pass", "name", 0, 197, 0, 1);
+}
+
+/* The behaviour change M2 exists for: installing a transport on a second
+ * connection while a first one is up. This used to be refused outright with
+ * "a connection is already installed", which is what made a second
+ * simultaneous connect impossible. */
+static void
+test_install_allows_a_second_connection (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *b = hx_conn_new ();
+
+    reset_stub_state ();
+    open_result = FAKE_A;
+    g_assert_true (install_plaintext (a));
+    g_assert_true (hx_bridge_is_installed (a));
+
+    open_result = FAKE_B;
+    g_assert_true (install_plaintext (b));
+    g_assert_cmpint (open_calls, ==, 2);
+
+    /* Two live transports, each on its own connection, each reachable
+     * independently. */
+    g_assert_true (hx_bridge_is_installed (a));
+    g_assert_true (hx_bridge_is_installed (b));
+    hx_bridge_send_frame (a, (const guint8 *)"x", 1);
+    g_assert_true (last_send_handle == FAKE_A);
+    hx_bridge_send_frame (b, (const guint8 *)"x", 1);
+    g_assert_true (last_send_handle == FAKE_B);
+
+    hx_bridge_uninstall (a);
+    hx_bridge_uninstall (b);
+    hx_conn_free (a);
+    hx_conn_free (b);
+}
+
+/* Still refused: a second install over the *same* connection, which would
+ * orphan the first actor and its socket with nothing left pointing at them. */
+static void
+test_install_refuses_over_the_same_connection (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+
+    reset_stub_state ();
+    g_assert_true (install_plaintext (a));
+
+    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL,
+                           "*already has a transport*");
+    g_assert_false (install_plaintext (a));
+    g_test_assert_expected_messages ();
+    /* Refused before reaching hxnet, so the first actor is untouched. */
+    g_assert_cmpint (open_calls, ==, 1);
+    g_assert_true (hx_bridge_is_installed (a));
+
+    hx_bridge_uninstall (a);
+    hx_conn_free (a);
+}
+
+/* ---- the stale-actor guards ------------------------------------------- *
+ *
+ * Both guards compare the handle an event carries against the one stored on
+ * the connection. They were written for reconnect — an event queued by the
+ * old actor arriving after a new handle is installed — and the per-connection
+ * move is what lets them tell that case apart from a *second live
+ * connection*, which under the old module-wide slot was indistinguishable. */
+
+static struct hxnet_frame_t *
+make_frame (void)
+{
+    struct hxnet_frame_t *f = g_new0 (struct hxnet_frame_t, 1);
+    f->type_ = 105;
+    return f;
+}
+
+static void
+test_event_from_a_stale_actor_is_dropped (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+
+    reset_stub_state ();
+    open_result = FAKE_A;
+    g_assert_true (install_plaintext (a));
+    test_stub_event_cb on_event = last_open_event_cb;
+    g_assert_nonnull (on_event);
+    g_assert_true (last_open_user_data == a);
+
+    /* The live handle dispatches. */
+    on_event (FAKE_A, make_frame (), a);
+    g_assert_cmpint (dispatch_calls, ==, 1);
+    g_assert_true (last_dispatch_htlc == a);
+    g_assert_cmpuint (last_dispatch_type, ==, 105);
+
+    /* A handle this connection no longer has does not — this is the frame
+     * that would otherwise be injected into a reconnected session's state
+     * machine. */
+    on_event (FAKE_B, make_frame (), a);
+    g_assert_cmpint (dispatch_calls, ==, 1);
+
+    /* Dropped or not, every frame is freed: the ownership contract does not
+     * bend for stale events. */
+    g_assert_cmpint (frame_free_calls, ==, 2);
+
+    hx_bridge_uninstall (a);
+    hx_conn_free (a);
+}
+
+/* The guard is per-connection, so B's live events are not mistaken for A's
+ * stale ones. Under the old single slot this was the frame that got dropped:
+ * whichever connection installed last owned the slot, and every other
+ * connection's traffic failed the identity test. */
+static void
+test_events_route_to_their_own_connection (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *b = hx_conn_new ();
+
+    reset_stub_state ();
+    open_result = FAKE_A;
+    g_assert_true (install_plaintext (a));
+    test_stub_event_cb on_event = last_open_event_cb;
+    open_result = FAKE_B;
+    g_assert_true (install_plaintext (b));
+
+    on_event (FAKE_A, make_frame (), a);
+    g_assert_cmpint (dispatch_calls, ==, 1);
+    g_assert_true (last_dispatch_htlc == a);
+
+    on_event (FAKE_B, make_frame (), b);
+    g_assert_cmpint (dispatch_calls, ==, 2);
+    g_assert_true (last_dispatch_htlc == b);
+
+    /* Crossed pairs are still rejected — the identity test is (handle,
+     * connection), not either one alone. */
+    on_event (FAKE_A, make_frame (), b);
+    on_event (FAKE_B, make_frame (), a);
+    g_assert_cmpint (dispatch_calls, ==, 2);
+    g_assert_cmpint (frame_free_calls, ==, 4);
+
+    hx_bridge_uninstall (a);
+    hx_bridge_uninstall (b);
+    hx_conn_free (a);
+    hx_conn_free (b);
+}
+
+/* A shutdown from an actor this connection has already replaced must not tear
+ * down the live one. This is the guard in the more dangerous direction: the
+ * old code's failure mode was destroying the *new* handle. */
+static void
+test_shutdown_from_a_stale_actor_is_ignored (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+
+    reset_stub_state ();
+    open_result = FAKE_A;
+    g_assert_true (install_plaintext (a));
+    test_stub_shutdown_cb on_shutdown = last_open_shutdown_cb;
+    g_assert_nonnull (on_shutdown);
+
+    on_shutdown (FAKE_B, 0 /* EOF */, a);
+    g_assert_cmpint (destroy_calls, ==, 0);
+    g_assert_true (hx_bridge_is_installed (a));
+
+    hx_bridge_uninstall (a);
+    hx_conn_free (a);
+}
+
+static void
+test_send_routes_to_its_own_connection (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *b = hx_conn_new ();
+    const guint8 payload[] = { 0xde, 0xad, 0xbe, 0xef };
+
+    hx_conn_set_bridge_handle (a, FAKE_A);
+    hx_conn_set_bridge_handle (b, FAKE_B);
+
+    last_send_handle = NULL;
+    g_assert_cmpint (hx_bridge_send_frame (a, payload, sizeof (payload)), ==,
+                     0);
+    g_assert_true (last_send_handle == FAKE_A);
+    g_assert_cmpuint (last_send_len, ==, sizeof (payload));
+
+    /* The bug this replaced: with one slot, this went to whichever
+     * connection installed last regardless of which one was asked. */
+    last_send_handle = NULL;
+    g_assert_cmpint (hx_bridge_send_frame (b, payload, sizeof (payload)), ==,
+                     0);
+    g_assert_true (last_send_handle == FAKE_B);
+
+    hx_conn_set_bridge_handle (a, NULL);
+    hx_conn_set_bridge_handle (b, NULL);
+    hx_conn_free (a);
+    hx_conn_free (b);
+}
+
+static void
+test_send_without_a_transport (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+    const guint8 payload[] = { 0x01 };
+
+    last_send_handle = NULL;
+    /* g_critical from the bridge is expected here — it is how the caller
+     * learns a send raced teardown. */
+    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL,
+                           "*no installed*");
+    g_assert_cmpint (hx_bridge_send_frame (a, payload, sizeof (payload)), ==,
+                     HX_BRIDGE_SEND_NOT_INSTALLED);
+    g_test_assert_expected_messages ();
+    g_assert_null (last_send_handle);
+
+    hx_conn_free (a);
+}
+
+static void
+test_uninstall_leaves_other_connections_alone (void)
+{
+    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *b = hx_conn_new ();
+
+    hx_conn_set_bridge_handle (a, FAKE_A);
+    hx_conn_set_bridge_handle (b, FAKE_B);
+
+    destroy_calls = 0;
+    last_destroyed_handle = NULL;
+    hx_bridge_uninstall (b);
+    g_assert_cmpint (destroy_calls, ==, 1);
+    g_assert_true (last_destroyed_handle == FAKE_B);
+    g_assert_false (hx_bridge_is_installed (b));
+    /* a still has its transport — disconnecting one connection must not
+     * tear down another. */
+    g_assert_true (hx_bridge_is_installed (a));
+
+    /* Idempotent: a second uninstall of the same connection is a no-op
+     * rather than a double free. */
+    hx_bridge_uninstall (b);
+    g_assert_cmpint (destroy_calls, ==, 1);
+
+    hx_bridge_uninstall (a);
+    g_assert_cmpint (destroy_calls, ==, 2);
+    g_assert_true (last_destroyed_handle == FAKE_A);
+    g_assert_false (hx_bridge_is_installed (a));
+
+    hx_conn_free (a);
+    hx_conn_free (b);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -506,5 +886,25 @@ main (int argc, char *argv[])
                      test_pack_header_full_u32_fields);
     g_test_add_func ("/hxnet_bridge/pack_header/byte_layout",
                      test_pack_header_byte_layout);
+    g_test_add_func ("/hxnet_bridge/handle/installed_is_per_connection",
+                     test_installed_is_per_connection);
+    g_test_add_func ("/hxnet_bridge/handle/installed_null_connection",
+                     test_installed_null_connection);
+    g_test_add_func ("/hxnet_bridge/handle/send_routes_to_its_own_connection",
+                     test_send_routes_to_its_own_connection);
+    g_test_add_func ("/hxnet_bridge/handle/send_without_a_transport",
+                     test_send_without_a_transport);
+    g_test_add_func ("/hxnet_bridge/handle/uninstall_leaves_others_alone",
+                     test_uninstall_leaves_other_connections_alone);
+    g_test_add_func ("/hxnet_bridge/install/allows_a_second_connection",
+                     test_install_allows_a_second_connection);
+    g_test_add_func ("/hxnet_bridge/install/refuses_over_the_same_connection",
+                     test_install_refuses_over_the_same_connection);
+    g_test_add_func ("/hxnet_bridge/guard/event_from_a_stale_actor",
+                     test_event_from_a_stale_actor_is_dropped);
+    g_test_add_func ("/hxnet_bridge/guard/events_route_to_their_own_connection",
+                     test_events_route_to_their_own_connection);
+    g_test_add_func ("/hxnet_bridge/guard/shutdown_from_a_stale_actor",
+                     test_shutdown_from_a_stale_actor_is_ignored);
     return g_test_run ();
 }

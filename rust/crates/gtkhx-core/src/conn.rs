@@ -54,6 +54,17 @@ pub struct HtlcConn {
     cipheralg: [c_char; 32],
     compressalg: [c_char; 32],
     hope_aead: *mut c_void,
+    /// The hxnet transport handle for *this* connection
+    /// (`hxnet_connection_opaque *`), or NULL when nothing is installed.
+    ///
+    /// It lives here rather than as a file-static in `hxnet_bridge.c`
+    /// because a module-level slot means one transport per process: every
+    /// outbound frame would go to whichever connection installed last, and
+    /// the bridge's stale-actor guards — which compare an event's handle
+    /// against the slot — would drop every frame belonging to any other
+    /// connection. Owned by the bridge, which installs and destroys it; this
+    /// seam only stores and returns the pointer.
+    bridge_handle: *mut c_void,
     caps: u64,
     history_max_msgs: u32,
     history_max_days: u32,
@@ -146,6 +157,16 @@ pub unsafe extern "C" fn hx_conn_reset(h: *mut HtlcConn) {
     if h.is_null() {
         return;
     }
+    // Nulls `bridge_handle` along with everything else, *without* destroying
+    // what it pointed at.
+    //
+    // So the requirement on every caller is: uninstall the bridge first, or
+    // this strands an hxnet actor and its socket with nothing left pointing
+    // at them. Stated as a rule rather than justified by who calls it today,
+    // because the call graph is the thing most likely to change.
+    //
+    // (Disconnect is not a caller: `hx_htlc_close` clears fields
+    // individually and uninstalls explicitly. It never reaches here.)
     *h = zeroed();
 }
 
@@ -517,10 +538,23 @@ pub unsafe extern "C" fn hx_conn_set_hope_aead(h: *mut HtlcConn, p: *mut c_void)
     (*h).hope_aead = p;
 }
 
+/// # Safety
+/// See the module note above the opaque-pointer accessors.
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_bridge_handle(h: *const HtlcConn) -> *mut c_void {
+    (*h).bridge_handle
+}
+/// # Safety
+/// See the module note above the opaque-pointer accessors.
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_set_bridge_handle(h: *mut HtlcConn, p: *mut c_void) {
+    (*h).bridge_handle = p;
+}
+
 /// Pin the layout: if this fires, `HtlcConn` and the C mirror in
 /// `hxconn_layout.h` have drifted. The C side pins the same value with
 /// `_Static_assert (sizeof (struct htlc_conn) == HXCONN_SIZEOF)`.
-pub const HXCONN_SIZEOF: usize = 760;
+pub const HXCONN_SIZEOF: usize = 768;
 const _: () = assert!(std::mem::size_of::<HtlcConn>() == HXCONN_SIZEOF);
 
 #[cfg(test)]

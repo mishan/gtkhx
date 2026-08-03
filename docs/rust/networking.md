@@ -184,8 +184,8 @@ close-time guards firing, and the sentinel is never passed to `close(2)`
 — teardown goes through the hxnet handle, not the fd.
 
 **3. Synchronous install ordering.** `hx_bridge_dispatch_frame` also
-gates on `hx_bridge_is_installed()`, so the bridge handle must be in the
-global slot before the first event callback fires. Because the
+gates on `hx_bridge_is_installed (htlc)`, so the handle must be stored on
+the connection before the first event callback fires. Because the
 orchestrator emits the replayed frame *before* `HandshakeDone`, and
 because events arrive on the GLib main loop (which is not re-entered
 until the connect function returns), installing the handle synchronously

@@ -27,6 +27,14 @@ typedef struct _session session;
 
 /* ---- Lifecycle -----------------------------------------------------------
  *
+ * hx_conn_reset zeroes every field, the transport handle included, without
+ * destroying what it pointed at. Callers must therefore uninstall the bridge
+ * before resetting, or an hxnet actor and its socket are stranded with
+ * nothing pointing at them.
+ *
+ * Disconnect does not come through here: hx_htlc_close clears fields
+ * individually and uninstalls explicitly.
+ *
  * hx_conn_new allocates a fresh, zeroed connection (the Rust owner Box-boxes
  * it); hx_conn_reset returns an existing one to the just-allocated state (the
  * reconnect path); hx_conn_free releases a hx_conn_new allocation. Production
@@ -214,6 +222,15 @@ extern void hx_conn_set_compressalg (struct htlc_conn *h, const char *v);
  * hxnet_hope_aead_* API); this seam only stores and returns the pointer. */
 extern void *hx_conn_hope_aead (const struct htlc_conn *h);
 extern void hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
+
+/* The hxnet transport handle for this connection (hxnet_connection_opaque *),
+ * or NULL when nothing is installed. Owned by hxnet_bridge.c, which installs
+ * and destroys it; this seam only stores and returns the pointer.
+ *
+ * Per-connection because the transport is: a module-level slot would send
+ * every connection's frames to whichever installed last. */
+extern void *hx_conn_bridge_handle (const struct htlc_conn *h);
+extern void hx_conn_set_bridge_handle (struct htlc_conn *h, void *p);
 
 /* ---- Outgoing transaction counter ----------------------------------------
  *
