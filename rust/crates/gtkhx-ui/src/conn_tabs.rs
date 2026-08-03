@@ -193,7 +193,12 @@ fn on_selected_page_changed(view: &adw::TabView) {
     // Focus first, then content. `hx_active_session()` is what the panels'
     // own handlers read, so a panel that rebuilds anything during the swap
     // must already see the connection it is being switched to.
-    unsafe { hx_session_set_active(sess) };
+    if unsafe { hx_session_set_active(sess) } == glib::ffi::GFALSE {
+        debug(&format!(
+            "connection {conn}: hx_session_set_active refused — session not in registry"
+        ));
+        return;
+    }
     swap_panels(conn);
 }
 
