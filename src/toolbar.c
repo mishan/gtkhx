@@ -376,7 +376,8 @@ on_action_about (GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static void
-on_action_connections (GSimpleAction *action, GVariant *param, gpointer user_data)
+on_action_connections (GSimpleAction *action, GVariant *param,
+                       gpointer user_data)
 {
     (void)action;
     (void)param;
