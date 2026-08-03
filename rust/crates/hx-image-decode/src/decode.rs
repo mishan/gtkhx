@@ -588,7 +588,12 @@ async fn run_decode(
             // last frame.
             None => break,
         };
-        push(&mut frames, &mut total_ms, adopt_texture(frame.texture()), delay);
+        push(
+            &mut frames,
+            &mut total_ms,
+            adopt_texture(frame.texture()),
+            delay,
+        );
     }
 
     Ok(DecodeOk::Animation(frames))
