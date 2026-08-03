@@ -47,6 +47,7 @@ extern size_t hx_conn_offsetof_hope_aead (void);
 extern size_t hx_conn_offsetof_bridge_handle (void);
 extern size_t hx_conn_offsetof_caps (void);
 extern size_t hx_conn_offsetof_serial (void);
+extern size_t hx_conn_offsetof_ping_timer (void);
 
 static void
 test_size_and_alignment_match (void)
@@ -74,6 +75,8 @@ test_field_offsets_match (void)
                       offsetof (struct htlc_conn, caps));
     g_assert_cmpuint (hx_conn_offsetof_serial (), ==,
                       offsetof (struct htlc_conn, serial));
+    g_assert_cmpuint (hx_conn_offsetof_ping_timer (), ==,
+                      offsetof (struct htlc_conn, ping_timer));
 }
 
 /* The field this test was written for. It sits in what used to be tail

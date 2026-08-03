@@ -157,8 +157,9 @@ banner_clear (void)
 }
 
 void
-rcv_login_reset (void)
+rcv_login_reset (struct htlc_conn *htlc)
 {
+    (void)htlc;
 }
 
 /* hx_rcv_hdr is the production receive callback. In the Phase G

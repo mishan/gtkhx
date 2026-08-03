@@ -173,7 +173,7 @@ extern void rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame,
 /* drop any pending post-login fallback timer. Called from
  * hx_htlc_close so we don't fire fetches into a closed connection if
  * the user disconnects within the 2-second AGREEMENTAGREE window. */
-extern void rcv_login_reset (void);
+extern void rcv_login_reset (struct htlc_conn *htlc);
 
 /* Fire deferred USER_GETLIST + news fetch. Idempotent (single-fire
  * guard). Called from hx_send_agreement_agree (network.c) after

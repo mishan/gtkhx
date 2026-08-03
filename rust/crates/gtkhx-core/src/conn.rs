@@ -93,6 +93,18 @@ pub struct HtlcConn {
     ///
     /// It lands in what was tail padding, so the struct is the same size.
     serial: u16,
+    /// GLib source id for the PING keepalive, or 0.
+    ///
+    /// A file-static until now, which is why a second connection never got a
+    /// keepalive at all: `ping_start` early-returns when the id is already
+    /// set, and the first connection had set it.
+    ping_timer: u32,
+    /// GLib source id for the post-login fallback fetch, or 0.
+    post_login_timer: u32,
+    /// The transaction id the orchestrator's replayed LOGIN reply will carry.
+    /// The login task has to be registered under it, so it is per-connection
+    /// for the same reason the transaction counter beside it is.
+    login_reply_trans: u32,
 }
 
 /// All fields are POD (integers, byte arrays, and null-valid raw pointers), so a
@@ -330,6 +342,24 @@ scalar!(
     hx_conn_gif_icons_probe_trans,
     hx_conn_set_gif_icons_probe_trans,
     gif_icons_probe_trans,
+    u32
+);
+scalar!(
+    hx_conn_ping_timer,
+    hx_conn_set_ping_timer,
+    ping_timer,
+    c_uint
+);
+scalar!(
+    hx_conn_post_login_timer,
+    hx_conn_set_post_login_timer,
+    post_login_timer,
+    c_uint
+);
+scalar!(
+    hx_conn_login_reply_trans,
+    hx_conn_set_login_reply_trans,
+    login_reply_trans,
     u32
 );
 
@@ -637,6 +667,7 @@ offsetof_export! {
     hx_conn_offsetof_bridge_handle => bridge_handle,
     hx_conn_offsetof_caps => caps,
     hx_conn_offsetof_serial => serial,
+    hx_conn_offsetof_ping_timer => ping_timer,
 }
 
 /// The size Rust believes the struct is, for the same comparison.
@@ -654,7 +685,7 @@ pub extern "C" fn hx_conn_alignof() -> usize {
 /// Pin the layout: if this fires, `HtlcConn` and the C mirror in
 /// `hxconn_layout.h` have drifted. The C side pins the same value with
 /// `_Static_assert (sizeof (struct htlc_conn) == HXCONN_SIZEOF)`.
-pub const HXCONN_SIZEOF: usize = 768;
+pub const HXCONN_SIZEOF: usize = 784;
 const _: () = assert!(std::mem::size_of::<HtlcConn>() == HXCONN_SIZEOF);
 
 #[cfg(test)]

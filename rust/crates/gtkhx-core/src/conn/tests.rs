@@ -241,3 +241,53 @@ fn serials_are_distinct_and_survive_a_reset() {
 fn a_null_connection_has_serial_zero() {
     assert_eq!(unsafe { hx_conn_serial(std::ptr::null()) }, 0);
 }
+
+/// The connect/login state that used to be file-statics in network.c and
+/// rcv.c is per-connection now. The keepalive is the one that was an outright
+/// bug: `ping_start` early-returns when the timer id is already set, and the
+/// id was process-wide — so once any connection had a keepalive running,
+/// every other connection silently went without one.
+#[test]
+fn connect_state_is_per_connection() {
+    unsafe {
+        let a = hx_conn_new();
+        let b = hx_conn_new();
+
+        assert_eq!(hx_conn_ping_timer(a), 0, "a fresh connection has none");
+        assert_eq!(hx_conn_ping_timer(b), 0);
+
+        hx_conn_set_ping_timer(a, 77);
+        assert_eq!(hx_conn_ping_timer(a), 77);
+        // The whole point: arming a's keepalive leaves b able to arm its own.
+        assert_eq!(hx_conn_ping_timer(b), 0);
+
+        hx_conn_set_post_login_timer(a, 5);
+        hx_conn_set_login_reply_trans(a, 2);
+        assert_eq!(hx_conn_post_login_timer(b), 0);
+        assert_eq!(hx_conn_login_reply_trans(b), 0);
+
+        hx_conn_free(a);
+        hx_conn_free(b);
+    }
+}
+
+/// Unlike the serial, these are state rather than identity: a reconnect must
+/// start with nothing armed, or the next `ping_start` would see a stale id
+/// and decline to arm a keepalive at all.
+#[test]
+fn connect_state_is_cleared_by_a_reset() {
+    unsafe {
+        let h = hx_conn_new();
+        hx_conn_set_ping_timer(h, 9);
+        hx_conn_set_post_login_timer(h, 9);
+        hx_conn_set_login_reply_trans(h, 9);
+
+        hx_conn_reset(h);
+
+        assert_eq!(hx_conn_ping_timer(h), 0);
+        assert_eq!(hx_conn_post_login_timer(h), 0);
+        assert_eq!(hx_conn_login_reply_trans(h), 0);
+
+        hx_conn_free(h);
+    }
+}

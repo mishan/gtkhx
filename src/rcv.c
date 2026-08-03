@@ -101,7 +101,22 @@
  * fresh. Stored on the htlc rather than as a file-local static
  * so the files-browser's remote provider (and other consumers
  * that need the "fully joined" gate) can read it directly. */
-static guint post_login_timer_id = 0;
+/* Cancel this connection's post-login fallback timer, if armed.
+ *
+ * The id lives on the connection rather than in a file-static: two
+ * connections can be mid-login at once, and a shared slot meant the second
+ * one's arming overwrote the first's id — leaking a source that would then
+ * fire against a connection nothing was tracking. */
+static void
+hx_post_login_timer_stop (struct htlc_conn *htlc)
+{
+    guint id = htlc ? hx_conn_post_login_timer (htlc) : 0;
+
+    if (id) {
+        g_source_remove (id);
+        hx_conn_set_post_login_timer (htlc, 0);
+    }
+}
 
 /* Public entry — network.c::hx_send_agreement_agree calls this
  * right after the hlwrite so post-login fetches fire on the spec-
@@ -114,10 +129,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
     }
     hx_conn_set_post_login_fetched (htlc, 1);
 
-    if (post_login_timer_id) {
-        g_source_remove (post_login_timer_id);
-        post_login_timer_id = 0;
-    }
+    hx_post_login_timer_stop (htlc);
 
     /* Fetch users + (gated) news. rcv_task_news_users handles
      * both — it calls rcv_task_user_list on the USER_GETLIST
@@ -204,7 +216,9 @@ post_login_fallback (gpointer data)
 {
     struct htlc_conn *htlc = data;
 
-    post_login_timer_id = 0;
+    if (htlc) {
+        hx_conn_set_post_login_timer (htlc, 0);
+    }
     if (htlc && hx_conn_fd (htlc) && !hx_conn_post_login_fetched (htlc)) {
         debug_log (
             "login",
@@ -215,12 +229,9 @@ post_login_fallback (gpointer data)
 }
 
 void
-rcv_login_reset (void)
+rcv_login_reset (struct htlc_conn *htlc)
 {
-    if (post_login_timer_id) {
-        g_source_remove (post_login_timer_id);
-        post_login_timer_id = 0;
-    }
+    hx_post_login_timer_stop (htlc);
     /* The post_login_fetched bit on htlc->flags is reset alongside
      * the other flags in hx_htlc_close — same reset point as
      * flags.logged_in. */
@@ -1309,10 +1320,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         gboolean already_fetched = hx_conn_post_login_fetched (htlc);
         if (!already_fetched) {
             hx_conn_set_post_login_fetched (htlc, 0);
-            if (post_login_timer_id) {
-                g_source_remove (post_login_timer_id);
-                post_login_timer_id = 0;
-            }
+            hx_post_login_timer_stop (htlc);
         }
 
         /* Phase 9.A: clear inline-media advisory limits BEFORE
@@ -1484,8 +1492,8 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
              * fetches after the AGREEMENTAGREE round-trip. Do NOT fire
              * HTLC_HDR_USER_GETLIST yet; arm a 2s fallback in case a misbehaving
              * server sends no agreement opcode at all. */
-            post_login_timer_id
-                = g_timeout_add_seconds (2, post_login_fallback, htlc);
+            hx_conn_set_post_login_timer (
+                htlc, g_timeout_add_seconds (2, post_login_fallback, htlc));
             break;
         default: /* HX_POST_LOGIN_NOTHING — fetches already fired */
             break;
