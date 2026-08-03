@@ -34,9 +34,6 @@ use crate::tr::tr;
 type Session = c_void;
 type Gchat = c_void;
 
-/// Stable panel id — matches `HX_PANEL_ID_CHAT` (`panel_registry.h`).
-const HX_ID_CHAT: &str = "chat";
-
 extern "C" {
     /// Make the public-chat gchat's C-coupled leaf widgets (subject / input /
     /// media button) + store them on the gchat; returns it, or NULL if there's
@@ -195,11 +192,11 @@ pub unsafe extern "C" fn create_chat_window(_parent: *mut c_void, data: *mut c_v
     crate::ensure_gtk_init();
 
     // Re-open → re-attach + raise the existing panel, don't rebuild.
-    if dock::raise_if_open(HX_ID_CHAT) {
-        return;
-    }
-
     let sess = data as *mut Session;
+    let dock::Open::Build(page) = dock::open(dock::ID_CHAT, data) else {
+        return;
+    };
+
     let content = build_content(sess);
     if content.is_null() {
         return;
@@ -207,8 +204,9 @@ pub unsafe extern "C" fn create_chat_window(_parent: *mut c_void, data: *mut c_v
 
     // On failure the bridge has already destroyed `content` (firing the
     // clear-ptrs destroy handler); skip the post-embed lifecycle.
-    if dock::embed(
-        HX_ID_CHAT,
+    if dock::place(
+        dock::ID_CHAT,
+        &page,
         dock::KIND_CENTER,
         dock::AREA_CENTER,
         "Chat",

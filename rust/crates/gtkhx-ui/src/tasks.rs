@@ -20,9 +20,6 @@ use crate::dock;
 /// Opaque C `session *`.
 type Session = c_void;
 
-/// Stable panel id — matches `HX_PANEL_ID_TASKS` (`panel_registry.h`).
-const HX_ID_TASKS: &str = "tasks";
-
 extern "C" {
     /// Build the Tasks panel content (action button bar over the task list
     /// scroller). Returns a still-floating container, or NULL if `sess` is
@@ -44,11 +41,13 @@ pub unsafe extern "C" fn create_tasks_window(_widget: *mut c_void, data: *mut c_
     crate::ensure_gtk_init();
 
     // Re-click of the toolbar button → re-attach + raise, don't rebuild.
-    if dock::raise_if_open(HX_ID_TASKS) {
-        return;
-    }
-
     let sess = data as *mut Session;
+    // Tasks is per-connection today; M6 turns the queue global, at which
+    // point this panel stops having pages at all.
+    let dock::Open::Build(page) = dock::open(dock::ID_TASKS, data) else {
+        return;
+    };
+
     let content = gtkhx_tasks_build_content(sess);
     if content.is_null() {
         return;
@@ -56,8 +55,9 @@ pub unsafe extern "C" fn create_tasks_window(_widget: *mut c_void, data: *mut c_
 
     // On failure the bridge has already destroyed `content`; skip the
     // post-embed lifecycle so we don't mark a non-existent panel open.
-    if dock::embed(
-        HX_ID_TASKS,
+    if dock::place(
+        dock::ID_TASKS,
+        &page,
         dock::KIND_SIDEBAR,
         dock::AREA_BOTTOM,
         "Tasks",

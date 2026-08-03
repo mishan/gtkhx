@@ -34,9 +34,6 @@ use crate::tr::tr;
 /// Opaque C `session *`.
 type Session = c_void;
 
-/// Stable panel id — matches `HX_PANEL_ID_NEWS` (`panel_registry.h`).
-const HX_ID_NEWS: &str = "news";
-
 use hxhandlers::send::news::hx_get_news;
 use hxtext::gtkhx_text_to_utf8;
 
@@ -518,10 +515,9 @@ unsafe fn into_floating_ptr<W: IsA<gtk::Widget>>(w: W) -> *mut gtk::ffi::GtkWidg
 pub unsafe extern "C" fn create_news_window(_toolbar_window: *mut c_void, sess: *mut c_void) {
     crate::ensure_gtk_init();
 
-    // Re-click of the toolbar button → re-attach + raise, don't rebuild.
-    if dock::raise_if_open(HX_ID_NEWS) {
+    let dock::Open::Build(page) = dock::open(dock::ID_NEWS, sess) else {
         return;
-    }
+    };
 
     let sess = sess as *mut Session;
     let content = build_content(sess);
@@ -531,8 +527,9 @@ pub unsafe extern "C" fn create_news_window(_toolbar_window: *mut c_void, sess: 
 
     // On failure the bridge has already destroyed `content`; skip the
     // post-embed lifecycle so we don't mark a non-existent panel open.
-    if dock::embed(
-        HX_ID_NEWS,
+    if dock::place(
+        dock::ID_NEWS,
+        &page,
         dock::KIND_SIDEBAR,
         dock::AREA_START,
         "News",

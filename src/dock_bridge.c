@@ -90,6 +90,14 @@ gtkhx_dock_raise_if_open (const char *id)
     return TRUE;
 }
 
+gboolean
+gtkhx_dock_is_embedded (const char *id)
+{
+    g_return_val_if_fail (id != NULL, FALSE);
+
+    return hx_panel_registry_lookup (id) != NULL;
+}
+
 void
 gtkhx_dock_set_needs_attention (const char *id, gboolean state)
 {
@@ -137,8 +145,9 @@ dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
         panel_widget_set_icon_name (PANEL_WIDGET (panel), icon_name);
     }
     /* The panel's child is a page stack, not the content directly — see
-     * dock_pages.h. At one connection it holds exactly one page and behaves
-     * as the old single child did. */
+     * dock_pages.h. `page` names the connection this first page belongs to;
+     * at one connection the stack holds exactly that one and behaves as the
+     * old single child did. */
     panel_widget_set_child (PANEL_WIDGET (panel),
                             hx_dock_pages_new (page, content));
 
@@ -155,13 +164,14 @@ dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
 
 gboolean
 gtkhx_dock_embed (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
-                  const char *title, const char *icon_name, GtkWidget *content)
+                  const char *title, const char *icon_name, const char *page,
+                  GtkWidget *content)
 {
     g_return_val_if_fail (id != NULL, FALSE);
+    g_return_val_if_fail (page != NULL, FALSE);
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
-    return dock_embed_common (id, kind, area, title, icon_name,
-                              HX_DOCK_PAGE_DEFAULT, content)
+    return dock_embed_common (id, kind, area, title, icon_name, page, content)
            != NULL;
 }
 

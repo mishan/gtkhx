@@ -33,6 +33,7 @@
 #include <libintl.h> /* bindtextdomain, bind_textdomain_codeset, textdomain */
 #include <getopt.h>
 #include "hx.h"
+#include "conn_tabs.h"
 #include "session_registry.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
 #include "hxconn.h"
@@ -929,6 +930,9 @@ init_icons (void)
     g_ptr_array_free (paths, FALSE);
 }
 
+/* Defined below fe_init, next to the explanation of what it is for. */
+static void hx_debug_second_session (void);
+
 static void
 fe_init (void)
 {
@@ -1013,7 +1017,58 @@ fe_init (void)
     create_users_window (toolbar_window, sess);
     create_tasks_window (toolbar_window, sess);
 
+    /* The first connection's tab. Invisible on its own — the strip autohides
+     * below two — so this changes nothing about how the window looks until a
+     * second connection exists. */
+    gtkhx_conn_tabs_add (sess, _ ("Not connected"));
+    hx_debug_second_session ();
+
     reinit_gtktexts (sess);
+}
+
+/* A second session, for exercising the connection tab strip by hand.
+ *
+ * `GTKHX_DEBUG=secondconn` only, and deliberately not reachable from the UI:
+ * this builds a session and gives it a tab, which is enough to click between
+ * two connections and watch what the switch does, but it is *not* a working
+ * second connection.
+ *
+ * Nothing connects it, and every one of the six per-connection panels still
+ * keeps its content in process-global state — chat in a shared tab view, users
+ * in file-static button handles, news and the 1.5 browser and the files
+ * browser each in a singleton. So `dock::claim_singleton` refuses all six for
+ * the second connection, it gets no pages, and switching to it leaves the
+ * first connection's content up. That is the whole of what M4g has to undo,
+ * and being able to see it from the outside is the point of this hook.
+ *
+ * One consequence to be aware of while the debug tab is selected:
+ * `hx_active_session()` returns a session with no windows and no views, so
+ * anything acted on from the toolbar is aimed at it.
+ *
+ * It exists because the alternative is shipping the switching path with no way
+ * to run it: M6 is what opens a second connection for real, and that is a long
+ * way after the machinery it depends on. */
+static void
+hx_debug_second_session (void)
+{
+    session *sess;
+
+    if (!debug_category_enabled ("secondconn")) {
+        return;
+    }
+
+    sess = hx_session_new ();
+    gtkhx_conn_tabs_add (sess, "Debug connection 2");
+    debug_log ("secondconn",
+               "built a second session (serial %u) — panels without a page "
+               "for it will stay on the first connection's content",
+               hx_conn_serial (sess->htlc));
+
+    /* Adding a tab selects it, which would leave the app focused on a
+     * connection that has nothing in it. Hand the focus back to the real one
+     * so startup looks normal and switching over is something the user
+     * chooses to do. */
+    gtkhx_conn_tabs_select (hx_session_at (0));
 }
 
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
@@ -1740,6 +1795,28 @@ on_connection_state_changed_signal (GtkhxSession *emitter,
     case GTKHX_CONNECTION_TCP_CONNECTED:
         set_status_bar (1);
         gtkhx_tray_set_connected (TRUE);
+        break;
+    default:
+        break;
+    }
+
+    /* Name this connection's tab for the server it is on. Above the session
+     * guard because it needs only the connection — the strip is per-connection
+     * by construction, so unlike the app-global chrome it is already routing
+     * correctly, and a connection whose back-pointer didn't resolve should
+     * still get an honest tab. Hidden entirely while there is one connection,
+     * so none of this is visible until it matters. */
+    switch (state) {
+    case GTKHX_CONNECTION_DISCONNECTED:
+        gtkhx_conn_tabs_set_title (htlc, _ ("Not connected"));
+        break;
+    case GTKHX_CONNECTION_CONNECTING:
+    case GTKHX_CONNECTION_TCP_CONNECTED:
+        /* The host, not the server's advertised name: that arrives later, or
+         * never on a server that sends no banner, and a tab saying where you
+         * asked to go beats one saying nothing until the server introduces
+         * itself. */
+        gtkhx_conn_tabs_set_title (htlc, hx_conn_serverhost (htlc));
         break;
     default:
         break;

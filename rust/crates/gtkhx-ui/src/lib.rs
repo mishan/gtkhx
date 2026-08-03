@@ -98,6 +98,14 @@ pub mod chat;
 // The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
 // gtkhx_chat_tabs_* C ABI chat.c / msg.c / users.c / gtkutil.c + chat.rs use.
 pub mod chat_tabs;
+// The connection tab strip — one tab per open connection, switching the focus
+// and with it every per-connection panel's content page. Not chat_tabs, which
+// switches conversations *within* whichever connection is showing.
+pub mod conn_tabs;
+// Every display-backed test in the crate, in one #[test]. There can only be
+// one; the module note says why.
+#[cfg(test)]
+mod gtk_tests;
 // The chat / pchat input GtkTextView key handler (was chat_input_key_pressed).
 // Exports gtkhx_chat_input_attach; keeps tab_nick_comp in C.
 pub mod chat_input;

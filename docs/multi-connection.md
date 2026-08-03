@@ -53,9 +53,10 @@ Two accessors are the seam that multi-connection routing will grow into:
   longer is — nor a struct field read, since the struct is opaque now.
 - **`hx_active_session()`** — the currently *focused* session. UI code (a button
   click, a menu action, a dialog) acts on whichever connection the user is
-  looking at. Today it returns the one session; when a connection tab strip
-  lands it becomes "the focused tab's session" and the call sites follow without
-  further edits.
+  looking at. This is now literally "the focused tab's session": the connection
+  tab strip moves the focus through `hx_session_set_active`, and every call site
+  routed through the accessor followed without further edits, which was the
+  whole point of introducing it.
 
 ---
 
@@ -772,7 +773,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | ~~M4c~~ | **Done.** The files browser and the remote provider each carry the session they list, and a per-pane operation asks the pane's provider rather than the browser; no `hx_active_session()` site is left in the four files. A copy routes by whichever pane is the remote one, and `xfer_new` takes a connection now, so an upload goes to the server it was dropped on rather than only being *gated* by it. | — |
 | ~~M4d~~ | **Done.** The tab strip keys on `(connection, cid)` / `(connection, uid)`, and the two close dispatchers get the connection the tab belonged to — so closing a background server's tab no longer tears down the focused server's conversation at the same id. | M3b |
 | ~~M4e~~ | **Done.** The session is a heap object in `session_registry.c`, `hx_active_session()` reads which one has focus, and `hx_session_new()` is the factory — so a second connection is one call. The three app-global calls that were interleaved with it in `fe_init` are now visibly outside it, and the `the_session` global is out of `session.h` so nothing can reach for it again. | M4a |
-| M4f | The connection tab strip, the build-once tests, and the badge demux. These are mutually dependent and land together: a tab strip needs something to switch between, the build-once tests need a connection to key on, and the badge needs a tab to land on. | M4e |
+| ~~M4f~~ | **Done.** The build-once test is per-connection now — `dock::open` at the head of all six window entry points, keyed on the connection's serial. The connection tab strip exists (`conn_tabs.rs`: an `AdwTabBar` over a never-drawn `AdwTabView`, autohiding below two connections, so a single-connection window is pixel-identical to before). Chat attention badges the connection tab as well as the panel and the chat tab, skipping the connection already selected and never clearing from there. `GTKHX_DEBUG=secondconn` builds a second session so the switch can be driven by hand. **The catch, and it is the whole of M4g:** keying the build-once test on the connection removed the accident that had been keeping a second connection *out* of the content modules, and all six of them still keep their state in one process-global slot — so reaching one twice overwrites the first connection's rather than giving the second its own. `dock::claim_singleton` hands each role to the first connection that asks and refuses the rest, which restores the intended behaviour (no page, panel unchanged, logged under `GTKHX_DEBUG=dock`) instead of silent corruption. Every entry in that table is a module M4g has to make per-connection. | M4e |
 | M4g | De-singletonise the remaining content modules (news browser, the users action buttons) and give inactive content trees an owner. The riskiest slice: the destroy handlers *are* the model-side teardown, so a naive reparent-and-drop nulls the state of the connection just switched away from. | M4f |
 | M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |
 | M6 | Global transfer queue with per-connection tags and a disconnect sweep; per-connection loss banner, status bar, titles and tray; bookmarks "open in new tab". | M4 |

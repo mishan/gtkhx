@@ -173,6 +173,71 @@ pub unsafe extern "C" fn hx_icon_set(_htlc: *mut c_void, _gif: *const u8, _len: 
 #[no_mangle]
 pub unsafe extern "C" fn hx_icon_clear(_htlc: *mut c_void) {}
 
+// ---- session identity + the dock bridge ----------------------------------
+//
+// For the connection tab strip, which keys everything on a connection's
+// serial, reaches it through the session, and asks the dock to swap pages.
+//
+// `hx_conn_serial` is deliberately *not* here: it lives in gtkhx-core, a Rust
+// crate this one already depends on, so stubbing it would be a duplicate
+// symbol — and a lie besides, since the serial is the one value the strip's
+// correctness rests on. The test allocates real connections instead, and
+// `gtkhx_session_htlc` below is an identity so that a connection can stand in
+// for the session that owns it. That keeps the real serial allocator in the
+// loop rather than substituting a fake one that could quietly hand every tab
+// the same key.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void {
+    sess
+}
+/// Counted, unlike its neighbours, because for one assertion the *call* is the
+/// thing under test rather than the answer: the tab strip's selection handler
+/// has no other observable effect inside a test binary, and whether it ran at
+/// all for the first tab is a real bug this once had.
+pub static SET_ACTIVE_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+#[no_mangle]
+pub unsafe extern "C" fn hx_session_set_active(_sess: *mut c_void) -> glib::ffi::gboolean {
+    SET_ACTIVE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    glib::ffi::GTRUE
+}
+#[no_mangle]
+pub unsafe extern "C" fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
+
+// The dock bridge (dock_bridge.c). Inert: the strip's selection handler runs
+// during the test — appending a tab selects it — and walks every
+// per-connection panel, so these have to exist. Answering FALSE throughout
+// means "no panel has a page for this connection", which is both true of a
+// test binary with no dock and the branch worth having run.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_dock_raise_if_open(_id: *const c_char) -> glib::ffi::gboolean {
+    glib::ffi::GFALSE
+}
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_dock_is_embedded(_id: *const c_char) -> glib::ffi::gboolean {
+    glib::ffi::GFALSE
+}
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_dock_set_needs_attention(
+    _id: *const c_char,
+    _state: glib::ffi::gboolean,
+) {
+}
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_dock_has_page(
+    _id: *const c_char,
+    _page: *const c_char,
+) -> glib::ffi::gboolean {
+    glib::ffi::GFALSE
+}
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_dock_show_page(
+    _id: *const c_char,
+    _page: *const c_char,
+) -> glib::ffi::gboolean {
+    glib::ffi::GFALSE
+}
+
 // ---- voice (hxvoice-runtime, voice_ptt_keyspec.c) -----------------------
 //
 // Only referenced in a voice build, and gated to match so the stub set

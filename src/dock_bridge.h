@@ -65,6 +65,18 @@ typedef enum {
  * lookup → ensure_attached → raise head of each old create_X_window. */
 gboolean gtkhx_dock_raise_if_open (const char *id);
 
+/* Whether `id` names an embedded panel — the same question
+ * gtkhx_dock_raise_if_open answers, without doing anything about it.
+ *
+ * Both exist because two callers ask with opposite intent. One asks "should I
+ * skip building?", and raising is the whole point of asking. The other asks
+ * "does a panel already exist, so this connection's content is a page rather
+ * than a new panel?" — a routing question, whose answer decides *how* to
+ * place content, and which must not raise on its own account: whether to show
+ * the result is a separate decision, made after, and only for the connection
+ * the user is looking at. */
+gboolean gtkhx_dock_is_embedded (const char *id);
+
 /* Set / clear the needs-attention hint on a registered panel (the dock
  * tab strip badges it when the panel isn't the visible tab). No-op if no
  * panel with this id is registered. Used by the Rust chat-tabs manager to
@@ -72,9 +84,13 @@ gboolean gtkhx_dock_raise_if_open (const char *id);
 void gtkhx_dock_set_needs_attention (const char *id, gboolean state);
 
 /* Create-or-embed a static (CENTER / SIDEBAR) panel: builds the HxPanel
- * for `id`, titles/icons it, sets `content` as its child, adds it to the
- * home frame for `area`, records the home frame, and registers it (the
- * registry strong-refs it so it survives Close-all-pages).
+ * for `id`, titles/icons it, sets `content` as its first content page named
+ * `page`, adds it to the home frame for `area`, records the home frame, and
+ * registers it (the registry strong-refs it so it survives Close-all-pages).
+ *
+ * `page` names the connection the content belongs to — see the per-connection
+ * page section below. This is the panel's *first* page; another connection's
+ * content goes in through gtkhx_dock_add_page.
  *
  * Returns TRUE on success. `content` is *always consumed* either way: on
  * success the panel takes its reference; on failure (the toolbar dock
@@ -84,7 +100,8 @@ void gtkhx_dock_set_needs_attention (const char *id, gboolean state);
  * the call regardless. */
 gboolean gtkhx_dock_embed (const char *id, GtkhxDockKind kind,
                            GtkhxDockArea area, const char *title,
-                           const char *icon_name, GtkWidget *content);
+                           const char *icon_name, const char *page,
+                           GtkWidget *content);
 
 /* Dynamic-panel variant (per-pchat / per-PM tabs): same embed, plus a
  * close trampoline. When the tab is closed, `on_close(user_data)` fires
@@ -106,14 +123,21 @@ gboolean gtkhx_dock_embed (const char *id, GtkhxDockKind kind,
  * user changes connection. See dock_pages.h for the shape and for why
  * switching must not remove pages.
  *
- * `page` names the connection the content belongs to. Until connections are
- * plural, everything embeds under HX_DOCK_PAGE_DEFAULT and a panel holds
- * exactly one page, behaving as the old single child did.
+ * `page` names the connection the content belongs to: its serial, rendered
+ * as a string on the Rust side. While there is one connection a panel holds
+ * exactly one page and behaves as the old single child did.
  *
  * An id with no panel reads as "no pages" throughout, matching what the
  * panel-level calls above do with an unknown id. */
 
-/* The page name used while there is one connection. */
+/* The page name for content that belongs to no connection in particular.
+ *
+ * Nothing reaches it any more: the six per-connection panels name every page
+ * after a connection, and the only other caller is gtkhx_dock_embed_dynamic,
+ * which has no callers of its own — private chats and PMs became tabs inside
+ * the Chat panel's shared AdwTabView rather than dynamic panels. Kept because
+ * a dynamic panel would still need *a* page name, and deleting the constant
+ * would not make the dead function less dead. */
 #define HX_DOCK_PAGE_DEFAULT "default"
 
 /* Add content as a new page of an already-embedded panel. Takes ownership of
