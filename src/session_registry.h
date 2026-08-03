@@ -61,6 +61,16 @@ session *hx_session_new (void);
  * deliberately names none of it. Never NULL. */
 session *hx_session_open (const char *title);
 
+/* Close a connection: disconnect it, destroy its content page in every
+ * per-connection panel, and drop it from the collection.
+ *
+ * The inverse of hx_session_open, and the same reason it lives in gtkhx.c: it
+ * names the panel layer. The caller moves the focus off it first — the tab
+ * strip does, by selecting a neighbour before closing.
+ *
+ * Does not free the session; see hx_session_remove. */
+void hx_session_close (session *sess);
+
 /* The session the user is looking at, or NULL before the first one exists.
  *
  * It used to be impossible for this to be NULL, and most callers still don't
@@ -83,6 +93,16 @@ session *hx_session_at (guint i);
 
 /* Where `sess` sits, or HX_SESSION_NOT_FOUND. */
 guint hx_session_index (session *sess);
+
+/* Drop `sess` from the collection. FALSE if it wasn't in it.
+ *
+ * Does *not* free the session: raw `session *` pointers are held by things
+ * with no way to learn one has gone (the tab strip's index, the voice token),
+ * all written against sessions being immortal. See the note on the definition.
+ *
+ * The caller is expected to have moved the focus off it first, and to have
+ * disconnected and torn down its panels — hx_session_close does all of that. */
+gboolean hx_session_remove (session *sess);
 
 G_END_DECLS
 

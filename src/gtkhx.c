@@ -34,6 +34,7 @@
 #include <getopt.h>
 #include "hx.h"
 #include "conn_tabs.h"
+#include "dock_bridge.h"
 #include "files_browser.h"
 #include "session_registry.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
@@ -971,6 +972,28 @@ hx_session_open (const char *title)
     return sess;
 }
 
+void
+hx_session_close (session *sess)
+{
+    if (sess == NULL) {
+        return;
+    }
+
+    /* Disconnect first, if it is up. This is where the wire-side teardown
+     * lives — the transfer sweep, the voice token, the task table — and it
+     * has to run while the session's collections are still intact. */
+    if (hx_conn_fd (sess->htlc)) {
+        hx_htlc_close (sess->htlc, 1);
+    }
+
+    /* Then the content. Removing a page destroys its widget tree, and every
+     * content module's destroy handler is its model-side teardown — that is
+     * why this is a *remove* and not the switch-away a tab change does. */
+    gtkhx_dock_remove_session_pages (sess);
+
+    hx_session_remove (sess);
+}
+
 static void
 fe_init (void)
 {
@@ -1104,6 +1127,14 @@ hx_debug_second_session (void)
      * do. Not something hx_session_open should do for everyone: a connection
      * the *user* opens is one they want to be looking at. */
     gtkhx_conn_tabs_select (hx_session_at (0));
+
+    /* With `closesecond` as well, close it straight back — the close path is
+     * otherwise only reachable by clicking, which a headless run can't do. */
+    if (debug_category_enabled ("closesecond")) {
+        gtkhx_conn_tabs_close (sess);
+        debug_log ("secondconn", "closed it again; %u session(s) left",
+                   hx_session_count ());
+    }
 }
 
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
@@ -1448,6 +1479,14 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
         return;
     }
     changetitlesconnected (sess);
+    /* Retitle the tab now that the server has said what it is called.
+     * `hx_session_label` prefers that over the host — the tab was named for
+     * where we were going, and can now be named for where we are. */
+    {
+        char *label = hx_session_label (sess);
+        gtkhx_conn_tabs_set_title (htlc, label);
+        g_free (label);
+    }
     setbtns (sess, 1);
     set_status_bar (sess, 2);
 }

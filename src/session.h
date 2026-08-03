@@ -197,6 +197,15 @@ typedef struct _session {
      * login. */
     char *server_name;
 
+    /* What this connection's status bar last said (-1 connecting, 0 not
+     * connected, 1 connected, 2 logged in).
+     *
+     * Per session because it decides whether a transition is worth
+     * announcing: "disconnected" is only a toast if this connection had got
+     * somewhere first. It was one static shared by every connection, which
+     * answered for whichever one had most recently changed state. */
+    int last_status;
+
     /* The Users panel's six action buttons.
      *
      * Per-session because each connection has its own Users content page, so

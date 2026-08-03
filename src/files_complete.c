@@ -25,7 +25,12 @@
 #define POPOVER_VISIBLE_ROWS 8
 
 struct _hx_path_complete {
-    GtkEntry *entry; /* not owned */
+    /* Not owned, and it can go first: the entry lives in the panel's widget
+     * tree, and the browser's teardown runs from the content box's "destroy",
+     * by which point the entry is already on its way out. `entry_destroy` is
+     * the handler that notices — see hx_path_complete_new. */
+    GtkEntry *entry;
+    gulong entry_destroy;
 
     GtkWidget *popover;
     GtkWidget *listview;
@@ -569,6 +574,8 @@ row_bind (GtkSignalListItemFactory *fac, GObject *obj, gpointer user_data)
 }
 
 /* ---- Public API ---- */
+/* The entry is going. Drop what is parented to it and forget it. */
+static void on_entry_destroy (hx_path_complete *c);
 
 hx_path_complete *
 hx_path_complete_attach (GtkEntry *entry)
@@ -649,7 +656,32 @@ hx_path_complete_attach (GtkEntry *entry)
                       G_CALLBACK (on_key_pressed), c);
     gtk_widget_add_controller (GTK_WIDGET (entry), c->key_controller);
 
+    /* The entry can be destroyed before the completer is freed — that is the
+     * ordinary case when a connection's Files page is removed, since the
+     * browser's teardown runs from the content box's own "destroy".
+     *
+     * Two things have to happen then, and neither can wait: the popover is
+     * *parented to the entry*, so it has to be unparented while unparenting is
+     * still legal (at destroy, not at finalize — GTK complains about an entry
+     * finalized with children left); and `c->entry` has to stop being a
+     * pointer to freed memory, so the disconnects below skip themselves. */
+    c->entry_destroy = g_signal_connect_swapped (
+        entry, "destroy", G_CALLBACK (on_entry_destroy), c);
+
     return c;
+}
+
+static void
+on_entry_destroy (hx_path_complete *c)
+{
+    if (c->popover) {
+        gtk_widget_unparent (c->popover);
+        c->popover = NULL;
+    }
+    /* Not disconnected: the handler dies with the instance it is on, and the
+     * entry is that instance. */
+    c->entry_destroy = 0;
+    c->entry = NULL;
 }
 
 void
@@ -664,6 +696,9 @@ hx_path_complete_free (hx_path_complete *c)
     if (c->key_controller && c->entry) {
         gtk_widget_remove_controller (GTK_WIDGET (c->entry), c->key_controller);
         /* gtk_widget_remove_controller takes the ref. */
+    }
+    if (c->entry && c->entry_destroy) {
+        g_signal_handler_disconnect (c->entry, c->entry_destroy);
     }
     /* Ownership chain set up in hx_path_complete_new:
      *   gtk_filter_list_model_new (store, filter)   — consumes both

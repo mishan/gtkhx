@@ -453,10 +453,15 @@ hx_session_label (const session *sess)
     return gtkhx_join_host_port (host, hx_conn_serverport (sess->htlc));
 }
 
-void
-set_status_bar (session *sess, int status)
+/* Shared body. `announce` is what separates a state *change* from a repaint:
+ * a change is worth a toast and a banner, and re-showing the same state
+ * because the user switched tabs is not. Without the split, switching back to
+ * a logged-in connection re-toasted "Logged in to …" every time. */
+static void status_bar_set (session *sess, int status, gboolean announce);
+
+static void
+status_bar_set (session *sess, int status, gboolean announce)
 {
-    static int last_status = 0;
     const char *fixed = NULL;
     char *fmt = NULL;
     char *toast = NULL;
@@ -491,7 +496,7 @@ set_status_bar (session *sess, int status)
         /* Toast + banner only on a real disconnect — first-launch
          * state change of 0 -> 0 shouldn't surface a notification,
          * and neither should a Connect-canceled (last_status == -1). */
-        if (last_status == 1 || last_status == 2) {
+        if (announce && (sess->last_status == 1 || sess->last_status == 2)) {
             toast = g_strdup_printf ("%s %s", _ ("Disconnected from"), addr);
             toolbar_show_connection_lost (addr);
         }
@@ -502,7 +507,9 @@ set_status_bar (session *sess, int status)
         break;
     case 2:
         fmt = g_strdup_printf ("%s %s", _ ("Logged in to"), addr);
-        toast = g_strdup (fmt);
+        if (announce) {
+            toast = g_strdup (fmt);
+        }
         toolbar_hide_banner ();
         break;
     default:
@@ -517,7 +524,15 @@ set_status_bar (session *sess, int status)
     g_free (addr);
     g_free (fmt);
     g_free (toast);
-    last_status = status;
+    if (announce) {
+        sess->last_status = status;
+    }
+}
+
+void
+set_status_bar (session *sess, int status)
+{
+    status_bar_set (sess, status, TRUE);
 }
 
 void
@@ -530,14 +545,18 @@ hx_chrome_refresh (void)
     }
     /* Derived from the connection rather than remembered, so this is correct
      * however the user got here — including a tab switch onto a connection
-     * whose state last changed long ago. */
+     * whose state last changed long ago.
+     *
+     * Repaint, never announce: nothing has *happened*, the user has just
+     * looked somewhere else. Announcing would re-toast "Logged in to …" on
+     * every switch back to a connected tab. */
     if (hx_conn_logged_in (sess->htlc)) {
-        set_status_bar (sess, 2);
+        status_bar_set (sess, 2, FALSE);
         changetitlesconnected (sess);
     } else if (hx_conn_fd (sess->htlc)) {
-        set_status_bar (sess, 1);
+        status_bar_set (sess, 1, FALSE);
     } else {
-        set_status_bar (sess, 0);
+        status_bar_set (sess, 0, FALSE);
         changetitlesdisconnected (sess);
     }
     gtkhx_tray_set_connected (hx_conn_logged_in (sess->htlc));

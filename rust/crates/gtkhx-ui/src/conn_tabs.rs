@@ -63,6 +63,9 @@ extern "C" {
     /// `gtkutil.c` — repaint the focus-following chrome for whichever
     /// connection is now selected.
     fn hx_chrome_refresh();
+    /// `gtkhx.c` — disconnect a session, destroy its content page in every
+    /// per-connection panel, and drop it from the registry.
+    fn hx_session_close(sess: *mut c_void);
 }
 
 fn debug(msg: &str) {
@@ -156,18 +159,51 @@ fn swap_panels(conn: ConnKey) {
     }
 }
 
-/// Refuse to close a connection tab.
+/// Close a connection: disconnect it, destroy its content, drop its tab.
 ///
-/// The button is there because `AdwTabView` puts one on every page, and there
-/// is nothing behind it yet: closing a connection means disconnecting it,
-/// tearing down its panels' pages and dropping its session from the registry,
-/// and none of that exists — the registry has no remove, and a page removed
-/// from a panel takes the content module's teardown with it. Declining is the
-/// only honest answer until M6 gives a connection a close path; silently
-/// removing the tab would strand a live session with no way back to it.
+/// The order matters. The focus moves off it *first*, because everything the
+/// teardown touches — the chrome, the panels — asks which connection is
+/// selected, and a session being dismantled is the wrong answer. Then
+/// `hx_session_close` does the wire-side teardown and removes the pages, each
+/// of which runs its content module's destroy handler. Only then does the tab
+/// go.
+///
+/// The last connection can't be closed, and needs no check: `AdwTabBar`
+/// autohides below two pages, so there is no close button to press.
 fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation {
-    debug("connection tabs can't be closed yet — no disconnect path (M6)");
-    view.close_page_finish(page, false);
+    let Some(conn) = tab_conn(page) else {
+        // No serial on the page — nothing to close against. Decline rather
+        // than drop a tab whose connection we can't identify.
+        view.close_page_finish(page, false);
+        return glib::Propagation::Stop;
+    };
+    let Some(sess) = STATE.with(|s| s.borrow().sessions.get(&conn).copied()) else {
+        view.close_page_finish(page, false);
+        return glib::Propagation::Stop;
+    };
+
+    // Move the focus off it if it is the one selected. Selecting a neighbour
+    // runs the ordinary switch — focus, panels, chrome — so by the time the
+    // teardown starts, nothing is pointing at the session being closed.
+    if view.selected_page().as_ref() == Some(page) {
+        let n = view.n_pages();
+        let pos = view.page_position(page);
+        let neighbour = if pos + 1 < n { pos + 1 } else { pos - 1 };
+        if neighbour >= 0 && neighbour < n {
+            view.set_selected_page(&view.nth_page(neighbour));
+        }
+    }
+
+    unsafe { hx_session_close(sess) };
+
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.tabs.remove(&conn);
+        st.sessions.remove(&conn);
+    });
+    debug(&format!("closed connection {conn}"));
+
+    view.close_page_finish(page, true);
     glib::Propagation::Stop
 }
 
@@ -308,6 +344,18 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_add(sess: *mut c_void, title: *const c_
 pub unsafe extern "C" fn gtkhx_conn_tabs_select(sess: *mut c_void) {
     if let (Some(view), Some(page)) = (view(), tab_for(serial_of(sess))) {
         view.set_selected_page(&page);
+    }
+}
+
+/// Close `sess`'s tab as if the user had clicked its close button — the same
+/// path, including the disconnect and the panel teardown.
+///
+/// # Safety
+/// `sess` is a live `session *`. Called on the GTK main thread.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_conn_tabs_close(sess: *mut c_void) {
+    if let (Some(view), Some(page)) = (view(), tab_for(serial_of(sess))) {
+        view.close_page(&page);
     }
 }
 
