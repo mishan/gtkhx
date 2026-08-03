@@ -18,7 +18,10 @@ gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
 hxtext = { path = "../hxtext" }
-hx-image-decode = { path = "../hx-image-decode" }
+# default-features = false: don't re-add hx-image-decode's default `glycin-v3`
+# through this edge — the backend is selected on the crate itself, and forcing
+# the default here would clash with a `-Dglycin_compat=1` (glycin-v2) build.
+hx-image-decode = { path = "../hx-image-decode", default-features = false }
 hxvoice-model = { path = "../hxvoice-model", optional = true }
 hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
 hxvoice-send = { path = "../hxvoice-send", optional = true }

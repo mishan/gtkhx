@@ -394,7 +394,12 @@ endif
 
 if glycin_gen == '1'
   cargo_no_default = '--no-default-features'
-  cargo_features = cargo_features + ',hx-image-decode/glycin-v2'
+  # --no-default-features is workspace-wide, so it also drops hxcrypto's
+  # default lz4 + zstd codecs — re-supply them (see the comment above). The
+  # gtkhx-ffi / gtkhx-ui edges to hx-image-decode are `default-features =
+  # false`, so glycin-v3 does NOT leak back in; glycin-v2 is selected on the
+  # crate directly here.
+  cargo_features = cargo_features + ',hxcrypto/lz4,hxcrypto/zstd,hx-image-decode/glycin-v2'
 else
   cargo_no_default = ''
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'

@@ -42,7 +42,13 @@ hxbookmarks = { path = "../hxbookmarks" }
 hxconfig = { path = "../hxconfig" }
 hxfiles-xfer = { path = "../hxfiles-xfer" }
 hxhfs = { path = "../hxhfs" }
-hx-image-decode = { path = "../hx-image-decode" }
+# default-features = false: hx-image-decode's default feature is `glycin-v3`.
+# Leaving it on here would force glycin-v3 through this edge even in the
+# `-Dglycin_compat=1` build (which passes `--no-default-features` and selects
+# glycin-v2 on the crate directly), enabling BOTH backends → compile_error. The
+# backend is chosen on the hx-image-decode member itself via meson's cargo
+# `--features`, so this edge must not re-add the default.
+hx-image-decode = { path = "../hx-image-decode", default-features = false }
 hxmacres = { path = "../hxmacres" }
 hxsound = { path = "../hxsound" }
 hxtext = { path = "../hxtext" }

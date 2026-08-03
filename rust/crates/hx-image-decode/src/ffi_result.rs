@@ -17,13 +17,7 @@
 use std::ffi::c_void;
 use std::ptr;
 
-// gtk-rs family is version-selected — see crate::compat.
-//
-// Note: `IntoGlibPtr::into_glib_ptr` is an `unsafe fn` under glib 0.20
-// (the glycin-v2 family) but a safe fn under glib 0.21 (glycin-v3). The
-// two call sites below wrap it in `unsafe {}` for the 0.20 case and
-// carry `#[allow(unused_unsafe)]` so the block is a harmless no-op under
-// 0.21.
+// Public gtk-rs family (always the workspace 0.21 line) — see crate::compat.
 use crate::compat::glib::translate::IntoGlibPtr;
 use crate::compat::{gdk, glib};
 
@@ -81,7 +75,6 @@ pub(crate) fn decoded_alloc() -> *mut HxInlineMediaDecoded {
 /// `sniffed_format` is captured so failed-decoder paths can
 /// still report what the sniff caught — useful for telemetry
 /// when a future format pinch-point shifts.
-#[allow(unused_unsafe)] // into_glib_ptr is safe under glib 0.21, unsafe under 0.20
 pub(crate) fn decoded_set_texture(
     result: *mut HxInlineMediaDecoded,
     texture: gdk::Texture,
@@ -92,7 +85,7 @@ pub(crate) fn decoded_set_texture(
     // `into_glib_ptr` transfers ownership: the GObject ref this
     // call adds is what the C side will eventually
     // `g_object_unref`. No double-ref / no leak.
-    let raw = unsafe { texture.into_glib_ptr() };
+    let raw = texture.into_glib_ptr();
     r.texture = raw;
     r.sniffed_format = sniffed as u32;
     r.canonical_mime = mime_cstr_for(sniffed);
@@ -122,7 +115,6 @@ pub struct HxInlineMediaFrame {
 /// frame's texture is *also* installed at `result->texture` so
 /// static-image consumers (callers that don't know about
 /// animation yet) keep working as before.
-#[allow(unused_unsafe)] // into_glib_ptr is safe under glib 0.21, unsafe under 0.20
 pub(crate) fn decoded_set_frames(
     result: *mut HxInlineMediaDecoded,
     frames: Vec<CollectedFrame>,
@@ -151,7 +143,7 @@ pub(crate) fn decoded_set_frames(
 
     let mut first_texture_ptr: *mut gdk::ffi::GdkTexture = ptr::null_mut();
     for (i, f) in frames.into_iter().enumerate() {
-        let raw_tex = unsafe { f.texture.into_glib_ptr() };
+        let raw_tex = f.texture.into_glib_ptr();
         let elem = HxInlineMediaFrame {
             texture: raw_tex,
             delay_ms: f.delay_ms,

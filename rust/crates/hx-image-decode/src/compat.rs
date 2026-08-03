@@ -2,30 +2,35 @@
 //!
 //! Exactly one glycin backend is compiled at a time (`glycin-v3` →
 //! glycin 3.x / 2+ loaders, the default; `glycin-v2` → glycin 2.x /
-//! 1+ loaders, for Debian-stable-class runtimes). The two majors pull
-//! different gtk-rs families (0.21 vs 0.20), so the rest of the crate
-//! can't name `glib` / `gio` / `gdk` / `glycin` directly without
-//! pinning a family. This module re-exports the active family under
-//! those stable names; every other module imports from
-//! `crate::compat`.
+//! 1+ loaders, for Debian-stable-class runtimes).
 //!
-//! Safety of mixing 0.20 and 0.21 in one binary: only one is ever
-//! linked (the inactive backend's deps are `optional` and gated off),
-//! and even across the staticlib boundary this crate only ever hands C
-//! raw `*mut GdkTexture` / `*mut GArray` pointers — never a Rust gtk-rs
-//! type — so no other workspace crate observes the family choice.
+//! **The crate's public gtk-rs family is fixed at the workspace's 0.21
+//! line** (`glib` / `gdk` below), independent of the backend. That is what
+//! lets gtkhx-ui / gtkhx-ffi — pinned to 0.21 — link this crate and consume
+//! the `gdk::Texture` that [`crate::decode::decode_first_frame_async`] returns,
+//! and it is what the C FFI `*mut GdkTexture` (`ffi_result.rs`) is built from,
+//! regardless of which glycin backend is active.
 //!
-//! This module is `pub` (but `#[doc(hidden)]`) purely so the
-//! integration test crate (`tests/decode.rs`), which lives outside the
-//! library and therefore can't see `crate::compat`, can borrow the same
-//! aliases via `hx_image_decode::compat`.
+//! glycin 2.x, however, is on gtk-rs 0.20, so its `Loader`/`Frame` speak the
+//! 0.20 family (`glib2` / `gio2` / `gdk2`, compiled only for Linux + glycin-v2).
+//! Those types never escape the crate: `decode.rs`'s `adopt_texture` bridges a
+//! glycin-2 `Texture` to the 0.21 public one by raw `GdkTexture*` (the pointer
+//! is ABI-identical across gtk-rs versions). glycin-v3 needs no bridge — glycin
+//! 3.x already uses the public 0.21 family.
+//!
+//! This module is `pub` (but `#[doc(hidden)]`) purely so the integration test
+//! crate (`tests/decode.rs`), which lives outside the library and therefore
+//! can't see `crate::compat`, can borrow the same aliases via
+//! `hx_image_decode::compat`.
 
 #[cfg(all(feature = "glycin-v2", feature = "glycin-v3"))]
 compile_error!(
     "hx-image-decode: enable exactly ONE glycin backend feature \
      (`glycin-v2` xor `glycin-v3`), not both. The Meson `-Dglycin_compat=1` \
      path must pass `--no-default-features` so the default `glycin-v3` is \
-     not additively combined with `glycin-v2`."
+     not additively combined with `glycin-v2`. Also check that gtkhx-ffi and \
+     gtkhx-ui depend on hx-image-decode with `default-features = false`, so the \
+     default backend does not leak in through those edges."
 );
 
 #[cfg(not(any(feature = "glycin-v2", feature = "glycin-v3")))]
@@ -35,14 +40,14 @@ compile_error!(
      loaders). Meson selects this via -Dglycin_compat."
 );
 
-// gtk-rs family aliases (glib/gio/gdk) — cross-platform. The texture FFI
-// (`ffi_result.rs`) needs gdk/glib on every target, and gtk-rs builds on
-// Windows/macOS, so these are selected purely by the backend feature.
-#[cfg(feature = "glycin-v3")]
-pub use {gdk3 as gdk, gio3 as gio, glib3 as glib};
+// Public gtk-rs family — the workspace 0.21 line, always. Re-exported here so
+// the rest of the crate imports gtk-rs from one place.
+pub use {::gdk, ::glib};
 
-#[cfg(feature = "glycin-v2")]
-pub use {gdk2 as gdk, gio2 as gio, glib2 as glib};
+// glycin-v2's gtk-rs 0.20 family — Linux + glycin-v2 only. Used solely to talk
+// to glycin 2.x and bridge its texture to the public `gdk` above.
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
+pub use {::gdk2, ::gio2, ::glib2};
 
 // glycin alias — Linux only. glycin is a Linux-only dependency (see Cargo.toml);
 // the non-Linux build decodes via the `image` crate in `decode.rs` and never
