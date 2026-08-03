@@ -118,6 +118,9 @@ gtkhx_sources = files(
   # dock_bridge.c because it is pure GtkStack manipulation with no libpanel
   # and no dock, which is what lets it be unit-tested.
   'dock_pages.c',
+  # session_registry.c — the collection of connections and which one has
+  # focus. Split out of gtkhx.c when `the_session` stopped being one struct.
+  'session_registry.c',
   # users_bridge.c — C content leaves (HxUserListView + action buttons +
   # voice panel) for the Rust Users window shell (gtkhx-ui `users`).
   'users_bridge.c',

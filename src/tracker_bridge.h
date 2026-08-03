@@ -8,11 +8,11 @@
  */
 
 /*
- * src/tracker_bridge.h — narrow C accessors into not-yet-ported global
- * session / prefs state, for the Rust tracker window (gtkhx-ui crate,
- * Phase R5). The tracker window UI itself lives in Rust now; these three
- * shims let it reach `the_session.htlc`, `gtkhx_prefs`, and the chat
- * logger without the Rust side having to mirror those large C structs.
+ * src/tracker_bridge.h — narrow C accessors into not-yet-ported session /
+ * prefs state, for the Rust tracker window (gtkhx-ui crate, Phase R5). The
+ * tracker window UI itself lives in Rust now; these three shims let it reach
+ * the focused session's connection, `gtkhx_prefs`, and the chat logger
+ * without the Rust side having to mirror those large C structs.
  *
  * Named for the tracker (its first consumer), but connect_apply /
  * log_info are generic and future R5 window ports reuse them.
@@ -30,12 +30,13 @@ extern int gtkhx_tracker_pref_case (void);
 
 /* Direct double-click connect: reset the session htlc's cipher /
  * compress alg, set cipheralg to `cipher_name` when non-NULL, then
- * hx_connect() to `the_session.htlc`. `secure` / `tls` are 0/1 flags. */
+ * hx_connect() on the focused session's connection. `secure` / `tls` are
+ * 0/1 flags. */
 extern void gtkhx_tracker_connect_apply (const char *address, guint16 port,
                                          char secure, char tls,
                                          const char *cipher_name);
 
-/* hx_printf_prefix(the_session.htlc, 0, INFOPREFIX, "%s", msg) — an
+/* hx_printf_prefix on the focused session's connection, with INFOPREFIX — an
  * INFO-prefixed status line in the chat output. */
 extern void gtkhx_tracker_log_info (const char *msg);
 

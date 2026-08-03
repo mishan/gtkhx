@@ -30,10 +30,9 @@
 #include "inline_media_upload.h"
 #include "debug.h"
 
-/* inline_media_upload.c uses task_new (in tasks.c) + hlwrite_chunks
- * (in network.c) + the_session global (in hx.c). All three pull in
- * GTK / pthread / GIOChannel state that doesn't make sense in a
- * Tier 2 binary. Stub them with just the bookkeeping the tests
+/* inline_media_upload.c uses task_new (in tasks.c) and hlwrite_chunks (in
+ * network.c). Both pull in GTK / pthread / GIOChannel state that doesn't make
+ * sense in a Tier 2 binary. Stub them with just the bookkeeping the tests
  * actually inspect:
  *
  *   task_new — record the ctx pointer the upload helper allocated
@@ -43,11 +42,7 @@
  *              the call to drive rcv_task_upload_media directly.
  *   hlwrite_chunks — delegate to hlpack_chunks so the first chunk's
  *              wire shape lands in hx_test_in(htlc)->buf, where the test
- *              can choose to inspect or discard.
- *   the_session — zeroed; the only test path that would touch
- *              it (chunked-continuation task_with_trans lookup)
- *              bails BEFORE the lookup on the oversized-token
- *              branch. */
+ *              can choose to inspect or discard. */
 static struct task fake_task;
 static void *captured_upload_ctx = NULL;
 
@@ -80,14 +75,6 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     hx_test_in (htlc)->buf = buf;
     hx_test_in (htlc)->pos = len;
 }
-
-/* the_session is a session*, dereferenced by inline_media_upload.c
- * (chunked-continuation task_with_trans lookup). The oversized-token
- * test path bails BEFORE that lookup, so an opaque-pointer extern
- * is enough to satisfy the linker without dragging in src/hx.h's
- * full session typedef. */
-extern void *the_session;
-void *the_session = NULL;
 
 /* task_inerror is in tasks.c; we want the test to drive a NON-error
  * intermediate reply (the oversized-token branch sits behind a

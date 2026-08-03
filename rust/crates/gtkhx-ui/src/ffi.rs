@@ -55,11 +55,11 @@ extern "C" {
     pub fn gtkhx_join_host_port(host: *const c_char, port: u16) -> *mut c_char;
     pub fn gtkhx_get_application() -> *mut GApplication;
 
-    // ---- multi-conn M0 session seam (gtkhx.c / session.h) ------------
-    /// The currently-focused `session *` (multi-conn M0 seam,
-    /// docs/multi-connection.md). Today == `&the_session`; UI
-    /// actions route through it so they act on the focused connection.
-    /// Held opaquely as `*mut c_void` (a `session *`).
+    // ---- multi-conn session seam (session_registry.c / session.h) ----
+    /// The currently-focused `session *` (docs/multi-connection.md). UI
+    /// actions route through it so they act on the connection the user is
+    /// looking at. Held opaquely as `*mut c_void` (a `session *`). NULL
+    /// before startup has built the first session.
     pub fn hx_active_session() -> *mut c_void;
 
     // ---- connect dialog (connect.c) ----------------------------------
@@ -99,7 +99,7 @@ extern "C" {
     pub fn gtkhx_tracker_pref_case() -> c_int;
     /// Direct double-click connect: reset htlc cipher/compress alg, set
     /// cipheralg to `cipher_name` (NULL = leave empty), call `hx_connect`
-    /// on `the_session.htlc`.
+    /// on the focused session's connection.
     pub fn gtkhx_tracker_connect_apply(
         address: *const c_char,
         port: u16,
@@ -107,6 +107,7 @@ extern "C" {
         tls: c_char,
         cipher_name: *const c_char,
     );
-    /// `hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s", msg)`.
+    /// `hx_printf_prefix` on the focused session's connection, with
+    /// `INFOPREFIX`.
     pub fn gtkhx_tracker_log_info(msg: *const c_char);
 }

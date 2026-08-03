@@ -203,8 +203,16 @@ fn next_serial() -> u16 {
     .unwrap_or(u16::MAX)
 }
 
-/// Reset to the just-allocated state (the old reconnect `memset(0)`). The caller
-/// re-stamps sess / icon / name afterwards, as `gtkhx.c` always did.
+/// Reset to the just-allocated state (the old reconnect `memset(0)`).
+///
+/// This clears the owning-session back-pointer along with everything else, so
+/// the caller must re-stamp `sess`, icon and name. Worth being explicit about
+/// `sess`: the session factory is the only thing that writes it, and a
+/// connection whose back-pointer is NULL routes nothing — `sess_from_htlc`
+/// answers NULL and the receive side silently drops that connection's events
+/// rather than crashing on them. Stated as a requirement rather than as what
+/// some caller happens to do, because no production caller is left to point
+/// at.
 ///
 /// # Safety
 /// `h` must be a valid `*mut HtlcConn` (or NULL, a no-op).

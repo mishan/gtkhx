@@ -33,6 +33,7 @@
 #include <libintl.h> /* bindtextdomain, bind_textdomain_codeset, textdomain */
 #include <getopt.h>
 #include "hx.h"
+#include "session_registry.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
 #include "hxconn.h"
 #include "tls_trust.h"
@@ -509,19 +510,29 @@ static struct timer *timer_list;
  * Was " \00310[\00303hx\00310]\003 " until C6. */
 const char *INFOPREFIX = "hx";
 
-session the_session;
+/* `the_session` and `hx_active_session` moved to session_registry.c: the
+ * session is a heap object in a collection now, and the accessor is a read of
+ * which one has focus. Every consumer already held a `session *`, so nothing
+ * downstream changed. */
 
-/*
- * hx_active_session — the currently-focused session (multi-conn seam,
- * see docs/multi-connection.md phase M0). N == 1 today, so this
- * returns the single session. When the connection tab strip lands this
- * becomes a lookup of the focused tab's session; every UI call site that
- * routes through here follows automatically.
- */
-session *
-hx_active_session (void)
+/* The session startup built, for the two call sites in this file that run
+ * after `fe_init` and take it as a given.
+ *
+ * `hx_active_session` can return NULL now — before the first session exists —
+ * which for these two is not a state to handle but a statement that the
+ * startup order changed underneath them. There is no useful way to continue:
+ * one is stamping the boot connection's identity, the other is wiring the
+ * only menu the app has. So say which call site, and stop. `g_error` rather
+ * than `g_assert` because this has to hold in a release build too. */
+static session *
+boot_session (const char *where)
 {
-    return &the_session;
+    session *sess = hx_active_session ();
+
+    if (sess == NULL) {
+        g_error ("%s: no session yet — fe_init must build one first", where);
+    }
+    return sess;
 }
 
 /* Forward declaration of the application object owned by loop(). hx_quit()
@@ -642,8 +653,13 @@ hx_quit (void)
     xfers_delete_all ();
     tracker_kill_threads ();
 
-    if (hx_conn_fd (the_session.htlc)) {
-        hx_htlc_close (the_session.htlc, 1);
+    /* Every connection, not just the focused one — quitting closes them
+     * all, and at one connection this is the same single call it was. */
+    for (guint i = 0; i < hx_session_count (); i++) {
+        session *s = hx_session_at (i);
+        if (s && hx_conn_fd (s->htlc)) {
+            hx_htlc_close (s->htlc, 1);
+        }
     }
 
 #if 0 /* XXX */
@@ -917,6 +933,14 @@ static void
 fe_init (void)
 {
     GtkWidget *widg = gtk_button_new ();
+    session *sess;
+
+    /* Before prefs_read, deliberately. Reading the preferences applies every
+     * change hook, and the connection-flavoured ones take a connection —
+     * so a session has to exist by then. It used to, trivially, because the
+     * session was a static that was simply always there; now that it is
+     * built, it has to be built first. */
+    sess = hx_session_new ();
 
     generate_colors (widg);
     gtkhx_widget_destroy (widg);
@@ -942,42 +966,22 @@ fe_init (void)
      * so the very first widget that gets gtkhx_apply_text_style() picks
      * up the right look on the first paint. */
     gtkhx_refresh_css ();
+
     init_icons ();
 
-    /* Single-session construction site. fe_init (here), hx_quit's
-     * teardown, main()'s zero-init, and hotline_client_init's identity
-     * setup are the only places that touch the concrete `the_session`
-     * storage rather than the sess_from_htlc() / hx_active_session()
-     * accessors — because this is where the one session is born and
-     * dies. Multi-conn turns these into a session factory
-     * over a collection; every accessor-routed call site downstream
-     * follows without further edits.
-     *
-     * hashtable-backed session collections. chats_init additionally
-     * seeds the table with the public chat (cid=0), which must always
-     * exist while the table does. */
-    chats_init (&the_session);
-    tasks_init (&the_session);
-    msg_windows_init (&the_session);
-
-#ifdef HAVE_VOICE
-    /* Voice indicator model. Lives for the whole session lifetime
-     * — users_view subscribes once at window construction time and
-     * the model survives reconnects (state cleared inside
-     * hx_htlc_close). Created here so users_view can connect to its
-     * "indicator-changed" signal during fe_init's window-creation
-     * sweep below. */
-    the_session.voice_model = hx_voice_model_new ();
-#endif
-
+    /* Everything from here down is per-*process*, not per-connection, and
+     * that is the split worth seeing: hx_session_new above owns the whole of
+     * what a second connection would repeat, while the signal wiring is
+     * per-type, the sound subscriber is one speaker, and the toolbar is one
+     * window. Running any of these per connection would be wrong rather than
+     * merely wasteful. */
     gtkhx_connect_signals (gtkhx_session_get_default ());
 
     /* Sound-effect subscriber: maps model-side signals (and the voice
      * model's presence chime) to play_sound ids. Connected after
      * gtkhx_connect_signals and after the voice model exists. */
 #ifdef HAVE_VOICE
-    gtkhx_sound_events_init (gtkhx_session_get_default (),
-                             the_session.voice_model);
+    gtkhx_sound_events_init (gtkhx_session_get_default (), sess->voice_model);
 #else
     gtkhx_sound_events_init (gtkhx_session_get_default (), NULL);
 #endif
@@ -988,10 +992,10 @@ fe_init (void)
      * path consumes when it runs create_chat_window /
      * create_tasks_window. Order matters: model state first, then
      * the toolbar (which now hosts everything). */
-    create_chat (&the_session);
-    create_tasks (&the_session);
+    create_chat (sess);
+    create_tasks (sess);
 
-    create_toolbar_window (&the_session);
+    create_toolbar_window (sess);
     init_colors (toolbar_window);
 
     /* Panels are eager-constructed inside create_toolbar_window; these
@@ -1004,12 +1008,12 @@ fe_init (void)
      * nothing ever cleared one. Every gate was therefore true for every
      * user after first run. Dropping the keys is behaviour-identical, and
      * the gates go with them. */
-    create_chat_window (toolbar_window, &the_session);
-    create_news_window (toolbar_window, &the_session);
-    create_users_window (toolbar_window, &the_session);
-    create_tasks_window (toolbar_window, &the_session);
+    create_chat_window (toolbar_window, sess);
+    create_news_window (toolbar_window, sess);
+    create_users_window (toolbar_window, sess);
+    create_tasks_window (toolbar_window, sess);
 
-    reinit_gtktexts (&the_session);
+    reinit_gtktexts (sess);
 }
 
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
@@ -1110,7 +1114,8 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
      * fe_init() — before g_application_run, so before the
      * AdwApplication exists. Now that we're in the activate handler
      * the application is alive, so wire them in. */
-    toolbar_register_actions (G_APPLICATION (app), &the_session);
+    toolbar_register_actions (G_APPLICATION (app),
+                              boot_session ("gtkhx_activate"));
 
     /* bind Ctrl+Q (and Ctrl+K) to GApplication actions so the
      * accelerators work from every window without per-window
@@ -1848,8 +1853,6 @@ void hotline_client_init (int argc, char **argv);
 int
 main (int argc, char **argv, char **envp)
 {
-    memset (&the_session, 0, sizeof (session));
-
     /* Defensively clear the test-only TLS-trust escape hatches at the
      * very start of the production entry point, before any connection
      * (and thus any cert decision) can happen. GTKHX_TLS_AUTO_ACCEPT
@@ -2024,6 +2027,7 @@ hotline_client_init (int argc, char **argv)
     char *bookmark = 0;
     int prompt_pass = 0;
     guint16 port = 5500;
+    session *boot;
 
     optind = 0;
     if (argc > 1) {
@@ -2075,24 +2079,11 @@ hotline_client_init (int argc, char **argv)
         }
     }
 
-    /* The session's connection is a Rust-owned allocation (gtkhx-core::conn module, the
-     * docs/rust/network-endgame.md) the session holds for its lifetime.
-     * Allocate once; on a re-entry (should not happen in the single-session
-     * world) reset the existing one to its fresh state. */
-    if (!the_session.htlc) {
-        the_session.htlc = hx_conn_new ();
-    } else {
-        hx_conn_reset (the_session.htlc);
-    }
-
-    /* Back-pointer for sess_from_htlc (survives the reset above). */
-    hx_conn_set_sess (the_session.htlc, &the_session);
-    hx_conn_set_icon (the_session.htlc, 500);
-    hx_conn_set_name (the_session.htlc, user ? user : "GtkHx User");
     /* Remember it: this is the identity a profile that has never set a
      * nickname presents, and a reconnect has to be able to restore it after a
      * /nick. Recorded here rather than recomputed later so there is one
-     * definition of what $USER falls back to. */
+     * definition of what $USER falls back to. This is a plain global and so
+     * can be set before any session exists. */
     hx_identity_set_startup_default (user ? user : "GtkHx User");
 
     gen_command_hash ();
@@ -2100,6 +2091,14 @@ hotline_client_init (int argc, char **argv)
     last_msg_nick[0] = 0;
 
     init (argc, argv);
+
+    /* After init, because that is where fe_init builds the first session and
+     * with it the connection this stamps. The connection and its
+     * back-pointer are the factory's job (hx_session_new); all that is left
+     * here is the startup identity. */
+    boot = boot_session ("hotline_client_init");
+    hx_conn_set_icon (boot->htlc, 500);
+    hx_conn_set_name (boot->htlc, user ? user : "GtkHx User");
 
     if (server) {
 #ifdef G_OS_UNIX
@@ -2110,7 +2109,7 @@ hotline_client_init (int argc, char **argv)
 #endif
         /* CLI --server bootstrap: tls=0 default. GTKHX_TLS=1 env-var
          * override applies (Phase 4 adds a --tls CLI flag). */
-        hx_connect (the_session.htlc, server, port, login ? login : "guest",
+        hx_connect (boot->htlc, server, port, login ? login : "guest",
                     pass ? pass : "", 0, /*tls=*/0);
         g_free (server);
         g_free (login);

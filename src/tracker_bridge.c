@@ -15,9 +15,9 @@
 /*
  * tracker_bridge.c — see tracker_bridge.h. Thin session/prefs accessors
  * for the Rust tracker window. Deliberately small: all the tracker UI
- * logic is in the gtkhx-ui crate; only the raw pokes at the global
- * `the_session` / `gtkhx_prefs` / logger live here, because those C
- * structs aren't ported yet (R6).
+ * logic is in the gtkhx-ui crate; only the raw pokes at the focused
+ * session, `gtkhx_prefs` and the logger live here, because those C structs
+ * aren't ported yet (R6).
  */
 
 #include "config.h"
@@ -31,12 +31,11 @@
 #include "gtkhx_log.h" /* hx_printf_prefix, INFOPREFIX */
 #include "tracker_bridge.h"
 
-/* These UI-side actions route through hx_active_session() (the
- * multi-conn M0 seam, docs/multi-connection.md) rather than
- * &the_session directly, matching what M0 did to the pre-port tracker.c:
- * a tracker double-click / connect / status line acts on whichever
- * connection the user is focused on. Today hx_active_session() ==
- * &the_session; when the tab strip lands (M3) this follows without edits. */
+/* These are UI-side actions — a tracker double-click, a connect, a status
+ * line — so they route through hx_active_session(): they act on whichever
+ * connection the user is looking at. That is the seam M0 introduced
+ * (docs/multi-connection.md); when the tab strip lands, the focus moves and
+ * these follow without edits. */
 
 int
 gtkhx_tracker_pref_case (void)
