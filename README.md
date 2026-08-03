@@ -6,6 +6,7 @@ being rewritten in Rust.
 - Modern GTK+ 4 / libadwaita / libpanel UI with retro look and feel
 - Full TLS support, for servers, file transfers, and trackers
 - Cross platform -- works on Linux, macOS, and Windows
+- Multiple connections
 - Support for extended Hotline protocol features and capabilities
   - Voice chat
   - Inline media
