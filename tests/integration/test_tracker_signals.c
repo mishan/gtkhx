@@ -51,12 +51,19 @@
 
 #include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
-#include "session.h"       /* the_session, hx_tracker_list_async */
+#include "session.h"       /* session, hx_tracker_list_async */
 #include "prefs.h"         /* gtkhx_prefs */
 #include "tracker.h"       /* tracker_kill_threads */
 #include "tracker_event.h" /* HxTrackerServer */
 #include "gtkhx_session.h" /* GtkhxSession, gtkhx_session_get_default */
 #include "tracker_matrix.h"
+
+/* The stub session from connect_test_stubs.c. Production has no session
+ * global — sessions are heap objects in session_registry.c — but these
+ * binaries deliberately don't link it (or gtkhx.c, or the GTK surface it
+ * drags in), so the stubs keep a single zeroed one. Declared here rather
+ * than in a header because it exists only for this pair of files. */
+extern session the_session;
 
 typedef struct {
     int begins;

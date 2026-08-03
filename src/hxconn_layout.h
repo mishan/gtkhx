@@ -33,8 +33,8 @@ struct htlc_conn {
     /* The session that owns this connection. Set once at allocation; read by
      * sess_from_htlc() to route a received event back to its session (replaces
      * the old container_of, which required htlc to be embedded in session).
-     * The single-session world sets this to &the_session; the multi-conn seam
-     * later sets it per connection. */
+     * Written once by the session factory (hx_session_new), which stamps each
+     * connection with the session it has just built around it. */
     session *sess;
     /* Server endpoint identification, populated at hx_connect time.
      * serverhost+serverport drive HTXF subchannel connects (rcv.c

@@ -268,15 +268,17 @@ typedef struct _session {
     unsigned int connected : 1;
 } session;
 
-/* Single-session world today (N == 1). The multi-connection routing
- * seam below (see docs/multi-connection.md, phase M0) replaces
- * direct `&the_session` access so the single global can later become
- * one of N sessions without re-touching call sites.
+/* Sessions are heap objects held by `session_registry.c`, which is also where
+ * the factory and the focus live — there is no global session struct to reach
+ * for, and `#include "session_registry.h"` is how you get one.
  *
- * The historical sessions[MAX_CONN] / sess_from_htlc() pretended to be
- * an array but always returned &sessions[0]; this reintroduces
- * sess_from_htlc() as an exact accessor rather than a fiction. */
-extern session the_session;
+ * The two routing accessors stay here, next to the type they answer with,
+ * because which of them a call site wants is a property of the code doing the
+ * asking rather than of the collection.
+ *
+ * The historical `sessions[MAX_CONN]` / `sess_from_htlc()` pretended to be an
+ * array but always returned `&sessions[0]`; what follows is the exact
+ * accessor rather than the fiction. */
 
 /*
  * sess_from_htlc(htlc) — the session that OWNS this connection.
@@ -301,11 +303,19 @@ sess_from_htlc (struct htlc_conn *htlc)
 /*
  * hx_active_session() — the currently-focused session.
  *
- * UI-side code (a button click, a menu action, a dialog) acts on
- * whichever connection the user is looking at. Today there is exactly
- * one, so this returns &the_session; when the connection tab strip
- * lands it becomes "the focused tab's session" and every
- * UI call site follows without further edits.
+ * UI-side code (a button click, a menu action, a dialog) acts on whichever
+ * connection the user is looking at. Today there is exactly one, so this and
+ * sess_from_htlc coincide; when the connection tab strip lands this becomes
+ * "the focused tab's session" and every UI call site follows without further
+ * edits.
+ *
+ * Declared here for the call sites that only want to read the focus. The rest
+ * of the collection — the factory, the count, the ordering — is in
+ * session_registry.h, which also declares this.
+ *
+ * NULL before the first session exists. Most callers predate that being
+ * possible and don't check; that is still safe in practice, because startup
+ * builds one before any UI can run, but new code should not lean on it.
  */
 extern session *hx_active_session (void);
 

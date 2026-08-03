@@ -34,14 +34,18 @@ typedef struct _session session;
  * or an hxnet actor and its socket are stranded with nothing pointing at
  * them.
  *
+ * It also clears the owning-session back-pointer, so a caller has to re-stamp
+ * it (hx_conn_set_sess) — a connection with a NULL back-pointer routes
+ * nothing, since sess_from_htlc answers NULL and the receive side then drops
+ * that connection's events rather than crashing on them.
+ *
  * Disconnect does not come through here: hx_htlc_close clears fields
  * individually and uninstalls explicitly.
  *
  * hx_conn_new allocates a fresh connection, zeroed but for its serial (the
- * Rust owner Box-boxes
- * it); hx_conn_reset returns an existing one to the just-allocated state (the
- * reconnect path); hx_conn_free releases a hx_conn_new allocation. Production
- * keeps exactly one connection for the process lifetime and never frees it. */
+ * Rust owner boxes it); hx_conn_reset returns an existing one to the
+ * just-allocated state; hx_conn_free releases a hx_conn_new allocation.
+ * Production creates a connection per session and never frees one. */
 extern struct htlc_conn *hx_conn_new (void);
 extern void hx_conn_reset (struct htlc_conn *h);
 extern void hx_conn_free (struct htlc_conn *h);
@@ -199,8 +203,9 @@ extern void hx_conn_set_fd (struct htlc_conn *h, int v);
  *
  * The session that owns this connection, set once at allocation. The read side
  * already has a chokepoint accessor — sess_from_htlc() in session.h — so only
- * the write needs a seam here; the single-session world sets it to
- * &the_session, the multi-conn seam later sets it per connection. */
+ * the write needs a seam here. Its one caller is the session factory
+ * (hx_session_new), which stamps each connection with the session it has just
+ * built around it. */
 extern session *hx_conn_sess (const struct htlc_conn *h);
 extern void hx_conn_set_sess (struct htlc_conn *h, session *s);
 

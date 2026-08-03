@@ -15,17 +15,25 @@ end of the C→Rust window port.
 ## The session model as it stands
 
 The old `sessions[MAX_CONN]` / `sess_from_htlc()` scaffolding — an array that
-always returned element zero — is **gone**. It was collapsed to an explicit
-single session during the modernization work, and this document is the only
-place in the tree that describes the resulting shape in full.
+always returned element zero — is **gone**, and so is the single-session
+global that replaced it.
 
-There is one global:
+Sessions are heap objects in a collection (`session_registry.c`), built by a
+factory:
 
 ```c
-/* session.h */
-typedef struct _session { ... } session;   /* per-session collections + the conn */
-extern session the_session;                /* the single-session world */
+session *hx_session_new (void);      /* the whole of what is per-connection */
+session *hx_active_session (void);   /* the one with focus; NULL before the first */
+gboolean hx_session_set_active (session *sess);
+guint    hx_session_count (void);
+session *hx_session_at (guint i);    /* creation order == tab order */
 ```
+
+The factory owns exactly the per-connection things: the connection itself and
+its back-pointer, the chats / tasks / msg-window tables, and the voice model.
+What ran alongside it in `fe_init` and must *not* repeat — the signal wiring
+(per-type), the sound subscriber (one speaker), the toolbar (one window) — now
+sits visibly outside it.
 
 The connection is **not** embedded in it. `session` carries
 `struct htlc_conn *htlc` — heap-allocated once at startup, owned by the session
@@ -761,9 +769,9 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | M4 | Model A, in seven slices — see below. The layout model is decided; the rest is the work. | M1, M3 |
 | M4a | The dock's content-swap mechanism: a panel holds a stack of named content pages instead of one child. Touches nothing outside `dock_bridge.c` and its six embed call sites; no behaviour change at one connection. | — |
 | ~~M4b~~ | **Done.** The keepalive timer, the post-login fallback timer and the login-reply transaction moved onto the connection, fixing the keepalive bug. The connect cancellable turned out to be dead and was deleted rather than relocated. Left for M6: the server address and port, and the `connected` flag — all three are read by view code (window titles, the status bar, the disconnect notice) and belong with the app-global chrome. | — |
-| ~~M4c~~ | **Done.** The files browser and the remote provider each carry the session they list; all ~33 `hx_active_session()` sites across the four files are gone. A copy routes by whichever pane is the remote one, so an upload goes to the server it was dropped on. | — |
+| ~~M4c~~ | **Done.** The files browser and the remote provider each carry the session they list, and a per-pane operation asks the pane's provider rather than the browser; no `hx_active_session()` site is left in the four files. A copy routes by whichever pane is the remote one, and `xfer_new` takes a connection now, so an upload goes to the server it was dropped on rather than only being *gated* by it. | — |
 | ~~M4d~~ | **Done.** The tab strip keys on `(connection, cid)` / `(connection, uid)`, and the two close dispatchers get the connection the tab belonged to — so closing a background server's tab no longer tears down the focused server's conversation at the same id. | M3b |
-| M4e | The session collection and factory: `the_session` becomes one of N, `hx_active_session()` returns the focused one, and `fe_init`'s per-session block becomes a factory — separating out the three app-global calls that must not run N times. | M4a |
+| ~~M4e~~ | **Done.** The session is a heap object in `session_registry.c`, `hx_active_session()` reads which one has focus, and `hx_session_new()` is the factory — so a second connection is one call. The three app-global calls that were interleaved with it in `fe_init` are now visibly outside it, and the `the_session` global is out of `session.h` so nothing can reach for it again. | M4a |
 | M4f | The connection tab strip, the build-once tests, and the badge demux. These are mutually dependent and land together: a tab strip needs something to switch between, the build-once tests need a connection to key on, and the badge needs a tab to land on. | M4e |
 | M4g | De-singletonise the remaining content modules (news browser, the users action buttons) and give inactive content trees an owner. The riskiest slice: the destroy handlers *are* the model-side teardown, so a naive reparent-and-drop nulls the state of the connection just switched away from. | M4f |
 | M5 | Voice arbiter: global token, preempt on acquire; per-session voice models retained. | M4 |

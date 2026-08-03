@@ -63,8 +63,11 @@
 #include "gtkutil.h"
 #include "users.h"
 
-/* ---- the_session + gtkhx_prefs globals ---------------------- */
+/* ---- session + gtkhx_prefs globals -------------------------- */
 
+/* Production has no session global: sessions are heap objects held by
+ * session_registry.c, which these binaries don't link. One zeroed struct is
+ * enough for what the connect path reads. */
 session the_session;
 struct gtkhx_prefs gtkhx_prefs;
 char last_msg_nick[32];

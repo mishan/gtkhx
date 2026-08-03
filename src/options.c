@@ -753,6 +753,25 @@ pref_hook_run (const struct pref_hook *hook)
 {
     session *sess = hx_active_session ();
 
+    /* A global hook takes nothing and so is always runnable. The other two
+     * both need a session and neither tolerates a NULL one — the view hooks
+     * reach the session's widgets, the connection hooks its htlc — so the
+     * check belongs here, once, rather than in whichever flavour was written
+     * most recently.
+     *
+     * The session is built rather than statically present now, so this can be
+     * NULL before startup has made one. `fe_init` builds it ahead of
+     * `prefs_read` for exactly this reason, which is why it should never
+     * fire — but "should never" is worth saying out loud rather than
+     * discovering as a NULL deref inside whichever hook the table happened to
+     * reach first. */
+    if (hook->kind != PREF_HOOK_GLOBAL && sess == NULL) {
+        g_critical ("preference '%s' applied before a session exists — "
+                    "startup has been reordered ahead of hx_session_new",
+                    hook->name);
+        return;
+    }
+
     switch (hook->kind) {
     case PREF_HOOK_VIEW:
         hook->fn.view (sess);
