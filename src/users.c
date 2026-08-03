@@ -244,7 +244,7 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
         /* Existing msgwin — just raise its tab inside the Chat
          * panel. The Chat panel itself gets attached / raised by
          * gtkhx_chat_tabs_raise_msg if it's hidden. */
-        gtkhx_chat_tabs_raise_msg (mi.uid);
+        gtkhx_chat_tabs_raise_msg (hx_active_session ()->htlc, mi.uid);
     } else {
         create_msgwin (hx_active_session (), mi.uid, mi.name);
     }
@@ -909,7 +909,7 @@ view_msg_btn (GtkWidget *w, gpointer data)
     }
     mw = msgwin_with_uid (hx_active_session (), mi.uid);
     if (mw) {
-        gtkhx_chat_tabs_raise_msg (mi.uid);
+        gtkhx_chat_tabs_raise_msg (hx_active_session ()->htlc, mi.uid);
     } else {
         create_msgwin (hx_active_session (), mi.uid, mi.name);
     }

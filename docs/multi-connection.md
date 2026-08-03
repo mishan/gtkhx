@@ -170,19 +170,18 @@ pointer, so a later split can happen without touching the signal shapes again.
 Two servers can both have a user with uid 5 and a private chat at cid 7. Three
 tables are keyed on those with no connection dimension:
 
-- **The chat tab strip.** A single process-wide `AdwTabView` with a cid-keyed
-  map of private chats and a uid-keyed map of private messages. Every exported
-  entry point takes a bare cid or uid with no session. The dock documentation's
-  claim that the tab view becomes a per-panel field and "the API stays the same"
-  is wrong in one specific way: the key namespace is also wrong.
+- ~~**The chat tab strip**~~ — qualified. The maps key on
+  `(connection serial, cid)` and `(connection serial, uid)`, and every
+  exported entry point takes the connection it acts on. The two close
+  dispatchers get it back: `pchat_close` and `msg_tab_on_close` used to
+  receive a bare id and could only ask the focused session, so closing a
+  background server's tab looked up whatever the focused server had at the
+  same id — sending a chat-leave to a server that was never in that chat, or
+  tearing down the wrong PM window.
 
-  **Still open, deliberately, and it is the one item here whose answer depends
-  on the layout model.** Under Model B each connection gets its own Chat panel
-  and its own tab view, so cids are unique within one and the collision
-  dissolves without a key change. Under Model A one tab view serves every
-  connection in turn, and the keys genuinely have to be qualified. Doing it now
-  means either throwing the work away or pre-committing to A, so it waits for
-  that decision — which is M4's to make.
+  The tab view itself is still a process-wide singleton, which is right under
+  Model A: one strip serves every connection in turn. Its *content* is what
+  switches.
 - **The GIF avatar caches** — *keys* fixed. Both tables key on
   `(connection serial, uid)` now, and the clear-all became
   `gtkhx_avatar_clear_conn`: one server's user list going away no longer takes
@@ -763,7 +762,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | M4a | The dock's content-swap mechanism: a panel holds a stack of named content pages instead of one child. Touches nothing outside `dock_bridge.c` and its six embed call sites; no behaviour change at one connection. | — |
 | ~~M4b~~ | **Done.** The keepalive timer, the post-login fallback timer and the login-reply transaction moved onto the connection, fixing the keepalive bug. The connect cancellable turned out to be dead and was deleted rather than relocated. Left for M6: the server address and port, and the `connected` flag — all three are read by view code (window titles, the status bar, the disconnect notice) and belong with the app-global chrome. | — |
 | ~~M4c~~ | **Done.** The files browser and the remote provider each carry the session they list; all ~33 `hx_active_session()` sites across the four files are gone. A copy routes by whichever pane is the remote one, so an upload goes to the server it was dropped on. | — |
-| M4d | Qualify the chat tab strip's cid/uid keys by connection, and the two close dispatchers with them. Unblocked by the Model A decision. | M3b |
+| ~~M4d~~ | **Done.** The tab strip keys on `(connection, cid)` / `(connection, uid)`, and the two close dispatchers get the connection the tab belonged to — so closing a background server's tab no longer tears down the focused server's conversation at the same id. | M3b |
 | M4e | The session collection and factory: `the_session` becomes one of N, `hx_active_session()` returns the focused one, and `fe_init`'s per-session block becomes a factory — separating out the three app-global calls that must not run N times. | M4a |
 | M4f | The connection tab strip, the build-once tests, and the badge demux. These are mutually dependent and land together: a tab strip needs something to switch between, the build-once tests need a connection to key on, and the badge needs a tab to land on. | M4e |
 | M4g | De-singletonise the remaining content modules (news browser, the users action buttons) and give inactive content trees an owner. The riskiest slice: the destroy handlers *are* the model-side teardown, so a naive reparent-and-drop nulls the state of the connection just switched away from. | M4f |

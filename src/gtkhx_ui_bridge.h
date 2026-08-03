@@ -62,13 +62,18 @@ extern void gtkhx_connect_apply (struct _session *sess, const char *server,
                                  const char *compress_name,
                                  const char *cipher_name, char tls);
 
+/* The connection a session owns, for Rust callers that hold the session a
+ * window is being built for and need its connection — to key a chat tab on,
+ * say, a cid or a uid being unique only within a connection. NULL in,
+ * NULL out. */
+extern struct htlc_conn *gtkhx_session_htlc (struct _session *sess);
+
 /* Flat News (news.rs) session seam. The Rust content build stashes its three
  * widget handles on the session (for gtkutil setbtns + options theme apply),
- * derives the session's htlc, gates on / marks the news-open pref, and mirrors
- * reload_news's READ_NEWS access gate. See gtkhx_ui_bridge.c. */
+ * gates on / marks the news-open pref, and mirrors reload_news's READ_NEWS
+ * access gate. See gtkhx_ui_bridge.c. */
 extern void gtkhx_news_set_widgets (struct _session *sess, GtkWidget *text,
                                     GtkWidget *post, GtkWidget *reload);
-extern struct htlc_conn *gtkhx_session_htlc (struct _session *sess);
 extern gboolean gtkhx_news_is_open (void);
 extern void gtkhx_news_mark_open (void);
 extern gboolean gtkhx_news_can_read (struct htlc_conn *htlc);

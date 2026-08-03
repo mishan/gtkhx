@@ -116,7 +116,7 @@ msgwin_free (gpointer p)
 /* Forward decl so msg_windows_init can wire it as the chat-tabs
  * close handler before destroy_msgwin's old static destroy_msgwin
  * function (now retired) was defined. */
-static void msg_tab_on_close (guint16 uid);
+static void msg_tab_on_close (struct htlc_conn *htlc, guint16 uid);
 
 void
 msg_windows_init (session *sess)
@@ -528,16 +528,16 @@ create_msg (session *sess, guint16 _uid, char *name)
  * tree as part of close-page-finish.
  *
  * Registered once at startup by msg_windows_init via
- * gtkhx_chat_tabs_set_close_handlers. */
+ * gtkhx_chat_tabs_set_close_msg_handler. */
 static void
-msg_tab_on_close (guint16 uid)
+msg_tab_on_close (struct htlc_conn *htlc, guint16 uid)
 {
-    /* The chat-tab strip keys tabs on a bare uid with no connection
-     * dimension, so this can only ask the focused session. That is the flat
-     * key namespace docs/multi-connection.md parks with the tab view itself;
-     * until it is qualified, closing a tab while a different connection is
-     * focused would look up the wrong window. */
-    struct msgwin *msg = msgwin_with_uid (hx_active_session (), uid);
+    /* The tab strip hands back the connection the tab belonged to, so this
+     * finds the window in *that* session's table. It used to get a bare uid
+     * and could only ask the focused session — which meant closing a
+     * background server's tab looked up whatever window the focused server
+     * happened to have at the same uid. */
+    struct msgwin *msg = msgwin_with_uid (sess_from_htlc (htlc), uid);
     if (msg != NULL) {
         /* Unparent the emoji typeahead popover from the input before
          * AdwTabView disposes the content tree — otherwise
@@ -700,7 +700,7 @@ msg_output_render (session *sess, const char *name, guint16 uid,
      * arrived while they're elsewhere. Self-echoes (the user just
      * typed) skip the indicator — no need to flag yourself. */
     if (!is_self) {
-        gtkhx_chat_tabs_set_attention_msg (uid, TRUE);
+        gtkhx_chat_tabs_set_attention_msg (sess->htlc, uid, TRUE);
     }
 }
 

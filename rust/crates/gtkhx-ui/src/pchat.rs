@@ -42,11 +42,12 @@ extern "C" {
     fn hx_emoji_button_new(target: *mut gtk::ffi::GtkWidget) -> *mut gtk::ffi::GtkWidget;
     fn hx_emoji_typeahead_attach(target: *mut gtk::ffi::GtkWidget);
     fn gtkhx_chat_tabs_add_pchat(
+        htlc: *mut c_void,
         content: *mut gtk::ffi::GtkWidget,
         cid: u32,
         title: *const std::ffi::c_char,
     ) -> *mut c_void;
-    fn gtkhx_chat_tabs_raise_pchat(cid: u32);
+    fn gtkhx_chat_tabs_raise_pchat(htlc: *mut c_void, cid: u32);
     fn init_keyaccel(widget: *mut gtk::ffi::GtkWidget);
 }
 
@@ -152,8 +153,8 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
 
     let title = format!("{}: 0x{:08x}", tr("Private Chat"), cid);
     let ctitle = crate::cs(&title);
-    gtkhx_chat_tabs_add_pchat(wptr(&hpane), cid, ctitle.as_ptr());
-    gtkhx_chat_tabs_raise_pchat(cid);
+    gtkhx_chat_tabs_add_pchat(htlc, wptr(&hpane), cid, ctitle.as_ptr());
+    gtkhx_chat_tabs_raise_pchat(htlc, cid);
     init_keyaccel(wptr(&hpane));
     input.grab_focus();
 

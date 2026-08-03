@@ -572,7 +572,7 @@ close_connected_windows (session *sess)
         }
         for (guint i = 0; i < cids->len; i++) {
             guint32 cid = g_array_index (cids, guint32, i);
-            gtkhx_chat_tabs_close_pchat (cid);
+            gtkhx_chat_tabs_close_pchat (sess->htlc, cid);
         }
         g_array_free (cids, TRUE);
     }

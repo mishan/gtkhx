@@ -137,6 +137,10 @@ gtkhx_news_set_widgets (session *sess, GtkWidget *text, GtkWidget *post,
     }
 }
 
+/* The connection a session owns. Not news-specific despite living in this
+ * block — the PM window and the users list ask it too, for the same reason:
+ * they hold the session a window is being built for and need its connection
+ * to key a chat tab on, a cid or uid being unique only within a connection. */
 struct htlc_conn *
 gtkhx_session_htlc (session *sess)
 {
