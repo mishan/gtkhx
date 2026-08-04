@@ -466,6 +466,7 @@ mod tests {
         assert!((mono[0] - 0.0).abs() < 1e-6); // (1 + -1)/2
         assert!((mono[1] - 0.5).abs() < 1e-6); // (0.5 + 0.5)/2
         assert!((mono[2] - 0.3).abs() < 1e-6); // (0.2 + 0.4)/2
+
         // Mono input passes through untouched.
         let m = downmix_to_mono(&[0.1, -0.2, 0.3], 1);
         assert_eq!(m, vec![0.1, -0.2, 0.3]);
