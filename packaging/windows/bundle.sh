@@ -87,10 +87,16 @@ copy_deps "$BIN/gtkhx.exe"
 # path; wasapi2 is the OS capture/render; coreelements/playback/autodetect glue.
 GST_SRC="$MINGW_PREFIX/lib/gstreamer-1.0"
 GST_DST="$LIB/gstreamer-1.0"
+# Source of truth: the element factories hxvoice-runtime creates (grep
+# ElementFactory::make in rust/crates/hxvoice-runtime). mulaw (mulawenc/mulawdec)
+# is the PCMU codec the servers negotiate — without it VoiceRuntime::new fails to
+# build the send bin and the client leaves the room the instant it joins.
+# audiotestsrc is the silence/fallback source autoaudiosrc drops to when there's
+# no capture device.
 GST_PLUGINS=(
   coreelements playback autodetect typefindfunctions
-  audioconvert audioresample audiomixer volume level
-  opus rtp rtpmanager srtp dtls sctp webrtc webrtcnice nice
+  audioconvert audioresample audiomixer volume level audiotestsrc
+  opus mulaw rtp rtpmanager srtp dtls sctp webrtc webrtcnice nice
   wasapi wasapi2 directsound
 )
 if [ -d "$GST_SRC" ]; then
