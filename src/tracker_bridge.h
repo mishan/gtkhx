@@ -30,7 +30,11 @@ extern int gtkhx_tracker_pref_case (void);
 
 /* Direct double-click connect: reset the session htlc's cipher /
  * compress alg, set cipheralg to `cipher_name` when non-NULL, then
- * hx_connect() on a new tab. `secure` / `tls` are 0/1 flags.
+ * hx_connect(). `secure` / `tls` are 0/1 flags.
+ *
+ * On the focused connection when it is idle, and on a *new* tab when it is
+ * not: the tracker is a browser of servers, so picking one from a listing is
+ * the last moment you would expect to lose the server you are already on.
  *
  * `listed_name` is what the tracker called this server, or NULL. It becomes
  * the connection's label until the server introduces itself — which a 1.2-era

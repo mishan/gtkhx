@@ -281,11 +281,18 @@ ninja -C build-voice && ninja -C build-novoice
 (cd build-voice && GDK_BACKEND=x11 xvfb-run -a meson test --no-suite integration)
 (cd build-novoice && GDK_BACKEND=x11 xvfb-run -a meson test --no-suite integration)
 cd rust
-cargo clippy --workspace --all-targets --features voice,hx-image-decode/glycin-v3
-cargo clippy --workspace --all-targets --features hx-image-decode/glycin-v3
+cargo clippy --workspace --all-targets \
+  --features voice,hx-image-decode/glycin-v3 -- -D warnings
+cargo clippy --workspace --all-targets \
+  --features hx-image-decode/glycin-v3 -- -D warnings
 GDK_BACKEND=x11 xvfb-run -a cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
 GDK_BACKEND=x11 xvfb-run -a cargo test -p gtkhx-ui --features hx-image-decode/glycin-v3
 ```
+
+`-D warnings` is not decoration: CI denies, so a lint that is only a warning
+locally — a deprecation, an unused import — is a red build there and invisible
+here. Deprecations in particular, because the gtk-rs bindings are pinned to a
+GTK older than the one on a dev machine.
 
 The Rust test run matters in both: a module behind `#[cfg(feature = "voice")]`
 — `voice_arbiter`, `voice_panel` — is not even compiled without it, so its
