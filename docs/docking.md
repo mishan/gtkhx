@@ -213,6 +213,53 @@ frame widget itself via `gtk_widget_insert_action_group` — no
 
 Empty frames also show the button — the discoverability fix.
 
+### `frame-ops.close-page` and the header's X
+
+The group carries a fourth action that isn't in that menu:
+`close-page`, which backs the close (X) button libpanel puts in the
+header's controls box.
+
+That button ships wired to `frame.close-page-or-frame`, and both its
+handler and the enabled state `panel_frame_update_actions` computes
+for it open with `gtk_widget_get_ancestor (frame, PANEL_TYPE_GRID)`.
+There is no `PanelGrid` in the main dock, so the X was **dead for the
+entire life of the `HxSplit` dock** — closing a single panel meant
+*Close all pages* on the whole frame and then reopening the ones you
+wanted.
+
+The `HxPanelFrame` trick that rescued the chevron's *Move Page* items
+does not work here, and the reason is the useful part. Overriding the
+class action from the subclass wins the lookup, but libpanel goes on
+disabling our action by name — and `panel_frame_add` and
+`panel_frame_remove` each call `panel_frame_update_actions` on the way
+*out*, after every notify a refresh hook could ride on. A menu item
+survives that: `AdwTabView::setup-menu` fires just before the popover
+reads state, so it can be fixed just in time. A button has no such
+moment — it reflects the enabled bit continuously, and libpanel always
+gets the last word. This was tried first and lost exactly there.
+
+So the fix doesn't contest the action; it retargets the button.
+`adopt_frame_close_button` finds it (controls box by CSS class, then
+the `window-close-symbolic` `GtkButton` inside — scoped that way
+because the pages popover's per-row close buttons share the icon
+name) and points its `action-name` at `frame-ops.close-page`. That
+group is an *inserted* one, invisible to `panel_frame_update_actions`,
+and the enabled state lives in a `GSimpleAction` we own outright,
+driven off `notify::visible-child`. The button keeps its icon,
+placement and circular styling; libpanel never touches `action-name`
+after the template is built, and `close_button` isn't even bound as a
+template child, so nothing in libpanel can reach it.
+
+The "or frame" half is deliberately not reimplemented — closing an
+empty frame is *Close frame* on the view-split menu — so the X simply
+greys out when the frame has no page.
+
+`tests/unit/test_frame_close_button.c` pins both halves: that the
+button is found and adopted (a libpanel header restructure breaks the
+search silently otherwise), and that its enabled state survives
+repeated add/remove churn, which is precisely where the class-action
+attempt failed.
+
 ### Per-panel chevron menu
 
 The libpanel chevron (the `pan-down-symbolic` button on each

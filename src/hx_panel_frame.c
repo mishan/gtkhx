@@ -98,7 +98,12 @@ move_down_action (GtkWidget *widget, const char *name, GVariant *param)
  * TRUE iff there's a neighbour leaf in that direction in the dock
  * tree. No visible HxPanel → all four greyed (no panel to move).
  * Panel present but no neighbour in a direction → that direction
- * specifically greyed (a no-op move stays inert in the menu). */
+ * specifically greyed (a no-op move stays inert in the menu).
+ *
+ * The header's close button has the same "libpanel disables what we
+ * enable" problem but could NOT be fixed this way — see the note on
+ * frame-ops.close-page in hx_split.c for why a menu item can be
+ * rescued here and a button can't. */
 static void
 refresh_move_enabled (HxPanelFrame *self)
 {

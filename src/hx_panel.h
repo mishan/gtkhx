@@ -191,6 +191,23 @@ void hx_panel_defang_drop_controls_on_frame (GtkWidget *frame);
  * coordinates against the dock's child frames. */
 void hx_panel_install_drop_target_on_dock (GtkWidget *dock);
 
+/* Depth-first search for a descendant carrying `css_class`, or NULL.
+ *
+ * The handle of last resort for libpanel's header internals. The
+ * header bar is a .ui template whose parts — the "controls" box
+ * holding the chevron and the close button, and the buttons inside
+ * it — are private template children with no accessors, and the CSS
+ * class is the only stable public thing about them. Same
+ * hunt-by-property approach as the drag-handle search in
+ * hx_panel.c, and the same caveat: stable surface today, worth
+ * re-checking whenever libpanel restructures its header.
+ *
+ * Two callers: the undocked-frame builder in hx_panel.c, which hides
+ * the whole controls box, and hx_split_install_frame_ui, which
+ * reaches the close button inside it. */
+GtkWidget *hx_panel_find_css_class_descendant (GtkWidget *root,
+                                               const char *css_class);
+
 G_END_DECLS
 
 #endif /* GTKHX_HX_PANEL_H */

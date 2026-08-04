@@ -1261,14 +1261,8 @@ on_undock_activate (GSimpleAction *action, GVariant *parameter,
     hx_panel_undock (HX_PANEL (user_data));
 }
 
-/* Depth-first traversal for a descendant carrying a CSS class.
- * Used to reach libpanel's header controls box, which is a private
- * template child with no accessor but a stable ".controls" class
- * (panel-frame-header-bar.ui). Same hunt-by-property approach as
- * find_drag_button above, and the same caveat: stable surface
- * today, worth re-checking if libpanel restructures the header. */
-static GtkWidget *
-find_css_class_descendant (GtkWidget *root, const char *css_class)
+GtkWidget *
+hx_panel_find_css_class_descendant (GtkWidget *root, const char *css_class)
 {
     GtkWidget *child;
 
@@ -1280,7 +1274,7 @@ find_css_class_descendant (GtkWidget *root, const char *css_class)
     }
     for (child = gtk_widget_get_first_child (root); child != NULL;
          child = gtk_widget_get_next_sibling (child)) {
-        GtkWidget *hit = find_css_class_descendant (child, css_class);
+        GtkWidget *hit = hx_panel_find_css_class_descendant (child, css_class);
         if (hit != NULL) {
             return hit;
         }
@@ -1339,7 +1333,8 @@ hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
      * into the dock — drag the panel over a pane, or just close the
      * window, which redocks via on_undocked_close_request — is
      * unchanged. */
-    controls = find_css_class_descendant (GTK_WIDGET (header), "controls");
+    controls
+        = hx_panel_find_css_class_descendant (GTK_WIDGET (header), "controls");
     if (controls != NULL) {
         gtk_widget_set_visible (controls, FALSE);
     } else {
