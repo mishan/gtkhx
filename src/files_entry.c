@@ -51,10 +51,23 @@ hx_file_entry_format_size (HxFileEntry *e)
     if (hx_file_entry_is_dir (e)) {
         guint64 size = hx_file_entry_get_size (e);
         if (size > 0) {
-            return g_strdup_printf (
-                g_dngettext (NULL, "(%" G_GUINT64_FORMAT " item)",
-                             "(%" G_GUINT64_FORMAT " items)", (gulong)size),
-                size);
+            /* The count goes in as a pre-formatted %s rather than a
+             * G_GUINT64_FORMAT spec. xgettext sees only what is written at
+             * the call site, and G_GUINT64_FORMAT is a macro — a msgid of
+             * "(%" G_GUINT64_FORMAT " item)" extracts as the two characters
+             * `(%`, so the entry can never match at runtime and the count
+             * stays English in every language. Formatting the number first
+             * keeps the whole sentence in one literal, and keeps the width
+             * honest on 32-bit where the old (gulong) cast truncated. */
+            char *num = g_strdup_printf ("%" G_GUINT64_FORMAT, size);
+            /* TRANSLATORS: How many files a folder holds, shown in the
+             * Size column of the file browser. %s is the count — it is a
+             * pre-formatted number, not a name. */
+            char *out = g_strdup_printf (
+                g_dngettext (NULL, "(%s item)", "(%s items)", (gulong)size),
+                num);
+            g_free (num);
+            return out;
         }
         return g_strdup ("—");
     }

@@ -83,7 +83,16 @@ pub fn tr_fmt(msgid: &str, args: &[&str]) -> String {
 /// Sequential placeholders consume `args` left to right; positional ones
 /// index directly. A placeholder with no matching argument is dropped.
 pub fn tr_argv(msgid: &str, args: &[&str]) -> String {
-    let s = tr(msgid);
+    subst(&tr(msgid), args)
+}
+
+/// Substitute `args` into an **already translated** string.
+///
+/// The body of [`tr_argv`], split out so the plural path can reach it:
+/// `trn` has already been through the catalog, and running it through
+/// `tr_argv` would translate it a second time — usually a no-op, but a
+/// lookup of a translated string is not something to rely on.
+fn subst(s: &str, args: &[&str]) -> String {
     let mut out = String::with_capacity(s.len() + 16);
     let mut chars = s.chars().peekable();
     let mut seq = 0usize;
@@ -149,6 +158,40 @@ pub const fn n_(s: &'static str) -> &'static str {
     s
 }
 
+/// Translate `msgid` in the disambiguating context `ctx`.
+///
+/// gettext's `pgettext`. Some English words carry unrelated senses that no
+/// other language can collapse the same way — "Login" is both the
+/// account-name field and the name of a sound event, "General" is both a
+/// preferences page and a server category. A context makes each sense its
+/// own catalog entry, so a translator can render them differently.
+///
+/// There is no `pgettext` symbol to link against: GNU gettext implements it
+/// as a macro that concatenates `ctx`, `U+0004` and the msgid into one
+/// lookup key. We do the same. When the catalog has no entry, `dgettext`
+/// hands the key straight back, so check for that and fall back to the bare
+/// msgid rather than showing the user a string with a control character in
+/// the middle of it.
+///
+/// xgettext is told about this by `--keyword=trc:1c,2` in `po/meson.build`.
+pub fn trc(ctx: &str, s: &str) -> String {
+    let key = format!("{ctx}\u{4}{s}");
+    let Ok(c) = CString::new(key.as_str()) else {
+        return s.to_owned();
+    };
+    unsafe {
+        let p = dgettext(DOMAIN.as_ptr() as *const c_char, c.as_ptr());
+        if p.is_null() {
+            return s.to_owned();
+        }
+        let out = CStr::from_ptr(p);
+        if out.to_bytes() == key.as_bytes() {
+            return s.to_owned();
+        }
+        out.to_string_lossy().into_owned()
+    }
+}
+
 /// Plural-aware translate: `singular` for n == 1, `plural` otherwise
 /// (subject to the catalog's plural rule).
 pub fn trn(singular: &str, plural: &str, n: u64) -> String {
@@ -166,5 +209,55 @@ pub fn trn(singular: &str, plural: &str, n: u64) -> String {
             return if n == 1 { singular } else { plural }.to_owned();
         }
         CStr::from_ptr(p).to_string_lossy().into_owned()
+    }
+}
+
+/// [`trn`] followed by [`tr_argv`]-style argument substitution.
+///
+/// The plural counterpart of `tr_argv`, for the common case of a plural
+/// msgid whose only placeholder is the count itself. Picking the form and
+/// filling in the number are one step at every call site, which is what
+/// keeps callers from reaching for the `file(s)` dodge.
+///
+/// xgettext is told about this by `--keyword=trn_argv:1,2` in
+/// `po/meson.build`.
+pub fn trn_argv(singular: &str, plural: &str, n: u64, args: &[&str]) -> String {
+    subst(&trn(singular, plural, n), args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The context separator is a wire format, not an implementation
+    /// detail. `msgfmt` writes a contexted entry into the `.mo` under the
+    /// key `ctx \u{4} msgid`, and `trc` has to build byte-identical keys or
+    /// every lookup silently misses and falls back to English. Verified
+    /// against a real catalog: `po/de.po`'s `msgctxt "sound event"` /
+    /// `msgid "Login"` entry lands in `gtkhx.mo` as the bytes
+    /// `sound event\x04Login\0`.
+    #[test]
+    fn trc_key_uses_the_eot_separator() {
+        let key = format!("{}\u{4}{}", "sound event", "Login");
+        assert_eq!(key.as_bytes(), b"sound event\x04Login");
+    }
+
+    /// With no catalog loaded, `dgettext` hands the lookup key straight
+    /// back. Returning it would show the user the context and a control
+    /// character; `trc` must strip back to the bare msgid instead.
+    #[test]
+    fn trc_falls_back_to_the_bare_msgid() {
+        let out = trc("no such context", "Untranslated Sentinel");
+        assert_eq!(out, "Untranslated Sentinel");
+        assert!(!out.contains('\u{4}'));
+    }
+
+    /// `subst` is shared by `tr_argv` and `trn_argv`; the plural path must
+    /// not re-translate, but it must substitute identically.
+    #[test]
+    fn subst_handles_sequential_and_positional() {
+        assert_eq!(subst("Wrote %u files.", &["3"]), "Wrote 3 files.");
+        assert_eq!(subst("%2$s then %1$s", &["a", "b"]), "b then a");
+        assert_eq!(subst("100%% done, %s", &["ok"]), "100% done, ok");
     }
 }

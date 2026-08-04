@@ -48,7 +48,14 @@ use std::time::{Duration, Instant};
 use crate::compat::gdk;
 use crate::compat::glib::{Bytes, MainContext};
 // glycin is Linux-only; the non-Linux backend below uses the `image` crate.
-#[cfg(target_os = "linux")]
+// Also gated on a backend actually being selected: with neither `glycin-v2`
+// nor `glycin-v3` on, `compat::glycin` does not exist, and naming it here
+// would bury compat.rs's "no glycin backend selected" diagnostic under a
+// cascade of follow-on errors. See the stub `run_decode` below.
+#[cfg(all(
+    target_os = "linux",
+    any(feature = "glycin-v2", feature = "glycin-v3")
+))]
 use crate::compat::glycin;
 
 use crate::caps::HxInlineMediaCaps;
@@ -447,7 +454,10 @@ struct DecodeErr {
     detail: Option<String>,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(
+    target_os = "linux",
+    any(feature = "glycin-v2", feature = "glycin-v3")
+))]
 async fn run_decode(
     gbytes: Bytes,
     max_dimension: u32,
@@ -597,6 +607,40 @@ async fn run_decode(
     }
 
     Ok(DecodeOk::Animation(frames))
+}
+
+/// Stand-in for the Linux backend when no glycin feature is selected.
+///
+/// This configuration never links: `compat.rs` raises a `compile_error!`
+/// saying which feature to turn on. The stub exists so that message is the
+/// *only* error. Without it, every `glycin::`-typed binding in the real
+/// `run_decode` goes undefined and rustc reports ten follow-on
+/// "cannot find value in this scope" errors, which is what the reader sees
+/// first and which say nothing about the actual cause.
+///
+/// The configuration is reachable by accident more often than it looks:
+/// `gtkhx-ui` and `gtkhx-ffi` both depend on this crate with
+/// `default-features = false`, because the backend is chosen on the
+/// `hx-image-decode` member itself by meson's cargo invocation. So a bare
+/// `cargo check -p gtkhx-ui` — no `--workspace` to unify the member's own
+/// defaults in — selects nothing and lands here.
+#[cfg(all(
+    target_os = "linux",
+    not(any(feature = "glycin-v2", feature = "glycin-v3"))
+))]
+async fn run_decode(
+    _gbytes: Bytes,
+    _max_dimension: u32,
+    _max_pixels: u32,
+    _max_frames: u32,
+    _max_duration_ms: u32,
+    _sniffed: Format,
+) -> Result<DecodeOk, DecodeErr> {
+    Err(DecodeErr {
+        code: MEDIA_ERR_UNSUPPORTED,
+        message: "no glycin backend compiled in",
+        detail: None,
+    })
 }
 
 // ---- Non-Linux backend: pure-Rust `image`-crate decode -------------------
@@ -824,7 +868,10 @@ fn adopt_texture(t: crate::compat::gdk2::Texture) -> gdk::Texture {
 /// caller would receive a borrowed pointer with an undefined
 /// lifetime); the detail goes to debug_log on the telemetry
 /// path where the format string can hold the ctx by value.
-#[cfg(target_os = "linux")]
+#[cfg(all(
+    target_os = "linux",
+    any(feature = "glycin-v2", feature = "glycin-v3")
+))]
 fn glycin_err_category(_ctx: &glycin::ErrorCtx) -> &'static str {
     // The glycin::Error variants are non_exhaustive — we
     // collapse to a single category here. Future refinement

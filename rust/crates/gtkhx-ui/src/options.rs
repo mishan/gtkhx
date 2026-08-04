@@ -12,7 +12,7 @@
 //! used to be reached from a C table through `#[no_mangle]` exports, and are
 //! now plain functions called from `options_window`.
 
-use crate::tr::tr;
+use crate::tr::{tr, trc};
 use crate::{cs, cstr};
 use gtk4 as gtk;
 use libadwaita as adw;
@@ -540,7 +540,11 @@ pub(crate) fn page_sound(page: &adw::PreferencesPage) {
     events.add(&switch_row(cfg::SND_ERROR, &tr("Error"), None));
     events.add(&switch_row(cfg::SND_FILE, &tr("Transfer complete"), None));
     events.add(&switch_row(cfg::SND_JOIN, &tr("Join"), None));
-    events.add(&switch_row(cfg::SND_LOGIN, &tr("Login"), None));
+    // TRANSLATORS: Name of a sound event — the chime that plays when you
+    // finish logging in to a server. The other "Login" in this catalog is
+    // the account-name field beside Password, which is a different word in
+    // most languages.
+    events.add(&switch_row(cfg::SND_LOGIN, &trc("sound event", "Login"), None));
     events.add(&switch_row(cfg::SND_MSG, &tr("Private message"), None));
     events.add(&switch_row(cfg::SND_NEWS, &tr("News post"), None));
     events.add(&switch_row(cfg::SND_PART, &tr("Leave"), None));

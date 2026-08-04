@@ -14,6 +14,12 @@ i18n.gettext(meson.project_name(),
   args : [
     '--directory=' + meson.project_source_root(),
     '--from-code=UTF-8',
+    # Carry `TRANSLATORS:` comments from the source into the catalog as
+    # `#.` notes. A msgctxt says two strings differ; only a note can say
+    # how. Plain --add-comments would sweep up every comment that happens
+    # to sit above a string, so the marker keeps the POT to what was
+    # deliberately written for a translator.
+    '--add-comments=TRANSLATORS:',
     # xgettext's defaults know about gettext / ngettext / dgettext but
     # not the glib variants. Tell it that g_dngettext's plural arg
     # pair lives at positions 2 (singular) and 3 (plural) — see
@@ -35,6 +41,11 @@ i18n.gettext(meson.project_name(),
     '--keyword=tr_fmt:1',
     '--keyword=tr_argv:1',
     '--keyword=trn:1,2',
+    '--keyword=trn_argv:1,2',
+    # pgettext, our `trc`. The `1c` says argument 1 is the disambiguating
+    # context rather than a msgid, so the pair lands in the catalog as a
+    # `msgctxt`/`msgid` entry instead of two unrelated strings.
+    '--keyword=trc:1c,2',
     # The N_() marker: a literal that is translated somewhere else later.
     '--keyword=n_:1',
   ],

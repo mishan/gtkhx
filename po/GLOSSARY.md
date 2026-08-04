@@ -153,6 +153,26 @@ Japanese conventions that matter here:
 - **Log lines** (lowercase, `\n`-terminated) stay terse; use plain form (だ/である is not
   needed — a bare noun phrase or plain verb is right), no です・ます.
 
+## Contexts (`msgctxt`)
+
+A few English words carry unrelated senses that no other language collapses the
+same way. Those entries take a `msgctxt`, so each sense is a separate catalog
+entry, plus a `#.` note saying which is which. Four exist today:
+
+| msgctxt | msgid | which sense |
+|---|---|---|
+| `sound event` | Login | the chime that plays on logging in — *not* the account-name field, which keeps the uncontexted entry |
+| `maturity rating` | General | an age rating: the mildest of Teen/Mature/Adult, meaning no age restriction |
+| `server category` | General | a server with no particular specialism, alongside Development, Gaming, Media |
+| `server details` | Identity | heading over the server's software, country, region, language and tags — *not* the user's own name and icon |
+
+If you meet another overloaded msgid, don't paper over it in one language: add a
+`trc("context", "Msgid")` at the call site (`g_dpgettext2` on the C side) so every
+language gets the choice. Write the reason as a `TRANSLATORS:` comment directly
+above the call — `--add-comments=TRANSLATORS:` carries those into the catalog as
+`#.` notes, and a context that says two strings differ without saying how is only
+half a fix.
+
 ## Mechanics — these are correctness issues, not style
 
 1. **Format specifiers.** `%s`, `%u`, `%d`, `%1$s` must appear in the translation exactly

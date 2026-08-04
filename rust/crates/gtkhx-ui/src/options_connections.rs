@@ -34,7 +34,7 @@ use crate::bookmark_store;
 use crate::cipher_vocab;
 use crate::ffi as cffi;
 use crate::icon_picker;
-use crate::tr::{tr, tr1, tr_fmt};
+use crate::tr::{tr, tr1, tr_fmt, trn_argv};
 use gtk4 as gtk;
 use libadwaita as adw;
 
@@ -857,9 +857,13 @@ fn on_export_legacy(anchor: &gtk::Widget) {
             Ok(n) => alert(
                 &anchor,
                 &tr("Connections exported"),
-                &tr1(
-                    "Wrote %s file(s) in the legacy Hotline format.",
-                    &n.to_string(),
+                // TRANSLATORS: Shown after exporting connections, one file
+                // per connection. %u is how many files were written.
+                &trn_argv(
+                    "Wrote %u file in the legacy Hotline format.",
+                    "Wrote %u files in the legacy Hotline format.",
+                    n as u64,
+                    &[&n.to_string()],
                 ),
             ),
             Err(e) => alert(&anchor, &tr("Export failed"), &tr1("Export failed: %s", &e)),
