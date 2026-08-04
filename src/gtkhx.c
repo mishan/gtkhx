@@ -949,15 +949,17 @@ hx_session_open (const char *title)
     sess->toolbar_window = toolbar_window;
 
     /* Two steps, in this order. The model-side per-session state first —
-     * create_chat seeds the public conversation's view, create_tasks its task
-     * list — then the panel content that reads it. Skipping the first half
+     * create_chat seeds the public conversation's view — then the panel
+     * content that reads it. create_tasks builds the shared task queue, which
+     * is why it is idempotent: only the first connection through here has
+     * anything to do. Skipping the first half
      * leaves the content builders with no conversation to render.
      *
      * This is what `fe_init` does for the first connection, and what every
      * connection after the first needs too, which is the whole reason it is a
      * function. */
     create_chat (sess);
-    create_tasks (sess);
+    create_tasks ();
 
     create_chat_window (toolbar_window, sess);
     create_news_window (toolbar_window, sess);
@@ -970,6 +972,10 @@ hx_session_open (const char *title)
      * looking at — which is what they asked for by opening it, and what every
      * panel's content build assumes about the session it was handed. */
     gtkhx_conn_tabs_add (sess, title);
+    /* Crossing from one connection to two is what makes the queue's
+     * connection labels worth showing — and crossing back is what hides them
+     * again (hx_session_close, below). */
+    gtkhx_tasks_refresh_tags ();
     return sess;
 }
 
@@ -999,7 +1005,22 @@ hx_session_close (session *sess)
      * why this is a *remove* and not the switch-away a tab change does. */
     gtkhx_dock_remove_session_pages (sess);
 
+    /* This connection's rows in the shared task queue, after the pages are
+     * gone rather than before: a content module's destroy handler that issued
+     * a request would build a row on the way out, and sweeping first would
+     * leave it standing with nothing left that could ever remove it.
+     *
+     * Unconditional, for the same reason the banner above is: hx_htlc_close
+     * sweeps them too, but it only runs for a connection that still has a
+     * socket — and the queue is no longer a per-connection page that the
+     * removal above would have taken with it. */
+    gtasks_delete_on_conn (sess->htlc);
+
     hx_session_remove (sess);
+
+    /* Back below two connections hides the queue's connection labels again.
+     * After the remove, so the count it reads is the new one. */
+    gtkhx_tasks_refresh_tags ();
 }
 
 static void
@@ -1066,7 +1087,7 @@ fe_init (void)
      * create_tasks_window. Order matters: model state first, then
      * the toolbar (which now hosts everything). */
     create_chat (sess);
-    create_tasks (sess);
+    create_tasks ();
 
     create_toolbar_window (sess);
     init_colors (toolbar_window);
@@ -1129,6 +1150,17 @@ hx_debug_second_session (void)
                "page in every per-connection panel",
                hx_conn_serial (sess->htlc));
 
+    /* Give it a row in the shared task queue, so the close below has
+     * something to sweep. The connect row is the one every connection gets,
+     * and asking for it here is also the only way a headless run reaches the
+     * queue at all. */
+    conn_task_update (sess, 1);
+    if (gtkhx_tasks_rows_for_conn (hx_conn_serial (sess->htlc)) == 0) {
+        g_error ("second connection got no row in the shared task queue");
+    }
+    debug_log ("secondconn", "the shared queue holds %u row(s) for it",
+               gtkhx_tasks_rows_for_conn (hx_conn_serial (sess->htlc)));
+
     /* Opening a connection selects its tab, which would leave the app focused
      * on one that has nothing in it. Hand the focus back to the real one so
      * startup looks normal and switching over is something the user chooses to
@@ -1151,6 +1183,14 @@ hx_debug_second_session (void)
          * warning in the log is what gets scrolled past. */
         if (hx_session_with_serial (serial) != NULL) {
             g_error ("closed connection %u is still in the registry", serial);
+        }
+        /* And its rows are out of the shared queue. Nothing destroys a page
+         * for it any more — the queue is one list for every connection — so
+         * if the sweep didn't run, its rows are simply still there, with a
+         * tag naming a server that no longer exists. */
+        if (gtkhx_tasks_rows_for_conn (serial) != 0) {
+            g_error ("closed connection %u left %u row(s) in the task queue",
+                     serial, gtkhx_tasks_rows_for_conn (serial));
         }
         debug_log ("secondconn", "closed it again; %u session(s) left",
                    hx_session_count ());
@@ -1507,6 +1547,8 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
         gtkhx_conn_tabs_set_title (htlc, label);
         g_free (label);
     }
+    /* And the same name on this connection's rows in the shared task queue. */
+    gtkhx_tasks_refresh_tags ();
     setbtns (sess, 1);
     set_status_bar (sess, 2);
 }

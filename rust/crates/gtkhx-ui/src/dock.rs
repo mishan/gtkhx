@@ -42,10 +42,19 @@ pub const ID_FILES: &str = "files";
 /// Every panel whose content belongs to one connection — the set a connection
 /// switch has to swap.
 ///
-/// All six of them, today. There is no global panel yet: the transfer queue is
-/// the one that wants to be (M6), and the Tracker is already outside the dock
-/// entirely, being a standalone window rather than a panel.
-pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_TASKS, ID_NEWS, ID_NEWS15, ID_FILES];
+/// Tasks is deliberately absent: the transfer queue is one list for the whole
+/// application, tagged per row, so switching tabs must leave it alone. See
+/// [`GLOBAL_PAGE`] and docs/multi-connection.md, "Global but tagged". The
+/// Tracker is absent for a different reason — it is a standalone window rather
+/// than a panel at all.
+pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_NEWS15, ID_FILES];
+
+/// The page name a global panel lives under.
+///
+/// Panels are addressed by page even when there is only ever one, because the
+/// dock bridge has no other vocabulary. A name rather than a serial, so it can
+/// never collide with a connection's — serials start at 1 and are decimal.
+pub const GLOBAL_PAGE: &str = "global";
 
 extern "C" {
     fn gtkhx_dock_raise_if_open(id: *const c_char) -> glib::ffi::gboolean;
@@ -158,7 +167,8 @@ pub enum Open {
     Build(String),
 }
 
-/// The head of all six window entry points: decide whether to build.
+/// The head of every per-connection window entry point: decide whether to
+/// build.
 ///
 /// Two answers: this connection already has a page here — in which case it is
 /// now the visible one and the panel is raised — or it doesn't and the caller
@@ -172,10 +182,25 @@ pub enum Open {
 ///
 /// It briefly had a third answer — a refusal, for a role whose content module
 /// was still a process singleton. Removing the panel-level test had also
-/// removed the accident that kept a second connection out of those, and all
-/// six needed making per-connection before the refusal could go.
+/// removed the accident that kept a second connection out of those, and every
+/// one of them needed making per-connection before the refusal could go.
 pub fn open(id: &str, sess: *mut c_void) -> Open {
-    let page = page_for_session(sess);
+    open_page(id, page_for_session(sess))
+}
+
+/// [`open`] for a panel that belongs to the whole application rather than to
+/// one connection.
+///
+/// Same two answers, but the page is fixed: the first connection to ask builds
+/// it and every one after that gets `Done`. Callers that still have
+/// per-connection state to push into a shared panel must do so on `Done` as
+/// well as after building — nothing else will, because no page is created for
+/// the connections that come later.
+pub fn open_global(id: &str) -> Open {
+    open_page(id, GLOBAL_PAGE.to_owned())
+}
+
+fn open_page(id: &str, page: String) -> Open {
     let cid = crate::cs(id);
     let cpage = crate::cs(&page);
 
@@ -224,7 +249,7 @@ pub fn place(
             // user is reading another one. A page added behind the current
             // one is exactly right in that case; the connection tab is what
             // advertises it.
-            if page == page_for_session(hx_active_session()) {
+            if page == GLOBAL_PAGE || page == page_for_session(hx_active_session()) {
                 gtkhx_dock_show_page(cid.as_ptr(), cpage.as_ptr());
                 gtkhx_dock_raise_if_open(cid.as_ptr());
             }

@@ -220,17 +220,18 @@ hx_session_remove (session *sess)
  *
  * Most widget fields on the session are borrowed: children of a dock page that
  * `hx_session_close` destroyed before getting here, gone with their parent.
- * Three are not, and each is released explicitly below, because a borrowed
- * pointer and an owned one look identical at the struct:
+ * One is not, and is released explicitly below, because a borrowed pointer and
+ * an owned one look identical at the struct:
  *
- *   - `gtklist` and `gtask_scroll` are `g_object_ref_sink`ed by `tasks.c` on
- *     purpose, so they survive being unparented.
  *   - `users_view` arrives transfer-full from Rust; the session holds the only
  *     reference, and dropping it is also what lets the view's `dispose`
  *     disconnect its handler on the process-lifetime theme object — a handler
  *     that would otherwise fire against a view holding a freed session.
- *   - `gtask_list` is a hand-rolled intrusive list, unrelated to the `tasks`
- *     hash table and not freed by it.
+ *
+ * The task queue is not on this list any more. It is one shared widget for the
+ * whole application now, and a departing connection's rows are swept by
+ * `gtasks_delete_on_conn` from `hx_htlc_close` — earlier, while the connection
+ * is still the thing being torn down, rather than here.
  *
  * Ordering matters within each clear, and `g_clear_pointer` is what provides
  * it: the macro NULLs the field *before* calling the destroy function, not
@@ -265,12 +266,6 @@ hx_session_free (session *sess)
     g_clear_pointer (&sess->chats, hx_chats_free);
     g_clear_pointer (&sess->server_name, g_free);
 
-    /* The task rows, before the widgets they are parented to. */
-    while (sess->gtask_list != NULL) {
-        gtask_delete (sess, sess->gtask_list);
-    }
-    g_clear_object (&sess->gtklist);
-    g_clear_object (&sess->gtask_scroll);
     g_clear_object (&sess->users_view);
 
 #ifdef HAVE_VOICE

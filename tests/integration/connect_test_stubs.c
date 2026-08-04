@@ -500,3 +500,21 @@ hx_session_with_serial (guint16 serial)
     (void)serial;
     return &the_session;
 }
+
+/* Task-queue stub. hx_htlc_close sweeps the disconnecting connection's rows
+ * out of the shared task queue; the queue is view state in tasks.c, which
+ * these binaries don't link. There are no rows here to sweep. */
+extern void gtasks_delete_on_conn (struct htlc_conn *htlc);
+void
+gtasks_delete_on_conn (struct htlc_conn *htlc)
+{
+    (void)htlc;
+}
+
+/* Same, for the tracker's connection-less rows — tracker_kill_threads drops
+ * them when a fetch stops early. */
+extern void gtasks_delete_tracker_rows (void);
+void
+gtasks_delete_tracker_rows (void)
+{
+}

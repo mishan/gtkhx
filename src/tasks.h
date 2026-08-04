@@ -1,13 +1,28 @@
 #ifndef HX_TASKS_H
 #define HX_TASKS_H
 
-extern void create_tasks (session *sess);
+/* Build the task queue's widgets. Once for the application: the queue is
+ * shared by every connection (docs/multi-connection.md, "Global but tagged").
+ * Idempotent, so a per-connection call site is harmless. */
+extern void create_tasks (void);
 extern void output_xfer_queue (session *sess, struct htxf_conn *htxf);
-/* Drop one task row: unparent its widget and unlink it from sess->gtask_list.
- * The list is hand-rolled and separate from the sess->tasks hash table, so
- * destroying that table does not free these — hx_session_free walks the list
- * with this. */
-extern void gtask_delete (session *sess, struct gtask *gtsk);
+/* Drop every row belonging to `htlc`. For disconnect: the queue is shared by
+ * every connection, so nothing else removes a departing connection's rows. */
+extern void gtasks_delete_on_conn (struct htlc_conn *htlc);
+
+/* Drop the tracker's progress rows. They belong to no connection, so the
+ * per-connection sweep leaves them alone; this is what ends them when a fetch
+ * stops early. */
+extern void gtasks_delete_tracker_rows (void);
+
+/* How many rows the shared queue holds for a connection. For the debug hooks
+ * that exercise open-and-close headlessly. */
+extern guint gtkhx_tasks_rows_for_conn (guint16 conn);
+
+/* Re-label the rows with the connection each belongs to, and show or hide
+ * those labels — they only appear above one connection. Call when the set of
+ * connections changes, including when one learns its name at login. */
+extern void gtkhx_tasks_refresh_tags (void);
 extern void gtask_delete_tsk (session *sess, guint32 trans);
 extern void gtask_delete_htxf (session *sess, struct htxf_conn *htxf);
 /* Sever the gtask's pointer to htxf without removing the UI row.
@@ -22,6 +37,10 @@ extern void task_update (session *sess, struct task *tsk);
 extern void create_tasks_window (GtkWidget *widget, gpointer data);
 extern GtkWidget *gtkhx_tasks_build_content (session *sess);
 extern void gtkhx_tasks_after_embed (session *sess);
+
+/* Push one connection's tasks and transfers into the shared queue. For a
+ * connection joining a panel another one already built. */
+extern void gtkhx_tasks_sync_conn (session *sess);
 extern void file_update (session *sess, struct htxf_conn *htxf);
 extern void task_delete (session *sess, struct task *tsk);
 extern void task_error (struct htlc_conn *htlc, const guint8 *frame,
