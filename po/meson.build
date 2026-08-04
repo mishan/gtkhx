@@ -21,6 +21,23 @@ i18n.gettext(meson.project_name(),
     # `info gettext "Marking Plural Forms"` — so plural strings from
     # files_browser.c / chat.c / etc. land in gtkhx.pot.
     '--keyword=g_dngettext:2,3',
+    # The Rust half's gettext shims (rust/crates/gtkhx-ui/src/tr.rs). xgettext
+    # has recognised Rust since gettext 0.25, and lexes it properly — it does
+    # not mistake the `_str` tail of `push_str("…")` for a keyword — but it has
+    # no idea what our wrappers are called, so name each one and say where its
+    # msgid sits. `trn` is the ngettext form and needs the singular/plural
+    # pair.
+    #
+    # Only the `gtkhx-pot` and `gtkhx-update-po` targets run xgettext, and
+    # neither is built by default, so an older gettext costs a maintainer
+    # regenerating the catalog rather than anybody building the client.
+    '--keyword=tr:1',
+    '--keyword=tr1:1',
+    '--keyword=tr_fmt:1',
+    '--keyword=tr_argv:1',
+    '--keyword=trn:1,2',
+    # The N_() marker: a literal that is translated somewhere else later.
+    '--keyword=n_:1',
   ],
   install : false,
 )

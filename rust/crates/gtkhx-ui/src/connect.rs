@@ -942,7 +942,11 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
     let bm = match bookmark_store::find(&name) {
         Ok(Some(bm)) => bm,
         Ok(None) => {
-            glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
+            // Hoisted out of the macro: xgettext's Rust lexer does not reach
+            // a keyword call nested inside a path-qualified macro's arguments,
+            // so inline this would extract as nothing.
+            let msg = tr("No such bookmark");
+            glib::g_warning!("gtkhx", "{} \"{}\"", msg, name);
             return;
         }
         Err(e) => {
@@ -982,7 +986,11 @@ fn open_bookmark_preload(name: &str) {
     let bm = match bookmark_store::find(name) {
         Ok(Some(bm)) => bm,
         Ok(None) => {
-            glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
+            // Hoisted out of the macro: xgettext's Rust lexer does not reach
+            // a keyword call nested inside a path-qualified macro's arguments,
+            // so inline this would extract as nothing.
+            let msg = tr("No such bookmark");
+            glib::g_warning!("gtkhx", "{} \"{}\"", msg, name);
             return;
         }
         Err(e) => {

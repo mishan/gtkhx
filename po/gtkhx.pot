@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-28 13:21-0700\n"
+"POT-Creation-Date: 2026-08-03 22:29-0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,1791 +18,2571 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/about.c:89 src/toolbar.c:591
-msgid "About GtkHx"
-msgstr ""
-
-#: src/about.c:140
-msgid "A GTK+ Hotline client"
-msgstr ""
-
-#: src/about.c:146
-msgid "Copyright © 2000–2026 Misha Nasledov"
-msgstr ""
-
-#: src/banner.c:240
-msgid "Server banner: URL mode without URL"
-msgstr ""
-
-#: src/banner.c:257
-#, c-format
-msgid "Server banner [%s] — loading..."
-msgstr ""
-
-#: src/banner.c:371
-msgid "Server banner: URL is not parseable"
-msgstr ""
-
-#: src/banner.c:406
-msgid "Server banner: fetch failed"
-msgstr ""
-
-#: src/banner.c:416
-msgid "Server banner: HTTP error"
-msgstr ""
-
-#: src/banner.c:431 src/banner.c:715
-msgid "Server banner: image not decodable"
-msgstr ""
-
-#: src/banner.c:499
-msgid "Server banner: empty transfer"
-msgstr ""
-
-#: src/banner.c:504
-msgid "Server banner: image too large"
-msgstr ""
-
-#: src/banner.c:550
-msgid "Server banner: fetch worker failed to start"
-msgstr ""
-
-#: src/banner.c:704
-msgid "Server banner: HTXF fetch failed"
-msgstr ""
-
-#: src/bookmarks.c:100
-msgid "Bookmark error"
-msgstr ""
-
-#: src/bookmarks.c:101 src/gtkutil.c:579 src/msg.c:890
-msgid "_OK"
-msgstr ""
-
-#: src/bookmarks.c:270
-#, c-format
-msgid ""
-"Could not load bookmark \"%s\". The file may be in the legacy format — pick "
-"it from the toolbar's Connect-button dropdown to convert it first."
-msgstr ""
-
-#: src/bookmarks.c:378 src/bookmarks.c:390
-msgid "Bookmark name cannot be empty."
-msgstr ""
-
-#: src/bookmarks.c:420
-#, c-format
-msgid "Rename failed: %s"
-msgstr ""
-
-#: src/bookmarks.c:457
-#, c-format
-msgid "Save failed: %s. The bookmark was restored to its original name."
-msgstr ""
-
-#: src/bookmarks.c:462
-#, c-format
-msgid ""
-"Save failed: %1$s. The file is now at \"%2$s\" with the previous contents — "
-"rollback also failed (%3$s)."
-msgstr ""
-
-#: src/bookmarks.c:469
-#, c-format
-msgid "Save failed: %s"
-msgstr ""
-
-#: src/bookmarks.c:547
-#, c-format
-msgid "Delete failed: %s"
-msgstr ""
-
-#: src/bookmarks.c:571
-#, c-format
-msgid "Delete the bookmark \"%s\"? This cannot be undone."
-msgstr ""
-
-#: src/bookmarks.c:574
-msgid "Delete Bookmark"
-msgstr ""
-
-#: src/bookmarks.c:577 src/connect.c:1172 src/files_browser.c:464
-#: src/files_browser.c:848 src/files_browser.c:1480 src/files_browser.c:1607
-#: src/news.c:578 src/news_browser.c:1173 src/news_browser.c:1314
-#: src/news_browser.c:1589 src/tls_trust_dialog.c:132 src/toolbar.c:206
-#: src/usermod.c:628 src/users.c:824
-msgid "_Cancel"
-msgstr ""
-
-#: src/bookmarks.c:579 src/files_browser.c:1609
-msgid "_Delete"
-msgstr ""
-
-#: src/bookmarks.c:597 src/bookmarks.c:609
-msgid "Off"
-msgstr ""
-
-#: src/bookmarks.c:641
-msgid "Bookmarks"
-msgstr ""
-
-#: src/bookmarks.c:705
-msgid "New bookmark"
-msgstr ""
-
-#: src/bookmarks.c:710
-msgid "Delete selected bookmark"
-msgstr ""
-
-#: src/bookmarks.c:730
-msgid "No Bookmark Selected"
-msgstr ""
-
-#: src/bookmarks.c:733
-msgid "Pick one from the list, or create a new one with the + button."
-msgstr ""
-
-#: src/bookmarks.c:747
-msgid "Bookmark"
-msgstr ""
-
-#: src/bookmarks.c:751 src/chat.c:2455 src/files.c:368 src/files_panel.c:1325
-#: src/plugin.c:153 src/tracker.c:469 src/users.c:975
-msgid "Name"
-msgstr ""
-
-#: src/bookmarks.c:756 src/connect.c:1275 src/connect.c:1288
-msgid "Server"
-msgstr ""
-
-#: src/bookmarks.c:761
-msgid "Port (blank = 5500)"
-msgstr ""
-
-#: src/bookmarks.c:766 src/connect.c:1307 src/options.c:2263 src/usermod.c:512
-#: src/usermod.c:641
-msgid "Login"
-msgstr ""
-
-#: src/bookmarks.c:771 src/connect.c:1313 src/usermod.c:529
-msgid "Password"
-msgstr ""
-
-#: src/bookmarks.c:781 src/connect.c:1329
-msgid "Use TLS"
-msgstr ""
-
-#: src/bookmarks.c:784 src/connect.c:1332
-msgid ""
-"Connect to the server's TLS port. Disables HOPE and compression — they're "
-"not meaningful over a TLS-encrypted stream."
-msgstr ""
-
-#: src/bookmarks.c:791
-msgid "HOPE (encrypted handshake)"
-msgstr ""
-
-#: src/bookmarks.c:796 src/connect.c:1383
-msgid "Cipher"
-msgstr ""
-
-#: src/bookmarks.c:811 src/connect.c:1362
-msgid "Compression"
-msgstr ""
-
-#: src/bookmarks.c:832 src/files.c:351 src/usermod.c:483
-msgid "Save"
-msgstr ""
-
-#: src/chat.c:82
+#: src/chat.c:197
 msgid "Load older messages"
 msgstr ""
 
-#: src/chat.c:92
+#: src/chat.c:207
 msgid "Loading older messages..."
 msgstr ""
 
-#: src/chat.c:886
+#: src/chat.c:1336
 #, c-format
 msgid "chat history (%u message)"
 msgid_plural "chat history (%u messages)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/chat.c:1010
+#: src/chat.c:1443
 msgid "live messages"
 msgstr ""
 
-#: src/chat.c:2074 src/chat.c:2215 src/gtkutil.c:467 src/gtkutil.c:511
-#: src/options.c:2772 src/toolbar.c:736
-msgid "Chat"
+#: src/chat.c:2277
+msgid "Subject Changed to"
 msgstr ""
 
-#: src/chat.c:2398
-msgid "invites you to private chat"
+#: src/chat.c:2294
+#, c-format
+msgid "join: %s\n"
 msgstr ""
 
-#: src/chat.c:2400
-msgid "Chat Invitation"
+#: src/chat.c:2300
+#, c-format
+msgid "parts: %s \n"
 msgstr ""
 
-#: src/chat.c:2402
-msgid "_Decline"
+#: src/chat.c:2306
+#, c-format
+msgid "%1$s is now known as %2$s\n"
 msgstr ""
 
-#: src/chat.c:2404
-msgid "_Join"
-msgstr ""
-
-#: src/chat.c:2454 src/users.c:974
-msgid "UID"
-msgstr ""
-
-#: src/chat.c:2476 src/chat.c:2632 src/users.c:548 src/users.c:1083
-msgid "Private Chat"
-msgstr ""
-
-#: src/chat.c:2594 src/users.c:1063
+#: src/chat.c:2449
 msgid "Msg"
 msgstr ""
 
-#: src/chat.c:2605 src/users.c:527 src/users.c:1068
+#: src/chat.c:2470 src/users.c:570
 msgid "Kick"
 msgstr ""
 
-#: src/chat.c:2616 src/users.c:1073
+#: src/chat.c:2484
 msgid "User Info"
 msgstr ""
 
-#: src/chat.c:2627 src/users.c:529 src/users.c:1078
+#: src/chat.c:2497 src/users.c:572
 msgid "Ban"
 msgstr ""
 
-#: src/chat.c:2643 src/users.c:536 src/users.c:1088
+#: src/chat.c:2505 src/users.c:591 rust/crates/gtkhx-ui/src/pchat.rs:154
+msgid "Private Chat"
+msgstr ""
+
+#: src/chat.c:2519 src/users.c:579
 msgid "Ignore"
 msgstr ""
 
-#: src/connect.c:632
-msgid "Convert Bookmark"
-msgstr ""
-
-#: src/connect.c:633
-msgid ""
-"This bookmark is written in an old GtkHx format. Would you like to convert "
-"it to the new format?"
-msgstr ""
-
-#: src/connect.c:635
-msgid "_No"
-msgstr ""
-
-#: src/connect.c:637
-msgid "_Convert"
-msgstr ""
-
-#: src/connect.c:849 src/connect.c:998
-msgid "No such bookmark"
-msgstr ""
-
-#: src/connect.c:858 src/connect.c:1007
-msgid "Could not read bookmark"
-msgstr ""
-
-#: src/connect.c:1071 src/options.c:2257
-msgid "Error"
-msgstr ""
-
-#: src/connect.c:1072
-msgid "You must specify a name for this bookmark with at least one character."
-msgstr ""
-
-#: src/connect.c:1169
-msgid "Save Bookmark"
-msgstr ""
-
-#: src/connect.c:1170
-msgid "Enter a name for this bookmark."
-msgstr ""
-
-#: src/connect.c:1174
-msgid "_Save"
-msgstr ""
-
-#: src/connect.c:1234 src/connect.c:1254 src/toolbar.c:677
-msgid "Connect"
-msgstr ""
-
-#: src/connect.c:1249
-msgid "Save Bookmark…"
-msgstr ""
-
-#: src/connect.c:1278
-msgid ""
-"Enter the server address. If you have an account, fill in your login and "
-"password below; otherwise leave them blank."
-msgstr ""
-
-#: src/connect.c:1294 src/tracker.c:472
-msgid "Port"
-msgstr ""
-
-#: src/connect.c:1303
-msgid "Account"
-msgstr ""
-
-#: src/connect.c:1321
-msgid "Connection"
-msgstr ""
-
-#: src/connect.c:1342
-msgid "Secure (HOPE)"
-msgstr ""
-
-#: src/connect.c:1345
-msgid "Encrypt and optionally compress the connection"
-msgstr ""
-
-#: src/emoji.c:67
-msgid "Insert emoji"
-msgstr ""
-
-#: src/files.c:200
+#: src/files.c:120
 msgid "Unknown"
 msgstr ""
 
-#: src/files.c:226
+#: src/files.c:145 rust/crates/hxmodel/src/files_entry/populate.rs:68
 #, c-format
 msgid "%s file"
 msgstr ""
 
-#: src/files.c:346
-msgid "File Info"
-msgstr ""
-
-#: src/files.c:379 src/files.c:382
-msgid "bytes"
-msgstr ""
-
-#: src/files.c:390
-msgid "Creator"
-msgstr ""
-
-#: src/files.c:392
-msgid "Type"
-msgstr ""
-
-#: src/files.c:394 src/files_panel.c:1327
-msgid "Size"
-msgstr ""
-
-#: src/files.c:396
-msgid "Created"
-msgstr ""
-
-#: src/files.c:398 src/files_panel.c:1330
-msgid "Modified"
-msgstr ""
-
-#: src/files.c:405
-msgid "Comments"
-msgstr ""
-
-#: src/files_browser.c:320
+#: src/files_browser.c:410
 msgid "Select a single file to preview."
 msgstr ""
 
-#: src/files_browser.c:324
+#: src/files_browser.c:414
 msgid "Preview is for files, not folders."
 msgstr ""
 
-#: src/files_browser.c:357
+#: src/files_browser.c:447
 msgid "Get Info is only available for remote files."
 msgstr ""
 
-#: src/files_browser.c:361
+#: src/files_browser.c:451
 msgid "Not connected."
 msgstr ""
 
-#: src/files_browser.c:366
+#: src/files_browser.c:456
 msgid "Select a single file."
 msgstr ""
 
-#: src/files_browser.c:432
+#: src/files_browser.c:522
 msgid "Rename failed."
 msgstr ""
 
-#: src/files_browser.c:459
+#: src/files_browser.c:549
 #, c-format
 msgid "Rename “%s” to:"
 msgstr ""
 
-#: src/files_browser.c:460
+#: src/files_browser.c:550
 msgid "Rename"
 msgstr ""
 
-#: src/files_browser.c:466
+#: src/files_browser.c:554 src/files_browser.c:947 src/files_browser.c:1581
+#: src/files_browser.c:1708 src/toolbar.c:271 src/users.c:743
+#: rust/crates/gtkhx-ui/src/broadcast.rs:152
+#: rust/crates/gtkhx-ui/src/connect.rs:864
+#: rust/crates/gtkhx-ui/src/create_post.rs:114
+#: rust/crates/gtkhx-ui/src/news_compose.rs:100
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:96
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:203
+#: rust/crates/gtkhx-ui/src/options_connections.rs:486
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:127
+#: rust/crates/gtkhx-ui/src/useredit.rs:344
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:554
+msgid "_Cancel"
+msgstr ""
+
+#: src/files_browser.c:556
 msgid "_Rename"
 msgstr ""
 
-#: src/files_browser.c:522
+#: src/files_browser.c:612
 msgid "Select a single file to rename."
 msgstr ""
 
-#: src/files_browser.c:651 src/files_browser.c:1102 src/files_ops.c:40
-#: src/files_remote_provider.c:122
+#: src/files_browser.c:751 src/files_browser.c:1204 src/files_ops.c:41
+#: src/files_remote_provider.c:237
+#: rust/crates/gtkhx-ui/src/news_browser.rs:1004
 msgid "Not connected to a server."
 msgstr ""
 
-#: src/files_browser.c:656 src/files_browser.c:1107
+#: src/files_browser.c:755 src/files_browser.c:1208
 msgid "You don't have permission to move files on the server."
 msgstr ""
 
-#: src/files_browser.c:696 src/files_browser.c:1133
+#: src/files_browser.c:795 src/files_browser.c:1234
 #, c-format
 msgid "Move requested for %u item."
 msgid_plural "Move requested for %u items."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_browser.c:701
+#: src/files_browser.c:800
 #, c-format
 msgid "Moved %u item."
 msgid_plural "Moved %u items."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_browser.c:707
+#: src/files_browser.c:806
 msgid "Move failed."
 msgstr ""
 
-#: src/files_browser.c:799
+#: src/files_browser.c:898
 msgid "Select files to move first."
 msgstr ""
 
-#: src/files_browser.c:819
+#: src/files_browser.c:918
 msgid ""
 "Move only works within one side. Use Copy then Delete to move between local "
 "and remote."
 msgstr ""
 
-#: src/files_browser.c:838
+#: src/files_browser.c:937
 #, c-format
 msgid "Move “%s” to:"
 msgstr ""
 
-#: src/files_browser.c:841
+#: src/files_browser.c:940
 #, c-format
 msgid "Move %u item to:"
 msgid_plural "Move %u items to:"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_browser.c:844
+#: src/files_browser.c:943
 msgid "Move"
 msgstr ""
 
-#: src/files_browser.c:850
+#: src/files_browser.c:949
 msgid "_Move"
 msgstr ""
 
-#: src/files_browser.c:1035
+#: src/files_browser.c:1134
 msgid "Select a file to copy first."
 msgstr ""
 
-#: src/files_browser.c:1057
+#: src/files_browser.c:1156
 #, c-format
 msgid "Transfer queued (%u item)."
 msgid_plural "Transfers queued (%u items)."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_browser.c:1066
+#: src/files_browser.c:1165
 #, c-format
 msgid "%1$u queued, %2$u failed (%3$s)."
 msgstr ""
 
-#: src/files_browser.c:1478 src/news_browser.c:1860
+#: src/files_browser.c:1579 rust/crates/gtkhx-ui/src/news_browser.rs:876
 msgid "New Folder"
 msgstr ""
 
-#: src/files_browser.c:1478
+#: src/files_browser.c:1579
 msgid "Enter a name for the new folder."
 msgstr ""
 
-#: src/files_browser.c:1482
+#: src/files_browser.c:1583
 msgid "C_reate"
 msgstr ""
 
-#: src/files_browser.c:1571
+#: src/files_browser.c:1672
 #, c-format
 msgid "Delete “%s”? This cannot be undone."
 msgstr ""
 
-#: src/files_browser.c:1575
+#: src/files_browser.c:1676
 #, c-format
 msgid "Delete %u item? This cannot be undone."
 msgid_plural "Delete %u items? This cannot be undone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_browser.c:1603 src/news_browser.c:1310 src/news_browser.c:1872
-#: src/usermod.c:492
+#: src/files_browser.c:1704 rust/crates/gtkhx-ui/src/news_browser.rs:896
+#: rust/crates/gtkhx-ui/src/useredit.rs:200
 msgid "Delete"
 msgstr ""
 
-#: src/files_browser.c:1902 src/toolbar.c:727
-msgid "Files"
+#: src/files_browser.c:1710 rust/crates/gtkhx-ui/src/options_connections.rs:487
+msgid "_Delete"
 msgstr ""
 
-#: src/files_browser.c:1950
+#: src/files_browser.c:2109
 msgid "Reload active panel (Ctrl+R)"
 msgstr ""
 
-#: src/files_browser.c:1952
+#: src/files_browser.c:2111
 msgid "New folder in active panel (F7, Ctrl+N)"
 msgstr ""
 
-#: src/files_browser.c:1954
+#: src/files_browser.c:2113
 msgid "Copy left selection to the right panel"
 msgstr ""
 
-#: src/files_browser.c:1956
+#: src/files_browser.c:2115
 msgid "Copy right selection to the left panel"
 msgstr ""
 
-#: src/files_browser.c:1958
+#: src/files_browser.c:2117
 msgid "Preview selected file (F3, Ctrl+P)"
 msgstr ""
 
-#: src/files_browser.c:1960
+#: src/files_browser.c:2119
 msgid "Get Info for selected file (Ctrl+I)"
 msgstr ""
 
-#: src/files_browser.c:1961
+#: src/files_browser.c:2120
 msgid "Rename selected file (F2)"
 msgstr ""
 
-#: src/files_browser.c:1964
+#: src/files_browser.c:2123
 msgid "Delete selection in active panel (F8, Delete, Ctrl+D)"
 msgstr ""
 
-#: src/files_entry.c:130
+#: src/files_entry.c:55
 msgid "(%"
 msgid_plural "(%"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_local_provider.c:134
+#: src/files_local_provider.c:145
 msgid "Local"
 msgstr ""
 
-#: src/files_local_provider.c:156
+#: src/files_local_provider.c:166
 msgid "No path to list"
 msgstr ""
 
-#: src/files_local_provider.c:172
+#: src/files_local_provider.c:182
 #, c-format
 msgid "Can't read %1$s: %2$s"
 msgstr ""
 
-#: src/files_local_provider.c:214
+#: src/files_local_provider.c:224
 msgid "Folder"
 msgstr ""
 
-#: src/files_local_provider.c:239
+#: src/files_local_provider.c:247
 #, c-format
 msgid "Error reading %1$s: %2$s"
 msgstr ""
 
-#: src/files_ops.c:34
+#: src/files_ops.c:35
 msgid "Copied."
 msgstr ""
 
-#: src/files_ops.c:36
+#: src/files_ops.c:37
 msgid "Nothing to copy."
 msgstr ""
 
-#: src/files_ops.c:38
+#: src/files_ops.c:39
 msgid "No target panel."
 msgstr ""
 
-#: src/files_ops.c:42
+#: src/files_ops.c:43
 msgid "You don't have permission for that."
 msgstr ""
 
-#: src/files_ops.c:44
+#: src/files_ops.c:45
 msgid ""
 "Hotline has no server-side copy. Use Move (F6) to relocate the file, or drag "
 "to your local panel first."
 msgstr ""
 
-#: src/files_ops.c:51
+#: src/files_ops.c:52
 msgid "Folder transfer not supported here."
 msgstr ""
 
-#: src/files_ops.c:53
+#: src/files_ops.c:54
 msgid "Local copy failed."
 msgstr ""
 
-#: src/files_ops.c:55
+#: src/files_ops.c:56
 msgid "Copy failed."
 msgstr ""
 
-#: src/files_panel.c:1022
+#: src/files_panel.c:1052
 msgid "Folder is upload-only — drop files here to upload"
 msgstr ""
 
-#: src/files_panel.c:1024
+#: src/files_panel.c:1054
 msgid "Can't list this folder."
 msgstr ""
 
-#: src/files_panel.c:1037
+#: src/files_panel.c:1067
 #, c-format
 msgid "%u item"
 msgid_plural "%u items"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/files_panel.c:1039
+#: src/files_panel.c:1069
 #, c-format
 msgid "%1$u of %2$u selected"
 msgstr ""
 
-#: src/files_panel.c:1272
+#: src/files_panel.c:1296
 msgid "Switch this panel between local filesystem and remote server"
 msgstr ""
 
-#: src/files_panel.c:1281
+#: src/files_panel.c:1305
 msgid "Up one level"
 msgstr ""
 
-#: src/files_panel.c:1333
+#: src/files_panel.c:1351 rust/crates/gtkhx-ui/src/file_info.rs:263
+#: rust/crates/gtkhx-ui/src/options_connections.rs:605
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:461
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:288
+#: rust/crates/gtkhx-ui/src/users_view.rs:490
+msgid "Name"
+msgstr ""
+
+#: src/files_panel.c:1353 rust/crates/gtkhx-ui/src/file_info.rs:272
+msgid "Size"
+msgstr ""
+
+#: src/files_panel.c:1356 rust/crates/gtkhx-ui/src/file_info.rs:274
+msgid "Modified"
+msgstr ""
+
+#: src/files_panel.c:1359
 msgid "Kind"
 msgstr ""
 
-#: src/files_remote_provider.c:134
+#: src/files_remote_provider.c:249
 msgid "Logging in…"
 msgstr ""
 
-#: src/files_remote_provider.c:392
+#: src/files_remote_provider.c:549
 msgid "Remote"
 msgstr ""
 
-#: src/gtkhx.c:1089
-#, c-format
-msgid "User Info: %1$s (%2$u)"
+#: src/gtkhx.c:1113 src/gtkhx.c:1147 src/gtkhx.c:1969
+msgid "Not connected"
 msgstr ""
 
-#: src/gtkhx.c:1600
-msgid "Agreement"
-msgstr ""
-
-#: src/gtkhx.c:1622
-msgid "Agree"
-msgstr ""
-
-#: src/gtkhx.c:1626
-msgid "Disagree"
-msgstr ""
-
-#: src/gtkhx.c:1890
+#: src/gtkhx.c:2226
 #, c-format
 msgid "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
 msgstr ""
 
-#: src/gtkhx.c:1891
+#: src/gtkhx.c:2227
 #, c-format
 msgid "GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
 msgstr ""
 
-#: src/gtkhx.c:1892
+#: src/gtkhx.c:2228
 #, c-format
 msgid "This is free software, and you are welcome\n"
 msgstr ""
 
-#: src/gtkhx.c:1893
+#: src/gtkhx.c:2229
 #, c-format
 msgid ""
 "to redistribute it under certain conditions.\n"
 "\n"
 msgstr ""
 
-#: src/gtkhx.c:1895
+#: src/gtkhx.c:2231
 #, c-format
 msgid "usage: %s [options]\n"
 msgstr ""
 
-#: src/gtkhx.c:1896
+#: src/gtkhx.c:2232
 #, c-format
 msgid ""
 "\n"
 "supported options:\n"
 msgstr ""
 
-#: src/gtkhx.c:1897
+#: src/gtkhx.c:2233
 #, c-format
 msgid "\t--help, -h\t\tPrint this help message out.\n"
 msgstr ""
 
-#: src/gtkhx.c:1898
+#: src/gtkhx.c:2234
 #, c-format
 msgid "\t--server, -s <host>\tConnect to <host>\n"
 msgstr ""
 
-#: src/gtkhx.c:1899
+#: src/gtkhx.c:2235
 #, c-format
 msgid "\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
 msgstr ""
 
-#: src/gtkhx.c:1901
+#: src/gtkhx.c:2237
 #, c-format
 msgid "\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
 msgstr ""
 
-#: src/gtkhx.c:1903
+#: src/gtkhx.c:2240
 #, c-format
 msgid "\t--pass, -p\t\tPrompt for pass of <login>.\n"
 msgstr ""
 
-#: src/gtkhx.c:1904
+#: src/gtkhx.c:2242
 #, c-format
 msgid "\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
 msgstr ""
 
-#: src/gtkurl.c:475
+#: src/gtkurl.c:415 rust/crates/gtkhx-ui/src/connect.rs:1116
+#: rust/crates/gtkhx-ui/src/connect.rs:1126
+msgid "Couldn't parse hotline:// URL"
+msgstr ""
+
+#: src/gtkurl.c:430
+#, c-format
+msgid "Saved bookmark \"%s\""
+msgstr ""
+
+#: src/gtkurl.c:435
+#, c-format
+msgid "Couldn't save bookmark: %s"
+msgstr ""
+
+#: src/gtkurl.c:436 rust/crates/gtkhx-ui/src/inline_media_dialog.rs:212
+msgid "unknown error"
+msgstr ""
+
+#: src/gtkurl.c:550
+msgid "Connect to Server"
+msgstr ""
+
+#: src/gtkurl.c:559 rust/crates/gtkhx-ui/src/connect.rs:861
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:287
+msgid "Save Bookmark"
+msgstr ""
+
+#: src/gtkurl.c:567
+msgid "Copy Link"
+msgstr ""
+
+#: src/gtkurl.c:585
 msgid "Open Link in Browser"
 msgstr ""
 
-#: src/gtkurl.c:486
+#: src/gtkurl.c:596
 msgid "Copy Selected Link"
 msgstr ""
 
-#: src/gtkutil.c:410
+#: src/gtkutil.c:490
 msgid "Connecting to"
 msgstr ""
 
-#: src/gtkutil.c:416 src/toolbar.c:769
+#: src/gtkutil.c:496 src/toolbar.c:1054
 msgid "Not Connected"
 msgstr ""
 
-#: src/gtkutil.c:421
+#: src/gtkutil.c:501
 msgid "Disconnected from"
 msgstr ""
 
-#: src/gtkutil.c:427
+#: src/gtkutil.c:506
 msgid "Connected to"
 msgstr ""
 
-#: src/gtkutil.c:431
+#: src/gtkutil.c:510
 msgid "Logged in to"
 msgstr ""
 
-#: src/gtkutil.c:457 src/gtkutil.c:520
+#: src/gtkutil.c:588 src/gtkutil.c:628
 msgid "GtkHx"
 msgstr ""
 
-#: src/gtkutil.c:462 src/gtkutil.c:508 src/news.c:671 src/news.c:768
-#: src/toolbar.c:716
-msgid "News"
+#: src/gtkutil.c:702 src/msg.c:859
+#: rust/crates/gtkhx-ui/src/options_connections.rs:384
+msgid "_OK"
 msgstr ""
 
-#: src/gtkutil.c:472 src/gtkutil.c:514 src/toolbar.c:732 src/tracker.c:470
-#: src/users.c:987 src/users.c:1147
-msgid "Users"
-msgstr ""
-
-#: src/gtkutil.c:477 src/gtkutil.c:517 src/tasks.c:903 src/tasks.c:955
-#: src/toolbar.c:740
-msgid "Tasks"
-msgstr ""
-
-#: src/msg.c:353 src/toolbar.c:592 src/users.c:506
+#: src/msg.c:333 src/toolbar.c:708 src/users.c:550
 msgid "Admin"
 msgstr ""
 
-#: src/msg.c:353 src/users.c:506
+#: src/msg.c:333 src/users.c:550
 msgid "Guest"
 msgstr ""
 
-#: src/msg.c:354 src/users.c:507
+#: src/msg.c:334 src/users.c:551
 msgid " (Away)"
 msgstr ""
 
-#: src/msg.c:880
+#: src/msg.c:849
 #, c-format
 msgid "broadcast: %s\n"
 msgstr ""
 
-#: src/msg.c:889 src/toolbar.c:202 src/toolbar.c:751
+#: src/msg.c:858 src/toolbar.c:1048 rust/crates/gtkhx-ui/src/broadcast.rs:149
 msgid "Broadcast"
 msgstr ""
 
-#: src/network.c:220 src/toolbar.c:310
+#: src/network.c:235 src/toolbar.c:321
 msgid "connection closed"
 msgstr ""
 
-#: src/network.c:950
-msgid "failed"
-msgstr ""
-
-#: src/network.c:989
-msgid "reading server magic"
-msgstr ""
-
-#: src/network.c:999
-msgid "invalid hotline server"
-msgstr ""
-
-#: src/network.c:1016
-msgid "writing client magic"
-msgstr ""
-
-#: src/network.c:1041
-msgid "connect"
-msgstr ""
-
-#: src/network.c:1050
-#, c-format
-msgid "connected to %s\n"
-msgstr ""
-
-#: src/network.c:1077
-msgid "remote address"
-msgstr ""
-
-#: src/network.c:1218
-msgid "building LOGIN packet"
-msgstr ""
-
-#: src/network.c:1651
-#, c-format
-msgid "connecting to %s (TLS)\n"
-msgstr ""
-
-#: src/network.c:1652
+#: src/network.c:580
 #, c-format
 msgid "connecting to %s\n"
 msgstr ""
 
-#: src/network.c:2072 src/network.c:2100 src/network.c:2126
+#: src/network.c:677
+#, c-format
+msgid "could not start connection to %s\n"
+msgstr ""
+
+#: src/network.c:710
+msgid "HOPE-secure login over TLS is not supported; use one or the other\n"
+msgstr ""
+
+#: src/network.c:1041
 #, c-format
 msgid "tracker: %1$s: %2$s\n"
 msgstr ""
 
-#: src/network.c:2073
-msgid "connect failed"
-msgstr ""
-
-#: src/network.c:2101
-msgid "magic write failed"
-msgstr ""
-
-#: src/news.c:152
-msgid "No results"
-msgstr ""
-
-#: src/news.c:334
-msgid "Previous match"
-msgstr ""
-
-#: src/news.c:340
-msgid "Next match"
-msgstr ""
-
-#: src/news.c:561 src/news.c:662
-msgid "Post News"
-msgstr ""
-
-#: src/news.c:584 src/news_browser.c:1590
-msgid "_Post"
-msgstr ""
-
-#: src/news.c:665
-msgid "Reload News"
-msgstr ""
-
-#: src/news.c:667
-msgid "Find in News (Ctrl+F)"
-msgstr ""
-
-#: src/news_browser.c:932 src/news_browser.c:1973
-msgid "Select a post in the tree to view it here."
-msgstr ""
-
-#: src/news_browser.c:939 src/news_browser.c:1506
-msgid "(no subject)"
-msgstr ""
-
-#: src/news_browser.c:943
-#, c-format
-msgid "%1$s — %2$s"
-msgstr ""
-
-#: src/news_browser.c:956
-msgid "Loading…"
-msgstr ""
-
-#: src/news_browser.c:1162
-msgid "New News Folder"
-msgstr ""
-
-#: src/news_browser.c:1163
-msgid "Enter a name for the new news folder."
-msgstr ""
-
-#: src/news_browser.c:1164
-msgid "C_reate Folder"
-msgstr ""
-
-#: src/news_browser.c:1166
-msgid "New News Category"
-msgstr ""
-
-#: src/news_browser.c:1167
-msgid "Enter a name for the new news category."
-msgstr ""
-
-#: src/news_browser.c:1168
-msgid "C_reate Category"
-msgstr ""
-
-#: src/news_browser.c:1294
-#, c-format
-msgid "Delete the folder “%s” and all its contents?"
-msgstr ""
-
-#: src/news_browser.c:1295
-msgid "_Delete Folder"
-msgstr ""
-
-#: src/news_browser.c:1298
-#, c-format
-msgid "Delete the category “%s” and all its posts?"
-msgstr ""
-
-#: src/news_browser.c:1299
-msgid "_Delete Category"
-msgstr ""
-
-#: src/news_browser.c:1302
-#, c-format
-msgid "Delete the post “%s”?"
-msgstr ""
-
-#: src/news_browser.c:1303
-msgid "_Delete Post"
-msgstr ""
-
-#: src/news_browser.c:1493
-#, c-format
-msgid "Replying to %1$s — %2$s"
-msgstr ""
-
-#: src/news_browser.c:1542
-msgid "(original post body not loaded — open the post first to fetch it)"
-msgstr ""
-
-#: src/news_browser.c:1577 src/news_browser.c:1869
-msgid "Reply"
-msgstr ""
-
-#: src/news_browser.c:1577 src/news_browser.c:1866
-msgid "New Post"
-msgstr ""
-
-#: src/news_browser.c:1615
-msgid "Subject:"
-msgstr ""
-
-#: src/news_browser.c:1832
-msgid "Threaded News"
-msgstr ""
-
-#: src/news_browser.c:1857
-msgid "Refresh"
-msgstr ""
-
-#: src/news_browser.c:1863
-msgid "New Category"
-msgstr ""
-
-#: src/options.c:1337
-msgid "Nickname color"
-msgstr ""
-
-#: src/options.c:1340
-msgid ""
-"Optional RGB color shown on servers that support the Colored-Nicknames "
-"extension"
-msgstr ""
-
-#: src/options.c:1366
-msgid "Clear"
-msgstr ""
-
-#: src/options.c:2084
-msgid "Browse Fonts"
-msgstr ""
-
-#: src/options.c:2161 src/options.c:2779
-msgid "Trackers"
-msgstr ""
-
-#: src/options.c:2163
-msgid "Servers polled when the Tracker window opens"
-msgstr ""
-
-#: src/options.c:2180
-msgid "Address:"
-msgstr ""
-
-#: src/options.c:2189
-msgid "Add"
-msgstr ""
-
-#: src/options.c:2192
-msgid "Remove"
-msgstr ""
-
-#: src/options.c:2220
-msgid "Search"
-msgstr ""
-
-#: src/options.c:2224
-msgid "Case-sensitive tracker search"
-msgstr ""
-
-#: src/options.c:2243
-msgid "Sounds"
-msgstr ""
-
-#: src/options.c:2246
-msgid "Play sounds"
-msgstr ""
-
-#: src/options.c:2247
-msgid "Master switch for chat and transfer alerts"
-msgstr ""
-
-#: src/options.c:2251 src/options.c:2547
-msgid "Events"
-msgstr ""
-
-#: src/options.c:2253
-msgid "Chat invitation"
-msgstr ""
-
-#: src/options.c:2255
-msgid "Chat message"
-msgstr ""
-
-#: src/options.c:2259
-msgid "Transfer complete"
-msgstr ""
-
-#: src/options.c:2261
-msgid "Join"
-msgstr ""
-
-#: src/options.c:2265 src/options.c:2552
-msgid "Private message"
-msgstr ""
-
-#: src/options.c:2267
-msgid "News post"
-msgstr ""
-
-#: src/options.c:2269
-msgid "Leave"
-msgstr ""
-
-#: src/options.c:2285
-msgid "Chat output"
-msgstr ""
-
-#: src/options.c:2288
-msgid "Show timestamps"
-msgstr ""
-
-#: src/options.c:2290
-msgid "Word wrap"
-msgstr ""
-
-#: src/options.c:2293
-msgid "Scrollback lines"
-msgstr ""
-
-#: src/options.c:2294
-msgid "0 keeps unlimited scrollback"
-msgstr ""
-
-#: src/options.c:2303
-msgid "Timestamp format"
-msgstr ""
-
-#: src/options.c:2305
-msgid ""
-"strftime(3) format string. Default: \"[%H:%M:%S] \". See `man 3 strftime` "
-"for the full list of conversion specifiers."
-msgstr ""
-
-#: src/options.c:2309
-msgid "Format"
-msgstr ""
-
-#: src/options.c:2319
-msgid "Highlight"
-msgstr ""
-
-#: src/options.c:2321
-msgid ""
-"Comma-separated words to highlight in chat (in addition to your own nick). "
-"Matches are case-insensitive at word boundaries."
-msgstr ""
-
-#: src/options.c:2325
-msgid "Words"
-msgstr ""
-
-#: src/options.c:2338
-msgid "Chat history"
-msgstr ""
-
-#: src/options.c:2340
-msgid ""
-"Servers that implement the chat-history extension (e.g. Janus) replay recent "
-"chat to you on login. 0 disables the initial pull; the \"Load older "
-"messages\" link in chat still works to fetch on demand."
-msgstr ""
-
-#: src/options.c:2348
-msgid "Initial messages to fetch"
-msgstr ""
-
-#: src/options.c:2349
-msgid "Also used as the page size for \"Load older messages\""
-msgstr ""
-
-#: src/options.c:2356 src/options.c:2360
-msgid "Font"
-msgstr ""
-
-#: src/options.c:2358
-msgid "Pango font description, e.g. \"Monospace 11\""
-msgstr ""
-
-#: src/options.c:2364
-msgid "Browse"
-msgstr ""
-
-#: src/options.c:2373 src/options.c:2588 src/options.c:2631
-msgid "Behavior"
-msgstr ""
-
-#: src/options.c:2376
-msgid "Show join / leave in chat"
-msgstr ""
-
-#: src/options.c:2379
-msgid "Old-style nick completion"
-msgstr ""
-
-#: src/options.c:2380
-msgid "Match against the most recently typed prefix instead of all users"
-msgstr ""
-
-#: src/options.c:2393
-msgid "Auto Copy Behavior"
-msgstr ""
-
-#: src/options.c:2396
-msgid ""
-"Drag-select in chat / news / private message text to populate the clipboard. "
-"Ctrl-V or middle-click pastes the selection elsewhere."
-msgstr ""
-
-#: src/options.c:2402
-msgid "Automatically copy selected text"
-msgstr ""
-
-#: src/options.c:2406
-msgid "Automatically include timestamps"
-msgstr ""
-
-#: src/options.c:2410
-msgid "Automatically include color information"
-msgstr ""
-
-#: src/options.c:2441 src/usermod.c:523
-msgid "Display name"
-msgstr ""
-
-#: src/options.c:2443
-msgid "Your name"
-msgstr ""
-
-#: src/options.c:2448
-msgid "Identity icon"
-msgstr ""
-
-#: src/options.c:2451
-msgid "Icon ID"
-msgstr ""
-
-#: src/options.c:2452
-msgid "Numeric ID from the loaded icon resource files"
-msgstr ""
-
-#: src/options.c:2457
-msgid "Available icons"
-msgstr ""
-
-#: src/options.c:2459
-msgid "Click an entry to copy its ID into the field above"
-msgstr ""
-
-#: src/options.c:2549
-msgid "Show a desktop notification when these events happen."
-msgstr ""
-
-#: src/options.c:2553
-msgid "Someone sends you a 1-to-1 message"
-msgstr ""
-
-#: src/options.c:2556
-msgid "Private chat invitation"
-msgstr ""
-
-#: src/options.c:2557
-msgid "Someone invites you to a private chat"
-msgstr ""
-
-#: src/options.c:2561
-msgid "Mention in public chat"
-msgstr ""
-
-#: src/options.c:2562
-msgid "Your name or a highlight word appears in a chat message"
-msgstr ""
-
-#: src/options.c:2566
-msgid "Mention in private chat"
-msgstr ""
-
-#: src/options.c:2567
-msgid "Your name or a highlight word appears in a private chat"
-msgstr ""
-
-#: src/options.c:2570
-msgid "Every public chat message"
-msgstr ""
-
-#: src/options.c:2571
-msgid "Noisy — only useful on quiet servers"
-msgstr ""
-
-#: src/options.c:2574
-msgid "Every private chat message"
-msgstr ""
-
-#: src/options.c:2576
-msgid "New news post"
-msgstr ""
-
-#: src/options.c:2579
-msgid "File transfer complete"
-msgstr ""
-
-#: src/options.c:2582
-msgid "Server broadcast"
-msgstr ""
-
-#: src/options.c:2583
-msgid "Admin-issued announcement to every user"
-msgstr ""
-
-#: src/options.c:2592
-msgid "Don't notify when the relevant window is focused"
-msgstr ""
-
-#: src/options.c:2593
-msgid ""
-"If a chat or private message window is already active, don't pop a "
-"notification on top of it"
-msgstr ""
-
-#: src/options.c:2601
-msgid "Mention Words"
-msgstr ""
-
-#: src/options.c:2603
-msgid ""
-"Comma-separated. Your nickname is always matched in addition to this list. "
-"The same list drives chat message highlighting."
-msgstr ""
-
-#: src/options.c:2607
-msgid "Highlight words"
-msgstr ""
-
-#: src/options.c:2622
-msgid "Auto Reply"
-msgstr ""
-
-#: src/options.c:2625
-msgid "Enable auto reply"
-msgstr ""
-
-#: src/options.c:2627
-msgid "Reply message"
-msgstr ""
-
-#: src/options.c:2635
-msgid "Show private messages at back"
-msgstr ""
-
-#: src/options.c:2636
-msgid "Don't raise the chat window when a private message arrives"
-msgstr ""
-
-#: src/options.c:2640
-msgid "Queue file transfers"
-msgstr ""
-
-#: src/options.c:2641
-msgid "Run downloads one at a time instead of in parallel"
-msgstr ""
-
-#: src/options.c:2657
-msgid "Follow system"
-msgstr ""
-
-#: src/options.c:2658
-msgid "Light"
-msgstr ""
-
-#: src/options.c:2659
-msgid "Dark"
-msgstr ""
-
-#: src/options.c:2662
-msgid "Appearance"
-msgstr ""
-
-#: src/options.c:2665
-msgid ""
-"Color scheme. \"Follow system\" tracks the desktop's light/dark preference."
-msgstr ""
-
-#: src/options.c:2669
-msgid "Theme"
-msgstr ""
-
-#: src/options.c:2678
-msgid "Paths"
-msgstr ""
-
-#: src/options.c:2680
-msgid "Download directory"
-msgstr ""
-
-#: src/options.c:2692
-msgid "System Integration"
-msgstr ""
-
-#: src/options.c:2695
-msgid "Show tray icon"
-msgstr ""
-
-#: src/options.c:2696
-msgid ""
-"Display a status icon in the system tray. Closing the main window hides to "
-"tray; click the icon to toggle GtkHx's windows."
-msgstr ""
-
-#: src/options.c:2753
-msgid "GtkHx Preferences"
-msgstr ""
-
-#: src/options.c:2768
-msgid "General"
-msgstr ""
-
-#: src/options.c:2770 src/usermod.c:508
-msgid "Identity"
-msgstr ""
-
-#: src/options.c:2774
-msgid "Sound"
-msgstr ""
-
-#: src/options.c:2776
-msgid "Notifications"
-msgstr ""
-
-#: src/options.c:2781
-msgid "Misc"
-msgstr ""
-
-#: src/plugin.c:96
-msgid "GtkHx - Select Plugin"
-msgstr ""
-
-#: src/plugin.c:154 src/tracker.c:473
-msgid "Description"
-msgstr ""
-
-#: src/plugin.c:161
-msgid "GtkHx - Plugins"
-msgstr ""
-
-#: src/plugin.c:165
-msgid "Load"
-msgstr ""
-
-#: src/plugin.c:168
-msgid "Unload"
-msgstr ""
-
-#: src/plugin.c:173
-msgid "Close"
-msgstr ""
-
-#: src/plugin.c:350
-msgid "Loading"
-msgstr ""
-
-#: src/plugin.c:526
-msgid "Could not load plugin: "
-msgstr ""
-
-#: src/rcv.c:556
-#, c-format
-msgid "join: %s\n"
-msgstr ""
-
-#: src/rcv.c:589
-#, c-format
-msgid "%1$s is now known as %2$s\n"
-msgstr ""
-
-#: src/rcv.c:665
-#, c-format
-msgid "parts: %s \n"
-msgstr ""
-
-#: src/rcv.c:713
-msgid "Subject Changed to"
-msgstr ""
-
-#: src/rcv.c:848
+#: src/rcv.c:674
 #, c-format
 msgid ""
 "Received queue id (%1$d) for xfer ref %2$d\n"
 "No such xfer.\n"
 msgstr ""
 
-#: src/rcv.c:929
+#: src/rcv.c:1156
 msgid "polite quit\n"
 msgstr ""
 
-#: src/rcv.c:938
+#: src/rcv.c:1180
 #, c-format
 msgid "unknown header type 0x%08x\n"
 msgstr ""
 
-#: src/rcv.c:1207
+#: src/rcv.c:1276
 msgid "login"
 msgstr ""
 
-#: src/rcv.c:1209
+#: src/rcv.c:1279
 msgid "failed?"
 msgstr ""
 
-#: src/rcv.c:1210
+#: src/rcv.c:1280
 msgid "successful"
 msgstr ""
 
-#: src/rcv.c:1556
+#: src/rcv.c:1393
 msgid "server confirmed large-file (64-bit) mode for this session\n"
 msgstr ""
 
-#: src/rcv.c:1562
+#: src/rcv.c:1398
 msgid "server confirmed UTF-8 text encoding for this session\n"
 msgstr ""
 
-#: src/rcv.c:1568
+#: src/rcv.c:1403
 msgid "server confirmed chat-history extension for this session\n"
 msgstr ""
 
-#: src/rcv.c:1892
+#: src/rcv.c:1408
+msgid "server confirmed inline-media extension for this session\n"
+msgstr ""
+
+#: src/rcv.c:1560
 msgid "kick successful"
 msgstr ""
 
-#: src/tasks.c:303
+#: src/tasks.c:387
 #, c-format
 msgid "Queued #%u"
 msgstr ""
 
-#: src/tasks.c:541
+#: src/tasks.c:790
 msgid "Listing tracker"
 msgstr ""
 
-#: src/tasks.c:546
+#: src/tasks.c:795
 #, c-format
 msgid "%1$s · %2$u of %3$u servers"
 msgstr ""
 
-#: src/tasks.c:570
+#: src/tasks.c:823
 msgid "Connecting to tracker"
 msgstr ""
 
-#: src/tasks.c:571
+#: src/tasks.c:824
 #, c-format
 msgid "%1$s · %2$u of %3$u"
 msgstr ""
 
-#: src/tasks.c:603
+#: src/tasks.c:858
 msgid "Connecting"
 msgstr ""
 
-#: src/tasks.c:604
+#: src/tasks.c:859
 #, c-format
 msgid "Step %1$u of %2$u"
 msgstr ""
 
-#: src/tasks.c:643
+#: src/tasks.c:898
 #, c-format
 msgid "Task 0x%x"
 msgstr ""
 
-#: src/tasks.c:654
+#: src/tasks.c:909
 #, c-format
 msgid "%1$s of %2$s"
 msgstr ""
 
-#: src/tasks.c:915
+#: src/tasks.c:1219
 msgid "Stop Task"
 msgstr ""
 
-#: src/tasks.c:917
+#: src/tasks.c:1221
 msgid "Start Task"
 msgstr ""
 
-#: src/tasks.c:919
+#: src/tasks.c:1223
 msgid "Move Xfer Up in Queue"
 msgstr ""
 
-#: src/tasks.c:922
+#: src/tasks.c:1226
 msgid "Move Xfer Down in Queue"
 msgstr ""
 
-#: src/tasks.c:1060
+#: src/tasks.c:1374
 #, c-format
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
 msgstr ""
 
-#: src/tasks.c:1064
+#: src/tasks.c:1378
 #, c-format
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr ""
 
-#: src/tls_trust_dialog.c:79
+#: src/toolbar.c:267
+msgid "Quit GtkHx?"
+msgstr ""
+
+#: src/toolbar.c:268
+msgid ""
+"Closing this window will disconnect from the current server and exit GtkHx."
+msgstr ""
+
+#: src/toolbar.c:273
+msgid "_Quit"
+msgstr ""
+
+#: src/toolbar.c:428
+msgid "Layout will reset on next launch."
+msgstr ""
+
+#: src/toolbar.c:633
+#, c-format
+msgid "Lost connection to %s"
+msgstr ""
+
+#: src/toolbar.c:700
+msgid "New User…"
+msgstr ""
+
+#: src/toolbar.c:701
+msgid "Edit User…"
+msgstr ""
+
+#: src/toolbar.c:704
+msgid "Settings"
+msgstr ""
+
+#: src/toolbar.c:705
+msgid "Connections…"
+msgstr ""
+
+#: src/toolbar.c:706 rust/crates/gtkhx-ui/src/about.rs:49
+msgid "About GtkHx"
+msgstr ""
+
+#: src/toolbar.c:707
+msgid "Reset Layout"
+msgstr ""
+
+#: src/toolbar.c:709
+msgid "Quit"
+msgstr ""
+
+#: src/toolbar.c:715
+msgid "Main menu"
+msgstr ""
+
+#: src/toolbar.c:957 rust/crates/gtkhx-ui/src/connect.rs:655
+#: rust/crates/gtkhx-ui/src/connect.rs:664
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:285
+msgid "Connect"
+msgstr ""
+
+#: src/toolbar.c:969
+msgid "Disconnect"
+msgstr ""
+
+#: src/toolbar.c:993 rust/crates/gtkhx-ui/src/tracker/actions.rs:562
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:737
+msgid "Tracker"
+msgstr ""
+
+#: src/toolbar.c:1004
+msgid "News"
+msgstr ""
+
+#: src/toolbar.c:1011
+msgid "News (1.5+)"
+msgstr ""
+
+#: src/toolbar.c:1015 rust/crates/gtkhx-ui/src/tracker/actions.rs:554
+msgid "Files"
+msgstr ""
+
+#: src/toolbar.c:1022 rust/crates/gtkhx-ui/src/tracker/mod.rs:297
+msgid "Users"
+msgstr ""
+
+#: src/toolbar.c:1029 rust/crates/gtkhx-ui/src/chat.rs:170
+#: rust/crates/gtkhx-ui/src/options_window.rs:71
+msgid "Chat"
+msgstr ""
+
+#: src/toolbar.c:1036
+msgid "Tasks"
+msgstr ""
+
+#: src/toolbar.c:1073
+msgid "Reconnect"
+msgstr ""
+
+#: src/users.c:190 src/users.c:968
+#, c-format
+msgid "ignore: %s is now ignored\n"
+msgstr ""
+
+#: src/users.c:209
+#, c-format
+msgid "ignore: %s is now unignored\n"
+msgstr ""
+
+#: src/users.c:445
+msgid "Volume"
+msgstr ""
+
+#: src/users.c:581
+msgid "UnIgnore"
+msgstr ""
+
+#: src/users.c:587
+msgid "Get User Info"
+msgstr ""
+
+#: src/users.c:589
+msgid "Private Message"
+msgstr ""
+
+#: src/users.c:602
+msgid "Resume Animation"
+msgstr ""
+
+#: src/users.c:603
+msgid "Pause Animation"
+msgstr ""
+
+#: src/users.c:739
+msgid "Private Chat Invitation"
+msgstr ""
+
+#: src/users.c:740
+msgid "Invite this user to an existing private chat, or create a new one."
+msgstr ""
+
+#: src/users.c:745
+msgid "_New Chat"
+msgstr ""
+
+#: src/users.c:747
+msgid "_Invite"
+msgstr ""
+
+#: src/users.c:969
+#, c-format
+msgid "ignore: %s is now unignored"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/about.rs:92
+msgid "A GTK+ Hotline client"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/about.rs:97
+msgid "Copyright © 2000–2026 Misha Nasledov"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/agreement.rs:43
+msgid "Agreement"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/agreement.rs:70
+msgid "Agree"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/agreement.rs:73
+msgid "Disagree"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:441
+msgid "Server banner: URL mode without URL"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:449
+msgid "Server banner [%s] — loading…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:542
+msgid "Server banner: empty transfer"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:546
+msgid "Server banner: image too large"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:731
+msgid "Server banner: image not decodable"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:793
+msgid "Server banner: empty response"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:796
+msgid "Server banner: fetch failed"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/banner.rs:927
+msgid "Server banner: HTXF fetch failed"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/broadcast.rs:150
+msgid "Send a broadcast message to every user on the server."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/broadcast.rs:153
+msgid "_Send"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/broadcast.rs:160
+msgid "Message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_find.rs:90
+#: rust/crates/gtkhx-ui/src/news.rs:161
+msgid "No results"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_find.rs:162
+msgid "Find in chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_find.rs:168
+msgid "Previous match (Ctrl+Shift+G, Shift+F3)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_find.rs:169
+msgid "Next match (Ctrl+G, F3)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_invite.rs:44
+msgid "invites you to private chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_invite.rs:48
+msgid "Chat Invitation"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_invite.rs:49
+msgid "_Decline"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/chat_invite.rs:50
+msgid "_Join"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:661
+msgid "Save Bookmark…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:680
+#: rust/crates/gtkhx-ui/src/connect.rs:686
+#: rust/crates/gtkhx-ui/src/options_connections.rs:602
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:459
+msgid "Server"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:682
+msgid ""
+"Enter the server address. If you have an account, fill in your login and "
+"password below; otherwise leave them blank."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:690
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:324
+msgid "Port"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:698
+#: rust/crates/gtkhx-ui/src/options_connections.rs:619
+msgid "Account"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:700
+#: rust/crates/gtkhx-ui/src/options_connections.rs:623
+#: rust/crates/gtkhx-ui/src/options.rs:543
+#: rust/crates/gtkhx-ui/src/useredit.rs:212
+#: rust/crates/gtkhx-ui/src/useredit.rs:352
+msgid "Login"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:704
+#: rust/crates/gtkhx-ui/src/options_connections.rs:627
+#: rust/crates/gtkhx-ui/src/useredit.rs:221
+msgid "Password"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:711
+#: rust/crates/gtkhx-ui/src/conn_tabs.rs:347
+msgid "Connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:714
+#: rust/crates/gtkhx-ui/src/options_connections.rs:677
+msgid "Use TLS"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:716
+#: rust/crates/gtkhx-ui/src/options_connections.rs:679
+msgid ""
+"Connect to the server's TLS port. Disables HOPE and compression — they're "
+"not meaningful over a TLS-encrypted stream."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:724
+msgid "Secure (HOPE)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:725
+msgid "Encrypt and optionally compress the connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:731
+#: rust/crates/gtkhx-ui/src/options_connections.rs:697
+msgid "Compression"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:738
+#: rust/crates/gtkhx-ui/src/options_connections.rs:691
+msgid "Cipher"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:853
+#: rust/crates/gtkhx-ui/src/connect.rs:885
+#: rust/crates/gtkhx-ui/src/connect.rs:953
+#: rust/crates/gtkhx-ui/src/connect.rs:997
+#: rust/crates/gtkhx-ui/src/options.rs:540
+msgid "Error"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:862
+msgid "Enter a name for this bookmark."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:865
+msgid "_Save"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:887
+msgid "You must specify a name for this bookmark with at least one character."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:948
+#: rust/crates/gtkhx-ui/src/connect.rs:992
+msgid "No such bookmark"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:1139
+msgid "Couldn't derive a bookmark name from URL"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/connect.rs:1150
+msgid ""
+"There is already a connection named \"%s\". Edit it in Settings → "
+"Connections."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/conn_tabs.rs:471
+msgid "Voice chat is active on this connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/create_post.rs:101
+#: rust/crates/gtkhx-ui/src/news.rs:296
+msgid "Post News"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/create_post.rs:116
+#: rust/crates/gtkhx-ui/src/news_compose.rs:101
+msgid "_Post"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/emoji.rs:93
+msgid "Insert emoji"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:86
+#: rust/crates/gtkhx-ui/src/file_info.rs:88
+msgid "bytes"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:244
+msgid "File Info"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:249
+#: rust/crates/gtkhx-ui/src/options_connections.rs:726
+#: rust/crates/gtkhx-ui/src/useredit.rs:194
+msgid "Save"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:270
+msgid "Creator"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:271
+msgid "Type"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:273
+msgid "Created"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/file_info.rs:279
+msgid "Comments"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/icon_picker.rs:223
+msgid "Choose Icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:148
+msgid "Image too large"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:149
+msgid "Unsupported image format"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:150
+msgid "Rate limited — try again shortly"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:151
+msgid "Not authorised to view this image"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:152
+msgid "Server temporarily busy"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:153
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:446
+msgid "Failed to load image"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:216
+msgid "Image decoder rejected: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:243
+msgid "Save Image"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:381
+msgid "Image"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:388
+msgid "Save As…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:392
+msgid "Open Externally"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:411
+msgid "Loading %u×%u (%u KB)…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:420
+msgid "Loading %u×%u…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:424
+#: rust/crates/gtkhx-ui/src/news_render.rs:97
+msgid "Loading…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/inline_media_dialog.rs:502
+msgid "Inline media unavailable on this server"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_browser.rs:582
+#: rust/crates/gtkhx-ui/src/news_browser.rs:991
+#: rust/crates/gtkhx-ui/src/news_render.rs:68
+msgid "Select a post in the tree to view it here."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_browser.rs:871
+msgid "Refresh"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_browser.rs:881
+msgid "New Category"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_browser.rs:886
+#: rust/crates/gtkhx-ui/src/news_compose.rs:81
+msgid "New Post"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_browser.rs:891
+#: rust/crates/gtkhx-ui/src/news_compose.rs:79
+msgid "Reply"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_compose.rs:119
+msgid "Subject:"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_compose.rs:214
+msgid "Replying to %1$s — %2$s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_compose.rs:223
+#: rust/crates/gtkhx-ui/src/news_render.rs:76
+msgid "(no subject)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_compose.rs:257
+msgid "(original post body not loaded — open the post first to fetch it)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:83
+msgid "New News Folder"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:84
+msgid "Enter a name for the new news folder."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:85
+msgid "C_reate Folder"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:89
+msgid "New News Category"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:90
+msgid "Enter a name for the new news category."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:91
+msgid "C_reate Category"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:183
+msgid "Delete this folder and all its contents?"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:184
+msgid "_Delete Folder"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:187
+msgid "Delete this category and all its posts?"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:188
+msgid "_Delete Category"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:190
+msgid "Delete this post?"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_dialogs.rs:190
+msgid "_Delete Post"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news_render.rs:91
+msgid "%1$s — %2$s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news.rs:230
+msgid "Previous match"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news.rs:233
+msgid "Next match"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news.rs:305
+msgid "Reload News"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/news.rs:314
+msgid "Find in News (Ctrl+F)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:162
+msgid "%1$s — as %2$s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:163
+msgid "%1$s — as %2$s, custom icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:164
+msgid "%s — custom icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:181
+msgid "No saved connections"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:183
+msgid ""
+"Add one with the + button. Connecting to an address that isn't saved here "
+"works fine — it just doesn't create an entry."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:251
+#: rust/crates/gtkhx-ui/src/options_connections.rs:253
+msgid "Nickname on this server"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:269
+msgid "Icon %s on this server"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:271
+msgid "Using the default (icon %s)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:391
+#: rust/crates/gtkhx-ui/src/options_connections.rs:552
+msgid "Connection error"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:398
+msgid "A connection needs a name."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:412
+msgid "Rename failed: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:426
+msgid "There is already a connection named \"%s\"."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:445
+msgid "Save failed: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:453
+msgid "Save failed: %s. The connection was restored to its original name."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:462
+msgid ""
+"Save failed: %1$s. The entry is now named \"%2$s\" — with the previous "
+"contents — because rolling the rename back also failed (%3$s)."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:482
+msgid "Delete the connection \"%s\"? This cannot be undone."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:485
+msgid "Delete Connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:503
+msgid "Delete failed: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:516
+msgid "Off"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:554
+msgid ""
+"Could not load the connection \"%s\". It may have been changed or removed by "
+"something else."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:589
+msgid "Edit Connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:591
+msgid "New Connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:609
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:469
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:315
+msgid "Address"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:613
+msgid "Port (blank = 5500)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:620
+msgid "Leave both blank to connect as a guest."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:638
+msgid "Identity on this server"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:640
+msgid ""
+"Leave these alone to use your usual name and icon from Settings → Identity. "
+"Changing those later moves every connection you haven't given its own."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:649
+msgid "Use the default nickname"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:655
+msgid "Icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:658
+#: rust/crates/gtkhx-ui/src/options_identity.rs:292
+msgid "Choose…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:662
+msgid "Use the default icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:671
+msgid "Transport"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:686
+msgid "HOPE (encrypted handshake)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:707
+msgid "Delete this connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:718
+msgid "Cancel"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:851
+msgid "Export Connections (legacy format)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:859
+msgid "Connections exported"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:861
+msgid "Wrote %s file(s) in the legacy Hotline format."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:865
+msgid "Export failed"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:865
+msgid "Export failed: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:876
+#: rust/crates/gtkhx-ui/src/options_window.rs:137
+msgid "Connections"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:878
+msgid ""
+"Servers this client knows about. Each one remembers how to reach it, how to "
+"log in, and optionally a nickname and icon to use there."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:884
+msgid "Add a connection"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:899
+msgid "Export in the legacy format…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_connections.rs:901
+msgid ""
+"Write one classic Hotline bookmark file per connection, for other clients to "
+"import."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:58
+msgid "Identity icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:61
+msgid "Icon ID"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:62
+msgid "Numeric ID from the loaded icon resource files"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:79
+msgid "Browse…"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:164
+msgid ""
+"Couldn't save the avatar — check the permissions on your GtkHx configuration "
+"directory."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:174
+msgid "Avatar updated."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:177
+msgid ""
+"Avatar saved — it'll be sent when you connect to a server that supports GIF "
+"icons."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:189
+msgid "That file is %s KB — the limit is %s KB. Pick a smaller one."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:199
+msgid "GIF images"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:205
+msgid "Choose an avatar"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:226
+msgid "File picker failed: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:248
+msgid "Couldn't read the file: %s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:253
+msgid "That file is empty."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:262
+msgid "That file is not a GIF."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:271
+msgid "Custom GIF avatar"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:273
+msgid ""
+"A GIF other users see in place of your icon. Best authored at icon size (or "
+"wide-banner size); max 32 KB. Sent automatically when you connect to a "
+"server that supports it."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:279
+msgid "Avatar"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:301
+#: rust/crates/gtkhx-ui/src/options.rs:288
+msgid "Clear"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:317
+msgid "Avatar cleared."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:319
+msgid "Avatar cleared for now, but the saved file could not be deleted."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:329
+msgid "Animate GIF avatars"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:331
+msgid "Play animated avatars in the user list. Turn off to show a still frame."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:340
+#: rust/crates/gtkhx-ui/src/useredit.rs:218
+msgid "Display name"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_identity.rs:341
+msgid "Your name"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:244
+msgid "Nickname color"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:246
+msgid ""
+"Optional RGB color shown on servers that support the Colored-Nicknames "
+"extension"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:255
+msgid "Pick Nickname Color"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:406
+msgid "Browse Fonts"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:440
+msgid "GtkHx theme"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:445
+#: rust/crates/gtkhx-ui/src/options_window.rs:73
+msgid "Appearance"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:447
+msgid ""
+"Color scheme. \"Follow system\" tracks the desktop's light/dark preference."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:449
+msgid "Follow system"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:449
+msgid "Light"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:449
+msgid "Dark"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:452
+msgid "Theme"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:463
+msgid "System Integration"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:466
+msgid "Show tray icon"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:468
+msgid ""
+"Display a status icon in the system tray. Closing the main window hides to "
+"tray; click the icon to toggle GtkHx's windows."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:477
+msgid "Chat output"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:478
+msgid "Show timestamps"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:481
+msgid "Show user icons"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:483
+msgid "Shows the speaker's icon beside the first message of each run"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:488
+msgid "Render markdown"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:490
+msgid ""
+"Formats **bold**, *italic*, `code`, quotes and links in received messages. "
+"What you send is unchanged."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:494
+msgid "Word wrap"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:497
+msgid "Scrollback lines"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:498
+msgid "0 keeps unlimited scrollback"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:505
+msgid "Timestamp format"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:507
+msgid ""
+"strftime(3) format string. Default: \"[%H:%M:%S] \". See `man 3 strftime` "
+"for the full list of conversion specifiers."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:510
+msgid "Format"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:513
+#: rust/crates/gtkhx-ui/src/options.rs:515
+msgid "Font"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:514
+msgid "Pango font description, e.g. \"Monospace 11\""
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:516
+msgid "Browse"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:529
+msgid "Sounds"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:532
+msgid "Play sounds"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:533
+msgid "Master switch for chat and transfer alerts"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:537
+#: rust/crates/gtkhx-ui/src/options.rs:659
+#: rust/crates/gtkhx-ui/src/options_window.rs:101
+msgid "Events"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:538
+msgid "Chat invitation"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:539
+msgid "Chat message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:541
+msgid "Transfer complete"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:542
+msgid "Join"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:544
+#: rust/crates/gtkhx-ui/src/options.rs:665
+msgid "Private message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:545
+msgid "News post"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:546
+msgid "Leave"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:555
+msgid "Voice chat join"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:560
+msgid "Voice chat leave"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:569
+#: rust/crates/gtkhx-ui/src/options.rs:857
+#: rust/crates/gtkhx-ui/src/options_window.rs:80
+#: rust/crates/gtkhx-ui/src/options_window.rs:108
+msgid "Behavior"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:572
+msgid "Show join / leave in chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:577
+msgid "Old-style nick completion"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:579
+msgid "Match against the most recently typed prefix instead of all users"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:584
+msgid "Auto Copy Behavior"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:586
+msgid ""
+"Drag-select in chat / news / private message text to populate the clipboard. "
+"Ctrl-V or middle-click pastes the selection elsewhere."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:591
+msgid "Automatically copy selected text"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:596
+msgid "Automatically include timestamps"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:601
+msgid "Automatically include color information"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:606
+msgid "Highlight"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:608
+msgid ""
+"Comma-separated words to highlight in chat (in addition to your own nick). "
+"Matches are case-insensitive at word boundaries."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:611
+msgid "Words"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:617
+msgid "Chat history"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:619
+msgid ""
+"Servers that implement the chat-history extension (e.g. Janus) replay recent "
+"chat to you on login. 0 disables the initial pull; the \"Load older "
+"messages\" link in chat still works to fetch on demand."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:625
+msgid "Initial messages to fetch"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:627
+msgid "Also used as the page size for \"Load older messages\""
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:638
+#: rust/crates/gtkhx-ui/src/options_window.rs:94
+msgid "Emoji"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:640
+msgid ""
+"When conversion is on, emoji you send on servers that don't support Unicode "
+"go out as text shortcodes like \":joy:\" instead of \"?\", and incoming "
+"shortcodes are shown as emoji on every server."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:646
+msgid "Convert emoji to/from :shortcodes:"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:651
+msgid "Suggest shortcodes as you type"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:652
+msgid "Show a popup of matching emoji when you type \":\""
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:661
+msgid "Show a desktop notification when these events happen."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:666
+msgid "Someone sends you a 1-to-1 message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:670
+msgid "Private chat invitation"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:671
+msgid "Someone invites you to a private chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:675
+msgid "Mention in public chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:677
+msgid "Your name or a highlight word appears in a chat message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:682
+msgid "Mention in private chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:684
+msgid "Your name or a highlight word appears in a private chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:689
+msgid "Every public chat message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:690
+msgid "Noisy — only useful on quiet servers"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:694
+msgid "Every private chat message"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:697
+msgid "New news post"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:700
+msgid "File transfer complete"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:705
+msgid "Server broadcast"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:706
+msgid "Admin-issued announcement to every user"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:713
+msgid "Downloads"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:714
+msgid "Download directory"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:717
+msgid "Queue file transfers"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:718
+msgid "Run downloads one at a time instead of in parallel"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:740
+#: rust/crates/gtkhx-ui/src/options_window.rs:144
+msgid "Trackers"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:741
+msgid "Servers polled when the Tracker window opens"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:779
+msgid "URL"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:799
+msgid "Address:"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:805
+msgid "Remove"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:807
+msgid "Add"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:846
+msgid "Search"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:849
+msgid "Case-sensitive tracker search"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:860
+msgid "Don't notify when the relevant window is focused"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:861
+msgid ""
+"If a chat or private message window is already active, don't pop a "
+"notification on top of it"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:865
+msgid "Mention Words"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:867
+msgid ""
+"Comma-separated. Your nickname is always matched in addition to this list. "
+"The same list drives chat message highlighting."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options.rs:870
+msgid "Highlight words"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:56
+msgid "System default"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:81
+msgid "Audio Devices"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:83
+msgid ""
+"Capture and playback devices for voice chat. \"System default\" follows your "
+"desktop's audio configuration. Changes take effect the next time you join a "
+"voice room."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:89
+msgid "Input (microphone)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:92
+msgid "Output (speakers)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:123
+msgid "Not set — click to capture"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:131
+msgid "Capture push-to-talk key"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:133
+msgid ""
+"Press the key (or modifier+key combination) you want to use as your push-to-"
+"talk binding.\n"
+"\n"
+"Accepted: F1–F24, Pause, Scroll Lock, Insert, Print, Menu, or any Ctrl/Alt/"
+"Super combination with another key. Plain letters and digits are rejected so "
+"they don't conflict with chat input.\n"
+"\n"
+"Press Escape to cancel."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:191
+msgid ""
+"That key would conflict with chat typing. Try a function key (F1–F24), "
+"Pause, or a Ctrl/Alt/Super-modified combination."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:223
+msgid "Push-to-Talk"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:225
+msgid ""
+"When enabled, you start muted and unmute by holding the captured key. Works "
+"from any focused widget in the GtkHx window."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:231
+msgid "Enable push-to-talk"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:236
+msgid "PTT key"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_voice.rs:244
+msgid "Clear PTT key"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:50
+#: rust/crates/gtkhx-ui/src/options_window.rs:52
+#: rust/crates/gtkhx-ui/src/options_window.rs:333
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:397
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:404
+msgid "General"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:59
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:483
+#: rust/crates/gtkhx-ui/src/useredit.rs:210
+msgid "Identity"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:66
+msgid "File Transfers"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:87
+msgid "History"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:99
+msgid "Notifications"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:113
+msgid "Audio"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:115
+msgid "Sound"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:129
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:540
+msgid "Voice"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:135
+msgid "Network"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:267
+msgid "GtkHx Preferences"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/options_window.rs:328
+msgid "Preferences"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:43
+msgid ""
+"This connection was saved with RC4 as its HOPE cipher. GtkHx no longer "
+"offers RC4 — it's a known-broken stream cipher and the \"Secure\" label it "
+"used to wear was misleading."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:49
+msgid ""
+"The bookmark \"%s\" was saved with RC4 as its HOPE cipher. GtkHx no longer "
+"offers RC4 — it's a known-broken stream cipher and the \"Secure\" label it "
+"used to wear was misleading."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:57
+msgid ""
+"Pick a replacement cipher and the bookmark will be rewritten so this prompt "
+"doesn't appear again. \"No cipher\" sends the connection in plaintext — "
+"that's less secure than Blowfish or ChaCha20-Poly1305, but at least you'll "
+"know the connection isn't protected. The server has to support whichever "
+"cipher you pick; if the negotiation fails you can change the bookmark's "
+"cipher from the connection's cipher in Settings → Connections and try again."
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:65
+msgid "Replace RC4 cipher"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:70
+msgid "Use _ChaCha20-Poly1305"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:71
+msgid "Use _Blowfish"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:72
+msgid "Connect without _encryption"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/rc4_dialog.rs:73
+msgid "Ca_ncel"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:87
 msgid "Certificate changed"
 msgstr ""
 
-#: src/tls_trust_dialog.c:80
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:87
 msgid "_Trust New Certificate"
 msgstr ""
 
-#: src/tls_trust_dialog.c:83
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:89
 msgid "Unknown server certificate"
 msgstr ""
 
-#: src/tls_trust_dialog.c:84
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:89
 msgid "_Trust and Connect"
 msgstr ""
 
-#: src/tls_trust_dialog.c:98
-#, c-format
-msgid ""
-"The TLS certificate for %s:%u doesn't match the one you previously trusted. "
-"This usually means the server rotated its certificate, but it can also "
-"indicate a man-in-the-middle attack. Verify the fingerprint out-of-band with "
-"the server operator before accepting."
-msgstr ""
-
-#: src/tls_trust_dialog.c:107
-#, c-format
-msgid ""
-"You haven't connected to %s:%u over TLS before. GtkHx will pin this "
-"certificate so future connections are silent — but only if you trust it now."
-msgstr ""
-
-#: src/tls_trust_dialog.c:115
-#, c-format
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:111
 msgid ""
 "If %s later presents the same certificate on a different port (for example "
 "the file transfer subchannel), it will be accepted silently without another "
 "prompt."
 msgstr ""
 
-#: src/tls_trust_dialog.c:122
-#, c-format
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:119
 msgid ""
 "Fingerprint:\n"
 "%s"
 msgstr ""
 
-#: src/tls_trust_dialog.c:126
-#, c-format
+#: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:123
 msgid "Pinned certificates live in %s."
 msgstr ""
 
-#: src/toolbar.c:203
-msgid "Send a broadcast message to every user on the server."
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:205
+msgid "Couldn't pick a bookmark name for this server."
 msgstr ""
 
-#: src/toolbar.c:208
-msgid "_Send"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:213
+msgid ""
+"There is already a connection with that name; edit it in Settings → "
+"Connections:"
 msgstr ""
 
-#: src/toolbar.c:217
-msgid "Message"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:233
+msgid "Saved bookmark"
 msgstr ""
 
-#: src/toolbar.c:518
-#, c-format
-msgid "Lost connection to %s"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:235
+msgid "Couldn't save bookmark"
 msgstr ""
 
-#: src/toolbar.c:585
-msgid "New User…"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:291
+msgid "Get Info"
 msgstr ""
 
-#: src/toolbar.c:586
-msgid "Edit User…"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:343
+msgid "Yes"
 msgstr ""
 
-#: src/toolbar.c:589
-msgid "Settings"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:394
+msgid "Teen"
 msgstr ""
 
-#: src/toolbar.c:590
-msgid "Bookmarks…"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:395
+msgid "Mature"
 msgstr ""
 
-#: src/toolbar.c:593
-msgid "Quit"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:396
+msgid "Adult"
 msgstr ""
 
-#: src/toolbar.c:599
-msgid "Main menu"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:405
+msgid "Development"
 msgstr ""
 
-#: src/toolbar.c:689
-msgid "Disconnect"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:406
+msgid "Archive"
 msgstr ""
 
-#: src/toolbar.c:713 src/tracker.c:480
-msgid "Tracker"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:407
+msgid "Warez"
 msgstr ""
 
-#: src/toolbar.c:723
-msgid "News (1.5+)"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:408
+msgid "Gaming"
 msgstr ""
 
-#: src/toolbar.c:762
-msgid "Plugin Manager"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:409
+msgid "Media"
 msgstr ""
 
-#: src/toolbar.c:791
-msgid "Reconnect"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:410
+msgid "Education"
 msgstr ""
 
-#: src/tracker.c:471
-msgid "Address"
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:411
+msgid "Research"
 msgstr ""
 
-#: src/tracker.c:516
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:412
+msgid "File Sharing"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:413
+msgid "Social"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:414
+msgid "Security"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:415
+msgid "Creative"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:416
+msgid "Unspecified"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:435
+msgid "Server details"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:471
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:342
+msgid "Description"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:472
+msgid "Users online"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:475
+msgid "Maximum users"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:485
+msgid "Software"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:486
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:306
+msgid "Country"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:487
+msgid "Region"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:488
+msgid "Language"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:489
+msgid "Tags"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:491
+msgid "Maturity"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:494
+msgid "Category"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:496
+msgid "Contact"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:497
+msgid "Rules"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:498
+msgid "Banner URL"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:499
+msgid "Icon URL"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:506
+msgid "Timezone"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:510
+msgid "Server launched"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:511
+msgid "Uptime"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:516
+msgid "Capabilities"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:521
+msgid "Protocol version"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:528
+msgid "Minimum client protocol"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:532
+msgid "HOPE encryption"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:533
+msgid "HOPE ciphers"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:534
+msgid "TLS"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:536
+msgid "TLS port"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:538
+msgid "IPv6"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:539
+msgid "Inline media"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:541
+msgid "Large files"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:542
+msgid "Link down (Mbit/s)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:543
+msgid "Link up (Mbit/s)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:548
+msgid "Activity"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:550
+msgid "Peak users (24h)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:551
+msgid "Average users (24h)"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:552
+msgid "News posts"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:553
+msgid "Message-board posts"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:555
+msgid "Total file size"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:556
+msgid "Last news activity"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:557
+msgid "Last public chat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:564
+msgid "Promoted"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:565
+msgid "Verified online"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:566
+msgid "Private listing"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:567
+msgid "Language strict"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:568
+msgid "First seen"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:569
+msgid "Last heartbeat"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:333
+msgid "Caps"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:441
+msgid "expecting"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:449
+msgid "no servers"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:458
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:467
+msgid "server"
+msgid_plural "servers"
+msgstr[0] ""
+msgstr[1] ""
+
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:757
 msgid "Search trackers"
 msgstr ""
 
-#: src/tracker.c:528
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:762
 msgid "Match case in tracker search"
 msgstr ""
 
-#: src/tracker.c:546
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:781
 msgid "Refresh tracker list"
 msgstr ""
 
-#: src/tracker.c:549
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:786
 msgid "Connect to selected server"
 msgstr ""
 
-#: src/usermod.c:469
-msgid "User Editor"
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:790
+msgid "Save selected server as a bookmark"
 msgstr ""
 
-#: src/usermod.c:473
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:794
+msgid "Show details for selected server"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/useredit.rs:188
 msgid "New User"
 msgstr ""
 
-#: src/usermod.c:546
+#: rust/crates/gtkhx-ui/src/useredit.rs:190
+msgid "User Editor"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/useredit.rs:226
 msgid "Generate a random password"
 msgstr ""
 
-#: src/usermod.c:625
+#: rust/crates/gtkhx-ui/src/useredit.rs:341
 msgid "Open User"
 msgstr ""
 
-#: src/usermod.c:625
+#: rust/crates/gtkhx-ui/src/useredit.rs:342
 msgid "Enter the login of the account to edit."
 msgstr ""
 
-#: src/usermod.c:630
+#: rust/crates/gtkhx-ui/src/useredit.rs:345
 msgid "_Open"
 msgstr ""
 
-#: src/users.c:233 src/users.c:731
-#, c-format
-msgid "ignore: %s is now ignored\n"
+#: rust/crates/gtkhx-ui/src/user_info.rs:39
+msgid "User Info: %1$s (%2$u)"
 msgstr ""
 
-#: src/users.c:247
-#, c-format
-msgid "ignore: %s is now unignored\n"
+#: rust/crates/gtkhx-ui/src/users_view.rs:422
+msgid "UID"
 msgstr ""
 
-#: src/users.c:538
-msgid "UnIgnore"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:449
+msgid "Voice chat requires permission"
 msgstr ""
 
-#: src/users.c:544
-msgid "Get User Info"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:451
+msgid "Leave the voice room"
 msgstr ""
 
-#: src/users.c:546
-msgid "Private Message"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:453
+msgid "Join the voice room for this chat"
 msgstr ""
 
-#: src/users.c:732
-#, c-format
-msgid "ignore: %s is now unignored"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:467
+msgid "Restore your microphone"
 msgstr ""
 
-#: src/users.c:820
-msgid "Private Chat Invitation"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:469
+msgid "Stop sending audio"
 msgstr ""
 
-#: src/users.c:821
-msgid "Invite this user to an existing private chat, or create a new one."
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:547
+msgid "Voice is already in use in another chat on this connection."
 msgstr ""
 
-#: src/users.c:826
-msgid "_New Chat"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:549
+msgid "Voice is already in use on %s."
 msgstr ""
 
-#: src/users.c:828
-msgid "_Invite"
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:553
+msgid "Leave the other voice chat?"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:555
+msgid "_Leave and Join"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:603
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:607
+msgid "another connection"
+msgstr ""
+
+#: rust/crates/hxchat-view/src/view.rs:2546
+msgid "Copy"
+msgstr ""
+
+#: rust/crates/hxchat-view/src/view.rs:2565
+msgid "Select All"
 msgstr ""

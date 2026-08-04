@@ -16,7 +16,7 @@
 //! navigation is a header-bar view switcher — the trade was losing its search
 //! entry in exchange for a sidebar that holds this many categories.)
 
-use crate::tr::tr;
+use crate::tr::{n_, tr};
 use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -47,72 +47,72 @@ struct Entry {
 fn entries() -> Vec<Entry> {
     let mut v = vec![
         Entry {
-            section: Some("General"),
+            section: Some(n_("General")),
             name: "general",
-            title: "General",
+            title: n_("General"),
             icon: "preferences-system-symbolic",
             draw: crate::options::page_general,
         },
         Entry {
             section: None,
             name: "identity",
-            title: "Identity",
+            title: n_("Identity"),
             icon: "user-info-symbolic",
             draw: crate::options::page_identity,
         },
         Entry {
             section: None,
             name: "filexfer",
-            title: "File Transfers",
+            title: n_("File Transfers"),
             icon: "folder-download-symbolic",
             draw: crate::options::page_file_transfers,
         },
         Entry {
-            section: Some("Chat"),
+            section: Some(n_("Chat")),
             name: "chat_appearance",
-            title: "Appearance",
+            title: n_("Appearance"),
             icon: "user-available-symbolic",
             draw: crate::options::page_chat_appearance,
         },
         Entry {
             section: None,
             name: "chat_behavior",
-            title: "Behavior",
+            title: n_("Behavior"),
             icon: "preferences-other-symbolic",
             draw: crate::options::page_chat_behavior,
         },
         Entry {
             section: None,
             name: "chat_history",
-            title: "History",
+            title: n_("History"),
             icon: "document-open-recent-symbolic",
             draw: crate::options::page_chat_history,
         },
         Entry {
             section: None,
             name: "chat_emoji",
-            title: "Emoji",
+            title: n_("Emoji"),
             icon: "face-smile-symbolic",
             draw: crate::options::page_chat_emoji,
         },
         Entry {
-            section: Some("Notifications"),
+            section: Some(n_("Notifications")),
             name: "notify_events",
-            title: "Events",
+            title: n_("Events"),
             icon: "preferences-system-notifications-symbolic",
             draw: crate::options::page_notify_events,
         },
         Entry {
             section: None,
             name: "notify_behavior",
-            title: "Behavior",
+            title: n_("Behavior"),
             icon: "preferences-other-symbolic",
             draw: crate::options::page_notify_behavior,
         },
         Entry {
-            section: Some("Audio"),
+            section: Some(n_("Audio")),
             name: "sound",
-            title: "Sound",
+            title: n_("Sound"),
             icon: "audio-speakers-symbolic",
             draw: crate::options::page_sound,
         },
@@ -126,22 +126,22 @@ fn entries() -> Vec<Entry> {
     v.push(Entry {
         section: None,
         name: "voice",
-        title: "Voice",
+        title: n_("Voice"),
         icon: "audio-input-microphone-symbolic",
         draw: crate::options::page_voice,
     });
 
     v.push(Entry {
-        section: Some("Network"),
+        section: Some(n_("Network")),
         name: "connections",
-        title: "Connections",
+        title: n_("Connections"),
         icon: "user-bookmarks-symbolic",
         draw: crate::options::page_connections,
     });
     v.push(Entry {
         section: None,
         name: "trackers",
-        title: "Trackers",
+        title: n_("Trackers"),
         icon: "network-server-symbolic",
         draw: crate::options::page_tracker,
     });
