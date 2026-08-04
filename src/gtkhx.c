@@ -58,6 +58,7 @@
 #include "toolbar.h"
 #include "banner.h"
 #include "dock_layout.h"
+#include "panel_registry.h" /* HX_PANEL_ID_* for the startup auto-open */
 #include "chat.h"
 #include "msg.h"
 #include "gtkhx_session.h"
@@ -961,12 +962,15 @@ hx_session_open (const char *title)
     create_chat (sess);
     create_tasks ();
 
-    create_chat_window (toolbar_window, sess);
-    create_news_window (toolbar_window, sess);
-    create_users_window (toolbar_window, sess);
-    create_tasks_window (toolbar_window, sess);
-    open_files_browser (sess);
-    open_news_browser (NULL, sess);
+    /* One content page per panel for this connection. Through
+     * toolbar_build_panel rather than the factories directly so that a
+     * panel the user closed isn't quietly resurrected by opening a second
+     * connection — but note the gate only applies to a panel that doesn't
+     * exist yet. One that is open gets this connection's page like any
+     * other, which is the case that matters. */
+    for (const char *const *idp = hx_panel_static_ids; *idp != NULL; idp++) {
+        toolbar_build_panel (*idp, sess, TRUE);
+    }
 
     /* Adding the tab selects it, so the new connection is the one the user is
      * looking at — which is what they asked for by opening it, and what every
@@ -1092,20 +1096,33 @@ fe_init (void)
     create_toolbar_window (sess);
     init_colors (toolbar_window);
 
-    /* Panels are eager-constructed inside create_toolbar_window; these
-     * calls registry-lookup-hit and raise the corresponding tab, so each
-     * panel becomes a focused tab on launch.
+    /* Panels are constructed inside create_toolbar_window; these calls
+     * registry-lookup-hit and raise the corresponding tab, so each panel
+     * becomes a focused tab on launch.
      *
      * They used to be gated on four persisted "has this panel ever been
      * opened" keys, which sounded like user intent and were not: the keys
      * defaulted to 1, each panel set its own on first construction, and
      * nothing ever cleared one. Every gate was therefore true for every
      * user after first run. Dropping the keys is behaviour-identical, and
-     * the gates go with them. */
-    create_chat_window (toolbar_window, sess);
-    create_news_window (toolbar_window, sess);
-    create_users_window (toolbar_window, sess);
-    create_tasks_window (toolbar_window, sess);
+     * the gates go with them.
+     *
+     * respect_saved_state=TRUE so a panel the user closed is neither
+     * built nor raised here — otherwise this would undo, one line later,
+     * the closed state create_toolbar_window just honoured. */
+    toolbar_present_panel (HX_PANEL_ID_CHAT, sess, TRUE);
+    toolbar_present_panel (HX_PANEL_ID_NEWS, sess, TRUE);
+    toolbar_present_panel (HX_PANEL_ID_USERS, sess, TRUE);
+    toolbar_present_panel (HX_PANEL_ID_TASKS, sess, TRUE);
+
+    /* The last word on which page each frame shows, and it has to be
+     * last: the raises above run in a fixed order, so whichever of them
+     * touches a frame last wins it. That is why a leaf holding both Chat
+     * and Tasks came up on Tasks however the user had left it. Restoring
+     * the saved foreground here — after every panel that is going to
+     * exist has been built and placed — overrides that. No-op on first
+     * launch and after Reset Layout. */
+    dock_layout_apply_selection ();
 
     /* The first connection's tab. Invisible on its own — the strip autohides
      * below two — so this changes nothing about how the window looks until a

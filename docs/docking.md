@@ -324,13 +324,54 @@ six-dot icon in the frame header):
    close-request handler so the redock path doesn't race the
    already-moved panel).
 
+### Drop feedback is per-pane
+
+GTK's default stylesheet outlines *any* widget with an active drop
+target under the pointer (`:not(window):drop(active)`). Our target is a
+single one on the dock, and the dock fills the window — so the whole
+window lit up and told the user nothing about which pane the panel
+would land in.
+
+Two halves to the fix, both in `hx_panel.c`:
+
+- The dock carries an `hx-dock-drop-host` class and a rule that turns
+  its own `:drop(active)` box-shadow off.
+- `enter` and `motion` run `frame_at_dock_coords` — the *same*
+  hit-test the drop uses, so the highlight can't disagree with where
+  the panel actually goes — and put an `hx-drop-target` class on that
+  frame. `leave` and `drop` clear it.
+
+The frame's highlight is `outline`, not `box-shadow: inset`, and the
+distinction is load-bearing: `gtk_widget_snapshot` paints background
+and border *before* the children and the outline *after*, so an inset
+shadow would be covered by whatever content fills the pane. A negative
+`outline-offset` keeps it inside the frame's own allocation instead of
+bleeding onto the neighbour.
+
+The tracking pointer is a `GWeakRef`-style weak pointer
+(`g_set_weak_pointer`): the highlighted frame can be destroyed
+mid-drag — a cross-dock drag that empties an undocked window does
+exactly that — and a raw pointer would dangle until the next motion
+event cleared it.
+
+Colours come from `@accent_bg_color` rather than
+`var(--accent-bg-color)`: the named colour works across the whole
+supported libadwaita range, and CSS custom properties don't reach back
+to our floor.
+
 `hx_panel_undock` builds a fresh `AdwApplicationWindow` containing a
 `PanelDock` + `PanelGrid` from an inline builder string, and moves the
 panel into the grid. It is context-aware: when invoked on a panel that's
-already in an undocked window (chevron menu in that window), it closes
-the undocked window instead, which triggers `on_undocked_close_request`
-to redock the panel to its home frame. The "already undocked?" test is
-simply "is this panel's `GtkRoot` the toolbar window?".
+already in an undocked window it closes the undocked window instead,
+which triggers `on_undocked_close_request` to redock the panel to its
+home frame. The "already undocked?" test is simply "is this panel's
+`GtkRoot` the toolbar window?".
+
+Nothing reaches that branch from the UI any more — it existed for the
+*Undock* item on an undocked window's own chevron, and that chevron is
+now hidden (see below). The branch stays because the entry point is
+public and the guard is one comparison; losing it would mean a second
+undocked window nested out of the first.
 
 ### Undocked windows use plain `PanelFrame`, not `HxPanelFrame`
 
@@ -344,16 +385,45 @@ ancestor, so our override would disable those items entirely
 (`hx_panel_can_move_in_direction` finds no leaf and returns
 FALSE for every direction).
 
-libpanel's default class-action handlers do the right thing in
-the undocked context: they move pages between `PanelGrid` cells
-and auto-create a new column when moving past the edge, which is
-useful behaviour for a multi-panel undocked window. Keeping
-plain `PanelFrame` there preserves it.
+libpanel's default class-action handlers are at least *coherent*
+in the undocked context — they move pages between `PanelGrid`
+cells — where ours would be dead. That argument has weakened
+since: the chevron that surfaced those items is now hidden (see
+below), so nothing reaches them either way. What's left is the
+narrower reason, which still holds: `HxPanelFrame` exists to
+serve the `HxSplit` tree, an undocked window has no `HxSplit`
+ancestor, and subclassing there would buy nothing but a class
+whose four actions can never be enabled.
 
 Frame-level hookups (`close-dispatcher`, `drag-out`,
 `drop-controls defang`) still apply to undocked frames — they
 operate via `gtk_widget_insert_action_group` and signals on the
 specific frame instance, not via class-level overrides.
+
+### An undocked window is a leaf
+
+Nothing docks *into* an undocked window. The dock-level
+`GtkDropTarget` lives on `toolbar_dock` alone, so a drop over an
+undocked window has never been accepted — but libpanel's header went
+on advertising the machinery for it, which reads as "this should
+work" and then doesn't.
+
+So `hx_panel_undocked_create_frame` hides the header's `.controls`
+box, which is the `pan-down-symbolic` chevron and the
+`window-close-symbolic` X together (`panel-frame-header-bar.ui` puts
+both in that one box). Neither means anything in a one-panel window:
+the chevron's *Move Page L/R/U/D* has nowhere to move to, and the X
+closes the *page*, leaving an empty window behind rather than
+redocking.
+
+The box is a private template child with no accessor, so we find it
+by CSS class — same hunt-by-property approach as the drag handle, and
+the same caveat about libpanel restructuring its header. A miss is a
+`g_warning`, not a silent skip.
+
+The drag handle and the title button stay, so both ways back into the
+dock are unchanged: drag the panel over a pane, or close the window
+and let `on_undocked_close_request` redock it to its home frame.
 
 ## Layout persistence
 
@@ -368,19 +438,75 @@ unit-tested without dragging in GTK and libpanel). File:
 #   h(A,B)              horizontal split
 #   v(A,B)              vertical split
 #   L[id1,id2,...]      leaf with panel IDs in tab order
+#   L[id1,*id2,...]     '*' marks the leaf's foreground page
 #   L[id1,id2,...:role] leaf tagged with a role; the four roles
 #                       (start, end, bottom, center) anchor the
 #                       toolbar_*_frame globals
-tree=h(L[news:start],h(v(L[chat,files,news15:center],L[tasks:bottom]),L[users:end]))
+tree=h(L[news:start],h(v(L[*chat,files,news15:center],L[tasks:bottom]),L[users:end]))
 
 # Paned divider positions in depth-first order; same count as
 # internal splits in the tree.
 sizes=240;620;380
+
+# Static panels that were in no dock at all at save time.
+closed=files;news15
 ```
 
 Whitespace between tokens is tolerated so the file can be hand-edited.
 Panel ids are anything that isn't a separator character (`,` `]` `:` or
 whitespace) — no quoting needed for the ids we actually have.
+
+### The foreground-page marker
+
+A frame shows one page at a time, and which one is the user's choice, so
+it is saved: `*` in front of an id means that page was the frame's
+visible child. At most one per leaf — two is a file that can't be acted
+on rather than a tie to break, so the parser rejects it and the loader
+falls back to defaults.
+
+Restoring it has to be the **last** thing startup does, and that's the
+whole subtlety. `panel_frame_add` selects the page it adds, and `fe_init`
+raises Chat, News, Users and Tasks in a fixed order after the dock is
+built — so whichever of those touched a frame last won it. A leaf holding
+both Chat and Tasks came up on Tasks however the user had left it.
+`dock_layout_apply_selection`, called at the end of `fe_init` once every
+panel exists and is placed, is what has the final say. It's one-shot: the
+saved selection describes launch, and every tab change after that belongs
+to the user.
+
+The list is keyed by panel id, not by frame — a panel id belongs to
+exactly one leaf, so the flat list is unambiguous, and it survives the
+reseat `dock_layout_place_panel` may do afterwards, which a frame-keyed
+record would not.
+
+### Closed panels stay closed
+
+`closed=` is the set of static panels (`hx_panel_static_ids`) that were in
+no dock at save time — neither in the main dock nor in an undocked window.
+On the next launch those panels' factories are not called at all;
+`toolbar_build_panel` checks `dock_layout_panel_was_closed` first. The
+toolbar button builds the panel on demand, passing
+`respect_saved_state=FALSE`, because an explicit user request outranks
+what was on disk.
+
+Two deliberate choices:
+
+- **The closed set is serialised, not the open set.** A panel id this
+  version has never heard of therefore defaults to open, and an absent
+  key — every layout file written before this existed — reads as "nothing
+  was closed", which is what those files meant.
+- **It is recomputed from live state at every save**, never tracked
+  incrementally. Reopening a panel makes it open again with no bookkeeping,
+  and there is no second source of truth to drift.
+
+Building a panel late is safe because the model-side state each one
+renders is created elsewhere and outlives it: `create_chat` and
+`create_tasks` run per session in `gtkhx.c`, so chat output accumulates
+into a parentless chat view and the whole scrollback is there when the
+panel finally packs it; `gtkhx_users_bridge_after_embed` replays the user
+list from the member model; `gtkhx_tasks_after_embed` replays the task and
+transfer lists; Files and News fetch fresh on open. A panel built on the
+first toolbar click comes up populated, not empty.
 
 Window size lives in `gtkhxrc` (the existing `gtkhx_prefs.geo.tool`
 mechanism) — `dock-layout.ini` stays focused on the dock tree.
@@ -407,6 +533,14 @@ into the entry points that mutate shape or placement:
 - `hx_panel_undock` also connects `notify::default-width` and
   `notify::default-height` on the new top-level so user-resize
   of the undocked window persists.
+- `on_frame_page_closed` in `hx_panel.c` requests a save for every
+  panel kind, not just DYNAMIC — closing a panel changes the
+  `closed=` set. `hx_panel_ensure_attached` requests one on the
+  mirror path, when a panel is spliced back in.
+- `HxPanelFrame`'s `notify::visible-child` handler requests a save —
+  a tab switch changes the `*` marker. Startup produces a burst of
+  these as panels are added one at a time; the debounce absorbs them
+  and the write that lands is the settled state.
 - `hx_quit` calls `dock_layout_shutdown`, which flushes any pending
   save synchronously before exit.
 

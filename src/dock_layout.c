@@ -54,6 +54,15 @@ static struct {
                                        * dock_layout_place_panel — each
                                        * matching id triggers a one-time
                                        * hx_panel_undock + size apply. */
+    GPtrArray *selected_ids;       /* char*, owned; one per saved leaf
+                                       * that recorded a foreground page.
+                                       * Consumed by
+                                       * dock_layout_apply_selection. */
+    GHashTable *closed_ids;        /* char* set of static panel ids the
+                                       * saved layout had nowhere in the
+                                       * dock. Read by
+                                       * dock_layout_panel_was_closed so
+                                       * startup leaves them unbuilt. */
     GtkPaned **paned_order;        /* depth-first order, set by load
                                        * + apply_geometry, used by save */
     guint n_paned;
@@ -120,6 +129,7 @@ serialize_leaf (GString *out, PanelFrame *frame)
 {
     guint n = panel_frame_get_n_pages (frame);
     const char *role = role_for_frame (GTK_WIDGET (frame));
+    PanelWidget *visible = panel_frame_get_visible_child (frame);
     gboolean first = TRUE;
 
     g_string_append (out, "L[");
@@ -130,6 +140,14 @@ serialize_leaf (GString *out, PanelFrame *frame)
         }
         if (!first) {
             g_string_append_c (out, ',');
+        }
+        /* '*' marks the frame's foreground page so the restore
+         * doesn't have to guess. Without it, whichever panel was
+         * constructed (or raised) last at startup won the frame,
+         * which is why a leaf holding Chat and Tasks came back
+         * showing Tasks however the user had left it. */
+        if (p == visible) {
+            g_string_append_c (out, '*');
         }
         g_string_append (out, hx_panel_get_id (HX_PANEL (p)));
         first = FALSE;
@@ -214,6 +232,18 @@ build_node (DLParsedNode *node, GtkWidget **out_sidebar, GtkWidget **out_center,
             const char *id = g_ptr_array_index (node->panel_ids, i);
             g_hash_table_replace (dock.id_to_frame, g_strdup (id), frame);
         }
+
+        /* Remember this leaf's foreground page by id rather than by
+         * frame. A panel id belongs to exactly one leaf, so the flat
+         * list is unambiguous, and it survives the reseat that
+         * dock_layout_place_panel may do afterwards — which a
+         * frame-keyed record would not. */
+        if (dock.selected_ids != NULL && node->selected >= 0
+            && node->selected < (int)node->panel_ids->len) {
+            g_ptr_array_add (dock.selected_ids,
+                             g_strdup (g_ptr_array_index (
+                                 node->panel_ids, (guint)node->selected)));
+        }
         return leaf;
     }
 
@@ -272,6 +302,63 @@ visit_undocked_panel (HxPanel *panel, gpointer user_data)
 }
 
 /* ----------------------------------------------------------------- */
+/* Save: closed-panel walk                                           */
+/* ----------------------------------------------------------------- */
+
+/* A static panel counts as OPEN when it is registered and hooked
+ * into some dock's widget tree — the main dock or an undocked
+ * window, both of which put a PanelFrame above it. Everything else
+ * is closed: never constructed this run, or constructed and then
+ * closed (the registry keeps its strong ref, so the panel is alive
+ * but parentless).
+ *
+ * gtk_widget_get_ancestor rather than gtk_widget_get_parent for the
+ * reason documented in docs/docking.md: libadwaita's AdwBin can
+ * outlive the AdwTabPage that wrapped it, so a just-closed panel
+ * still appears to have a parent for a moment. */
+static gboolean
+static_panel_is_open (const char *id)
+{
+    HxPanel *panel = hx_panel_registry_lookup (id);
+
+    if (panel == NULL) {
+        return FALSE;
+    }
+    return gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
+           != NULL;
+}
+
+/* Write [Dock] closed= as a ';'-separated list of the static panels
+ * that aren't in any dock right now.
+ *
+ * Serialised as the closed set rather than the open one so that a
+ * panel id this version has never heard of — one added by a later
+ * release, or by a file written before this key existed — defaults
+ * to open. An absent key therefore means "nothing was closed",
+ * which is exactly how every layout file written before this change
+ * should be read. */
+static void
+serialize_closed_panels (GKeyFile *kf)
+{
+    GString *closed = g_string_new (NULL);
+
+    for (const char *const *idp = hx_panel_static_ids; *idp != NULL; idp++) {
+        if (static_panel_is_open (*idp)) {
+            continue;
+        }
+        if (closed->len > 0) {
+            g_string_append_c (closed, ';');
+        }
+        g_string_append (closed, *idp);
+    }
+
+    if (closed->len > 0) {
+        g_key_file_set_string (kf, "Dock", "closed", closed->str);
+    }
+    g_string_free (closed, TRUE);
+}
+
+/* ----------------------------------------------------------------- */
 /* Save (coalesced)                                                  */
 /* ----------------------------------------------------------------- */
 
@@ -284,6 +371,30 @@ on_save_idle (gpointer user_data)
     HxSplit *root = dock.dock_root;
     if (root == NULL) {
         debug_log ("layout", "save: no dock root, skipping");
+        return G_SOURCE_REMOVE;
+    }
+
+    /* Refuse to serialise a dock that has never been allocated.
+     *
+     * An unallocated GtkPaned reports position 0, so a save that
+     * landed here would write sizes=0;0;0 — and since
+     * dock_layout_apply_geometry ignores a saved position of 0, the
+     * next launch would silently come up with default dividers and
+     * the user's arrangement would be gone.
+     *
+     * That became reachable when tab switches started requesting a
+     * save: startup adds panels one at a time, each add fires
+     * notify::visible-child, and the resulting timer can beat the
+     * first allocation. Nothing the user did is at stake this early
+     * — the state here is exactly what was loaded — so dropping the
+     * request is right, and any real change afterwards re-arms it.
+     *
+     * Width rather than realized/mapped: the paned positions are set
+     * from a notify::max-position handler that fires *during* the
+     * first allocation pass, and a non-zero width is the property
+     * that says that pass has happened. */
+    if (gtk_widget_get_width (GTK_WIDGET (root)) <= 0) {
+        debug_log ("layout", "save: dock not allocated yet, skipping");
         return G_SOURCE_REMOVE;
     }
 
@@ -304,6 +415,7 @@ on_save_idle (gpointer user_data)
      * nothing is undocked — GKeyFile drops empty groups so the
      * file just doesn't gain an [Undocked] header in that case. */
     hx_panel_registry_foreach (visit_undocked_panel, kf);
+    serialize_closed_panels (kf);
     if (sizes->len > 0) {
         GString *sz = g_string_new (NULL);
         for (guint i = 0; i < sizes->len; i++) {
@@ -412,6 +524,11 @@ dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
         dock.id_to_frame
             = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     }
+    if (dock.selected_ids != NULL) {
+        g_ptr_array_set_size (dock.selected_ids, 0);
+    } else {
+        dock.selected_ids = g_ptr_array_new_with_free_func (g_free);
+    }
 
     GPtrArray *paneds = g_ptr_array_new ();
     *out_sidebar_frame = NULL;
@@ -453,6 +570,7 @@ dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
                        "falling back to defaults");
             g_ptr_array_unref (paneds);
             g_hash_table_remove_all (dock.id_to_frame);
+            g_ptr_array_set_size (dock.selected_ids, 0);
             if (root != NULL) {
                 g_object_unref (g_object_ref_sink (root));
             }
@@ -513,6 +631,31 @@ dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
             g_free (val);
         }
         g_strfreev (keys);
+    }
+
+    /* Parse [Dock] closed= into the closed set. Read by
+     * dock_layout_panel_was_closed, which the startup panel-build
+     * path consults before calling a factory. */
+    if (dock.closed_ids != NULL) {
+        g_hash_table_remove_all (dock.closed_ids);
+    } else {
+        dock.closed_ids
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    }
+
+    {
+        char *closed_str = g_key_file_get_string (kf, "Dock", "closed", NULL);
+        if (closed_str != NULL) {
+            char **parts = g_strsplit (closed_str, ";", -1);
+            for (guint i = 0; parts[i] != NULL; i++) {
+                char *id = g_strstrip (parts[i]);
+                if (id[0] != '\0') {
+                    g_hash_table_add (dock.closed_ids, g_strdup (id));
+                }
+            }
+            g_strfreev (parts);
+            g_free (closed_str);
+        }
     }
 
     dock.loaded = TRUE;
@@ -655,6 +798,54 @@ dock_layout_place_panel (HxPanel *panel)
 }
 
 /* ----------------------------------------------------------------- */
+/* Foreground page restore                                           */
+/* ----------------------------------------------------------------- */
+
+void
+dock_layout_apply_selection (void)
+{
+    if (!dock.loaded || dock.selected_ids == NULL) {
+        return;
+    }
+
+    for (guint i = 0; i < dock.selected_ids->len; i++) {
+        const char *id = g_ptr_array_index (dock.selected_ids, i);
+        HxPanel *panel = hx_panel_registry_lookup (id);
+
+        if (panel == NULL) {
+            continue; /* saved page never got built this run */
+        }
+        /* Only raise a panel that is actually in a frame. Raising a
+         * detached one is a no-op at best; at worst it would mask a
+         * placement bug by looking like it worked. */
+        if (gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
+            == NULL) {
+            continue;
+        }
+        panel_widget_raise (PANEL_WIDGET (panel));
+        debug_log ("layout", "raised saved foreground page: %s", id);
+    }
+
+    /* One-shot, like the pending-undock map: the list describes the
+     * state at startup, and everything after that is the user
+     * choosing a tab. */
+    g_ptr_array_set_size (dock.selected_ids, 0);
+}
+
+/* ----------------------------------------------------------------- */
+/* Closed panels                                                     */
+/* ----------------------------------------------------------------- */
+
+gboolean
+dock_layout_panel_was_closed (const char *id)
+{
+    if (!dock.loaded || dock.closed_ids == NULL || id == NULL) {
+        return FALSE;
+    }
+    return g_hash_table_contains (dock.closed_ids, id);
+}
+
+/* ----------------------------------------------------------------- */
 /* Reset                                                             */
 /* ----------------------------------------------------------------- */
 
@@ -672,6 +863,12 @@ dock_layout_reset (void)
     }
     if (dock.id_to_undock_size != NULL) {
         g_hash_table_remove_all (dock.id_to_undock_size);
+    }
+    if (dock.selected_ids != NULL) {
+        g_ptr_array_set_size (dock.selected_ids, 0);
+    }
+    if (dock.closed_ids != NULL) {
+        g_hash_table_remove_all (dock.closed_ids);
     }
     dock.loaded = FALSE;
 

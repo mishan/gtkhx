@@ -90,6 +90,32 @@ extern void toolbar_register_actions (GApplication *app, session *sess);
  * leaf's PanelFrame needs the same hooks). */
 extern void toolbar_install_panel_hooks_on_frame (GtkWidget *frame);
 
+/* Build a static dock panel by its registry id. Returns TRUE when
+ * the panel exists afterwards.
+ *
+ * `respect_saved_state` is the whole difference between the callers.
+ * TRUE is the startup path: a panel the saved dock layout recorded
+ * as closed is deliberately left unbuilt, which is what "closed
+ * panels stay closed across a restart" means. FALSE is the user path
+ * — a toolbar-button click is an explicit request and outranks
+ * whatever was on disk.
+ *
+ * The saved state only governs whether a panel is built in the first
+ * place. An existing panel's factory runs regardless, because the
+ * factories are keyed by (panel, session): a second connection needs
+ * its own content page inside a panel the first one already built.
+ *
+ * `sess` is the session whose content the panel renders. NULL is
+ * tolerated and builds nothing. */
+extern gboolean toolbar_build_panel (const char *id, session *sess,
+                                     gboolean respect_saved_state);
+
+/* toolbar_build_panel, then re-attach the panel if it was closed
+ * earlier this session, then bring it forward in its frame. What a
+ * toolbar button does, and what the startup auto-open does. */
+extern void toolbar_present_panel (const char *id, session *sess,
+                                   gboolean respect_saved_state);
+
 /* Hard horizontal minimum every leaf in the dock applies via
  * gtk_widget_set_size_request. Lives in the header so the
  * saved-layout loader (src/dock_layout.c) and the default-build

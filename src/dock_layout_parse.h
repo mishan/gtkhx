@@ -22,13 +22,16 @@
  *   h(A,B)              horizontal split
  *   v(A,B)              vertical split
  *   L[id1,id2,...]      leaf with panel IDs in tab order
+ *   L[id1,*id2]         '*' marks the leaf's foreground page
  *   L[ids:role]         leaf tagged with one of start / end /
  *                       bottom / center
  *
  * Whitespace between tokens is tolerated so users can hand-edit
  * the file. Panel IDs are anything that isn't a separator
  * character (',' ']' ':' or whitespace) — no quoting needed for
- * the IDs we actually have.
+ * the IDs we actually have. A leading '*' on an ID is the
+ * foreground marker and is not part of the ID; at most one ID per
+ * leaf may carry it.
  */
 
 #ifndef GTKHX_DOCK_LAYOUT_PARSE_H
@@ -49,6 +52,13 @@ typedef struct DLParsedNode {
     gboolean is_leaf;
     GPtrArray *panel_ids; /* char *, owned */
     char *role;           /* owned; NULL when untagged */
+
+    /* Index into panel_ids of the page that was in the foreground
+     * when the layout was saved, or -1 when the leaf recorded none
+     * (an empty leaf, or a file written before the marker existed).
+     * NOT zero-defaulted: 0 is a legitimate index, so every
+     * construction path sets this explicitly. */
+    int selected;
 
     /* Internal-split state. is_leaf FALSE → these are populated. */
     DLOrientation orientation;

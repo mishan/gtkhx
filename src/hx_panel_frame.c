@@ -15,6 +15,7 @@
 #include "config.h"
 
 #include "hx_panel_frame.h"
+#include "dock_layout.h"
 #include "hx_panel.h"
 #include "debug.h"
 
@@ -132,6 +133,13 @@ on_visible_child_notify (HxPanelFrame *self, GParamSpec *pspec,
     /* connect_after: libpanel's notify::visible-child handler
      * (which calls panel_frame_update_actions) has already run. */
     refresh_move_enabled (self);
+
+    /* Which page a frame shows is part of the saved layout (the '*'
+     * marker in the tree expression), so a tab switch is a layout
+     * change. The 200 ms debounce absorbs the burst of these that
+     * startup produces as panels are added one by one; the write
+     * that lands is the settled state. */
+    dock_layout_request_save ();
 }
 
 /* AdwTabView's setup-menu signal fires immediately before the

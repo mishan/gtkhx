@@ -19,8 +19,12 @@
  *   split  := ('h' | 'v') '(' node ',' node ')'
  *   leaf   := 'L' '[' ids? (':' role)? ']'
  *   ids    := id (',' id)*
- *   id     := one or more chars from [^,]:[whitespace]
+ *   id     := '*'? one or more chars from [^,]:[whitespace]
  *   role   := one or more chars from [^]] [whitespace]
+ *
+ * The optional '*' prefix marks the leaf's foreground page. At most
+ * one ID per leaf may carry it — a second one is a structurally
+ * broken file, not a tie to break arbitrarily, so it's rejected.
  */
 
 #include "config.h"
@@ -94,25 +98,51 @@ parse_leaf (Cursor *c)
     DLParsedNode *n = g_new0 (DLParsedNode, 1);
     n->is_leaf = TRUE;
     n->panel_ids = g_ptr_array_new_with_free_func (g_free);
+    n->selected = -1;
 
     skip_ws (c);
     /* Empty leaf ("L[]" or "L[:role]")? */
     while (c->p < c->end && *c->p != ']' && *c->p != ':') {
-        const char *start = c->p;
+        const char *start;
+        gboolean is_selected = FALSE;
+
+        /* Foreground marker. Consumed before the id scan so the '*'
+         * never lands in the id itself. A second marker in the same
+         * leaf means two foreground pages in one frame, which the
+         * serialiser can't produce and we can't act on. */
+        if (*c->p == '*') {
+            if (n->selected >= 0) {
+                dl_parsed_node_free (n);
+                return NULL;
+            }
+            is_selected = TRUE;
+            c->p++;
+            skip_ws (c); /* "L[ * b ]" — the file is hand-editable */
+        }
+
+        start = c->p;
+        /* '*' terminates an id as well as separating one, so a second
+         * marker ("L[**a]") can't be quietly absorbed into the id and
+         * then match no panel at restore time. No real panel id
+         * contains one. */
         while (c->p < c->end && *c->p != ',' && *c->p != ']' && *c->p != ':'
-               && !g_ascii_isspace (*c->p)) {
+               && *c->p != '*' && !g_ascii_isspace (*c->p)) {
             c->p++;
         }
         /* Reject zero-length ids ("L[,a]", "L[a,,b]", "L[a,]" all
-         * have at least one empty slot). The serialiser would
-         * never produce these, so a hand-edited file with them is
-         * structurally broken. */
+         * have at least one empty slot; "L[*]" is a marker with
+         * nothing behind it). The serialiser would never produce
+         * these, so a hand-edited file with them is structurally
+         * broken. */
         if (c->p == start) {
             dl_parsed_node_free (n);
             return NULL;
         }
         g_ptr_array_add (n->panel_ids,
                          g_strndup (start, (gsize)(c->p - start)));
+        if (is_selected) {
+            n->selected = (int)n->panel_ids->len - 1;
+        }
         skip_ws (c);
         if (!match (c, ',')) {
             break;
@@ -180,6 +210,7 @@ parse_split (Cursor *c, DLOrientation orientation)
     n->orientation = orientation;
     n->child_a = a;
     n->child_b = b;
+    n->selected = -1; /* leaf-only field; never read on a split */
     return n;
 }
 
