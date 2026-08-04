@@ -53,6 +53,7 @@
 
 #ifdef HAVE_VOICE
 #include "voice_model.h"
+#include "voice_runtime.h"
 #endif
 
 /* Every live session, in creation order. Strong: the registry owns them.
@@ -63,6 +64,8 @@ static GPtrArray *sessions;
 /* Index into `sessions` of the one the user is looking at. Meaningless when
  * the array is empty, which is why every reader checks the length first. */
 static guint focused;
+
+static void hx_session_free (session *sess);
 
 static void
 ensure_array (void)
@@ -128,6 +131,22 @@ hx_active_session (void)
     return g_ptr_array_index (sessions, focused);
 }
 
+session *
+hx_session_with_serial (guint16 serial)
+{
+    if (sessions == NULL || serial == 0) {
+        return NULL;
+    }
+    for (guint i = 0; i < sessions->len; i++) {
+        session *sess = g_ptr_array_index (sessions, i);
+
+        if (hx_conn_serial (sess->htlc) == serial) {
+            return sess;
+        }
+    }
+    return NULL;
+}
+
 gboolean
 hx_session_set_active (session *sess)
 {
@@ -180,19 +199,94 @@ hx_session_remove (session *sess)
         focused = sessions->len - 1;
     }
 
-    /* The struct itself is deliberately not freed.
-     *
-     * Raw `session *` pointers are held in places that have no way to learn
-     * one has gone: the connection tab strip's index, the voice arbiter's
-     * token, a dialog captured mid-answer. Every one of them is written
-     * against "sessions are immortal", which has been true since the registry
-     * was built and is what makes those pointers safe to hold at all.
-     *
-     * So closing a connection leaks one session struct and its collections.
-     * That is the honest trade until those holders can be told — an audit
-     * worth doing on its own, not on the way past. It is bounded by how many
-     * connections a user opens and closes in one run. */
+    hx_session_free (sess);
     return TRUE;
+}
+
+/* Release a session and everything it owns. Static because a session still in
+ * the collection must never be freed, and hx_session_remove is the only place
+ * that knows it isn't.
+ *
+ * Only reachable through hx_session_remove, so a freed session is never in the
+ * collection — which is what makes the connection serial a safe thing to hold
+ * in place of a pointer: `hx_session_with_serial` answers NULL the moment this
+ * runs, and every long-lived holder asks it rather than keeping a pointer of
+ * its own.
+ *
+ * The three collections destroy their entries: `tasks` through `task_free`,
+ * `msg_windows` through `msgwin_free`, and the chat registry through the
+ * `chat_free` it was built with — which is also what tears down each chat's
+ * attached view.
+ *
+ * Most widget fields on the session are borrowed: children of a dock page that
+ * `hx_session_close` destroyed before getting here, gone with their parent.
+ * Three are not, and each is released explicitly below, because a borrowed
+ * pointer and an owned one look identical at the struct:
+ *
+ *   - `gtklist` and `gtask_scroll` are `g_object_ref_sink`ed by `tasks.c` on
+ *     purpose, so they survive being unparented.
+ *   - `users_view` arrives transfer-full from Rust; the session holds the only
+ *     reference, and dropping it is also what lets the view's `dispose`
+ *     disconnect its handler on the process-lifetime theme object — a handler
+ *     that would otherwise fire against a view holding a freed session.
+ *   - `gtask_list` is a hand-rolled intrusive list, unrelated to the `tasks`
+ *     hash table and not freed by it.
+ *
+ * Ordering matters within each clear, and `g_clear_pointer` is what provides
+ * it: the macro NULLs the field *before* calling the destroy function, not
+ * after. So a destroy callback that re-enters — a chat's `chat_free`, a task's
+ * `ptr_free` — finds `sess->chats` / `sess->tasks` already NULL and takes the
+ * empty-table path, rather than walking a table mid-destruction. Reading it as
+ * "destroy, then NULL" is the natural mistake, and would be a use-after-free
+ * waiting for the first callback that looks back at its session.
+ *
+ * The connection is the exception, and it stays allocated. hxnet posts
+ * main-loop events carrying the raw `struct htlc_conn *`, and a shutdown
+ * already on the idle queue can be dispatched after the close that provoked it
+ * — `hx_bridge_dispatch_shutdown` reads the connection to decide whether it is
+ * a late duplicate. Freeing it here would turn that read into a
+ * use-after-free. What we can do is cut the back-pointer, so `sess_from_htlc`
+ * answers NULL and every model-side path that would have reached a dead
+ * session is safe by construction rather than by timing.
+ *
+ * The residue is therefore one fixed-size connection struct per closed
+ * connection rather than a whole session tree. Freeing that too means the
+ * hxnet callbacks carrying a serial and looking the connection up, the same
+ * shape used here — worth doing, and its own piece of work. */
+static void
+hx_session_free (session *sess)
+{
+    if (sess == NULL) {
+        return;
+    }
+
+    g_clear_pointer (&sess->tasks, g_hash_table_destroy);
+    g_clear_pointer (&sess->msg_windows, g_hash_table_destroy);
+    g_clear_pointer (&sess->chats, hx_chats_free);
+    g_clear_pointer (&sess->server_name, g_free);
+
+    /* The task rows, before the widgets they are parented to. */
+    while (sess->gtask_list != NULL) {
+        gtask_delete (sess, sess->gtask_list);
+    }
+    g_clear_object (&sess->gtklist);
+    g_clear_object (&sess->gtask_scroll);
+    g_clear_object (&sess->users_view);
+
+#ifdef HAVE_VOICE
+    g_clear_object (&sess->voice_model);
+    /* Normally already gone: hx_htlc_close frees it, and hx_session_close runs
+     * that first. Not unconditionally, though — it only closes a connection
+     * that still has a socket — so a runtime outliving a connection that was
+     * already down would otherwise take a GStreamer pipeline with it. */
+    if (sess->voice_runtime != NULL) {
+        gtkhx_voice_runtime_free (sess->voice_runtime);
+        sess->voice_runtime = NULL;
+    }
+#endif
+
+    hx_conn_set_sess (sess->htlc, NULL);
+    g_free (sess);
 }
 
 guint

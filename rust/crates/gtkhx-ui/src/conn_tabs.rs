@@ -64,8 +64,12 @@ extern "C" {
     /// connection is now selected.
     fn hx_chrome_refresh();
     /// `gtkhx.c` — disconnect a session, destroy its content page in every
-    /// per-connection panel, and drop it from the registry.
+    /// per-connection panel, drop it from the registry and free it.
     fn hx_session_close(sess: *mut c_void);
+    /// `session_registry.c` — the live session on this connection, or NULL if
+    /// it has been closed. The safe way to keep a reference across a turn of
+    /// the main loop.
+    fn hx_session_with_serial(serial: u16) -> *mut c_void;
 }
 
 fn debug(msg: &str) {
@@ -86,19 +90,13 @@ struct ConnTabs {
     /// chat tab strip.
     strip: Option<gtk::Box>,
     view: Option<adw::TabView>,
-    /// serial → its tab, and serial → its session. Two maps rather than one of
-    /// pairs because the lookups go in both directions: a badge arrives with a
-    /// connection and wants the tab, a selection arrives with a tab and wants
-    /// the session.
-    ///
-    /// The session pointers are raw and unowned, and nothing here can tell
-    /// whether one is still good. That is safe *only* because sessions are
-    /// immortal: `session_registry.c` has no remove, and `on_close_page`
-    /// refuses to close a tab, so an entry once written is never stale. M6 is
-    /// what breaks that — the moment a connection can be closed, this needs an
-    /// invalidation path, and the tab removal is where it goes.
+    /// serial → its tab. The other direction — a tab to the session it belongs
+    /// to — used to be a second map of raw `session *`, which was safe only
+    /// while sessions were immortal. They aren't: closing a tab frees one. So
+    /// the session is looked up from the serial through the registry at the
+    /// moment it is needed, and a connection that has gone answers NULL
+    /// instead of handing back a pointer into freed memory.
     tabs: HashMap<ConnKey, adw::TabPage>,
-    sessions: HashMap<ConnKey, *mut c_void>,
 }
 
 thread_local! {
@@ -177,10 +175,16 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
         view.close_page_finish(page, false);
         return glib::Propagation::Stop;
     };
-    let Some(sess) = STATE.with(|s| s.borrow().sessions.get(&conn).copied()) else {
-        view.close_page_finish(page, false);
+    let sess = unsafe { hx_session_with_serial(conn) };
+    if sess.is_null() {
+        // The connection is already gone. Its tab shouldn't be here, but
+        // taking it away is closer to right than refusing to.
+        STATE.with(|s| {
+            s.borrow_mut().tabs.remove(&conn);
+        });
+        view.close_page_finish(page, true);
         return glib::Propagation::Stop;
-    };
+    }
 
     // Move the focus off it if it is the one selected. Selecting a neighbour
     // runs the ordinary switch — focus, panels, chrome — so by the time the
@@ -197,9 +201,7 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     unsafe { hx_session_close(sess) };
 
     STATE.with(|s| {
-        let mut st = s.borrow_mut();
-        st.tabs.remove(&conn);
-        st.sessions.remove(&conn);
+        s.borrow_mut().tabs.remove(&conn);
     });
     debug(&format!("closed connection {conn}"));
 
@@ -219,12 +221,13 @@ fn on_selected_page_changed(view: &adw::TabView) {
 
     page.set_needs_attention(false);
 
-    // Drop the borrow before anything that can re-enter: hx_session_set_active
-    // is C, and swap_panels goes through the dock bridge into libpanel.
-    let sess = STATE.with(|s| s.borrow().sessions.get(&conn).copied());
-    let Some(sess) = sess else {
+    let sess = unsafe { hx_session_with_serial(conn) };
+    if sess.is_null() {
+        debug(&format!(
+            "connection {conn}: selected a tab with no session"
+        ));
         return;
-    };
+    }
 
     // Focus first, then content. `hx_active_session()` is what the panels'
     // own handlers read, so a panel that rebuilds anything during the swap
@@ -320,9 +323,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_add(sess: *mut c_void, title: *const c_
     set_tab_conn(&page, conn);
 
     STATE.with(|s| {
-        let mut st = s.borrow_mut();
-        st.tabs.insert(conn, page.clone());
-        st.sessions.insert(conn, sess);
+        s.borrow_mut().tabs.insert(conn, page.clone());
     });
 
     // `append` selects the page itself when the view was empty, and it does
@@ -510,6 +511,10 @@ pub(crate) mod tests {
         // and there is nothing to free them for.
         let (a, b) = unsafe { (hx_conn_new(), hx_conn_new()) };
         assert_ne!(serial_of(a), serial_of(b), "two connections, one serial");
+        // Into the stand-in registry, because the strip finds a session by
+        // asking for it rather than by keeping a pointer.
+        crate::options_test_stubs::register_session(a);
+        crate::options_test_stubs::register_session(b);
         unsafe {
             gtkhx_conn_tabs_add(a, c"Server A".as_ptr());
             assert_eq!(gtkhx_conn_tabs_count(), 1);
@@ -580,5 +585,33 @@ pub(crate) mod tests {
         );
         unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GFALSE) };
         assert!(!tab_for(other).unwrap().needs_attention());
+
+        // Closing. Three things have to happen together: the tab goes, the
+        // session is told, and the connection stops resolving. The first two
+        // are the pair that was broken — closing was refused outright, so the
+        // button looked live and did nothing. The third is what makes the
+        // strip safe now that a close *frees* the session: it keeps serials
+        // rather than pointers precisely so a closed connection answers
+        // nothing instead of answering with freed memory.
+        let closes = crate::options_test_stubs::SESSION_CLOSE_CALLS
+            .load(std::sync::atomic::Ordering::Relaxed);
+        unsafe { gtkhx_conn_tabs_close(b) };
+        assert_eq!(gtkhx_conn_tabs_count(), 1, "closing left the tab behind");
+        assert_eq!(view.n_pages(), 1);
+        assert!(tab_for(other).is_none(), "closed connection still indexed");
+        assert_eq!(
+            crate::options_test_stubs::SESSION_CLOSE_CALLS
+                .load(std::sync::atomic::Ordering::Relaxed),
+            closes + 1,
+            "the tab went but the connection was never torn down"
+        );
+        assert!(
+            unsafe { crate::options_test_stubs::hx_session_with_serial(other) }.is_null(),
+            "a closed connection still resolves to a session"
+        );
+        // Back below two, so the strip hides itself again.
+        assert!(!bar.is_tabs_revealed(), "strip visible at one connection");
+        // And the survivor is what the user is left looking at.
+        assert_eq!(tab_conn(&view.selected_page().unwrap()), Some(serial_of(a)));
     }
 }

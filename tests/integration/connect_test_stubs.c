@@ -486,3 +486,17 @@ hx_voice_model_clear (HxVoiceModel *self)
 {
     (void)self;
 }
+
+/* Session-registry stub. network.c's tracker drain resolves the connection
+ * that asked for the walk from its serial each tick, so a tab closed mid-walk
+ * stops the drain rather than delivering into a freed session. These binaries
+ * link network.c without session_registry.c and drive the tracker directly,
+ * with no registry behind them — answering NULL would end every fetch on the
+ * first tick, so this reports the one session the harness runs as. */
+extern session *hx_session_with_serial (guint16 serial);
+session *
+hx_session_with_serial (guint16 serial)
+{
+    (void)serial;
+    return &the_session;
+}
