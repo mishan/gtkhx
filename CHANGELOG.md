@@ -23,6 +23,9 @@
   - Users may now be connected to more than one server at a time, and switch between connections with tabs
 - Sound
   - Replaced libcanberra with rodio for notification sound playback
+- Translations
+  - Updated existing translations
+  - Added Japanese translations
 - User Interface
   - Button icons now default to their original size, rather than upscaled
   - Brand new hxchat widget for Chat (replaces forked version of HexChat's xtext)
