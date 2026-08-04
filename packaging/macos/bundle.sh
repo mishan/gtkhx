@@ -71,10 +71,16 @@ run_dylibbundler --create-dir --overwrite-files --bundle-deps \
 # DYLD fallback path as a backstop for anything not rewritten.
 GST_SRC="$BREW/lib/gstreamer-1.0"
 GST_DST="$FW/gstreamer-1.0"
+# Source of truth: the element factories hxvoice-runtime creates (grep
+# ElementFactory::make in rust/crates/hxvoice-runtime). mulaw (mulawenc/mulawdec)
+# is the PCMU codec the servers negotiate — without it VoiceRuntime::new fails to
+# build the send bin and the client leaves the room the instant it joins.
+# audiotestsrc is the silence/fallback source autoaudiosrc drops to when there's
+# no capture device.
 GST_PLUGINS=(
   coreelements playback autodetect typefindfunctions
-  audioconvert audioresample audiomixer volume level
-  opus rtp rtpmanager srtp dtls sctp webrtc webrtcnice nice
+  audioconvert audioresample audiomixer volume level audiotestsrc
+  opus mulaw rtp rtpmanager srtp dtls sctp webrtc webrtcnice nice
   osxaudio applemedia
 )
 if [ -d "$GST_SRC" ]; then
