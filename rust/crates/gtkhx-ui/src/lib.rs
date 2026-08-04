@@ -244,6 +244,14 @@ pub(crate) fn ensure_tab_attention_css() {
 /// bar is a control for — and in the connection strip's case the view is never
 /// drawn at all, so it would never see the event.
 ///
+/// **In the capture phase**, which is what makes it work at all. `AdwTabBar`
+/// wraps its tabs in a `GtkScrolledWindow` so a long strip can be scrolled
+/// sideways, and that is a *descendant* of the bar — so in the ordinary bubble
+/// phase it handles the wheel first and the event never reaches here. Capture
+/// runs top-down, so the bar sees it before the scrolled window does. The cost
+/// is deliberate: wheeling over the strip switches tabs instead of panning it,
+/// which is the behaviour asked for and the one browsers have.
+///
 /// Wheel up selects the previous tab and down the next, which is the direction
 /// every tabbed application agrees on. Horizontal wheels and touchpad kinetic
 /// scrolling arrive through the same controller, so both axes are read and the
@@ -263,6 +271,8 @@ pub(crate) fn wheel_switches_tabs(
     let scroll = gtk4::EventControllerScroll::new(
         gtk4::EventControllerScrollFlags::BOTH_AXES | gtk4::EventControllerScrollFlags::DISCRETE,
     );
+    scroll.set_propagation_phase(gtk4::PropagationPhase::Capture);
+
     let view = view.clone();
     scroll.connect_scroll(move |_, dx, dy| {
         let d = if dy.abs() >= dx.abs() { dy } else { dx };

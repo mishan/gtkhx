@@ -890,4 +890,84 @@ pub(crate) mod tests {
             "the closed connection still resolves"
         );
     }
+
+    /// Wheeling over the tab strip switches tabs.
+    ///
+    /// Two halves, and the first shipped broken because only the second was
+    /// thought about. `AdwTabBar` wraps its tabs in a `GtkScrolledWindow` for
+    /// sideways panning, and that is a descendant of the bar — so a controller
+    /// in the ordinary bubble phase never sees the wheel at all, because the
+    /// scrolled window has already handled it. Hence the phase assertion:
+    /// it is the whole difference between working and silently doing nothing,
+    /// and nothing else in the client would notice it changing.
+    ///
+    /// The handler itself is driven by emitting `scroll` on the controller,
+    /// which is what GTK does once the event reaches it. Synthesising a real
+    /// wheel event needs a compositor; what this can pin is that the
+    /// controller is mounted where the event will find it, and that it does
+    /// the right thing when it arrives.
+    pub(crate) fn check_wheel_switches_tabs() {
+        let view = view().expect("strip built by an earlier check");
+        let bar = strip()
+            .expect("strip built")
+            .first_child()
+            .and_downcast::<adw::TabBar>()
+            .expect("the strip's first child is the tab bar");
+
+        let scroll = bar
+            .observe_controllers()
+            .into_iter()
+            .flatten()
+            .find_map(|c| c.downcast::<gtk::EventControllerScroll>().ok())
+            .expect("no scroll controller on the tab bar");
+
+        assert_eq!(
+            scroll.propagation_phase(),
+            gtk::PropagationPhase::Capture,
+            "not in the capture phase — the tab bar's own scrolled window \
+             will eat the wheel before this ever runs"
+        );
+
+        // Two connections, so there is somewhere to move to.
+        let (x, y) = unsafe { (hx_conn_new(), hx_conn_new()) };
+        crate::options_test_stubs::register_session(x);
+        crate::options_test_stubs::register_session(y);
+        unsafe {
+            gtkhx_conn_tabs_add(x, c"First".as_ptr());
+            gtkhx_conn_tabs_add(y, c"Second".as_ptr());
+        }
+        let (kx, ky) = (serial_of(x), serial_of(y));
+
+        // Adding selects the last one added.
+        view.set_selected_page(&tab_for(ky).unwrap());
+        let selected = || tab_conn(&view.selected_page().unwrap());
+
+        // Up is previous, down is next — the direction every tabbed
+        // application agrees on.
+        scroll.emit_by_name::<bool>("scroll", &[&0.0f64, &-1.0f64]);
+        assert_eq!(
+            selected(),
+            Some(kx),
+            "wheel up did not go to the previous tab"
+        );
+        scroll.emit_by_name::<bool>("scroll", &[&0.0f64, &1.0f64]);
+        assert_eq!(
+            selected(),
+            Some(ky),
+            "wheel down did not go to the next tab"
+        );
+
+        // At the end there is nowhere to go, and the event is left for
+        // whatever is underneath rather than swallowed against a wall.
+        let at_end = scroll.emit_by_name::<bool>("scroll", &[&0.0f64, &1.0f64]);
+        assert!(!at_end, "claimed a scroll that moved nothing");
+
+        // A diagonal flick moves one tab, not two: the larger axis wins.
+        scroll.emit_by_name::<bool>("scroll", &[&-0.2f64, &-1.0f64]);
+        assert_eq!(
+            selected(),
+            Some(kx),
+            "a diagonal scroll did not follow its larger axis"
+        );
+    }
 }

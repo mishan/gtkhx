@@ -31,4 +31,5 @@ fn display_backed() {
     crate::options_window::tests::check_every_page_builds();
     crate::conn_tabs::tests::check_strip_indexes_connections();
     crate::conn_tabs::tests::check_live_connection_asks_before_closing();
+    crate::conn_tabs::tests::check_wheel_switches_tabs();
 }
