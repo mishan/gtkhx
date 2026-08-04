@@ -254,6 +254,12 @@ pub unsafe extern "C" fn hx_session_with_serial(serial: u16) -> *mut c_void {
 /// or behind C state a test binary doesn't link. Inert.
 #[no_mangle]
 pub unsafe extern "C" fn hx_chrome_refresh() {}
+/// The server's advertised name, or its address. Transfer-full in
+/// production, so this hands back an allocation the caller frees.
+#[no_mangle]
+pub unsafe extern "C" fn hx_session_label(_sess: *mut c_void) -> *mut c_char {
+    glib::ffi::g_strdup(c"test server".as_ptr())
+}
 #[no_mangle]
 pub unsafe extern "C" fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
 

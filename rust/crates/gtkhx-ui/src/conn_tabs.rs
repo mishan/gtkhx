@@ -41,20 +41,27 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 
 use gtk::glib;
-use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
+// Re-exports gtk4's prelude, so this is the only one needed.
+use libadwaita::prelude::*;
 
 use crate::dock;
 use crate::dock::ConnKey;
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 extern "C" {
-    /// `gtkhx_ui_bridge.c` — the connection a session owns. Only for the
-    /// tests, which use a connection as its own session; the module reaches
-    /// the key through `dock` like everything else.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// `gtkhx_ui_bridge.c` — the connection a session owns. The module
+    /// reaches the *key* through `dock` like everything else; this is for the
+    /// one place that needs the connection itself, plus the tests, which use
+    /// a connection as its own session.
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// `gtkhx-core` — the connection's socket, or 0 when it has none.
+    /// Dereferences, so never hand it NULL.
+    fn hx_conn_fd(htlc: *const c_void) -> std::os::raw::c_int;
+    /// `gtkutil.c` — the server's advertised name, or its address. Owned by
+    /// the caller.
+    fn hx_session_label(sess: *mut c_void) -> *mut c_char;
     /// `session_registry.c` — move the focus. FALSE if the session isn't in
     /// the collection, which leaves the focus alone.
     fn hx_session_set_active(sess: *mut c_void) -> glib::ffi::gboolean;
@@ -101,6 +108,18 @@ struct ConnTabs {
 
 thread_local! {
     static STATE: RefCell<ConnTabs> = RefCell::new(ConnTabs::default());
+}
+
+// How many close requests `AdwTabView` has delivered.
+//
+// The only way to see the property that a *declined* close still has to be
+// reported: an unfinished close leaves the page mid-close, and libadwaita then
+// stops delivering `close-page` for it — so the tab can never be shut again,
+// silently. Nothing else observes that, because the symptom is the absence of
+// a signal.
+#[cfg(test)]
+thread_local! {
+    static CLOSE_REQUESTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Clone the view out of the cell, holding the borrow only for the clone — so
@@ -166,9 +185,19 @@ fn swap_panels(conn: ConnKey) {
 /// of which runs its content module's destroy handler. Only then does the tab
 /// go.
 ///
+/// A live connection asks first. Closing its tab disconnects it, which is not
+/// what a misplaced click on an [X] should do — and the tab strip only appears
+/// once there are two connections, so the button is small, adjacent to the one
+/// you are looking at, and easy to hit by accident. `close-page` is designed
+/// for exactly this: the handler stops the close and finishes it later, so the
+/// question can be asked without blocking.
+///
 /// The last connection can't be closed, and needs no check: `AdwTabBar`
 /// autohides below two pages, so there is no close button to press.
 fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation {
+    #[cfg(test)]
+    CLOSE_REQUESTS.with(|n| n.set(n.get() + 1));
+
     let Some(conn) = tab_conn(page) else {
         // No serial on the page — nothing to close against. Decline rather
         // than drop a tab whose connection we can't identify.
@@ -186,6 +215,86 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
         return glib::Propagation::Stop;
     }
 
+    // A connection with a socket is one this would disconnect, so ask. Having
+    // a socket rather than being logged in, matching what the Disconnect
+    // button acts on: a connection still handshaking is just as much something
+    // the user would not expect a stray click to throw away.
+    if unsafe { hx_conn_fd(gtkhx_session_htlc(sess)) } != 0 {
+        confirm_close(view, page, conn);
+        return glib::Propagation::Stop;
+    }
+
+    finish_close(view, page, conn, sess);
+    glib::Propagation::Stop
+}
+
+/// Ask before disconnecting, then finish or abandon the close.
+///
+/// Everything is re-resolved in the response handler rather than captured:
+/// between asking and answering, the connection can have dropped on its own,
+/// or the tab can have gone. The serial is the only thing safe to hold across
+/// that gap, which is the same reason the strip indexes on one.
+fn confirm_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey) {
+    let label = unsafe { hx_session_with_serial(conn) };
+    let name = if label.is_null() {
+        tr("this server")
+    } else {
+        unsafe {
+            let p = hx_session_label(label);
+            let s = crate::cstr(p);
+            glib::ffi::g_free(p as *mut _);
+            s
+        }
+    };
+
+    let dialog = adw::AlertDialog::new(
+        Some(&tr("Disconnect from this server?")),
+        Some(&tr1("Closing this tab disconnects from %s.", &name)),
+    );
+    dialog.add_response("cancel", &tr("_Cancel"));
+    dialog.add_response("close", &tr("_Disconnect"));
+    dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+
+    let anchor = view.clone();
+    let view = view.clone();
+    let page = page.clone();
+    dialog.connect_response(None, move |_dlg, response| {
+        on_confirm_response(&view, &page, conn, response == "close");
+    });
+
+    dialog.present(Some(&anchor));
+}
+
+/// Act on the answer. Split out of the dialog so the two arms are reachable
+/// without one: what a test needs to know is that declining leaves the tab and
+/// unsticks the page, and that accepting tears the connection down — neither
+/// of which is a question about `AdwAlertDialog`.
+fn on_confirm_response(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, confirmed: bool) {
+    if !confirmed {
+        // Declining has to be reported too: an unfinished close leaves the
+        // page stuck, refusing every later attempt to shut it.
+        view.close_page_finish(page, false);
+        return;
+    }
+    // Re-resolve: the connection may have dropped while the question was
+    // open, in which case there is nothing to disconnect and the tab
+    // should simply go.
+    let sess = unsafe { hx_session_with_serial(conn) };
+    if sess.is_null() {
+        STATE.with(|s| {
+            s.borrow_mut().tabs.remove(&conn);
+        });
+        view.close_page_finish(page, true);
+        return;
+    }
+    finish_close(view, page, conn, sess);
+}
+
+/// Tear the connection down and drop its tab. The second half of
+/// [`on_close_page`], reached directly when nothing needed asking.
+fn finish_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, sess: *mut c_void) {
     // Move the focus off it if it is the one selected. Selecting a neighbour
     // runs the ordinary switch — focus, panels, chrome — so by the time the
     // teardown starts, nothing is pointing at the session being closed.
@@ -206,7 +315,6 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     debug(&format!("closed connection {conn}"));
 
     view.close_page_finish(page, true);
-    glib::Propagation::Stop
 }
 
 /// A tab was dragged out of the strip and dropped on the desktop.
@@ -300,6 +408,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_new() -> *mut gtk::ffi::GtkWidget {
 
     let bar = adw::TabBar::new();
     bar.set_view(Some(&view));
+    crate::wheel_switches_tabs(&bar, &view);
     // The default, set explicitly because the single-connection appearance
     // depends on it: with one page (and none pinned) the bar hides itself, so
     // a session with one connection looks as it did before this existed.
@@ -490,6 +599,14 @@ pub(crate) mod tests {
     extern "C" {
         /// `gtkhx-core` — a fresh connection, with the next serial.
         fn hx_conn_new() -> *mut c_void;
+        /// `gtkhx-core` — set the connection's socket. The real accessor, so
+        /// a test connection can be made to look live to the same read
+        /// production gates on.
+        fn hx_conn_set_fd(htlc: *mut c_void, fd: std::os::raw::c_int);
+    }
+
+    fn closes() -> u32 {
+        crate::options_test_stubs::SESSION_CLOSE_CALLS.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// How many times the selection handler has reached `hx_session_set_active`.
@@ -612,6 +729,49 @@ pub(crate) mod tests {
         unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GFALSE) };
         assert!(!tab_for(other).unwrap().needs_attention());
 
+        // A flagged tab's title is bold. The flag is a libadwaita property and
+        // the weight comes from a CSS rule naming libadwaita's own classes, so
+        // this asserts on what is actually rendered — a selector that stopped
+        // matching would leave `needs_attention` perfectly true and nothing
+        // visibly different.
+        unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GTRUE) };
+        fn title_weight(w: &gtk::Widget, want_attention: bool) -> Option<String> {
+            if w.type_().name() == "AdwTab" && w.has_css_class("needs-attention") == want_attention
+            {
+                let mut c = w.first_child();
+                while let Some(ch) = c {
+                    if ch.has_css_class("tab-title") {
+                        // The name of the weight, not its number: the
+                        // comparison only needs the two to differ, and
+                        // `Bold` says what it is asserting.
+                        return Some(format!(
+                            "{:?}",
+                            ch.pango_context().font_description()?.weight()
+                        ));
+                    }
+                    c = ch.next_sibling();
+                }
+            }
+            let mut c = w.first_child();
+            while let Some(ch) = c {
+                if let Some(v) = title_weight(&ch, want_attention) {
+                    return Some(v);
+                }
+                c = ch.next_sibling();
+            }
+            None
+        }
+        let root = bar.upcast_ref::<gtk::Widget>();
+        let flagged = title_weight(root, true).expect("no flagged tab title");
+        let plain = title_weight(root, false).expect("no unflagged tab title");
+        assert_ne!(
+            flagged, plain,
+            "a tab needing attention renders no differently from one that \
+             doesn't — the CSS selector has stopped matching"
+        );
+        assert_eq!(flagged, "Bold", "flagged tab title is not bold");
+        unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GFALSE) };
+
         // A tab dragged onto the desktop. libadwaita asks for a view to move
         // the page into and will not take nothing for an answer — a NULL
         // leaves the drag half-finished and crashes in GTK. Answering with
@@ -659,5 +819,120 @@ pub(crate) mod tests {
         assert!(!bar.is_tabs_revealed(), "strip visible at one connection");
         // And the survivor is what the user is left looking at.
         assert_eq!(tab_conn(&view.selected_page().unwrap()), Some(serial_of(a)));
+    }
+
+    /// Closing the tab of a *live* connection asks first, and the answer is
+    /// acted on.
+    ///
+    /// The gate is the point: closing a tab disconnects, and the strip only
+    /// appears once there are two connections, so the [X] is small and next to
+    /// the one you were reading. Nothing else in the client would notice a
+    /// regression here — the tab would simply close, which is what it looks
+    /// like it should do.
+    ///
+    /// The dialog itself is not driven. `AdwAlertDialog` presenting and
+    /// emitting `response` is libadwaita's to get right; what belongs to this
+    /// module is that a live connection takes the asking path at all, and that
+    /// each answer does what it says. So the gate is observed through
+    /// `close_page`, and the two arms are called the way the dialog calls them.
+    pub(crate) fn check_live_connection_asks_before_closing() {
+        let view = view().expect("strip built by the previous check");
+        let c = unsafe { hx_conn_new() };
+        crate::options_test_stubs::register_session(c);
+        unsafe { gtkhx_conn_tabs_add(c, c"Live Server".as_ptr()) };
+        let conn = serial_of(c);
+        let page = tab_for(conn).expect("no tab for the new connection");
+
+        // A connection with no socket closes on the spot — the same path the
+        // never-connected case takes, and the baseline the gate is measured
+        // against.
+        let before = closes();
+        assert_eq!(
+            unsafe { hx_conn_fd(c) },
+            0,
+            "a fresh connection has a socket"
+        );
+
+        // Now make it live. -1 rather than a plausible descriptor: production
+        // sets exactly that between spawning a connect and the socket
+        // existing, and the gate is a non-zero test, not a valid-fd test.
+        unsafe { hx_conn_set_fd(c, -1) };
+        unsafe { gtkhx_conn_tabs_close(c) };
+        assert!(
+            tab_for(conn).is_some(),
+            "a live connection's tab closed without asking"
+        );
+        assert_eq!(closes(), before, "disconnected before the user answered");
+
+        // Declining leaves the tab — and must report the refusal, or the page
+        // stays mid-close and libadwaita stops delivering `close-page` for it,
+        // so the tab can never be shut again. That is invisible from the
+        // outside: the symptom is a signal that no longer arrives. Hence the
+        // request count.
+        on_confirm_response(&view, &page, conn, false);
+        assert!(tab_for(conn).is_some(), "declining still closed the tab");
+        assert_eq!(closes(), before, "declining still disconnected");
+
+        // Accepting tears it down — and the request reaching us at all is what
+        // proves the decline above unstuck the page.
+        let requests = CLOSE_REQUESTS.with(|n| n.get());
+        unsafe { gtkhx_conn_tabs_close(c) };
+        assert_eq!(
+            CLOSE_REQUESTS.with(|n| n.get()),
+            requests + 1,
+            "a second close was never delivered — declining left the page stuck"
+        );
+        on_confirm_response(&view, &page, conn, true);
+        assert!(tab_for(conn).is_none(), "accepting left the tab behind");
+        assert_eq!(closes(), before + 1, "accepting did not disconnect");
+        assert!(
+            unsafe { crate::options_test_stubs::hx_session_with_serial(conn) }.is_null(),
+            "the closed connection still resolves"
+        );
+    }
+
+    /// The wheel is wired to the tab bar, in the phase where it can see the
+    /// event.
+    ///
+    /// This is the half that shipped broken, and it shipped broken because
+    /// only the *other* half was thought about. `AdwTabBar` wraps its tabs in
+    /// a `GtkScrolledWindow` so a long strip can be panned sideways, and that
+    /// is a descendant of the bar — so a controller in the ordinary bubble
+    /// phase never sees the wheel at all, because the scrolled window has
+    /// already handled it. Nothing else in the client would notice the phase
+    /// changing; the symptom is a feature that quietly does nothing.
+    ///
+    /// What is deliberately *not* here is emitting `scroll` to watch the
+    /// selection move. That was tried and was not reproducible — the handler
+    /// ran on some invocations and not others, in one build configuration and
+    /// not the other — and a flaky test is worse than no test. The decision
+    /// the handler makes is pure and tested as `wheel_direction` below; this
+    /// asserts the wiring.
+    pub(crate) fn check_wheel_is_wired_to_the_bar() {
+        let bar = strip()
+            .expect("strip built by an earlier check")
+            .first_child()
+            .and_downcast::<adw::TabBar>()
+            .expect("the strip's first child is the tab bar");
+
+        let scroll = bar
+            .observe_controllers()
+            .into_iter()
+            .flatten()
+            .find_map(|c| c.downcast::<gtk::EventControllerScroll>().ok())
+            .expect("the connection strip's tab bar has no scroll controller");
+
+        assert_eq!(
+            scroll.propagation_phase(),
+            gtk::PropagationPhase::Capture,
+            "not in the capture phase — the tab bar's own scrolled window \
+             will eat the wheel before this ever runs"
+        );
+        assert!(
+            scroll
+                .flags()
+                .contains(gtk::EventControllerScrollFlags::BOTH_AXES),
+            "only one axis is watched — a touchpad's horizontal wheel is lost"
+        );
     }
 }

@@ -258,7 +258,50 @@ The rule: a doc describes how a subsystem *works* and why it is shaped that way.
 finishes, its plan gets folded into the subject doc or deleted — git history is the record
 of how we got there.
 
-## Conventions for working in this repo
+## Before calling anything done
+
+Run the repo's own gates, not an approximation of them. Formatting has been
+broken on branches that had `clang-format` run over the files that were edited
+— because a later `sed` touched one again, or because a file was edited after
+the formatter ran. The per-file version answers a different question from the
+one CI asks.
+
+```sh
+tools/reformat.sh --check          # clang-format, every C file
+python3 tools/fix-whitespace.py --check
+tools/check-potfiles.sh            # needs gettext 0.25+ for Rust support
+cd rust && cargo fmt --all --check
+```
+
+Then, **both** voice configurations — CI builds each, and `#ifdef HAVE_VOICE`
+mistakes are invisible in whichever one you happen to be in:
+
+```sh
+ninja -C build-voice && ninja -C build-novoice
+(cd build-voice && GDK_BACKEND=x11 xvfb-run -a meson test --no-suite integration)
+(cd build-novoice && GDK_BACKEND=x11 xvfb-run -a meson test --no-suite integration)
+cd rust
+cargo clippy --workspace --all-targets \
+  --features voice,hx-image-decode/glycin-v3 -- -D warnings
+cargo clippy --workspace --all-targets \
+  --features hx-image-decode/glycin-v3 -- -D warnings
+GDK_BACKEND=x11 xvfb-run -a cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
+GDK_BACKEND=x11 xvfb-run -a cargo test -p gtkhx-ui --features hx-image-decode/glycin-v3
+```
+
+`-D warnings` is not decoration: CI denies, so a lint that is only a warning
+locally — a deprecation, an unused import — is a red build there and invisible
+here. Deprecations in particular, because the gtk-rs bindings are pinned to a
+GTK older than the one on a dev machine.
+
+The Rust test run matters in both: a module behind `#[cfg(feature = "voice")]`
+— `voice_arbiter`, `voice_panel` — is not even compiled without it, so its
+tests can be failing to build while the default run is green.
+
+**Run the display-backed test more than once.** It is one `#[test]` holding
+every check in sequence against process-global widget state, so a check that
+depends on what an earlier one left behind can pass, fail, and pass again. If a
+new check asserts on the live tab strip, prefer building its own widgets.
 
 - **Branches, not direct main commits.** `claude/<short-topic>`, kebab-case. Misha opens the
   PR, reviews, merges. Push follow-up commits to the same branch after review; don't

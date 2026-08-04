@@ -202,6 +202,127 @@ pub(crate) fn ensure_gtk_init() {
     unsafe { gtk4::set_initialized() };
 }
 
+/// Which way a wheel event moves the selection.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Wheel {
+    Previous,
+    Next,
+}
+
+/// Read a scroll delta as a tab step, or `None` for one that means neither.
+///
+/// Split out of the controller so it can be tested without one. Emitting
+/// `scroll` on a live `GtkEventControllerScroll` turned out not to be
+/// reliably reproducible — the handler runs on some invocations and not
+/// others — and a flaky test is worse than none. This is the part with a
+/// decision in it; that the controller is mounted, and *where*, is asserted
+/// separately on the widget.
+///
+/// Both axes are read and the larger wins, so a diagonal touchpad flick moves
+/// one tab rather than firing twice. Up is previous and down is next, which is
+/// the direction every tabbed application agrees on.
+pub(crate) fn wheel_direction(dx: f64, dy: f64) -> Option<Wheel> {
+    let d = if dy.abs() >= dx.abs() { dy } else { dx };
+    if d < 0.0 {
+        Some(Wheel::Previous)
+    } else if d > 0.0 {
+        Some(Wheel::Next)
+    } else {
+        None
+    }
+}
+
+/// Bold the title of any tab flagged as needing attention.
+///
+/// `AdwTabPage:title` is plain text — no markup — so the weight has to come
+/// from CSS. libadwaita puts a `needs-attention` class on the `AdwTab` widget
+/// and holds the label in a `.tab-title`; both were read off a live widget
+/// tree rather than assumed, because a rule naming a class that doesn't exist
+/// fails silently and looks exactly like a flag that was never set.
+///
+/// Deliberately not scoped to the connection strip. The chat tabs use the same
+/// flag for the same reason — something happened over there — and an unread
+/// private message should read the same way whichever strip is carrying it.
+///
+/// Attached to the display, once, at
+/// `GTK_STYLE_PROVIDER_PRIORITY_APPLICATION`: above the theme's defaults,
+/// below the user's own `gtk.css`, which is the same priority the rest of the
+/// client's CSS uses.
+pub(crate) fn ensure_tab_attention_css() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static LOADED: AtomicBool = AtomicBool::new(false);
+    if LOADED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let Some(display) = gtk4::gdk::Display::default() else {
+        LOADED.store(false, Ordering::Relaxed);
+        return;
+    };
+    let css = gtk4::CssProvider::new();
+    // load_from_string is gtk 4.12; the crate targets v4_10, so use the
+    // (deprecated-in-4.12 but present) load_from_data — the same trade
+    // users_view.rs makes for its own provider.
+    #[allow(deprecated)]
+    css.load_from_data("tab.needs-attention .tab-title { font-weight: bold; }");
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &css,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+}
+
+/// Make a tab bar switch tabs on a mouse wheel, the way a browser's does.
+///
+/// Attached to the *bar* rather than the view, because the view is what the
+/// bar is a control for — and in the connection strip's case the view is never
+/// drawn at all, so it would never see the event.
+///
+/// **In the capture phase**, which is what makes it work at all. `AdwTabBar`
+/// wraps its tabs in a `GtkScrolledWindow` so a long strip can be scrolled
+/// sideways, and that is a *descendant* of the bar — so in the ordinary bubble
+/// phase it handles the wheel first and the event never reaches here. Capture
+/// runs top-down, so the bar sees it before the scrolled window does. The cost
+/// is deliberate: wheeling over the strip switches tabs instead of panning it,
+/// which is the behaviour asked for and the one browsers have.
+///
+/// Wheel up selects the previous tab and down the next, which is the direction
+/// every tabbed application agrees on. Horizontal wheels and touchpad kinetic
+/// scrolling arrive through the same controller, so both axes are read and the
+/// larger one wins; a diagonal flick otherwise fires twice.
+///
+/// The event is claimed only when a tab was actually switched. Refusing it at
+/// the ends lets the scroll fall through to whatever is underneath instead of
+/// swallowing it against a wall.
+pub(crate) fn wheel_switches_tabs(
+    bar: &impl gtk4::prelude::IsA<gtk4::Widget>,
+    view: &libadwaita::TabView,
+) {
+    use gtk4::prelude::*;
+
+    ensure_tab_attention_css();
+
+    let scroll = gtk4::EventControllerScroll::new(
+        gtk4::EventControllerScrollFlags::BOTH_AXES | gtk4::EventControllerScrollFlags::DISCRETE,
+    );
+    scroll.set_propagation_phase(gtk4::PropagationPhase::Capture);
+
+    let view = view.clone();
+    scroll.connect_scroll(move |_, dx, dy| {
+        let moved = match wheel_direction(dx, dy) {
+            Some(Wheel::Next) => view.select_next_page(),
+            Some(Wheel::Previous) => view.select_previous_page(),
+            None => false,
+        };
+        if moved {
+            gtk4::glib::Propagation::Stop
+        } else {
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    bar.as_ref().add_controller(scroll);
+}
+
 /// C `char*` → owned `String` (empty on NULL). UTF-8 lossy.
 ///
 /// # Safety
@@ -221,4 +342,32 @@ pub(crate) fn cs(s: &str) -> std::ffi::CString {
         v.retain(|&b| b != 0);
         std::ffi::CString::new(v).unwrap()
     })
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::{wheel_direction, Wheel};
+
+    /// Up is previous, down is next, and a diagonal follows its larger axis
+    /// rather than firing twice. Pure, so unlike the rest of this crate's
+    /// checks it needs no display and no `gtk_tests` slot.
+    #[test]
+    fn wheel_direction_reads_the_larger_axis() {
+        assert_eq!(wheel_direction(0.0, -1.0), Some(Wheel::Previous));
+        assert_eq!(wheel_direction(0.0, 1.0), Some(Wheel::Next));
+
+        // Horizontal alone still counts — a touchpad's sideways flick.
+        assert_eq!(wheel_direction(-1.0, 0.0), Some(Wheel::Previous));
+        assert_eq!(wheel_direction(1.0, 0.0), Some(Wheel::Next));
+
+        // Diagonals resolve to one step, taking the axis the user leaned on.
+        assert_eq!(wheel_direction(-0.2, 1.0), Some(Wheel::Next));
+        assert_eq!(wheel_direction(1.0, -0.2), Some(Wheel::Next));
+
+        // A tie goes to the vertical, which is the axis a mouse wheel has.
+        assert_eq!(wheel_direction(1.0, -1.0), Some(Wheel::Previous));
+
+        // Nothing at all is not a step, and must not claim the event.
+        assert_eq!(wheel_direction(0.0, 0.0), None);
+    }
 }

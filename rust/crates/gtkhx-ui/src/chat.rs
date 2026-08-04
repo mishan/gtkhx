@@ -164,6 +164,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     let tab_bar = adw::TabBar::new();
     if let Some(tv) = tab_view.downcast_ref::<adw::TabView>() {
         tab_bar.set_view(Some(tv));
+        crate::wheel_switches_tabs(&tab_bar, tv);
     }
     tab_bar.set_autohide(true);
 

@@ -25,7 +25,9 @@
 #include <string.h>
 #include <glib.h>
 
-#include "session.h"          /* hx_active_session, hx_connect */
+#include "session.h" /* hx_active_session, hx_connect */
+#include "conn_tabs.h"
+#include "gtkutil.h"          /* hx_session_label, changetitlesconnected */
 #include "session_registry.h" /* hx_session_open */
 #include "hxconn.h"           /* hx_conn_set_cipheralg / _compressalg */
 #include "prefs.h"            /* gtkhx_prefs */
@@ -46,7 +48,8 @@ gtkhx_tracker_pref_case (void)
 
 void
 gtkhx_tracker_connect_apply (const char *address, guint16 port, char secure,
-                             char tls, const char *cipher_name)
+                             char tls, const char *cipher_name,
+                             const char *listed_name)
 {
     session *sess = hx_active_session ();
 
@@ -61,6 +64,23 @@ gtkhx_tracker_connect_apply (const char *address, guint16 port, char secure,
     hx_conn_set_compressalg (sess->htlc, NULL);
     hx_conn_set_cipheralg (sess->htlc, cipher_name);
     hx_connect (sess->htlc, address ? address : "", port, "", "", secure, tls);
+
+    /* After the connect, not before: its preamble clears the name fields so a
+     * reconnect can't fly the last server's flag, and this one has to survive
+     * that. A tracker knows what a server calls itself before we have spoken
+     * to it — and a 1.2-era server never sends a name at all — so without
+     * this, picking a recognisable server out of a listing gives you a tab
+     * labelled with an IP. */
+    if (listed_name && *listed_name) {
+        g_free (sess->listed_name);
+        sess->listed_name = g_strdup (listed_name);
+
+        /* The connect above already titled the tab with the address. */
+        char *label = hx_session_label (sess);
+        gtkhx_conn_tabs_set_title (sess->htlc, label);
+        g_free (label);
+        changetitlesconnected (sess);
+    }
 }
 
 void
