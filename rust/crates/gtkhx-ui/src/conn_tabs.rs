@@ -110,6 +110,18 @@ thread_local! {
     static STATE: RefCell<ConnTabs> = RefCell::new(ConnTabs::default());
 }
 
+// How many close requests `AdwTabView` has delivered.
+//
+// The only way to see the property that a *declined* close still has to be
+// reported: an unfinished close leaves the page mid-close, and libadwaita then
+// stops delivering `close-page` for it — so the tab can never be shut again,
+// silently. Nothing else observes that, because the symptom is the absence of
+// a signal.
+#[cfg(test)]
+thread_local! {
+    static CLOSE_REQUESTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 /// Clone the view out of the cell, holding the borrow only for the clone — so
 /// the handle can drive adw calls that re-enter our own signal handlers.
 fn view() -> Option<adw::TabView> {
@@ -183,6 +195,9 @@ fn swap_panels(conn: ConnKey) {
 /// The last connection can't be closed, and needs no check: `AdwTabBar`
 /// autohides below two pages, so there is no close button to press.
 fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation {
+    #[cfg(test)]
+    CLOSE_REQUESTS.with(|n| n.set(n.get() + 1));
+
     let Some(conn) = tab_conn(page) else {
         // No serial on the page — nothing to close against. Decline rather
         // than drop a tab whose connection we can't identify.
@@ -246,27 +261,35 @@ fn confirm_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey) {
     let view = view.clone();
     let page = page.clone();
     dialog.connect_response(None, move |_dlg, response| {
-        if response != "close" {
-            // Declining has to be reported too: an unfinished close leaves the
-            // page stuck, refusing every later attempt to shut it.
-            view.close_page_finish(&page, false);
-            return;
-        }
-        // Re-resolve: the connection may have dropped while the question was
-        // open, in which case there is nothing to disconnect and the tab
-        // should simply go.
-        let sess = unsafe { hx_session_with_serial(conn) };
-        if sess.is_null() {
-            STATE.with(|s| {
-                s.borrow_mut().tabs.remove(&conn);
-            });
-            view.close_page_finish(&page, true);
-            return;
-        }
-        finish_close(&view, &page, conn, sess);
+        on_confirm_response(&view, &page, conn, response == "close");
     });
 
     dialog.present(Some(&anchor));
+}
+
+/// Act on the answer. Split out of the dialog so the two arms are reachable
+/// without one: what a test needs to know is that declining leaves the tab and
+/// unsticks the page, and that accepting tears the connection down — neither
+/// of which is a question about `AdwAlertDialog`.
+fn on_confirm_response(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, confirmed: bool) {
+    if !confirmed {
+        // Declining has to be reported too: an unfinished close leaves the
+        // page stuck, refusing every later attempt to shut it.
+        view.close_page_finish(page, false);
+        return;
+    }
+    // Re-resolve: the connection may have dropped while the question was
+    // open, in which case there is nothing to disconnect and the tab
+    // should simply go.
+    let sess = unsafe { hx_session_with_serial(conn) };
+    if sess.is_null() {
+        STATE.with(|s| {
+            s.borrow_mut().tabs.remove(&conn);
+        });
+        view.close_page_finish(page, true);
+        return;
+    }
+    finish_close(view, page, conn, sess);
 }
 
 /// Tear the connection down and drop its tab. The second half of
@@ -576,6 +599,14 @@ pub(crate) mod tests {
     extern "C" {
         /// `gtkhx-core` — a fresh connection, with the next serial.
         fn hx_conn_new() -> *mut c_void;
+        /// `gtkhx-core` — set the connection's socket. The real accessor, so
+        /// a test connection can be made to look live to the same read
+        /// production gates on.
+        fn hx_conn_set_fd(htlc: *mut c_void, fd: std::os::raw::c_int);
+    }
+
+    fn closes() -> u32 {
+        crate::options_test_stubs::SESSION_CLOSE_CALLS.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// How many times the selection handler has reached `hx_session_set_active`.
@@ -788,5 +819,75 @@ pub(crate) mod tests {
         assert!(!bar.is_tabs_revealed(), "strip visible at one connection");
         // And the survivor is what the user is left looking at.
         assert_eq!(tab_conn(&view.selected_page().unwrap()), Some(serial_of(a)));
+    }
+
+    /// Closing the tab of a *live* connection asks first, and the answer is
+    /// acted on.
+    ///
+    /// The gate is the point: closing a tab disconnects, and the strip only
+    /// appears once there are two connections, so the [X] is small and next to
+    /// the one you were reading. Nothing else in the client would notice a
+    /// regression here — the tab would simply close, which is what it looks
+    /// like it should do.
+    ///
+    /// The dialog itself is not driven. `AdwAlertDialog` presenting and
+    /// emitting `response` is libadwaita's to get right; what belongs to this
+    /// module is that a live connection takes the asking path at all, and that
+    /// each answer does what it says. So the gate is observed through
+    /// `close_page`, and the two arms are called the way the dialog calls them.
+    pub(crate) fn check_live_connection_asks_before_closing() {
+        let view = view().expect("strip built by the previous check");
+        let c = unsafe { hx_conn_new() };
+        crate::options_test_stubs::register_session(c);
+        unsafe { gtkhx_conn_tabs_add(c, c"Live Server".as_ptr()) };
+        let conn = serial_of(c);
+        let page = tab_for(conn).expect("no tab for the new connection");
+
+        // A connection with no socket closes on the spot — the same path the
+        // never-connected case takes, and the baseline the gate is measured
+        // against.
+        let before = closes();
+        assert_eq!(
+            unsafe { hx_conn_fd(c) },
+            0,
+            "a fresh connection has a socket"
+        );
+
+        // Now make it live. -1 rather than a plausible descriptor: production
+        // sets exactly that between spawning a connect and the socket
+        // existing, and the gate is a non-zero test, not a valid-fd test.
+        unsafe { hx_conn_set_fd(c, -1) };
+        unsafe { gtkhx_conn_tabs_close(c) };
+        assert!(
+            tab_for(conn).is_some(),
+            "a live connection's tab closed without asking"
+        );
+        assert_eq!(closes(), before, "disconnected before the user answered");
+
+        // Declining leaves the tab — and must report the refusal, or the page
+        // stays mid-close and libadwaita stops delivering `close-page` for it,
+        // so the tab can never be shut again. That is invisible from the
+        // outside: the symptom is a signal that no longer arrives. Hence the
+        // request count.
+        on_confirm_response(&view, &page, conn, false);
+        assert!(tab_for(conn).is_some(), "declining still closed the tab");
+        assert_eq!(closes(), before, "declining still disconnected");
+
+        // Accepting tears it down — and the request reaching us at all is what
+        // proves the decline above unstuck the page.
+        let requests = CLOSE_REQUESTS.with(|n| n.get());
+        unsafe { gtkhx_conn_tabs_close(c) };
+        assert_eq!(
+            CLOSE_REQUESTS.with(|n| n.get()),
+            requests + 1,
+            "a second close was never delivered — declining left the page stuck"
+        );
+        on_confirm_response(&view, &page, conn, true);
+        assert!(tab_for(conn).is_none(), "accepting left the tab behind");
+        assert_eq!(closes(), before + 1, "accepting did not disconnect");
+        assert!(
+            unsafe { crate::options_test_stubs::hx_session_with_serial(conn) }.is_null(),
+            "the closed connection still resolves"
+        );
     }
 }
