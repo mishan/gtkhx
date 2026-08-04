@@ -2105,6 +2105,25 @@ void hotline_client_init (int argc, char **argv);
 int
 main (int argc, char **argv, char **envp)
 {
+#ifdef G_OS_WIN32
+    /* The Windows build is a GUI-subsystem app (win_subsystem:'windows'), so it
+     * has no console and stderr — where GTKHX_DEBUG traces are written — is
+     * discarded. When launched from a terminal (PowerShell/cmd), attach to that
+     * parent console and reopen the C stdio streams onto it, so trace output is
+     * visible and can be redirected (e.g. `GtkHx.exe 2> trace.txt`). A
+     * double-click has no parent console, so AttachConsole fails and this is a
+     * no-op — the app stays windowless. AttachConsole/ATTACH_PARENT_PROCESS are
+     * hand-declared to avoid dragging <windows.h> (and its min/max/interface
+     * macros) into this translation unit; the symbol lives in kernel32, which
+     * is linked by default. */
+    extern int AttachConsole (unsigned long dwProcessId);
+    if (AttachConsole ((unsigned long)-1)) { /* ATTACH_PARENT_PROCESS */
+        (void)freopen ("CONOUT$", "w", stdout);
+        (void)freopen ("CONOUT$", "w", stderr);
+        (void)freopen ("CONIN$", "r", stdin);
+    }
+#endif
+
     /* Defensively clear the test-only TLS-trust escape hatches at the
      * very start of the production entry point, before any connection
      * (and thus any cert decision) can happen. GTKHX_TLS_AUTO_ACCEPT
