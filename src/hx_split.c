@@ -835,6 +835,125 @@ on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
     }
 }
 
+/* ----------------------------------------------------------------- */
+/* frame-ops.close-page — the header's X                             */
+/* ----------------------------------------------------------------- */
+
+/* libpanel's close (X) button lives in the header's "controls" box
+ * (panel-frame-header-bar.ui) wired to frame.close-page-or-frame.
+ * Both that action's handler and the enabled state
+ * panel_frame_update_actions computes for it start with
+ *
+ *     gtk_widget_get_ancestor (frame, PANEL_TYPE_GRID)
+ *
+ * and the dock is an HxSplit tree with no PanelGrid in it. So the X
+ * was permanently greyed, and closing a single panel meant Close all
+ * pages on the whole frame and then reopening the ones you wanted.
+ *
+ * The HxPanelFrame trick that rescued the chevron's Move Page items
+ * does NOT work here, and the reason is worth keeping. Overriding
+ * the class action from a subclass wins the *lookup*, but libpanel
+ * keeps disabling our action by name — and panel_frame_add and
+ * panel_frame_remove both call panel_frame_update_actions on the way
+ * OUT, after every notify our refresh hooks ride on. For a menu item
+ * that's survivable: AdwTabView::setup-menu fires just before the
+ * popover reads state, so the item can be fixed just in time. A
+ * button has no such moment; it reflects the enabled bit
+ * continuously, and libpanel always gets the last word.
+ *
+ * So don't fight over that action — point the button at one of ours.
+ * frame-ops is an inserted action group, which
+ * panel_frame_update_actions has no idea about, and the state lives
+ * in a GSimpleAction we own outright. The button keeps its icon,
+ * placement and circular styling; only its action-name changes, and
+ * libpanel never touches that after the template is built.
+ *
+ * The "or frame" half of close-page-or-frame is deliberately not
+ * reimplemented: closing an empty frame is Close frame on the
+ * view-split menu, so the X simply greys out when there's no page. */
+static void
+on_frame_close_page (GSimpleAction *action, GVariant *parameter,
+                     gpointer user_data)
+{
+    PanelFrame *frame = PANEL_FRAME (user_data);
+    PanelWidget *visible;
+
+    (void)action;
+    (void)parameter;
+
+    visible = panel_frame_get_visible_child (frame);
+    if (visible == NULL) {
+        return;
+    }
+    /* panel_widget_close routes through PanelFrame::page-closed,
+     * which is where hx_panel.c's dispatcher tears down DYNAMIC
+     * panels, unregisters them, and requests a layout save so a
+     * closed static panel is still closed after a restart. It is
+     * also what libpanel's own Close all pages uses, and it needs no
+     * PanelGrid. */
+    panel_widget_close (visible);
+}
+
+/* The X is live exactly when there's a page under it. notify::
+ * visible-child is the right and only trigger: it fires on every
+ * transition that changes the answer (empty → page, page → empty,
+ * page → other page) and on none that don't. */
+static void
+on_frame_visible_child_notify (GObject *frame, GParamSpec *pspec,
+                               gpointer user_data)
+{
+    (void)pspec;
+    g_simple_action_set_enabled (
+        G_SIMPLE_ACTION (user_data),
+        panel_frame_get_visible_child (PANEL_FRAME (frame)) != NULL);
+}
+
+/* Retarget the header's close button onto frame-ops.close-page.
+ * Scoped to the controls box rather than searched from the frame:
+ * the pages popover's per-row close buttons carry the same icon
+ * name, and though they're built lazily by a list factory and so
+ * don't exist yet, depending on that would be a trap for whoever
+ * next changes the ordering. */
+static void
+adopt_frame_close_button (GtkWidget *frame, GSimpleAction *close_action)
+{
+    GtkWidget *controls;
+    GtkWidget *child;
+
+    controls = hx_panel_find_css_class_descendant (frame, "controls");
+    if (controls == NULL) {
+        g_warning ("hx_split: no .controls box on the frame header — "
+                   "libpanel's template changed; the close button will "
+                   "stay greyed");
+        return;
+    }
+
+    for (child = gtk_widget_get_first_child (controls); child != NULL;
+         child = gtk_widget_get_next_sibling (child)) {
+        if (!GTK_IS_BUTTON (child)) {
+            continue; /* the chevron is a GtkMenuButton, not a GtkButton */
+        }
+        if (g_strcmp0 (gtk_button_get_icon_name (GTK_BUTTON (child)),
+                       "window-close-symbolic")
+            != 0) {
+            continue;
+        }
+        gtk_actionable_set_action_name (GTK_ACTIONABLE (child),
+                                        "frame-ops.close-page");
+        gtk_widget_set_tooltip_text (child, _ ("Close panel"));
+        g_signal_connect_object (frame, "notify::visible-child",
+                                 G_CALLBACK (on_frame_visible_child_notify),
+                                 close_action, G_CONNECT_DEFAULT);
+        g_simple_action_set_enabled (
+            close_action,
+            panel_frame_get_visible_child (PANEL_FRAME (frame)) != NULL);
+        return;
+    }
+
+    g_warning ("hx_split: no close button in the frame header's controls "
+               "box — libpanel's template changed");
+}
+
 /* Update enabled state of the three GActions based on the current
  * tree shape. Called once at install and again after every split
  * (the parent shape changes), so that close-frame is greyed only
@@ -873,6 +992,7 @@ hx_split_install_frame_ui (GtkWidget *frame)
     GMenu *menu;
     GtkWidget *button;
     PanelFrameHeader *header;
+    GSimpleAction *close_page = NULL;
 
     g_return_if_fail (PANEL_IS_FRAME (frame));
 
@@ -901,11 +1021,20 @@ hx_split_install_frame_ui (GtkWidget *frame)
                                  frame, G_CONNECT_DEFAULT);
         g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (act));
         g_object_unref (act);
+
+        /* Not in the menu — this one backs the header's X. */
+        close_page = g_simple_action_new ("close-page", NULL);
+        g_signal_connect_object (close_page, "activate",
+                                 G_CALLBACK (on_frame_close_page), frame,
+                                 G_CONNECT_DEFAULT);
+        g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (close_page));
+        g_object_unref (close_page); /* the group holds the ref now */
     }
     gtk_widget_insert_action_group (frame, "frame-ops", G_ACTION_GROUP (group));
     g_object_unref (group);
 
     update_frame_action_enabled (frame);
+    adopt_frame_close_button (frame, close_page);
 
     /* Build the menu model and a small GtkMenuButton, then add as
      * a suffix on the frame's header. priority=0 puts it at the

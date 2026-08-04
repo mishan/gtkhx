@@ -286,6 +286,27 @@ test_dock_pages = executable('test_dock_pages',
 test('dock_pages', test_dock_pages,
      suite : 'unit')
 
+# The close (X) button on a dock frame's header. Unlike dock_pages this
+# needs the real widgets — libpanel's frame + header template, an
+# HxSplit leaf, the frame-ops action group — because what's under test
+# is which of libpanel's action and ours wins on that button, and that
+# question only exists once they're both present. Needs a display, so
+# the suite runs under xvfb.
+test_frame_close_button = executable('test_frame_close_button',
+  'unit/test_frame_close_button.c',
+  '../src/hx_split.c',
+  '../src/hx_panel.c',
+  '../src/hx_panel_frame.c',
+  '../src/panel_registry.c',
+  '../src/dock_layout.c',
+  '../src/dock_layout_parse.c',
+  '../src/debug.c',
+  dependencies        : test_deps + [adw_dep, panel_dep],
+  include_directories : test_inc,
+)
+test('frame_close_button', test_frame_close_button,
+     suite : 'unit')
+
 # The C mirror of struct htlc_conn against the Rust struct that owns the
 # storage. Both sides pin sizeof; this pins positions, which is the half
 # sizeof cannot check once a field lands in padding.
