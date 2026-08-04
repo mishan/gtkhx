@@ -106,6 +106,9 @@ extern "C" {
         secure: c_char,
         tls: c_char,
         cipher_name: *const c_char,
+        // What the tracker listed this server as — the connection's label
+        // until the server introduces itself, which a 1.2-era one never does.
+        listed_name: *const c_char,
     );
     /// `hx_printf_prefix` on the focused session's connection, with
     /// `INFOPREFIX`.

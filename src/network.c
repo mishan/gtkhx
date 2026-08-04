@@ -544,6 +544,10 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
 
         if (sess) {
             g_clear_pointer (&sess->server_name, g_free);
+            /* The tracker's name goes too. gtkhx_tracker_connect_apply sets
+             * it again after this returns, for a connect that came from a
+             * listing; anything else must not inherit the last one. */
+            g_clear_pointer (&sess->listed_name, g_free);
         }
     }
 

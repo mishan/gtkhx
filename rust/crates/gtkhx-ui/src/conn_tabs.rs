@@ -698,6 +698,49 @@ pub(crate) mod tests {
         unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GFALSE) };
         assert!(!tab_for(other).unwrap().needs_attention());
 
+        // A flagged tab's title is bold. The flag is a libadwaita property and
+        // the weight comes from a CSS rule naming libadwaita's own classes, so
+        // this asserts on what is actually rendered — a selector that stopped
+        // matching would leave `needs_attention` perfectly true and nothing
+        // visibly different.
+        unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GTRUE) };
+        fn title_weight(w: &gtk::Widget, want_attention: bool) -> Option<String> {
+            if w.type_().name() == "AdwTab" && w.has_css_class("needs-attention") == want_attention
+            {
+                let mut c = w.first_child();
+                while let Some(ch) = c {
+                    if ch.has_css_class("tab-title") {
+                        // The name of the weight, not its number: the
+                        // comparison only needs the two to differ, and
+                        // `Bold` says what it is asserting.
+                        return Some(format!(
+                            "{:?}",
+                            ch.pango_context().font_description()?.weight()
+                        ));
+                    }
+                    c = ch.next_sibling();
+                }
+            }
+            let mut c = w.first_child();
+            while let Some(ch) = c {
+                if let Some(v) = title_weight(&ch, want_attention) {
+                    return Some(v);
+                }
+                c = ch.next_sibling();
+            }
+            None
+        }
+        let root = bar.upcast_ref::<gtk::Widget>();
+        let flagged = title_weight(root, true).expect("no flagged tab title");
+        let plain = title_weight(root, false).expect("no unflagged tab title");
+        assert_ne!(
+            flagged, plain,
+            "a tab needing attention renders no differently from one that \
+             doesn't — the CSS selector has stopped matching"
+        );
+        assert_eq!(flagged, "Bold", "flagged tab title is not bold");
+        unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GFALSE) };
+
         // A tab dragged onto the desktop. libadwaita asks for a view to move
         // the page into and will not take nothing for an answer — a NULL
         // leaves the drag half-finished and crashes in GTK. Answering with

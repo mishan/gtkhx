@@ -202,6 +202,42 @@ pub(crate) fn ensure_gtk_init() {
     unsafe { gtk4::set_initialized() };
 }
 
+/// Bold the title of any tab flagged as needing attention.
+///
+/// `AdwTabPage:title` is plain text — no markup — so the weight has to come
+/// from CSS. libadwaita puts a `needs-attention` class on the `AdwTab` widget
+/// and holds the label in a `.tab-title`; both were read off a live widget
+/// tree rather than assumed, because a rule naming a class that doesn't exist
+/// fails silently and looks exactly like a flag that was never set.
+///
+/// Deliberately not scoped to the connection strip. The chat tabs use the same
+/// flag for the same reason — something happened over there — and an unread
+/// private message should read the same way whichever strip is carrying it.
+///
+/// Attached to the display, once, at
+/// `GTK_STYLE_PROVIDER_PRIORITY_APPLICATION`: above the theme's defaults,
+/// below the user's own `gtk.css`, which is the same priority the rest of the
+/// client's CSS uses.
+pub(crate) fn ensure_tab_attention_css() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static LOADED: AtomicBool = AtomicBool::new(false);
+    if LOADED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let Some(display) = gtk4::gdk::Display::default() else {
+        LOADED.store(false, Ordering::Relaxed);
+        return;
+    };
+    let css = gtk4::CssProvider::new();
+    css.load_from_data("tab.needs-attention .tab-title { font-weight: bold; }");
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &css,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+}
+
 /// Make a tab bar switch tabs on a mouse wheel, the way a browser's does.
 ///
 /// Attached to the *bar* rather than the view, because the view is what the
@@ -221,6 +257,8 @@ pub(crate) fn wheel_switches_tabs(
     view: &libadwaita::TabView,
 ) {
     use gtk4::prelude::*;
+
+    ensure_tab_attention_css();
 
     let scroll = gtk4::EventControllerScroll::new(
         gtk4::EventControllerScrollFlags::BOTH_AXES | gtk4::EventControllerScrollFlags::DISCRETE,

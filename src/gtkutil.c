@@ -443,9 +443,15 @@ hx_session_label (const session *sess)
         return g_strdup ("");
     }
     /* What the server calls itself, if it has said — that is the name the user
-     * recognises. Otherwise the endpoint they typed. */
+     * recognises. Then whatever a tracker listed it as, which is the same name
+     * from a source that knew it before we connected, and the only one a
+     * 1.2-era server that sends no name will ever have. Otherwise the endpoint
+     * they typed. */
     if (sess->server_name && *sess->server_name) {
         return g_strdup (sess->server_name);
+    }
+    if (sess->listed_name && *sess->listed_name) {
+        return g_strdup (sess->listed_name);
     }
     host = hx_conn_serverhost (sess->htlc);
     if (host == NULL || *host == 0) {

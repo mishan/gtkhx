@@ -341,6 +341,7 @@ hx_session_free (session *sess)
     g_clear_pointer (&sess->msg_windows, g_hash_table_destroy);
     g_clear_pointer (&sess->chats, hx_chats_free);
     g_clear_pointer (&sess->server_name, g_free);
+    g_clear_pointer (&sess->listed_name, g_free);
 
     g_clear_object (&sess->users_view);
 

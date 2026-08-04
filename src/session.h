@@ -197,6 +197,16 @@ typedef struct _session {
      * login. */
     char *server_name;
 
+    /* What the *tracker* listed this server as, when the connection was
+     * started by picking it from a tracker listing. NULL otherwise.
+     *
+     * A third source of a name, below `server_name` and above the address:
+     * a tracker knows what a server calls itself before we have connected to
+     * it, and 1.2-era servers never send a name at all — so without this,
+     * picking a recognisable server out of a tracker list gives you a tab
+     * labelled with an IP. Freed and re-set per connect, like `server_name`. */
+    char *listed_name;
+
     /* What this connection's status bar last said (-1 connecting, 0 not
      * connected, 1 connected, 2 logged in).
      *

@@ -94,6 +94,9 @@ pub(super) fn on_section_activate(url: &str, pos: u32) {
     let cname = cipher::name(cipher_byte).map(cs);
     let cipher_name = cname.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
     let addr = cs(&row.address());
+    // What the tracker listed it as — the name the user actually recognised
+    // and clicked on. Empty for a listing that gave none.
+    let listed = cs(&row.name());
     unsafe {
         cffi::gtkhx_tracker_connect_apply(
             addr.as_ptr(),
@@ -101,6 +104,7 @@ pub(super) fn on_section_activate(url: &str, pos: u32) {
             secure as c_char,
             tls as c_char,
             cipher_name,
+            listed.as_ptr(),
         )
     };
 }
