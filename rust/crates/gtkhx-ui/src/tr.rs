@@ -137,6 +137,18 @@ pub fn tr_argv(msgid: &str, args: &[&str]) -> String {
     out
 }
 
+/// Mark a literal for extraction without translating it here.
+///
+/// gettext's `N_()` idiom. xgettext can only see a string where it is written,
+/// so a table of `&'static str` that is translated later — the Settings page
+/// list, whose titles go through `tr(entry.title)` at build time — offers it
+/// nothing to extract, and every one of those strings silently never reaches a
+/// translator. Wrapping the literal makes it visible to the catalog while
+/// leaving it untouched at runtime; the deferred `tr` still does the work.
+pub const fn n_(s: &'static str) -> &'static str {
+    s
+}
+
 /// Plural-aware translate: `singular` for n == 1, `plural` otherwise
 /// (subject to the catalog's plural rule).
 pub fn trn(singular: &str, plural: &str, n: u64) -> String {
