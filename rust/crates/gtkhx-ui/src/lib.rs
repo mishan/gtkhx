@@ -202,6 +202,36 @@ pub(crate) fn ensure_gtk_init() {
     unsafe { gtk4::set_initialized() };
 }
 
+/// Which way a wheel event moves the selection.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Wheel {
+    Previous,
+    Next,
+}
+
+/// Read a scroll delta as a tab step, or `None` for one that means neither.
+///
+/// Split out of the controller so it can be tested without one. Emitting
+/// `scroll` on a live `GtkEventControllerScroll` turned out not to be
+/// reliably reproducible — the handler runs on some invocations and not
+/// others — and a flaky test is worse than none. This is the part with a
+/// decision in it; that the controller is mounted, and *where*, is asserted
+/// separately on the widget.
+///
+/// Both axes are read and the larger wins, so a diagonal touchpad flick moves
+/// one tab rather than firing twice. Up is previous and down is next, which is
+/// the direction every tabbed application agrees on.
+pub(crate) fn wheel_direction(dx: f64, dy: f64) -> Option<Wheel> {
+    let d = if dy.abs() >= dx.abs() { dy } else { dx };
+    if d < 0.0 {
+        Some(Wheel::Previous)
+    } else if d > 0.0 {
+        Some(Wheel::Next)
+    } else {
+        None
+    }
+}
+
 /// Bold the title of any tab flagged as needing attention.
 ///
 /// `AdwTabPage:title` is plain text — no markup — so the weight has to come
@@ -275,13 +305,10 @@ pub(crate) fn wheel_switches_tabs(
 
     let view = view.clone();
     scroll.connect_scroll(move |_, dx, dy| {
-        let d = if dy.abs() >= dx.abs() { dy } else { dx };
-        let moved = if d < 0.0 {
-            view.select_previous_page()
-        } else if d > 0.0 {
-            view.select_next_page()
-        } else {
-            false
+        let moved = match wheel_direction(dx, dy) {
+            Some(Wheel::Next) => view.select_next_page(),
+            Some(Wheel::Previous) => view.select_previous_page(),
+            None => false,
         };
         if moved {
             gtk4::glib::Propagation::Stop
@@ -311,4 +338,32 @@ pub(crate) fn cs(s: &str) -> std::ffi::CString {
         v.retain(|&b| b != 0);
         std::ffi::CString::new(v).unwrap()
     })
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::{wheel_direction, Wheel};
+
+    /// Up is previous, down is next, and a diagonal follows its larger axis
+    /// rather than firing twice. Pure, so unlike the rest of this crate's
+    /// checks it needs no display and no `gtk_tests` slot.
+    #[test]
+    fn wheel_direction_reads_the_larger_axis() {
+        assert_eq!(wheel_direction(0.0, -1.0), Some(Wheel::Previous));
+        assert_eq!(wheel_direction(0.0, 1.0), Some(Wheel::Next));
+
+        // Horizontal alone still counts — a touchpad's sideways flick.
+        assert_eq!(wheel_direction(-1.0, 0.0), Some(Wheel::Previous));
+        assert_eq!(wheel_direction(1.0, 0.0), Some(Wheel::Next));
+
+        // Diagonals resolve to one step, taking the axis the user leaned on.
+        assert_eq!(wheel_direction(-0.2, 1.0), Some(Wheel::Next));
+        assert_eq!(wheel_direction(1.0, -0.2), Some(Wheel::Next));
+
+        // A tie goes to the vertical, which is the axis a mouse wheel has.
+        assert_eq!(wheel_direction(1.0, -1.0), Some(Wheel::Previous));
+
+        // Nothing at all is not a step, and must not claim the event.
+        assert_eq!(wheel_direction(0.0, 0.0), None);
+    }
 }

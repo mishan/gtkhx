@@ -25,7 +25,7 @@
 #include <string.h>
 #include <glib.h>
 
-#include "session.h"          /* hx_active_session, hx_connect */
+#include "session.h" /* hx_active_session, hx_connect */
 #include "conn_tabs.h"
 #include "gtkutil.h"          /* hx_session_label, changetitlesconnected */
 #include "session_registry.h" /* hx_session_open */
