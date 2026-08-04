@@ -38,6 +38,9 @@
   - Ctrl-U now works to clear any input in the app
   - [Enter] in the Connect dialog now connects
   - Handle character conversion on user list and user info
+  - Closed panels/windows will not reopen on startup
+  - Docking a window will now highlight the pane that is being targeted
+  - Panel foreground state is now persisted
 
 ## 1.2.2
 
