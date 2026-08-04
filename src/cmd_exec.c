@@ -40,9 +40,15 @@
 #include "gtkhx_log.h" /* hx_printf / hx_printf_prefix / INFOPREFIX */
 #include "chat.h"      /* hx_send_chat */
 #include "cmd_exec.h"
+#include "session_registry.h"
 
 struct hxd_file {
-    struct htlc_conn *htlc;
+    /* The connection `/exec -o` output goes back to, by serial rather than by
+     * pointer. The pipe watch outlives whatever started it — a `tail -f`
+     * keeps producing after its tab is closed — and closing a tab frees the
+     * connection, so a pointer here would be read after the free on the very
+     * next chunk. 0 means plain `/exec`, printing locally. */
+    guint16 conn;
     guint32 cid;
     int fd;
     void (*ready_read) (int fd);
@@ -211,18 +217,26 @@ exec_ready_read (int fd)
         exec_close (fd);
     } else {
         buf[r] = 0;
-        /* conn.htlc holds the connection that started the command in
-         * `/exec -o` mode (see the setter in cmd_exec), or NULL for a
-         * plain `/exec` whose output prints locally. Route -o output back
-         * to that originating connection — not hx_active_session(), which
-         * can differ from it once multiple connections exist. */
-        struct htlc_conn *out_htlc = hxd_files[fd].htlc;
-        if (out_htlc) {
-            LF2CR (buf, r);
-            if (buf[r - 1] == '\r') {
-                buf[r - 1] = 0;
+        /* `conn` names the connection that started the command in `/exec -o`
+         * mode (see the setter in cmd_exec), or 0 for a plain `/exec` whose
+         * output prints locally. Route -o output back to that originating
+         * connection — not hx_active_session(), which can differ from it once
+         * multiple connections exist. */
+        if (hxd_files[fd].conn != 0) {
+            /* NULL once that connection has been closed — a `tail -f` keeps
+             * producing long after its tab is gone. Drop the output rather
+             * than falling through to printing it on whichever connection
+             * happens to be focused now. */
+            struct htlc_conn *out_htlc
+                = hx_conn_with_serial (hxd_files[fd].conn);
+
+            if (out_htlc != NULL) {
+                LF2CR (buf, r);
+                if (buf[r - 1] == '\r') {
+                    buf[r - 1] = 0;
+                }
+                hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
             }
-            hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
         } else {
             hx_printf (hx_active_session ()->htlc, hxd_files[fd].cid, "%s",
                        buf);
@@ -312,11 +326,7 @@ find_cmd_arg:
         _exit (127);
     default:
         close (pfds[1]);
-        if (output_to) {
-            hxd_files[pfds[0]].htlc = htlc;
-        } else {
-            hxd_files[pfds[0]].htlc = 0;
-        }
+        hxd_files[pfds[0]].conn = output_to ? hx_conn_serial (htlc) : 0;
         hxd_files[pfds[0]].fd = pfds[0];
         hxd_files[pfds[0]].cid = cid;
         hxd_files[pfds[0]].ready_read = exec_ready_read;

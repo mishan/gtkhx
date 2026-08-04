@@ -22,6 +22,8 @@
 #include "hxnet_bridge.h"
 #include "protocol.h"
 #include "hxconn.h"
+#include "session_registry.h"
+#include "tls_trust.h"
 #include "proto_helpers.h"
 #include "hotline_proto.h" /* gtkhx_proto_pack_header (wire header encode) */
 #include "gtkhx_session.h" /* GtkhxConnectionState + emit (Phase G state cb) */
@@ -371,11 +373,93 @@ set_conn_handle (struct htlc_conn *htlc, hxnet_connection_opaque *h)
  * shapes into the bridge's existing dispatch helpers, free the
  * frame body (per the on_event ownership contract), and clear
  * the connection's handle on shutdown so the install gate flips off. */
+/* What hxnet is handed as `user_data` for all four callbacks. Owned by this
+ * file, allocated at install and freed at uninstall — never the connection
+ * itself.
+ *
+ * The connection is named by *serial* because hxnet posts events to the GLib
+ * main loop, and one can be dispatched after the close that provoked it —
+ * that is the whole reason the stale-actor guards below exist. By the time a
+ * callback runs, the connection may have been freed with its session. A
+ * serial can't dangle: resolving it answers NULL and the callback drops the
+ * event, which is what each of them already does for a connection it can't
+ * match.
+ *
+ * The endpoint is *copied* rather than resolved, because `verify_cert` is the
+ * one callback that does not run on the main loop — hxnet calls it from the
+ * tokio lifecycle task. Walking the session collection from there would race
+ * the main thread's adds and removes, and the host it would hand to the trust
+ * prompt is storage inside the connection, which the main thread can free
+ * while that prompt is still open. Both problems go away by never reaching
+ * for the connection at all. */
+struct bridge_ctx {
+    guint16 serial;
+    char *host;
+    guint16 port;
+};
+
+/* serial → its live context, so uninstall can free one. Main thread only:
+ * install and uninstall both run there, and the tokio-side callback only ever
+ * reads the context it was handed. */
+static GHashTable *bridge_ctxs;
+
+static void
+bridge_ctx_free (gpointer p)
+{
+    struct bridge_ctx *ctx = p;
+
+    g_free (ctx->host);
+    g_free (ctx);
+}
+
+static void *
+conn_user_data (const struct htlc_conn *htlc, const char *host, guint16 port)
+{
+    struct bridge_ctx *ctx = g_new0 (struct bridge_ctx, 1);
+
+    ctx->serial = hx_conn_serial (htlc);
+    ctx->host = g_strdup (host ? host : "");
+    ctx->port = port;
+
+    if (bridge_ctxs == NULL) {
+        bridge_ctxs = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+                                             NULL, bridge_ctx_free);
+    }
+    /* Replaces any context left by an earlier install on this connection.
+     * There should not be one — install refuses over a live handle — but a
+     * stale entry would leak rather than be overwritten. */
+    g_hash_table_insert (bridge_ctxs, GUINT_TO_POINTER ((guint)ctx->serial),
+                         ctx);
+    return ctx;
+}
+
+/* Drop a connection's context. Safe only once `hxnet_connection_destroy` has
+ * returned: that aborts the lifecycle task, so no verify callback can still
+ * be running or start afterwards. */
+static void
+conn_user_data_release (const struct htlc_conn *htlc)
+{
+    if (bridge_ctxs != NULL) {
+        g_hash_table_remove (bridge_ctxs,
+                             GUINT_TO_POINTER ((guint)hx_conn_serial (htlc)));
+    }
+}
+
+/* The connection a main-loop callback belongs to, or NULL once it has been
+ * closed. */
+static struct htlc_conn *
+conn_from_user_data (void *user_data)
+{
+    const struct bridge_ctx *ctx = user_data;
+
+    return ctx ? hx_conn_with_serial (ctx->serial) : NULL;
+}
+
 static void
 bridge_on_event_cb (hxnet_connection_opaque *conn, hxnet_frame_t *frame,
                     void *user_data)
 {
-    struct htlc_conn *htlc = user_data;
+    struct htlc_conn *htlc = conn_from_user_data (user_data);
     /* Only the currently-installed handle may dispatch. After an
      * uninstall+reinstall cycle, an event the GLib forwarder had
      * already queued from the OLD actor could otherwise be injected
@@ -403,7 +487,7 @@ static void
 bridge_on_shutdown_cb (hxnet_connection_opaque *conn, int reason,
                        void *user_data)
 {
-    struct htlc_conn *htlc = user_data;
+    struct htlc_conn *htlc = conn_from_user_data (user_data);
 
     /* Ignore a shutdown delivered by a stale actor. If an old
      * actor's shutdown was queued on the main loop and only runs
@@ -473,7 +557,11 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
                     void *user_data)
 {
     GtkhxSession *sess = gtkhx_session_get_default ();
-    struct htlc_conn *htlc = user_data;
+    struct htlc_conn *htlc = conn_from_user_data (user_data);
+
+    if (!htlc) {
+        return;
+    }
     switch (state) {
     case HXNET_BRIDGE_STATE_CONNECTED:
         gtkhx_session_emit_connection_state (sess, htlc,
@@ -633,7 +721,8 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
      * the GLib main loop. Storing the handle on the connection before
      * that return is what makes the orchestrator's replayed LOGIN-reply
      * frame pass hx_bridge_dispatch_frame's installed gate.
-     * user_data is the htlc for all three callbacks. */
+     * user_data is the connection's serial for all three callbacks — see
+     * conn_from_user_data for why it is not the connection itself. */
     /* open_plaintext parses proxy_uri synchronously (before spawning the
      * lifecycle task), so this g_autofree URI is safe to free on return. */
     g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
@@ -642,7 +731,8 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
         strlen (login), (const guint8 *)pass, strlen (pass),
         (const guint8 *)name, strlen (name), icon, version, caps, trans,
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
-        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
+        conn_user_data (htlc, host, port));
     if (!h) {
         /* open_plaintext logs its own g_critical on the failure
          * paths (NULL/empty host, non-UTF-8 host, trans==0, runtime
@@ -689,7 +779,8 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
         (const guint8 *)name, strlen (name), icon, version, caps, trans,
         (const guint8 *)cipher_alg, strlen (cipher_alg),
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
-        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
+        conn_user_data (htlc, host, port));
     if (!h) {
         return FALSE;
     }
@@ -723,12 +814,16 @@ hx_bridge_orchestrated_hope_aead (const struct htlc_conn *htlc)
 static int
 bridge_on_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
 {
-    struct htlc_conn *htlc = user_data;
-    if (!htlc || !fp) {
+    const struct bridge_ctx *ctx = user_data;
+
+    if (!ctx || !fp) {
         return 0; /* reject: no context / no fingerprint */
     }
+    /* The endpoint off our own owned copy — this runs on the tokio thread,
+     * where the connection is neither safe to look up nor safe to borrow
+     * from. See struct bridge_ctx. */
     g_autofree char *fp_str = g_strndup ((const char *)fp, fp_len);
-    return hx_tls_orchestrator_verify_cert (htlc, fp_str) ? 1 : 0;
+    return hx_tls_verify_cert (ctx->host, ctx->port, fp_str) ? 1 : 0;
 }
 
 gboolean
@@ -758,7 +853,7 @@ hx_bridge_install_orchestrated_plaintext_tls (
         (const guint8 *)name, strlen (name), icon, version, caps, trans,
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
-        bridge_on_verify_cert_cb, htlc);
+        bridge_on_verify_cert_cb, conn_user_data (htlc, host, port));
     if (!h) {
         return FALSE;
     }
@@ -803,4 +898,7 @@ hx_bridge_uninstall (struct htlc_conn *htlc)
     }
     set_conn_handle (htlc, NULL);
     hxnet_connection_destroy (h);
+    /* After the destroy: it aborts the lifecycle task, so the tokio-side
+     * verify callback can neither be running nor start once it returns. */
+    conn_user_data_release (htlc);
 }

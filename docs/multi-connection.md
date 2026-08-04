@@ -536,10 +536,14 @@ Three tiers fall out naturally.
   upload on a connection you aren't currently looking at becomes invisible. The
   queue's job is to be the one place you check.
 
-  Implementation note: the live-transfer registry is already one flat
-  process-wide list and each handle carries its own connection, so the tagged
-  view is close to free. What does not exist is a per-connection *filter* or a
-  cancel-sweep, which disconnect will need.
+  **Shipped in M6.** The live-transfer registry was already one flat
+  process-wide list with each handle carrying its own connection, so the tagged
+  view was close to free; the per-connection filter and the disconnect sweep
+  were what had to be built. What the estimate missed is that the *rows* were
+  per-connection even though the transfers were not, and that the row keys —
+  transaction ids, plus fixed pseudo-ids for the connect and tracker progress
+  rows — are only unique within a connection. Sharing the list without keying
+  on the pair would have had two servers driving each other's rows.
 
 ### Axis 4 — Voice exclusivity
 
@@ -797,8 +801,18 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | ~~M4f~~ | **Done.** The build-once test is per-connection now — `dock::open` at the head of all six window entry points, keyed on the connection's serial. The connection tab strip exists (`conn_tabs.rs`: an `AdwTabBar` over a never-drawn `AdwTabView`, autohiding below two connections, so a single-connection window is pixel-identical to before). Chat attention badges the connection tab as well as the panel and the chat tab, skipping the connection already selected and never clearing from there. `GTKHX_DEBUG=secondconn` builds a second session so the switch can be driven by hand. **The catch, and it is the whole of M4g:** keying the build-once test on the connection removed the accident that had been keeping a second connection *out* of the content modules, and all six of them still keep their state in one process-global slot — so reaching one twice overwrites the first connection's rather than giving the second its own. `dock::claim_singleton` hands each role to the first connection that asks and refuses the rest, which restores the intended behaviour (no page, panel unchanged, logged under `GTKHX_DEBUG=dock`) instead of silent corruption. Every entry in that table is a module M4g has to make per-connection. | M4e |
 | ~~M4g~~ | **Done.** All six content modules own their state per connection: the Users action buttons moved onto `session`, the flat-News view and the 1.5 news browser became maps keyed on the connection, the files browser's `the_browser` static became a table keyed on the session, and each connection's Chat page gets its own `AdwTabView` — that last one being the actual blocker for Chat, since `sess->chats` was already per-session and the shared tab view was what a second content build would have re-parented. Three process-wide "was this panel ever built?" latches went with them, each replaced by a test on the session's own widget. Every session signal handler that fires per browser now filters on the connection it was handed, so a background server disconnecting no longer resets the foreground one. `dock::claim_singleton` is gone. `GTKHX_DEBUG=secondconn` builds a second connection with its own page in all six panels, and switching between them swaps every panel with nothing logged. | M4f |
 | ~~M5~~ | **Done.** `voice_arbiter.rs` holds a process-global `(connection, room)` token. It is taken at the **join**, not where a runtime is built — a runtime serves every room on its connection, so gating construction would let a connection hop rooms without asking, which is half of what "one voice chat anywhere" means. Acquiring reports what would have to be given up; the panel confirms with the user, drives the holder's graceful leave (601 on its own wire, not a runtime free), then joins. The token is taken only after the join actually goes out, and released by `hx_htlc_close` so a disconnect can't leave it naming a torn-down runtime. The connection tab carries a microphone mark, driven from `take` / `release` so the mark and the token cannot drift apart — and voice ending by *failure* (a server task error on the join, a WebRTC failure, the wedge deadline) releases too, through `state_changed_cb`, which is the only place that sees all of those. Per-session voice models retained. Two things fixed alongside: the three runtime signal callbacks resolved through `hx_active_session()` despite being handed their own connection as `user_data`, so a background connection's voice state updated the focused connection's panels and speaker model; and push-to-talk latched the session the toolbar was built with, so it silently did nothing once voice moved elsewhere. It asks the arbiter now. | M4 |
-| M6 | Global transfer queue with per-connection tags and a disconnect sweep; per-connection loss banner, status bar, titles and tray; bookmarks "open in new tab". | M4 |
+| ~~M6~~ | **Done.** The transfer queue is one list for the whole application, tagged per row: the row list and its widgets came off `session`, and each row carries the connection's serial — which is more than a label, because transaction ids are only unique within a connection and the connect and tracker progress rows use fixed pseudo-ids, so a single list keyed on the id alone would have had two servers driving each other's rows. Every lookup keys on the pair. The tag is hidden below two connections, so a single-connection session is unchanged. The tracker's rows belong to *no* connection — a fetch is one process-wide operation, and tagging it with whichever connection was focused would both misname it and let that connection's disconnect delete the row out from under a live fetch. Closing a connection sweeps its rows, from `hx_htlc_close` and again from `hx_session_close` for a tab closed while already disconnected, because there is no page left whose destruction would take them. The chrome follows the focus rather than becoming per-connection — status bar, window titles, tray and the server banner all show the connection you are looking at, repainting on a tab switch without re-announcing — and `server_addr`, `server_port` and `connected` are gone, each having been one slot the most recent connection overwrote. Bookmarks open in a new tab. Three button bugs fell out of the queue no longer belonging to one connection: Stop on a connect row disconnected the *focused* server, Stop on an already-finished task left its row standing, and Up/Down moved rows by one visual position while the queue swapped them with a different transfer. | M4 |
 | M7 | Layout persistence across connections; two-server isolation test. | M4 |
+
+Two pieces of lifetime work landed alongside M6 and are worth naming, because
+until they did, "close a connection" was not a thing the client could survive.
+Closing a tab now **frees the session** — the struct, its task table, its
+message windows, its chat registry, and the widget refs it owned. That was
+blocked on nothing being able to learn a session had gone, which is why the tab
+strip, the voice token and each voice panel hold a connection *serial* now and
+resolve it through `hx_session_with_serial`, answering NULL rather than handing
+back freed memory. The connection struct behind it is freed too; the callbacks
+that outlive a close carry a serial rather than a pointer for the same reason.
 
 **M0 has landed** — it is what the "session model as it stands" section
 describes. It was safe to do ahead of every open decision precisely because it

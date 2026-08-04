@@ -501,6 +501,24 @@ hx_session_with_serial (guint16 serial)
     return &the_session;
 }
 
+/* The connection-side form, which the hxnet bridge's callbacks resolve on
+ * every dispatch — they carry a serial rather than the connection itself, so
+ * an event queued before a close can drop itself instead of dereferencing
+ * freed memory.
+ *
+ * The serial is ignored, and deliberately: these harnesses build their
+ * connection by hand rather than through hx_conn_new, so it has no serial to
+ * match on. There is one connection, and the harness publishes it as
+ * `the_session.htlc` — answering NULL here would silence every bridge
+ * callback and take the orchestrator path with it. */
+extern struct htlc_conn *hx_conn_with_serial (guint16 serial);
+struct htlc_conn *
+hx_conn_with_serial (guint16 serial)
+{
+    (void)serial;
+    return the_session.htlc;
+}
+
 /* Task-queue stub. hx_htlc_close sweeps the disconnecting connection's rows
  * out of the shared task queue; the queue is view state in tasks.c, which
  * these binaries don't link. There are no rows here to sweep. */

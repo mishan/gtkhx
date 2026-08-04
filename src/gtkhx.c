@@ -1172,6 +1172,7 @@ hx_debug_second_session (void)
      * otherwise only reachable by clicking, which a headless run can't do. */
     if (debug_category_enabled ("closesecond")) {
         guint16 serial = hx_conn_serial (sess->htlc);
+        guint freed_before = hx_debug_conns_freed ();
 
         gtkhx_conn_tabs_close (sess);
         /* `sess` is freed from here on — don't read it. The serial is all that
@@ -1183,6 +1184,20 @@ hx_debug_second_session (void)
          * warning in the log is what gets scrolled past. */
         if (hx_session_with_serial (serial) != NULL) {
             g_error ("closed connection %u is still in the registry", serial);
+        }
+        /* And neither does the connection. This is what the hxnet callbacks
+         * resolve on every dispatch, so a serial that still answers after a
+         * close means a late event would be handed a freed connection.
+         *
+         * On its own this proves only that the session left the collection —
+         * which is what makes the serial stop resolving — so the count of
+         * frees is what actually says the connection was released. */
+        if (hx_conn_with_serial (serial) != NULL) {
+            g_error ("closed connection %u still resolves to a connection",
+                     serial);
+        }
+        if (hx_debug_conns_freed () != freed_before + 1) {
+            g_error ("closing connection %u freed no connection", serial);
         }
         /* And its rows are out of the shared queue. Nothing destroys a page
          * for it any more — the queue is one list for every connection — so

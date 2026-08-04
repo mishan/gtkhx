@@ -217,7 +217,14 @@ pub extern "C" fn gtkhx_chat_tabs_init(htlc: *mut c_void) -> *mut gtk::ffi::GtkW
 /// `htlc` is NULL or a live connection. GTK main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_chat_tabs_forget(htlc: *mut c_void) {
-    let conn = conn_key(htlc);
+    forget_conn(conn_key(htlc));
+}
+
+/// [`gtkhx_chat_tabs_forget`] for a caller that already holds the serial.
+///
+/// The form a destroy handler wants: it may run after the connection has been
+/// freed, so it must not be holding one to resolve.
+pub(crate) fn forget_conn(conn: ConnKey) {
     STATE.with(|s| {
         let mut st = s.borrow_mut();
         st.views.remove(&conn);
