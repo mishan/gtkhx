@@ -398,20 +398,24 @@ struct bridge_ctx {
     guint16 port;
 };
 
-/* serial → its live context, so uninstall can free one. Main thread only:
- * install and uninstall both run there, and the tokio-side callback only ever
- * reads the context it was handed. */
-static GHashTable *bridge_ctxs;
-
-static void
-bridge_ctx_free (gpointer p)
-{
-    struct bridge_ctx *ctx = p;
-
-    g_free (ctx->host);
-    g_free (ctx);
-}
-
+/* A context is allocated per install and **never freed**. That is deliberate,
+ * and it is the safe answer rather than the lazy one.
+ *
+ * hxnet's FFI takes `user_data` as a bare pointer with no destroy notify: the
+ * verify closure captures it (`hxnet/src/ffi.rs`, `SendUserData`) and nothing
+ * tells us when that closure is dropped. `hxnet_connection_destroy` only
+ * *aborts* the lifecycle task, and an abort takes effect at the task's next
+ * await — so a verify callback already running on the tokio thread can still
+ * be reading `ctx->host` after destroy returns. Freeing there raced with it.
+ *
+ * Without a drop hook there is no moment we can prove is after the last read,
+ * so the context outlives everything. A fresh one per install rather than a
+ * mutated one, so a verify still in flight keeps reading a consistent copy of
+ * the endpoint it was started with.
+ *
+ * The cost is a few dozen bytes per connect attempt, and it also means the
+ * install failure paths below need no unwind. The real fix is a destroy
+ * notify on hxnet's side, which would let this be owned properly. */
 static void *
 conn_user_data (const struct htlc_conn *htlc, const char *host, guint16 port)
 {
@@ -420,29 +424,7 @@ conn_user_data (const struct htlc_conn *htlc, const char *host, guint16 port)
     ctx->serial = hx_conn_serial (htlc);
     ctx->host = g_strdup (host ? host : "");
     ctx->port = port;
-
-    if (bridge_ctxs == NULL) {
-        bridge_ctxs = g_hash_table_new_full (g_direct_hash, g_direct_equal,
-                                             NULL, bridge_ctx_free);
-    }
-    /* Replaces any context left by an earlier install on this connection.
-     * There should not be one — install refuses over a live handle — but a
-     * stale entry would leak rather than be overwritten. */
-    g_hash_table_insert (bridge_ctxs, GUINT_TO_POINTER ((guint)ctx->serial),
-                         ctx);
     return ctx;
-}
-
-/* Drop a connection's context. Safe only once `hxnet_connection_destroy` has
- * returned: that aborts the lifecycle task, so no verify callback can still
- * be running or start afterwards. */
-static void
-conn_user_data_release (const struct htlc_conn *htlc)
-{
-    if (bridge_ctxs != NULL) {
-        g_hash_table_remove (bridge_ctxs,
-                             GUINT_TO_POINTER ((guint)hx_conn_serial (htlc)));
-    }
 }
 
 /* The connection a main-loop callback belongs to, or NULL once it has been
@@ -898,7 +880,4 @@ hx_bridge_uninstall (struct htlc_conn *htlc)
     }
     set_conn_handle (htlc, NULL);
     hxnet_connection_destroy (h);
-    /* After the destroy: it aborts the lifecycle task, so the tokio-side
-     * verify callback can neither be running nor start once it returns. */
-    conn_user_data_release (htlc);
 }

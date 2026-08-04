@@ -1082,7 +1082,11 @@ task_up (GtkWidget *widget, gpointer data)
 
     num = xfer_num (gtsk->htxf);
 
-    if (num <= 1) {
+    /* xfer_up swaps `num` with `num - 1`, so index 1 — the second transfer in
+     * the queue — is a legitimate move to the top. Only index 0 and the
+     * not-in-the-queue -1 have nowhere to go. This used to reject 1 as well,
+     * which pinned whatever was second in the queue. */
+    if (num < 1) {
         return;
     }
 
