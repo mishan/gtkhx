@@ -52,10 +52,7 @@ use crate::compat::glib::{Bytes, MainContext};
 // nor `glycin-v3` on, `compat::glycin` does not exist, and naming it here
 // would bury compat.rs's "no glycin backend selected" diagnostic under a
 // cascade of follow-on errors. See the stub `run_decode` below.
-#[cfg(all(
-    target_os = "linux",
-    any(feature = "glycin-v2", feature = "glycin-v3")
-))]
+#[cfg(all(target_os = "linux", any(feature = "glycin-v2", feature = "glycin-v3")))]
 use crate::compat::glycin;
 
 use crate::caps::HxInlineMediaCaps;
@@ -454,10 +451,7 @@ struct DecodeErr {
     detail: Option<String>,
 }
 
-#[cfg(all(
-    target_os = "linux",
-    any(feature = "glycin-v2", feature = "glycin-v3")
-))]
+#[cfg(all(target_os = "linux", any(feature = "glycin-v2", feature = "glycin-v3")))]
 async fn run_decode(
     gbytes: Bytes,
     max_dimension: u32,
@@ -868,10 +862,7 @@ fn adopt_texture(t: crate::compat::gdk2::Texture) -> gdk::Texture {
 /// caller would receive a borrowed pointer with an undefined
 /// lifetime); the detail goes to debug_log on the telemetry
 /// path where the format string can hold the ctx by value.
-#[cfg(all(
-    target_os = "linux",
-    any(feature = "glycin-v2", feature = "glycin-v3")
-))]
+#[cfg(all(target_os = "linux", any(feature = "glycin-v2", feature = "glycin-v3")))]
 fn glycin_err_category(_ctx: &glycin::ErrorCtx) -> &'static str {
     // The glycin::Error variants are non_exhaustive — we
     // collapse to a single category here. Future refinement
