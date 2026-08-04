@@ -184,13 +184,18 @@ fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
         }
     };
 
-    let channels = decoder.channels();
+    let src_channels = decoder.channels();
     let src_rate = decoder.sample_rate();
     // rodio decoders yield i16 samples; normalise to f32 in [-1, 1].
-    let interleaved: Vec<f32> = decoder.map(|s| s as f32 / 32768.0).collect();
-    if interleaved.is_empty() || channels == 0 {
+    let decoded: Vec<f32> = decoder.map(|s| s as f32 / 32768.0).collect();
+    if decoded.is_empty() || src_channels == 0 {
         return;
     }
+
+    // Downmix to mono before resampling — see downmix_to_mono for why this is
+    // load-bearing (it dodges a rodio stereo-playback hazard), not just tidiness.
+    let interleaved = downmix_to_mono(&decoded, src_channels);
+    let channels = 1u16;
 
     // Resample to the device rate so rodio's own converter is a pass-through.
     // If the resampler can't be built we fall back to the original samples at
@@ -215,9 +220,9 @@ fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
             "resample FAILED -> rodio's linear converter runs (lower quality)"
         };
         eprintln!(
-            "hxsound: {} -- {} ch, {} Hz -> {} Hz [{}]",
+            "hxsound: {} -- {} ch (mono-downmixed), {} Hz -> {} Hz [{}]",
             path.display(),
-            channels,
+            src_channels,
             src_rate,
             rate,
             mode
@@ -238,6 +243,29 @@ fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
         }
         Err(e) => eprintln!("hxsound: sink: {e}"),
     }
+}
+
+/// Average `channels`-interleaved samples down to a single mono channel. Mono
+/// in, mono out. A short fire-and-forget notification blip gains nothing from
+/// stereo, and mixing down sidesteps a rodio playback hazard: its mixer/queue
+/// idle-filler is a *mono* silence, and a multi-channel buffer handed in can end
+/// up read against that mono frame, clocking the interleaved L,R,L,R samples out
+/// sequentially — the clip then plays at half speed (an octave down) with heavy
+/// near-Nyquist buzz. A mono source matches the idle format and always plays
+/// correctly. Averaging (rather than dropping a channel) keeps hard-panned
+/// content audible.
+fn downmix_to_mono(interleaved: &[f32], channels: u16) -> Vec<f32> {
+    let ch = channels.max(1) as usize;
+    if ch == 1 {
+        return interleaved.to_vec();
+    }
+    let frames = interleaved.len() / ch;
+    let mut mono = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let sum: f32 = interleaved[f * ch..f * ch + ch].iter().sum();
+        mono.push(sum / ch as f32);
+    }
+    mono
 }
 
 /// High-quality (windowed-sinc) resample of interleaved f32 audio from `from`
@@ -422,6 +450,25 @@ mod tests {
             "onset lost: in_peak {in_peak}, out_peak {out_peak}"
         );
         assert!(out_peak < in_peak * 1.4, "unexpected overshoot: {out_peak}");
+    }
+
+    /// Stereo downmix averages channels and halves the sample count, so the
+    /// buffer handed to rodio is genuinely mono. Guards the fix for the stereo
+    /// clip that played an octave low with near-Nyquist buzz when a 2-channel
+    /// buffer was handed to rodio's mono-idle mixer.
+    #[test]
+    fn downmix_stereo_to_mono() {
+        use super::downmix_to_mono;
+        // interleaved L,R: (1,-1),(0.5,0.5),(0.2,0.4)
+        let stereo = [1.0, -1.0, 0.5, 0.5, 0.2, 0.4];
+        let mono = downmix_to_mono(&stereo, 2);
+        assert_eq!(mono.len(), 3, "stereo->mono must halve the sample count");
+        assert!((mono[0] - 0.0).abs() < 1e-6); // (1 + -1)/2
+        assert!((mono[1] - 0.5).abs() < 1e-6); // (0.5 + 0.5)/2
+        assert!((mono[2] - 0.3).abs() < 1e-6); // (0.2 + 0.4)/2
+        // Mono input passes through untouched.
+        let m = downmix_to_mono(&[0.1, -0.2, 0.3], 1);
+        assert_eq!(m, vec![0.1, -0.2, 0.3]);
     }
 
     /// Empty input yields an empty result rather than panicking.
