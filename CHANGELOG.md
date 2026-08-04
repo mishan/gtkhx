@@ -1,4 +1,4 @@
-## 1.3.0-dev
+## 1.3.0
 
 - Connections (formerly Bookmarks)
   - Bookmarks are now Settings → Connections; the separate Bookmarks window is gone
