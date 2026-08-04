@@ -232,9 +232,13 @@ hx_session_remove (session *sess)
  *   - `gtask_list` is a hand-rolled intrusive list, unrelated to the `tasks`
  *     hash table and not freed by it.
  *
- * Ordering matters in one place: `chats` is cleared before it is freed, so a
- * re-entrant `chat_with_cid` during teardown sees NULL rather than a table
- * mid-destruction. `tasks` gets the same treatment for the same reason.
+ * Ordering matters within each clear, and `g_clear_pointer` is what provides
+ * it: the macro NULLs the field *before* calling the destroy function, not
+ * after. So a destroy callback that re-enters — a chat's `chat_free`, a task's
+ * `ptr_free` — finds `sess->chats` / `sess->tasks` already NULL and takes the
+ * empty-table path, rather than walking a table mid-destruction. Reading it as
+ * "destroy, then NULL" is the natural mistake, and would be a use-after-free
+ * waiting for the first callback that looks back at its session.
  *
  * The connection is the exception, and it stays allocated. hxnet posts
  * main-loop events carrying the raw `struct htlc_conn *`, and a shutdown
