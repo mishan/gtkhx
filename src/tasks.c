@@ -109,15 +109,16 @@ static GtkWidget *gtask_scroll;
 
 /* The connection a session is on. Every public entry point below still takes
  * the session — its callers are signal handlers that have one — and turns it
- * into the serial the rows are keyed on right here. */
+ * into the serial the rows are keyed on right here.
+ *
+ * NULL answers CONN_NONE, which is a real key rather than a failure: it is
+ * where the tracker's connection-less rows live. That makes it the wrong
+ * answer for anything else, which is why the entry points reject a NULL
+ * session rather than letting one through to here. A freed connection is not
+ * tolerated at all — hx_conn_serial dereferences. */
 static guint16
 sess_conn (session *sess)
 {
-    /* NULL reads as CONN_NONE, which is a real answer rather than a failure
-     * — but not one a *row* should ever get: a row keyed there belongs to no
-     * connection and no per-connection sweep will ever remove it. The public
-     * entry points reject a NULL session for that reason; the tracker's rows
-     * ask for CONN_NONE deliberately, by name. */
     return sess != NULL ? hx_conn_serial (sess->htlc) : CONN_NONE;
 }
 
@@ -396,6 +397,9 @@ output_xfer_queue (session *sess, struct htxf_conn *htxf)
 {
     struct gtask *gtsk = gtask_with_htxf (htxf);
 
+    /* No session needed, and so no NULL guard: a transfer handle is unique
+     * across the process, and the row that holds it is the one that owns it.
+     * The parameter stays because the signal handlers that call in have one. */
     (void)sess;
     if (!gtsk) {
         return;
@@ -412,9 +416,11 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     GtkWidget *icon, *title, *subtitle, *pbar, *queue, *listitem, *tag;
     struct gtask *gtsk;
 
-    /* CONN_NONE is legitimate — the tracker's rows live there — but only
-     * when asked for by name. A caller that arrived here with a NULL session
-     * would be building a row nothing can ever sweep. */
+    /* `conn` must be a real connection serial (>= 1) unless the caller is
+     * building one of the tracker's rows, which ask for CONN_NONE by name.
+     * Anything else arriving with CONN_NONE is building a row that no
+     * disconnect will ever sweep, because the sweep is per connection and
+     * this one belongs to none. */
     gtsk = g_malloc (sizeof (struct gtask));
     gtsk->next = 0;
     gtsk->prev = gtask_list;
@@ -564,8 +570,10 @@ gtasks_delete_on_conn (struct htlc_conn *htlc)
     guint16 conn = hx_conn_serial (htlc);
     struct gtask *gtsk, *prev;
 
-    /* Never sweep the connection-less rows. A NULL or already-freed
-     * connection reads as CONN_NONE, and the tracker's rows live there. */
+    /* Never sweep the connection-less rows: that is where the tracker's live,
+     * and a NULL htlc reads as CONN_NONE. A *freed* connection is a different
+     * matter and is not tolerated here — hx_conn_serial dereferences, so the
+     * caller must still hold a live connection or NULL. */
     if (conn == CONN_NONE) {
         return;
     }
@@ -685,6 +693,8 @@ void
 gtask_delete_htxf (session *sess, struct htxf_conn *htxf)
 {
     struct gtask *gtsk = gtask_with_htxf (htxf);
+    /* Keyed on the transfer, which is unique process-wide — see
+     * output_xfer_queue on why there is no session guard here. */
     (void)sess;
     if (!gtsk) {
         return;
@@ -709,6 +719,8 @@ void
 gtask_clear_htxf (session *sess, struct htxf_conn *htxf)
 {
     struct gtask *gtsk = gtask_with_htxf (htxf);
+    /* Keyed on the transfer, which is unique process-wide — see
+     * output_xfer_queue on why there is no session guard here. */
     (void)sess;
     if (!gtsk) {
         return;
@@ -719,7 +731,14 @@ gtask_clear_htxf (session *sess, struct htxf_conn *htxf)
 void
 gtask_delete_tsk (session *sess, guint32 trans)
 {
-    struct gtask *gtsk = gtask_with_trans (sess_conn (sess), trans);
+    struct gtask *gtsk;
+
+    /* A NULL session would key the lookup on CONN_NONE, which is where the
+     * tracker's rows live — so a pseudo-id colliding with one of theirs would
+     * delete a tracker row, and any other id would silently find nothing. */
+    g_return_if_fail (sess != NULL);
+
+    gtsk = gtask_with_trans (sess_conn (sess), trans);
     if (!gtsk) {
         return;
     }
@@ -759,6 +778,9 @@ track_prog_update (session *sess, char *str, int num, int total)
     guint32 tot = (guint32)(total < 0 ? 0 : total);
     g_autofree char *sub = NULL;
 
+    /* Deliberately ignored: the tracker's rows belong to no connection, so
+     * this asks for CONN_NONE by name rather than deriving a serial from
+     * whichever session happened to start the fetch. */
     (void)sess;
     gtsk = gtask_with_trans (CONN_NONE, -127);
     if (!gtsk) {
@@ -789,6 +811,9 @@ trackconn_prog_update (session *sess, char *str, int num, int total)
     guint32 tot = (guint32)(total < 0 ? 0 : total);
     g_autofree char *sub = NULL;
 
+    /* Deliberately ignored: the tracker's rows belong to no connection, so
+     * this asks for CONN_NONE by name rather than deriving a serial from
+     * whichever session happened to start the fetch. */
     (void)sess;
     gtsk = gtask_with_trans (CONN_NONE, -129);
     if (!gtsk) {
