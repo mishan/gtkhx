@@ -6,7 +6,7 @@ use super::row::HxTrackerRow;
 use super::{cs, cstr, section_row_at, WIN};
 use crate::bookmark_store;
 use crate::ffi as cffi;
-use crate::tr::tr;
+use crate::tr::{tr, trc};
 use gtk4 as gtk;
 use hxbookmarks::{cipher, Bookmark};
 use libadwaita as adw;
@@ -394,14 +394,20 @@ fn maturity_label(m: i32) -> String {
         x if x == super::meta::MATURITY_TEEN => tr("Teen"),
         x if x == super::meta::MATURITY_MATURE => tr("Mature"),
         x if x == super::meta::MATURITY_ADULT => tr("Adult"),
-        _ => tr("General"),
+        // TRANSLATORS: An age rating, the mildest of Teen/Mature/Adult —
+        // "suitable for everyone", no age restriction. Not the server
+        // category "General" below, and not the "General" preferences page.
+        _ => trc("maturity rating", "General"),
     }
 }
 
 fn category_label(c: i32) -> String {
     use super::meta::*;
     match c {
-        x if x == CATEGORY_GENERAL => tr("General"),
+        // TRANSLATORS: A server category, alongside Development, Gaming,
+        // Media and so on — a server with no particular specialism. Not the
+        // age rating "General" above, and not the preferences page.
+        x if x == CATEGORY_GENERAL => trc("server category", "General"),
         x if x == CATEGORY_DEVELOPMENT => tr("Development"),
         x if x == CATEGORY_ARCHIVE => tr("Archive"),
         x if x == CATEGORY_WAREZ => tr("Warez"),
@@ -480,7 +486,10 @@ fn show_server_details(row: &HxTrackerRow) {
     if let Some(m) = m {
         // --- Identity ---
         let grp = adw::PreferencesGroup::new();
-        grp.set_title(&tr("Identity"));
+        // TRANSLATORS: Heading for a group of facts about the server —
+        // its software, country, region, language and tags. The other
+        // "Identity" in this catalog is the user's own name and icon.
+        grp.set_title(&trc("server details", "Identity"));
         let mut n = 0;
         n += add_str(&grp, &tr("Software"), unsafe { &cstr(m.server_software) });
         n += add_str(&grp, &tr("Country"), unsafe { &cstr(m.country_code) });

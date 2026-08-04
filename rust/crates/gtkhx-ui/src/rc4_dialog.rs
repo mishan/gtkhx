@@ -53,13 +53,19 @@ pub unsafe fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
         )
     };
     body.push_str("\n\n");
+    // Two things this paragraph used to get wrong, both of which every
+    // translator hit: it named an option called "No cipher" that appears
+    // nowhere (the button below says "Connect without encryption", and the
+    // combo's first row says "Off"), and its last clause — "change the
+    // bookmark's cipher from the connection's cipher" — was garbled enough
+    // that translations had to guess at the intent.
     body.push_str(&tr(
         "Pick a replacement cipher and the bookmark will be rewritten so this prompt \
-         doesn't appear again. \"No cipher\" sends the connection in plaintext — that's \
-         less secure than Blowfish or ChaCha20-Poly1305, but at least you'll know the \
-         connection isn't protected. The server has to support whichever cipher you \
-         pick; if the negotiation fails you can change the bookmark's cipher from the \
-         connection's cipher in Settings → Connections and try again.",
+         doesn't appear again. \"Connect without encryption\" sends the connection in \
+         plaintext — that's less secure than Blowfish or ChaCha20-Poly1305, but at \
+         least you'll know the connection isn't protected. The server has to support \
+         whichever cipher you pick; if the negotiation fails, change the connection's \
+         cipher in Settings → Connections and try again.",
     ));
 
     let dialog = adw::AlertDialog::new(Some(&tr("Replace RC4 cipher")), Some(&body));
