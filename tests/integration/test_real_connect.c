@@ -262,11 +262,19 @@ static session test_session;
  * still mean what they say. */
 static struct htlc_conn test_htlc_storage;
 #define test_htlc test_htlc_storage
+/* The stubbed session registry answers with `the_session` (connect_test_stubs.c),
+ * and the hxnet bridge now resolves its callbacks' connection through that
+ * registry rather than carrying a pointer — so the harness has to publish its
+ * connection there or every callback would resolve to NULL and the whole
+ * orchestrator path would go quiet. */
+extern session the_session;
+
 static inline void
 test_htlc_rearm (void)
 {
     test_session.htlc = &test_htlc_storage;
     test_htlc_storage.sess = &test_session;
+    the_session.htlc = &test_htlc_storage;
 }
 
 static void

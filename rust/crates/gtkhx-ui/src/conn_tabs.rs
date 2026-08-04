@@ -209,6 +209,31 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     glib::Propagation::Stop
 }
 
+/// A tab was dragged out of the strip and dropped on the desktop.
+///
+/// `AdwTabView` asks here for the view to move the page into, and **the answer
+/// may not be nothing**: libadwaita logs a critical for a NULL and then leaves
+/// the drag half-finished, which crashes inside GTK's crossing-event
+/// synthesis when the drop target is resolved against a tab that is being torn
+/// down. Not connecting the signal at all has exactly that effect, which is
+/// what this used to do.
+///
+/// There is no way to refuse a detach — no `can-detach` on the page or the
+/// bar — so the only answer that keeps the page somewhere valid is the view it
+/// is already in. The drop becomes a no-op and the tab stays put.
+///
+/// That is a placeholder for real detaching, not a decision against it. A
+/// detached connection needs its own window with its own dock, and the dock is
+/// a process singleton today: one `PanelDock`, four frame globals, and a panel
+/// registry keyed on the panel id with no connection dimension, so two windows
+/// would collide on every one of the six panel ids. See
+/// docs/multi-connection.md — this is the difference between layout Model A,
+/// which is what exists, and Model B.
+fn on_create_window(view: &adw::TabView) -> Option<adw::TabView> {
+    debug("tab dropped outside the strip; detaching is not implemented");
+    Some(view.clone())
+}
+
 /// Tab selected: move the focus, swap every per-connection panel, and treat
 /// the selection as acknowledging whatever the tab was flagged for.
 fn on_selected_page_changed(view: &adw::TabView) {
@@ -271,6 +296,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_new() -> *mut gtk::ffi::GtkWidget {
     let view = adw::TabView::new();
     view.connect_selected_page_notify(on_selected_page_changed);
     view.connect_close_page(on_close_page);
+    view.connect_create_window(on_create_window);
 
     let bar = adw::TabBar::new();
     bar.set_view(Some(&view));
@@ -585,6 +611,26 @@ pub(crate) mod tests {
         );
         unsafe { gtkhx_conn_tabs_set_attention(gtkhx_session_htlc(b), glib::ffi::GFALSE) };
         assert!(!tab_for(other).unwrap().needs_attention());
+
+        // A tab dragged onto the desktop. libadwaita asks for a view to move
+        // the page into and will not take nothing for an answer — a NULL
+        // leaves the drag half-finished and crashes in GTK. Answering with
+        // the view the page is already in makes the drop a no-op, and what
+        // has to survive that round trip is the page's connection key: it is
+        // qdata, and the strip's entire tab-to-connection mapping is built on
+        // it. Driven through `transfer_page` because that is what libadwaita
+        // does with the returned view.
+        let dropped = tab_for(other).unwrap();
+        let same = on_create_window(&view).unwrap();
+        assert_eq!(same, view, "detach handler pointed somewhere else");
+        view.transfer_page(&dropped, &same, view.page_position(&dropped));
+        assert_eq!(gtkhx_conn_tabs_count(), 2, "the no-op detach lost a tab");
+        assert_eq!(
+            tab_conn(&dropped),
+            Some(other),
+            "the page lost its connection key crossing the transfer"
+        );
+        assert_eq!(tab_for(other).as_ref(), Some(&dropped), "index went stale");
 
         // Closing. Three things have to happen together: the tab goes, the
         // session is told, and the connection stops resolving. The first two

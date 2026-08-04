@@ -251,6 +251,12 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * live. Per connection, so disconnecting one server leaves another's
      * downloads running. */
     xfers_delete_on_conn (htlc);
+    /* And this connection's rows in the shared queue. The transfers above are
+     * cancelled, but the queue is one list for the whole app now, so nothing
+     * else takes their rows away — a disconnected server would leave dead
+     * progress bars behind, with a reconnect building fresh ones beside them.
+     * The protocol-task rows go the same way. */
+    gtasks_delete_on_conn (htlc);
 
     /* Tear down the hxnet handle if it was installed. Drops the
      * ConnectionHandle, which the actor sees as HandleDropped;
@@ -1159,6 +1165,11 @@ tracker_kill_threads (void)
         tracker_drain_source_id = 0;
     }
     tracker_fetch_cleanup ();
+    /* The progress rows go with the fetch. They are connection-less, so the
+     * per-connection sweep never touches them, and reaching the last server
+     * of a walk is the only other thing that removes them — which a fetch
+     * that errors out never does. */
+    gtasks_delete_tracker_rows ();
 }
 
 void

@@ -252,8 +252,10 @@ typedef struct _session {
 
     GtkWidget *agreementwin;
 
-    struct gtask *gtask_list;
-    GtkWidget *gtklist, *gtask_scroll;
+    /* The task queue used to live here — the row list and its two widgets,
+     * one set per connection. It is one shared queue now, tagged per row, so
+     * those three are file-statics in tasks.c. See docs/multi-connection.md,
+     * "Global but tagged". */
 
     struct gnews_folder *gfnews_list;
 

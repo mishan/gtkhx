@@ -411,17 +411,19 @@ hxnet_connection_open_plaintext_tls (
  * symbol must resolve — define it here (test never reads it). */
 int connected;
 
-/* bridge_on_verify_cert_cb (TLS TOFU trampoline) calls the production
- * verify in network.c. Tier 1 never drives the TLS path, but the
- * symbol must resolve. */
+/* bridge_on_verify_cert_cb (TLS TOFU trampoline) calls the trust store
+ * directly now — it runs on a tokio thread, where resolving a connection is
+ * neither safe nor necessary, so it works off the host and port the bridge
+ * copied at install. Tier 1 never drives the TLS path, but the symbol must
+ * resolve. */
 struct htlc_conn;
-gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
-                                          const char *fingerprint);
+gboolean hx_tls_verify_cert (const char *host, guint16 port,
+                             const char *fingerprint);
 gboolean
-hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
-                                 const char *fingerprint)
+hx_tls_verify_cert (const char *host, guint16 port, const char *fingerprint)
 {
-    (void)htlc;
+    (void)host;
+    (void)port;
     (void)fingerprint;
     g_assert_not_reached ();
     return FALSE;
@@ -560,11 +562,49 @@ static int fake_transport_b;
 #define FAKE_A ((struct hxnet_connection_opaque *)&fake_transport_a)
 #define FAKE_B ((struct hxnet_connection_opaque *)&fake_transport_b)
 
+/* The bridge's callbacks no longer receive the connection — they receive its
+ * *serial*, and resolve it. That is what lets an event queued before a close
+ * be dropped instead of dereferencing a connection that has since been freed,
+ * and it is the machinery these stale-actor tests exercise, so the stub here
+ * models the real registry rather than always answering with one connection:
+ * a serial that was never registered resolves to NULL, exactly as it would in
+ * production once a tab is closed. */
+static GPtrArray *test_conns;
+
+static struct htlc_conn *
+test_conn_new (void)
+{
+    struct htlc_conn *c = hx_conn_new ();
+
+    if (test_conns == NULL) {
+        test_conns = g_ptr_array_new ();
+    }
+    /* Never removed: connections are leaked for the run, and serials are
+     * unique for the process, so an entry can't be mistaken for a later
+     * connection's. */
+    g_ptr_array_add (test_conns, c);
+    return c;
+}
+
+extern struct htlc_conn *hx_conn_with_serial (guint16 serial);
+struct htlc_conn *
+hx_conn_with_serial (guint16 serial)
+{
+    for (guint i = 0; test_conns != NULL && i < test_conns->len; i++) {
+        struct htlc_conn *c = g_ptr_array_index (test_conns, i);
+
+        if (hx_conn_serial (c) == serial) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
 static void
 test_installed_is_per_connection (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
-    struct htlc_conn *b = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
+    struct htlc_conn *b = test_conn_new ();
 
     g_assert_false (hx_bridge_is_installed (a));
     g_assert_false (hx_bridge_is_installed (b));
@@ -625,6 +665,28 @@ install_plaintext (struct htlc_conn *htlc)
         htlc, "example.invalid", 5500, "login", "pass", "name", 0, 197, 0, 1);
 }
 
+/* What the bridge handed hxnet for each connection.
+ *
+ * Opaque here on purpose: it is a record the bridge allocates and owns, and
+ * the only honest way for a test to drive a callback the way the real
+ * forwarder does is to hand back exactly what the install produced. Recorded
+ * by `install_and_capture` rather than synthesised, so a change to the
+ * record's shape can't quietly make these tests drive something production
+ * never would.
+ *
+ * Note this is also why the test's own registry can't cover the
+ * connection-has-gone path: the record outlives the connection by design, and
+ * making the lookup miss requires a *session* teardown, which this Tier 1
+ * binary has no registry to do. That path is covered by the `closesecond`
+ * debug hook under valgrind instead. */
+static void *
+install_and_capture (struct htlc_conn *c)
+{
+    g_assert_true (install_plaintext (c));
+    g_assert_nonnull (last_open_user_data);
+    return last_open_user_data;
+}
+
 /* The behaviour change M2 exists for: installing a transport on a second
  * connection while a first one is up. This used to be refused outright with
  * "a connection is already installed", which is what made a second
@@ -632,8 +694,8 @@ install_plaintext (struct htlc_conn *htlc)
 static void
 test_install_allows_a_second_connection (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
-    struct htlc_conn *b = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
+    struct htlc_conn *b = test_conn_new ();
 
     reset_stub_state ();
     open_result = FAKE_A;
@@ -664,7 +726,7 @@ test_install_allows_a_second_connection (void)
 static void
 test_install_refuses_over_the_same_connection (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
 
     reset_stub_state ();
     g_assert_true (install_plaintext (a));
@@ -700,17 +762,16 @@ make_frame (void)
 static void
 test_event_from_a_stale_actor_is_dropped (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
 
     reset_stub_state ();
     open_result = FAKE_A;
-    g_assert_true (install_plaintext (a));
+    void *ud_a = install_and_capture (a);
     test_stub_event_cb on_event = last_open_event_cb;
     g_assert_nonnull (on_event);
-    g_assert_true (last_open_user_data == a);
 
     /* The live handle dispatches. */
-    on_event (FAKE_A, make_frame (), a);
+    on_event (FAKE_A, make_frame (), ud_a);
     g_assert_cmpint (dispatch_calls, ==, 1);
     g_assert_true (last_dispatch_htlc == a);
     g_assert_cmpuint (last_dispatch_type, ==, 105);
@@ -718,7 +779,7 @@ test_event_from_a_stale_actor_is_dropped (void)
     /* A handle this connection no longer has does not — this is the frame
      * that would otherwise be injected into a reconnected session's state
      * machine. */
-    on_event (FAKE_B, make_frame (), a);
+    on_event (FAKE_B, make_frame (), ud_a);
     g_assert_cmpint (dispatch_calls, ==, 1);
 
     /* Dropped or not, every frame is freed: the ownership contract does not
@@ -736,28 +797,28 @@ test_event_from_a_stale_actor_is_dropped (void)
 static void
 test_events_route_to_their_own_connection (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
-    struct htlc_conn *b = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
+    struct htlc_conn *b = test_conn_new ();
 
     reset_stub_state ();
     open_result = FAKE_A;
-    g_assert_true (install_plaintext (a));
+    void *ud_a = install_and_capture (a);
     test_stub_event_cb on_event = last_open_event_cb;
     open_result = FAKE_B;
-    g_assert_true (install_plaintext (b));
+    void *ud_b = install_and_capture (b);
 
-    on_event (FAKE_A, make_frame (), a);
+    on_event (FAKE_A, make_frame (), ud_a);
     g_assert_cmpint (dispatch_calls, ==, 1);
     g_assert_true (last_dispatch_htlc == a);
 
-    on_event (FAKE_B, make_frame (), b);
+    on_event (FAKE_B, make_frame (), ud_b);
     g_assert_cmpint (dispatch_calls, ==, 2);
     g_assert_true (last_dispatch_htlc == b);
 
     /* Crossed pairs are still rejected — the identity test is (handle,
      * connection), not either one alone. */
-    on_event (FAKE_A, make_frame (), b);
-    on_event (FAKE_B, make_frame (), a);
+    on_event (FAKE_A, make_frame (), ud_b);
+    on_event (FAKE_B, make_frame (), ud_a);
     g_assert_cmpint (dispatch_calls, ==, 2);
     g_assert_cmpint (frame_free_calls, ==, 4);
 
@@ -773,15 +834,15 @@ test_events_route_to_their_own_connection (void)
 static void
 test_shutdown_from_a_stale_actor_is_ignored (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
 
     reset_stub_state ();
     open_result = FAKE_A;
-    g_assert_true (install_plaintext (a));
+    void *ud_a = install_and_capture (a);
     test_stub_shutdown_cb on_shutdown = last_open_shutdown_cb;
     g_assert_nonnull (on_shutdown);
 
-    on_shutdown (FAKE_B, 0 /* EOF */, a);
+    on_shutdown (FAKE_B, 0 /* EOF */, ud_a);
     g_assert_cmpint (destroy_calls, ==, 0);
     g_assert_true (hx_bridge_is_installed (a));
 
@@ -792,8 +853,8 @@ test_shutdown_from_a_stale_actor_is_ignored (void)
 static void
 test_send_routes_to_its_own_connection (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
-    struct htlc_conn *b = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
+    struct htlc_conn *b = test_conn_new ();
     const guint8 payload[] = { 0xde, 0xad, 0xbe, 0xef };
 
     hx_conn_set_bridge_handle (a, FAKE_A);
@@ -821,7 +882,7 @@ test_send_routes_to_its_own_connection (void)
 static void
 test_send_without_a_transport (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
     const guint8 payload[] = { 0x01 };
 
     last_send_handle = NULL;
@@ -840,8 +901,8 @@ test_send_without_a_transport (void)
 static void
 test_uninstall_leaves_other_connections_alone (void)
 {
-    struct htlc_conn *a = hx_conn_new ();
-    struct htlc_conn *b = hx_conn_new ();
+    struct htlc_conn *a = test_conn_new ();
+    struct htlc_conn *b = test_conn_new ();
 
     hx_conn_set_bridge_handle (a, FAKE_A);
     hx_conn_set_bridge_handle (b, FAKE_B);

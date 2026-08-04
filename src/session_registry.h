@@ -91,6 +91,15 @@ session *hx_active_session (void);
  * Serial 0 means "no connection" and always answers NULL. */
 session *hx_session_with_serial (guint16 serial);
 
+/* The live connection with this serial, or NULL when there is none.
+ *
+ * The connection-side form of hx_session_with_serial, and the safe way for
+ * anything asynchronous to name a connection: a callback queued on the main
+ * loop can be dispatched after the close that provoked it, and the connection
+ * struct is freed with its session. A serial resolves to NULL from that moment
+ * instead of to freed memory. */
+struct htlc_conn *hx_conn_with_serial (guint16 serial);
+
 /* Move the focus. FALSE if `sess` isn't in the collection, which leaves the
  * focus alone — a failed switch should not blank the UI. */
 gboolean hx_session_set_active (session *sess);
@@ -105,6 +114,11 @@ session *hx_session_at (guint i);
 
 /* Where `sess` sits, or HX_SESSION_NOT_FOUND. */
 guint hx_session_index (session *sess);
+
+/* How many connections have been freed since launch. For the debug hooks that
+ * exercise open-and-close headlessly — see the note on the definition for why
+ * the serial-resolution assertions can't stand in for this. */
+guint hx_debug_conns_freed (void);
 
 /* Drop `sess` from the collection and free it. FALSE if it wasn't in it.
  *

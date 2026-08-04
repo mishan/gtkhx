@@ -12,6 +12,12 @@
 //!
 //! The task list content + its transfer-model coupling (htxf / xfers queue)
 //! stay C until the transfers subsystem itself is ported.
+//!
+//! Unlike the other five dock panels this one is **global**: one queue for the
+//! whole application, with each row tagged by the connection it belongs to.
+//! Switching connection tabs leaves it alone. What that costs here is that a
+//! connection after the first still has state to push into a panel it did not
+//! build — see the `Done` arm below.
 
 use std::ffi::c_void;
 
@@ -23,11 +29,14 @@ type Session = c_void;
 extern "C" {
     /// Build the Tasks panel content (action button bar over the task list
     /// scroller). Returns a still-floating container, or NULL if `sess` is
-    /// NULL. Requires `create_tasks` to have run (sess->gtask_scroll set).
+    /// NULL. Requires `create_tasks` to have run.
     fn gtkhx_tasks_build_content(sess: *mut Session) -> *mut gtk4::ffi::GtkWidget;
     /// Mark the panel open in prefs and push the current task + xfer state
     /// into the freshly-embedded list.
     fn gtkhx_tasks_after_embed(sess: *mut Session);
+    /// Push one connection's tasks and transfers into the queue, for a
+    /// connection joining a panel that already exists.
+    fn gtkhx_tasks_sync_conn(sess: *mut Session);
 }
 
 /// Open (or raise) the Tasks panel. C ABI replacement for the old
@@ -40,12 +49,18 @@ extern "C" {
 pub unsafe extern "C" fn create_tasks_window(_widget: *mut c_void, data: *mut c_void) {
     crate::ensure_gtk_init();
 
-    // Re-click of the toolbar button → re-attach + raise, don't rebuild.
     let sess = data as *mut Session;
-    // Tasks is per-connection today; M6 turns the queue global, at which
-    // point this panel stops having pages at all.
-    let dock::Open::Build(page) = dock::open(dock::ID_TASKS, data) else {
-        return;
+
+    // A second connection opening: either
+    // way the queue already exists and must not be rebuilt. It is shared, so
+    // what this connection still needs is its own rows put into it — nothing
+    // else will, because no page is created for it.
+    let page = match dock::open_global(dock::ID_TASKS) {
+        dock::Open::Done => {
+            gtkhx_tasks_sync_conn(sess);
+            return;
+        }
+        dock::Open::Build(page) => page,
     };
 
     let content = gtkhx_tasks_build_content(sess);

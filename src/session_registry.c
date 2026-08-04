@@ -50,6 +50,8 @@
 #include "msg.h"
 #include "session_registry.h"
 #include "tasks.h"
+#include "hxnet_bridge.h"
+#include "hxnet_htxf.h" /* hxnet_hope_aead_free */
 
 #ifdef HAVE_VOICE
 #include "voice_model.h"
@@ -66,6 +68,20 @@ static GPtrArray *sessions;
 static guint focused;
 
 static void hx_session_free (session *sess);
+
+/* Connections freed so far. Debug-only, and it exists because freeing has no
+ * other visible effect in a headless run: the close hook's "does this serial
+ * still resolve?" assertions pass whether or not the connection was freed,
+ * since a serial stops resolving the moment the *session* leaves the
+ * collection. Counting the frees is the only thing that can tell the two
+ * apart. */
+static guint conns_freed;
+
+guint
+hx_debug_conns_freed (void)
+{
+    return conns_freed;
+}
 
 static void
 ensure_array (void)
@@ -147,6 +163,14 @@ hx_session_with_serial (guint16 serial)
     return NULL;
 }
 
+struct htlc_conn *
+hx_conn_with_serial (guint16 serial)
+{
+    session *sess = hx_session_with_serial (serial);
+
+    return sess ? sess->htlc : NULL;
+}
+
 gboolean
 hx_session_set_active (session *sess)
 {
@@ -203,6 +227,54 @@ hx_session_remove (session *sess)
     return TRUE;
 }
 
+/* Free a connection, releasing anything it is still holding first.
+ *
+ * Everything below is normally already released: `hx_htlc_close` stops the
+ * keepalive and the GIF-icons probe, `rcv.c` stops the post-login fallback,
+ * and the HOPE material and the transport handle go the same way. But
+ * `hx_session_close` only runs that path for a connection that still has a
+ * socket, and this is the last moment anything can be released at all — a
+ * timer left armed would fire into freed memory, and the two allocations would
+ * simply leak. Doing it unconditionally costs nothing and does not depend on
+ * every close path having been walked in the right order.
+ *
+ * `hx_bridge_uninstall` rather than a bare clear: the handle owns a live hxnet
+ * actor, and dropping the pointer would leave it running against a connection
+ * that no longer exists. */
+static void
+hx_conn_release (struct htlc_conn *htlc)
+{
+    guint id;
+
+    if (htlc == NULL) {
+        return;
+    }
+
+    if ((id = hx_conn_ping_timer (htlc)) != 0) {
+        g_source_remove (id);
+        hx_conn_set_ping_timer (htlc, 0);
+    }
+    if ((id = hx_conn_post_login_timer (htlc)) != 0) {
+        g_source_remove (id);
+        hx_conn_set_post_login_timer (htlc, 0);
+    }
+    if ((id = hx_conn_gif_icons_probe_timer (htlc)) != 0) {
+        g_source_remove (id);
+        hx_conn_set_gif_icons_probe_timer (htlc, 0);
+    }
+
+    if (hx_conn_bridge_handle (htlc) != NULL) {
+        hx_bridge_uninstall (htlc);
+    }
+    if (hx_conn_hope_aead (htlc) != NULL) {
+        hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
+        hx_conn_set_hope_aead (htlc, NULL);
+    }
+
+    hx_conn_free (htlc);
+    conns_freed++;
+}
+
 /* Release a session and everything it owns. Static because a session still in
  * the collection must never be freed, and hx_session_remove is the only place
  * that knows it isn't.
@@ -220,17 +292,18 @@ hx_session_remove (session *sess)
  *
  * Most widget fields on the session are borrowed: children of a dock page that
  * `hx_session_close` destroyed before getting here, gone with their parent.
- * Three are not, and each is released explicitly below, because a borrowed
- * pointer and an owned one look identical at the struct:
+ * One is not, and is released explicitly below, because a borrowed pointer and
+ * an owned one look identical at the struct:
  *
- *   - `gtklist` and `gtask_scroll` are `g_object_ref_sink`ed by `tasks.c` on
- *     purpose, so they survive being unparented.
  *   - `users_view` arrives transfer-full from Rust; the session holds the only
  *     reference, and dropping it is also what lets the view's `dispose`
  *     disconnect its handler on the process-lifetime theme object — a handler
  *     that would otherwise fire against a view holding a freed session.
- *   - `gtask_list` is a hand-rolled intrusive list, unrelated to the `tasks`
- *     hash table and not freed by it.
+ *
+ * The task queue is not on this list any more. It is one shared widget for the
+ * whole application now, and a departing connection's rows are swept by
+ * `gtasks_delete_on_conn` from `hx_htlc_close` — earlier, while the connection
+ * is still the thing being torn down, rather than here.
  *
  * Ordering matters within each clear, and `g_clear_pointer` is what provides
  * it: the macro NULLs the field *before* calling the destroy function, not
@@ -240,19 +313,23 @@ hx_session_remove (session *sess)
  * "destroy, then NULL" is the natural mistake, and would be a use-after-free
  * waiting for the first callback that looks back at its session.
  *
- * The connection is the exception, and it stays allocated. hxnet posts
- * main-loop events carrying the raw `struct htlc_conn *`, and a shutdown
- * already on the idle queue can be dispatched after the close that provoked it
- * — `hx_bridge_dispatch_shutdown` reads the connection to decide whether it is
- * a late duplicate. Freeing it here would turn that read into a
- * use-after-free. What we can do is cut the back-pointer, so `sess_from_htlc`
- * answers NULL and every model-side path that would have reached a dead
- * session is safe by construction rather than by timing.
+ * The connection goes too. That used to be impossible: hxnet posts main-loop
+ * events carrying the connection, and a shutdown already on the idle queue can
+ * be dispatched after the close that provoked it, so freeing here would have
+ * turned `hx_bridge_dispatch_shutdown`'s "is this a late duplicate?" read into
+ * a use-after-free. The callbacks carry the connection's *serial* now and
+ * resolve it, which answers NULL for a connection that has gone — so a late
+ * event drops itself, the same way it already dropped one from a stale actor.
  *
- * The residue is therefore one fixed-size connection struct per closed
- * connection rather than a whole session tree. Freeing that too means the
- * hxnet callbacks carrying a serial and looking the connection up, the same
- * shape used here — worth doing, and its own piece of work. */
+ * The back-pointer is cut first, but do not mistake that for a safety net any
+ * more. It used to be one: while the connection outlived everything, a holder
+ * of a stale connection got a graceful NULL out of `sess_from_htlc`. The two
+ * statements are now adjacent, so that NULL is observable for no main-loop
+ * iterations at all — a stale connection pointer reads freed memory inside
+ * `hx_conn_sess` before it can answer anything. The rule that replaces it:
+ * anything holding a connection across a turn of the main loop holds a serial
+ * and resolves it. The cut is kept because it costs nothing and keeps the
+ * struct honest for the instant between the two lines. */
 static void
 hx_session_free (session *sess)
 {
@@ -265,12 +342,6 @@ hx_session_free (session *sess)
     g_clear_pointer (&sess->chats, hx_chats_free);
     g_clear_pointer (&sess->server_name, g_free);
 
-    /* The task rows, before the widgets they are parented to. */
-    while (sess->gtask_list != NULL) {
-        gtask_delete (sess, sess->gtask_list);
-    }
-    g_clear_object (&sess->gtklist);
-    g_clear_object (&sess->gtask_scroll);
     g_clear_object (&sess->users_view);
 
 #ifdef HAVE_VOICE
@@ -286,6 +357,7 @@ hx_session_free (session *sess)
 #endif
 
     hx_conn_set_sess (sess->htlc, NULL);
+    hx_conn_release (sess->htlc);
     g_free (sess);
 }
 
