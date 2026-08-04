@@ -212,7 +212,6 @@ mod doubles {
     use super::*;
     use std::cell::RefCell;
 
-    #[derive(Default)]
     pub struct Env {
         // inputs
         pub fd: c_int,
@@ -229,6 +228,29 @@ mod doubles {
         /// question — the other half is whether it reached the right one.
         pub last_send_htlc: *mut HtlcConn,
         pub close_calls: u32,
+    }
+
+    // Hand-written rather than `#[derive(Default)]`: `*mut T` only gained a
+    // `Default` impl in a rustc newer than the workspace MSRV floor (1.85 —
+    // Debian stable's stock toolchain, `rust-version` in rust/Cargo.toml), so
+    // the derive fails to resolve `*mut HtlcConn: Default` there. It builds on
+    // Debian unstable's newer rustc but not on the floor. A null default is
+    // exactly what the derive would produce anyway.
+    impl Default for Env {
+        fn default() -> Self {
+            Self {
+                fd: 0,
+                trans: 0,
+                installed: false,
+                send_rc: 0,
+                trace_begin_trans: None,
+                trace_chunks: 0,
+                send_calls: 0,
+                last_send_len: 0,
+                last_send_htlc: std::ptr::null_mut(),
+                close_calls: 0,
+            }
+        }
     }
 
     thread_local! {
