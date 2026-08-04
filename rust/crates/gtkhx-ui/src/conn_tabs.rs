@@ -41,20 +41,27 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 
 use gtk::glib;
-use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
+// Re-exports gtk4's prelude, so this is the only one needed.
+use libadwaita::prelude::*;
 
 use crate::dock;
 use crate::dock::ConnKey;
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 extern "C" {
-    /// `gtkhx_ui_bridge.c` — the connection a session owns. Only for the
-    /// tests, which use a connection as its own session; the module reaches
-    /// the key through `dock` like everything else.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// `gtkhx_ui_bridge.c` — the connection a session owns. The module
+    /// reaches the *key* through `dock` like everything else; this is for the
+    /// one place that needs the connection itself, plus the tests, which use
+    /// a connection as its own session.
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// `gtkhx-core` — the connection's socket, or 0 when it has none.
+    /// Dereferences, so never hand it NULL.
+    fn hx_conn_fd(htlc: *const c_void) -> std::os::raw::c_int;
+    /// `gtkutil.c` — the server's advertised name, or its address. Owned by
+    /// the caller.
+    fn hx_session_label(sess: *mut c_void) -> *mut c_char;
     /// `session_registry.c` — move the focus. FALSE if the session isn't in
     /// the collection, which leaves the focus alone.
     fn hx_session_set_active(sess: *mut c_void) -> glib::ffi::gboolean;
@@ -166,6 +173,13 @@ fn swap_panels(conn: ConnKey) {
 /// of which runs its content module's destroy handler. Only then does the tab
 /// go.
 ///
+/// A live connection asks first. Closing its tab disconnects it, which is not
+/// what a misplaced click on an [X] should do — and the tab strip only appears
+/// once there are two connections, so the button is small, adjacent to the one
+/// you are looking at, and easy to hit by accident. `close-page` is designed
+/// for exactly this: the handler stops the close and finishes it later, so the
+/// question can be asked without blocking.
+///
 /// The last connection can't be closed, and needs no check: `AdwTabBar`
 /// autohides below two pages, so there is no close button to press.
 fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation {
@@ -186,6 +200,78 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
         return glib::Propagation::Stop;
     }
 
+    // A connection with a socket is one this would disconnect, so ask. Having
+    // a socket rather than being logged in, matching what the Disconnect
+    // button acts on: a connection still handshaking is just as much something
+    // the user would not expect a stray click to throw away.
+    if unsafe { hx_conn_fd(gtkhx_session_htlc(sess)) } != 0 {
+        confirm_close(view, page, conn);
+        return glib::Propagation::Stop;
+    }
+
+    finish_close(view, page, conn, sess);
+    glib::Propagation::Stop
+}
+
+/// Ask before disconnecting, then finish or abandon the close.
+///
+/// Everything is re-resolved in the response handler rather than captured:
+/// between asking and answering, the connection can have dropped on its own,
+/// or the tab can have gone. The serial is the only thing safe to hold across
+/// that gap, which is the same reason the strip indexes on one.
+fn confirm_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey) {
+    let label = unsafe { hx_session_with_serial(conn) };
+    let name = if label.is_null() {
+        tr("this server")
+    } else {
+        unsafe {
+            let p = hx_session_label(label);
+            let s = crate::cstr(p);
+            glib::ffi::g_free(p as *mut _);
+            s
+        }
+    };
+
+    let dialog = adw::AlertDialog::new(
+        Some(&tr("Disconnect from this server?")),
+        Some(&tr1("Closing this tab disconnects from %s.", &name)),
+    );
+    dialog.add_response("cancel", &tr("_Cancel"));
+    dialog.add_response("close", &tr("_Disconnect"));
+    dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+
+    let anchor = view.clone();
+    let view = view.clone();
+    let page = page.clone();
+    dialog.connect_response(None, move |_dlg, response| {
+        if response != "close" {
+            // Declining has to be reported too: an unfinished close leaves the
+            // page stuck, refusing every later attempt to shut it.
+            view.close_page_finish(&page, false);
+            return;
+        }
+        // Re-resolve: the connection may have dropped while the question was
+        // open, in which case there is nothing to disconnect and the tab
+        // should simply go.
+        let sess = unsafe { hx_session_with_serial(conn) };
+        if sess.is_null() {
+            STATE.with(|s| {
+                s.borrow_mut().tabs.remove(&conn);
+            });
+            view.close_page_finish(&page, true);
+            return;
+        }
+        finish_close(&view, &page, conn, sess);
+    });
+
+    dialog.present(Some(&anchor));
+}
+
+/// Tear the connection down and drop its tab. The second half of
+/// [`on_close_page`], reached directly when nothing needed asking.
+fn finish_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, sess: *mut c_void) {
     // Move the focus off it if it is the one selected. Selecting a neighbour
     // runs the ordinary switch — focus, panels, chrome — so by the time the
     // teardown starts, nothing is pointing at the session being closed.
@@ -206,7 +292,6 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     debug(&format!("closed connection {conn}"));
 
     view.close_page_finish(page, true);
-    glib::Propagation::Stop
 }
 
 /// A tab was dragged out of the strip and dropped on the desktop.
@@ -300,6 +385,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_new() -> *mut gtk::ffi::GtkWidget {
 
     let bar = adw::TabBar::new();
     bar.set_view(Some(&view));
+    crate::wheel_switches_tabs(&bar, &view);
     // The default, set explicitly because the single-connection appearance
     // depends on it: with one page (and none pinned) the bar hides itself, so
     // a session with one connection looks as it did before this existed.

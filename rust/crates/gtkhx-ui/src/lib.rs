@@ -202,6 +202,48 @@ pub(crate) fn ensure_gtk_init() {
     unsafe { gtk4::set_initialized() };
 }
 
+/// Make a tab bar switch tabs on a mouse wheel, the way a browser's does.
+///
+/// Attached to the *bar* rather than the view, because the view is what the
+/// bar is a control for — and in the connection strip's case the view is never
+/// drawn at all, so it would never see the event.
+///
+/// Wheel up selects the previous tab and down the next, which is the direction
+/// every tabbed application agrees on. Horizontal wheels and touchpad kinetic
+/// scrolling arrive through the same controller, so both axes are read and the
+/// larger one wins; a diagonal flick otherwise fires twice.
+///
+/// The event is claimed only when a tab was actually switched. Refusing it at
+/// the ends lets the scroll fall through to whatever is underneath instead of
+/// swallowing it against a wall.
+pub(crate) fn wheel_switches_tabs(
+    bar: &impl gtk4::prelude::IsA<gtk4::Widget>,
+    view: &libadwaita::TabView,
+) {
+    use gtk4::prelude::*;
+
+    let scroll = gtk4::EventControllerScroll::new(
+        gtk4::EventControllerScrollFlags::BOTH_AXES | gtk4::EventControllerScrollFlags::DISCRETE,
+    );
+    let view = view.clone();
+    scroll.connect_scroll(move |_, dx, dy| {
+        let d = if dy.abs() >= dx.abs() { dy } else { dx };
+        let moved = if d < 0.0 {
+            view.select_previous_page()
+        } else if d > 0.0 {
+            view.select_next_page()
+        } else {
+            false
+        };
+        if moved {
+            gtk4::glib::Propagation::Stop
+        } else {
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    bar.as_ref().add_controller(scroll);
+}
+
 /// C `char*` → owned `String` (empty on NULL). UTF-8 lossy.
 ///
 /// # Safety
