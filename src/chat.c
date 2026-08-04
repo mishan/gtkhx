@@ -2583,9 +2583,13 @@ hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
         return;
     }
     hx_chat_view_clear (gchat->output);
-    if (hx_panel_was_constructed (HX_PANEL_ID_CHAT)) {
-        if (subj) {
-            gtk_editable_set_text (GTK_EDITABLE (gchat->subject), "");
-        }
+    /* The subject entry belongs to the Chat panel's content, so it is
+     * NULL both before the panel is first built and after it is closed
+     * (gtkhx_chat_clear_content_ptrs nulls it on the content box's
+     * destroy). Test the pointer, not hx_panel_was_constructed — that
+     * latch is set once and never cleared, so it stays TRUE across a
+     * close and would wave a NULL straight into GTK_EDITABLE. */
+    if (subj && gchat->subject != NULL) {
+        gtk_editable_set_text (GTK_EDITABLE (gchat->subject), "");
     }
 }

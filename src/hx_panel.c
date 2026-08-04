@@ -252,6 +252,12 @@ on_frame_page_closed (PanelFrame *frame, PanelWidget *page, gpointer user_data)
         return;
     }
 
+    /* Closing a panel changes which panels are in the dock, and that
+     * is now persisted (the [Dock] closed= key). Requested for every
+     * kind, before the dynamic-panel early return below, so a closed
+     * static panel is still closed after a restart. */
+    dock_layout_request_save ();
+
     self = HX_PANEL (page);
     if (self->kind != HX_PANEL_KIND_DYNAMIC) {
         return;
@@ -712,6 +718,95 @@ frame_at_dock_coords (GtkWidget *dock, double x, double y)
     return result;
 }
 
+/* --- Drop highlight ---------------------------------------------- */
+
+/* Class on the PanelFrame the pointer is currently over. */
+#define HX_DROP_TARGET_CLASS "hx-drop-target"
+/* Class on the dock hosting our drop target, so the CSS below can
+ * turn off the outline GTK would otherwise draw around it. */
+#define HX_DOCK_DROP_HOST_CLASS "hx-dock-drop-host"
+
+/* Weak pointer: the highlighted frame can be destroyed mid-drag (a
+ * cross-dock drag that empties an undocked window, say), and a raw
+ * pointer would dangle until the next motion event cleared it. */
+static GtkWidget *drop_highlight_frame;
+
+static void
+set_drop_highlight (GtkWidget *frame)
+{
+    if (drop_highlight_frame == frame) {
+        return;
+    }
+    if (drop_highlight_frame != NULL) {
+        gtk_widget_remove_css_class (drop_highlight_frame,
+                                     HX_DROP_TARGET_CLASS);
+        g_clear_weak_pointer (&drop_highlight_frame);
+    }
+    if (frame != NULL) {
+        gtk_widget_add_css_class (frame, HX_DROP_TARGET_CLASS);
+        g_set_weak_pointer (&drop_highlight_frame, frame);
+    }
+}
+
+/* Install the drop-feedback stylesheet once, at
+ * GTK_STYLE_PROVIDER_PRIORITY_APPLICATION so both rules beat the
+ * theme's.
+ *
+ * `outline` rather than `box-shadow: inset` for the frame, and the
+ * distinction matters: GtkWidget snapshots background and border
+ * BEFORE its children and the outline AFTER, so an inset box-shadow
+ * is painted over by whatever content fills the pane, while the
+ * outline lands on top. A negative outline-offset keeps it inside
+ * the frame's own allocation instead of bleeding onto the
+ * neighbouring pane.
+ *
+ * @accent_bg_color rather than var(--accent-bg-color): the named
+ * color works across the whole supported libadwaita range, and CSS
+ * custom properties do not reach back to our floor. */
+static void
+ensure_drop_css (void)
+{
+    static GtkCssProvider *provider = NULL;
+    GdkDisplay *display;
+
+    if (provider != NULL) {
+        return;
+    }
+    display = gdk_display_get_default ();
+    if (display == NULL) {
+        return;
+    }
+
+    provider = gtk_css_provider_new ();
+    gtk_css_provider_load_from_string (
+        provider,
+        /* GTK's default stylesheet outlines ANY widget that has an
+         * active drop target under the pointer
+         * (":not(window):drop(active)"). Ours is a single target on
+         * the dock, which fills the window — so the whole window lit
+         * up during a drag and gave the user no clue which pane the
+         * panel would land in. Suppress it there; the hit-tested
+         * frame gets the highlight instead.
+         *
+         * All three properties that rule sets, not just box-shadow.
+         * The other two are inert on a PanelDock today (no border
+         * width, no caret) but would resurface the moment libpanel
+         * gave the dock a border, and a suppression rule that only
+         * half-suppresses is a trap. */
+        "paneldock." HX_DOCK_DROP_HOST_CLASS ":drop(active) {"
+        "  box-shadow: none;"
+        "  border-color: inherit;"
+        "  caret-color: inherit;"
+        "}"
+        "panelframe." HX_DROP_TARGET_CLASS " {"
+        "  outline: 3px solid @accent_bg_color;"
+        "  outline-offset: -3px;"
+        "}");
+    gtk_style_context_add_provider_for_display (
+        display, GTK_STYLE_PROVIDER (provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
 static gboolean
 on_dock_drop (GtkDropTarget *target, const GValue *value, double x, double y,
               gpointer user_data)
@@ -723,6 +818,10 @@ on_dock_drop (GtkDropTarget *target, const GValue *value, double x, double y,
 
     debug_log ("dnd", "dock_drop: x=%g y=%g, value type=%s", x, y,
                G_VALUE_TYPE_NAME (value));
+
+    /* The drag is over either way — clear the highlight before any
+     * of the early returns below can skip it. */
+    set_drop_highlight (NULL);
 
     if (!G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET)) {
         return FALSE;
@@ -744,24 +843,41 @@ on_dock_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     return ret;
 }
 
+/* enter and motion share a body: light up whichever frame the
+ * pointer is over, using the same hit-test the drop itself uses so
+ * the highlight can never point at a pane other than the one that
+ * will receive the panel. */
 static GdkDragAction
 on_dock_enter (GtkDropTarget *target, double x, double y, gpointer user_data)
 {
+    GtkWidget *dock = GTK_WIDGET (user_data);
+    PanelFrame *frame = frame_at_dock_coords (dock, x, y);
+
     (void)target;
-    (void)x;
-    (void)y;
-    (void)user_data;
+    set_drop_highlight (frame != NULL ? GTK_WIDGET (frame) : NULL);
     return GDK_ACTION_MOVE;
 }
 
 static GdkDragAction
 on_dock_motion (GtkDropTarget *target, double x, double y, gpointer user_data)
 {
+    GtkWidget *dock = GTK_WIDGET (user_data);
+    PanelFrame *frame = frame_at_dock_coords (dock, x, y);
+
     (void)target;
-    (void)x;
-    (void)y;
-    (void)user_data;
+    set_drop_highlight (frame != NULL ? GTK_WIDGET (frame) : NULL);
     return GDK_ACTION_MOVE;
+}
+
+/* Leave fires when the pointer exits the dock and when the drag ends
+ * anywhere else — including a cancelled drag, which is the path that
+ * would otherwise leave a pane outlined with nothing in flight. */
+static void
+on_dock_leave (GtkDropTarget *target, gpointer user_data)
+{
+    (void)target;
+    (void)user_data;
+    set_drop_highlight (NULL);
 }
 
 void
@@ -791,7 +907,14 @@ hx_panel_install_drop_target_on_dock (GtkWidget *dock)
     g_signal_connect (target, "drop", G_CALLBACK (on_dock_drop), dock);
     g_signal_connect (target, "enter", G_CALLBACK (on_dock_enter), dock);
     g_signal_connect (target, "motion", G_CALLBACK (on_dock_motion), dock);
+    g_signal_connect (target, "leave", G_CALLBACK (on_dock_leave), dock);
     gtk_widget_add_controller (dock, GTK_EVENT_CONTROLLER (target));
+
+    /* Per-pane drop feedback: the class marks this dock as the one
+     * whose whole-widget :drop(active) outline should be suppressed,
+     * and the stylesheet paints the hit-tested frame instead. */
+    gtk_widget_add_css_class (dock, HX_DOCK_DROP_HOST_CLASS);
+    ensure_drop_css ();
 
     debug_log ("dnd", "installed dock drop target on %p", dock);
 }
@@ -897,12 +1020,16 @@ hx_panel_ensure_attached (HxPanel *self)
             }
             panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (self));
             hx_panel_set_home_frame (self, target);
+            /* Re-opening a closed panel puts it back in the dock —
+             * the mirror of the page-closed save above. */
+            dock_layout_request_save ();
             return;
         }
     }
 
     panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (self));
     /* home_frame already points here — don't reset. */
+    dock_layout_request_save ();
 }
 
 GtkWidget *
@@ -1134,15 +1261,45 @@ on_undock_activate (GSimpleAction *action, GVariant *parameter,
     hx_panel_undock (HX_PANEL (user_data));
 }
 
-/* The undocked window's grid needs a create-frame handler. Uses
- * a plain PanelFrame — NOT HxPanelFrame — so libpanel's built-in
- * page.move-{left,right,up,down} class actions remain in force.
- * Those actions reflow pages between PanelGrid cells (auto-
- * creating a new column at the edge), which is the right
- * behaviour for an undocked-window layout. HxPanelFrame's
- * override targets the main dock's HxSplit tree and would
- * disable the chevron Move Page items here because there's no
- * HxSplit ancestor in an undocked window.
+/* Depth-first traversal for a descendant carrying a CSS class.
+ * Used to reach libpanel's header controls box, which is a private
+ * template child with no accessor but a stable ".controls" class
+ * (panel-frame-header-bar.ui). Same hunt-by-property approach as
+ * find_drag_button above, and the same caveat: stable surface
+ * today, worth re-checking if libpanel restructures the header. */
+static GtkWidget *
+find_css_class_descendant (GtkWidget *root, const char *css_class)
+{
+    GtkWidget *child;
+
+    if (root == NULL) {
+        return NULL;
+    }
+    if (gtk_widget_has_css_class (root, css_class)) {
+        return root;
+    }
+    for (child = gtk_widget_get_first_child (root); child != NULL;
+         child = gtk_widget_get_next_sibling (child)) {
+        GtkWidget *hit = find_css_class_descendant (child, css_class);
+        if (hit != NULL) {
+            return hit;
+        }
+    }
+    return NULL;
+}
+
+/* The undocked window's grid needs a create-frame handler. Uses a
+ * plain PanelFrame — NOT HxPanelFrame. HxPanelFrame exists to
+ * repurpose the chevron's page.move-{left,right,up,down} onto the
+ * main dock's HxSplit tree, and an undocked window has no HxSplit
+ * ancestor, so subclassing here would buy nothing but four actions
+ * that can never be enabled.
+ *
+ * (This used to be argued the other way round — that libpanel's own
+ * handlers reflow pages between PanelGrid cells and are worth
+ * keeping. The chevron they live behind is hidden below, so nothing
+ * reaches them either way; the reason above is the one that still
+ * holds.)
  *
  * The other HxPanel hookups still apply — close-dispatcher
  * (DYNAMIC panel teardown + registry unregister), drag-out
@@ -1155,12 +1312,42 @@ hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
     GtkWidget *frame = panel_frame_new ();
     PanelFrameHeader *header
         = PANEL_FRAME_HEADER (panel_frame_header_bar_new ());
+    GtkWidget *controls;
+
     (void)grid;
     (void)user_data;
     panel_frame_set_header (PANEL_FRAME (frame), header);
     hx_panel_install_close_dispatcher (frame);
     hx_panel_install_drag_out_on_frame (frame);
     hx_panel_defang_drop_controls_on_frame (frame);
+
+    /* An undocked window is a LEAF: it holds the one panel that was
+     * dragged or undocked into it and nothing docks into it. The
+     * dock-level GtkDropTarget lives on toolbar_dock alone, so a
+     * drop here has never been accepted — but libpanel's header
+     * still advertises the machinery for it, which reads as "this
+     * should work" and then doesn't.
+     *
+     * Hide the ".controls" box, which is the pan-down chevron (Move
+     * Page L/R/U/D + our Undock item) and the window-close X
+     * together. Both are dock operations with no meaning in a
+     * one-panel window: Move Page has nowhere to move to, and the X
+     * would close the page and leave an empty window behind rather
+     * than redocking.
+     *
+     * The drag handle and the title button stay, so the way back
+     * into the dock — drag the panel over a pane, or just close the
+     * window, which redocks via on_undocked_close_request — is
+     * unchanged. */
+    controls = find_css_class_descendant (GTK_WIDGET (header), "controls");
+    if (controls != NULL) {
+        gtk_widget_set_visible (controls, FALSE);
+    } else {
+        g_warning ("HxPanel: no .controls box on the undocked frame's "
+                   "header — libpanel's template changed; the chevron "
+                   "and close button will still be shown");
+    }
+
     return PANEL_FRAME (frame);
 }
 

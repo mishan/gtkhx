@@ -21,14 +21,20 @@
  *   #   h(A,B)              horizontal split
  *   #   v(A,B)              vertical split
  *   #   L[id1,id2,...]      leaf with panel IDs (tab order)
+ *   #   L[id1,*id2,...]     '*' marks the leaf's foreground page
  *   #   L[id1,id2,...:role] leaf tagged with a role (start, end,
  *   #                       bottom, center) for the four
  *   #                       toolbar_*_frame globals
- *   tree=h(L[news:start],h(v(L[chat,files,news15:center],L[tasks:bottom]),L[users:end]))
+ *   tree=h(L[news:start],h(v(L[*chat,files,news15:center],L[tasks:bottom]),L[users:end]))
  *
  *   # Paned divider positions in depth-first order. Same count
  *   # as internal splits in the tree.
  *   sizes=240;620;380
+ *
+ *   # Static panels that were in no dock at save time. Absent key
+ *   # means nothing was closed, so a file written before this key
+ *   # existed reads as "everything open" — which it was.
+ *   closed=files;news15
  *
  * Save is coalesced on a 200 ms idle so a burst of changes (e.g.
  * the divider being dragged) writes the file once.
@@ -102,6 +108,28 @@ void dock_layout_request_save (void);
  * appears in a saved-layout entry, reseat it to the saved frame.
  * No-op for unknown ids or when no saved layout is in effect. */
 void dock_layout_place_panel (HxPanel *panel);
+
+/* Raise each leaf's saved foreground page.
+ *
+ * Has to run LAST, after every panel that is going to exist has been
+ * constructed and placed — panel_frame_add selects the page it adds,
+ * so any construction after this call would steal the foreground
+ * back. The startup sequence ends with it for that reason.
+ *
+ * One-shot: the saved selection describes launch state, and every
+ * tab change after that is the user's. A second call does nothing.
+ * No-op when no saved layout is in effect. */
+void dock_layout_apply_selection (void);
+
+/* Did the saved layout have this static panel in no dock at all?
+ *
+ * TRUE means the user closed it and it should stay closed across the
+ * restart — the startup path skips the panel's factory entirely.
+ * FALSE for an unknown id, and FALSE whenever no saved layout is in
+ * effect, so first launch and a reset both build everything. An
+ * explicit user action (a toolbar button) ignores this and builds
+ * the panel anyway. */
+gboolean dock_layout_panel_was_closed (const char *id);
 
 /* Delete the saved file and reset the in-memory map so the next
  * launch comes up with defaults. Wired into the hamburger menu's

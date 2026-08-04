@@ -58,6 +58,8 @@
 #include "dock_layout.h"
 #include "panel_registry.h"
 #include "conn_tabs.h"
+#include "session_registry.h" /* hx_session_count / hx_session_at */
+#include "debug.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
@@ -450,18 +452,31 @@ on_action_reset_layout (GSimpleAction *action, GVariant *param,
  * staleness and not the same consequence, since none of them touches a page.
  * They are listed in docs/multi-connection.md under the app-global chrome
  * that still has to be made per-connection. */
+/* The two news buttons build through toolbar_build_panel before
+ * calling their own entry point. Both entry points are single-session
+ * factories, so on their own they would give a panel that had been
+ * closed a content page for the active connection and none for the
+ * others; toolbar_build_panel covers every open connection. The
+ * second call is then a raise, plus the server fetch that is the
+ * reason these two don't just use toolbar_show_panel. */
 static void
 on_news_clicked (GtkButton *btn, gpointer data)
 {
+    session *sess = hx_active_session ();
+
     (void)data;
-    open_news (GTK_WIDGET (btn), hx_active_session ());
+    toolbar_build_panel (HX_PANEL_ID_NEWS, sess, FALSE);
+    open_news (GTK_WIDGET (btn), sess);
 }
 
 static void
 on_news15_clicked (GtkButton *btn, gpointer data)
 {
+    session *sess = hx_active_session ();
+
     (void)data;
-    open_news_browser (GTK_WIDGET (btn), hx_active_session ());
+    toolbar_build_panel (HX_PANEL_ID_NEWS15, sess, FALSE);
+    open_news_browser (GTK_WIDGET (btn), sess);
 }
 
 /* Ctrl+U — clear whatever text input has focus, anywhere in the app.
@@ -794,31 +809,129 @@ install_leaf_hooks_cb (HxSplit *leaf, gpointer user_data)
     }
 }
 
-/* toolbar buttons "show
- * panel X". The button's `data' is the panel's registry id (a
- * static string). Behaviour:
+/* Panel construction by id.
  *
- *   - Look up the panel from the registry.
- *   - panel_widget_raise() — selects the panel's tab in its frame,
- *     so even if its area was already visible with a different tab
- *     active, the click brings THIS panel forward.
- *   - Reveal the area the panel lives in. Walking the panel up to
- *     its PanelFrame and that frame up to a PanelDockChild gives
- *     us the right area; flip its reveal-area on.
+ * The six static panels each have their own factory with its own
+ * argument shape, and until now every one of them was called
+ * unconditionally at startup. Layout persistence needs to skip the
+ * ones the user had closed, and the toolbar buttons need to build
+ * one on demand when it was skipped — so the id→factory mapping has
+ * to live somewhere. This is that somewhere.
  *
- * Net: each toolbar button reliably brings up its specific panel
- * regardless of dock state, instead of just toggling visibility of
- * whatever happens to be in a given area. */
-static void
-toolbar_show_panel (GtkButton *button, gpointer data)
+ * Each factory is keyed by (panel, session) through dock::open: one
+ * call gives ONE connection its content page. When that page already
+ * exists the factory raises the panel and returns, which is what the
+ * startup auto-open wants anyway — so calling it on an existing
+ * panel is deliberate, not sloppy. */
+static gboolean
+panel_factory_run (const char *id, session *sess)
 {
-    const char *panel_id = data;
+    if (sess == NULL || toolbar_window == NULL) {
+        return FALSE;
+    }
+
+    if (g_strcmp0 (id, HX_PANEL_ID_CHAT) == 0) {
+        create_chat_window (toolbar_window, sess);
+    } else if (g_strcmp0 (id, HX_PANEL_ID_NEWS) == 0) {
+        create_news_window (toolbar_window, sess);
+    } else if (g_strcmp0 (id, HX_PANEL_ID_USERS) == 0) {
+        create_users_window (toolbar_window, sess);
+    } else if (g_strcmp0 (id, HX_PANEL_ID_TASKS) == 0) {
+        create_tasks_window (toolbar_window, sess);
+    } else if (g_strcmp0 (id, HX_PANEL_ID_FILES) == 0) {
+        open_files_browser (sess);
+    } else if (g_strcmp0 (id, HX_PANEL_ID_NEWS15) == 0) {
+        /* The news browser is a singleton and ignores its widget
+         * argument; NULL is what every other caller passes. */
+        open_news_browser (NULL, sess);
+    } else {
+        g_warning ("toolbar_build_panel: no factory for panel id '%s'", id);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* Is this panel in a dock right now? Registered is not enough — the
+ * registry holds a strong ref on every static panel for the process
+ * lifetime, so a panel the user closed this run is still registered
+ * and still looks built. The PanelFrame-ancestor test is the
+ * truthful one (docs/docking.md, "Use gtk_widget_get_ancestor to
+ * test attached"), and it's the same test the save path uses to
+ * decide what goes in [Dock] closed=. */
+static gboolean
+panel_is_open (const char *id)
+{
+    HxPanel *panel = hx_panel_registry_lookup (id);
+
+    return panel != NULL
+           && gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
+                  != NULL;
+}
+
+gboolean
+toolbar_build_panel (const char *id, session *sess,
+                     gboolean respect_saved_state)
+{
+    gboolean open;
+
+    g_return_val_if_fail (id != NULL, FALSE);
+
+    open = panel_is_open (id);
+
+    /* A panel that is open gets this connection's page like any
+     * other — the saved state has nothing to say about a panel the
+     * user is looking at.
+     *
+     * A panel that isn't is left strictly alone by every automatic
+     * caller, whether it's closed because the saved layout said so
+     * or because the user closed it a minute ago. Running the
+     * factory would splice it back into the dock: dock::place ends
+     * up in hx_panel_ensure_attached, which is exactly the
+     * resurrection this is meant to prevent. Only an explicit user
+     * request (respect_saved_state=FALSE) reopens one. */
+    if (respect_saved_state && !open
+        && (hx_panel_registry_lookup (id) != NULL
+            || dock_layout_panel_was_closed (id))) {
+        debug_log ("layout", "panel %s stays closed", id);
+        return FALSE;
+    }
+
+    /* Building a panel that didn't exist has to cover every open
+     * connection, not just the one that asked. One factory call is
+     * one connection's page, and nothing later would fill the gap —
+     * hx_session_open only runs at connect time — so the other
+     * connections would switch to a panel with no page of their
+     * own. `sess` goes last so the connection that asked is the one
+     * left showing. */
+    if (!open) {
+        guint n = hx_session_count ();
+
+        for (guint i = 0; i < n; i++) {
+            session *other = hx_session_at (i);
+            if (other != NULL && other != sess) {
+                panel_factory_run (id, other);
+            }
+        }
+    }
+
+    panel_factory_run (id, sess);
+
+    return hx_panel_registry_lookup (id) != NULL;
+}
+
+void
+toolbar_present_panel (const char *id, session *sess,
+                       gboolean respect_saved_state)
+{
     HxPanel *panel;
 
-    (void)button;
+    if (!toolbar_build_panel (id, sess, respect_saved_state)) {
+        return;
+    }
 
-    panel = hx_panel_registry_lookup (panel_id);
-    if (panel == NULL || toolbar_dock == NULL) {
+    panel = hx_panel_registry_lookup (id);
+    if (panel == NULL) {
         return;
     }
 
@@ -829,7 +942,31 @@ toolbar_show_panel (GtkButton *button, gpointer data)
      * the user's click on the toolbar button silently does nothing. */
     hx_panel_ensure_attached (panel);
 
+    /* Selects the panel's tab in its frame, so even if the frame was
+     * already visible with a different tab active, the click brings
+     * THIS panel forward. */
     panel_widget_raise (PANEL_WIDGET (panel));
+}
+
+/* toolbar buttons "show panel X". The button's `data' is the panel's
+ * registry id (a static string).
+ *
+ * respect_saved_state=FALSE: the user asking for a panel outranks
+ * the closed state on disk. Reopening also makes the panel open
+ * again for persistence purposes, because the closed set is
+ * recomputed from live state at every save rather than tracked. */
+static void
+toolbar_show_panel (GtkButton *button, gpointer data)
+{
+    const char *panel_id = data;
+
+    (void)button;
+
+    if (toolbar_dock == NULL) {
+        return;
+    }
+
+    toolbar_present_panel (panel_id, hx_active_session (), FALSE);
 }
 
 /* DEFAULT_LEAF_MIN_WIDTH lives in toolbar.h so the saved-layout
@@ -992,13 +1129,11 @@ create_toolbar_window (session *sess)
         make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.png",
                             _ ("Tracker"), G_CALLBACK (create_tracker_window),
                             sess));
-    /* Files / Users / Tasks
-     * buttons use the toolbar_show_panel helper so each one raises
-     * its specific panel + reveals the area, rather than just
-     * toggling area visibility. Chat and the two news entry
-     * points keep their own factories which build-or-raise AND
-     * kick off a server fetch when connected — that's the bit
-     * the bare show-panel helper can't do. */
+    /* Chat / Files / Users / Tasks buttons use the toolbar_show_panel
+     * helper, which builds the panel if it isn't up, re-attaches it if
+     * it was closed, and raises it. The two news buttons wrap that with
+     * their own entry point, purely for the server fetch it fires when
+     * connected — that's the bit the bare helper can't do. */
     news_btn
         = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
                               _ ("News"), G_CALLBACK (on_news_clicked), NULL);
@@ -1315,23 +1450,23 @@ create_toolbar_window (session *sess)
     hx_voice_ptt_attach (toolbar_window);
 #endif
 
-    /* eager-construct the sidebar
-     * panels (Users + Tasks) so the sidebar has real residents
-     * from the start. Revealing an empty side area would
-     * auto-collapse immediately (panel_dock_notify_empty_cb).
-     * News goes in the center PanelGrid; the grid lazily
-     * creates a PanelFrame for it (and subsequent center
-     * panels share that frame's tab strip). Subsequent fe_init
-     * auto-open calls hit the registry. */
-    create_users_window (toolbar_window, sess);
-    create_tasks_window (toolbar_window, sess);
-    create_news_window (toolbar_window, sess);
-    create_chat_window (toolbar_window, sess);
-    /* Eager-construct so the Files toolbar button's toolbar_show_panel
-     * lookup always hits. */
-    open_files_browser (sess);
-    /* The news browser is still a singleton and ignores both of its args,
-     * hence the NULL parent — but eager-construct it too, so the toolbar
-     * button's toolbar_show_panel lookup hits the registry on first click. */
-    open_news_browser (NULL, sess);
+    /* Build the static panels, so the dock has real residents from
+     * the start and every toolbar button's registry lookup hits.
+     *
+     * respect_saved_state=TRUE is what makes "closed panels stay
+     * closed" work: a panel the saved layout recorded as being in no
+     * dock is left unbuilt entirely, and its toolbar button builds
+     * it on the first click instead. That is safe because the
+     * model-side state each panel renders is created elsewhere and
+     * outlives it — create_chat / create_tasks run per session in
+     * gtkhx.c, the user list is replayed from the member model by
+     * gtkhx_users_bridge_after_embed, the task list by
+     * gtkhx_tasks_after_embed, and files / news fetch fresh on open.
+     * A panel built late therefore comes up populated, not empty.
+     *
+     * On first launch and after Reset Layout nothing is recorded as
+     * closed, so all six get built exactly as before. */
+    for (const char *const *idp = hx_panel_static_ids; *idp != NULL; idp++) {
+        toolbar_build_panel (*idp, sess, TRUE);
+    }
 }

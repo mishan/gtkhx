@@ -25,6 +25,23 @@
 
 #include <glib.h>
 
+/* String literals from the header, so nothing here is owned.
+ *
+ * The order is the order the startup path builds them in, and it is
+ * the order the six factory calls in create_toolbar_window used to
+ * appear in — worth keeping, because panel_frame_add appends and so
+ * this is what decides the tab order within a shared leaf on first
+ * launch. */
+const char *const hx_panel_static_ids[] = {
+    HX_PANEL_ID_USERS,
+    HX_PANEL_ID_TASKS,
+    HX_PANEL_ID_NEWS,
+    HX_PANEL_ID_CHAT,
+    HX_PANEL_ID_FILES,
+    HX_PANEL_ID_NEWS15,
+    NULL,
+};
+
 static GHashTable *
 get_table (void)
 {

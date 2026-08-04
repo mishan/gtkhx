@@ -108,6 +108,125 @@ test_empty_leaf_with_role (void)
     dl_parsed_node_free (n);
 }
 
+/* ---------- 2b. The foreground-page marker --------------------------- */
+
+static void
+test_no_selected_marker (void)
+{
+    /* Every layout file written before the marker existed looks like
+     * this. -1, not 0: index 0 is a real page, and defaulting to it
+     * would silently promote the first tab to the foreground on
+     * every restore of an older file. */
+    DLParsedNode *n = dl_parse_tree ("L[chat,files]");
+    g_assert_nonnull (n);
+    g_assert_cmpint (n->selected, ==, -1);
+    dl_parsed_node_free (n);
+}
+
+static void
+test_selected_first (void)
+{
+    DLParsedNode *n = dl_parse_tree ("L[*chat,files,news15]");
+    g_assert_nonnull (n);
+    g_assert_cmpuint (n->panel_ids->len, ==, 3);
+    /* The '*' is a marker, not part of the id. */
+    g_assert_cmpstr (nth_id (n, 0), ==, "chat");
+    g_assert_cmpint (n->selected, ==, 0);
+    dl_parsed_node_free (n);
+}
+
+static void
+test_selected_middle (void)
+{
+    DLParsedNode *n = dl_parse_tree ("L[chat,*files,news15]");
+    g_assert_nonnull (n);
+    g_assert_cmpstr (nth_id (n, 1), ==, "files");
+    g_assert_cmpint (n->selected, ==, 1);
+    dl_parsed_node_free (n);
+}
+
+static void
+test_selected_with_role (void)
+{
+    /* Marker and role tag coexist — this is the shape the serialiser
+     * actually emits for the default center leaf. */
+    DLParsedNode *n = dl_parse_tree ("L[chat,files,*news15:center]");
+    g_assert_nonnull (n);
+    g_assert_cmpstr (nth_id (n, 2), ==, "news15");
+    g_assert_cmpint (n->selected, ==, 2);
+    g_assert_cmpstr (n->role, ==, "center");
+    dl_parsed_node_free (n);
+}
+
+static void
+test_selected_single_page (void)
+{
+    DLParsedNode *n = dl_parse_tree ("L[*users:end]");
+    g_assert_nonnull (n);
+    g_assert_cmpstr (nth_id (n, 0), ==, "users");
+    g_assert_cmpint (n->selected, ==, 0);
+    g_assert_cmpstr (n->role, ==, "end");
+    dl_parsed_node_free (n);
+}
+
+static void
+test_selected_is_leaf_only (void)
+{
+    /* A split holds no pages, so it has no foreground page. The
+     * field is still -1 rather than a zeroed 0, so a reader that
+     * forgets to check is_leaf first gets an obviously-absent
+     * value rather than a plausible index. */
+    DLParsedNode *n = dl_parse_tree ("h(L[*a],L[b])");
+    g_assert_nonnull (n);
+    g_assert_cmpint (n->selected, ==, -1);
+    g_assert_cmpint (n->child_a->selected, ==, 0);
+    g_assert_cmpint (n->child_b->selected, ==, -1);
+    dl_parsed_node_free (n);
+}
+
+static void
+test_selected_whitespace_tolerance (void)
+{
+    /* Hand-edited files put spaces wherever they like. The marker
+     * binds to the id it precedes, abutting or not — rejecting
+     * "L[ * b ]" would throw away the whole layout over a space. */
+    DLParsedNode *n = dl_parse_tree ("L[ a , *b , c ]");
+    g_assert_nonnull (n);
+    g_assert_cmpstr (nth_id (n, 1), ==, "b");
+    g_assert_cmpint (n->selected, ==, 1);
+    dl_parsed_node_free (n);
+
+    n = dl_parse_tree ("L[ * b ]");
+    g_assert_nonnull (n);
+    g_assert_cmpuint (n->panel_ids->len, ==, 1);
+    g_assert_cmpstr (nth_id (n, 0), ==, "b");
+    g_assert_cmpint (n->selected, ==, 0);
+    dl_parsed_node_free (n);
+}
+
+static void
+test_malformed_two_selected (void)
+{
+    /* Two foreground pages in one frame is not a tie to break
+     * arbitrarily — a frame shows exactly one page, so the file is
+     * structurally broken and the loader falls back to defaults. */
+    g_assert_null (dl_parse_tree ("L[*a,*b]"));
+    g_assert_null (dl_parse_tree ("L[*a,b,*c:center]"));
+    /* A doubled marker must not be half-interpreted either: '*'
+     * terminates an id, so this can't come back as the id "*a". */
+    g_assert_null (dl_parse_tree ("L[**a]"));
+    g_assert_null (dl_parse_tree ("L[a,*b*c]"));
+}
+
+static void
+test_malformed_bare_marker (void)
+{
+    /* A marker with no id behind it. */
+    g_assert_null (dl_parse_tree ("L[*]"));
+    g_assert_null (dl_parse_tree ("L[a,*]"));
+    g_assert_null (dl_parse_tree ("L[*:center]"));
+}
+
 /* ---------- 3. Splits ------------------------------------------------ */
 
 static void
@@ -316,6 +435,24 @@ main (int argc, char **argv)
     g_test_add_func ("/dock_layout_parse/leaf/role", test_leaf_with_role);
     g_test_add_func ("/dock_layout_parse/leaf/empty_with_role",
                      test_empty_leaf_with_role);
+
+    g_test_add_func ("/dock_layout_parse/selected/absent",
+                     test_no_selected_marker);
+    g_test_add_func ("/dock_layout_parse/selected/first", test_selected_first);
+    g_test_add_func ("/dock_layout_parse/selected/middle",
+                     test_selected_middle);
+    g_test_add_func ("/dock_layout_parse/selected/with_role",
+                     test_selected_with_role);
+    g_test_add_func ("/dock_layout_parse/selected/single_page",
+                     test_selected_single_page);
+    g_test_add_func ("/dock_layout_parse/selected/leaf_only",
+                     test_selected_is_leaf_only);
+    g_test_add_func ("/dock_layout_parse/selected/whitespace",
+                     test_selected_whitespace_tolerance);
+    g_test_add_func ("/dock_layout_parse/malformed/two_selected",
+                     test_malformed_two_selected);
+    g_test_add_func ("/dock_layout_parse/malformed/bare_marker",
+                     test_malformed_bare_marker);
 
     g_test_add_func ("/dock_layout_parse/split/horizontal",
                      test_horizontal_split);

@@ -70,6 +70,17 @@ G_BEGIN_DECLS
 /* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
  * not a docked panel — it has never had an HxPanel. */
 
+/* Every static panel id, NULL-terminated, in the order the startup
+ * path builds them — which is also the tab order within a shared
+ * leaf on first launch, since panel_frame_add appends.
+ *
+ * "Static" as opposed to DYNAMIC panels, which come and go with a
+ * model object and so can't be enumerated ahead of time. Layout
+ * persistence walks this to work out which permanent panels the user
+ * has closed. An id added above belongs here too — a missing entry
+ * doesn't fail to build, it just quietly never persists as closed. */
+extern const char *const hx_panel_static_ids[];
+
 /* Register / lookup / unregister. register_panel is normally
  * called from each HxPanel-owning factory once the panel is
  * constructed; unregister is called when the panel is being
