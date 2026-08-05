@@ -161,6 +161,40 @@ if [ -f icons.rsrc ]; then
   cp icons.rsrc "$SHARE/gtkhx/icons/"
 fi
 
+# ---- translations (gettext .mo) --------------------------------------------
+# meson lays the compiled catalogues out as build/po/<lang>/LC_MESSAGES/gtkhx.mo
+# — already the share/locale layout. The app binds this dir via the Windows
+# module prefix (see gtkhx.c), so copy it verbatim under share/locale.
+echo ">> collecting translations"
+for d in "$BUILD_DIR"/po/*/; do
+  [ -f "$d/LC_MESSAGES/gtkhx.mo" ] || continue
+  lang=$(basename "$d")
+  mkdir -p "$SHARE/locale/$lang/LC_MESSAGES"
+  cp "$d/LC_MESSAGES/gtkhx.mo" "$SHARE/locale/$lang/LC_MESSAGES/"
+done
+
+# ---- fontconfig ------------------------------------------------------------
+# Without a config fontconfig uses its compiled-in MSYS2 path (absent on the
+# user's machine) and pango finds no fonts. Ship the generic-family aliases
+# (conf.d) and a fonts.conf that points at the Windows system font dir;
+# gtkhx.c sets FONTCONFIG_PATH to this dir at startup.
+echo ">> writing fontconfig config"
+FC_DIR="$STAGE/etc/fonts"
+mkdir -p "$FC_DIR"
+[ -d "$MINGW_PREFIX/etc/fonts/conf.d" ] && cp -r "$MINGW_PREFIX/etc/fonts/conf.d" "$FC_DIR/"
+cat > "$FC_DIR/fonts.conf" <<'FONTS'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <!-- Windows system fonts (Segoe UI, Arial, …). -->
+  <dir>WINDOWSFONTDIR</dir>
+  <!-- Per-user cache under %LOCALAPPDATA%\fontconfig. -->
+  <cachedir prefix="xdg">fontconfig</cachedir>
+  <!-- Generic-family aliases: sans-serif → a real font, etc. -->
+  <include ignore_missing="yes">conf.d</include>
+</fontconfig>
+FONTS
+
 # ---- zip -------------------------------------------------------------------
 echo ">> zipping"
 ( cd "$OUT_DIR" && zip -qr "$APP.zip" "$APP" )

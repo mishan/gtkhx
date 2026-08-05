@@ -1434,9 +1434,51 @@ init (int argc, char **argv)
      * defined in config.h via meson; the codeset bind tells libintl to
      * hand us UTF-8 regardless of the user's LC_CTYPE so GTK doesn't
      * trip over Latin-1 in fr_FR / es_ES locale aliases. */
-    bindtextdomain (PACKAGE, PACKAGE_LOCALE_DIR);
+    /* Resolve the catalogue directory. The compiled-in PACKAGE_LOCALE_DIR is an
+     * absolute build-prefix path, wrong for a relocated bundle (Windows ZIP /
+     * macOS .app). Prefer, in order: an explicit GTKHX_LOCALEDIR (set by the
+     * macOS launcher into the bundle's Resources); on Windows the module-derived
+     * <prefix>/share/locale; otherwise the compiled-in default (Unix install). */
+    {
+        const char *localedir = PACKAGE_LOCALE_DIR;
+        const char *env_ld = g_getenv ("GTKHX_LOCALEDIR");
+        char *win_ld = NULL;
+        if (env_ld && *env_ld) {
+            localedir = env_ld;
+        }
+#ifdef G_OS_WIN32
+        else {
+            char *root
+                = g_win32_get_package_installation_directory_of_module (NULL);
+            if (root) {
+                win_ld = g_build_filename (root, "share", "locale", NULL);
+                localedir = win_ld;
+                g_free (root);
+            }
+        }
+#endif
+        bindtextdomain (PACKAGE, localedir);
+        g_free (win_ld);
+    }
     bind_textdomain_codeset (PACKAGE, "UTF-8");
     textdomain (PACKAGE);
+
+#ifdef G_OS_WIN32
+    /* Point fontconfig at the bundled config before gtk_init() triggers pango.
+     * The compiled-in fontconfig path is the MSYS2 build prefix, absent on a
+     * user's machine — leaving pango with no fonts ("All font fallbacks
+     * failed"). Our etc/fonts/fonts.conf lists WINDOWSFONTDIR so the Windows
+     * system fonts are found. Only set it if the user hasn't overridden it. */
+    if (!g_getenv ("FONTCONFIG_PATH")) {
+        char *root = g_win32_get_package_installation_directory_of_module (NULL);
+        if (root) {
+            char *fc = g_build_filename (root, "etc", "fonts", NULL);
+            g_setenv ("FONTCONFIG_PATH", fc, TRUE);
+            g_free (fc);
+            g_free (root);
+        }
+    }
+#endif
     gtk_init ();
     /* panel_init() registers libpanel's boxed
      * types and CSS provider. It has to run before the first
