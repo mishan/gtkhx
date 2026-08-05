@@ -220,8 +220,10 @@ export GST_PLUGIN_SCANNER="$FW/gstreamer-1.0-libexec/gst-plugin-scanner"
 export GDK_PIXBUF_MODULE_FILE="$RES/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
 export GSETTINGS_SCHEMA_DIR="$RES/share/glib-2.0/schemas"
 export XDG_DATA_DIRS="$RES/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-export FONTCONFIG_PATH="$RES/etc/fonts"
-export GTKHX_LOCALEDIR="$RES/share/locale"
+# Only default these when the user hasn't set them, so the bundle can be
+# overridden for debugging (matches the Windows FONTCONFIG_PATH handling).
+export FONTCONFIG_PATH="${FONTCONFIG_PATH:-$RES/etc/fonts}"
+export GTKHX_LOCALEDIR="${GTKHX_LOCALEDIR:-$RES/share/locale}"
 exec "$HERE/gtkhx-bin" "$@"
 LAUNCH
 chmod +x "$MACOS/GtkHx"

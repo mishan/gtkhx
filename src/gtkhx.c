@@ -1469,8 +1469,11 @@ init (int argc, char **argv)
      * user's machine — leaving pango with no fonts ("All font fallbacks
      * failed"). Our etc/fonts/fonts.conf lists WINDOWSFONTDIR so the Windows
      * system fonts are found. Only set it if the user hasn't overridden it. */
-    if (!g_getenv ("FONTCONFIG_PATH")) {
-        char *root = g_win32_get_package_installation_directory_of_module (NULL);
+    const char *fc_env = g_getenv ("FONTCONFIG_PATH");
+    if (!fc_env
+        || !*fc_env) { /* unset OR empty — both mean "use the bundle's" */
+        char *root
+            = g_win32_get_package_installation_directory_of_module (NULL);
         if (root) {
             char *fc = g_build_filename (root, "etc", "fonts", NULL);
             g_setenv ("FONTCONFIG_PATH", fc, TRUE);
