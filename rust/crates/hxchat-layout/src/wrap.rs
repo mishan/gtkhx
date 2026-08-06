@@ -623,28 +623,87 @@ fn next_boundary(s: &str, from: usize) -> usize {
 /// it only has to keep the scrollbar plausible until the row is actually
 /// measured, and being fast matters more than being close, since it runs
 /// for every row in the buffer on a resize.
+///
+/// Crude, but not *low*. The distinction matters because while the view
+/// is following the bottom its scroll offset is `total - viewport`, and
+/// the total is this estimate for every row that has not been laid out
+/// yet — which always includes the row that was just appended. An
+/// under-estimate therefore puts "the bottom" above the real bottom and
+/// clips the newest message off the bottom edge. Over-estimating costs a
+/// slightly wrong scrollbar thumb until the row is measured, which is
+/// the tradeoff [`crate::index`] already documents.
+///
+/// Three things it has to get right for that, all of which it once got
+/// wrong: a body's *hard newlines* (dividing the byte length by the
+/// column count answers "how far would this wrap", not "how many lines
+/// does it have", so a five-line message estimated as one); the width
+/// the body actually wraps against, which in indent mode is the content
+/// width less the gutter; and the vertical padding a code or image block
+/// adds. The avatar floor is the same rule `layout_message` applies at
+/// the end.
 pub fn estimate_height(msg: &Message, params: &LayoutParams, measure: &dyn TextMeasure) -> u32 {
     let metrics = measure.metrics();
     let line_h = metrics.line_height.max(1);
-    let cols = (params.width / metrics.space_width.max(1)).max(1) as usize;
+    let body_x = if params.indent {
+        params.indent_width
+    } else {
+        0
+    };
+    let body_width = params.width.saturating_sub(body_x).max(line_h);
+    let cols = (body_width / metrics.space_width.max(1)).max(1) as usize;
+    // Hard newlines break unconditionally; each resulting segment then
+    // wraps on its own.
+    let wrapped = |s: &str| {
+        s.split('\n')
+            .map(|seg| seg.len().div_ceil(cols).max(1))
+            .sum::<usize>()
+            .max(1)
+    };
     let mut lines = 0usize;
     let mut extra = 0u32;
 
     for b in &msg.blocks {
         match b {
-            Block::Text(p) => lines += p.text.len().div_ceil(cols).max(1),
-            Block::Code { text, .. } => lines += text.lines().count().max(1),
-            Block::Quote { content, .. } => lines += content.text.len().div_ceil(cols).max(1),
+            Block::Text(p) => lines += wrapped(&p.text),
+            Block::Code { text, .. } => {
+                // Code never wraps, so it is exactly its own line count —
+                // but it is boxed, and the box has padding above and
+                // below.
+                lines += text.split('\n').count().max(1);
+                extra += params.block_padding * 2;
+            }
+            Block::Quote { content, depth } => {
+                let qx = body_x + params.quote_indent * u32::from(*depth).max(1);
+                let qw = params.width.saturating_sub(qx).max(line_h);
+                let qcols = (qw / metrics.space_width.max(1)).max(1) as usize;
+                lines += content
+                    .text
+                    .split('\n')
+                    .map(|seg| seg.len().div_ceil(qcols).max(1))
+                    .sum::<usize>()
+                    .max(1);
+            }
             Block::Image { size, alt, .. } => match size {
                 Some(sz) => {
-                    let (_, h) = measure.image_size((sz.width, sz.height), params.width);
+                    let (_, h) = measure.image_size((sz.width, sz.height), body_width);
                     extra += h + params.block_padding * 2;
                 }
-                None => lines += alt.len().div_ceil(cols).max(1),
+                None => lines += wrapped(alt),
             },
         }
     }
-    (lines.max(1) as u32) * line_h + extra
+    let text_h = (lines.max(1) as u32) * line_h + extra;
+    // A group head is at least as tall as the icon it draws.
+    let avatar_h = if params.indent
+        && params.avatar_size > 0
+        && !msg.flags.contains(MessageFlags::GROUPED)
+        && msg.speaker.as_ref().is_some_and(|s| s.uid != 0)
+    {
+        params.avatar_size
+    } else {
+        0
+    };
+    text_h.max(avatar_h)
 }
 
 /// Whether a message draws in the muted secondary colour.

@@ -203,6 +203,31 @@ have never been on screen are never shaped. The honest cost is that the
 scrollbar's extent is approximate until estimates are replaced — which is
 survivable precisely because scroll position is not stored in pixels.
 
+The estimate is allowed to be crude. It is not allowed to be *low*, and
+the reason is the one case where an estimate does feed a pixel value:
+while the view follows the bottom, the scroll offset is
+`total_height − viewport`, and the total counts estimates. An
+under-estimate therefore puts "the bottom" above the real bottom and
+clips the newest message off the bottom edge. Over-estimating only
+misplaces the scrollbar thumb. Three things the estimator has to respect
+to stay on the safe side, all of which it originally got wrong: a body's
+*hard newlines* (dividing byte length by a column count answers "how far
+would this wrap", not "how many lines does it have", so a five-line
+message estimated as one — which is why this surfaced as a multi-line
+bug); the width the body actually wraps against, which in indent mode is
+the content width less the settled gutter; and the padding a code or
+image block adds.
+
+Even a careful estimator cannot close the gap, because the engine has no
+font stack — a proportional font's space width makes the column count
+wildly optimistic, and a bold run is wider than the estimator can know.
+So `snapshot` **re-derives the offset after the layout pass and before it
+places anything**, and pushes the corrected value into the adjustment.
+Each pass measures strictly more rows, so it settles immediately; the
+loop bound is belt-and-braces, and the reconfigure is gated on having
+actually corrected something so the scrolled window's redraw-on-changed
+does not become a loop.
+
 ### The anchor
 
 The scroll position is `(row, offset within it, gravity)`, and the

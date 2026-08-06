@@ -11,7 +11,7 @@ use crate::markdown::{self, RawBlock};
 use crate::measure::{FixedMeasure, TextMeasure};
 use crate::message::{Block, ImageSize, Message, Speaker};
 use crate::span::{Attrs, ParsedText, Style};
-use crate::wrap::{layout_message, LayoutGeneration, LayoutParams};
+use crate::wrap::{estimate_height, layout_message, LayoutGeneration, LayoutParams};
 
 // ---------------------------------------------------------------- markdown
 
@@ -3135,5 +3135,223 @@ fn a_continuation_row_has_no_avatar_to_hit() {
     assert!(
         b.avatar_at(4, top + 2).is_none(),
         "grouped rows show no icon"
+    );
+}
+
+// ---------------------------------------------- estimate vs. real height
+//
+// These pin the relationship the scroll extent depends on. `total_height`
+// sums the index, and the index holds an *estimate* for every row that
+// has not been laid out yet — including, always, the row that was just
+// appended. So while the view is following the bottom, the adjustment
+// value it derives is `estimated_total - viewport`. If the estimate is
+// smaller than the row's real height, "the bottom" is short by the
+// difference and the newest message is clipped off the bottom edge until
+// something else re-syncs.
+//
+// The estimator is allowed to be crude. It is not allowed to be *low*.
+
+/// Height the row will really occupy once it is laid out.
+fn real_height(msg: &Message, p: &LayoutParams, m: &FixedMeasure) -> u32 {
+    layout_message(msg, p, LayoutGeneration::default(), m).height
+}
+
+#[test]
+fn estimate_is_never_shorter_than_the_real_height_for_one_line() {
+    let m = FixedMeasure::new(10);
+    let p = params(400);
+    let msg = Message::system(ParsedText::plain("a short line"));
+    assert!(
+        estimate_height(&msg, &p, &m) >= real_height(&msg, &p, &m),
+        "a single-line row must not be under-estimated"
+    );
+}
+
+#[test]
+fn estimate_counts_hard_newlines() {
+    // The reported bug's shape: a multi-line message.
+    //
+    // `estimate_height` divides the body's *byte length* by the column
+    // count, which answers "how many lines would this wrap to" and not
+    // "how many lines does this have". A body with hard newlines is short
+    // enough to fit on one line by that measure, so a five-line message
+    // is estimated at one line — and the scroll extent that follows is
+    // four lines short.
+    let m = FixedMeasure::new(10);
+    let p = params(400);
+    let msg = Message::system(ParsedText::plain("one\ntwo\nthree\nfour\nfive"));
+    let est = estimate_height(&msg, &p, &m);
+    let real = real_height(&msg, &p, &m);
+    assert!(
+        est >= real,
+        "five hard-broken lines estimated at {est}px against a real {real}px"
+    );
+}
+
+#[test]
+fn estimate_accounts_for_the_gutter_column() {
+    // The estimator has to wrap against the same column the layout
+    // does. In indent mode that is the content width *less the gutter*,
+    // so a line the full width would fit on one row genuinely takes two
+    // — and the buffer, which is the only thing that knows the settled
+    // gutter width, has to hand that width to the estimator.
+    let m = FixedMeasure::new(10);
+    let mut p = params(400);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    let nick = "a-fairly-long-nickname";
+
+    // Settle the gutter on a wide nick.
+    b.append(
+        Message::live(Speaker::new(1, nick), ParsedText::plain("hi")),
+        &m,
+    );
+    b.ensure_layout(0, &m);
+    assert!(b.indent_width() > 0, "the gutter should have settled");
+
+    // A body that fits the full width but not the body column.
+    b.append(
+        Message::live(
+            Speaker::new(2, nick),
+            ParsedText::plain("x".repeat(38)), // 380px of a 400px width
+        ),
+        &m,
+    );
+    let est = b.index_mut().height_at(1);
+    let real = b.ensure_layout(1, &m);
+    assert!(
+        est >= real,
+        "estimated {est}px against a real {real}px — the estimator wrapped \
+         against the full width while the layout wrapped against \
+         width - {}",
+        b.indent_width()
+    );
+}
+
+#[test]
+fn following_append_leaves_the_new_row_fully_visible() {
+    // The bug, in the exact order the view performs it.
+    //
+    //   append()                 → row enters the index at its estimate
+    //   sync_adjustment()        → value = estimated_total - viewport
+    //   snapshot(): scroll_offset → the same value, captured
+    //   snapshot(): ensure_visible → the visible rows get real heights
+    //
+    // Nothing re-derives the adjustment after that last step, so the
+    // frame is drawn at a scroll position computed from heights that the
+    // same frame has just corrected. If the correction grew the buffer,
+    // the newest row hangs below the viewport's bottom edge.
+    let m = FixedMeasure::new(10);
+    let mut b = ChatBuffer::new(params(400));
+    let vh = 200u32;
+
+    for i in 0..50 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    // Draw once so everything before the new message is measured, which
+    // is the state a live window is actually in.
+    let settled = b.scroll_offset(vh);
+    b.ensure_visible(settled, vh, &m);
+    assert!(b.is_following());
+
+    b.append(
+        Message::system(ParsedText::plain("one\ntwo\nthree\nfour\nfive")),
+        &m,
+    );
+
+    let scroll = b.scroll_offset(vh);
+    b.ensure_visible(scroll, vh, &m);
+
+    let last = b.len() - 1;
+    let bottom = b.index_mut().offset_of(last) + u64::from(b.index_mut().height_at(last));
+    assert!(
+        bottom <= scroll + u64::from(vh),
+        "the appended row ends at {bottom}px but the viewport ends at {} — \
+         it is {}px below the bottom edge",
+        scroll + u64::from(vh),
+        bottom - (scroll + u64::from(vh))
+    );
+}
+
+/// Every character is `char_width` wide, except bold, which is wider.
+///
+/// The estimator has no styles — it divides byte length by a column
+/// count derived from the space width — so a bold run is the case it
+/// cannot get right by construction, whatever else is fixed about it.
+/// That makes this the measurer for testing the *correction*, as
+/// distinct from testing the estimate.
+#[derive(Clone, Copy, Debug)]
+struct BoldIsWider(FixedMeasure);
+
+impl TextMeasure for BoldIsWider {
+    fn metrics(&self) -> crate::measure::FontMetrics {
+        self.0.metrics()
+    }
+
+    fn run_width(&self, text: &str, style: Style) -> u32 {
+        let w = self.0.run_width(text, style);
+        if style.attrs.contains(Attrs::BOLD) {
+            w * 3
+        } else {
+            w
+        }
+    }
+}
+
+#[test]
+fn re_deriving_the_offset_after_layout_reaches_the_bottom() {
+    // What the view has to do, and the reason estimating better is not
+    // on its own enough.
+    //
+    // The offset the anchor yields while following is
+    // `total_height - viewport`, and `total_height` counts estimates for
+    // rows that have not been laid out. So the value read *before* the
+    // layout pass is stale by exactly the correction that pass makes.
+    // Reading it again afterwards is what lands on the real bottom.
+    //
+    // Bold text makes the estimate wrong in a way no estimator without a
+    // font stack could avoid, so this holds regardless of how good
+    // `estimate_height` gets.
+    let m = BoldIsWider(FixedMeasure::new(10));
+    let mut b = ChatBuffer::new(params(400));
+    let vh = 200u32;
+
+    for i in 0..50 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    let settled = b.scroll_offset(vh);
+    b.ensure_visible(settled, vh, &m);
+
+    // 30 bold characters: 300px by the estimator's reckoning, 900px
+    // measured, so three lines where it predicted one.
+    let mut body = ParsedText::plain("x".repeat(30));
+    body.spans.push(crate::span::Span {
+        range: 0..30,
+        style: Style::default().with_attrs(Attrs::BOLD),
+    });
+    b.append(Message::system(body), &m);
+
+    let first = b.scroll_offset(vh);
+    b.ensure_visible(first, vh, &m);
+    let settled = b.scroll_offset(vh);
+    assert!(
+        settled > first,
+        "the layout pass should have moved the bottom ({first} -> {settled})"
+    );
+
+    // Re-deriving, then laying out again, settles — and the newest row
+    // ends exactly at the viewport's bottom edge.
+    b.ensure_visible(settled, vh, &m);
+    assert_eq!(
+        b.scroll_offset(vh),
+        settled,
+        "a second correction should not be needed"
+    );
+    let last = b.len() - 1;
+    let bottom = b.index_mut().offset_of(last) + u64::from(b.index_mut().height_at(last));
+    assert_eq!(
+        bottom,
+        settled + u64::from(vh),
+        "the newest row should end exactly at the bottom edge"
     );
 }
