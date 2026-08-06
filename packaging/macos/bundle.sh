@@ -158,6 +158,40 @@ if [ -f icons.rsrc ]; then
   cp icons.rsrc "$RES/share/gtkhx/icons/"
 fi
 
+# ---- translations (gettext .mo) --------------------------------------------
+# meson lays these out as build/po/<lang>/LC_MESSAGES/gtkhx.mo already; the
+# launcher points the app at Resources/share/locale via GTKHX_LOCALEDIR.
+echo ">> collecting translations"
+for d in "$BUILD_DIR"/po/*/; do
+  [ -f "$d/LC_MESSAGES/gtkhx.mo" ] || continue
+  lang=$(basename "$d")
+  mkdir -p "$RES/share/locale/$lang/LC_MESSAGES"
+  cp "$d/LC_MESSAGES/gtkhx.mo" "$RES/share/locale/$lang/LC_MESSAGES/"
+done
+
+# ---- fontconfig ------------------------------------------------------------
+# Homebrew's fontconfig config path is the brew prefix, absent on an end user's
+# machine, so pango can find no fonts. Ship the generic-family aliases (conf.d)
+# and a fonts.conf pointing at the macOS system font dirs; the launcher sets
+# FONTCONFIG_PATH to this dir.
+echo ">> writing fontconfig config"
+FC_DIR="$RES/etc/fonts"
+mkdir -p "$FC_DIR"
+[ -d "$BREW/etc/fonts/conf.d" ] && cp -R "$BREW/etc/fonts/conf.d" "$FC_DIR/"
+cat > "$FC_DIR/fonts.conf" <<'FONTS'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <dir>/System/Library/Fonts</dir>
+  <dir>/System/Library/Fonts/Supplemental</dir>
+  <dir>/Library/Fonts</dir>
+  <dir prefix="xdg">fonts</dir>
+  <dir>~/Library/Fonts</dir>
+  <cachedir prefix="xdg">fontconfig</cachedir>
+  <include ignore_missing="yes">conf.d</include>
+</fontconfig>
+FONTS
+
 # ---- app icon (.icns from src/pixmaps) -------------------------------------
 echo ">> building app icon"
 ICONSET="$(mktemp -d)/GtkHx.iconset"
@@ -186,6 +220,10 @@ export GST_PLUGIN_SCANNER="$FW/gstreamer-1.0-libexec/gst-plugin-scanner"
 export GDK_PIXBUF_MODULE_FILE="$RES/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
 export GSETTINGS_SCHEMA_DIR="$RES/share/glib-2.0/schemas"
 export XDG_DATA_DIRS="$RES/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# Only default these when the user hasn't set them, so the bundle can be
+# overridden for debugging (matches the Windows FONTCONFIG_PATH handling).
+export FONTCONFIG_PATH="${FONTCONFIG_PATH:-$RES/etc/fonts}"
+export GTKHX_LOCALEDIR="${GTKHX_LOCALEDIR:-$RES/share/locale}"
 exec "$HERE/gtkhx-bin" "$@"
 LAUNCH
 chmod +x "$MACOS/GtkHx"
