@@ -187,11 +187,43 @@ pub fn store_path(config_dir: &Path) -> PathBuf {
 /// The bookmarks GtkHx ships with. Seeded into the TOML the first time it's
 /// created (requirement: they become ordinary, user-removable entries).
 pub fn builtins() -> Vec<Bookmark> {
-    vec![Bookmark {
-        name: "Hotline Communications".to_string(),
-        server: "hlserver.com".to_string(),
-        ..Default::default()
-    }]
+    vec![
+        Bookmark {
+            name: "Hotline Central Hub".to_string(),
+            server: "server.bigredh.com".to_string(),
+            tls: true,
+            port: "5600".to_string(),
+            ..Default::default()
+        },
+        Bookmark {
+            name: "Hotline Communications".to_string(),
+            server: "hlserver.com".to_string(),
+            ..Default::default()
+        },
+        Bookmark {
+            name: "chatonly.org".to_string(),
+            server: "chatonly.org".to_string(),
+            ..Default::default()
+        },
+        Bookmark {
+            name: "Classic Macs Hotline Server".to_string(),
+            server: "macos.retro-os.live".to_string(),
+            tls: true,
+            port: "5600".to_string(),
+            ..Default::default()
+        },
+        Bookmark {
+            name: "Mobius Strip".to_string(),
+            server: "hotline.morphing.cloud".to_string(),
+            ..Default::default()
+        },
+        Bookmark {
+            name: "VesperNet".to_string(),
+            server: "hotline.vespernet.net".to_string(),
+            tls: true,
+            port: "5600".to_string(),
+            ..Default::default()
+        }]
 }
 
 /// The existing `bookmarks.toml` couldn't be read or parsed. Carries the
