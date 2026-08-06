@@ -190,7 +190,7 @@ impl ChatBuffer {
         if self.groups_with_previous(&msg, self.rows.len()) {
             msg.flags = msg.flags.union(MessageFlags::GROUPED);
         }
-        let h = estimate_height(&msg, &self.params, measure);
+        let h = estimate_height(&msg, &self.layout_params(), measure);
         self.rows.push_back(Row {
             id,
             msg,
@@ -227,7 +227,7 @@ impl ChatBuffer {
             None => 0,
         };
         let id = self.alloc_id();
-        let h = estimate_height(&msg, &self.params, measure);
+        let h = estimate_height(&msg, &self.layout_params(), measure);
         self.rows.insert(
             at,
             Row {
@@ -274,7 +274,7 @@ impl ChatBuffer {
         let Some(row) = self.row_of(id) else {
             return false;
         };
-        let h = estimate_height(&msg, &self.params, measure);
+        let h = estimate_height(&msg, &self.layout_params(), measure);
         self.rows[row].msg = msg;
         self.rows[row].layout = None;
         self.index.set_height(row, h, false);
@@ -320,7 +320,8 @@ impl ChatBuffer {
             return false;
         }
         self.rows[row].layout = None;
-        let h = estimate_height(&self.rows[row].msg, &self.params, measure);
+        let params = self.layout_params();
+        let h = estimate_height(&self.rows[row].msg, &params, measure);
         self.index.set_height(row, h, false);
         true
     }

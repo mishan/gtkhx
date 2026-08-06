@@ -205,6 +205,7 @@ fn font_change_invalidates_the_cache() {
 
 use gtk4::glib::prelude::*;
 use gtk4::glib::translate::IntoGlib;
+use gtk4::prelude::*;
 
 #[test]
 fn gtk_class_and_construction_smoke() {
@@ -464,6 +465,100 @@ fn gtk_class_and_construction_smoke() {
         view.zoom_step(-1);
     }
     assert!(view.zoom_permille() >= 500);
+
+    // --- a following append must land at the true bottom -----------
+    //
+    // The reported bug: with a multi-line message the view stopped just
+    // short of the bottom and the newest row was clipped off the edge.
+    //
+    // Two independent causes, so this runs twice.
+    //
+    // `estimate_height` divided a body's byte length by a column count
+    // to guess how many lines it wrapped to, which answers the wrong
+    // question for a body containing hard newlines: a five-line message
+    // was estimated at one. And the view read the scroll offset *before*
+    // the frame's layout pass, when following the bottom means
+    // `total - viewport` and the layout pass is exactly what corrects
+    // the total. Either alone puts the newest row below the bottom edge.
+    //
+    // The second case is the one no estimator can fix. A proportional
+    // font's space is far narrower than its average glyph, so the column
+    // count is wildly optimistic and any long line under-counts — and
+    // the layout engine deliberately has no font stack to know better.
+    //
+    // Its own widgets, not the ones above: this asserts on live
+    // adjustment state, and reusing a view that earlier checks have
+    // zoomed, selected and cleared would make the result depend on what
+    // they happened to leave behind.
+    for (font, body, case) in [
+        (
+            "Monospace 10",
+            "one\ntwo\nthree\nfour\nfive",
+            "hard newlines",
+        ),
+        ("Sans 10", &"WWWWWWWWWW ".repeat(12), "a proportional font"),
+    ] {
+        let view = crate::view::HxChatView::new();
+        view.set_font_from_string(font);
+        view.set_indent(false);
+        view.set_word_wrap(true);
+
+        let adj = gtk4::Adjustment::new(0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        view.set_vadjustment(Some(&adj));
+
+        let holder = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        holder.append(&view);
+        // Drives the real `size_allocate`, which is what tells the
+        // buffer its width and first configures the adjustment.
+        holder.allocate(400, 200, -1, None);
+
+        // The `snapshot` vfunc, called directly on the private impl
+        // rather than through `gtk_widget_snapshot_child`. GTK skips an
+        // unmapped widget, and mapping one means a real window and a
+        // frame clock — an asynchronous dependency in a test asking a
+        // synchronous question. The vfunc is the same code GTK runs.
+        let frame = || {
+            use gtk4::subclass::prelude::WidgetImpl;
+            view.imp_ref().snapshot(&gtk4::Snapshot::new());
+        };
+
+        for i in 0..60 {
+            view.append(crate::view::plain_message(&format!("line {i}")));
+        }
+        // One frame, so everything already in the buffer is measured —
+        // the state a live window is actually in when a message lands.
+        frame();
+        assert!(
+            view.imp_ref().buffer.borrow().is_following(),
+            "the view should still be following the bottom"
+        );
+
+        view.append(crate::view::plain_message(body));
+        frame();
+
+        let bottom = {
+            let mut buf = view.imp_ref().buffer.borrow_mut();
+            let last = buf.len() - 1;
+            let top = buf.index_mut().offset_of(last);
+            top + u64::from(buf.index_mut().height_at(last))
+        };
+        let viewport_end = (adj.value() + adj.page_size()) as u64;
+        assert!(
+            bottom <= viewport_end,
+            "with {case}: the content ends at {bottom}px but the viewport \
+             ends at {viewport_end}px — the newest row hangs {}px below \
+             the bottom edge",
+            bottom.saturating_sub(viewport_end)
+        );
+        assert!(
+            (adj.value() - (adj.upper() - adj.page_size())).abs() < 1.0,
+            "with {case}: following the bottom means value == upper - page; \
+             got value {} against upper {} page {}",
+            adj.value(),
+            adj.upper(),
+            adj.page_size()
+        );
+    }
 }
 
 // ---- run-based append (C6) ------------------------------------------

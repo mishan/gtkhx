@@ -980,11 +980,6 @@ impl HxChatView {
         snapshot.save();
         snapshot.translate(&gtk4::graphene::Point::new(PAD_X as f32, PAD_Y as f32));
 
-        let scroll = {
-            let mut buf = imp.buffer.borrow_mut();
-            buf.scroll_offset(height as u32)
-        };
-
         // Lay out only what is on screen, and resolve each row's top
         // edge while we still hold the mutable borrow — `offset_of`
         // needs `&mut` because it repairs the index's lazy prefix sums.
@@ -993,17 +988,65 @@ impl HxChatView {
         //
         // This is the O(visible) property: a resize marked every row
         // unmeasured, and only these get re-measured.
-        let placed: Vec<(usize, i64)> = {
+        //
+        // **The scroll offset has to be re-derived after the layout
+        // pass, not before it.** While the view is following the bottom
+        // the offset is `total_height - viewport`, and `total_height`
+        // counts an *estimate* for every row that has not been laid out
+        // — which always includes the row that just arrived. Laying the
+        // visible rows out replaces those estimates with real heights
+        // and so moves the bottom. Reading the offset once, up front,
+        // draws the frame at a position the same frame has already
+        // invalidated: the newest message ends up hanging below the
+        // bottom edge by however much the estimate was short. It looks
+        // intermittent because the next frame to draw for any reason
+        // repairs it.
+        //
+        // Estimating better narrows the gap but cannot close it — a
+        // proportional font, a bold run, an image whose decode has yet
+        // to land — so the correction belongs here, where the real
+        // heights are known. Bounded and monotonic in practice: each
+        // pass measures strictly more rows, so it settles at once, and
+        // the cap is belt-and-braces.
+        const MAX_SCROLL_SETTLE_PASSES: usize = 3;
+        let (placed, corrected) = {
             let m = imp.measure.borrow();
             let mut buf = imp.buffer.borrow_mut();
-            let rows = buf.ensure_visible(scroll, height as u32, &*m);
-            rows.into_iter()
+            let first = buf.scroll_offset(height as u32);
+            let mut scroll = first;
+            let mut rows = buf.ensure_visible(scroll, height as u32, &*m);
+            for _ in 0..MAX_SCROLL_SETTLE_PASSES {
+                let settled = buf.scroll_offset(height as u32);
+                if settled == scroll {
+                    break;
+                }
+                scroll = settled;
+                rows = buf.ensure_visible(scroll, height as u32, &*m);
+            }
+            let placed: Vec<(usize, i64)> = rows
+                .into_iter()
                 .map(|row| {
                     let top = buf.index_mut().offset_of(row) as i64 - scroll as i64;
                     (row, top)
                 })
-                .collect()
+                .collect();
+            (placed, scroll != first)
         };
+
+        // The extent the scrollbar reports is stale by the same
+        // correction, so push it now rather than waiting for whatever
+        // allocates next. Leaving it would put the thumb and the drawn
+        // content on different frames, and anything that reads the
+        // adjustment in between — the scrollbar, a Page Down, a wheel
+        // event — would be working from the pre-correction numbers.
+        //
+        // Gated on having actually corrected something, or this is an
+        // unconditional reconfigure-per-frame loop: the scrolled window
+        // redraws on ::changed. The frame that follows finds the rows
+        // measured, corrects nothing, and stops.
+        if corrected {
+            self.sync_adjustment(height as u32);
+        }
 
         // The indent separator, matching gtk_xtext_draw_sep: a full-height
         // vertical rule half a space-width left of the body column, drawn
