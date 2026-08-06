@@ -1,3 +1,12 @@
+## 1.3.1
+
+- Build
+  - Bundle fonts and translations for macOS and Windows packages
+- Connections
+  - Include some more servers for new users
+- User Interface
+  - Fix chat scroll bug
+
 ## 1.3.0
 
 - Connections (formerly Bookmarks)
