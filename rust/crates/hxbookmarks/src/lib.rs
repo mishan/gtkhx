@@ -223,7 +223,8 @@ pub fn builtins() -> Vec<Bookmark> {
             tls: true,
             port: "5600".to_string(),
             ..Default::default()
-        }]
+        },
+    ]
 }
 
 /// The existing `bookmarks.toml` couldn't be read or parsed. Carries the
