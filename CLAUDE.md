@@ -303,7 +303,7 @@ every check in sequence against process-global widget state, so a check that
 depends on what an earlier one left behind can pass, fail, and pass again. If a
 new check asserts on the live tab strip, prefer building its own widgets.
 
-- **Branches, not direct main commits.** `claude/<short-topic>`, kebab-case. Misha opens the
+- **Branches, not direct main commits.** `<short-topic>`, kebab-case, no prefix. Misha opens the
   PR, reviews, merges. Push follow-up commits to the same branch after review; don't
   force-push without asking. CI must be green to merge.
 - **Squash before opening the PR** — one commit per branch. `git reset --soft <merge-base>`.
