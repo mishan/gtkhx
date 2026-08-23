@@ -88,12 +88,34 @@ Pass:    (empty)        (upstream default — empty password works
                          HMAC(key="", session_key) server-side)
 ```
 
-Or as admin (full access):
+Or as admin (full access), with **HOPE off**:
 
 ```
 Login:   admin
-Pass:    adminpass      (set by the Dockerfile HOPE-seed step)
+Pass:    adminpass      (bcrypt hash written into Users/admin.yaml by the
+                         base image; see hotline-docker/images/janus)
 ```
+
+This used to be broken, and the reason is worth keeping: the seed step
+PATCHes the password through the admin REST API, which reports success and
+writes a `HOPEPassword:` blob but leaves `Password:` — the bcrypt hash a
+non-HOPE login checks — holding upstream's unpublished value. So the
+credential the API appeared to change went on being rejected on every path.
+The base image now writes that field directly. Nothing in this suite covers
+it: every Janus test logs in as `guest`, and the one admin login under
+`tests/integration/` is against *mhxd* with no password.
+
+HOPE login as admin is still a separate matter — the `HOPEPassword:` blob
+the API writes doesn't validate (see the HOPE notes under "What's enabled").
+`guest` is the account that works with HOPE, because Janus computes
+`HMAC(key="", session_key)` server-side rather than reading a blob.
+
+This matters for news: `guest` ships with `news_create_fldr: false` and
+`news_create_cat: false`, so creating news folders on Janus needs admin.
+
+This matters for news: `guest` ships with `news_create_fldr: false` and
+`news_create_cat: false`, so creating folders on Janus needs admin. mhxd is
+the easier rig for that today.
 
 Janus's default `guest` account has `ReadChatHistory: true` already
 set (access bit 56), so chat-history queries from a guest connection

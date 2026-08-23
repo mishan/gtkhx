@@ -43,8 +43,13 @@
 #      in APIKeys, so this just works.
 #   2. Poll the GET endpoint until the API listener is up (Janus
 #      takes ~1-2s in practice; we cap at 30s).
-#   3. PATCH admin with password "adminpass". Janus updates the
-#      bcrypt and writes a HOPEPassword field into the YAML.
+#   3. PATCH admin with password "adminpass". This writes a
+#      HOPEPassword field into the YAML and nothing else — it does
+#      NOT update the `Password:` bcrypt hash a non-HOPE login
+#      checks, which is why admin/adminpass never logged in on any
+#      path. The base image (hotline-docker/images/janus) now writes
+#      that field directly; this PATCH is only here for the HOPE
+#      blob.
 #   4. Send SIGTERM to Janus and wait for it to flush — some YAML
 #      rewrites happen on shutdown rather than synchronously
 #      inside the PATCH handler.

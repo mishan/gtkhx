@@ -18,7 +18,13 @@ USER root
 # file/folder fixtures the Tier 3 file/folder tests assert on.
 COPY conf/hxd.conf /opt/mhxd/run/hxd.conf
 COPY conf/accounts/guest/UserData /opt/mhxd/run/accounts/guest/UserData
-RUN mkdir -p /opt/mhxd/run/files/Uploads /opt/mhxd/run/files/test_folder \
+# The 1.5 threaded-news tree. The base image creates this now; kept here so a
+# build against an older cached base still gets threaded news rather than an
+# empty root and "No such file or directory" on folder creation. Empty on
+# purpose — seeding it would give the Tier 3 news assertions more content to
+# drift against.
+RUN mkdir -p /opt/mhxd/run/newsdir \
+ && mkdir -p /opt/mhxd/run/files/Uploads /opt/mhxd/run/files/test_folder \
  && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
  && printf 'tier-3 integration suite test data\n' \
         > /opt/mhxd/run/files/integration_seed.txt \
