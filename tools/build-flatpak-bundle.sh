@@ -120,6 +120,24 @@ flatpak-builder \
     "$BUILD_DIR" \
     "$MANIFEST"
 
+# Nothing may install into /app/lib64. Flatpak puts only /app/lib on
+# LD_LIBRARY_PATH, and the app carries no rpath, so a library in
+# /app/lib64 resolves only via the ld.so.cache flatpak regenerates on
+# the *user's* machine — it depends on their runtime commit and
+# flatpak version. A bundle built that way starts here and fails on
+# someone else's desktop with "cannot open shared object file". The
+# manifest pins libdir to /app/lib; this catches a buildsystem that
+# ignores it. Shipping a broken bundle is much worse than a red build.
+STRAY_LIBS=$(find "$BUILD_DIR/files/lib64" -name '*.so*' 2>/dev/null | head -20)
+if [[ -n "$STRAY_LIBS" ]]; then
+    echo "error: libraries installed into /app/lib64:" >&2
+    echo "$STRAY_LIBS" | sed 's|^|  |' >&2
+    echo >&2
+    echo "  These are not on the runtime library search path. Give the" >&2
+    echo "  offending module an explicit libdir in $MANIFEST." >&2
+    exit 1
+fi
+
 # build-bundle pulls the just-built app out of repo/ and writes a
 # single self-contained .flatpak file. No runtime inside — the
 # end-user pulls org.gnome.Platform//$RUNTIME_VER from their
