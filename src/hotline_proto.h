@@ -854,12 +854,13 @@ extern int32_t gtkhx_proto_build_news_delete_chunks (const uint8_t *path_ptr,
                                                      struct hx_chunk *chunks,
                                                      size_t chunks_cap);
 
-/* HTLC_HDR_MAKENEWSDIR: same shape as NEWSCATLIST (the last path
- * component is the new directory name). */
-extern int32_t gtkhx_proto_build_news_mkdir_chunks (const uint8_t *path_ptr,
-                                                    size_t path_len,
-                                                    struct hx_chunk *chunks,
-                                                    size_t chunks_cap);
+/* HTLC_HDR_MAKENEWSDIR: NEWSPATH (the *parent* folder) + FILE_NAME (the
+ * new folder). chunks_cap >= 2. Returns 2 on success, 0 on validation
+ * failure. Not the NEWSCATLIST shape: the server resolves the path as an
+ * existing directory, so the new name cannot ride in it. */
+extern int32_t gtkhx_proto_build_news_mkdir_chunks (
+    const uint8_t *path_ptr, size_t path_len, const uint8_t *name_ptr,
+    size_t name_len, struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_DELETETHREAD: NEWSPATH + THREADID (u32). chunks_cap >= 2,
  * scratch_cap >= 4. Returns 2 on success, 0 on validation failure. */

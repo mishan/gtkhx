@@ -34,9 +34,12 @@ use hxhandlers::send::news::{
     hx_news15_delete, hx_news15_delete_thread, hx_news15_mkcat, hx_news15_mkdir,
 };
 
+// The node's Hotline path (NULL for a pathless node) comes straight from the
+// hxmodel crate — it is Rust, and a hand-written `extern "C"` block for it only
+// removed the compiler's ability to check the signature.
+use hxmodel::news::node::hx_news_node_path;
+
 extern "C" {
-    // hxmodel::news C ABI — the node's Hotline path (NULL for a pathless node).
-    fn hx_news_node_path(node: *mut c_void) -> *const c_char;
     // gtkhx_ui_bridge.c — the active session's htlc (single-conn today).
     fn gtkhx_active_htlc() -> *mut c_void;
     // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
@@ -44,17 +47,6 @@ extern "C" {
     // news_browser.c — re-fetch a listing after a create/delete (the server
     // doesn't push notifications for these). `node` NULL means refresh the root.
     fn gtkhx_news_browser_refresh(node: *mut c_void);
-}
-
-/// Join a parent Hotline path and a child name into the child's full path.
-/// The root case ("/") is special-cased to avoid producing "//child" (mirrors
-/// `news_browser.c::build_child_path`).
-fn build_child_path(parent_path: &str, child_name: &str) -> String {
-    if parent_path.is_empty() || parent_path == "/" {
-        format!("/{child_name}")
-    } else {
-        format!("{parent_path}/{child_name}")
-    }
 }
 
 /// Present the "New News Folder" / "New News Category" dialog.
@@ -120,19 +112,23 @@ pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
                 let parent_path = if parent.is_null() {
                     "/".to_string()
                 } else {
-                    crate::cstr(hx_news_node_path(parent))
+                    crate::cstr(hx_news_node_path(parent.cast()))
                 };
                 let htlc = gtkhx_active_htlc();
-                if kind == NB_KIND_FOLDER {
-                    let child = build_child_path(&parent_path, text);
-                    if let Ok(c) = std::ffi::CString::new(child) {
-                        hx_news15_mkdir(htlc, c.as_ptr());
-                    }
-                } else if let (Ok(p), Ok(n)) = (
+                // Both senders take (parent path, new name): the server
+                // resolves the path as an existing folder and creates the name
+                // inside it. Folder creation used to join the two and send one
+                // path, which asked the server to resolve a folder that did not
+                // exist yet — ENOENT, every time.
+                if let (Ok(p), Ok(n)) = (
                     std::ffi::CString::new(parent_path.clone()),
                     std::ffi::CString::new(text),
                 ) {
-                    hx_news15_mkcat(htlc, p.as_ptr(), n.as_ptr());
+                    if kind == NB_KIND_FOLDER {
+                        hx_news15_mkdir(htlc, p.as_ptr(), n.as_ptr());
+                    } else {
+                        hx_news15_mkcat(htlc, p.as_ptr(), n.as_ptr());
+                    }
                 }
                 // Settle: re-fetch the parent's listing so the new item shows.
                 gtkhx_news_browser_refresh(parent);

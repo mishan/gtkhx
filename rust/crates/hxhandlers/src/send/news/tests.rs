@@ -13,6 +13,7 @@ use std::ffi::CString;
 // Data-chunk tags the assertions pin (hotline.h).
 const TAG_CATEGORY: u16 = 0x0142;
 const TAG_NEWSPATH: u16 = 0x0145;
+const TAG_FILE_NAME: u16 = 0x00c9;
 const TAG_THREADID: u16 = 0x0146;
 const TAG_NEWSTYPE: u16 = 0x0147;
 const TAG_NEWSSUBJECT: u16 = 0x0148;
@@ -324,13 +325,22 @@ fn mkcat_emits_path_and_category() {
 }
 
 #[test]
-fn mkdir_emits_single_newspath() {
+fn mkdir_emits_parent_path_and_name() {
     reset();
-    let path = cstr("/folder/new");
-    unsafe { hx_news15_mkdir(htlc(), path.as_ptr()) };
+    let path = cstr("/folder");
+    let name = cstr("new");
+    unsafe { hx_news15_mkdir(htlc(), path.as_ptr(), name.as_ptr()) };
     let s = last().unwrap();
     assert_eq!(s.ty, HTLC_HDR_MAKENEWSDIR);
-    assert_eq!(s.chunks, vec![(TAG_NEWSPATH, b"/folder/new".to_vec())]);
+    // The new folder travels as FILE_NAME, never as the path's last
+    // component — the server resolves the path as an existing directory.
+    assert_eq!(
+        s.chunks,
+        vec![
+            (TAG_NEWSPATH, b"/folder".to_vec()),
+            (TAG_FILE_NAME, b"new".to_vec())
+        ]
+    );
     assert_eq!(last_task().unwrap().label, "news15_mkdir");
 }
 
@@ -399,7 +409,7 @@ fn null_htlc_is_no_op() {
         hx_news15_delete_thread(std::ptr::null_mut(), path.as_ptr(), 1);
         hx_news15_delete(std::ptr::null_mut(), path.as_ptr());
         hx_news15_mkcat(std::ptr::null_mut(), path.as_ptr(), name.as_ptr());
-        hx_news15_mkdir(std::ptr::null_mut(), path.as_ptr());
+        hx_news15_mkdir(std::ptr::null_mut(), path.as_ptr(), name.as_ptr());
     }
     assert!(last().is_none());
     assert!(last_task().is_none());
@@ -435,7 +445,7 @@ fn null_path_arg_is_no_op() {
         hx_news15_delete_thread(htlc(), std::ptr::null(), 1);
         hx_news15_delete(htlc(), std::ptr::null());
         hx_news15_mkcat(htlc(), std::ptr::null(), name.as_ptr());
-        hx_news15_mkdir(htlc(), std::ptr::null());
+        hx_news15_mkdir(htlc(), std::ptr::null(), name.as_ptr());
     }
     assert!(last().is_none());
     assert!(last_task().is_none());

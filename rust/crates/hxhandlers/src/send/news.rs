@@ -28,7 +28,7 @@ use std::os::raw::c_int;
 
 use hotline_proto::build::{
     self, HxChunk, NewsDeleteThreadRequest, NewsGetThreadRequest, NewsMakeCategoryRequest,
-    NewsPostThreadRequest,
+    NewsMakeDirRequest, NewsPostThreadRequest,
 };
 
 // Wire opcodes (hotline.h). Only GETTHREAD / POSTTHREAD have ClientHdr enum
@@ -448,13 +448,25 @@ pub unsafe extern "C" fn hx_news15_mkcat(
     glib::ffi::g_free(hldir as *mut c_void);
 }
 
-/// `void hx_news15_mkdir(struct htlc_conn *htlc, char *path)` — MAKENEWSDIR
-/// (the path's last component is the new folder name). No reply handler.
+/// `void hx_news15_mkdir(struct htlc_conn *htlc, char *path, const char *name)`
+/// — MAKENEWSDIR. `path` is the *parent* folder, `name` the new folder. No
+/// reply handler.
+///
+/// Same two-field shape as `hx_news15_mkcat`, and for the same reason: the
+/// server resolves the path as an existing directory and creates `name` inside
+/// it. Passing the new folder as the path's last component asks it to resolve
+/// something that doesn't exist yet, which is an ENOENT — see
+/// `build_news_mkdir_chunks`.
 ///
 /// # Safety
-/// `htlc` is NULL or valid; `path` is a NUL-terminated C string or NULL.
+/// `htlc` is NULL or valid; `path` / `name` are NUL-terminated C strings or
+/// NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_news15_mkdir(htlc: *mut c_void, path: *const c_char) {
+pub unsafe extern "C" fn hx_news15_mkdir(
+    htlc: *mut c_void,
+    path: *const c_char,
+    name: *const c_char,
+) {
     // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
     // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
     // refresh) rather than crash.
@@ -463,19 +475,26 @@ pub unsafe extern "C" fn hx_news15_mkdir(htlc: *mut c_void, path: *const c_char)
     }
     let mut hldirlen: u16 = 0;
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
+    let utf8 = hx_htlc_text_encoding_cap(htlc);
 
-    let mut chunks = [HxChunk::EMPTY; 1];
-    let hc = build::build_news_mkdir_chunks(hldir_slice(&hldir, hldirlen), &mut chunks);
-    if hc > 0 {
-        task_new(
-            htlc,
-            None,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            c"news15_mkdir".as_ptr(),
-        );
-        hlwrite_chunks(htlc, HTLC_HDR_MAKENEWSDIR, 0, chunks.as_ptr(), hc as c_int);
-    }
+    with_wire(name, utf8, glib::ffi::GFALSE, |name_wire| {
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let req = NewsMakeDirRequest {
+            path: hldir_slice(&hldir, hldirlen),
+            name: name_wire,
+        };
+        let hc = build::build_news_mkdir_chunks(&req, &mut chunks);
+        if hc > 0 {
+            task_new(
+                htlc,
+                None,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                c"news15_mkdir".as_ptr(),
+            );
+            hlwrite_chunks(htlc, HTLC_HDR_MAKENEWSDIR, 0, chunks.as_ptr(), hc as c_int);
+        }
+    });
     glib::ffi::g_free(hldir as *mut c_void);
 }
 

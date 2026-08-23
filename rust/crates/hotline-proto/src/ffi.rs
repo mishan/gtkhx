@@ -12,7 +12,8 @@
 use crate::build::{
     self, AccountModifyRequest, AgreementAgreeRequest, BroadcastRequest, ChatRequest,
     ChatSubjectRequest, HxChunk, MsgRequest, NewsDeleteThreadRequest, NewsGetThreadRequest,
-    NewsMakeCategoryRequest, NewsPostThreadRequest, UserChangeRequest, UserKickRequest,
+    NewsMakeCategoryRequest, NewsMakeDirRequest, NewsPostThreadRequest, UserChangeRequest,
+    UserKickRequest,
 };
 use crate::parse::{self, AgreementResult, CatList, DirList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
@@ -2509,25 +2510,38 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_delete_chunks(
     )
 }
 
-/// Build `HTLC_HDR_MAKENEWSDIR` chunks. Same shape and contract as
-/// [`gtkhx_proto_build_news_catlist_chunks`].
+/// Build `HTLC_HDR_MAKENEWSDIR` chunks: NEWSPATH (the parent) + FILE_NAME
+/// (the new folder). `chunks_cap >= 2`. Same shape and contract as
+/// [`gtkhx_proto_build_news_mkcat_chunks`].
 ///
 /// # Safety
-/// As [`gtkhx_proto_build_news_catlist_chunks`].
+/// `chunks` valid for `chunks_cap` slots (or NULL); `path_ptr` /
+/// `name_ptr` valid for their lengths (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_proto_build_news_mkdir_chunks(
     path_ptr: *const u8,
     path_len: usize,
+    name_ptr: *const u8,
+    name_len: usize,
     chunks: *mut HxChunk,
     chunks_cap: usize,
 ) -> i32 {
-    build_news_path_only_chunks(
-        path_ptr,
-        path_len,
-        chunks,
-        chunks_cap,
-        build::build_news_mkdir_chunks,
-    )
+    const MAX_CHUNKS: usize = 2;
+    if chunks.is_null() || chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if (path_ptr.is_null() && path_len != 0) || (name_ptr.is_null() && name_len != 0) {
+        return 0;
+    }
+    if path_len > u16::MAX as usize || name_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let req = NewsMakeDirRequest {
+        path: as_slice(path_ptr, path_len),
+        name: as_slice(name_ptr, name_len),
+    };
+    build::build_news_mkdir_chunks(&req, chunks_slice) as i32
 }
 
 // ---- 1.5 news SEND builders with extra fields ------------------------
