@@ -307,7 +307,10 @@ pub unsafe extern "C" fn hx_news15_post_thread(
             let mut scratch = [0u8; 8];
             let req = NewsPostThreadRequest {
                 path: hldir_slice(&hldir, hldirlen),
-                parent_thread: 0,
+                // Field 334, the flags field — always zero, and not
+                // where the parent article's id goes. That is
+                // `thread_id` below.
+                flags: 0,
                 mime_type: b"text/plain",
                 subject: subj_wire,
                 text: text_wire,

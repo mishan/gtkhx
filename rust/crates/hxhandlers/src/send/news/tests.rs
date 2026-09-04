@@ -18,7 +18,7 @@ const TAG_THREADID: u16 = 0x0146;
 const TAG_NEWSTYPE: u16 = 0x0147;
 const TAG_NEWSSUBJECT: u16 = 0x0148;
 const TAG_NEWSDATA: u16 = 0x014d;
-const TAG_PARENTTHREAD: u16 = 0x014e;
+const TAG_NEWSFLAGS: u16 = 0x014e;
 
 struct Sent {
     ty: u32,
@@ -275,7 +275,7 @@ fn post_thread_emits_six_chunks_in_order() {
     assert_eq!(s.ty, HTLC_HDR_POSTTHREAD);
     assert_eq!(s.chunks.len(), 6);
     assert_eq!(s.chunks[0], (TAG_NEWSPATH, b"/cat".to_vec()));
-    assert_eq!(s.chunks[1], (TAG_PARENTTHREAD, vec![0, 0, 0, 0])); // always 0
+    assert_eq!(s.chunks[1], (TAG_NEWSFLAGS, vec![0, 0, 0, 0])); // always 0
     assert_eq!(s.chunks[2], (TAG_NEWSTYPE, b"text/plain".to_vec()));
     assert_eq!(s.chunks[3], (TAG_NEWSSUBJECT, b"Hello".to_vec()));
     assert_eq!(s.chunks[4], (TAG_NEWSDATA, b"world".to_vec()));

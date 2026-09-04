@@ -2668,8 +2668,9 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_mkcat_chunks(
 }
 
 /// Build `HTLC_HDR_POSTTHREAD` chunks: 6 chunks in the wire order
-/// NEWSPATH + PARENTTHREAD + NEWSTYPE + NEWSSUBJECT + NEWSDATA +
-/// THREADID. `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s).
+/// NEWSPATH + NEWSFLAGS + NEWSTYPE + NEWSSUBJECT + NEWSDATA +
+/// THREADID. `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s — the
+/// flags field and the article id; the parent's id is the latter).
 ///
 /// # Safety
 /// `chunks` / `scratch` valid for their declared lengths (or NULL);
@@ -2678,7 +2679,7 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_mkcat_chunks(
 pub unsafe extern "C" fn gtkhx_proto_build_news_post_thread_chunks(
     path_ptr: *const u8,
     path_len: usize,
-    parent_thread: u32,
+    flags: u32,
     mime_type_ptr: *const u8,
     mime_type_len: usize,
     subject_ptr: *const u8,
@@ -2718,7 +2719,7 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_post_thread_chunks(
     let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
     let req = NewsPostThreadRequest {
         path: as_slice(path_ptr, path_len),
-        parent_thread,
+        flags,
         mime_type: as_slice(mime_type_ptr, mime_type_len),
         subject: as_slice(subject_ptr, subject_len),
         text: as_slice(text_ptr, text_len),

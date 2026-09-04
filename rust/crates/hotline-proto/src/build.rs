@@ -897,7 +897,7 @@ pub fn build_news_mkdir_chunks(req: &NewsMakeDirRequest<'_>, chunks: &mut [HxChu
 //
 // Build on top of the NEWSPATH-only shape with one or more additional
 // chunks: THREADID (u32), NEWSTYPE / NEWSSUBJECT / NEWSDATA /
-// CATEGORY (byte payloads), PARENTTHREAD (u32, gtkhx always sends 0).
+// CATEGORY (byte payloads), NEWSFLAGS (u32, gtkhx always sends 0).
 //
 // All the variable-length payloads (mime type, subject, body, category
 // name) are pre-encoded by the C caller via `gtkhx_text_for_wire`;
@@ -1033,14 +1033,15 @@ pub fn build_news_mkcat_chunks(req: &NewsMakeCategoryRequest<'_>, chunks: &mut [
 
 /// Request data for [`build_news_post_thread_chunks`]. Mirrors the C
 /// `hx_news15_post_thread` call site: subject, text, and mime type are
-/// pre-encoded bytes; PARENTTHREAD is opaque to mhxd (the C side
-/// always sends 0) but the wire spec requires the chunk to be
-/// present.
+/// pre-encoded bytes; the flags field is listed in the request shape
+/// but read by no server we test against.
 pub struct NewsPostThreadRequest<'a> {
     pub path: &'a [u8],
-    /// PARENTTHREAD chunk value. gtkhx always sends 0; the wire shape
-    /// requires the chunk regardless of value.
-    pub parent_thread: u32,
+    /// `NEWSFLAGS` (334, `myField_NewsArtFlags`). gtkhx always sends 0;
+    /// the request shape lists the field regardless of value.
+    ///
+    /// This is *not* the parent article — see [`Self::thread_id`].
+    pub flags: u32,
     /// MIME type bytes (the C call site hard-codes "text/plain").
     pub mime_type: &'a [u8],
     /// Single-line subject bytes, already encoded by the caller's
@@ -1053,23 +1054,30 @@ pub struct NewsPostThreadRequest<'a> {
     /// LF→CR send-path normalisation is applied for legacy Mac
     /// servers).
     pub text: &'a [u8],
-    /// THREADID for the post being replied to. mhxd writes this into
-    /// the new post's `References:` header.
+    /// `THREADID` (326, `myField_NewsArtID`) — the article the new
+    /// post replies to, 0 for a top-level post. This is the field that
+    /// carries the parent's id: mhxd writes it into the new post's
+    /// `References:` header, and Mobius reads it as the parent article
+    /// and threads the reply under it.
     pub thread_id: u32,
 }
 
 /// Build the chunk array for `HTLC_HDR_POSTTHREAD` — 6 chunks in this
 /// wire order:
 ///
-/// 1. `HTLC_DATA_NEWSPATH`
-/// 2. `HTLC_DATA_PARENTTHREAD`  (u32 BE; gtkhx always sends 0)
-/// 3. `HTLC_DATA_NEWSTYPE`      (e.g. "text/plain")
-/// 4. `HTLC_DATA_NEWSSUBJECT`
-/// 5. `HTLC_DATA_NEWSDATA`
-/// 6. `HTLC_DATA_THREADID`      (u32 BE; the article being replied to)
+/// 1. `HTLC_DATA_NEWSPATH`     (325)
+/// 2. `HTLC_DATA_NEWSFLAGS`    (334; u32 BE, gtkhx always sends 0)
+/// 3. `HTLC_DATA_NEWSTYPE`     (327; e.g. "text/plain")
+/// 4. `HTLC_DATA_NEWSSUBJECT`  (328)
+/// 5. `HTLC_DATA_NEWSDATA`     (333)
+/// 6. `HTLC_DATA_THREADID`     (326; u32 BE, the article being replied to)
 ///
-/// `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s — parent at +0,
-/// thread at +4). Returns 6 on success, 0 on validation failure.
+/// Those are exactly the six fields the SDK lists for Post News
+/// Article, so the bytes on the wire were always right — only the name
+/// of chunk 2 was wrong, and it named chunk 6's job.
+///
+/// `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s — flags at +0,
+/// article id at +4). Returns 6 on success, 0 on validation failure.
 pub fn build_news_post_thread_chunks(
     req: &NewsPostThreadRequest<'_>,
     chunks: &mut [HxChunk],
@@ -1084,7 +1092,7 @@ pub fn build_news_post_thread_chunks(
     {
         return 0;
     }
-    scratch[0..4].copy_from_slice(&req.parent_thread.to_be_bytes());
+    scratch[0..4].copy_from_slice(&req.flags.to_be_bytes());
     scratch[4..8].copy_from_slice(&req.thread_id.to_be_bytes());
 
     chunks[0] = HxChunk {
@@ -1097,7 +1105,7 @@ pub fn build_news_post_thread_chunks(
         },
     };
     chunks[1] = HxChunk {
-        tag: tag::PARENTTHREAD,
+        tag: tag::NEWSFLAGS,
         len: 4,
         data: scratch.as_ptr(),
     };
@@ -3092,7 +3100,7 @@ mod tests {
     fn news_post_thread_emits_six_chunks_in_order() {
         let req = NewsPostThreadRequest {
             path: b"/Articles",
-            parent_thread: 0,
+            flags: 0,
             mime_type: b"text/plain",
             subject: b"Hello",
             text: b"World",
@@ -3103,7 +3111,7 @@ mod tests {
         let hc = build_news_post_thread_chunks(&req, &mut chunks, &mut scratch);
         assert_eq!(hc, 6);
         assert_eq!(chunks[0].tag, tag::NEWSPATH);
-        assert_eq!(chunks[1].tag, tag::PARENTTHREAD);
+        assert_eq!(chunks[1].tag, tag::NEWSFLAGS);
         assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0, 0, 0, 0]);
         assert_eq!(chunks[2].tag, tag::NEWSTYPE);
         assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"text/plain");
@@ -3122,7 +3130,7 @@ mod tests {
     fn news_post_thread_rejects_short_buffers() {
         let req = NewsPostThreadRequest {
             path: b"p",
-            parent_thread: 0,
+            flags: 0,
             mime_type: b"m",
             subject: b"s",
             text: b"t",
@@ -3148,7 +3156,7 @@ mod tests {
         for which in 0..4 {
             let req = NewsPostThreadRequest {
                 path: if which == 0 { &big } else { b"p" },
-                parent_thread: 0,
+                flags: 0,
                 mime_type: if which == 1 { &big } else { b"m" },
                 subject: if which == 2 { &big } else { b"s" },
                 text: if which == 3 { &big } else { b"t" },
