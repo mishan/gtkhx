@@ -1,10 +1,10 @@
 # Multi-server test rig (docker-compose)
 
-One command brings up both Hotline servers, both trackers, and a SOCKS5
-proxy — all on host networking — with the servers registered against the
-trackers, so the tracker-listing, registration, and SOCKS-connect paths
-can all be exercised end-to-end without standing up five containers by
-hand.
+One command brings up all three Hotline servers, both trackers, and a
+SOCKS5 proxy — all on host networking — with the servers registered
+against the trackers, so the tracker-listing, registration, and
+SOCKS-connect paths can all be exercised end-to-end without standing up
+six containers by hand.
 
 ## What's in the rig
 
@@ -12,6 +12,7 @@ hand.
 |------------|------------------|-------------------------------------|------------|
 | `mhxd`     | Hotline server   | 5500 (HTLS), 5501 (HTXF)            | `localhost:5500` |
 | `janus`    | Hotline server   | 5510/5511, 5610/5611 (TLS), 5514/udp | `localhost:5510` |
+| `mobius`   | Hotline server   | 5520 (HTLS), 5521 (HTXF)            | `localhost:5520` |
 | `hxtrackd` | Tracker (v1)     | 5498 (HTRK), 5499/udp               | tracker host `localhost:5498` |
 | `argus`    | Tracker (v1/2/3) | 5698 (HTRK), 6498 (TLS), 5699/udp   | tracker host `localhost:5698` |
 | `socks`    | SOCKS5 proxy     | 1080                                | `socks5://localhost:1080` |
@@ -33,7 +34,7 @@ are hardcoded compile-time constants (`HTRK_TCPPORT`/`HTRK_UDPPORT` =
 ```sh
 cd tests
 
-./build-all.sh            # build all five images (forwards args, e.g. --no-cache)
+./build-all.sh            # build every image (forwards args, e.g. --no-cache)
 ./run.sh                  # rebuild + tear down + restart the whole rig
 ./run.sh --no-cache       # same, forcing a clean rebuild
 
@@ -41,6 +42,7 @@ cd tests
 ./build.sh janus
 ./build.sh argus --no-cache
 ./build.sh mhxd --build-arg MHXD_REV=<sha>
+./build.sh mobius --build-arg MOBIUS_TAG=v0.24.0
 ./build.sh socks          # builds gtkhx-socks from tests/socks-proxy/
 ```
 
@@ -92,6 +94,12 @@ each server — no image is hard-wired to the rig, so standalone
   `TRACKERS="127.0.0.1:5499,127.0.0.1:5699"`, so Janus registers with
   **both** hxtrackd (5499) and Argus (5699).
 
+- **Mobius** — doesn't register at all. `EnableTrackerRegistration` is
+  `false` in `tests/mobius/conf/config.yaml`, on purpose: the two above
+  already cover registration from both directions, and a third
+  registrant would change the listings the tracker tests assert on
+  without exercising a path they don't already reach.
+
 So hxtrackd receives mhxd + Janus (+ its own seeded fixture), and Argus
 receives Janus. Both send the classic HTRK UDP registration.
 
@@ -117,3 +125,9 @@ through the proxy to mhxd. The test asks the proxy to CONNECT to
 exactly what host networking gives it (the same reason everything else in
 the rig is host-net). It binds the host's `1080` directly, matching the
 standalone `docker run --network host gtkhx-socks`.
+
+## Per-server notes
+
+Each server container has a README with its ports, its account layout,
+and whatever interop findings it has turned up:
+`tests/mhxd/`, `tests/janus/`, `tests/mobius/`.
