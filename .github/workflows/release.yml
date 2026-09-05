@@ -196,6 +196,55 @@ jobs:
       - name: bundle
         run: packaging/macos/bundle.sh build dist
 
+      - name: report the bundle's minimum macOS
+        # A bundle runs only on the highest macOS any Mach-O inside it
+        # demands — not on what the main executable or the Info.plist
+        # claims. Those can be lower, and when they are the app launches
+        # on an older system and then dies in dyld instead of being
+        # refused cleanly.
+        #
+        # Most of what ships here is Homebrew dylibs, and brew bottles
+        # carry the OS they were built for. So this number moves when the
+        # runner image or the bottle lineup moves, with nothing else in
+        # the build to notice. Measure it every run and print it.
+        #
+        # Informational only. continue-on-error plus the closing `true`
+        # keep a missing vtool or an unreadable file from ever failing a
+        # release — this step reports, it does not gate.
+        continue-on-error: true
+        run: |
+          app="dist/GtkHx.app"
+          : > /tmp/minos.tsv
+          while IFS= read -r f; do
+            case "$(file -b "$f" 2>/dev/null)" in
+              *Mach-O*) ;;
+              *) continue ;;
+            esac
+            # `|| true` on every capture: the runner's shell is bash -eo
+            # pipefail, so a missing vtool or a Mach-O it declines to read
+            # would otherwise take the whole step down at the assignment,
+            # silently, exactly the way the /app/lib64 guard did.
+            v=$(vtool -show-build "$f" 2>/dev/null |
+                awk '/^ *minos/ {print $2; exit}' || true)
+            if [ -n "$v" ]; then
+              printf '%s\t%s\n' "$v" "${f#$app/}" >> /tmp/minos.tsv
+            fi
+          done < <(find "$app" -type f 2>/dev/null || true)
+
+          sort -V -o /tmp/minos.tsv /tmp/minos.tsv || true
+          floor=$(tail -1 /tmp/minos.tsv | cut -f1 || true)
+          plist=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+                    "$app/Contents/Info.plist" 2>/dev/null || true)
+
+          echo "runner image:                       ${{ matrix.os }}"
+          echo "MACOSX_DEPLOYMENT_TARGET (our code): ${MACOSX_DEPLOYMENT_TARGET:-unset}"
+          echo "Info.plist LSMinimumSystemVersion:   ${plist:-unset}"
+          echo "highest requirement in the bundle:   ${floor:-unknown}"
+          echo
+          echo "---- the ten highest ----"
+          tail -10 /tmp/minos.tsv
+          true
+
       - name: name the artifact
         run: |
           case "$GITHUB_REF" in
