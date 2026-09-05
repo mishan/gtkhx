@@ -507,10 +507,29 @@ struct hl_user_data {
 #define HTLC_DATA_NEWSDATE ((guint16)0x014a)
 #define HTLC_DATA_NEWSDIR ((guint16)0x01c8)
 
+/* 1.5 threaded-news article fields, 331-336. Spelled against the
+ * original SDK's myField_* names, because two of the numbers in this
+ * block are one apart and mean very different things:
+ *
+ *   331 0x014b  myField_NewsArtPrevArt      previous article
+ *   332 0x014c  myField_NewsArtNextArt      next article
+ *   333 0x014d  myField_NewsArtData         article body
+ *   334 0x014e  myField_NewsArtFlags        flags  <- NOT the parent
+ *   335 0x014f  myField_NewsArtParentArt    parent article
+ *   336 0x0150  myField_NewsArt1stChildArt  first child article
+ *
+ * 0x014e used to be spelled HTLC_DATA_PARENTTHREAD here, one number
+ * below the field that really is the parent article. It is the flags
+ * field; the Post News Article request carries it (as zero) alongside
+ * the parent article id, which travels in HTLC_DATA_THREADID (326,
+ * myField_NewsArtID). mhxd doesn't define 0x014e at all and Mobius
+ * ignores it, so the mix-up cost nothing on the wire — it just made
+ * the send path read as though the parent id went somewhere it never
+ * went. */
 #define HTLC_DATA_PREVTHREAD ((guint16)0x014b)
 #define HTLC_DATA_NEXTTHREAD ((guint16)0x014c)
 #define HTLC_DATA_NEWSDATA ((guint16)0x014d)
-#define HTLC_DATA_PARENTTHREAD ((guint16)0x014e)
+#define HTLC_DATA_NEWSFLAGS ((guint16)0x014e)
 #define HTLC_DATA_PARENT_POST ((guint16)0x014f)
 #define HTLC_DATA_CHILD_POST ((guint16)0x0150)
 

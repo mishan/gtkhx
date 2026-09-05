@@ -854,12 +854,13 @@ extern int32_t gtkhx_proto_build_news_delete_chunks (const uint8_t *path_ptr,
                                                      struct hx_chunk *chunks,
                                                      size_t chunks_cap);
 
-/* HTLC_HDR_MAKENEWSDIR: same shape as NEWSCATLIST (the last path
- * component is the new directory name). */
-extern int32_t gtkhx_proto_build_news_mkdir_chunks (const uint8_t *path_ptr,
-                                                    size_t path_len,
-                                                    struct hx_chunk *chunks,
-                                                    size_t chunks_cap);
+/* HTLC_HDR_MAKENEWSDIR: NEWSPATH (the *parent* folder) + FILE_NAME (the
+ * new folder). chunks_cap >= 2. Returns 2 on success, 0 on validation
+ * failure. Not the NEWSCATLIST shape: the server resolves the path as an
+ * existing directory, so the new name cannot ride in it. */
+extern int32_t gtkhx_proto_build_news_mkdir_chunks (
+    const uint8_t *path_ptr, size_t path_len, const uint8_t *name_ptr,
+    size_t name_len, struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_DELETETHREAD: NEWSPATH + THREADID (u32). chunks_cap >= 2,
  * scratch_cap >= 4. Returns 2 on success, 0 on validation failure. */
@@ -883,11 +884,14 @@ extern int32_t gtkhx_proto_build_news_mkcat_chunks (
     size_t name_len, struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_POSTTHREAD: 6 chunks in wire order — NEWSPATH +
- * PARENTTHREAD (u32) + NEWSTYPE + NEWSSUBJECT + NEWSDATA + THREADID
+ * NEWSFLAGS (u32) + NEWSTYPE + NEWSSUBJECT + NEWSDATA + THREADID
  * (u32). chunks_cap >= 6, scratch_cap >= 8. Returns 6 on success, 0
- * on validation failure. */
+ * on validation failure.
+ *
+ * `flags` is field 334 and is always 0; the parent article's id rides
+ * in `thread_id` (326). See the news-field block in hotline.h. */
 extern int32_t gtkhx_proto_build_news_post_thread_chunks (
-    const uint8_t *path_ptr, size_t path_len, uint32_t parent_thread,
+    const uint8_t *path_ptr, size_t path_len, uint32_t flags,
     const uint8_t *mime_type_ptr, size_t mime_type_len,
     const uint8_t *subject_ptr, size_t subject_len, const uint8_t *text_ptr,
     size_t text_len, uint32_t thread_id, struct hx_chunk *chunks,

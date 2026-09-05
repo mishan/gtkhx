@@ -54,7 +54,7 @@ const HL_ACCESS_DELETE_CATEGORIES: i32 = 35;
 const HL_ACCESS_CREATE_NEWS_BUNDLES: i32 = 36;
 const HL_ACCESS_DELETE_NEWS_BUNDLES: i32 = 37;
 
-use gtkhx_core::conn::{hx_conn_access_has, hx_conn_access_permits};
+use gtkhx_core::conn::hx_conn_access_permits;
 use gtkhx_core::session::gtkhx_session_get_default;
 use hotline_proto::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
 use hxhandlers::recv::news::carrier::{
@@ -262,15 +262,25 @@ fn sync_action_buttons(br: &NewsBrowser) {
             kind == NB_KIND_FOLDER || kind == NB_KIND_CATEGORY || kind == NB_KIND_POST,
         );
 
+        // `permits`, not `has`, and the distinction decides whether this toolbar
+        // works at all against a server that sends no access bitmap: `has` reads
+        // the bit and an all-zero map denies everything, while `permits` treats
+        // the absent map as the permissive legacy default. `threaded_news_available`
+        // already takes the permissive reading — so with `has` here the browser
+        // would speak 1.5 news to such a server, draw its tree, and then grey out
+        // every button, which is the "no controls" the mhxd rig shows. A server
+        // that does send a map and withholds a bit still denies: `permits` only
+        // differs when nothing at all was sent. Anything the server disagrees with
+        // comes back as a task error.
         let htlc = gtkhx_active_htlc();
         br.btn_new_folder
-            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
+            .set_sensitive(hx_conn_access_permits(htlc.cast(), HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
         br.btn_new_category
-            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_CREATE_CATEGORIES) != 0);
+            .set_sensitive(hx_conn_access_permits(htlc.cast(), HL_ACCESS_CREATE_CATEGORIES) != 0);
         br.btn_new_post
-            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_POST_NEWS) != 0);
+            .set_sensitive(hx_conn_access_permits(htlc.cast(), HL_ACCESS_POST_NEWS) != 0);
         br.btn_reply
-            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_POST_NEWS) != 0);
+            .set_sensitive(hx_conn_access_permits(htlc.cast(), HL_ACCESS_POST_NEWS) != 0);
 
         let delete_bit = match kind {
             NB_KIND_FOLDER => HL_ACCESS_DELETE_NEWS_BUNDLES,
@@ -279,7 +289,7 @@ fn sync_action_buttons(br: &NewsBrowser) {
             _ => -1,
         };
         br.btn_delete
-            .set_sensitive(delete_bit >= 0 && hx_conn_access_has(htlc.cast(), delete_bit) != 0);
+            .set_sensitive(delete_bit >= 0 && hx_conn_access_permits(htlc.cast(), delete_bit) != 0);
     }
 }
 
@@ -303,6 +313,34 @@ unsafe fn threaded_news_available(htlc: *mut c_void) -> bool {
 /// the user happens to be looking at. Sending it on the focused connection
 /// would have asked the wrong server for a tree and filed the reply under the
 /// wrong browser, leaving the background one empty and re-firing forever.
+/// Is a NEWSDIRLIST for this exact `(connection, target)` already on the wire?
+///
+/// Opening the browser has three legitimate reasons to want the root listing —
+/// the panel's `presented` hook, the LOGIN_READY transition, and the toolbar
+/// entry point — and `open_news_browser` reaches two of them in a single call:
+/// `create_news_browser_window` docks the page, which presents the panel and
+/// fires the first fetch, then the post-login block below it fires the second.
+///
+/// Each of those guarded on `root_store.n_items() == 0`, which asks a different
+/// question. The store is still empty while a request is in flight, so both
+/// passed, both replies came back, and `hx_news_build_dirlist_from_dirlist`
+/// appended each of them into the same store — the whole tree, twice. Guard on
+/// the request instead of on the result.
+///
+/// `None`/root is the null `target`, so the comparison is just the pointer.
+fn dirlist_in_flight(htlc: *mut c_void, target: *mut c_void) -> bool {
+    let conn = dock::conn_key(htlc);
+    PENDING_DIRLISTS.with(|t| {
+        t.borrow().values().any(|(c, node)| {
+            *c == conn
+                && node
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |o| o.as_ptr() as *mut c_void)
+                    == target
+        })
+    })
+}
+
 fn fetch_dirlist(htlc: *mut c_void, target: *mut c_void) {
     unsafe {
         if !threaded_news_available(htlc) {
@@ -312,6 +350,9 @@ fn fetch_dirlist(htlc: *mut c_void, target: *mut c_void) {
         // byte-oriented (may be non-UTF8), so a cstr()/cs() round-trip would be
         // lossy. Only the root case synthesizes "/" (path_to_hldir derefs it
         // unconditionally, so it can't be NULL).
+        if dirlist_in_flight(htlc, target) {
+            return;
+        }
         let path = if !target.is_null() && !hx_news_node_path(target.cast()).is_null() {
             hx_news_node_path(target.cast())
         } else {
@@ -587,8 +628,15 @@ fn reset_browser_state(br: &NewsBrowser) {
 }
 
 fn on_connection_state(htlc: *mut c_void, state: u32) {
-    with_browser_on(dock::conn_key(htlc), |br| match state {
+    let conn = dock::conn_key(htlc);
+    with_browser_on(conn, |br| match state {
         GTKHX_CONNECTION_DISCONNECTED => {
+            // Forget what was on the wire. Those replies are never coming, and
+            // now that a pending request suppresses the next one, a fetch left
+            // in the table across a disconnect would wedge the tree empty for
+            // the rest of the session.
+            PENDING_DIRLISTS.with(|t| t.borrow_mut().retain(|_, (c, _)| *c != conn));
+            PENDING_CATLISTS.with(|t| t.borrow_mut().retain(|_, (c, _)| *c != conn));
             reset_browser_state(br);
             br.disconnected_banner.set_revealed(true);
         }
@@ -1180,5 +1228,67 @@ pub unsafe extern "C" fn open_news_browser(widget: *mut c_void, sess: *mut c_voi
             }
             fetch_dirlist(htlc, std::ptr::null_mut());
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Opening the browser asks for the root listing from more than one place —
+    /// `open_news_browser` alone reaches two, via the panel's `presented` hook
+    /// and its own post-login block. Each used to guard on `root_store` being
+    /// empty, which stays true for as long as the request is in flight, so both
+    /// went out and both replies were appended: the whole tree, twice. The guard
+    /// has to be on the request.
+    ///
+    /// No display and no widgets — this is the fetch table, not the view.
+    #[test]
+    fn root_dirlist_is_deduped_while_in_flight() {
+        let root = std::ptr::null_mut();
+        // conn_key(NULL) reads as 0, so a null htlc is a usable stand-in for
+        // "connection 0" without inventing a live htlc to dereference.
+        let this_conn: ConnKey = 0;
+        let other_conn: ConnKey = 1;
+
+        assert!(
+            !dirlist_in_flight(root, root),
+            "empty table: nothing is on the wire"
+        );
+
+        PENDING_DIRLISTS.with(|t| t.borrow_mut().insert(0xF00D, (this_conn, None)));
+        assert!(
+            dirlist_in_flight(root, root),
+            "root listing already requested on this connection"
+        );
+
+        // Another connection's root listing is a different request; it must not
+        // suppress ours.
+        PENDING_DIRLISTS.with(|t| t.borrow_mut().clear());
+        PENDING_DIRLISTS.with(|t| t.borrow_mut().insert(0xBEEF, (other_conn, None)));
+        assert!(
+            !dirlist_in_flight(root, root),
+            "a pending fetch on another connection must not gate this one"
+        );
+
+        // Nor does an in-flight fetch for a folder inside the tree stand in for
+        // the root listing, or vice versa.
+        let node = glib::Object::new::<glib::Object>();
+        let node_ptr = node.as_ptr() as *mut c_void;
+        PENDING_DIRLISTS.with(|t| t.borrow_mut().clear());
+        PENDING_DIRLISTS.with(|t| {
+            t.borrow_mut()
+                .insert(0xCAFE, (this_conn, Some(node.clone())))
+        });
+        assert!(
+            !dirlist_in_flight(root, root),
+            "a folder's listing is not the root listing"
+        );
+        assert!(
+            dirlist_in_flight(root, node_ptr),
+            "that folder's listing is already on the wire"
+        );
+
+        PENDING_DIRLISTS.with(|t| t.borrow_mut().clear());
     }
 }

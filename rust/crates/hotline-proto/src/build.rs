@@ -846,18 +846,58 @@ pub fn build_news_delete_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
     build_newspath_only_chunks(path, chunks)
 }
 
-/// Build the chunk array for `HTLC_HDR_MAKENEWSDIR` — single
-/// `HTLC_DATA_NEWSPATH` chunk (the path encodes the new directory's
-/// position; the last component is the new name).
-pub fn build_news_mkdir_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
-    build_newspath_only_chunks(path, chunks)
+/// Request data for [`build_news_mkdir_chunks`].
+pub struct NewsMakeDirRequest<'a> {
+    /// The *parent* folder's wire-encoded path. Empty for the root.
+    pub path: &'a [u8],
+    /// New folder name, already encoded by the caller.
+    pub name: &'a [u8],
+}
+
+/// Build the chunk array for `HTLC_HDR_MAKENEWSDIR` — `HTLC_DATA_NEWSPATH`
+/// (the *parent*) + `HTLC_DATA_FILE_NAME` (the new folder). Returns 2 on
+/// success, 0 on validation failure. `chunks.len() >= 2`.
+///
+/// This used to emit a lone NEWSPATH whose last component was the new name, on
+/// the assumption that MAKENEWSDIR had the same shape as NEWSDIRLIST. It does
+/// not, and the reference server says so plainly: `rcv_news_mkdir` reads
+/// NEWSPATH and FILE_NAME as separate fields, resolves NEWSPATH through
+/// `hldir_to_path` — which requires every component to already exist — and
+/// creates `<resolved>/<FILE_NAME>`. Folding the new name into the path asked
+/// the server to resolve a directory that by definition wasn't there yet, so
+/// the request came back ENOENT ("No such file or directory") and no folder was
+/// ever created. Verified against mhxd both ways round.
+pub fn build_news_mkdir_chunks(req: &NewsMakeDirRequest<'_>, chunks: &mut [HxChunk]) -> usize {
+    if chunks.len() < 2 || req.path.len() > u16::MAX as usize || req.name.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::NEWSPATH,
+        len: req.path.len() as u16,
+        data: if req.path.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.path.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    2
 }
 
 // ---- 1.5 news send opcodes with extra fields -------------------------
 //
 // Build on top of the NEWSPATH-only shape with one or more additional
 // chunks: THREADID (u32), NEWSTYPE / NEWSSUBJECT / NEWSDATA /
-// CATEGORY (byte payloads), PARENTTHREAD (u32, gtkhx always sends 0).
+// CATEGORY (byte payloads), NEWSFLAGS (u32, gtkhx always sends 0).
 //
 // All the variable-length payloads (mime type, subject, body, category
 // name) are pre-encoded by the C caller via `gtkhx_text_for_wire`;
@@ -993,14 +1033,15 @@ pub fn build_news_mkcat_chunks(req: &NewsMakeCategoryRequest<'_>, chunks: &mut [
 
 /// Request data for [`build_news_post_thread_chunks`]. Mirrors the C
 /// `hx_news15_post_thread` call site: subject, text, and mime type are
-/// pre-encoded bytes; PARENTTHREAD is opaque to mhxd (the C side
-/// always sends 0) but the wire spec requires the chunk to be
-/// present.
+/// pre-encoded bytes; the flags field is listed in the request shape
+/// but read by no server we test against.
 pub struct NewsPostThreadRequest<'a> {
     pub path: &'a [u8],
-    /// PARENTTHREAD chunk value. gtkhx always sends 0; the wire shape
-    /// requires the chunk regardless of value.
-    pub parent_thread: u32,
+    /// `NEWSFLAGS` (334, `myField_NewsArtFlags`). gtkhx always sends 0;
+    /// the request shape lists the field regardless of value.
+    ///
+    /// This is *not* the parent article — see [`Self::thread_id`].
+    pub flags: u32,
     /// MIME type bytes (the C call site hard-codes "text/plain").
     pub mime_type: &'a [u8],
     /// Single-line subject bytes, already encoded by the caller's
@@ -1013,23 +1054,30 @@ pub struct NewsPostThreadRequest<'a> {
     /// LF→CR send-path normalisation is applied for legacy Mac
     /// servers).
     pub text: &'a [u8],
-    /// THREADID for the post being replied to. mhxd writes this into
-    /// the new post's `References:` header.
+    /// `THREADID` (326, `myField_NewsArtID`) — the article the new
+    /// post replies to, 0 for a top-level post. This is the field that
+    /// carries the parent's id: mhxd writes it into the new post's
+    /// `References:` header, and Mobius reads it as the parent article
+    /// and threads the reply under it.
     pub thread_id: u32,
 }
 
 /// Build the chunk array for `HTLC_HDR_POSTTHREAD` — 6 chunks in this
 /// wire order:
 ///
-/// 1. `HTLC_DATA_NEWSPATH`
-/// 2. `HTLC_DATA_PARENTTHREAD`  (u32 BE; gtkhx always sends 0)
-/// 3. `HTLC_DATA_NEWSTYPE`      (e.g. "text/plain")
-/// 4. `HTLC_DATA_NEWSSUBJECT`
-/// 5. `HTLC_DATA_NEWSDATA`
-/// 6. `HTLC_DATA_THREADID`      (u32 BE; the article being replied to)
+/// 1. `HTLC_DATA_NEWSPATH`     (325)
+/// 2. `HTLC_DATA_NEWSFLAGS`    (334; u32 BE, gtkhx always sends 0)
+/// 3. `HTLC_DATA_NEWSTYPE`     (327; e.g. "text/plain")
+/// 4. `HTLC_DATA_NEWSSUBJECT`  (328)
+/// 5. `HTLC_DATA_NEWSDATA`     (333)
+/// 6. `HTLC_DATA_THREADID`     (326; u32 BE, the article being replied to)
 ///
-/// `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s — parent at +0,
-/// thread at +4). Returns 6 on success, 0 on validation failure.
+/// Those are exactly the six fields the SDK lists for Post News
+/// Article, so the bytes on the wire were always right — only the name
+/// of chunk 2 was wrong, and it named chunk 6's job.
+///
+/// `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s — flags at +0,
+/// article id at +4). Returns 6 on success, 0 on validation failure.
 pub fn build_news_post_thread_chunks(
     req: &NewsPostThreadRequest<'_>,
     chunks: &mut [HxChunk],
@@ -1044,7 +1092,7 @@ pub fn build_news_post_thread_chunks(
     {
         return 0;
     }
-    scratch[0..4].copy_from_slice(&req.parent_thread.to_be_bytes());
+    scratch[0..4].copy_from_slice(&req.flags.to_be_bytes());
     scratch[4..8].copy_from_slice(&req.thread_id.to_be_bytes());
 
     chunks[0] = HxChunk {
@@ -1057,7 +1105,7 @@ pub fn build_news_post_thread_chunks(
         },
     };
     chunks[1] = HxChunk {
-        tag: tag::PARENTTHREAD,
+        tag: tag::NEWSFLAGS,
         len: 4,
         data: scratch.as_ptr(),
     };
@@ -2845,7 +2893,6 @@ mod tests {
             build_news_catlist_chunks as fn(&[u8], &mut [HxChunk]) -> usize,
             build_news_dirlist_chunks,
             build_news_delete_chunks,
-            build_news_mkdir_chunks,
         ] {
             let mut chunks = [HxChunk::EMPTY];
             let hc = builder(b"/Articles/2026", &mut chunks);
@@ -2854,6 +2901,38 @@ mod tests {
             assert_eq!(chunks[0].len, 14);
             assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"/Articles/2026");
         }
+    }
+
+    #[test]
+    fn mkdir_sends_parent_path_and_name_separately() {
+        // MAKENEWSDIR is NOT a NEWSPATH-only opcode, which is what the
+        // single-chunk shape above used to assume. The server resolves the
+        // path as an existing folder and creates FILE_NAME inside it, so the
+        // new folder's name must not be folded into the path.
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let req = NewsMakeDirRequest {
+            path: b"/Articles",
+            name: b"2026",
+        };
+        assert_eq!(build_news_mkdir_chunks(&req, &mut chunks), 2);
+        assert_eq!(chunks[0].tag, tag::NEWSPATH);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"/Articles");
+        assert_eq!(chunks[1].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"2026");
+
+        // Creating at the root is an empty path, not a missing chunk.
+        let req = NewsMakeDirRequest {
+            path: b"",
+            name: b"Top",
+        };
+        assert_eq!(build_news_mkdir_chunks(&req, &mut chunks), 2);
+        assert_eq!(chunks[0].tag, tag::NEWSPATH);
+        assert_eq!(chunks[0].len, 0);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"Top");
+
+        // Too few slots is a validation failure, not a partial write.
+        let mut one = [HxChunk::EMPTY; 1];
+        assert_eq!(build_news_mkdir_chunks(&req, &mut one), 0);
     }
 
     #[test]
@@ -3021,7 +3100,7 @@ mod tests {
     fn news_post_thread_emits_six_chunks_in_order() {
         let req = NewsPostThreadRequest {
             path: b"/Articles",
-            parent_thread: 0,
+            flags: 0,
             mime_type: b"text/plain",
             subject: b"Hello",
             text: b"World",
@@ -3032,7 +3111,7 @@ mod tests {
         let hc = build_news_post_thread_chunks(&req, &mut chunks, &mut scratch);
         assert_eq!(hc, 6);
         assert_eq!(chunks[0].tag, tag::NEWSPATH);
-        assert_eq!(chunks[1].tag, tag::PARENTTHREAD);
+        assert_eq!(chunks[1].tag, tag::NEWSFLAGS);
         assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0, 0, 0, 0]);
         assert_eq!(chunks[2].tag, tag::NEWSTYPE);
         assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"text/plain");
@@ -3051,7 +3130,7 @@ mod tests {
     fn news_post_thread_rejects_short_buffers() {
         let req = NewsPostThreadRequest {
             path: b"p",
-            parent_thread: 0,
+            flags: 0,
             mime_type: b"m",
             subject: b"s",
             text: b"t",
@@ -3077,7 +3156,7 @@ mod tests {
         for which in 0..4 {
             let req = NewsPostThreadRequest {
                 path: if which == 0 { &big } else { b"p" },
-                parent_thread: 0,
+                flags: 0,
                 mime_type: if which == 1 { &big } else { b"m" },
                 subject: if which == 2 { &big } else { b"s" },
                 text: if which == 3 { &big } else { b"t" },
