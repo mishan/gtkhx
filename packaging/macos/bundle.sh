@@ -228,6 +228,57 @@ exec "$HERE/gtkhx-bin" "$@"
 LAUNCH
 chmod +x "$MACOS/GtkHx"
 
+# ---- minimum macOS ---------------------------------------------------------
+# Measured, not typed. A bundle runs only on the highest macOS any Mach-O in it
+# was built for, and nearly all of these are Homebrew dylibs carrying the OS
+# their bottle was built on — so the real answer moves when the build machine or
+# the bottle lineup moves, and a number written here by hand goes stale silently.
+#
+# Declaring lower than the truth does not widen support. It removes Finder's
+# refusal and lets the app start on a system where it then dies in dyld, which
+# is a worse way to learn the same thing. (This file declared 11.0 for a long
+# while; the real floor measured 14.0 on arm64 and 15.0 on x86_64.)
+#
+# The whole measurement is ONE guarded expression. `|| min_os=""` is what makes
+# the fallback below reachable: the script runs under `set -euo pipefail`, so
+# without it a failure anywhere in that pipeline aborts the bundle at the
+# assignment — the per-command `|| true`s inside cover the tools they wrap and
+# nothing else, which is precisely the trap of guarding the parts and not the
+# whole.
+#
+# The max is computed in awk rather than `sort -V | tail -1`. macOS's sort does
+# accept -V, but a hand-rolled comparator needs no such claim to be true, and
+# comparing the version components as numbers is what we actually mean.
+MIN_OS_FALLBACK="14.0"
+min_os=$(
+    find "$APP" -type f 2>/dev/null |
+    while IFS= read -r f; do
+        case "$(file -b "$f" 2>/dev/null || true)" in
+            *Mach-O*) ;;
+            *) continue ;;
+        esac
+        vtool -show-build "$f" 2>/dev/null |
+            awk '/^ *minos/ { print $2; exit }' || true
+    done |
+    awk '
+        # major.minor[.patch] -> one comparable number, so 9.0 < 10.15 < 14.0
+        # rather than whatever string order would say.
+        {
+            split($0, p, ".")
+            v = (p[1] + 0) * 10000 + (p[2] + 0) * 100 + (p[3] + 0)
+            if (v > best) { best = v; highest = $0 }
+        }
+        END { if (highest != "") print highest }
+    '
+) || min_os=""
+
+if [ -z "$min_os" ]; then
+    echo "::warning:: couldn't read a minimum macOS out of the bundle;" \
+         "declaring $MIN_OS_FALLBACK" >&2
+    min_os="$MIN_OS_FALLBACK"
+fi
+echo ">> minimum macOS: $min_os"
+
 # Version from meson if available, else a dev placeholder.
 VERSION="$(awk -F\' '/version *:/ {print $2; exit}' meson.build 2>/dev/null || echo 0.0.0-dev)"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -243,7 +294,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>        <string>GtkHx</string>
   <key>CFBundleIconFile</key>          <string>GtkHx.icns</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
-  <key>LSMinimumSystemVersion</key>    <string>11.0</string>
+  <key>LSMinimumSystemVersion</key>    <string>$min_os</string>
   <key>NSHighResolutionCapable</key>   <true/>
 </dict>
 </plist>
