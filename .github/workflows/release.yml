@@ -121,13 +121,27 @@ jobs:
   # macOS .app bundle (both arches)
   # ------------------------------------------------------------------
   macos-package:
-    name: package (${{ matrix.os }})
+    # Named for the CPU architecture, not the runner image. The runner
+    # label says "arm64" only by today's coincidence of GitHub's
+    # labelling, and that coincidence has broken before — macos-latest
+    # flipped from x86_64 to arm64 in 2024, which is why the Intel image
+    # now needs an explicit -intel suffix. Bumping macos-14 to macos-15
+    # would silently rename the artifact without changing what is in it.
+    #
+    # matrix.os stays in the cache keys below: Homebrew bottles and Rust
+    # build artifacts really are per-runner-image, so keying those on the
+    # image is correct.
+    name: package (macOS ${{ matrix.arch }})
     if: github.event_name != 'workflow_dispatch' || inputs.build_macos
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15-intel]
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       HOMEBREW_NO_AUTO_UPDATE: 1
@@ -141,6 +155,20 @@ jobs:
           path: ~/Library/Caches/Homebrew/downloads
           key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/release.yml') }}
           restore-keys: ${{ matrix.os }}-brew-
+
+      - name: verify runner architecture
+        # The zip inside the artifact is named from `uname -m` (see
+        # packaging/macos/bundle.sh); the artifact around it is named from
+        # matrix.arch. If GitHub ever re-points one of these images at the
+        # other architecture, that mapping is wrong and the artifact would
+        # claim an arch its contents don't have. Cheap to check, and both
+        # sides are always non-empty, so this only fires on a real mismatch.
+        run: |
+          if [ "$(uname -m)" != "${{ matrix.arch }}" ]; then
+            echo "runner ${{ matrix.os }} is $(uname -m), but the matrix" \
+                 "calls it ${{ matrix.arch }}" >&2
+            exit 1
+          fi
 
       - name: brew deps
         run: |
@@ -168,6 +196,55 @@ jobs:
       - name: bundle
         run: packaging/macos/bundle.sh build dist
 
+      - name: report the bundle's minimum macOS
+        # A bundle runs only on the highest macOS any Mach-O inside it
+        # demands — not on what the main executable or the Info.plist
+        # claims. Those can be lower, and when they are the app launches
+        # on an older system and then dies in dyld instead of being
+        # refused cleanly.
+        #
+        # Most of what ships here is Homebrew dylibs, and brew bottles
+        # carry the OS they were built for. So this number moves when the
+        # runner image or the bottle lineup moves, with nothing else in
+        # the build to notice. Measure it every run and print it.
+        #
+        # Informational only. continue-on-error plus the closing `true`
+        # keep a missing vtool or an unreadable file from ever failing a
+        # release — this step reports, it does not gate.
+        continue-on-error: true
+        run: |
+          app="dist/GtkHx.app"
+          : > /tmp/minos.tsv
+          while IFS= read -r f; do
+            case "$(file -b "$f" 2>/dev/null)" in
+              *Mach-O*) ;;
+              *) continue ;;
+            esac
+            # `|| true` on every capture: the runner's shell is bash -eo
+            # pipefail, so a missing vtool or a Mach-O it declines to read
+            # would otherwise take the whole step down at the assignment,
+            # silently, exactly the way the /app/lib64 guard did.
+            v=$(vtool -show-build "$f" 2>/dev/null |
+                awk '/^ *minos/ {print $2; exit}' || true)
+            if [ -n "$v" ]; then
+              printf '%s\t%s\n' "$v" "${f#$app/}" >> /tmp/minos.tsv
+            fi
+          done < <(find "$app" -type f 2>/dev/null || true)
+
+          sort -V -o /tmp/minos.tsv /tmp/minos.tsv || true
+          floor=$(tail -1 /tmp/minos.tsv | cut -f1 || true)
+          plist=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+                    "$app/Contents/Info.plist" 2>/dev/null || true)
+
+          echo "runner image:                       ${{ matrix.os }}"
+          echo "MACOSX_DEPLOYMENT_TARGET (our code): ${MACOSX_DEPLOYMENT_TARGET:-unset}"
+          echo "Info.plist LSMinimumSystemVersion:   ${plist:-unset}"
+          echo "highest requirement in the bundle:   ${floor:-unknown}"
+          echo
+          echo "---- the ten highest ----"
+          tail -10 /tmp/minos.tsv
+          true
+
       - name: name the artifact
         run: |
           case "$GITHUB_REF" in
@@ -180,7 +257,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gtkhx-macos-${{ matrix.os }}
+          name: gtkhx-macos-${{ matrix.arch }}
           path: dist/*.zip
           if-no-files-found: error
 
