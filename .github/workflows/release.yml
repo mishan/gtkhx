@@ -121,13 +121,27 @@ jobs:
   # macOS .app bundle (both arches)
   # ------------------------------------------------------------------
   macos-package:
-    name: package (${{ matrix.os }})
+    # Named for the CPU architecture, not the runner image. The runner
+    # label says "arm64" only by today's coincidence of GitHub's
+    # labelling, and that coincidence has broken before — macos-latest
+    # flipped from x86_64 to arm64 in 2024, which is why the Intel image
+    # now needs an explicit -intel suffix. Bumping macos-14 to macos-15
+    # would silently rename the artifact without changing what is in it.
+    #
+    # matrix.os stays in the cache keys below: Homebrew bottles and Rust
+    # build artifacts really are per-runner-image, so keying those on the
+    # image is correct.
+    name: package (macOS ${{ matrix.arch }})
     if: github.event_name != 'workflow_dispatch' || inputs.build_macos
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15-intel]
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       HOMEBREW_NO_AUTO_UPDATE: 1
@@ -141,6 +155,20 @@ jobs:
           path: ~/Library/Caches/Homebrew/downloads
           key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/release.yml') }}
           restore-keys: ${{ matrix.os }}-brew-
+
+      - name: verify runner architecture
+        # The zip inside the artifact is named from `uname -m` (see
+        # packaging/macos/bundle.sh); the artifact around it is named from
+        # matrix.arch. If GitHub ever re-points one of these images at the
+        # other architecture, that mapping is wrong and the artifact would
+        # claim an arch its contents don't have. Cheap to check, and both
+        # sides are always non-empty, so this only fires on a real mismatch.
+        run: |
+          if [ "$(uname -m)" != "${{ matrix.arch }}" ]; then
+            echo "runner ${{ matrix.os }} is $(uname -m), but the matrix" \
+                 "calls it ${{ matrix.arch }}" >&2
+            exit 1
+          fi
 
       - name: brew deps
         run: |
@@ -180,7 +208,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gtkhx-macos-${{ matrix.os }}
+          name: gtkhx-macos-${{ matrix.arch }}
           path: dist/*.zip
           if-no-files-found: error
 
