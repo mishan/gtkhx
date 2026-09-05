@@ -1,0 +1,319 @@
+# Build the distributable packages for all three ship targets.
+#
+#   * Windows   — portable ZIP (MSYS2 UCRT64, voice-enabled)
+#   * macOS     — .app bundle zipped, per arch (arm64 + x86_64, voice-enabled)
+#   * Linux     — Flatpak bundle (.flatpak) via the existing manifest
+#
+# Reusable only — this has no trigger of its own. Two callers drive it:
+#
+#   * .github/workflows/snapshot.yml — a manual build at the current commit,
+#     optionally published as a pre-release.
+#   * .github/workflows/release.yml  — a tagged build whose artifacts are
+#     attached to that tag's GitHub Release.
+#
+# Everything version-shaped is an input. A job here never looks at GITHUB_REF
+# to work out what to call its output, because "what version is this" is the
+# one thing the two callers genuinely disagree about — the caller decides and
+# passes it down, so the build logic stays identical for both.
+#
+# Artifacts are uploaded here and downloaded by the caller's publish job; a
+# reusable workflow shares the caller's run, so they land in the same place.
+#
+# The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml
+# (same deps + caching); this workflow adds the packaging step + artifact upload.
+
+name: build packages
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Version string baked into the artifact filenames, e.g. "v1.3.2",
+          "1.3.3b1" or "snapshot-a1b2c3d".
+        type: string
+        required: true
+      ref:
+        description: >-
+          Git ref to build. Empty (the default) checks out whatever the caller
+          is already on, which is what a snapshot wants; the release workflow
+          passes the tag.
+        type: string
+        required: false
+        default: ''
+      build_windows:
+        type: boolean
+        required: false
+        default: true
+      build_macos:
+        type: boolean
+        required: false
+        default: true
+      build_flatpak:
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  windows-package:
+    name: package (Windows)
+    # On a tag push, build everything; on a manual run, honor the checkbox.
+    if: inputs.build_windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CARGO_HOME: ${{ github.workspace }}\.cargo-home
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          cache: true
+          pacboy: >-
+            cc:p meson:p ninja:p pkgconf:p rust:p
+            gtk4:p libadwaita:p libpanel:p gettext:p
+            gstreamer:p gst-plugins-base:p gst-plugins-good:p gst-plugins-bad:p
+            libnice:p
+          # zip is a plain MSYS package (no mingw-w64-ucrt-x86_64- variant), so
+          # it goes through `install`, not pacboy's ':p' prefix resolver.
+          install: zip
+
+      - name: cache rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-target
+            .cargo-home
+          key: windows-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: windows-rust-
+
+      - name: build (voice enabled)
+        run: |
+          meson setup build -Dvoice=enabled -Dtests=false \
+            -Dcargo_target_dir="$(pwd)/rust-target"
+          ninja -C build
+
+      - name: bundle
+        run: packaging/windows/bundle.sh build dist
+
+      - name: name the artifact
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          mv dist/GtkHx-win64.zip "dist/GtkHx-${VER}-win64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtkhx-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # macOS .app bundle (both arches)
+  # ------------------------------------------------------------------
+  macos-package:
+    # Named for the CPU architecture, not the runner image. The runner
+    # label says "arm64" only by today's coincidence of GitHub's
+    # labelling, and that coincidence has broken before — macos-latest
+    # flipped from x86_64 to arm64 in 2024, which is why the Intel image
+    # now needs an explicit -intel suffix. Bumping macos-14 to macos-15
+    # would silently rename the artifact without changing what is in it.
+    #
+    # matrix.os stays in the cache keys below: Homebrew bottles and Rust
+    # build artifacts really are per-runner-image, so keying those on the
+    # image is correct.
+    name: package (macOS ${{ matrix.arch }})
+    if: inputs.build_macos
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: cache homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/release.yml') }}
+          restore-keys: ${{ matrix.os }}-brew-
+
+      - name: verify runner architecture
+        # The zip inside the artifact is named from `uname -m` (see
+        # packaging/macos/bundle.sh); the artifact around it is named from
+        # matrix.arch. If GitHub ever re-points one of these images at the
+        # other architecture, that mapping is wrong and the artifact would
+        # claim an arch its contents don't have. Cheap to check, and both
+        # sides are always non-empty, so this only fires on a real mismatch.
+        run: |
+          if [ "$(uname -m)" != "${{ matrix.arch }}" ]; then
+            echo "runner ${{ matrix.os }} is $(uname -m), but the matrix" \
+                 "calls it ${{ matrix.arch }}" >&2
+            exit 1
+          fi
+
+      - name: brew deps
+        run: |
+          brew install meson ninja pkgconf gtk4 libadwaita libpanel gettext \
+                       gstreamer libnice dylibbundler
+
+      - name: rust toolchain
+        run: rustup show
+
+      - name: cache rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-target
+            .cargo-home
+          key: ${{ matrix.os }}-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-rust-
+
+      - name: build (voice enabled)
+        run: |
+          meson setup build -Dvoice=enabled -Dtests=false \
+            -Dcargo_target_dir="$(pwd)/rust-target"
+          ninja -C build
+
+      - name: bundle
+        run: packaging/macos/bundle.sh build dist
+
+      - name: report the bundle's minimum macOS
+        # A bundle runs only on the highest macOS any Mach-O inside it
+        # demands — not on what the main executable or the Info.plist
+        # claims. Those can be lower, and when they are the app launches
+        # on an older system and then dies in dyld instead of being
+        # refused cleanly.
+        #
+        # Most of what ships here is Homebrew dylibs, and brew bottles
+        # carry the OS they were built for. So this number moves when the
+        # runner image or the bottle lineup moves, with nothing else in
+        # the build to notice. Measure it every run and print it.
+        #
+        # Informational only. continue-on-error plus the closing `true`
+        # keep a missing vtool or an unreadable file from ever failing a
+        # release — this step reports, it does not gate.
+        continue-on-error: true
+        run: |
+          app="dist/GtkHx.app"
+          : > /tmp/minos.tsv
+          while IFS= read -r f; do
+            case "$(file -b "$f" 2>/dev/null)" in
+              *Mach-O*) ;;
+              *) continue ;;
+            esac
+            # `|| true` on every capture: the runner's shell is bash -eo
+            # pipefail, so a missing vtool or a Mach-O it declines to read
+            # would otherwise take the whole step down at the assignment,
+            # silently, exactly the way the /app/lib64 guard did.
+            v=$(vtool -show-build "$f" 2>/dev/null |
+                awk '/^ *minos/ {print $2; exit}' || true)
+            if [ -n "$v" ]; then
+              printf '%s\t%s\n' "$v" "${f#"$app"/}" >> /tmp/minos.tsv
+            fi
+          done < <(find "$app" -type f 2>/dev/null || true)
+
+          sort -V -o /tmp/minos.tsv /tmp/minos.tsv || true
+          floor=$(tail -1 /tmp/minos.tsv | cut -f1 || true)
+          plist=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+                    "$app/Contents/Info.plist" 2>/dev/null || true)
+
+          echo "runner image:                       ${{ matrix.os }}"
+          echo "MACOSX_DEPLOYMENT_TARGET (our code): ${MACOSX_DEPLOYMENT_TARGET:-unset}"
+          echo "Info.plist LSMinimumSystemVersion:   ${plist:-unset}"
+          echo "highest requirement in the bundle:   ${floor:-unknown}"
+          echo
+          echo "---- the ten highest ----"
+          tail -10 /tmp/minos.tsv
+          true
+
+      - name: name the artifact
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          for z in dist/GtkHx-macos-*.zip; do
+            mv "$z" "${z/GtkHx-macos-/GtkHx-${VER}-macos-}"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtkhx-macos-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Linux Flatpak bundle
+  # ------------------------------------------------------------------
+  linux-flatpak:
+    name: package (Linux Flatpak)
+    if: inputs.build_flatpak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+
+      # Restore the user flatpak install (runtime + SDK) and flatpak-builder's
+      # download/ccache cache BEFORE installing, so a warm cache skips the
+      # ~1 GB GNOME runtime pull.
+      - name: cache flatpak
+        uses: actions/cache@v4
+        with:
+          path: |
+            .flatpak-builder
+            ~/.local/share/flatpak
+          key: flatpak-${{ hashFiles('com.nasledov.gtkhx.yml') }}
+          restore-keys: flatpak-
+
+      - name: flathub remote + build deps
+        # User-scoped: a *system* remote/install needs root/polkit, which the CI
+        # user isn't granted ("ConfigureRemote not allowed for user").
+        #
+        # Let flatpak-builder resolve and install the deps itself rather than
+        # naming them by hand: the manifest needs org.gnome.Platform/Sdk//49 AND
+        # the org.freedesktop.Sdk.Extension.rust-stable extension, whose branch
+        # is the *freedesktop* base version (e.g. 25.08 for GNOME 49), not "49".
+        # --install-deps-only reads the correct branch from the SDK metadata, so
+        # we don't hardcode it. No-op refs are skipped when the cache is warm.
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --user --install-deps-from=flathub --install-deps-only \
+            --force-clean build-flatpak com.nasledov.gtkhx.yml
+
+      - name: build flatpak bundle
+        run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak
+
+      - name: name the artifact
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          mv gtkhx.flatpak "GtkHx-${VER}.flatpak"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtkhx-flatpak
+          path: '*.flatpak'
+          if-no-files-found: error

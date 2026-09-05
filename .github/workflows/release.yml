@@ -1,29 +1,26 @@
-# GtkHx release / snapshot artifacts.
-#
-# Builds distributable packages for all three ship targets and, on a version
-# tag, attaches them to a GitHub Release:
-#
-#   * Windows   — portable ZIP (MSYS2 UCRT64, voice-enabled)
-#   * macOS     — .app bundle zipped, per arch (arm64 + x86_64, voice-enabled)
-#   * Linux     — Flatpak bundle (.flatpak) via the existing manifest
+# Build a tagged version and attach the packages to its GitHub Release.
 #
 # Triggers:
-#   * push a tag matching v*        → build + a draft GitHub Release for the tag
-#   * workflow_dispatch (manual)    → build the targets whose checkboxes are
-#     ticked (all on by default); artifacts are always attached to the workflow
-#     run (downloadable from the Actions tab). Tick create_release to also
-#     publish a "snapshot" pre-release at the current commit; leave it unticked
-#     for artifacts only (no Release). A tag push always builds all targets.
+#   * push a tag matching v*   → build that tag
+#   * workflow_dispatch        → build a tag you name, for re-running a
+#                                release whose build failed or whose assets
+#                                need replacing
 #
-# The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml
-# (same deps + caching); this workflow adds the packaging step + artifact upload.
-# The bundle collectors (packaging/{windows,macos}/bundle.sh) are best-effort and
-# will need a CI round or two to settle the GStreamer plugin + dylib closures.
+# The tag is the only input. There are no per-platform checkboxes: a release
+# ships all three targets or it isn't a release. Snapshots are the place for
+# partial builds — see snapshot.yml.
+#
+# What this does to the Release itself: uploads the assets and nothing else.
+# If a release already exists for the tag its draft/published state, title and
+# notes are left exactly as you wrote them, so writing the notes by hand first
+# and then running this is the intended flow. If no release exists yet — the
+# usual case straight after a tag push — a draft is created to hold the
+# assets, and publishing it stays a deliberate act.
 
 name: release
 
 permissions:
-  contents: write        # create releases + upload assets on tag
+  contents: write        # create/attach release assets
 
 on:
   push:
@@ -31,316 +28,62 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      build_windows:
-        description: 'Build the Windows package'
-        type: boolean
-        default: true
-      build_macos:
-        description: 'Build the macOS packages'
-        type: boolean
-        default: true
-      build_flatpak:
-        description: 'Build the Linux Flatpak'
-        type: boolean
-        default: true
-      create_release:
-        description: 'Publish a snapshot pre-release from this run (otherwise just uploads workflow artifacts)'
-        type: boolean
-        default: false
+      tag:
+        description: 'Tag to build and attach artifacts to, e.g. v1.3.2'
+        type: string
+        required: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Keyed on the tag, and deliberately NOT cancel-in-progress: a half-uploaded
+  # set of release assets is worse than two runs racing to upload the same
+  # bytes (the upload is --clobber, so the loser is harmless).
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  # ------------------------------------------------------------------
-  # Windows portable ZIP
-  # ------------------------------------------------------------------
-  windows-package:
-    name: package (Windows)
-    # On a tag push, build everything; on a manual run, honor the checkbox.
-    if: github.event_name != 'workflow_dispatch' || inputs.build_windows
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
-    env:
-      CARGO_HOME: ${{ github.workspace }}\.cargo-home
+  target:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          cache: true
-          pacboy: >-
-            cc:p meson:p ninja:p pkgconf:p rust:p
-            gtk4:p libadwaita:p libpanel:p gettext:p
-            gstreamer:p gst-plugins-base:p gst-plugins-good:p gst-plugins-bad:p
-            libnice:p
-          # zip is a plain MSYS package (no mingw-w64-ucrt-x86_64- variant), so
-          # it goes through `install`, not pacboy's ':p' prefix resolver.
-          install: zip
-
-      - name: cache rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            rust-target
-            .cargo-home
-          key: windows-rust-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: windows-rust-
-
-      - name: build (voice enabled)
+      - id: t
+        env:
+          # Through env rather than ${{ }}: on a dispatch this is typed input.
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          meson setup build -Dvoice=enabled -Dtests=false \
-            -Dcargo_target_dir="$(pwd)/rust-target"
-          ninja -C build
-
-      - name: bundle
-        run: packaging/windows/bundle.sh build dist
-
-      - name: name the artifact
-        # Tag name on a tag push, else a snapshot label.
-        run: |
-          ref="${GITHUB_REF_NAME}"
-          case "$GITHUB_REF" in
-            refs/tags/*) ver="$ref" ;;
-            *)           ver="snapshot-${GITHUB_SHA::7}" ;;
-          esac
-          mv dist/GtkHx-win64.zip "dist/GtkHx-${ver}-win64.zip"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gtkhx-windows
-          path: dist/*.zip
-          if-no-files-found: error
-
-  # ------------------------------------------------------------------
-  # macOS .app bundle (both arches)
-  # ------------------------------------------------------------------
-  macos-package:
-    # Named for the CPU architecture, not the runner image. The runner
-    # label says "arm64" only by today's coincidence of GitHub's
-    # labelling, and that coincidence has broken before — macos-latest
-    # flipped from x86_64 to arm64 in 2024, which is why the Intel image
-    # now needs an explicit -intel suffix. Bumping macos-14 to macos-15
-    # would silently rename the artifact without changing what is in it.
-    #
-    # matrix.os stays in the cache keys below: Homebrew bottles and Rust
-    # build artifacts really are per-runner-image, so keying those on the
-    # image is correct.
-    name: package (macOS ${{ matrix.arch }})
-    if: github.event_name != 'workflow_dispatch' || inputs.build_macos
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            arch: arm64
-          - os: macos-15-intel
-            arch: x86_64
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cargo-home
-      HOMEBREW_NO_AUTO_UPDATE: 1
-      HOMEBREW_NO_INSTALL_CLEANUP: 1
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: cache homebrew downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/Homebrew/downloads
-          key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/release.yml') }}
-          restore-keys: ${{ matrix.os }}-brew-
-
-      - name: verify runner architecture
-        # The zip inside the artifact is named from `uname -m` (see
-        # packaging/macos/bundle.sh); the artifact around it is named from
-        # matrix.arch. If GitHub ever re-points one of these images at the
-        # other architecture, that mapping is wrong and the artifact would
-        # claim an arch its contents don't have. Cheap to check, and both
-        # sides are always non-empty, so this only fires on a real mismatch.
-        run: |
-          if [ "$(uname -m)" != "${{ matrix.arch }}" ]; then
-            echo "runner ${{ matrix.os }} is $(uname -m), but the matrix" \
-                 "calls it ${{ matrix.arch }}" >&2
-            exit 1
+          if [ -n "$INPUT_TAG" ]; then
+            tag=$(printf '%s' "$INPUT_TAG" | tr -d '[:space:]')
+          else
+            tag="$GITHUB_REF_NAME"
           fi
 
-      - name: brew deps
-        run: |
-          brew install meson ninja pkgconf gtk4 libadwaita libpanel gettext \
-                       gstreamer libnice dylibbundler
-
-      - name: rust toolchain
-        run: rustup show
-
-      - name: cache rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            rust-target
-            .cargo-home
-          key: ${{ matrix.os }}-rust-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: ${{ matrix.os }}-rust-
-
-      - name: build (voice enabled)
-        run: |
-          meson setup build -Dvoice=enabled -Dtests=false \
-            -Dcargo_target_dir="$(pwd)/rust-target"
-          ninja -C build
-
-      - name: bundle
-        run: packaging/macos/bundle.sh build dist
-
-      - name: report the bundle's minimum macOS
-        # A bundle runs only on the highest macOS any Mach-O inside it
-        # demands — not on what the main executable or the Info.plist
-        # claims. Those can be lower, and when they are the app launches
-        # on an older system and then dies in dyld instead of being
-        # refused cleanly.
-        #
-        # Most of what ships here is Homebrew dylibs, and brew bottles
-        # carry the OS they were built for. So this number moves when the
-        # runner image or the bottle lineup moves, with nothing else in
-        # the build to notice. Measure it every run and print it.
-        #
-        # Informational only. continue-on-error plus the closing `true`
-        # keep a missing vtool or an unreadable file from ever failing a
-        # release — this step reports, it does not gate.
-        continue-on-error: true
-        run: |
-          app="dist/GtkHx.app"
-          : > /tmp/minos.tsv
-          while IFS= read -r f; do
-            case "$(file -b "$f" 2>/dev/null)" in
-              *Mach-O*) ;;
-              *) continue ;;
-            esac
-            # `|| true` on every capture: the runner's shell is bash -eo
-            # pipefail, so a missing vtool or a Mach-O it declines to read
-            # would otherwise take the whole step down at the assignment,
-            # silently, exactly the way the /app/lib64 guard did.
-            v=$(vtool -show-build "$f" 2>/dev/null |
-                awk '/^ *minos/ {print $2; exit}' || true)
-            if [ -n "$v" ]; then
-              printf '%s\t%s\n' "$v" "${f#$app/}" >> /tmp/minos.tsv
-            fi
-          done < <(find "$app" -type f 2>/dev/null || true)
-
-          sort -V -o /tmp/minos.tsv /tmp/minos.tsv || true
-          floor=$(tail -1 /tmp/minos.tsv | cut -f1 || true)
-          plist=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
-                    "$app/Contents/Info.plist" 2>/dev/null || true)
-
-          echo "runner image:                       ${{ matrix.os }}"
-          echo "MACOSX_DEPLOYMENT_TARGET (our code): ${MACOSX_DEPLOYMENT_TARGET:-unset}"
-          echo "Info.plist LSMinimumSystemVersion:   ${plist:-unset}"
-          echo "highest requirement in the bundle:   ${floor:-unknown}"
-          echo
-          echo "---- the ten highest ----"
-          tail -10 /tmp/minos.tsv
-          true
-
-      - name: name the artifact
-        run: |
-          case "$GITHUB_REF" in
-            refs/tags/*) ver="$GITHUB_REF_NAME" ;;
-            *)           ver="snapshot-${GITHUB_SHA:0:7}" ;;
+          case "$tag" in
+            *[!A-Za-z0-9./+_-]*)
+              echo "::error::tag may only contain letters, digits and" \
+                   ". / + _ - (got '$tag')"
+              exit 1 ;;
           esac
-          for z in dist/GtkHx-macos-*.zip; do
-            mv "$z" "${z/GtkHx-macos-/GtkHx-${ver}-macos-}"
-          done
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gtkhx-macos-${{ matrix.arch }}
-          path: dist/*.zip
-          if-no-files-found: error
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "building $tag"
 
-  # ------------------------------------------------------------------
-  # Linux Flatpak bundle
-  # ------------------------------------------------------------------
-  linux-flatpak:
-    name: package (Linux Flatpak)
-    if: github.event_name != 'workflow_dispatch' || inputs.build_flatpak
+  build:
+    needs: target
+    uses: ./.github/workflows/build-packages.yml
+    with:
+      version: ${{ needs.target.outputs.tag }}
+      ref: ${{ needs.target.outputs.tag }}
+      build_windows: true
+      build_macos: true
+      build_flatpak: true
+
+  publish:
+    name: attach assets
+    needs: [target, build]
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: install flatpak-builder
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-
-      # Restore the user flatpak install (runtime + SDK) and flatpak-builder's
-      # download/ccache cache BEFORE installing, so a warm cache skips the
-      # ~1 GB GNOME runtime pull.
-      - name: cache flatpak
-        uses: actions/cache@v4
-        with:
-          path: |
-            .flatpak-builder
-            ~/.local/share/flatpak
-          key: flatpak-${{ hashFiles('com.nasledov.gtkhx.yml') }}
-          restore-keys: flatpak-
-
-      - name: flathub remote + build deps
-        # User-scoped: a *system* remote/install needs root/polkit, which the CI
-        # user isn't granted ("ConfigureRemote not allowed for user").
-        #
-        # Let flatpak-builder resolve and install the deps itself rather than
-        # naming them by hand: the manifest needs org.gnome.Platform/Sdk//49 AND
-        # the org.freedesktop.Sdk.Extension.rust-stable extension, whose branch
-        # is the *freedesktop* base version (e.g. 25.08 for GNOME 49), not "49".
-        # --install-deps-only reads the correct branch from the SDK metadata, so
-        # we don't hardcode it. No-op refs are skipped when the cache is warm.
-        run: |
-          flatpak remote-add --user --if-not-exists flathub \
-            https://flathub.org/repo/flathub.flatpakrepo
-          flatpak-builder --user --install-deps-from=flathub --install-deps-only \
-            --force-clean build-flatpak com.nasledov.gtkhx.yml
-
-      - name: build flatpak bundle
-        run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak
-
-      - name: name the artifact
-        run: |
-          case "$GITHUB_REF" in
-            refs/tags/*) ver="$GITHUB_REF_NAME" ;;
-            *)           ver="snapshot-${GITHUB_SHA:0:7}" ;;
-          esac
-          mv gtkhx.flatpak "GtkHx-${ver}.flatpak"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gtkhx-flatpak
-          path: '*.flatpak'
-          if-no-files-found: error
-
-  # ------------------------------------------------------------------
-  # Publish a GitHub Release.
-  #   * tag push (v*)              → a draft release for that version (review
-  #                                  the assets, then publish).
-  #   * manual run + create_release → a published "snapshot" pre-release at the
-  #                                  current commit. A plain manual run without
-  #                                  the box ticked lands here NOT AT ALL — it
-  #                                  only leaves downloadable workflow artifacts.
-  # ------------------------------------------------------------------
-  release:
-    name: publish release
-    needs: [windows-package, macos-package, linux-flatpak]
-    # !failure() && !cancelled() lets this run even when some package jobs were
-    # skipped (a deselected target) — but not if a selected one actually failed,
-    # so a release never ships a partial/broken build.
-    if: >-
-      !failure() && !cancelled() &&
-      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-       (github.event_name == 'workflow_dispatch' && inputs.create_release))
-    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: download artifacts
         uses: actions/download-artifact@v4
@@ -348,29 +91,31 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # Tag push: a draft release named for the tag, for review before publish.
-      - name: tagged release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          draft: true
-          generate_release_notes: true
+      - name: attach to the release for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.target.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=(artifacts/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no artifacts were downloaded — nothing to attach"
+            exit 1
+          fi
 
-      # Manual snapshot: a published pre-release at the current commit. The tag
-      # (snapshot-<short-sha>) matches the artifact filenames and is created at
-      # this SHA; re-running on the same commit updates the same release.
-      - name: snapshot version
-        if: github.event_name == 'workflow_dispatch'
-        id: snap
-        run: echo "sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          # `gh release view` in an if-condition: its failure is the question
+          # being asked, not an error, and set -e exempts the condition of an
+          # if. Deliberately not softprops/action-gh-release here — its inputs
+          # describe a release to create, and passing them at an existing one
+          # can rewrite state (draft, title, notes) that a human set by hand.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release exists for $TAG — uploading assets, leaving its" \
+                 "draft state, title and notes alone"
+          else
+            echo "no release for $TAG yet — creating a draft to hold the assets"
+            gh release create "$TAG" --draft --title "$TAG" --generate-notes
+          fi
 
-      - name: snapshot pre-release
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          tag_name: snapshot-${{ steps.snap.outputs.sha }}
-          name: Snapshot ${{ steps.snap.outputs.sha }}
-          prerelease: true
-          generate_release_notes: true
+          gh release upload "$TAG" "${files[@]}" --clobber
+          echo "attached ${#files[@]} asset(s) to $TAG"
