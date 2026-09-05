@@ -92,8 +92,30 @@ Or as admin (full access):
 
 ```
 Login:   admin
-Pass:    adminpass      (set by the Dockerfile HOPE-seed step)
+Pass:    (empty)        (the base image rewrites Users/admin.yaml to
+                         bcrypt-of-empty, matching guest)
 ```
+
+Admin used to be documented as `adminpass` and never worked, on any path.
+Two separate reasons, both now dealt with in the base image:
+
+1. The seed step set the password through the admin REST API. That writes a
+   `HOPEPassword:` blob, leaves the bcrypt `Password:` untouched, and leaves
+   the account unable to log in at all — measured with a throwaway account.
+   The seed no longer touches passwords.
+2. Janus does not de-obfuscate the password field. Hotline inverts every byte
+   of both login and password; Janus de-inverts the login and compares the
+   password as it arrived, so a spec-correct client can never authenticate a
+   non-empty password against it. An empty password avoids the whole question
+   because the client omits the field entirely — which is why `guest` always
+   worked.
+
+Point 2 is a live interop bug, not just a rig detail: **GtkHx cannot log in to
+any Janus server, including hotline.vespernet.net, with a non-empty password.**
+The client is spec-correct here; nothing in this repo works around it.
+
+This matters for news: `guest` ships with `news_create_fldr: false` and
+`news_create_cat: false`, so creating folders on Janus needs admin.
 
 Janus's default `guest` account has `ReadChatHistory: true` already
 set (access bit 56), so chat-history queries from a guest connection
@@ -132,13 +154,12 @@ Out of the box:
        server-side and compares. Works out of the box —
        `test_hope_chacha20` uses this path, matching
        hotline.vespernet.net's guest configuration.
-    2. *Non-empty password* via the admin REST API. The
-       Dockerfile exposes the API on `:8973` and PATCHes
-       `admin` to `"adminpass"`. Janus writes a `HOPEPassword:`
-       blob into `Server/Users/admin.yaml`, but empirically
-       the blob doesn't validate at HOPE login (likely a Janus
-       issue). We seed it anyway in case future tests need
-       a non-empty HOPE password and the path gets fixed.
+    2. *Non-empty password* — no working path known. The admin
+       REST API writes a `HOPEPassword:` blob that doesn't
+       validate, leaves the bcrypt `Password:` untouched, and
+       leaves the account unable to log in at all. The seed step
+       no longer calls it; both bundled accounts are
+       passwordless.
   The master key Janus generated for the encryption sits in
   `Server/Data/` and ships in the image.
 - Large-file (>4 GiB) transfers.

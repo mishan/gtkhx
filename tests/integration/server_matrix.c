@@ -17,10 +17,9 @@
 /* ---- The matrix --------------------------------------------------- */
 /*
  * Phase A added mhxd as a row in the table rather than hardcoded
- * throughout the harness. Phase C (this revision) adds Janus, the
- * closed-source VesperNet server we use as the chat-history test
- * target. Phase B (Mobius) is still pending and can be slotted in
- * between when it lands.
+ * throughout the harness. Phase C added Janus, the closed-source
+ * VesperNet server we use as the chat-history test target. Phase B —
+ * Mobius, the most widely deployed modern server — lands here too.
  *
  * Caps are conservative — only bits the server reliably handles for
  * tests we already run get set. Adding a bit later (e.g. when we
@@ -28,9 +27,9 @@
  * one-line change.
  *
  * Container ports: mhxd answers on the conventional 5500/5501; Janus
- * is mapped to 5510/5511 in the test Compose setup so both can run
- * side-by-side. The matrix records the *host-side* port the
- * container is published on.
+ * is mapped to 5510/5511 and Mobius to 5520/5521 in the test Compose
+ * setup so all three can run side-by-side. The matrix records the
+ * *host-side* port the container is published on.
  */
 const hx_test_server hx_test_server_matrix[] = {
     {
@@ -66,7 +65,8 @@ const hx_test_server hx_test_server_matrix[] = {
          * HX_TEST_CAP_VOICE matrix filter. */
         .voice_port = 0,
         .hl_version = 185,
-        .caps = HX_TEST_CAP_HOPE | HX_TEST_CAP_NEWS_15 | HX_TEST_CAP_BLOWFISH,
+        .caps = HX_TEST_CAP_HOPE | HX_TEST_CAP_NEWS_15
+                | HX_TEST_CAP_NEWS_15_FIXTURES | HX_TEST_CAP_BLOWFISH,
     },
     {
         /* Janus: VesperNet's closed-source server, pulled from
@@ -78,11 +78,12 @@ const hx_test_server hx_test_server_matrix[] = {
          * with the empty password Janus ships upstream — that's
          * the path that works for HOPE login (server computes
          * HMAC(key="", session_key) without needing a stored
-         * HOPEPassword). The Dockerfile additionally seeds
-         * admin's password to "adminpass" via the REST admin
-         * API at build time; see tests/janus/seed-hope-
-         * passwords.sh for the full background on why we don't
-         * seed guest.
+         * HOPEPassword). Both bundled accounts are
+         * passwordless: Janus does not de-obfuscate
+         * HTLC_DATA_PASSWORD, so no non-empty password can be
+         * authenticated by a spec-correct client, and an empty
+         * one omits the field entirely. admin differs from guest
+         * only in its access bits. See tests/janus/README.md.
          *
          * TLS shipped 2026-05 (claude/tls-phase1-control-channel):
          * the Dockerfile generates a self-signed CN=localhost cert
@@ -109,7 +110,19 @@ const hx_test_server hx_test_server_matrix[] = {
         .voice_port = 5514,
         .hl_version = 190,
         .caps = HX_TEST_CAP_LARGE_FILES | HX_TEST_CAP_TEXT_ENCODING
-                | HX_TEST_CAP_CHAT_HISTORY | HX_TEST_CAP_BANNER_HTXF
+                | HX_TEST_CAP_CHAT_HISTORY
+                | HX_TEST_CAP_BANNER_HTXF
+                /* NEWS_15 without NEWS_15_FIXTURES: the container
+                        * ships no seeded news tree, so the article
+                        * read-path tests have nothing to read here.
+                        * The listing and creation tests still visit —
+                        * creation via the refusal path, since Janus's
+                        * guest has neither news_create_cat nor
+                        * news_create_fldr and its admin needs a
+                        * password Janus can't authenticate (see
+                        * tests/janus/README.md). The bit itself
+                        * predates any test using it; the first run of
+                        * the fanned news15 suite is what confirms it. */
                 | HX_TEST_CAP_NEWS_15 | HX_TEST_CAP_HOPE
                 | HX_TEST_CAP_CHACHA20
                 /* Janus also accepts Blowfish under HOPE
@@ -141,6 +154,51 @@ const hx_test_server hx_test_server_matrix[] = {
                         * probe finds it echoed in the LOGIN reply.
                         * See docs/inline-media.md. */
                 | HX_TEST_CAP_INLINE_MEDIA,
+    },
+    {
+        /* Mobius (github.com/jhalter/mobius): the most widely
+         * deployed modern server — Classic Macs Hotline, MacSecret,
+         * VesperNet's listing, hotline.semihosted.xyz. That makes it
+         * the target where an interop bug costs the most, and the
+         * one where it surfaces slowest: via a user report, weeks
+         * later. Pinned at v0.23.1 in tests/mobius/Dockerfile; see
+         * tests/mobius/README.md for the container and its findings.
+         *
+         * Caps are the narrow set the rig actually proves today.
+         * NEWS_15 is the point of the entry: Mobius implements the
+         * whole 1.5 threaded-news opcode set, and the container's
+         * guest account carries the News* write bits so the
+         * create / list / delete round-trip runs here as well as on
+         * mhxd. (On Janus it can't — its guest ships without
+         * news_create_cat / news_create_fldr and its admin needs a
+         * password Janus can't authenticate. See tests/janus/README.md.)
+         *
+         * Not asserted, and why:
+         *   TLS          — Mobius supports a separate TLS port, but
+         *                  the upstream image is FROM scratch and the
+         *                  overlay has no shell to generate a cert
+         *                  with. Janus covers the TLS tests.
+         *   BANNER_HTXF  — the container serves upstream's banner in
+         *                  the image's default mode, not the HTXF
+         *                  mode the picker tests need.
+         *   HOPE, VOICE, CHAT_HISTORY, INLINE_MEDIA
+         *                — Mobius implements none of these.
+         *   LARGE_FILES, TEXT_ENCODING
+         *                — plausible but unaudited here; the guest
+         *                  account isn't granted the file bits those
+         *                  tests need either. Grant both together
+         *                  when a file-family test points this way. */
+        .name = "mobius",
+        .host = "127.0.0.1",
+        .port = 5520,
+        .xfer_port = 5521,
+        .tls_port = 0,
+        .tls_xfer_port = 0,
+        .voice_port = 0,
+        /* Echoed in the LOGIN reply's HTLS_DATA_VERSION as 190,
+         * same as Janus. */
+        .hl_version = 190,
+        .caps = HX_TEST_CAP_NEWS_15 | HX_TEST_CAP_NEWS_15_FIXTURES,
     },
 };
 

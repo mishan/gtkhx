@@ -1,0 +1,31 @@
+# Seeded threaded-news tree, deliberately shaped like mhxd's
+# run/hxd/newsdir/: one category holding one article, plus one folder.
+# The category name matches mhxd's cat_irasshaimase so the seeded
+# assertions in the Tier 3 news tests read the same content whichever of
+# the two is the default target.
+#
+# The date is a fixed literal, not a build-time stamp — [year(2), ms(2),
+# seconds(4)] in Mobius's NewNewsTime layout — so the fixture is
+# byte-identical on every build. Mobius rewrites this file in place
+# whenever a client mutates the tree, so a running container's copy
+# drifts from this one; that is what the container rebuild is for.
+Categories:
+    irasshaimase:
+        Type: [0, 3]
+        Name: irasshaimase
+        Articles:
+            1:
+                Title: Welcome
+                Poster: Seeder
+                Date: [7, 234, 0, 0, 1, 69, 137, 6]
+                PrevArt: [0, 0, 0, 0]
+                NextArt: [0, 0, 0, 0]
+                ParentArt: [0, 0, 0, 0]
+                FirstChildArtArt: [0, 0, 0, 0]
+                Data: "Seeded threaded-news article for the GtkHx Tier 3 suite.\r"
+        SubCats: {}
+    test_folder:
+        Type: [0, 2]
+        Name: test_folder
+        Articles: {}
+        SubCats: {}

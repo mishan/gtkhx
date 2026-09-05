@@ -3,7 +3,7 @@
 # bring the whole rig back up fresh.
 #
 # Steps:
-#   1. build-all.sh           — rebuild all five images
+#   1. build-all.sh           — rebuild every image
 #   2. docker compose down    — stop + remove the currently running rig
 #   3. docker compose up -d   — start the freshly-built rig detached
 #
@@ -70,7 +70,8 @@ dc up -d
 echo
 dc ps
 echo
-echo "Rig is up. Servers: mhxd localhost:5500, Janus localhost:5510."
+echo "Rig is up. Servers: mhxd localhost:5500, Janus localhost:5510,"
+echo "                    Mobius localhost:5520."
 echo "Trackers: hxtrackd localhost:5498, Argus localhost:5698."
 # Quote the path so a spaced repo path stays copy-pasteable.
 echo "Follow logs: $COMPOSE -f \"$COMPOSE_FILE\" logs -f"

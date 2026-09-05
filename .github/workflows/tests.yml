@@ -239,6 +239,20 @@ jobs:
           cache-from: type=gha,scope=janus
           cache-to: type=gha,mode=max,scope=janus
 
+      - name: build mobius test container
+        # Mobius publishes its own server image, so this build is a thin
+        # config overlay on ghcr.io/jhalter/mobius-hotline-server (pinned by
+        # MOBIUS_TAG in tests/mobius/Dockerfile) rather than a compile. The
+        # base is FROM scratch — see tests/mobius/README.md for what that
+        # rules out.
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/mobius
+          tags: gtkhx-mobius
+          load: true
+          cache-from: type=gha,scope=mobius
+          cache-to: type=gha,mode=max,scope=mobius
+
       - name: build hxtrackd test container
         # hxtrackd is mhxd's bundled pre-spec v1 tracker — coverage for the
         # probe-then-fallback path in network.c. See tests/hxtrackd/README.md.
@@ -273,13 +287,14 @@ jobs:
           cache-to: type=gha,mode=max,scope=socks
 
       - name: start rig (compose)
-        # One `compose up` starts all five test containers, every one on host
+        # One `compose up` starts every test container, all on host
         # networking. The images were just built (build-push-action above) with
         # the same gtkhx-<name> tags the compose file references, so compose
         # reuses them and never rebuilds. Host ports match server_matrix.c /
         # tracker_matrix.c:
         #   mhxd     5500/5501
         #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice)
+        #   mobius   5520/5521
         #   hxtrackd 5498 + 5499/udp        (its hardcoded HTRK ports)
         #   argus    5698 + 6498 (TLS via stunnel) + 5699/udp
         #   socks    1080 (forwards CONNECTs to 127.0.0.1:5500)
@@ -306,6 +321,7 @@ jobs:
           }
           wait_tcp 5500   # mhxd HTLS
           wait_tcp 5510   # janus HTLS
+          wait_tcp 5520   # mobius HTLS
           wait_tcp 5498   # hxtrackd listing
           wait_tcp 5698   # argus listing
           wait_tcp 6498   # argus TLS (stunnel)
