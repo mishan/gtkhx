@@ -19,8 +19,23 @@
 # Artifacts are uploaded here and downloaded by the caller's publish job; a
 # reusable workflow shares the caller's run, so they land in the same place.
 #
-# The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml
-# (same deps + caching); this workflow adds the packaging step + artifact upload.
+# The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml;
+# this workflow adds the packaging step + artifact upload.
+#
+# NO BUILD CACHE HERE, ON PURPOSE. tests.yml caches rust-target and the flatpak
+# tree and this file used to as well, which CodeQL flags as cache poisoning
+# (actions/cache-poisoning-direct-cache): the callers run on a tag push and on
+# workflow_dispatch, both of which can write the default-branch cache scope, and
+# release.yml checks out a ref its caller names. Anything that can write a cache
+# entry the release build restores can put bytes into a binary that people
+# install. The query's own first recommendation is to avoid caching in workflows
+# that handle releases.
+#
+# The cost is a cold compile per release — a few hundred crates on three
+# platforms, plus the ~1 GB GNOME runtime pull for the Flatpak. Releases are
+# rare and the jobs run in parallel, so this buys an assurance worth more than
+# the minutes. Don't add a cache of build output back here; cache in tests.yml,
+# which runs on every push and is where the wait actually hurts.
 
 name: build packages
 
@@ -71,6 +86,10 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - uses: msys2/setup-msys2@v2
+        # cache: true caches the MSYS2 install and its pacman downloads —
+        # upstream packages, not anything built from this repo, so it is the
+        # same shape as the Homebrew cache in the macOS job and stays for the
+        # same reason. CodeQL flagged neither.
         with:
           msystem: UCRT64
           update: true
@@ -83,15 +102,6 @@ jobs:
           # zip is a plain MSYS package (no mingw-w64-ucrt-x86_64- variant), so
           # it goes through `install`, not pacboy's ':p' prefix resolver.
           install: zip
-
-      - name: cache rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            rust-target
-            .cargo-home
-          key: windows-rust-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: windows-rust-
 
       - name: build (voice enabled)
         run: |
@@ -148,11 +158,17 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      # The one cache left here, and the reason it is allowed to stay: it
+      # holds bottles downloaded from Homebrew, not anything built from the
+      # checked-out source, so a poisoned entry can't turn into code inside a
+      # shipped binary. Keyed on this file, which is where the brew list now
+      # lives — it named release.yml until the jobs moved here, so the key
+      # stopped changing when the dependency list did.
       - name: cache homebrew downloads
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/Homebrew/downloads
-          key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/release.yml') }}
+          key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/build-packages.yml') }}
           restore-keys: ${{ matrix.os }}-brew-
 
       - name: verify runner architecture
@@ -176,15 +192,6 @@ jobs:
 
       - name: rust toolchain
         run: rustup show
-
-      - name: cache rust build
-        uses: actions/cache@v4
-        with:
-          path: |
-            rust-target
-            .cargo-home
-          key: ${{ matrix.os }}-rust-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: ${{ matrix.os }}-rust-
 
       - name: build (voice enabled)
         run: |
@@ -275,18 +282,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
 
-      # Restore the user flatpak install (runtime + SDK) and flatpak-builder's
-      # download/ccache cache BEFORE installing, so a warm cache skips the
-      # ~1 GB GNOME runtime pull.
-      - name: cache flatpak
-        uses: actions/cache@v4
-        with:
-          path: |
-            .flatpak-builder
-            ~/.local/share/flatpak
-          key: flatpak-${{ hashFiles('com.nasledov.gtkhx.yml') }}
-          restore-keys: flatpak-
-
       - name: flathub remote + build deps
         # User-scoped: a *system* remote/install needs root/polkit, which the CI
         # user isn't granted ("ConfigureRemote not allowed for user").
@@ -296,7 +291,8 @@ jobs:
         # the org.freedesktop.Sdk.Extension.rust-stable extension, whose branch
         # is the *freedesktop* base version (e.g. 25.08 for GNOME 49), not "49".
         # --install-deps-only reads the correct branch from the SDK metadata, so
-        # we don't hardcode it. No-op refs are skipped when the cache is warm.
+        # we don't hardcode it. This pulls the runtime every run — there is no
+        # flatpak cache here any more; see the note at the top of the file.
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://flathub.org/repo/flathub.flatpakrepo
