@@ -1,0 +1,138 @@
+# Build a snapshot of the current commit, and optionally publish it as a
+# pre-release.
+#
+# Always: the three packages land as downloadable workflow artifacts on the
+# run (Actions tab), named for whatever version you gave — or for the commit
+# if you gave none.
+#
+# With "publish" ticked: the same files are also attached to a GitHub
+# pre-release tagged v<version>, created at this commit.
+#
+# The version is only required when publishing. An unpublished snapshot is a
+# throwaway build for one person to try, so making it name itself is friction
+# for no gain; a published one becomes a URL other people quote, and
+# "snapshot-a1b2c3d" is a poor thing to quote. That asymmetry is the whole
+# reason this is a separate workflow from release.yml — see the header there.
+
+name: snapshot
+
+permissions:
+  contents: write        # create the pre-release + upload assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. 1.3.3b1 (required only if publishing)'
+        type: string
+        required: false
+        default: ''
+      publish:
+        description: 'Publish a pre-release for this version'
+        type: boolean
+        default: false
+      build_windows:
+        description: 'Build the Windows package'
+        type: boolean
+        default: true
+      build_macos:
+        description: 'Build the macOS packages'
+        type: boolean
+        default: true
+      build_flatpak:
+        description: 'Build the Linux Flatpak'
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Settle the version before anything is built. A missing version when
+  # publishing is a 10-second failure here rather than a 30-minute build
+  # followed by a publish step with nowhere to put its files.
+  # ------------------------------------------------------------------
+  version:
+    name: resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - id: v
+        env:
+          # Through env, not ${{ }} interpolation: this string came from a
+          # human typing into the dispatch form and ends up in a shell.
+          INPUT_VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          v=$(printf '%s' "$INPUT_VERSION" | tr -d '[:space:]')
+
+          if [ "$PUBLISH" = "true" ] && [ -z "$v" ]; then
+            echo "::error::Publishing needs a version — re-run and give one," \
+                 "e.g. 1.3.3b1. (Leave publish unticked to just build.)"
+            exit 1
+          fi
+
+          if [ -n "$v" ]; then
+            # Keep it to what is safe in a filename, a git tag and a shell.
+            case "$v" in
+              *[!A-Za-z0-9.+_-]*)
+                echo "::error::version may only contain letters, digits and" \
+                     ". + _ - (got '$v')"
+                exit 1 ;;
+            esac
+            # Tag is v-prefixed, without doubling a v you typed yourself.
+            case "$v" in
+              v*) tag="$v" ;;
+              *)  tag="v$v" ;;
+            esac
+          else
+            # No version and not publishing: name it after the commit, which
+            # is what these builds were called before the field existed.
+            v="snapshot-${GITHUB_SHA::7}"
+            tag=""
+          fi
+
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"   >> "$GITHUB_OUTPUT"
+          echo "artifacts will be named GtkHx-$v-*"
+          if [ -n "$tag" ] && [ "$PUBLISH" = "true" ]; then
+            echo "will publish pre-release $tag"
+          fi
+
+  build:
+    needs: version
+    uses: ./.github/workflows/build-packages.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      # Empty ref: build the commit this run was dispatched against.
+      ref: ''
+      build_windows: ${{ inputs.build_windows }}
+      build_macos: ${{ inputs.build_macos }}
+      build_flatpak: ${{ inputs.build_flatpak }}
+
+  publish:
+    name: publish pre-release
+    if: inputs.publish
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.version }}
+          prerelease: true
+          generate_release_notes: true
