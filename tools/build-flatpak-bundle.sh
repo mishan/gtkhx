@@ -128,7 +128,23 @@ flatpak-builder \
 # someone else's desktop with "cannot open shared object file". The
 # manifest pins libdir to /app/lib; this catches a buildsystem that
 # ignores it. Shipping a broken bundle is much worse than a red build.
-STRAY_LIBS=$(find "$BUILD_DIR/files/lib64" -name '*.so*' 2>/dev/null | head -20)
+#
+# Test for the directory before searching it. `find` on a path that
+# isn't there exits 1; under `set -o pipefail` that status survives the
+# `head`, and `set -e` then kills the script at the assignment — with
+# nothing on stderr, because it was redirected away. That is the
+# *passing* case, so writing the check as a bare `find ... | head`
+# aborted every clean build right after flatpak-builder's last line,
+# before the bundle was ever exported. It only looked fine when it was
+# written because the bug it guards against was still present and the
+# directory existed.
+STRAY_LIBS=""
+if [[ -d "$BUILD_DIR/files/lib64" ]]; then
+    # No 2>/dev/null and no `head`: the directory is known to exist, so
+    # a non-zero find here is a real error and should be loud, and a
+    # truncated list of misplaced libraries helps nobody.
+    STRAY_LIBS=$(find "$BUILD_DIR/files/lib64" -name '*.so*')
+fi
 if [[ -n "$STRAY_LIBS" ]]; then
     echo "error: libraries installed into /app/lib64:" >&2
     echo "$STRAY_LIBS" | sed 's|^|  |' >&2
