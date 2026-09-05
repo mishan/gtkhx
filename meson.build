@@ -1,5 +1,5 @@
 project('gtkhx', 'c',
-  version : '1.3.2',
+  version : '1.3.3-dev',
   license : 'GPL-2.0-or-later',
   meson_version : '>= 0.60.0',
   default_options : [
