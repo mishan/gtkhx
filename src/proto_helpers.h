@@ -396,7 +396,7 @@ extern gboolean hx_user_change_extract (const guint8 *frame, gsize frame_len,
  * the *existing* member state (from the per-chat HxMemberModel), decide what
  * the handler should do, with no side effects. The handler applies the plan
  * (emit create/change, adopt self uid, print the rename notice, mirror onto
- * htlc). The implementation lives in Rust (hotline-proto's user_change module);
+ * htlc). The implementation lives in Rust (hxproto's user_change module);
  * this decl + the two structs below are the C ABI it exports, and the
  * _Static_asserts in proto_helpers.c pin the struct layout its #[repr(C)]
  * mirrors depend on.
@@ -492,9 +492,9 @@ extern int hx_news_post_walk (const guint8 *frame, gsize frame_len,
 /* The 1.5 news dirlist / catlist C parse shims (hx_news_dirlist_parse_* +
  * hx_newscat_parse) and their result structs (hx_news_dirlist_entry /
  * hx_newscat*) are gone — the receive path parses to owned handles via
- * hotline-proto's gtkhx_proto_parse_dirlist / _catlist, read directly by
+ * hxproto's gtkhx_proto_parse_dirlist / _catlist, read directly by
  * hxmodel::news. The per-chunk / whole-message parsers stay covered by
- * hotline-proto's native cargo tests. */
+ * hxproto's native cargo tests. */
 
 /*
  * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.

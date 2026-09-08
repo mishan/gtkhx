@@ -1768,7 +1768,7 @@ name = "gtkhx-core"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "hotline-proto",
+ "hxproto",
 ]
 
 [[package]]
@@ -1777,7 +1777,6 @@ version = "0.1.0"
 dependencies = [
  "gtkhx-core",
  "gtkhx-ui",
- "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
  "hxbridge",
@@ -1790,6 +1789,7 @@ dependencies = [
  "hxmacres",
  "hxmodel",
  "hxnet",
+ "hxproto",
  "hxsound",
  "hxtask",
  "hxtext",
@@ -1801,6 +1801,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtkhx-proto-ffi"
+version = "0.1.0"
+dependencies = [
+ "hxproto",
+]
+
+[[package]]
 name = "gtkhx-ui"
 version = "0.1.0"
 dependencies = [
@@ -1809,13 +1816,13 @@ dependencies = [
  "glib 0.21.5",
  "gtk4",
  "gtkhx-core",
- "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
  "hxchat-layout",
  "hxconfig",
  "hxhandlers",
  "hxmodel",
+ "hxproto",
  "hxtext",
  "hxtls-trust",
  "hxvoice-model",
@@ -1928,10 +1935,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hotline-proto"
-version = "0.1.0"
-
-[[package]]
 name = "hound"
 version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1995,7 +1998,7 @@ dependencies = [
 name = "hxconfig"
 version = "0.1.0"
 dependencies = [
- "hotline-proto",
+ "hxproto",
  "toml_edit",
 ]
 
@@ -2027,10 +2030,10 @@ version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
  "gtkhx-core",
- "hotline-proto",
  "hxhfs",
  "hxmodel",
  "hxnet",
+ "hxproto",
  "hxtask",
  "hxtext",
 ]
@@ -2056,7 +2059,7 @@ dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
  "gtkhx-core",
- "hotline-proto",
+ "hxproto",
 ]
 
 [[package]]
@@ -2068,11 +2071,11 @@ dependencies = [
  "getrandom 0.3.4",
  "glib 0.21.5",
  "hkdf",
- "hotline-proto",
  "hxbridge",
  "hxcrypto",
  "hxfiles-xfer",
  "hxhfs",
+ "hxproto",
  "libc",
  "lz4_flex",
  "rustls-native-certs",
@@ -2083,6 +2086,11 @@ dependencies = [
  "ureq",
  "zstd",
 ]
+
+[[package]]
+name = "hxproto"
+version = "0.1.0"
+source = "git+https://github.com/mishan/hx-libs.git?rev=f4304bc4e495e1ea01ae8cc77a8a1a45660077dc#f4304bc4e495e1ea01ae8cc77a8a1a45660077dc"
 
 [[package]]
 name = "hxsound"
@@ -2098,7 +2106,7 @@ version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
  "gtkhx-core",
- "hotline-proto",
+ "hxproto",
 ]
 
 [[package]]
@@ -2106,7 +2114,7 @@ name = "hxtext"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "hotline-proto",
+ "hxproto",
 ]
 
 [[package]]
@@ -2125,7 +2133,7 @@ name = "hxvoice-model"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "hotline-proto",
+ "hxproto",
 ]
 
 [[package]]
@@ -2138,7 +2146,7 @@ dependencies = [
  "gstreamer-audio",
  "gstreamer-sdp",
  "gstreamer-webrtc",
- "hotline-proto",
+ "hxproto",
  "hxvoice",
 ]
 
@@ -2147,7 +2155,7 @@ name = "hxvoice-send"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "hotline-proto",
+ "hxproto",
 ]
 
 [[package]]

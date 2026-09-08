@@ -13,7 +13,7 @@
 //!   the client uses to derive its HMAC challenge response.
 //!
 //! This module reads one 22-byte header + body off the
-//! transport, parses the chunks via hotline-proto, and
+//! transport, parses the chunks via hxproto, and
 //! produces a typed `LoginReply` for the Phase F HOPE state
 //! machine to consume.
 //!
@@ -34,8 +34,8 @@ use std::io;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 
-use hotline_proto::parse::decode_header_full;
-use hotline_proto::wire::ChunkIter;
+use hxproto::parse::decode_header_full;
+use hxproto::wire::ChunkIter;
 
 use crate::{ConnectionState, Event, MAX_BODY_LEN};
 
@@ -166,7 +166,7 @@ where
         // Read the 22-byte header. Bounded by the shared deadline so a
         // server that goes silent (or drip-feeds frames) can't wedge the
         // connect (and the connect/login UI task) past the timeout.
-        let mut hdr_buf = [0u8; hotline_proto::HL_HDR_LEN];
+        let mut hdr_buf = [0u8; hxproto::HL_HDR_LEN];
         tokio::time::timeout_at(deadline, stream.read_exact(&mut hdr_buf))
             .await
             .map_err(|_| {
@@ -208,8 +208,8 @@ where
         // header), which already excludes the hc-counted 2 bytes that
         // the chunk parser handles internally.
         let body_len = decoded.body_len as usize;
-        let mut body_buf = vec![0u8; hotline_proto::HL_HDR_LEN + body_len];
-        body_buf[..hotline_proto::HL_HDR_LEN].copy_from_slice(&hdr_buf);
+        let mut body_buf = vec![0u8; hxproto::HL_HDR_LEN + body_len];
+        body_buf[..hxproto::HL_HDR_LEN].copy_from_slice(&hdr_buf);
         if body_len > 0 {
             // Same shared deadline bounds the body read: a server that
             // advertises a body then stalls mid-body would otherwise hang
@@ -217,7 +217,7 @@ where
             // by the single `deadline`.
             tokio::time::timeout_at(
                 deadline,
-                stream.read_exact(&mut body_buf[hotline_proto::HL_HDR_LEN..]),
+                stream.read_exact(&mut body_buf[hxproto::HL_HDR_LEN..]),
             )
             .await
             .map_err(|_| {
@@ -315,7 +315,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hotline_proto::build::{pack_message, pack_message_size, PackChunk};
+    use hxproto::build::{pack_message, pack_message_size, PackChunk};
     use tokio::io::{duplex, AsyncWriteExt};
 
     /// Build a TASK reply with the given chunks for the test.

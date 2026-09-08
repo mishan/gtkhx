@@ -48,7 +48,7 @@
 //!
 //! - Dispatch arm for `Action::AddRemoteIce` — parses the
 //!   `RTCIceCandidateInit` JSON via the shared
-//!   `hotline_proto::voice::ice::parse` helper, emits
+//!   `hxproto::voice::ice::parse` helper, emits
 //!   `webrtcbin.add-ice-candidate(mline_index, candidate)`.
 //!   Defensive drops on malformed JSON, missing
 //!   `sdpMLineIndex`, and the end-of-candidates marker (empty
@@ -295,7 +295,7 @@ pub trait Backend {
     /// `HTLC_HDR_VOICE_*` numeric values; `body` is the chunk
     /// payload the state machine pre-built. C-side dispatch
     /// translates this into a call to `hlwrite_chunks` after
-    /// re-packing via `hotline_proto::voice::build_voice_*_chunks`.
+    /// re-packing via `hxproto::voice::build_voice_*_chunks`.
     fn send_wire_frame(&mut self, opcode: u32, body: &[u8]);
 
     /// Emit a GtkhxSession signal so the UI updates. `kind` and
@@ -2332,7 +2332,7 @@ impl VoiceRuntime {
             //
             // Same shape as the SDP arms: clone the bin handle,
             // drop the `Inner` borrow, hand the parsed bits to
-            // GStreamer. Parse via hotline-proto::voice::ice (the
+            // GStreamer. Parse via hxproto::voice::ice (the
             // same parser the C-side wire layer uses, so the JSON
             // shape definition lives in one place) and hand
             // webrtcbin a (mlineindex, candidate) pair through
@@ -2732,7 +2732,7 @@ fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64, generation: u6
 }
 
 /// Dispatch arm for `Action::AddRemoteIce`. Parses the JSON via
-/// the shared hotline-proto::voice::ice parser, then emits
+/// the shared hxproto::voice::ice parser, then emits
 /// `webrtcbin.add-ice-candidate` with the extracted mlineindex +
 /// candidate string.
 ///
@@ -2752,7 +2752,7 @@ fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64, generation: u6
 ///    requires the index; without it we'd have to guess, which
 ///    is worse than dropping the candidate.
 fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
-    let parsed = match hotline_proto::voice::ice::parse(candidate_json.as_bytes()) {
+    let parsed = match hxproto::voice::ice::parse(candidate_json.as_bytes()) {
         Some(p) => p,
         None => {
             gstreamer::warning!(
@@ -2806,7 +2806,7 @@ fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
 /// so we resolve it from the bin's `local-description` SDP by
 /// looking up the `a=mid:…` attribute on the media line at the
 /// signal's index. The fogWraith voice extension's wire format
-/// treats `sdpMid` as a required key — `hotline_proto::voice::ice`
+/// treats `sdpMid` as a required key — `hxproto::voice::ice`
 /// rejects payloads missing it — so shipping a candidate without
 /// it would break trickle ICE downstream.
 ///
@@ -2861,7 +2861,7 @@ fn connect_on_ice_candidate(webrtcbin: &gstreamer::Element, runtime_id: u64) {
             }
         };
         let candidate_json =
-            hotline_proto::voice::ice::build(&hotline_proto::voice::ice::IceCandidate {
+            hxproto::voice::ice::build(&hxproto::voice::ice::IceCandidate {
                 candidate: Some(candidate),
                 sdp_mid: Some(sdp_mid),
                 sdp_mline_index: Some(mline_index),
@@ -3472,8 +3472,8 @@ fn uid_from_recv_bin_name(name: &str) -> Option<u16> {
         Some((mid, _pad)) => mid,
         None => rest,
     };
-    match hotline_proto::voice::parse_voice_mid_label(mid.as_bytes()) {
-        Some(hotline_proto::voice::MidLabel::User(uid)) => Some(uid),
+    match hxproto::voice::parse_voice_mid_label(mid.as_bytes()) {
+        Some(hxproto::voice::MidLabel::User(uid)) => Some(uid),
         _ => None,
     }
 }

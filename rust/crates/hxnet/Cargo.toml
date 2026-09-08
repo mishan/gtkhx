@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
 license = "GPL-2.0-or-later"
-description = "Hotline Connection actor for GtkHx (Phase R3.3 — tokio + hotline-proto)"
+description = "Hotline Connection actor for GtkHx (Phase R3.3 — tokio + hxproto)"
 publish = false
 
 # R3.3.b adds `staticlib` so meson can link the FFI symbols into
@@ -28,7 +28,7 @@ socks = ["dep:tokio-socks"]
 
 [dependencies]
 hxcrypto = { path = "../hxcrypto" }
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }
 # S0 (xfer_handle module): the struct htxf_conn storage mirror needs libc for the
 # platform-correct `timeval` layout so the #[repr(C)] mirror matches the C
 # compiler on every target. (MAXPATHLEN is a hard-coded 4095 — compat.h clamps

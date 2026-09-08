@@ -94,7 +94,7 @@ typedef struct {
  *
  * NOTE: both functions moved to the Rust gtkhx-core crate
  * (boxed/history.rs) — parse delegates to
- * hotline_proto::parse::parse_history_entry, free releases the glib
+ * hxproto::parse::parse_history_entry, free releases the glib
  * buffers. The struct above stays C-visible (chat.c reads its fields)
  * and its layout is pinned by _Static_asserts in chat_history.c. */
 extern HxHistoryEntry *hx_history_entry_parse (const guint8 *data, gsize len);
@@ -127,7 +127,7 @@ extern void hx_history_entry_free (HxHistoryEntry *entry);
  *
  * Body moved to the hxhandlers Rust crate (send/chat_history.rs): it
  * cap-gates, builds the chunks with the native
- * hotline_proto::build::build_get_chat_history_chunks, and calls
+ * hxproto::build::build_get_chat_history_chunks, and calls
  * hlwrite_chunks. The prototype stays for the C callers (chat.c's
  * Load-older flow, rcv.c's hx_post_login_fetches). Callers still
  * task_new()-register rcv_task_chat_history first (keyed on htlc->trans).
@@ -156,7 +156,7 @@ struct hx_chunk;
  * channel_id is mandatory, before/after/limit are emitted only when
  * non-zero. Returns the chunk count (always <= 4), or 0 on bad args.
  *
- * Moved to the Rust hotline-proto crate: a C-ABI shim over the native
+ * Moved to the Rust hxproto crate: a C-ABI shim over the native
  * build_get_chat_history_chunks, kept under this historical name for the
  * one remaining C caller — the integration test harness, which packs the
  * chunks via hlpack_chunks and sends them synchronously over its blocking

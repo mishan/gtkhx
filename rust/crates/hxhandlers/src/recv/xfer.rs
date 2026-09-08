@@ -3,7 +3,7 @@
 //! The five transfer task-replies (`rcv_task_file_get` / `_folder_get` /
 //! `_file_put` / `_folder_put` / `_banner_get`), the file-info reply
 //! (`rcv_task_file_getinfo`), and the unsolicited `hx_rcv_xfer_queue` live here.
-//! Each one parses its reply natively (`hotline_proto::parse::*` — no
+//! Each one parses its reply natively (`hxproto::parse::*` — no
 //! `gtkhx_proto_*` FFI round-trip), applies the pure dispatch gates and the
 //! stamping/error/upload-size *logic* in Rust, and reaches the still-C-owned
 //! transfer state only through the narrow `hx_htxf_*` accessor seam
@@ -125,14 +125,14 @@ pub unsafe extern "C" fn hx_xfer_announce(htlc: *mut c_void, htxf: *mut c_void, 
 // ---- receive handlers (rcv_task_* callbacks) -------------------------------
 
 /// True when the reply frame's task-error bit is set — the native equivalent of
-/// the C `task_inerror()` (`hotline_proto` header parse + `flag & 1`). A frame
+/// the C `task_inerror()` (`hxproto` header parse + `flag & 1`). A frame
 /// too short to hold a header is treated as not-in-error, matching the C shim.
 unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
     if frame.is_null() {
         return false;
     }
     let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
-    hotline_proto::parse::Header::parse(s).is_some_and(|h| h.in_error())
+    hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
 }
 
 /// Borrow the reply frame as a byte slice (empty on a NULL frame).
@@ -192,7 +192,7 @@ pub unsafe extern "C" fn rcv_task_file_get(
         return;
     }
     let s = frame_slice(frame, frame_len);
-    let r = hotline_proto::parse::parse_file_get_reply(s, s.len());
+    let r = hxproto::parse::parse_file_get_reply(s, s.len());
     if (r.size == 0 && !r.size64_seen) || r.ref_ == 0 {
         return;
     }
@@ -251,7 +251,7 @@ pub unsafe extern "C" fn rcv_task_folder_get(
         return;
     }
     let s = frame_slice(frame, frame_len);
-    let r = hotline_proto::parse::parse_folder_get_reply(s, s.len());
+    let r = hxproto::parse::parse_folder_get_reply(s, s.len());
     if r.ref_ == 0 {
         return;
     }
@@ -295,7 +295,7 @@ pub unsafe extern "C" fn rcv_task_file_put(
         return;
     }
     let s = frame_slice(frame, frame_len);
-    let r = hotline_proto::parse::parse_file_put_reply(s, s.len());
+    let r = hxproto::parse::parse_file_put_reply(s, s.len());
     if r.ref_ == 0 {
         return;
     }
@@ -356,7 +356,7 @@ pub unsafe extern "C" fn rcv_task_folder_put(
         return;
     }
     let s = frame_slice(frame, frame_len);
-    let r = hotline_proto::parse::parse_folder_put_reply(s, s.len());
+    let r = hxproto::parse::parse_folder_put_reply(s, s.len());
     if r.ref_ == 0 {
         return;
     }
@@ -387,7 +387,7 @@ pub unsafe extern "C" fn rcv_task_banner_get(
         return;
     }
     let s = frame_slice(frame, frame_len);
-    let r = hotline_proto::parse::parse_banner_get_reply(s, s.len());
+    let r = hxproto::parse::parse_banner_get_reply(s, s.len());
     banner_handle_htxf_reply(htlc, r.ref_, r.size);
 }
 
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn rcv_task_file_getinfo(
         return;
     }
     let s = frame_slice(frame, frame_len);
-    let f = hotline_proto::parse::parse_file_getinfo(s, s.len(), 255, 31, 31, 255);
+    let f = hxproto::parse::parse_file_getinfo(s, s.len(), 255, 31, 31, 255);
     let size = if f.size64_seen {
         f.size64
     } else {

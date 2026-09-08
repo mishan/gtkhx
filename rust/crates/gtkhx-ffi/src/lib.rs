@@ -50,7 +50,7 @@ use gtkhx_core as _;
 use gtkhx_ui as _;
 
 // --- protocol core ---
-use hotline_proto as _;
+use hxproto as _;
 use hxbridge as _;
 use hxnet as _;
 

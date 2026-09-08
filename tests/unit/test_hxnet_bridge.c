@@ -4,7 +4,7 @@
  *
  * The module ships two ingest paths:
  *
- *   * `gtkhx_proto_pack_header` (hotline-proto) — turns a (type,
+ *   * `gtkhx_proto_pack_header` (hxproto) — turns a (type,
  *     trans, flag, hc, body_len) tuple into a 22-byte Hotline
  *     header. The bridge calls it to reconstruct the header of a
  *     frame the hxnet actor already parsed; tested here against the

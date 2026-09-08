@@ -14,7 +14,7 @@
 //! event stream would still need converting into byte-ranged
 //! [`Span`](crate::span::Span)s, which is most of the work; and a scanner
 //! for six constructs is small enough to be exhaustively tested and
-//! predictable on pathological input. `hotline-proto` is hand-written for
+//! predictable on pathological input. `hxproto` is hand-written for
 //! the same reasons.
 //!
 //! **What is deliberately not supported**, and why: headings (`#` opens

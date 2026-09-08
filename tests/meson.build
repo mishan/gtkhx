@@ -30,11 +30,11 @@ test_deps = [
 # compress.h pull in any C cipher library. No nettle dependency here.
 proto_test_deps = test_deps + [
   # Phase R2: src/proto_helpers.c (compiled into most proto tests)
-  # now calls into the Rust hotline-proto crate for the SELFINFO
+  # now calls into the Rust hxproto crate for the SELFINFO
   # parse, so every test that links proto_helpers.c needs the
   # staticlib. Harmless for the few proto tests that don't reference
   # the symbol — the linker drops the unused archive members.
-  rust_hotline_proto_dep,
+  rust_hxproto_dep,
   # Phase R3.0: src/gtkhx_session.c::gtkhx_session_emit_task_update
   # delegates to gtkhx_bridge_emit_pointer_pair_signal in hxbridge.
   # The integration harness + the production-connect Tier 3 tests
@@ -323,7 +323,7 @@ test_hxnet_bridge = executable('test_hxnet_bridge',
   '../src/hxnet_bridge.c',
   '../src/host_port.c',
   '../src/proto_helpers.c',
-  dependencies        : test_deps + [rust_hotline_proto_dep],
+  dependencies        : test_deps + [rust_hxproto_dep],
   include_directories : test_inc,
 )
 test('hxnet_bridge', test_hxnet_bridge,
@@ -448,7 +448,7 @@ test('human_readable', test_human_readable,
 # fields and pin the bytes. Catches the "Oni Tracks folder hang"
 # regression (always-zero type field) and any future struct
 # rearrangement. Pulls in proto_test_deps because proto_helpers.c
-# needs the Rust hotline-proto staticlib.
+# needs the Rust hxproto staticlib.
 test_htxf_hdr = executable('test_htxf_hdr',
   'unit/test_htxf_hdr.c',
   '../src/proto_helpers.c',
@@ -474,7 +474,7 @@ test('path_hldir', test_path_hldir,
      suite : 'unit')
 
 # hl_date — the Hotline 8-byte timestamp decoder now lives in the
-# hotline-proto Rust crate (crate::hl_date::parse_hl_date), exercised by that
+# hxproto Rust crate (crate::hl_date::parse_hl_date), exercised by that
 # crate's native cargo tests. The C test that used to pin src/hl_date.c is gone
 # with the file.
 
@@ -826,7 +826,7 @@ test('news_file', test_news_file,
 
 # (test_news_dirlist / test_newscat removed — the C parse shims they exercised
 # (hx_news_dirlist_parse_* / hx_newscat_parse) were retired when the 1.5 news
-# receive path moved to owned handles; the parsers are covered by hotline-proto's
+# receive path moved to owned handles; the parsers are covered by hxproto's
 # native cargo tests, e.g. parse::tests::dirlist_* and catlist_*.)
 
 # chat_event — hx_chat_event_new is the parsed value-object the
@@ -849,7 +849,7 @@ test('chat_event', test_chat_event,
 # (filelist_walker retired — the FILE_LIST walk + per-entry decode moved
 # into the hxmodel::files_entry Rust crate's gtkhx_files_populate_from_reply,
 # tested headless there; the underlying wire parse is covered by
-# hotline-proto's parse_file_list_entry unit tests.)
+# hxproto's parse_file_list_entry unit tests.)
 
 # folder_xfer — wire-format lockdown for the 1.5 folder-transfer
 # opcodes (HTLC_HDR_FILE_GETFOLDER 0xd2, HTLC_HDR_FILE_PUTFOLDER 0xd5)

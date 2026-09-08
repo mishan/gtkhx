@@ -133,7 +133,7 @@ two-second timer.
 
 ## Receive, cache, and render
 
-Wire parsing lives entirely in `hotline-proto::gif_icons` — whole-message
+Wire parsing lives entirely in `hxproto::gif_icons` — whole-message
 walkers for all four transactions plus the packed-entry unpacker, with
 bounds-checked rejection of truncated entries, and a `GIF87a`/`GIF89a`
 signature validator. The C receive handlers hand the raw input buffer
@@ -241,7 +241,7 @@ benefits any test needing the uid on that server.
 
 ## Testing
 
-- **Wire fixtures** in `hotline-proto` cover the four builders, the
+- **Wire fixtures** in `hxproto` cover the four builders, the
   `0x0301` entry walker (including truncated and oversized rejection),
   and the GIF signature validator.
 - **Integration** (`tests/integration/test_gif_icons.c`) covers the

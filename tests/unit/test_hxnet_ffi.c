@@ -19,7 +19,7 @@
  *   - the HxnetFrame struct ABI (offsets / size / alignment).
  *
  * The C side mirrors the FFI's constants by hand — the established
- * discipline for hxbridge / hotline-proto FFI (drift surfaces as a
+ * discipline for hxbridge / hxproto FFI (drift surfaces as a
  * link-time undefined symbol or a test failure).
  */
 

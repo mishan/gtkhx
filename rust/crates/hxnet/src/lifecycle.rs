@@ -694,7 +694,7 @@ mod tests {
     use super::*;
     use crate::magic::{HTLC_MAGIC, HTLS_MAGIC};
     use crate::Command;
-    use hotline_proto::build::{pack_message, pack_message_size, PackChunk};
+    use hxproto::build::{pack_message, pack_message_size, PackChunk};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;

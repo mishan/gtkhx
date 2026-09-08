@@ -56,7 +56,7 @@ const HL_ACCESS_DELETE_NEWS_BUNDLES: i32 = 37;
 
 use gtkhx_core::conn::{hx_conn_access_has, hx_conn_access_permits};
 use gtkhx_core::session::gtkhx_session_get_default;
-use hotline_proto::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
+use hxproto::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
 use hxhandlers::recv::news::carrier::{
     gnews_catalog_free, gnews_catalog_new, gnews_catalog_parsed, gnews_folder_free,
     gnews_folder_new, gnews_folder_parsed, news_post_body, news_post_free, news_post_target,

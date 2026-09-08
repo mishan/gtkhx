@@ -4,7 +4,7 @@
 //! This replaces the C `files_remote_provider.c::populate_from_chunks` +
 //! `populate_from_chunks_cb` (and the `filelist_walker.c` shim they drove).
 //! Given the accumulated FILE_LIST reply bytes, it walks each entry via the
-//! `hotline-proto` parser, decodes the display name (Mac Roman → UTF-8), the
+//! `hxproto` parser, decodes the display name (Mac Roman → UTF-8), the
 //! dir flag, the icon id, and the kind label, builds an [`HxFileEntry`], and
 //! appends it to the provider's `gio::ListStore`. The store is cleared first,
 //! so one call fully refreshes the listing.
@@ -19,7 +19,7 @@ use std::slice;
 use glib::translate::from_glib_none;
 
 use crate::files_entry::HxFileEntry;
-use hotline_proto::parse::FTYPE_FLDR;
+use hxproto::parse::FTYPE_FLDR;
 
 // ---- gettext shim (mirrors gtkhx-ui::tr, the `gtkhx` text domain) ---------
 //
@@ -85,11 +85,11 @@ fn kind_for(ftype_be: [u8; 4]) -> String {
 /// a real `gio::ListStore` and no raw pointers.
 fn fill(store: &gio::ListStore, data: &[u8]) {
     let mut off = 0usize;
-    while let Some((entry, next)) = hotline_proto::parse::parse_file_list_entry(data, off) {
+    while let Some((entry, next)) = hxproto::parse::parse_file_list_entry(data, off) {
         let ftype_be = entry.ftype.to_be_bytes();
         let is_dir = entry.ftype == FTYPE_FLDR;
         // Display name: Mac Roman (or already-UTF-8) wire bytes → UTF-8.
-        let name = hotline_proto::text::to_utf8(entry.name);
+        let name = hxproto::text::to_utf8(entry.name);
         // Icon + kind both key off the raw big-endian FourCC; the icon also
         // consults the raw (pre-UTF-8) name bytes for "DROP BOX" / "UPLOAD".
         let icon = crate::files::icon_id_for(Some(&ftype_be), Some(entry.name));

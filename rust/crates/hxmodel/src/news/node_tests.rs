@@ -330,7 +330,7 @@ fn build_dirlist_empty_or_null_is_no_op() {
 
 // ---- hx_news_build_category_tree_from_catlist -----------------------------
 
-use hotline_proto::parse::{CatList, CatPart, CatPost};
+use hxproto::parse::{CatList, CatPart, CatPost};
 
 fn cat_post(postid: u32, parentid: u32, subject: &str, sender: &str, mime: &str) -> CatPost {
     CatPost {
@@ -449,7 +449,7 @@ fn build_from_catlist_null_is_no_op() {
 
 // ---- hx_news_build_dirlist_from_dirlist -----------------------------------
 
-use hotline_proto::parse::{DirList, NewsDirEntry, NewsDirKind};
+use hxproto::parse::{DirList, NewsDirEntry, NewsDirKind};
 
 #[test]
 fn build_dirlist_from_dirlist_reads_handle() {

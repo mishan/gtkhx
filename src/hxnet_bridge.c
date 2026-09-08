@@ -243,7 +243,7 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
  * Forward declarations for the hxnet FFI surface we wrap.
  * Hand-written instead of cbindgen — drift surfaces as a
  * link-time undefined symbol, same discipline as the other
- * hxnet / hxbridge / hotline-proto FFI consumers.
+ * hxnet / hxbridge / hxproto FFI consumers.
  *
  * Mirror of rust/crates/hxnet/src/ffi.rs.
  */

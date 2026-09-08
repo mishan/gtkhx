@@ -1,5 +1,5 @@
 //! Send-path unit tests for the 1.5 news RPC senders. The native
-//! `hotline_proto::build` news builders run for real; the C send-path
+//! `hxproto::build` news builders run for real; the C send-path
 //! primitives — `path_to_hldir`, the text encoder, the CAP probe, the task
 //! table, the write primitive, the rcv handlers, and the `news_send_bridge`
 //! accessors — are stubbed here (recording what the wrapper handed to

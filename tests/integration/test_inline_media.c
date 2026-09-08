@@ -274,7 +274,7 @@ send_upload_media (int fd, struct htlc_conn *htlc, const guint8 *payload,
  * send-then-receive state machine inline, but with all the
  * chunk-shape construction (PART_INDEX endianness, PART_COUNT,
  * PART_FINAL toggling, which chunks belong on the first vs the
- * follow-ups) deferred to the same hotline-proto builders the
+ * follow-ups) deferred to the same hxproto builders the
  * production helper uses — the test stays a pure orchestration
  * loop and doesn't reimplement protocol decisions.
  *

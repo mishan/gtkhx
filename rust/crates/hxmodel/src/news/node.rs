@@ -19,7 +19,7 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use gio::prelude::*;
 use gio::subclass::prelude::*;
 use glib::translate::{from_glib_none, IntoGlib, IntoGlibPtr};
-use hotline_proto::parse::{CatList, DirList, NewsDirKind};
+use hxproto::parse::{CatList, DirList, NewsDirKind};
 
 /// The `NB_KIND_*` node kinds from `news_browser.c`. Named so the Rust and C
 /// meanings of `kind` can't silently drift.
@@ -507,7 +507,7 @@ pub unsafe extern "C" fn hx_news_build_category_tree(
 
 /// `void hx_news_build_category_tree_from_catlist(GListStore *dest,
 /// const char *category_path, const CatList *cl)` — build the same tree straight
-/// from the `hotline-proto` owned parse handle, skipping the `#[repr(C)]` array
+/// from the `hxproto` owned parse handle, skipping the `#[repr(C)]` array
 /// marshal. The receive port (`gnews_browser_handle_catlist`) calls this with the
 /// handle carried on `gnews_catalog->parsed`; the handle is **borrowed** here
 /// (the caller frees it with `gtkhx_proto_catlist_free`).
@@ -645,7 +645,7 @@ pub unsafe extern "C" fn hx_news_build_dirlist_into(
 
 /// `void hx_news_build_dirlist_from_dirlist(GListStore *dest,
 /// const char *parent_path, const DirList *dl)` — the same folder-tree build,
-/// read straight from the `hotline-proto` owned parse handle (the receive port,
+/// read straight from the `hxproto` owned parse handle (the receive port,
 /// `gnews_browser_handle_dirlist`), skipping the `#[repr(C)]` array marshal. The
 /// handle is **borrowed** here — the caller frees it (`gtkhx_proto_dirlist_free`).
 ///

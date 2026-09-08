@@ -319,7 +319,7 @@ less rig.
 `hxnet::tracker` (the per-connection protocol engine) and
 `hxnet::tracker_fetch` (the serial walk over configured tracker URLs) own
 the tracker behind the `hxnet_tracker_fetch_*` FFI. The parsers were
-already Rust in `hotline-proto`; this move was about the transport
+already Rust in `hxproto`; this move was about the transport
 orchestration.
 
 **It was never on the critical path.** The fetch was already off the

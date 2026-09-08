@@ -668,7 +668,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_ice_candidate(
 /// blob has been parsed.
 ///
 /// `blob` + `len` describe the 6-byte-per-entry packed binary the
-/// `hotline_proto::voice::parse_voice_participants` iterator
+/// `hxproto::voice::parse_voice_participants` iterator
 /// consumes. We re-parse here on the Rust side rather than asking
 /// the C side to construct `hxvoice::Participant` (which lives
 /// inside hxvoice's `no_std`-friendly typed surface and isn't
@@ -692,7 +692,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
     // byte length to be ≤ isize::MAX (so the size in bytes fits
     // in a `ssize_t`-shaped integer). A C caller passing an
     // out-of-range `size_t` would otherwise trigger UB. The
-    // hotline-proto FFI shims established the convention of
+    // hxproto FFI shims established the convention of
     // treating len > isize::MAX as an empty slice; mirror that
     // here. Combined with the NULL / zero-length guard, the
     // result is "treat malformed input as a zero-participant
@@ -713,7 +713,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
     // operator can see it.
     const MAX_PARTICIPANTS: usize = 256;
     let mut entries: Vec<hxvoice::event::Participant> =
-        hotline_proto::voice::parse_voice_participants(bytes)
+        hxproto::voice::parse_voice_participants(bytes)
             .take(MAX_PARTICIPANTS + 1)
             .map(|p| hxvoice::event::Participant {
                 user_id: p.user_id,

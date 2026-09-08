@@ -16,8 +16,8 @@
 use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
-use hotline_proto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
-use hotline_proto::messages::ClientHdr;
+use hxproto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
+use hxproto::messages::ClientHdr;
 use hxnet::htxf::{hxnet_htxf_abort, hxnet_htxf_close, HtxfAbort, HtxfConn};
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
@@ -49,12 +49,12 @@ const FILE_DONE: c_int = 3;
 /// `XFER_GET` (src/protocol.h).
 const XFER_GET: u8 = 0;
 /// The download / upload request opcodes `xfer_go` writes (single source of
-/// truth is the `hotline_proto::messages::ClientHdr` enum).
+/// truth is the `hxproto::messages::ClientHdr` enum).
 const HTLC_HDR_FILE_GET: u32 = ClientHdr::FileGet as u32;
 const HTLC_HDR_FILE_PUT: u32 = ClientHdr::FilePut as u32;
 /// The negotiated capability bits `xfer_go` reads — XFERSIZE64 emission
 /// (`LARGE_FILES`) and wire text encoding (`TEXT_ENCODING`). These LOGIN cap bits
-/// aren't modelled in hotline-proto; spelled here against the hotline.h reference.
+/// aren't modelled in hxproto; spelled here against the hotline.h reference.
 const HTLC_CAP_LARGE_FILES: u64 = 0x0001;
 const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
 

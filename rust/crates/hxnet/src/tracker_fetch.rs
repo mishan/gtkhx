@@ -475,7 +475,7 @@ impl TrackerConnector for TcpTlsConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hotline_proto::parse::tracker_v3;
+    use hxproto::parse::tracker_v3;
     use std::collections::VecDeque;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

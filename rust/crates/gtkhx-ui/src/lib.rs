@@ -75,7 +75,7 @@ pub mod voice_arbiter;
 #[cfg(feature = "voice")]
 pub mod voice_ptt;
 // the voice-chat wire-out senders (was voice.c) moved to their own
-// lean crate `hxvoice-send` (cargo-testable; native hotline-proto builders).
+// lean crate `hxvoice-send` (cargo-testable; native hxproto builders).
 // The sibling voice modules reach hx_send_voice_* through their existing
 // externs, resolved at the final C link against that staticlib.
 // the Users window shell (raise + dock registration + lifecycle).
@@ -146,7 +146,7 @@ pub mod inline_media_dialog;
 pub mod user_info;
 // the File "Get Info" dialog (was files.c's output_file_info + Save/date
 // helpers); fired from the file-info GtkhxSession signal. Dates format natively
-// (hl_date), the Save button sends FILE_SETINFO natively (hotline_proto).
+// (hl_date), the Save button sends FILE_SETINFO natively (hxproto).
 // output_file_info is this module's #[no_mangle] export.
 pub mod file_info;
 // the Create-Post composer (was news.c's post window). A modal
@@ -176,11 +176,11 @@ pub mod news_compose;
 pub mod news_render;
 // the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
-// hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
+// hxproto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
 pub mod emoji;
 // the Broadcast composer + wire sender (was toolbar.c's broadcast
 // dialog + msg.c's hx_send_broadcast). AdwAlertDialog + AdwEntryRow; the wire
-// build is native hotline-proto, the text encoder / task / write stay C.
+// build is native hxproto, the text encoder / task / write stay C.
 // gtkhx_broadcast_dialog_open is this module's #[no_mangle] export.
 pub mod broadcast;
 // the server banner surface + URL / HTXF fetch state machines (was banner.c +

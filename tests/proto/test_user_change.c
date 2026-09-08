@@ -348,7 +348,7 @@ test_user_change_null_out_returns_false (void)
 
 /* ============================================================
  * hx_user_change_plan_resolve — FFI smoke tests. The decision logic lives in
- * Rust (hotline-proto's user_change module) with the exhaustive case coverage;
+ * Rust (hxproto's user_change module) with the exhaustive case coverage;
  * these two go through the real C ABI (fill the C struct, call the linked
  * symbol, read the C plan back) to pin the #[repr(C)] marshalling end to end.
  * ============================================================ */

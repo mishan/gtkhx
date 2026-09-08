@@ -30,7 +30,7 @@ extern "C" {
 
 /// A NEWSDIRLIST / NEWSCATLIST request carrier: the path we asked for plus the
 /// owned parse handle the receive path stashes on it (`parsed`, a
-/// hotline-proto `DirList` / `CatList`, freed by the browser's reply handler).
+/// hxproto `DirList` / `CatList`, freed by the browser's reply handler).
 struct Carrier {
     path: CString,
     parsed: *mut c_void,

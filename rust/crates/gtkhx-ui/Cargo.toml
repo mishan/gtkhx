@@ -55,9 +55,9 @@ libadwaita = { workspace = true, features = ["v1_6"] }
 # - Native wire builders for the Rust senders (e.g. broadcast.rs's
 # build_broadcast_chunks + the ClientHdr opcode enum). Pure Rust; the unused
 # #[no_mangle] exports dead-strip out of gtkhx-ui's archive, so no
-# duplicate-symbol clash with the separately-linked hotline-proto staticlib
+# duplicate-symbol clash with the separately-linked hxproto staticlib
 # (same as hxnet / hxvoice-* which already depend on it).
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }
 # M2 wire-up (Option A): the user list owns an authoritative HxMemberModel
 # (membership as a gio::ListModel) built from hxchat_model::Member data. Pure
 # Rust (glib/gio only, no extra C surface) — rides in gtkhx-ui's archive.

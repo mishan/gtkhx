@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "crates/hxcrypto",
-    "crates/hotline-proto",
+    "crates/gtkhx-proto-ffi",
     "crates/hxbridge",
     "crates/gtkhx-core",
     "crates/gtkhx-ui",
@@ -82,6 +82,7 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "f4304bc4e495e1ea01ae8cc77a8a1a45660077dc" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

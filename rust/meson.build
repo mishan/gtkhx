@@ -8,7 +8,7 @@
 # Current crates:
 #   hxcrypto        — HOPE crypto + transport compression (hash / stream /
 #                     aead / compress; four crates before step 3).
-#   hotline-proto   — Phase R2 wire protocol parsers + builders.
+#   hxproto   — Phase R2 wire protocol parsers + builders.
 #   gtkhx-core      — the extern-free GObject layer (GtkhxSession + its boxed
 #                     payloads + htlc_conn). Must stay extern-free: the Tier 2
 #                     proto tests link its archive alone. See its lib.rs.
@@ -59,6 +59,9 @@ cargo = find_program('cargo')
 rust_sources = files(
   # The single-archive façade (see the rust_gtkhx_ffi_dep block below).
   'crates/gtkhx-ffi/src/lib.rs',
+  # Focused staticlib façade for the C protocol tests. The implementation
+  # itself is the pinned hxproto git dependency.
+  'crates/gtkhx-proto-ffi/src/lib.rs',
   'crates/hxcrypto/src/lib.rs',
   'crates/hxcrypto/src/hash.rs',
   'crates/hxcrypto/src/stream.rs',
@@ -66,15 +69,6 @@ rust_sources = files(
   'crates/hxcrypto/src/aead.rs',
   'crates/hxcrypto/src/compress.rs',
   'crates/hxcrypto/Cargo.toml',
-  'crates/hotline-proto/src/lib.rs',
-  'crates/hotline-proto/src/wire.rs',
-  'crates/hotline-proto/src/messages.rs',
-  'crates/hotline-proto/src/text.rs',
-  'crates/hotline-proto/src/user_change.rs',
-  'crates/hotline-proto/src/login.rs',
-  'crates/hotline-proto/src/parse.rs',
-  'crates/hotline-proto/src/hl_date.rs',
-  'crates/hotline-proto/src/ffi.rs',
   'crates/hxbridge/src/lib.rs',
   # Phase R3.1+ submodules, gated behind the `runtime` Cargo feature
   # that the rust_build custom_target turns on below.
@@ -274,7 +268,7 @@ rust_sources = files(
   'crates/hxsound/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
-  'crates/hotline-proto/Cargo.toml',
+  'crates/gtkhx-proto-ffi/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
   'crates/gtkhx-ui/Cargo.toml',
   'crates/hxnet/Cargo.toml',
@@ -491,11 +485,11 @@ rust_hxcrypto_dep = declare_dependency(
 # SELFINFO + TASK-header parsers. FFI prototypes are hand-declared on
 # the C side (no cbindgen) — drift surfaces as a link-time undefined
 # symbol, same discipline as the R1 crates.
-rust_hotline_proto_dep = declare_dependency(
+rust_hxproto_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhotline_proto',
+    '-lgtkhx_proto_ffi',
   ],
 )
 
@@ -591,7 +585,7 @@ rust_hxbridge_dep = declare_dependency(
 
 # hxtext (Phase R5) — the Rust port of src/text_util.c. Exports the four
 # gtkhx_text_* C ABI symbols (to_utf8 / for_wire / the emoji-shortcode
-# toggle) the ~16 C callers link against; implemented over hotline-proto's
+# toggle) the ~16 C callers link against; implemented over hxproto's
 # native text/emoji primitives. Unconditional (text encoding is always
 # needed), so it's part of the default --workspace cargo build.
 rust_hxtext_dep = declare_dependency(
@@ -603,7 +597,7 @@ rust_hxtext_dep = declare_dependency(
 )
 
 # Hotline Connection actor (Phase R3.3). hxnet wraps tokio + the
-# hotline-proto frame layer behind a C-callable FFI surface
+# hxproto frame layer behind a C-callable FFI surface
 # (rust/crates/hxnet/src/ffi.rs). The first consumer is the smoke
 # test in tests/unit/test_hxnet_ffi.c; a later phase (R3.3.e)
 # wires the production switch in network.c. hxnet shares

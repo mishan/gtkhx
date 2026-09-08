@@ -5,7 +5,7 @@
 //! private CHAT, and the CHAT_CREATE / _INVITE / _JOIN / _PART / _SUBJECT
 //! room-management opcodes. Each one: encodes any text body for the wire
 //! (via `gtkhx_text_for_wire`, the hxtext crate), builds the chunks with the
-//! **native** `hotline_proto::build` builders (not the C-ABI
+//! **native** `hxproto::build` builders (not the C-ABI
 //! `gtkhx_proto_build_*` shims — the whole build flow is Rust), registers a
 //! reply task where the C original did, and hands the chunks to
 //! `hlwrite_chunks`. Exports the exact `hx_send_chat` / `hx_chat_*` /
@@ -13,7 +13,7 @@
 //! C ABI so every caller (toolbar.c, users.c, the chat input handler, the
 //! Rust invite dialog) links unchanged.
 //!
-//! A lean dedicated crate (only `glib` + the pure `hotline-proto`, no GTK) so
+//! A lean dedicated crate (only `glib` + the pure `hxproto`, no GTK) so
 //! it's `cargo test`-able: the builders run natively and the C send-path
 //! primitives are stubbed in the test module.
 //!
@@ -26,10 +26,10 @@
 use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 
-use hotline_proto::build::{self, ChatRequest, ChatSubjectRequest, HxChunk};
-use hotline_proto::messages::ClientHdr;
+use hxproto::build::{self, ChatRequest, ChatSubjectRequest, HxChunk};
+use hxproto::messages::ClientHdr;
 
-// Wire opcodes — single source of truth is hotline_proto::messages::ClientHdr
+// Wire opcodes — single source of truth is hxproto::messages::ClientHdr
 // (the repr(u32) HTLC_HDR_* enum), not re-spelled magic numbers.
 const HTLC_HDR_CHAT: u32 = ClientHdr::Chat as u32;
 const HTLC_HDR_CHAT_CREATE: u32 = ClientHdr::ChatCreate as u32;

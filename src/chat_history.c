@@ -19,7 +19,7 @@
  *     (rust/crates/gtkhx-core/src/boxed/history.rs).
  *   - hx_get_chat_history (the TRAN 700 sender) → the hxhandlers crate
  *     (rust/crates/hxhandlers/src/send/chat_history.rs).
- *   - hx_get_chat_history_build_chunks (the pure chunk builder) → hotline-proto
+ *   - hx_get_chat_history_build_chunks (the pure chunk builder) → hxproto
  *     (native build_get_chat_history_chunks + the C-ABI shim of the same name in
  *     ffi.rs, kept for the integration harness).
  *

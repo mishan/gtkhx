@@ -43,10 +43,10 @@
 //! - Not a wire-format library. The action list carries
 //!   `SendWireFrame { opcode, body }` payloads where `body` is a
 //!   small opaque `Vec<u8>` (cid + payload bytes per opcode); the
-//!   runtime crate parses this and calls `hotline-proto`'s
+//!   runtime crate parses this and calls `hxproto`'s
 //!   `build_voice_*_chunks` to produce a real `HxChunk` array
 //!   before handing the chunks to `hlwrite_chunks` via the FFI.
-//!   Building the chunks is `hotline-proto`'s job, not this
+//!   Building the chunks is `hxproto`'s job, not this
 //!   crate's.
 //!
 //! See `docs/voice.md` "State machine" and "Where it lives" for the full

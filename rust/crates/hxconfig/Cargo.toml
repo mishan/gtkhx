@@ -24,4 +24,4 @@ toml_edit = "0.25"
 # sort of hand-mirrored duplicate that drifted in the system being replaced.
 # This crate has no dependencies of its own, so it adds nothing external and
 # keeps `cargo test -p hxconfig` headless.
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }

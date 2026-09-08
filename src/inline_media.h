@@ -26,7 +26,7 @@
  *
  * Phase 9.A: just the cap gate + a per-session post-LOGIN logging
  * helper for the server's advertised limits. The Rust crate
- * (hotline-proto::inline_media) does the chunk shaping; src/
+ * (hxproto::inline_media) does the chunk shaping; src/
  * inline_media.c provides the thin C wrappers C dispatch sites
  * can call.
  */

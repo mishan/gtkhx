@@ -80,7 +80,7 @@ G_BEGIN_DECLS
  * vocabulary arrived with the XChat xtext fork in 2000 and every
  * "\003NN" byte in a GtkHx buffer was written by GtkHx itself (nick
  * brackets, highlight, the info prefix, history-muted rows, media
- * placeholders). Servers never send them, and hotline-proto's
+ * placeholders). Servers never send them, and hxproto's
  * strip_ansi would fold most of them anyway. Hotline's actual per-user
  * colour is a separate u32 RGB attribute on the user record, not
  * in-band markup.

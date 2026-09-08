@@ -50,19 +50,19 @@ pub enum Action {
     /// - MUTE: 4-byte `cid` + 2-byte BE `muted` flag.
     ///
     /// The state machine deliberately doesn't depend on
-    /// `hotline-proto`'s `HxChunk` ABI. The runtime side parses
+    /// `hxproto`'s `HxChunk` ABI. The runtime side parses
     /// this payload, calls the matching
-    /// `hotline_proto::voice::build_voice_*_chunks` builder to
+    /// `hxproto::voice::build_voice_*_chunks` builder to
     /// produce a real chunk array, and hands those chunks to
     /// `hlwrite_chunks` via the C FFI. Keeping the wire-format
     /// encoding out of the state machine lets `cargo test -p
-    /// hxvoice` run without a `hotline-proto` dependency.
+    /// hxvoice` run without a `hxproto` dependency.
     SendWireFrame {
         /// The HTLC opcode (e.g. `0x258` for VOICE_JOIN).
         opcode: u32,
         /// Opaque payload bytes — see [`SendWireFrame`] for the
         /// per-opcode shape the runtime must re-pack into
-        /// `hotline-proto`'s `HxChunk` array before calling
+        /// `hxproto`'s `HxChunk` array before calling
         /// `hlwrite_chunks`.
         body: WireFrameBody,
     },

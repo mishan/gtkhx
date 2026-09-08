@@ -25,7 +25,7 @@ use alloc::vec::Vec;
 /// Categorised by source:
 /// - **UI** — `JoinRequested`, `LeaveRequested`, `MuteToggleRequested`.
 /// - **Wire** (incoming from the Hotline control channel via
-///   `hotline-proto`'s parsers): `SdpOfferReceived`,
+///   `hxproto`'s parsers): `SdpOfferReceived`,
 ///   `IceCandidateReceived`, `EndOfRemoteCandidates`,
 ///   `ParticipantsUpdated`, `ServerTaskError`.
 /// - **WebRTC** (from `webrtcbin` signals): `WebrtcPadAdded`,
@@ -127,7 +127,7 @@ pub enum Event {
 
 /// One voice participant as carried in a 605 ROOM_STATUS update.
 /// Stripped down to the fields the state machine cares about; the
-/// raw 6-byte wire layout lives in `hotline_proto::voice`.
+/// raw 6-byte wire layout lives in `hxproto::voice`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Participant {
     /// Hotline user id.

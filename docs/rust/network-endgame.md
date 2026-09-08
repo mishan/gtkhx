@@ -134,9 +134,9 @@ seam, which is what makes the rest tractable rather than a rewrite:
 
 | Concern | Where it lives |
 |---|---|
-| Wire parse / build | `hotline-proto` |
+| Wire parse / build | `hxproto` |
 | Transaction table | `hxtask` |
-| Opcode → handler routing | `hotline-proto::dispatch::route` (`hx_recv_route`) |
+| Opcode → handler routing | `hxproto::dispatch::route` (`hx_recv_route`) |
 | Receive handler bodies + signal emit | `hxhandlers::recv` (one module per domain) |
 | View boundary (signals) | `GtkhxSession` (`gtkhx-core::session`) |
 | Per-session collections | `HxChatRegistry`, `HxMemberModel`, `MediaTable` |
@@ -267,11 +267,11 @@ reasons. Three are resolved:
   afterwards) is gone; dispatch routes the parsed opcode straight to the
   body handler.
 - **Outbound framing spread across many sender sites**: serialization is
-  `hotline-proto`'s now, and both send entry points go through it.
+  `hxproto`'s now, and both send entry points go through it.
 
 The fourth — **handlers braiding wire parse, task correlation, and view
 emission** — is what's left, and it is mostly unbraided by construction:
-the parse half went to `hotline-proto` and the emit half to
+the parse half went to `hxproto` and the emit half to
 `hxhandlers::recv` before the bodies moved. What remains braided is
 concentrated in the login and post-login path.
 

@@ -16,7 +16,7 @@
 //!   u16 hc     — chunk count
 //!
 //! Tests construct frames by hand because hxnet doesn't have a
-//! frame-builder yet — that lives in hotline-proto's `build`
+//! frame-builder yet — that lives in hxproto's `build`
 //! module, and pulling it in for tests just to construct test
 //! fixtures isn't worth the layering. Hand-rolled 22-byte
 //! arrays are easier to read.
@@ -385,7 +385,7 @@ async fn try_send_returns_full_when_command_channel_is_saturated() {
 async fn frame_helper_constructor_round_trips_header_fields() {
     // Doc-style sanity check: hand-build a Header via the proto
     // crate, wrap it, body it, and re-extract.
-    let header = hotline_proto::parse::decode_header_full(&build_header(0x6c, 7, 1, 3, 0), 4096)
+    let header = hxproto::parse::decode_header_full(&build_header(0x6c, 7, 1, 3, 0), 4096)
         .expect("test header decodes");
     let f = Frame::new(header, b"abc".to_vec());
     assert_eq!(f.header.type_, 0x6c);
@@ -402,7 +402,7 @@ async fn frame_helper_constructor_round_trips_header_fields() {
 trait InErrorBitCheck {
     fn in_error_bit_check(&self) -> bool;
 }
-impl InErrorBitCheck for hotline_proto::parse::HeaderDecoded {
+impl InErrorBitCheck for hxproto::parse::HeaderDecoded {
     fn in_error_bit_check(&self) -> bool {
         self.flag & 1 != 0
     }

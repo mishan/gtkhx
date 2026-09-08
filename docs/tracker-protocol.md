@@ -272,7 +272,7 @@ registering server:
   listing-request builder, response-header parser, single-record parser
   (borrowing slices into the caller's buffer, reporting bytes
   consumed), and the TLV walker. The parsing delegates to
-  `hotline-proto`.
+  `hxproto`.
 - **`src/tracker_v3_meta.{c,h}`** — the typed TLV decoder. One sweep
   over the blob, each ID stored into the matching struct field,
   unknown IDs skipped. Strings are `g_utf8_make_valid`-ed at

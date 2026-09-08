@@ -1,5 +1,5 @@
 //! Send-path unit tests for the chat wire-out senders. The native
-//! `hotline_proto::build` chat builders run for real; the C send-path
+//! `hxproto::build` chat builders run for real; the C send-path
 //! primitives — the text encoder, the chat-model/caps bridge, the task table,
 //! and the write primitive — are stubbed here (recording what the wrapper
 //! handed to `hlwrite_chunks` / `task_new`) so the cargo-test build needs no
@@ -8,7 +8,7 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
-use hotline_proto::build::HxChunk;
+use hxproto::build::HxChunk;
 
 // Data-chunk tags the assertions pin (hotline.h / messages::tag).
 const TAG_BODY: u16 = 0x0065;

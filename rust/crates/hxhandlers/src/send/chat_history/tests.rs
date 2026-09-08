@@ -1,5 +1,5 @@
 //! Send-path unit tests for `hx_get_chat_history`. The native
-//! `hotline_proto::build::build_get_chat_history_chunks` runs for real; the cap
+//! `hxproto::build::build_get_chat_history_chunks` runs for real; the cap
 //! check and the write primitive are stubbed here (recording what the wrapper
 //! handed to `hlwrite_chunks`), so the cargo-test build needs no gtkhx-core
 //! accessor / network.c.
@@ -7,7 +7,7 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
-use hotline_proto::messages::tag;
+use hxproto::messages::tag;
 
 /// One captured `hlwrite_chunks` call: the wire opcode + each chunk's
 /// (tag, copied data bytes).

@@ -48,8 +48,8 @@ use std::io;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use hotline_proto::build::{pack_message, pack_message_size, PackChunk};
-use hotline_proto::messages::tag;
+use hxproto::build::{pack_message, pack_message_size, PackChunk};
+use hxproto::messages::tag;
 
 use crate::{ConnectionState, Event};
 
@@ -60,7 +60,7 @@ use crate::{ConnectionState, Event};
 pub const HTLC_HDR_LOGIN: u32 = 0x0000_006b;
 
 /// `HTLC_DATA_CLIENTVERSION` chunk tag — 2-byte BE client version.
-/// Re-exported from hotline-proto's canonical tag table so there's a
+/// Re-exported from hxproto's canonical tag table so there's a
 /// single source of truth (the C side mirrors it as 0x00a0 in
 /// `src/hotline.h`). Servers (mhxd) read this to set the `can_ping`
 /// access bit (>= 150 → PING keepalive accepted).

@@ -140,7 +140,7 @@ struct date_time {
  * folder_item / news_folder) are all gone from C. The fetch carriers are
  * Rust-owned in hxhandlers::recv::news's `carrier` module: the browser gets an opaque
  * handle, the sender reads its path, the receive handler stashes a Rust-owned
- * hotline-proto parse handle (DirList / CatList), and the tree is built by
+ * hxproto parse handle (DirList / CatList), and the tree is built by
  * hx_news_build_dirlist_from_dirlist / hx_news_build_category_tree_from_catlist
  * (hxmodel::news). No C GUI struct in the
  * middle. */

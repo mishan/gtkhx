@@ -25,10 +25,10 @@ fn push_chunk(v: &mut Vec<u8>, tag: u16, data: &[u8]) {
 }
 
 /// Build a real HTLS_HDR_CHAT_INVITE frame: 22-byte header + UID/CHAT_ID/NAME
-/// chunks. The handler runs the production `hotline_proto::parse::parse_chat_invite`
+/// chunks. The handler runs the production `hxproto::parse::parse_chat_invite`
 /// over these bytes — no parse double.
 fn invite_frame(uid: u16, cid: u32, name: &[u8]) -> Vec<u8> {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     let mut v = Vec::new();
     v.extend_from_slice(&0x0000_0071u32.to_be_bytes()); // type = CHAT_INVITE
     v.extend_from_slice(&[0u8; 18]); // trans(4) flag(4) len(4) len2(4) hc(2)
@@ -84,7 +84,7 @@ fn rcv_handler_header_only_emits_zeroed() {
 
 /// Build a real HTLS_HDR_CHAT_SUBJECT frame: 22-byte header + CHAT_ID/CHAT_SUBJECT.
 fn subject_frame(cid: u32, subject: &[u8]) -> Vec<u8> {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     let mut v = Vec::new();
     v.extend_from_slice(&0x0000_0077u32.to_be_bytes()); // type = CHAT_SUBJECT
     v.extend_from_slice(&[0u8; 18]);
@@ -127,7 +127,7 @@ fn rcv_subject_handler_empty_noops() {
 /// extra chunks, e.g. media companions). The header type is ignored by
 /// parse_chat — it walks chunks.
 fn chat_frame(cid: u32, uid: u16, body: &[u8], extra: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     let mut v = Vec::new();
     v.extend_from_slice(&0x0000_0069u32.to_be_bytes()); // type (ignored)
     v.extend_from_slice(&[0u8; 18]);
@@ -177,7 +177,7 @@ fn rcv_chat_handler_honours_ignore() {
 
 #[test]
 fn rcv_chat_handler_attaches_media_when_cap_set() {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     test_env::reset();
     test_env::HAS_CAP.with(|c| c.set(true));
     let extra = vec![
@@ -197,7 +197,7 @@ fn rcv_chat_handler_attaches_media_when_cap_set() {
 
 #[test]
 fn rcv_chat_handler_drops_orphaned_media() {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     test_env::reset();
     test_env::HAS_CAP.with(|c| c.set(true));
     // Only the ID present (no TYPE) → orphan → drop the whole chat.
@@ -212,7 +212,7 @@ fn rcv_chat_handler_drops_orphaned_media() {
 
 #[test]
 fn rcv_chat_handler_ignores_media_without_cap() {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     // Media chunks present but cap NOT negotiated → media ignored, line still emits.
     test_env::reset();
     let extra = vec![
@@ -386,7 +386,7 @@ fn history_entry_body(message_id: u64, flags: u16, icon: u16, nick: &[u8], msg: 
 /// Build a real GET_CHAT_HISTORY (700) TASK reply: 22-byte header + the given
 /// chunks (the handler walks them with production `ChunkIter` + native parse).
 fn chat_history_frame(chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    use hotline_proto::messages::ServerHdr;
+    use hxproto::messages::ServerHdr;
     let mut v = Vec::new();
     v.extend_from_slice(&(ServerHdr::Task as u32).to_be_bytes()); // type
     v.extend_from_slice(&[0u8; 18]); // trans(4) flag(4) len(4) len2(4) hc(2)

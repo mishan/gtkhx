@@ -18,4 +18,4 @@ crate-type = ["rlib"]
 # binary already links, so the system-library surface doesn't grow.
 glib = { workspace = true }
 # The DATA_VOICE_PARTICIPANTS blob parser (typed Rust API, not the C ABI).
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }

@@ -18,7 +18,7 @@ pub enum Command {
     /// `AsyncWrite`. The actor does **not** validate that the bytes
     /// constitute a well-formed Hotline frame — the producer side
     /// (today: C's `hlpack_chunks`, eventually: a Rust builder
-    /// over [`hotline_proto::build`]) is responsible for that.
+    /// over [`hxproto::build`]) is responsible for that.
     ///
     /// Backpressure: [`ConnectionHandle::send`](
     /// crate::ConnectionHandle::send) awaits if the bounded

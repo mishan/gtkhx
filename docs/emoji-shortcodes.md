@@ -41,7 +41,7 @@ Mac Roman server get full round-trip emoji (😂 → `:joy:` on the wire →
    alike, for consistent behaviour and because people are used to typing
    shortcodes.
 2. **The table and the scan/replace logic live in Rust**, in
-   `hotline-proto` — the same crate that already owns Mac Roman
+   `hxproto` — the same crate that already owns Mac Roman
    conversion — exposed over the existing C FFI surface. Keeps the
    encoding layer thin and gets cheap Rust unit tests over the table.
 3. **Send-side conversion runs only in legacy mode.** On a UTF-8 server
@@ -67,7 +67,7 @@ One dependency gives gemoji/Slack shortcodes for encode and a permissive
 superset for decode, without hand-stitching two datasets.
 
 The generator runs **by hand** and its output
-(`hotline-proto/src/emoji_table.rs`) is checked in with a provenance
+(`crates/hxproto/src/emoji_table.rs` in hx-libs) is checked in with a provenance
 header naming the package version — the same approach as the Mac Roman
 table next door, which was generated once from `iconv` and committed. No
 build-time codegen. Re-run after a package bump.

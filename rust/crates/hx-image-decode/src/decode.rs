@@ -65,7 +65,7 @@ use crate::telemetry::{
 };
 
 /// Spec MediaErrorCode mapping. Mirrors
-/// `hotline-proto::inline_media::MediaErrorCode`. The wire
+/// `hxproto::inline_media::MediaErrorCode`. The wire
 /// reserves 3–5 for server-side errors (rate-limit / not-
 /// authorised / busy); the decoder only emits 1 (PayloadTooLarge)
 /// and 2 (UnsupportedFormat), plus 0 (Generic) for the catch-all.

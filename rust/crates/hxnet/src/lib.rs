@@ -6,7 +6,7 @@
 //!
 //! 1. Owns a `tokio::net::TcpStream` (or any `AsyncRead + AsyncWrite`).
 //! 2. Reads Hotline-framed bytes off the wire, decodes via
-//!    [`hotline-proto`], and emits typed [`Event`]s on a channel
+//!    [`hxproto`], and emits typed [`Event`]s on a channel
 //!    the GLib main thread drains.
 //! 3. Receives typed [`Command`]s from a paired channel and writes
 //!    encoded bytes back out.
