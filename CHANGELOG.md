@@ -1,3 +1,10 @@
+## 1.3.2
+
+- Fixed issue with Linux Flatpak and bundled library paths
+- News Browser
+  - Fixed double load issue
+  - Fixed a bug that prevented users from creating a new folder
+
 ## 1.3.1
 
 - Build

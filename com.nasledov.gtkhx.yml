@@ -58,9 +58,28 @@ command: gtkhx
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
-  # Modules built into /app (libpanel, poppler, imagemagick) land their .pc in
-  # /app/lib64/pkgconfig on this SDK, which isn't on the default PKG_CONFIG_PATH
-  # — so a later module's `dependency('libpanel-1')` fails to find them. Add it.
+
+  # Pin the install libdir for every inline module (libpanel, poppler,
+  # imagemagick). Left to itself, meson picks lib vs lib64 by probing the
+  # *build host* for a real /usr/lib64, so which one we get is a property of
+  # whatever org.gnome.Sdk//49 snapshot the build machine happened to have —
+  # it silently flipped from lib to lib64 partway through the 49 series.
+  #
+  # That matters at runtime, not just at build time. Flatpak guarantees exactly
+  # one search path for app-private libraries, LD_LIBRARY_PATH=/app/lib, and we
+  # set no install_rpath. Anything landing in /app/lib64 is then reachable only
+  # through the ld.so.cache flatpak regenerates per (app, runtime) pair on the
+  # user's own machine, which depends on their runtime commit and flatpak
+  # version — so the identical bundle starts on one box and dies on another
+  # with "libpanel-1.so.1: cannot open shared object file". Pin it and the
+  # question doesn't arise. Also keeps the typelibs in /app/lib, where the
+  # default GI_TYPELIB_PATH looks.
+  libdir: /app/lib
+
+  # Belt and braces: if some future module's buildsystem ignores libdir and
+  # installs to lib64 anyway, a later module's `dependency('libpanel-1')` would
+  # fail to find its .pc file. Costs nothing when the directory doesn't exist.
+  # (tools/build-flatpak-bundle.sh fails the build if one shows up.)
   append-pkg-config-path: /app/lib64/pkgconfig
 
 # Sandbox permissions. Each line is justified — Flathub reviewers
