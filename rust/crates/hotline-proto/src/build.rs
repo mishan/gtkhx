@@ -426,6 +426,57 @@ pub fn build_get_chat_history_chunks(
     hc
 }
 
+/// One optional mini-TLV carried after a packed chat-history entry.
+#[derive(Debug, Clone, Copy)]
+pub struct HistorySubfield<'a> {
+    pub ty: u16,
+    pub data: &'a [u8],
+}
+
+/// Build one `DATA_HISTORY_ENTRY` body, the exact inverse of
+/// [`crate::parse::parse_history_entry`]. Returns `None` when a text or
+/// sub-field cannot be represented by its u16 length, or when the complete
+/// body would not fit in one Hotline data chunk.
+pub fn build_history_entry(
+    message_id: u64,
+    timestamp: i64,
+    flags: u16,
+    icon_id: u16,
+    nick: &[u8],
+    message: &[u8],
+    subfields: &[HistorySubfield<'_>],
+) -> Option<Vec<u8>> {
+    let nick_len = u16::try_from(nick.len()).ok()?;
+    let message_len = u16::try_from(message.len()).ok()?;
+    let mut len = 24usize
+        .checked_add(nick.len())?
+        .checked_add(message.len())?;
+    for field in subfields {
+        let _ = u16::try_from(field.data.len()).ok()?;
+        len = len.checked_add(4)?.checked_add(field.data.len())?;
+    }
+    if len > u16::MAX as usize {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(len);
+    out.extend_from_slice(&message_id.to_be_bytes());
+    out.extend_from_slice(&timestamp.to_be_bytes());
+    out.extend_from_slice(&flags.to_be_bytes());
+    out.extend_from_slice(&icon_id.to_be_bytes());
+    out.extend_from_slice(&nick_len.to_be_bytes());
+    out.extend_from_slice(nick);
+    out.extend_from_slice(&message_len.to_be_bytes());
+    out.extend_from_slice(message);
+    for field in subfields {
+        out.extend_from_slice(&field.ty.to_be_bytes());
+        out.extend_from_slice(&(field.data.len() as u16).to_be_bytes());
+        out.extend_from_slice(field.data);
+    }
+    assert_eq!(out.len(), len);
+    Some(out)
+}
+
 // ---- HTLC_HDR_AGREEMENTAGREE ------------------------------------------
 //
 // Wire shape: ICON + NAME + OPTIONS, all three mandatory (Mobius panics
@@ -4103,5 +4154,22 @@ mod tests {
         let chunks = [pc(1, &huge)];
         let mut out = vec![0u8; huge.len() + 64];
         assert!(pack_message(&mut out, 0, 0, 0, &chunks).is_none());
+    }
+
+    #[test]
+    fn history_entry_builder_round_trips_through_the_parser() {
+        let fields = [HistorySubfield {
+            ty: 0x1234,
+            data: b"future",
+        }];
+        let body =
+            build_history_entry(42, 1_700_000_000, 1, 128, b"alice", b"waves", &fields).unwrap();
+        let parsed = crate::parse::parse_history_entry(&body).unwrap();
+        assert_eq!(parsed.message_id, 42);
+        assert_eq!(parsed.timestamp, 1_700_000_000);
+        assert_eq!(parsed.flags, 1);
+        assert_eq!(parsed.icon_id, 128);
+        assert_eq!(parsed.nick, b"alice");
+        assert_eq!(parsed.message, b"waves");
     }
 }

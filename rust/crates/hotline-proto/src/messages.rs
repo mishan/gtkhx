@@ -279,6 +279,10 @@ pub mod tag {
     pub const HISTORY_AFTER: u16 = 0x0f03;
     /// `0x0f04` — GET_CHAT_HISTORY max-results limit. u16 BE; omitted when zero.
     pub const HISTORY_LIMIT: u16 = 0x0f04;
+    /// `0x0f05` — one packed chat-history row in a transaction 700 reply.
+    pub const HISTORY_ENTRY: u16 = 0x0f05;
+    /// `0x0f06` — u8 boolean: more rows exist in the query direction.
+    pub const HISTORY_HAS_MORE: u16 = 0x0f06;
     /// `0x0f07` — chat-history retention hint: max message count (LOGIN reply).
     pub const HISTORY_MAX_MSGS: u16 = 0x0f07;
     /// `0x0f08` — chat-history retention hint: max age in days (LOGIN reply).
