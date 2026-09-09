@@ -82,7 +82,7 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "ce1401b0f226287e72f79be7ffcf097206524ae8" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "0c11efd2e12c55d716e3fe9e027a65e475ff2cd4" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

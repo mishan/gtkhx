@@ -2090,7 +2090,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ce1401b0f226287e72f79be7ffcf097206524ae8#ce1401b0f226287e72f79be7ffcf097206524ae8"
+source = "git+https://github.com/mishan/hx-libs.git?rev=0c11efd2e12c55d716e3fe9e027a65e475ff2cd4#0c11efd2e12c55d716e3fe9e027a65e475ff2cd4"
 
 [[package]]
 name = "hxsound"
