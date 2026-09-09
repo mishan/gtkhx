@@ -37,9 +37,9 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 
 use gtkhx_core::conn::{hx_conn_hope_aead, hx_conn_serverhost, hx_conn_serverport, hx_conn_tls};
-use hxproto::build::HxChunk;
 use hx_image_decode::ffi::HxInlineMediaCaps;
 use hx_image_decode::{decode_first_frame_async, ImageDecodeHandle, ImageDecodeOutcome};
+use hxproto::build::HxChunk;
 
 use crate::ensure_gtk_init;
 use crate::tr::tr;

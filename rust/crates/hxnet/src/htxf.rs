@@ -914,14 +914,7 @@ pub unsafe extern "C" fn hxnet_htxf_pack_preamble(
         return 0;
     }
     let out = slice::from_raw_parts_mut(buf, cap);
-    hxproto::build::build_htxf_preamble(
-        out,
-        ref_id,
-        total_size,
-        type_code,
-        flags,
-        size64 != 0,
-    )
+    hxproto::build::build_htxf_preamble(out, ref_id, total_size, type_code, flags, size64 != 0)
 }
 
 /// Create a new, unarmed cancellation token. Called on the main thread

@@ -16,8 +16,6 @@
 use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
-use hxproto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
-use hxproto::messages::ClientHdr;
 use hxnet::htxf::{hxnet_htxf_abort, hxnet_htxf_close, HtxfAbort, HtxfConn};
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
@@ -27,6 +25,8 @@ use hxnet::xfer_handle::{
     hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
     hx_htxf_set_destructor, hx_htxf_set_total_pos, hx_htxf_unref, HtxfHandle,
 };
+use hxproto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
+use hxproto::messages::ClientHdr;
 
 // Native collaborators for the xfer_go wire build (test build shadows them via the
 // doubles below). hx_conn_has_cap is already Rust (gtkhx-core); the reply-task

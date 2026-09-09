@@ -2860,13 +2860,12 @@ fn connect_on_ice_candidate(webrtcbin: &gstreamer::Element, runtime_id: u64) {
                 return None;
             }
         };
-        let candidate_json =
-            hxproto::voice::ice::build(&hxproto::voice::ice::IceCandidate {
-                candidate: Some(candidate),
-                sdp_mid: Some(sdp_mid),
-                sdp_mline_index: Some(mline_index),
-                username_fragment: None,
-            });
+        let candidate_json = hxproto::voice::ice::build(&hxproto::voice::ice::IceCandidate {
+            candidate: Some(candidate),
+            sdp_mid: Some(sdp_mid),
+            sdp_mline_index: Some(mline_index),
+            username_fragment: None,
+        });
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
             with_main_thread_runtime(runtime_id, |rt| {
