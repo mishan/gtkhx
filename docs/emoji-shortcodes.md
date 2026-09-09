@@ -60,17 +60,18 @@ GitHub's **gemoji** set (one canonical name plus aliases per emoji) and
 rather than the colon-style names people type, so they're only useful as
 a supplementary decode source.
 
-The generator (`tools/gen_emoji_table.py`) reads the Python `emoji`
-package's `EMOJI_DATA`, which bundles exactly the needed material: each
-entry carries a CLDR English name plus the gemoji/Slack-style aliases.
-One dependency gives gemoji/Slack shortcodes for encode and a permissive
-superset for decode, without hand-stitching two datasets.
+The generator (`tools/gen_emoji_table.py`, in hx-libs beside the crate
+it writes into) reads the Python `emoji` package's `EMOJI_DATA`, which
+bundles exactly the needed material: each entry carries a CLDR English
+name plus the gemoji/Slack-style aliases. One dependency gives
+gemoji/Slack shortcodes for encode and a permissive superset for decode,
+without hand-stitching two datasets.
 
 The generator runs **by hand** and its output
-(`crates/hxproto/src/emoji_table.rs` in hx-libs) is checked in with a provenance
-header naming the package version — the same approach as the Mac Roman
-table next door, which was generated once from `iconv` and committed. No
-build-time codegen. Re-run after a package bump.
+(`crates/hxproto/src/emoji_table.rs`, also in hx-libs) is checked in with
+a provenance header naming the package version — the same approach as the
+Mac Roman table next door, which was generated once from `iconv` and
+committed. No build-time codegen. Re-run after a package bump.
 
 The generated file holds two plain sorted slices — no `phf`, no
 `HashMap`, no extra crate dependency, keeping the crate std-only.
