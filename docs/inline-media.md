@@ -118,7 +118,7 @@ depth, not a guarantee.**
 
 ## Where it lives
 
-- **Wire format** — `hotline-proto::inline_media` (typed builders and
+- **Wire format** — `hxproto::inline_media` (typed builders and
   parsers for both transactions, the chunked-upload state shapes, the
   limits advertisement, and the error-code enum).
 - **Decoder** — the `hx-image-decode` crate, behind the C ABI in

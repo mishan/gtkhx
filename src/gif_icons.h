@@ -9,7 +9,7 @@
 
 /* GIF-icons extension (fogWraith GIF-Icons.md) — client send path and
  * probe-and-fallback negotiation. Receive-side parsing lives in the
- * Rust hotline-proto crate (crate::gif_icons); the rcv handlers
+ * Rust hxproto crate (crate::gif_icons); the rcv handlers
  * (rcv_task_icon_get / _getlist, hx_rcv_icon_change in rcv.c) call
  * those parsers and emit GtkhxSession::gif-icon-* signals. */
 

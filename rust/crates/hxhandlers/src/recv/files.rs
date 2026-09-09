@@ -17,8 +17,8 @@
 //! download (`mkdir` trees, `xfer_new`, `path_to_hldir`) — genuine files-subsystem
 //! C that reads the Rust `cfl` through the same accessors.
 
-use hotline_proto::parse::FTYPE_FLDR;
-use hotline_proto::wire::ChunkIter;
+use hxproto::parse::FTYPE_FLDR;
+use hxproto::wire::ChunkIter;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 
 /// `HTLS_DATA_FILE_LIST` (src/hotline.h).
@@ -187,14 +187,14 @@ extern "C" {
     );
 }
 
-/// True when the reply frame's task-error bit is set (native `hotline_proto`
+/// True when the reply frame's task-error bit is set (native `hxproto`
 /// header parse; a too-short frame is not-in-error, matching the old C shim).
 unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
     if frame.is_null() {
         return false;
     }
     let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
-    hotline_proto::parse::Header::parse(s).is_some_and(|h| h.in_error())
+    hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
 }
 
 fn be32(b: &[u8]) -> u32 {

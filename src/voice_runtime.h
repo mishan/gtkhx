@@ -416,7 +416,7 @@ extern void gtkhx_voice_runtime_ice_candidate (gtkhx_voice_runtime *rt,
 /* Fire Event::ParticipantsUpdated { cid, entries }. blob+len is
  * the 6-byte-per-entry packed binary the server ships in
  * DATA_VOICE_PARTICIPANTS; the Rust side parses it via the
- * hotline_proto::voice::parse_voice_participants iterator. NULL
+ * hxproto::voice::parse_voice_participants iterator. NULL
  * blob with len==0 is an empty list (room is empty). */
 extern void gtkhx_voice_runtime_room_status (gtkhx_voice_runtime *rt,
                                              uint32_t cid, const uint8_t *blob,

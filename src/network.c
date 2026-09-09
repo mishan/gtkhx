@@ -1188,7 +1188,7 @@ kill_threads (void)
 }
 
 /* The send primitives hlwrite_chunks + hlwrite moved to Rust (hxtask::send):
- * hlwrite_chunks owns the pack (native hotline-proto) + wire trace + hxnet send
+ * hlwrite_chunks owns the pack (native hxproto) + wire trace + hxnet send
  * + close-on-fail, and the variadic hlwrite was dead in production and is
  * retired. This file no longer packs or sends control-channel frames. */
 

@@ -200,7 +200,7 @@ Those three carry a sole `Copyright (C) 2000-2002 Misha Nasledov` header in the
 GtkHx tree, but that header is **inaccurate** — they are derivative works of
 hxd.
 
-**Stays GPL-2.0-or-later (hxd-derived):** `hotline-proto` (the typed
+**Stays GPL-2.0-or-later (hxd-derived):** `hxproto` (the typed
 1.0/1.2/1.5/1.9 wire parser and builder — the crate with the widest genuine
 appeal to other Hotline clients and servers), `hxhfs` (CAP / AppleDouble /
 Netatalk sidecar metadata; genuinely generic, and the real loss here — it is
@@ -239,11 +239,16 @@ over an existing crate to justify a public API and its maintenance.
 
 ---
 
-## 5. Open work
+## 5. Shared-crate status and open work
+
+`hxproto` now lives in [hx-libs](https://github.com/mishan/hx-libs) and GtkHx pins it as a git
+dependency. hxd-ng consumes the same crate, so protocol changes land once and
+are validated by both applications. The remaining candidates stay local until
+a real second consumer justifies moving them.
 
 - **Relicense** `hx-image-decode` and `hxtls-trust` to `MIT OR Apache-2.0`
   after the file-by-file read-through above. Blocks the packaging work.
-- **Package for external reuse.** Gate the C ABI behind a Cargo feature so a
+- **Prepare for registry publication.** Gate the C ABI behind a Cargo feature so a
   pure-Rust consumer does not pay for it:
 
   ```toml
@@ -258,17 +263,10 @@ over an existing crate to justify a public API and its maintenance.
   separated in every candidate crate, and `hxmacres` / `hxhfs` would then have
   essentially no dependencies at all (their only glib use is inside `ffi.rs`).
 
-  The rest of the publish prep: rename the reusable crates for what they do
-  rather than the internal `hx*` prefix (`hotline-proto` is already right;
+  The rest of the publish prep: rename reusable crates for what they do
+  (`hxproto` is already right;
   something like `appledouble` / `macresource` / `glycin-compat` for the
   others), turn on `#![warn(missing_docs)]`, write a README per published
   crate, and drop `publish = false`. Publish at `0.x` — it signals "breaking
   changes in minor releases" while still being `cargo add`-able, which is the
   compromise that makes the semver commitment bearable.
-
-- **Reconcile with `docs/rust/ROADMAP.md`.** The roadmap's motivations section
-  states that a reusable protocol crate is a *side effect* rather than a goal,
-  and that we will not freeze APIs for outside consumers. That is still the
-  accurate description of today. If the publishing work above is taken up, that
-  paragraph is the thing to change first — otherwise the next person to read
-  the roadmap will make choices that undo it.

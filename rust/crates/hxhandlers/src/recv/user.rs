@@ -6,7 +6,7 @@
 //! shared tail is [`hx_user_apply_recv`], called by both paths (`incremental`
 //! tells them apart) so the create/change/upsert routing lives in one place.
 //! [`hx_user_part_recv`] handles the `USER_PART` removal. The change-*decision*
-//! itself (`hx_user_change_plan_resolve`) lives in `hotline-proto`; the C side
+//! itself (`hx_user_change_plan_resolve`) lives in `hxproto`; the C side
 //! keeps the parse, the plan resolution, the self-uid bookkeeping, and the
 //! ignore/rename logging keyed on these functions' return values.
 
@@ -37,8 +37,8 @@ use hxmodel::conversation::{
 // Native reply parsers — pure Rust, identical in test and production. The old C
 // rcv_task_user_list / _user_info round-tripped through the
 // gtkhx_proto_parse_user_* C ABI; here we call the native parsers directly.
-use hotline_proto::parse::{parse_user_info, parse_user_list_record};
-use hotline_proto::wire::ChunkIter;
+use hxproto::parse::{parse_user_info, parse_user_list_record};
+use hxproto::wire::ChunkIter;
 
 /// Wire chunk types carried in a USER_LIST reply (hotline.h).
 const HTLS_DATA_USER_LIST: u16 = 0x012c;
@@ -123,7 +123,7 @@ fn gbool(b: bool) -> c_int {
 /// users this bug was visible to.
 unsafe fn cstring_wire_text(bytes: &[u8]) -> std::ffi::CString {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    std::ffi::CString::new(hotline_proto::text::to_utf8(&bytes[..end])).unwrap_or_default()
+    std::ffi::CString::new(hxproto::text::to_utf8(&bytes[..end])).unwrap_or_default()
 }
 
 /// Bytes of a NUL-terminated C string, or `None` for a NULL pointer.
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn hx_rcv_user_change(htlc: *mut c_void, frame: *const u8,
         return;
     }
     let buf = std::slice::from_raw_parts(frame, frame_len);
-    let uc = hotline_proto::parse::parse_user_change(buf, frame_len, 31);
+    let uc = hxproto::parse::parse_user_change(buf, frame_len, 31);
 
     let sess = hx_conn_sess(htlc.cast());
     let mut chat = chat_with_cid(sess, uc.cid);
@@ -278,7 +278,7 @@ pub unsafe extern "C" fn hx_rcv_user_change(htlc: *mut c_void, frame: *const u8,
 
     let self_name_bytes = optr_bytes(hx_conn_name(htlc.cast()));
 
-    let plan = hotline_proto::user_change::resolve(&hotline_proto::user_change::ChangeInput {
+    let plan = hxproto::user_change::resolve(&hxproto::user_change::ChangeInput {
         uid: uc.uid,
         name: &uc.name,
         got_color: uc.got_color,
@@ -424,7 +424,7 @@ pub unsafe extern "C" fn hx_rcv_user_part(htlc: *mut c_void, frame: *const u8, f
         return;
     }
     let buf = std::slice::from_raw_parts(frame, frame_len);
-    let pm = hotline_proto::parse::parse_user_part(buf, frame_len);
+    let pm = hxproto::parse::parse_user_part(buf, frame_len);
 
     let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, pm.cid);

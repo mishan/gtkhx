@@ -22,7 +22,7 @@ hxmodel = { path = "../hxmodel" }
 gtkhx-ui = { path = "../gtkhx-ui" }
 
 # --- protocol core ---
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }
 hxnet = { path = "../hxnet" }
 hxbridge = { path = "../hxbridge", features = ["runtime"] }
 

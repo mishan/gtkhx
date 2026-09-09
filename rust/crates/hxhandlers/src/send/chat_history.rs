@@ -3,14 +3,14 @@
 //!
 //! Cap-gates on `CAP_CHAT_HISTORY` (sending TRAN 700 to a server that didn't echo
 //! the bit earns a task error every time), builds the request chunks with the
-//! **native** `hotline_proto::build::build_get_chat_history_chunks`, and hands
+//! **native** `hxproto::build::build_get_chat_history_chunks`, and hands
 //! them to `hlwrite_chunks`. The caller registers the `rcv_task_chat_history`
 //! reply task *before* calling — the task is keyed on `htlc->trans`, which
 //! `hlwrite_chunks` consumes — so this crate stays free of the task table, same
 //! contract as the C original.
 //!
 //! The pure chunk-builder stays reachable to the integration harness via the
-//! `hx_get_chat_history_build_chunks` C-ABI shim in hotline-proto; only the
+//! `hx_get_chat_history_build_chunks` C-ABI shim in hxproto; only the
 //! cap-gate + write wrapper lives here. Exports the exact `hx_get_chat_history`
 //! C ABI so its callers (chat.c's Load-older flow, `hx_post_login_fetches`) link
 //! unchanged.
@@ -18,8 +18,8 @@
 use std::os::raw::{c_int, c_void};
 
 use glib::ffi::{gboolean, GFALSE, GTRUE};
-use hotline_proto::build::{self, GetChatHistoryRequest, HxChunk};
-use hotline_proto::messages::ClientHdr;
+use hxproto::build::{self, GetChatHistoryRequest, HxChunk};
+use hxproto::messages::ClientHdr;
 
 /// `HTLC_CAP_CHAT_HISTORY` (bit 4, hotline.h) — the negotiated-cap bit that must
 /// be set before a TRAN 700 request is legal.

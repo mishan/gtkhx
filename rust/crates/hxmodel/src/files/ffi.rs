@@ -64,7 +64,7 @@ pub unsafe extern "C" fn gtkhx_files_kind_label_for(ftype: *const c_char) -> *co
 
 // ---- RemoteListing: the remote provider's path-navigation model ----------
 //
-// Opaque owned handle (same shape as hotline-proto's parse_dirlist /
+// Opaque owned handle (same shape as hxproto's parse_dirlist /
 // parse_catlist). The C `HxRemoteFilesProvider` holds one and delegates all
 // path math + the sticky listing-error flag to it, keeping only the
 // GListStore, the FILE_LIST RPC send, the no-reply watchdog, and the

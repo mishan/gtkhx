@@ -50,7 +50,7 @@
  * before reaching the typed view — this view is best-effort.
  *
  * scalar / bool readers + enum-clamp logic moved to the
- * Rust hotline-proto crate. The strict-size + closed-vocab
+ * Rust hxproto crate. The strict-size + closed-vocab
  * behaviour is preserved byte-for-byte; the thin wrappers below
  * keep the in-file call shape so the on_tlv switch is unchanged.
  * Strings stay in C because they need g_utf8_make_valid +

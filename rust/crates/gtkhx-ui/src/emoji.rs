@@ -9,7 +9,7 @@
 //!   * `hx_emoji_typeahead_attach` / `_detach` — a keyboard-driven
 //!     `:prefix` popover of matching shortcodes (Up/Down select,
 //!     Tab/Enter commit, Esc dismiss). The match list comes from
-//!     `hotline_proto::emoji::shortcode_matches` (native Rust); this module
+//!     `hxproto::emoji::shortcode_matches` (native Rust); this module
 //!     owns only the GTK wiring.
 //!
 //! The three C ABI entry points are preserved so chat.c / msg.c (and the
@@ -233,7 +233,7 @@ fn ta_update(ta: &EmojiTypeahead) {
         return;
     };
 
-    let matches = hotline_proto::emoji::shortcode_matches(&prefix, TA_MAX_MATCHES);
+    let matches = hxproto::emoji::shortcode_matches(&prefix, TA_MAX_MATCHES);
     if matches.is_empty() {
         ta_hide(ta);
         return;

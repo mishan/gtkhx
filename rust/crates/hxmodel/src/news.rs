@@ -91,7 +91,7 @@ pub unsafe extern "C" fn hx_news_thread_parent_indices(
     // Defensive slice-size ceiling: `slice::from_raw_parts` is UB if the total
     // byte size exceeds `isize::MAX`. A corrupt/hostile `n` (e.g. a bogus
     // `group->post_count`) must fail closed here, before the deref — matching
-    // the `len <= isize::MAX` guards on hotline-proto's FFI shims. Each of the
+    // the `len <= isize::MAX` guards on hxproto's FFI shims. Each of the
     // three arrays holds `n` 4-byte elements (`u32` / `c_int`).
     if n > isize::MAX as usize / std::mem::size_of::<u32>() {
         return;

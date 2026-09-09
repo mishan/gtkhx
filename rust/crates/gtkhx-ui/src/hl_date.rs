@@ -1,13 +1,13 @@
 //! View-side formatting of Hotline wire timestamps.
 //!
 //! The wire *decode* (which of the two formats, sentinel + range checks) is the
-//! protocol layer's job — `hotline_proto::hl_date::parse_hl_date`. Turning the
+//! protocol layer's job — `hxproto::hl_date::parse_hl_date`. Turning the
 //! result into an absolute instant (the modern format is relative to Jan 1 of
 //! its year in *local* time) and formatting it for display is the view's, via
 //! `glib::DateTime` (local timezone, strftime-style format codes). This is where
 //! the old C `news_recv_bridge.c::post_date_format` + `hl_date.c` lived.
 
-use hotline_proto::hl_date::{parse_hl_date, HlDate, MAC_TO_UNIX_EPOCH_OFFSET};
+use hxproto::hl_date::{parse_hl_date, HlDate, MAC_TO_UNIX_EPOCH_OFFSET};
 use std::os::raw::c_void;
 
 // The post timestamp type comes from hxmodel::news directly now. This module

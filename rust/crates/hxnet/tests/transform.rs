@@ -270,7 +270,7 @@ async fn connection_spawn_boxed_over_aead_plus_gzip() {
         compose(right_inner, right_cipher, CompressionKind::Gzip).unwrap();
 
     // Hand-build a minimal Hotline header. Layout per
-    // hotline_proto::parse::Header is:
+    // hxproto::parse::Header is:
     //   type(4) + trans(4) + flag(4) + len(4) + len2(4) + hc(2)
     // = 22 bytes. The read path frames by `len2` (offset 16 = DataSize,
     // this frame's byte count), NOT `len` (offset 12 = TotalSize) — see
@@ -279,12 +279,12 @@ async fn connection_spawn_boxed_over_aead_plus_gzip() {
     // they're equal, and a real sender (gtkhx's hlpack) sets both; set
     // both here so decode_header_full reports the right body_len.
     let body = b"transform-stack actor round trip".to_vec();
-    let mut frame = vec![0u8; hotline_proto::HL_HDR_LEN + body.len()];
+    let mut frame = vec![0u8; hxproto::HL_HDR_LEN + body.len()];
     let len_wire = (body.len() as u32) + 2;
     let len_off = 4 + 4 + 4; // after type, trans, flag
     frame[len_off..len_off + 4].copy_from_slice(&len_wire.to_be_bytes());
     frame[len_off + 4..len_off + 8].copy_from_slice(&len_wire.to_be_bytes()); // len2
-    frame[hotline_proto::HL_HDR_LEN..].copy_from_slice(&body);
+    frame[hxproto::HL_HDR_LEN..].copy_from_slice(&body);
 
     // Push it in via the right side; shut down so the writer
     // half closes its compressed frame deterministically.

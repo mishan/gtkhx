@@ -3,7 +3,7 @@
 //!
 //! Thin wrappers that emit the client-initiated voice transactions
 //! (600 JOIN / 601 LEAVE / 603 SDP_ANSWER / 604 ICE / 606 MUTE): cap-gate,
-//! build the wire chunks with the **native** `hotline_proto::voice` builders
+//! build the wire chunks with the **native** `hxproto::voice` builders
 //! (not the C-ABI `gtkhx_proto_build_*` shims — the whole build flow is Rust),
 //! register the reply task (except 604, a bidirectional notification with no
 //! reply), and hand the chunks to `hlwrite_chunks`. Exports the exact
@@ -11,7 +11,7 @@
 //! voice modules (`voice_panel`, `voice_ptt` in gtkhx-ui) keep reaching it
 //! through their existing externs.
 //!
-//! A lean dedicated crate (only `glib` + the pure `hotline-proto`, no GTK) so
+//! A lean dedicated crate (only `glib` + the pure `hxproto`, no GTK) so
 //! it's `cargo test`-able — the builders run natively and the C send-path
 //! primitives are stubbed in the test module — and so the C send-path unit
 //! test can link just this staticlib. Built + linked only when voice is
@@ -28,11 +28,11 @@
 use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 
-use hotline_proto::build::HxChunk;
-use hotline_proto::messages::ClientHdr;
-use hotline_proto::voice;
+use hxproto::build::HxChunk;
+use hxproto::messages::ClientHdr;
+use hxproto::voice;
 
-// Wire opcodes — the single source of truth is hotline_proto::messages::
+// Wire opcodes — the single source of truth is hxproto::messages::
 // ClientHdr (the repr(u32) HTLC_HDR_* enum), not re-spelled magic numbers.
 const HTLC_HDR_VOICE_JOIN: u32 = ClientHdr::VoiceJoin as u32;
 const HTLC_HDR_VOICE_LEAVE: u32 = ClientHdr::VoiceLeave as u32;

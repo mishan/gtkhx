@@ -122,18 +122,18 @@ to work back to back.
 
 | Crate | Role |
 |---|---|
-| `hotline-proto` (`voice.rs`) | Typed wire builders/parsers for 600–606 and `0x01F5`–`0x01F9`; SDP shape parsing (mid labels, BUNDLE group, disabled-slot detection); the `RTCIceCandidateInit` JSON build/parse, hand-rolled rather than pulling in a JSON dependency for a bounded four-field shape. |
+| `hxproto` (`voice.rs`) | Typed wire builders/parsers for 600–606 and `0x01F5`–`0x01F9`; SDP shape parsing (mid labels, BUNDLE group, disabled-slot detection); the `RTCIceCandidateInit` JSON build/parse, hand-rolled rather than pulling in a JSON dependency for a bounded four-field shape. |
 | `hxvoice` | The pure state machine. `no_std`, zero non-Rust dependencies — no GLib, GStreamer, GTK, or OS surface — so its tests run in any container on any architecture regardless of audio devices. Every transition is `step(&mut self, Event) -> Vec<Action>`, which makes the spec's annotated lifecycle examples replayable verbatim as event traces. |
 | `hxvoice-runtime` | The GStreamer runtime: owns the pipeline, `webrtcbin`, and the state machine. Pumps events in and walks the action list. Bridges back to the UI through a `SignalCallbacks` FFI struct. |
 | `hxvoice-model` | `HxVoiceModel` — the per-uid voice presence GObject behind the user-list indicators. |
-| `hxvoice-send` | The client-initiated wire senders (`hx_send_voice_*`). Deliberately lean — only glib plus the pure `hotline-proto`, no GTK — so it is `cargo test`-able and the send-path unit test links just that staticlib. |
+| `hxvoice-send` | The client-initiated wire senders (`hx_send_voice_*`). Deliberately lean — only glib plus the pure `hxproto`, no GTK — so it is `cargo test`-able and the send-path unit test links just that staticlib. |
 | `gtkhx-ui` (`voice_panel.rs`, `voice_ptt.rs`, `users_voice_col.rs`) | The per-chat-tab toolbar, the push-to-talk key controller, and the user-list indicator column. Behind the crate's `voice` Cargo feature. |
 
 ### C
 
 | File | Role |
 |---|---|
-| `src/hotline.h` | `HTLC_HDR_VOICE_*` 600–606 and `HTLC_DATA_VOICE_*` `0x01F5`–`0x01F9` integer aliases for switch-case readability in `rcv.c`. The canonical typed definitions are in `hotline-proto`. |
+| `src/hotline.h` | `HTLC_HDR_VOICE_*` 600–606 and `HTLC_DATA_VOICE_*` `0x01F5`–`0x01F9` integer aliases for switch-case readability in `rcv.c`. The canonical typed definitions are in `hxproto`. |
 | `src/hl_access.h` | `HL_ACCESS_VOICE_CHAT` (bit 55). |
 | `src/voice.h` | The `hx_send_voice_*` C ABI the receive path calls; implemented by `hxvoice-send`. |
 | `src/voice_runtime.h` | The opaque-handle FFI surface for the Rust runtime — construction, event injection, device enumeration, signal callbacks. |
@@ -476,7 +476,7 @@ strips the kernel route the server-reflexive candidate path needs — and
 because host networking makes the container's listen ports the host
 ports, its config pins the published numbers directly.
 
-Wire-fixture tests in `hotline-proto` and state-machine tests in
+Wire-fixture tests in `hxproto` and state-machine tests in
 `hxvoice` are the unit floor; the integration suite covers the
 live-wire shapes those tiers can't replicate (join, SDP round-trip, ICE
 trickle, mute, implicit leave, participants, disconnect cleanup, and

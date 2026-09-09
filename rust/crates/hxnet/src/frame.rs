@@ -1,8 +1,8 @@
 //! Plaintext Hotline frame: header + body.
 //!
 //! A frame is a 22-byte `hl_hdr` (decoded via
-//! [`hotline_proto::parse::decode_header_full`] into a
-//! [`hotline_proto::parse::HeaderDecoded`]) plus a body of
+//! [`hxproto::parse::decode_header_full`] into a
+//! [`hxproto::parse::HeaderDecoded`]) plus a body of
 //! `wire_len - 2` bytes. The minus-2 is for the `hc`
 //! (chunk-count) field, which the wire-protocol header counts
 //! as part of `len` but `HeaderDecoded::body_len` has already
@@ -15,11 +15,11 @@
 //! [`crate::connection`] reads one at a time off the wire and
 //! emits an [`Event::Frame`](crate::Event::Frame) per frame.
 //! Higher-level event decoding (Chat, Msg, UserCreate, …) layers
-//! on top by calling the relevant `hotline_proto::parse` functions
+//! on top by calling the relevant `hxproto::parse` functions
 //! against `frame.body`.
 
-use hotline_proto::parse::{decode_header_full, HeaderDecoded};
-use hotline_proto::HL_HDR_LEN;
+use hxproto::parse::{decode_header_full, HeaderDecoded};
+use hxproto::HL_HDR_LEN;
 
 /// Maximum body byte count the actor will accept on a single
 /// frame. Matches `MAX_HOTLINE_PACKET_LEN` from `src/compat.h`

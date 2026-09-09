@@ -11,7 +11,7 @@
  * Inline-media extension client-side helpers (Phase 9.A).
  *
  * Wire shape and per-opcode builder/parser logic lives in the Rust
- * crate (rust/crates/hotline-proto/src/inline_media.rs). This file
+ * crate (hxproto::inline_media). This file
  * holds:
  *
  *   - inline_media_cap_ok: per-send cap gate.

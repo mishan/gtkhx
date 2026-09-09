@@ -14,7 +14,7 @@ crate-type = ["rlib"]
 
 # glib for the GHashTable FFI (sess->tasks stays a real GHashTable that
 # network.c's teardown iterates directly) + g_malloc0 / g_strdup / g_free +
-# g_malloc/g_free on the send path; hotline-proto for the HxChunk (type, len,
+# g_malloc/g_free on the send path; hxproto for the HxChunk (type, len,
 # data) triple the send primitive takes. No gtk. The rest of the C environment —
 # the session/htlc field accessors (tasks_bridge.c), the task-update signal emit
 # (gtkhx-core), gtask_delete_tsk (tasks.c), and the send side's frame packer /
@@ -24,5 +24,5 @@ crate-type = ["rlib"]
 # headless.
 [dependencies]
 gtkhx-core = { path = "../gtkhx-core" }
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }
 glib = { workspace = true }

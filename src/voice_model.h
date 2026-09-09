@@ -102,7 +102,7 @@ extern HxVoiceModel *hx_voice_model_new (void);
 
 /* Update presence + mute state from a freshly-arrived
  * VOICE_PARTICIPANTS blob (the 6-byte-per-entry packed binary as
- * defined in hotline_proto::voice). `blob` may be NULL with
+ * defined in hxproto::voice). `blob` may be NULL with
  * `len == 0` for an empty room. uids absent from the new blob
  * transition to NONE; uids present transition to IN_VOICE/MUTED
  * depending on bit 0 of their flags field (per fogWraith

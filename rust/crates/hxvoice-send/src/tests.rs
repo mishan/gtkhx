@@ -1,15 +1,15 @@
 //! Send-path unit tests, ported from `tests/proto/test_voice.c` (the
-//! `/proto/voice/send/*` cases). The native `hotline_proto::voice` builders
+//! `/proto/voice/send/*` cases). The native `hxproto::voice` builders
 //! run for real; the C send-path primitives are stubbed here (recording the
 //! chunks the wrapper handed to `hlwrite_chunks`) so the cargo-test build
 //! needs no network.c / tasks.c / rcv.c. The `/proto/voice/parse/*` cases
-//! stay in test_voice.c — they exercise hotline-proto's C ABI directly and
+//! stay in test_voice.c — they exercise hxproto's C ABI directly and
 //! don't touch the senders.
 
 use super::*;
 use std::cell::{Cell, RefCell};
 
-use hotline_proto::build::HxChunk;
+use hxproto::build::HxChunk;
 
 // Data-chunk tags + opcodes the assertions pin (hotline.h).
 const TAG_CHAT_ID: u16 = 0x0072;

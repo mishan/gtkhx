@@ -40,8 +40,8 @@
 
 use std::io;
 
-use hotline_proto::build::{pack_message, pack_message_size, PackChunk};
-use hotline_proto::messages::tag;
+use hxproto::build::{pack_message, pack_message_size, PackChunk};
+use hxproto::messages::tag;
 
 use crate::login::HTLC_HDR_LOGIN;
 use crate::login_reply::{
@@ -603,7 +603,7 @@ mod tests {
         };
         let frame = build_step2_login(&req).expect("build");
 
-        use hotline_proto::wire::ChunkIter;
+        use hxproto::wire::ChunkIter;
         let mut saw_cipher = false;
         let mut saw_login = false;
         for chunk in ChunkIter::over_message(&frame, frame.len()) {
@@ -661,8 +661,8 @@ mod tests {
         assert_eq!(&frame[0..4], &HTLC_HDR_LOGIN.to_be_bytes());
 
         // Body should contain XOR'd login somewhere. Walk
-        // chunks via hotline-proto.
-        use hotline_proto::wire::ChunkIter;
+        // chunks via hxproto.
+        use hxproto::wire::ChunkIter;
         let mut found_login = false;
         let mut found_password_mac = false;
         for chunk in ChunkIter::over_message(&frame, frame.len()) {

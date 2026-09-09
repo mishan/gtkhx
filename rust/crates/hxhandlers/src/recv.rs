@@ -2,7 +2,7 @@
 //! live in `rcv.c`, one module per protocol domain.
 //!
 //! Each was its own crate before the step 3 consolidation. They share the same
-//! shape: parse the frame (natively via `hotline-proto`, or take an
+//! shape: parse the frame (natively via `hxproto`, or take an
 //! already-parsed one from the C dispatcher), consult the model, emit the
 //! matching `GtkhxSession` signal, and return a discriminant telling the C
 //! caller which branch was taken.

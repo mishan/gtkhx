@@ -10,7 +10,7 @@
 //! Everything the dialog needs is native Rust now: the two Hotline date stamps
 //! format through [`crate::hl_date::format_wire`] (no raw-bytes → C round-trip),
 //! and the Save button builds the FILE_SETINFO request with
-//! `hotline_proto::build::build_file_setinfo_chunks` + the Rust send primitive.
+//! `hxproto::build::build_file_setinfo_chunks` + the Rust send primitive.
 //! What stays on the C ABI is leaf glue: the active-connection accessor, the
 //! path helpers (`dirchar_basename` / `path_to_hldir`), the task table +
 //! `hlwrite_chunks`, and `human_size`.
@@ -22,7 +22,7 @@ use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use hotline_proto::build::{build_file_setinfo_chunks, FileSetInfoRequest, HxChunk};
+use hxproto::build::{build_file_setinfo_chunks, FileSetInfoRequest, HxChunk};
 
 use crate::ffi as cffi;
 use crate::tr::tr;

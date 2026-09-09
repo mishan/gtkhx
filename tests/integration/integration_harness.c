@@ -1812,7 +1812,7 @@ integration_send_agreementagree_hope (int fd, struct htlc_conn *htlc,
                                       const char *display_name, guint16 icon)
 {
     /* Drive the same chunk builder production uses
-     * (gtkhx_proto_build_agreement_agree_chunks, hotline-proto).
+     * (gtkhx_proto_build_agreement_agree_chunks, hxproto).
      * Wire shape: icon as u16 BE, display name as raw bytes, options
      * as u16 BE (zero from production; the chunk is mandatory or
      * Mobius panics — see hx_send_agreement_agree's comment). Janus

@@ -1,0 +1,14 @@
+[package]
+name = "gtkhx-proto-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+rust-version.workspace = true
+description = "Static-library facade for GtkHx protocol tests"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+hxproto = { workspace = true }

@@ -1,7 +1,7 @@
 //! `hxhandlers` — the Hotline protocol handler layer.
 //!
 //! Ten crates that were the same crate wearing ten hats. Every one was thin
-//! glue of an identical shape — parse a frame via `hotline-proto`, apply a
+//! glue of an identical shape — parse a frame via `hxproto`, apply a
 //! gate, emit a `GtkhxSession` signal, hand a discriminant back to the C
 //! caller — and they shared their dependencies, their consumers, and their
 //! position in the old hand-ordered link line. Three were under 250 lines.

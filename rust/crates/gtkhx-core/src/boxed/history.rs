@@ -67,7 +67,7 @@ unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
 /// `HxHistoryEntry *hx_history_entry_parse (data, len)` — decode one packed
 /// `HTLS_DATA_HISTORY_ENTRY` chunk body into a heap `HxHistoryEntry`, or NULL on
 /// a malformed entry (too short, or a declared length running past the buffer).
-/// The packed-binary decode itself is `hotline_proto::parse::parse_history_entry`
+/// The packed-binary decode itself is `hxproto::parse::parse_history_entry`
 /// (24-byte fixed header + nick + message + best-effort mini-TLV walk); this wraps
 /// it with the glib allocation the entry's owner expects. Caller frees via
 /// [`hx_history_entry_free`].
@@ -83,7 +83,7 @@ pub unsafe extern "C" fn hx_history_entry_parse(
         return ptr::null_mut();
     }
     let s = std::slice::from_raw_parts(data, len);
-    let Some(e) = hotline_proto::parse::parse_history_entry(s) else {
+    let Some(e) = hxproto::parse::parse_history_entry(s) else {
         return ptr::null_mut();
     };
     let entry = g_malloc0(size_of::<HxHistoryEntry>()) as *mut HxHistoryEntry;

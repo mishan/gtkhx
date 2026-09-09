@@ -662,8 +662,8 @@ struct hl_user_data {
  * the bit to advertise SFU support, and clients that don't negotiate
  * the cap never emit or receive these opcodes.
  *
- * The canonical typed definitions live in the Rust hotline-proto
- * crate (rust/crates/hotline-proto/src/messages.rs); these C #defines
+ * The canonical typed definitions live in the Rust hxproto
+ * crate (hxproto::messages); these C #defines
  * are integer aliases for switch-case readability in rcv.c. Same
  * dual-define convention as HTLC_HDR_GET_CHAT_HISTORY above. */
 #define HTLC_HDR_VOICE_JOIN ((guint32)0x00000258)       /* 600 client->server */

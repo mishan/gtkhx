@@ -13,7 +13,7 @@
 //!
 //! [`task_new`]: crate::task_new
 //!
-//! The frame is packed **natively in Rust** via `hotline_proto` (the same
+//! The frame is packed **natively in Rust** via `hxproto` (the same
 //! builder the old C `hlpack_chunks` wrapper delegated to), so nothing bounces
 //! back out to C to build bytes — and the wire format is byte-for-byte unchanged
 //! (1.2 / 1.5 / 1.9 compat is a hard requirement). The only C this reaches into
@@ -27,10 +27,10 @@
 
 use std::os::raw::{c_char, c_int};
 
-use hotline_proto::build::HxChunk;
+use hxproto::build::HxChunk;
 // Native pack (no C detour): the same builder the C `hlpack_chunks` wrapper
 // called, reached directly as a Rust function.
-use hotline_proto::ffi::{gtkhx_proto_pack_message, gtkhx_proto_pack_message_size};
+use hxproto::ffi::{gtkhx_proto_pack_message, gtkhx_proto_pack_message_size};
 
 use crate::HtlcConn;
 
@@ -201,7 +201,7 @@ pub unsafe extern "C" fn hlwrite_chunks(
 
 // ---- test doubles for the C environment ------------------------------------
 //
-// The pack itself runs for real (hotline-proto is a normal Cargo dependency, so
+// The pack itself runs for real (hxproto is a normal Cargo dependency, so
 // `cargo test` links the true builder). Only the C environment is doubled: each
 // test drives the branch matrix through a thread-local `Env`, setting the inputs
 // (fd liveness, whether the bridge is installed, the send return code) and

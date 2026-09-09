@@ -75,7 +75,7 @@ extern gboolean htxf_connect (struct htxf_conn *htxf);
 /* The control-channel send primitive. Packs the (type, flag, chunk-array)
  * message and hands the bytes to hxnet, tearing the connection down on a send
  * failure. Defined in Rust (hxtask::send); the wire format is built natively by
- * hotline-proto. The old variadic hlwrite front door was dead in production and
+ * hxproto. The old variadic hlwrite front door was dead in production and
  * has been retired — build a struct hx_chunk[] and call this directly. */
 struct hx_chunk;
 extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,

@@ -11,7 +11,7 @@ publish = false
 # FFO/FILP frame + HFS fork math lives here as pure logic so it is fully
 # unit-testable headless. The worker state machines (tokio) and the
 # C-ABI surface land in later increments and will pull hxnet /
-# hotline-proto; this codec layer deliberately has no dependencies.
+# hxproto; this codec layer deliberately has no dependencies.
 [lib]
 # staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
 # single archive the gtkhx binary links. The standalone staticlib exists

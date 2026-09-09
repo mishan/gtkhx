@@ -7,7 +7,7 @@
 //! HTLC_HDR_MSG_BROADCAST. `gtkhx_broadcast_dialog_open` keeps the C-callback
 //! ABI so toolbar.c's Broadcast button connects to it.
 //!
-//! The whole build flow is native Rust (hotline_proto::build); what stays C
+//! The whole build flow is native Rust (hxproto::build); what stays C
 //! behind the FFI seam is the send-path infrastructure: the Mac-Roman/UTF-8
 //! wire text encoder (`gtkhx_text_for_wire`, text_util.c), the task table
 //! (`task_new`), the write primitive (`hlwrite_chunks`, network.c), and the
@@ -22,8 +22,8 @@ use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use hotline_proto::build::{build_broadcast_chunks, BroadcastRequest, HxChunk};
-use hotline_proto::messages::ClientHdr;
+use hxproto::build::{build_broadcast_chunks, BroadcastRequest, HxChunk};
+use hxproto::messages::ClientHdr;
 
 use crate::tr::tr;
 

@@ -307,7 +307,7 @@ block rules to suppress exactly the constructs listed above; its event
 stream would still need converting into byte-ranged spans, which is most
 of the work; and a scanner for a handful of constructs is exhaustively
 unit-testable and predictable on the pathological input chat actually
-produces. `hotline-proto` is hand-written for the same reasons.
+produces. `hxproto` is hand-written for the same reasons.
 
 **Send side — what goes on the wire is the literal text.** The protocol
 carries plain text, so `**bold**` is transmitted as `**bold**`. Other
@@ -585,7 +585,7 @@ The findings:
 - **Nothing else consumed them.** The news viewers, agreement window,
   user-info window and broadcast dialog are all `GtkTextView` and ignore
   escapes entirely. xtext was the only consumer.
-- **A server could not inject them anyway.** `hotline-proto`'s
+- **A server could not inject them anyway.** `hxproto`'s
   `strip_ansi` (`sanitize.rs`) folds bytes 14–30 into the printable range
   on every received text field.
 

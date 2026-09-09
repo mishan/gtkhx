@@ -1,7 +1,7 @@
 //! `hxtext` — text encoding + emoji-shortcode helpers (the Rust port of
 //! `src/text_util.c`).
 //!
-//! Three jobs, all delegating to hotline-proto's **native** primitives (no
+//! Three jobs, all delegating to hxproto's **native** primitives (no
 //! C-ABI `gtkhx_proto_*` shim, no glib `g_convert`):
 //!
 //!   * `gtkhx_text_to_utf8` — decode wire bytes to UTF-8 (fast-path
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn gtkhx_text_to_utf8(
     let cap = len * 3 + 1;
     let buf = glib::ffi::g_malloc(cap) as *mut u8;
     let dst = std::slice::from_raw_parts_mut(buf, len * 3);
-    let written = hotline_proto::text::to_utf8_into(input, dst);
+    let written = hxproto::text::to_utf8_into(input, dst);
     *buf.add(written) = 0;
     // Shrink to the bytes actually used (+ the NUL); the leading `written + 1`
     // bytes — including the NUL just written — are preserved across the move.
@@ -161,13 +161,13 @@ pub unsafe extern "C" fn gtkhx_text_for_wire(
     // Rewrite emoji → `:shortcode:` so they survive Mac Roman as readable
     // text instead of the `?` fallback (unless the toggle is off / empty).
     let sc: String = if emoji_shortcodes_on() && utf8_len > 0 {
-        hotline_proto::emoji::emoji_to_shortcodes(&text)
+        hxproto::emoji::emoji_to_shortcodes(&text)
     } else {
         text.into_owned()
     };
 
     // Encode the shortcoded UTF-8 to Mac Roman (`?` for out-of-repertoire).
-    let mut wire = hotline_proto::text::from_utf8(&sc);
+    let mut wire = hxproto::text::from_utf8(&sc);
 
     // Body fields: LF → CR for legacy clients (spec: legacy servers expect
     // CR-terminated lines on the wire).

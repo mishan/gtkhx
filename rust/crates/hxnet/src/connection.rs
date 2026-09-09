@@ -39,7 +39,7 @@
 
 use std::io;
 
-use hotline_proto::parse::{decode_header_full, HeaderDecoded};
+use hxproto::parse::{decode_header_full, HeaderDecoded};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -47,7 +47,7 @@ use tokio::task::JoinHandle;
 use crate::{Command, Event, Frame, ShutdownReason, MAX_BODY_LEN};
 
 /// Header size on the wire (`hl_hdr` = 22 bytes).
-const HL_HDR_LEN: usize = hotline_proto::HL_HDR_LEN;
+const HL_HDR_LEN: usize = hxproto::HL_HDR_LEN;
 
 /// Default capacity of the event channel (actor → consumer).
 /// 64 buffers a typical chat burst without locking out the

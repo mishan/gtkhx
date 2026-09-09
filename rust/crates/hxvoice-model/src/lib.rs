@@ -181,8 +181,8 @@ impl HxVoiceModel {
                  {MAX_PARTICIPANTS}. uids past the cap are treated as leavers."
             );
         }
-        let parts: Vec<hotline_proto::voice::Participant> =
-            hotline_proto::voice::parse_voice_participants(blob)
+        let parts: Vec<hxproto::voice::Participant> =
+            hxproto::voice::parse_voice_participants(blob)
                 .take(MAX_PARTICIPANTS)
                 .collect();
 
@@ -348,7 +348,7 @@ pub unsafe extern "C" fn hx_voice_model_ingest_participants(
     }
     // Guard from_raw_parts' precondition: NULL base or len past isize::MAX is
     // UB. A buggy / attacker-controlled caller could pass an out-of-range
-    // size_t; treat it as empty (same convention as hotline-proto's as_slice /
+    // size_t; treat it as empty (same convention as hxproto's as_slice /
     // hxvoice-runtime's room_status).
     let slice: &[u8] = if blob.is_null() || len == 0 || len > isize::MAX as usize {
         &[]

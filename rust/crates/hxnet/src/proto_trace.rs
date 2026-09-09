@@ -18,8 +18,8 @@
 
 use std::sync::OnceLock;
 
-use hotline_proto::parse::decode_header_full;
-use hotline_proto::wire::ChunkIter;
+use hxproto::parse::decode_header_full;
+use hxproto::wire::ChunkIter;
 
 /// Cheap once-checked gate: enabled when `GTKHX_DEBUG` contains the
 /// `proto` (or `all`) category, matching `src/debug.c`'s parsing.

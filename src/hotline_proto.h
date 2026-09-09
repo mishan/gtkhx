@@ -13,8 +13,8 @@
  */
 
 /*
- * FFI prototypes for the Phase R2 `hotline-proto` Rust crate
- * (rust/crates/hotline-proto). These are hand-declared rather than
+ * FFI prototypes for the Phase R2 `hxproto` Rust crate
+ * (the hxproto crate in hx-libs). These are hand-declared rather than
  * cbindgen-generated — the same discipline the Phase R1 crypto crates
  * use: a signature mismatch surfaces as an undefined symbol at link
  * time, which is enough for this small, opaque-pointer-free surface.
@@ -402,7 +402,7 @@ struct gtkhx_proto_history_entry {
 /* Pin the C-ABI mirror size so any padding / alignment drift across
  * compilers or targets is caught at build time rather than turning
  * into memory corruption on the Rust side (the #[repr(C)] mirror
- * HistoryEntryOut in rust/crates/hotline-proto/src/ffi.rs has to
+ * HistoryEntryOut in hxproto::ffi has to
  * match exactly). Layout: u64 (8) + i64 (8) + 6×u16 (flags +
  * icon_id + nick_off + nick_len + msg_off + msg_len = 12) =
  * 28 bytes of data + 4 bytes of trailing alignment-to-8 padding
@@ -854,11 +854,18 @@ extern int32_t gtkhx_proto_build_news_delete_chunks (const uint8_t *path_ptr,
                                                      struct hx_chunk *chunks,
                                                      size_t chunks_cap);
 
+/* Original ABI: one NEWSPATH containing the complete destination path.
+ * Retained for compatibility; new code should use the named form below. */
+extern int32_t gtkhx_proto_build_news_mkdir_chunks (const uint8_t *path_ptr,
+                                                    size_t path_len,
+                                                    struct hx_chunk *chunks,
+                                                    size_t chunks_cap);
+
 /* HTLC_HDR_MAKENEWSDIR: NEWSPATH (the *parent* folder) + FILE_NAME (the
  * new folder). chunks_cap >= 2. Returns 2 on success, 0 on validation
  * failure. Not the NEWSCATLIST shape: the server resolves the path as an
  * existing directory, so the new name cannot ride in it. */
-extern int32_t gtkhx_proto_build_news_mkdir_chunks (
+extern int32_t gtkhx_proto_build_news_mkdir_named_chunks (
     const uint8_t *path_ptr, size_t path_len, const uint8_t *name_ptr,
     size_t name_len, struct hx_chunk *chunks, size_t chunks_cap);
 
@@ -1219,7 +1226,7 @@ extern bool gtkhx_proto_htxf_hdr_pack (uint8_t *out, size_t out_cap,
  *
  * struct hx_chunk is the chunk-array element type already shared with
  * proto_helpers.h — its layout is { guint16 type; guint16 len;
- * const void *data; }, mirrored byte-for-byte by hotline-proto::build's
+ * const void *data; }, mirrored byte-for-byte by hxproto::build's
  * #[repr(C)] HxChunk (the Rust mirror calls the first field `tag` because
  * `type` is a Rust keyword, but the ABI is identical). */
 
@@ -1366,7 +1373,7 @@ extern size_t gtkhx_proto_shortcode_matches (const uint8_t *prefix, size_t len,
  *
  * Builders for HTLC_HDR_VOICE_* and parsers for HTLS_HDR_VOICE_* /
  * VOICE_ROOM_STATUS / the JOIN reply, all defined in
- * rust/crates/hotline-proto/src/voice.rs. The C-side wrapper sits
+ * hxproto::voice. The C-side wrapper sits
  * in src/voice.{h,c}; rcv.c dispatches the 600-606 family through
  * the parsers below.
  *
@@ -1747,8 +1754,8 @@ extern size_t gtkhx_proto_parse_icon_list (const uint8_t *buf, size_t len,
 /*
  * Receive-dispatch routing. hx_dispatch_frame calls hx_recv_route(type) to map
  * a server frame's opcode to a handler category, then switches on the result to
- * pick the body handler. This enum mirrors hotline-proto's dispatch::HandlerKind
- * (rust/crates/hotline-proto/src/dispatch.rs) — the values must stay in lockstep
+ * pick the body handler. This enum mirrors hxproto's dispatch::HandlerKind
+ * (hxproto::dispatch) — the values must stay in lockstep
  * with the Rust discriminants. The composite-TASK mask (folding a now-fixed
  * Heidrun quirk where the TASK reply echoed the request opcode in the low u16,
  * kept defensively for older deployments) is applied inside hx_recv_route, so
@@ -1778,7 +1785,7 @@ typedef enum {
 extern hx_recv_handler_kind hx_recv_route (guint32 opcode);
 
 /* Decoded 8-byte Hotline wire timestamp (mirror of #[repr(C)] GtkhxProtoHlDate
- * in hotline-proto's ffi.rs). `kind` is 0 = Mac 1904 epoch, 1 = modern. The
+ * in hxproto's ffi.rs). `kind` is 0 = Mac 1904 epoch, 1 = modern. The
  * caller resolves this to an absolute instant + display string (local-tz
  * calendar math, e.g. GDateTime) — the decode is protocol, the format is view. */
 struct gtkhx_proto_hl_date {

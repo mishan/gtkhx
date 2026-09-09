@@ -512,11 +512,11 @@ impl SessionMachine {
             (SessionState::OfferPending, Event::WebrtcAnswerCreated { sdp }) => {
                 let cid = self.active_cid.unwrap_or(0);
                 // The wire-format build runs in the runtime layer
-                // (we don't link hotline-proto here to keep the
+                // (we don't link hxproto here to keep the
                 // crate free of crate-graph deps). The state
                 // machine carries the SDP string in the body; the
                 // runtime translates to chunks via
-                // hotline_proto::voice::build_voice_answer_chunks
+                // hxproto::voice::build_voice_answer_chunks
                 // before calling hlwrite_chunks.
                 let mut answer_actions = vec![
                     Action::SetLocalDescription { sdp: sdp.clone() },
@@ -1113,9 +1113,9 @@ impl SessionMachine {
 //
 // The state machine produces wire-frame bodies as opaque Vec<u8>
 // rather than typed chunk arrays so it doesn't have to depend on
-// hotline-proto's HxChunk surface. The runtime side translates
+// hxproto's HxChunk surface. The runtime side translates
 // these into the actual chunks by calling
-// hotline_proto::voice::build_voice_*_chunks just before handing
+// hxproto::voice::build_voice_*_chunks just before handing
 // them to hlwrite_chunks. The encoding here is the simplest
 // possible: a tagged payload the runtime side knows how to read.
 //
@@ -1178,11 +1178,11 @@ fn connection_state_for_session(s: SessionState) -> ConnectionState {
 
 // ---- Wire-protocol opcodes ----
 //
-// Re-declared here rather than imported from `hotline-proto::messages`
+// Re-declared here rather than imported from `hxproto::messages`
 // so this crate stays dep-free. The numeric values are pinned by
 // the spec-matched test fixture at the bottom of this file's
 // tests module — see `crate::state::tests::wire_opcode_constants_match_spec`
-// (and the corresponding fixture in hotline-proto, which pins the
+// (and the corresponding fixture in hxproto, which pins the
 // same opcode numbers on its own).
 const HTLC_HDR_VOICE_JOIN: u32 = 600;
 const HTLC_HDR_VOICE_LEAVE: u32 = 601;
@@ -2468,7 +2468,7 @@ mod tests {
         // match on the module-local HTLC_HDR_VOICE_LEAVE constant
         // rather than the literal `601` so a future opcode-table
         // move (e.g. consolidating the wire-protocol numbers into
-        // hotline-proto::messages) doesn't silently leave the
+        // hxproto::messages) doesn't silently leave the
         // assertion checking a stale number.
         let leave_idx = acts
             .iter()
@@ -2728,10 +2728,10 @@ mod tests {
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
 
-    // ---- Sanity: opcode constants match hotline-proto ----
+    // ---- Sanity: opcode constants match hxproto ----
     //
     // The state machine deliberately doesn't depend on the
-    // hotline-proto crate (keeps it no_std-friendly), so these
+    // hxproto crate (keeps it no_std-friendly), so these
     // constants are re-declared from the spec. Pin the numeric
     // values here so a future tweak in either crate surfaces
     // the drift at test time.

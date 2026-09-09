@@ -2,7 +2,7 @@
  * tests/proto/test_inline_media.c — pin the C-side wire shape of
  * the fogWraith inline-media extension (Capabilities-Inline-Media.md).
  *
- * The Rust crate (hotline-proto::inline_media) has dense unit tests
+ * The Rust crate (hxproto::inline_media) has dense unit tests
  * for builders + parsers. What this file adds:
  *
  *   cap_gate  — inline_media_cap_ok refuses to send when CAP_INLINE_MEDIA

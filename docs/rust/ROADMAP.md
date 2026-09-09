@@ -37,22 +37,12 @@ Three motivations, locked in during the kickoff conversation:
    contributor expects to encounter when they file an issue and want to fix it.
    The C of 2003 is not.
 
-**Notably not a motivation: shipping a reusable `libhotline` crate for other
-clients.** We are producing one structurally — the leaf-up extraction naturally
-yielded a clean protocol crate in `hotline-proto` — but we do not optimize for
-external consumers and do not freeze APIs for them. If a TUI client ever wants
-it, it can vendor the version it likes.
-
-That remains the accurate description of today's intent, and it is a real
-constraint on the rest of the plan: it is why `hotline-proto` carries its C ABI
-unconditionally, why every crate is `publish = false` at `0.1.0`, and why we
-refactor `pub` signatures freely. `crate-layout.md` §5 sets out what would have
-to change to reverse it — a Cargo feature gating the C ABI, a rename away from
-the internal `hx*` prefix, a `missing_docs` pass, a semver commitment at `0.x`,
-and (for the crates that are hxd-derived and must stay GPL) an honest read of
-who the audience actually is. **If that work is ever taken up, this paragraph
-is the first thing to change** — otherwise the next person reading the roadmap
-will make choices that undo it.
+**Shared protocol code is now an explicit goal.** The leaf-up extraction yielded
+`hxproto`, and GtkHx and hxd-ng consume the same revision from
+[hx-libs](https://github.com/mishan/hx-libs). The dependency remains
+`publish = false` at `0.1.0`: git revisions, coordinated changes, and both
+projects' CI are the compatibility contract while the public API is still
+evolving. Publishing and a semver commitment remain separate decisions.
 
 The leaf-up strategy comes from
 [the librsvg precedent](https://blogs.gnome.org/alatiera/category/librsvg/):
@@ -157,7 +147,7 @@ the map.
 |---|---|---|
 | Build plumbing | `rust/meson.build` + the Cargo workspace | — |
 | Crypto + transport compression | `hxcrypto` (hash / stream / aead / compress) | `hmac.c`, `cipher.c`, `cipher_aead.c`, `compress.c`, `md5.c`, `sha.c`, `haval.c` |
-| Wire protocol — parsers, builders, framing, Mac Roman text, dates | `hotline-proto` | the byte-twiddling half of `rcv.c` / `proto_helpers.c` / the `hlwrite` send path |
+| Wire protocol — parsers, builders, framing, Mac Roman text, dates | `hxproto` | the byte-twiddling half of `rcv.c` / `proto_helpers.c` / the `hlwrite` send path |
 | Connection lifecycle: connect, magic, LOGIN, HOPE, ciphers, compression, TLS | `hxnet` + `hxbridge` (tokio runtime + GLib ferry) | `network.c`'s connect/decode state machine, `hope.c`, `network_decode.c`, `connect_magic.c` |
 | HTXF file transfers — subchannel transport, the recv/send/folder byte loops, `htxf_conn` storage and lifecycle, the worker shell | `hxnet::{htxf,xfer,xfer_handle}` + `hxhandlers::xfer` | `xfers.c`, `xfers_recv.c`, `xfers_send.c`, `htxf_io.c`, `htxf_subchannel.c`, `gtkthreads.c` |
 | HFS sidecar / resource-fork I/O; FFO+FILP fork-header codec | `hxhfs`, `hxfiles-xfer` | `hfs.c` and the fiddly byte math in `xfers.c` |
@@ -233,7 +223,7 @@ Things that cost real time to learn and would cost it again.
   RustCrypto's APIs are byte-oriented and don't care, but the byte-swap macros
   lived alongside cipher code in places. Don't drop the swap.
 - **Mac Roman ↔ UTF-8 conversion belongs to the protocol layer.** It lives in
-  `hotline-proto`'s `text` module and matches glibc's `iconv` `MACINTOSH` table
+  `hxproto`'s `text` module and matches glibc's `iconv` `MACINTOSH` table
   byte for byte. (Not to be confused with `hl_code.c`, the unrelated XOR-0xff
   obfuscation of LOGIN/PASSWORD chunks.)
 - **The HOPE rekey marker is wire-format-critical.** A random nibble in the

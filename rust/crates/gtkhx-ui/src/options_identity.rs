@@ -258,7 +258,7 @@ fn choose_avatar(button: &gtk::Button, preview: &gtk::Picture) {
                 toast(&too_big(bytes.len() as u64));
                 return;
             }
-            if !hotline_proto::gif_icons::is_gif(&bytes) {
+            if !hxproto::gif_icons::is_gif(&bytes) {
                 toast(&tr("That file is not a GIF."));
                 return;
             }

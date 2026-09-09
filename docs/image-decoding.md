@@ -223,7 +223,7 @@ the tokio interop helpers; the `gdk4` feature is what gives
 ## Rejected alternatives
 
 - **A reusable `glycin-bridge` crate** for other GNOME-Rust apps. Same
-  rule as `hotline-proto`: we may produce one structurally, but we don't
+  rule as `hxproto`: we may produce one structurally, but we don't
   commit to external API stability.
 - **Reviving the retired `hxutil` crate** as the home for this. It was
   empty and the name is generic; a purpose-named leaf crate is the

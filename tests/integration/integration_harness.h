@@ -165,7 +165,7 @@ extern gboolean integration_send_message (int fd, struct htlc_conn *htlc,
  * + framing semantics, but takes a pre-built struct hx_chunk
  * array (as the Phase R2 Rust builders produce) rather than
  * the variadic shape. Use this when a test wants to route the
- * wire shape through the production hotline-proto builders
+ * wire shape through the production hxproto builders
  * instead of hand-rolling the chunk layout in the test —
  * keeps the test honest by exercising the same builder code the
  * production helper exercises.

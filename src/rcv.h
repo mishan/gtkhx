@@ -150,7 +150,7 @@ extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame,
                                 void *data);
 /* rcv_task_file_getinfo / _file_get / _file_put / _folder_get / _folder_put (and
  * rcv_task_banner_get in banner.h) moved to the hxhandlers::recv::xfer Rust crate: each
- * parses its reply natively (hotline_proto::parse::*) and reaches the C-owned
+ * parses its reply natively (hxproto::parse::*) and reaches the C-owned
  * htxf state through the hx_htxf_* accessor seam (htxf_accessors.c). The
  * prototypes stay because the C senders (xfers.c, files.c, banner.c) register the
  * handlers via RCV_TASK_FN(); the symbols now resolve against the Rust crate at

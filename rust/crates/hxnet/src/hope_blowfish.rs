@@ -56,7 +56,7 @@ pub(crate) const HC_SIZE: usize = 2;
 
 /// Maximum body length we will accept on the read side before
 /// erroring out. Matches the cap in `hxnet::frame` (which is
-/// `hotline_proto::MAX_BODY_LEN` = 1 MiB), so the dispatcher
+/// `hxproto::MAX_BODY_LEN` = 1 MiB), so the dispatcher
 /// doesn't need to do its own ceiling check after our parse.
 const MAX_BODY_LEN: usize = 1024 * 1024;
 

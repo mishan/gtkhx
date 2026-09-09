@@ -69,7 +69,7 @@ fn non_gif_payload_coerced_to_cleared() {
 
 // ---- ICON_GET / ICON_GETLIST reply handlers --------------------------------
 
-use hotline_proto::messages::{tag, ServerHdr};
+use hxproto::messages::{tag, ServerHdr};
 use std::os::raw::c_void;
 
 const GIF87: &[u8] = b"GIF87a\x00\x00";

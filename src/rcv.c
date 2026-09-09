@@ -257,14 +257,14 @@ int
 task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* the header error-bit test moved to the Rust
-     * hotline-proto crate (gtkhx_proto_header_in_error). Same
+     * hxproto crate (gtkhx_proto_header_in_error). Same
      * computation as the old g_ntohl(h->flag) & 1, with bounds
      * checking on a short buffer. */
     return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
 }
 
 /* hx_rcv_chat (HTLS_HDR_CHAT) is a #[no_mangle] fn in the hxhandlers::recv::chat module
- * it parses the body via native hotline_proto::parse::parse_chat,
+ * it parses the body via native hxproto::parse::parse_chat,
  * pulls the inline-media companion via native inline_media::extract_chat_media_meta
  * (dropping the line on an orphan), builds + attaches the boxed HxChatEvent via
  * the C producers, delegates the ignore-gate + emit to hx_chat_recv, and frees
@@ -430,7 +430,7 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
 
 /* hx_rcv_news_post (HTLS_HDR_NEWS_POST, the flat 1.0/1.2 news push) is a
  * #[no_mangle] fn in the hxhandlers::recv::news module (rust/crates/hxhandlers/src/recv/news.rs): it walks
- * the HTLS_DATA_NEWS chunks natively (hotline_proto::parse::news_post_chunks)
+ * the HTLS_DATA_NEWS chunks natively (hxproto::parse::news_post_chunks)
  * and emits one news-post line per chunk via hx_news_post_recv. The dispatch
  * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
@@ -442,7 +442,7 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     char error = 0;
 
     /* transaction-id extraction moved to the Rust
-     * hotline-proto crate (replaces HN32(&trans, &h->trans)). A
+     * hxproto crate (replaces HN32(&trans, &h->trans)). A
      * short buffer leaves trans at 0, which task_with_trans treats
      * as "no such task" — the same safe fallthrough as before. */
     gtkhx_proto_header_trans (frame, frame_len, &trans);
@@ -683,7 +683,7 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 #ifdef HAVE_VOICE
 /* ---- Voice-chat extension (Phase 8.A) ---------------------------- */
 /*
- * The handlers below parse the body via the Rust hotline-proto::voice
+ * The handlers below parse the body via the Rust hxproto::voice
  * shims and log a structured line through debug_log("voice", ...).
  * Phase 8.A intentionally does not emit GtkhxSession signals — the
  * model→view bridge for voice lands in Phase 8.C with the
@@ -911,7 +911,7 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame,
     }
 
     /* Phase 8.D runtime wiring: forward the raw blob. The Rust
-     * side re-parses via hotline_proto::voice::parse_voice_participants
+     * side re-parses via hxproto::voice::parse_voice_participants
      * (same parser the typed walk above used) and feeds the state
      * machine's mid_to_user / participants caches. */
     {
@@ -1195,7 +1195,7 @@ rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
     hl_access_bits access;
 
     /* chunk-walk + hl_decode (XOR-0xff) of LOGIN /
-     * PASSWORD moved to the Rust hotline-proto crate's
+     * PASSWORD moved to the Rust hxproto crate's
      * parse_account_read. The PASSWORD no-password sentinel
      * (single 0x00 byte, or empty) is preserved by the Rust
      * parser — pass_len = 0 in that case, and the C buffer stays
@@ -1246,13 +1246,13 @@ rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 
 /* rcv_task_news_users / rcv_task_user_list / rcv_task_user_list_switch /
  * rcv_task_user_info moved to the hxhandlers Rust crate (recv/user.rs): they
- * walk the reply chunks natively (hotline_proto::parse::parse_user_list_record /
+ * walk the reply chunks natively (hxproto::parse::parse_user_list_record /
  * parse_user_info) and fold into the roster through the shared, already-Rust
  * hx_user_apply_recv — no C chunk-walk or C↔Rust bounce. The C senders still
  * register them via RCV_TASK_FN(); the symbols resolve against the Rust crate at
  * link. rcv_task_kick stays here (it logs via the variadic hx_printf_prefix). */
 
-/* Post-login fetch sequencing decision — Rust hotline-proto (login module).
+/* Post-login fetch sequencing decision — Rust hxproto (login module).
  * Returns HX_POST_LOGIN_FETCH_NOW (1.0/1.2: fire fetches now),
  * HX_POST_LOGIN_ARM_FALLBACK (1.5+: wait for AGREEMENTAGREE, arm the 2s timer),
  * or HX_POST_LOGIN_NOTHING (already fetched). */
@@ -1343,7 +1343,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
          * walker; these can't piggyback on that. */
         inline_media_reset_advisory_limits (htlc);
 
-        /* The LOGIN reply chunk-walk moved to the Rust hotline-proto crate
+        /* The LOGIN reply chunk-walk moved to the Rust hxproto crate
          * (gtkhx_proto_parse_login). It enforces the same per-field width
          * gates the C code did (UID/VERSION as u16; each media / history
          * limit requires the spec's 4 bytes or it's skipped), sanitises
@@ -1513,7 +1513,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 
 /* rcv_task_news_file (the flat NEWS_FILE task reply — the whole 1.0/1.2 news
  * document) is a #[no_mangle] fn in the hxhandlers::recv::news module: it parses the first
- * HTLS_DATA_NEWS chunk natively (hotline_proto::parse::parse_news_file) and
+ * HTLS_DATA_NEWS chunk natively (hxproto::parse::parse_news_file) and
  * publishes it via hx_news_file_recv, emitting an empty document on a chunk-less
  * reply. hxhandlers::send::news registers it as the reply callback (declared in rcv.h); no
  * C body — and no news_buf/news_len scratch — remains here. */

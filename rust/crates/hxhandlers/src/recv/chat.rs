@@ -32,7 +32,7 @@ use hxmodel::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_s
 // real in both builds — glib and gtkhx-core work under `cargo test`.
 use glib::ffi::{g_ptr_array_add, g_ptr_array_new_with_free_func, g_ptr_array_unref, gpointer};
 use gtkhx_core::boxed::history::{hx_history_entry_free, hx_history_entry_parse, HxHistoryEntry};
-use hotline_proto::wire::ChunkIter;
+use hxproto::wire::ChunkIter;
 
 /// Wire chunk types in a GET_CHAT_HISTORY (700) reply (hotline.h).
 const HTLS_DATA_HISTORY_ENTRY: u16 = 0x0f05;
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn hx_chat_invite_recv(
 /// primary handler (was `rcv.c`). The first receive handler whose whole body
 /// lives in Rust (docs/rust/network-endgame.md): the C dispatch switch in
 /// `hx_dispatch_frame` calls this by name; the body parses the frame via
-/// `hotline_proto::parse` (a native Rust call — no C-ABI round-trip), resolves
+/// `hxproto::parse` (a native Rust call — no C-ABI round-trip), resolves
 /// the public chat's member model through the chat.c lookups, and delegates the
 /// ignore-gate + emit to [`hx_chat_invite_recv`].
 ///
@@ -150,7 +150,7 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
     // 31: the C name cap (hx_chat_invite_msg.name[32] − NUL). Missing chunks
     // parse as uid/cid 0 + empty name — the same "always emit" behaviour the old
     // C had (its extractor never failed on malformed data).
-    let inv = hotline_proto::parse::parse_chat_invite(buf, frame_len, 31);
+    let inv = hxproto::parse::parse_chat_invite(buf, frame_len, 31);
     let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, 0);
     if chat.is_null() {
@@ -171,7 +171,7 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
 
 /// `void hx_rcv_chat_subject (htlc, frame, frame_len)` — the HTLS_HDR_CHAT_SUBJECT
 /// primary handler (was `rcv.c`). Parses the frame via
-/// `hotline_proto::parse` (native), and — for a non-empty subject on a known
+/// `hxproto::parse` (native), and — for a non-empty subject on a known
 /// chat — delegates the change-gate + emit to [`hx_chat_subject_recv`]. On a real
 /// change it sets the chat model subject (C collaborator) and emits the
 /// "Subject Changed to" notice signal (the view-side handler owns the gettext).
@@ -192,7 +192,7 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(
     let buf = std::slice::from_raw_parts(frame, frame_len);
     // 255: the C subject cap. Subjects carry no line endings, so no CR2LF /
     // strip_ansi — raw wire bytes (may be Mac Roman; UTF-8 fix-up is view-side).
-    let sub = hotline_proto::parse::parse_chat_subject(buf, frame_len, 255);
+    let sub = hxproto::parse::parse_chat_subject(buf, frame_len, 255);
     if sub.subject.is_empty() {
         return;
     }
@@ -219,7 +219,7 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(
 
 /// `void hx_rcv_chat (htlc, frame, frame_len)` — the HTLS_HDR_CHAT public-chat
 /// line handler (was `rcv.c`). Parses the body via native
-/// `hotline_proto::parse::parse_chat`; when the inline-media cap is negotiated,
+/// `hxproto::parse::parse_chat`; when the inline-media cap is negotiated,
 /// pulls the media companion via native `inline_media::extract_chat_media_meta`
 /// (dropping the whole line on an orphaned companion, per spec). Builds the boxed
 /// `HxChatEvent` (C producer, which copies + UTF-8-validates + self-classifies),
@@ -237,7 +237,7 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
     let buf = std::slice::from_raw_parts(frame, frame_len);
     // 8192: the C body cap. parse_chat CR2LF's + strip_ansi's the body and drops
     // a single leading LF; `text()` is the display slice.
-    let cm = hotline_proto::parse::parse_chat(buf, frame_len, 8192);
+    let cm = hxproto::parse::parse_chat(buf, frame_len, 8192);
 
     let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, 0);
@@ -247,10 +247,10 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
 
     // Inline-media companion — only when the server confirmed the cap. `media`
     // borrows `buf` (the raw frame), valid for the whole handler.
-    let mut media: Option<hotline_proto::inline_media::ChatMediaMeta> = None;
+    let mut media: Option<hxproto::inline_media::ChatMediaMeta> = None;
     if hx_conn_has_cap(htlc.cast(), HTLC_CAP_INLINE_MEDIA) != 0 {
-        let walker = hotline_proto::wire::ChunkIter::over_message(buf, frame_len);
-        match hotline_proto::inline_media::extract_chat_media_meta(walker) {
+        let walker = hxproto::wire::ChunkIter::over_message(buf, frame_len);
+        match hxproto::inline_media::extract_chat_media_meta(walker) {
             Ok(None) => {}
             Ok(Some(m)) => media = Some(m),
             Err(_) => {

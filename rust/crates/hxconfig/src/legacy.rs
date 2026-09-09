@@ -65,7 +65,7 @@ pub enum Form {
 pub fn decode(bytes: &[u8]) -> (String, bool) {
     match std::str::from_utf8(bytes) {
         Ok(text) => (text.to_string(), false),
-        Err(_) => (hotline_proto::text::to_utf8(bytes), true),
+        Err(_) => (hxproto::text::to_utf8(bytes), true),
     }
 }
 

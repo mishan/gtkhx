@@ -17,4 +17,4 @@ crate-type = ["rlib"]
 glib = { workspace = true }
 # The native (Rust) voice chunk builders + the repr(C) HxChunk type — no C-ABI
 # shim in the path, and it makes the send logic cargo-testable.
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }

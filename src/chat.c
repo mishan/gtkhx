@@ -363,7 +363,7 @@ gtkhx_apply_theme_palette (gboolean dark)
 
 /* hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join / hx_part_chat
  * / hx_change_subject moved to the hxhandlers::send::chat Rust crate (the port of
- * chat.c's send path, over hotline-proto's native chat builders). chat.h keeps
+ * chat.c's send path, over hxproto's native chat builders). chat.h keeps
  * the C ABI decls; the per-htlc cap + chat-model lookups the senders need are
  * in chat_send_bridge.c. */
 

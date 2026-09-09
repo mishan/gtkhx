@@ -49,7 +49,8 @@ The single most important orienting fact: **this is a hybrid codebase, and the R
 is now the larger half.** A mental model of "a C app with some Rust helpers" will send you
 looking for code in the wrong place.
 
-- **Rust owns**: the wire protocol (`hotline-proto`); the whole network stack including
+- **Rust owns**: the wire protocol (the shared `hxproto` crate from
+  [hx-libs](https://github.com/mishan/hx-libs)); the whole network stack including
   connect lifecycle, TLS, crypto, compression, framing, file transfers, and tracker fetch
   (`hxnet`); most receive handlers (`hxhandlers`); the session GObject and its boxed signal
   payloads (`gtkhx-core`); the chat rendering widget (`hxchat-layout` + `hxchat-view`); and
@@ -109,11 +110,11 @@ protocol crate), `hxconn.h` + `hxconn_layout.h` (the accessor seam over the now-
 Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there is no
 `chat_view.c`; C links straight to Rust exports), `hl_access.h` (account access bits).
 
-### `rust/crates/` — by role
+### Rust crates — by role
 
 | Role | Crates |
 |---|---|
-| **Wire protocol** | `hotline-proto` — typed builders and parsers for every opcode; the biggest crate in the tree |
+| **Shared wire protocol** | `hxproto` — typed builders and parsers for every opcode, pinned from hx-libs; `gtkhx-proto-ffi` bundles its C ABI for focused protocol tests |
 | **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
 | **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |

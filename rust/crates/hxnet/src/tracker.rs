@@ -5,7 +5,7 @@
 //! fetch over an already-connected (optionally TLS-wrapped) byte stream.
 //! It replaces the hand-rolled C async state machine in
 //! `network.c` (the `tracker_run_ctx` / `tracker_fetch_ctx` chain) — the
-//! wire parsing already lives in `hotline-proto::parse`; this module is
+//! wire parsing already lives in `hxproto::parse`; this module is
 //! the transport orchestration that calls those parsers.
 //!
 //! T1 scope: the per-connection engine + unit tests. No C FFI and no
@@ -47,7 +47,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use hotline_proto::parse::{
+use hxproto::parse::{
     pack_tracker_v3_handshake, pack_tracker_v3_listing_request_simple, parse_tracker_header,
     parse_tracker_record_fixed, parse_tracker_v3_record, parse_tracker_v3_response_header,
     tracker_normalize_text, tracker_record_is_padding, tracker_v3,

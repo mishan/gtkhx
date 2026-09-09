@@ -2,7 +2,7 @@
 
 use super::*;
 
-use hotline_proto::parse::FTYPE_FLDR;
+use hxproto::parse::FTYPE_FLDR;
 
 const HTLS_DATA_FILE_LIST: u16 = 0x00c8;
 const OTHER_TAG: u16 = 0x0064;

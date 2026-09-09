@@ -19,4 +19,4 @@ crate-type = ["rlib"]
 gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }
 gio = { workspace = true }
-hotline-proto = { path = "../hotline-proto" }
+hxproto = { workspace = true }

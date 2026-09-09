@@ -2,7 +2,7 @@
 //!
 //! The GIF-icons extension broadcasts an `ICON_CHANGE` frame (uid only) when a
 //! user changes their avatar. This crate owns that handler end to end: parse the
-//! uid out of the frame body (via `hotline-proto`) and emit the
+//! uid out of the frame body (via `hxproto`) and emit the
 //! `gif-icon-changed` signal so the user list refreshes the avatar. Unlike the
 //! chat-invite handler (whose parse stayed C because it reads `htlc->in` through
 //! a struct), the icon-change parse is already a bytes-in Rust parser, so the
@@ -16,13 +16,13 @@ use gtkhx_core::session::{
     gtkhx_session_get_default,
 };
 #[cfg(not(test))]
-use hotline_proto::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
+use hxproto::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
 
 // Native reply parsers — pure Rust, identical in test and production. The C rcv
 // handlers used to round-trip through the `gtkhx_proto_parse_icon_*` C ABI; here
 // we walk the frame with the native `gif_icons` API directly (no FFI bounce).
-use hotline_proto::gif_icons::{parse_icon_get_reply, parse_icon_list};
-use hotline_proto::wire::ChunkIter;
+use hxproto::gif_icons::{parse_icon_get_reply, parse_icon_list};
+use hxproto::wire::ChunkIter;
 
 /// GIF-icons negotiation tri-state (mirror of the C `enum` in `gif_icons.h`).
 const GIF_ICONS_SUPPORTED: c_int = 1;
@@ -56,7 +56,7 @@ unsafe fn frame_slice<'a>(frame: *const c_void, frame_len: usize) -> &'a [u8] {
 /// a header is treated as not-in-error, matching the C shim.
 unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
     let s = frame_slice(frame, frame_len);
-    hotline_proto::parse::Header::parse(s).is_some_and(|h| h.in_error())
+    hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
 }
 
 /// Disarm the GIF-icons probe watchdog if armed (the reply beat the timeout).

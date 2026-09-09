@@ -64,7 +64,7 @@ hx_chat_extract (const guint8 *frame, gsize frame_len, struct hx_chat_msg *out)
     }
 
     /* the chunk walk + CR2LF + strip_ansi + leading-LF strip
-     * moved to the Rust hotline-proto crate (gtkhx_proto_parse_chat). It
+     * moved to the Rust hxproto crate (gtkhx_proto_parse_chat). It
      * writes the full sanitised line into out->buf (NUL-terminated, capped
      * at sizeof(out->buf)-1) and reports where the display text starts. */
     struct gtkhx_proto_chat c;
@@ -132,7 +132,7 @@ hx_banner_extract (const guint8 *frame, gsize frame_len,
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
-    /* the chunk walk moved to the Rust hotline-proto crate
+    /* the chunk walk moved to the Rust hxproto crate
      * (gtkhx_proto_parse_selfinfo). The crate enforces the same
      * field-length gates the C code did (ACCESS exactly 8, USER_LIST
      * >= 8 fixed bytes, COLOR exactly 4) and clamps the cached name to
@@ -284,7 +284,7 @@ hx_user_change_extract (const guint8 *frame, gsize frame_len,
     return TRUE;
 }
 
-/* hx_user_change_plan_resolve moved to Rust (hotline-proto's user_change
+/* hx_user_change_plan_resolve moved to Rust (hxproto's user_change
  * module). These pins guard the #[repr(C)] mirrors it reads/writes against
  * silent drift of the C structs here + in proto_helpers.h. */
 _Static_assert (sizeof (struct hx_user_change_msg) == 60,
@@ -396,7 +396,7 @@ hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out,
  * hx_news_dirlist_entry / struct hx_newscat) are gone — the 1.5 news
  * receive path now parses to owned handles (gtkhx_proto_parse_dirlist /
  * _catlist) read directly by hxmodel::news. The underlying parsers stay
- * covered by hotline-proto's native cargo tests. */
+ * covered by hxproto's native cargo tests. */
 
 /* Trampoline: gtkhx_proto_walk_news_post invokes a typedef'd C
  * callback with a uint8_t* buffer; the public hx_news_post_walk
@@ -438,7 +438,7 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap,
      * and delegate to hlpack_chunks, so BOTH send entry points serialize
      * through the one Rust packer (gtkhx_proto_pack_message) rather than a
      * hand-rolled C loop. Every variadic caller passes a handful of chunks;
-     * the 64 cap matches hotline-proto's MAX_PACK_CHUNKS (above which
+     * the 64 cap matches hxproto's MAX_PACK_CHUNKS (above which
      * pack_message_size rejects anyway) and guards the stack array. The data
      * arg is consumed even for a zero-length chunk, matching the old walk. */
     struct hx_chunk chunks[64];
@@ -459,7 +459,7 @@ void
 hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
                   guint16 flags)
 {
-    /* delegate to the Rust hotline-proto crate. The wire
+    /* delegate to the Rust hxproto crate. The wire
      * layout (16 bytes, big-endian: magic, ref, len, (type<<16)|flags)
      * is byte-for-byte identical; callers in htxf_subchannel.c and the
      * Tier 3 harness use this as a leaf packer so the FFI signature
@@ -497,7 +497,7 @@ hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
 guint64
 hl_capabilities_decode (const guint8 *bytes, guint16 len)
 {
-    /* delegate to the Rust hotline-proto crate. The decode
+    /* delegate to the Rust hxproto crate. The decode
      * rule (1..8 bytes big-endian, MSB-first, truncate beyond 8, empty
      * is 0) is identical; this wrapper just bridges the GLib u16-len
      * signature to the FFI's size_t. */
@@ -550,7 +550,7 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 {
     /* the inner serialize loop (header byte layout, per-chunk
      * data hdr + payload writes, len/len2 wire-length math) moved to the
-     * Rust hotline-proto crate (build::pack_message). The C side packs the
+     * Rust hxproto crate (build::pack_message). The C side packs the
      * one message into a fresh block and hands ownership back — there is no
      * per-connection send buffer; the only lingering connection-lifecycle
      * side effect is the trans post-increment.

@@ -8,7 +8,7 @@
 //! DELNEWSDIRCAT, MAKECATEGORY, MAKENEWSDIR. Each
 //! one: encodes the request's path to the wire `NEWSPATH` bytes (via C's
 //! `path_to_hldir`), encodes any text for the wire (`gtkhx_text_for_wire`,
-//! hxtext), builds the chunks with the **native** `hotline_proto::build`
+//! hxtext), builds the chunks with the **native** `hxproto::build`
 //! builders (the same ones the R2 `gtkhx_proto_build_news_*` C-ABI shims wrap),
 //! registers a reply task where the C original did, and hands the chunks to
 //! `hlwrite_chunks`. Exports the exact `hx_news15_*` C ABI its callers (the
@@ -19,14 +19,14 @@
 //! request path through the `gnews_*_path` accessor. `get_post` takes its path
 //! directly.
 //!
-//! A lean crate (`glib` + the pure `hotline-proto`, no GTK) so it's
+//! A lean crate (`glib` + the pure `hxproto`, no GTK) so it's
 //! `cargo test`-able: the builders run natively and the C send-path primitives
 //! are stubbed in the test module. Mirrors `hxhandlers::send::chat`.
 
 use std::ffi::{c_char, c_void, CStr};
 use std::os::raw::c_int;
 
-use hotline_proto::build::{
+use hxproto::build::{
     self, HxChunk, NewsDeleteThreadRequest, NewsGetThreadRequest, NewsMakeCategoryRequest,
     NewsMakeDirRequest, NewsPostThreadRequest,
 };

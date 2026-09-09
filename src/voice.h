@@ -10,7 +10,7 @@
 /*
  * Voice-chat extension wire-out path (Phase 8.A).
  *
- * Pure send-side wrappers around the Rust `hotline-proto::voice`
+ * Pure send-side wrappers around the Rust `hxproto::voice`
  * builders. Each function is `hx_send_voice_*` so the call sites in
  * future UI / debug paths read naturally; under the hood they call the
  * `gtkhx_proto_build_voice_*_chunks` FFI shims declared in

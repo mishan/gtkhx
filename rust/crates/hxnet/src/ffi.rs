@@ -128,7 +128,7 @@ struct CallbackState {
 }
 
 /// Plain-old-data frame the C side reads after try_recv. Mirrors
-/// the union of [`hotline_proto::parse::HeaderDecoded`] (header
+/// the union of [`hxproto::parse::HeaderDecoded`] (header
 /// fields the C side cares about) plus an owned body buffer.
 ///
 /// `body_ptr` + `body_len` are owned by Rust. The C side must
@@ -148,7 +148,7 @@ pub struct HxnetFrame {
 
 // Pin the cross-language ABI layout from the Rust side. Same
 // pattern as `HeaderDecodedOut` / `HistoryEntryOut` /
-// `TrackerRecordFixedOut` in hotline-proto. The fixed-size
+// `TrackerRecordFixedOut` in hxproto. The fixed-size
 // prefix is stable across targets; `body_ptr`'s offset and the
 // struct's total size depend on pointer alignment (8 bytes on
 // 64-bit targets, 4 on 32-bit) so we express those in terms of
@@ -185,7 +185,7 @@ const _: () = {
 
 // Event return codes from try_recv_frame. Mirrored on the C side
 // by `tests/unit/test_hxnet_ffi.c` (kept in sync by hand — the
-// FFI drift discipline matches the other hxbridge / hotline-proto
+// FFI drift discipline matches the other hxbridge / hxproto
 // surfaces).
 
 /// No event was available right now. Try again later.
@@ -369,7 +369,7 @@ pub unsafe extern "C" fn hxnet_frame_free(frame: *mut HxnetFrame) {
         // body that large ourselves, so any value past the ceiling
         // implies caller-side corruption. Log + leak the body
         // rather than reach into UB territory — same discipline as
-        // hotline-proto's `as_slice` helper.
+        // hxproto's `as_slice` helper.
         if (f.body_len as u64) > (isize::MAX as u64) {
             glib::g_critical!(
                 "hxnet",

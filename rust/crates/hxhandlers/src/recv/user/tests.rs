@@ -176,7 +176,7 @@ fn frame(msg_type: u32, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
 }
 
 fn part_frame(uid: u16, cid: u32) -> Vec<u8> {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     frame(
         0x0000_0077, // HTLS_HDR_USER_PART (value irrelevant to parse; walks chunks)
         &[
@@ -240,7 +240,7 @@ fn rcv_part_of_non_member_no_delete_no_notice() {
 }
 
 fn change_frame(uid: u16, cid: u32, name: &str, icon: u16) -> Vec<u8> {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     frame(
         0x0000_0076, // HTLS_HDR_USER_CHANGE (value irrelevant to parse)
         &[
@@ -608,7 +608,7 @@ fn user_list_switch_ok_loads_users() {
 
 #[test]
 fn user_info_publishes_when_both_present() {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     test_env::reset();
     let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
     let f = frame(
@@ -643,7 +643,7 @@ fn user_info_publishes_when_both_present() {
 /// full wire length — so a downstream length-aware reader can't run past it.
 #[test]
 fn user_info_body_interior_nul_truncates_len() {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     test_env::reset();
     let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
     let f = frame(
@@ -675,7 +675,7 @@ fn user_info_body_interior_nul_truncates_len() {
 
 #[test]
 fn user_info_dropped_when_info_empty() {
-    use hotline_proto::messages::tag;
+    use hxproto::messages::tag;
     test_env::reset();
     let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
     let f = frame(0, &[(tag::NAME, b"Alice".to_vec())]); // no BODY → gate fails
