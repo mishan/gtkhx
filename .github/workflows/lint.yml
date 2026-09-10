@@ -2,9 +2,10 @@
 #
 # Two jobs:
 #
-#   format     — whitespace hygiene (tools/fix-whitespace.py) and C
-#                formatting (clang-format via tools/reformat.sh). Runs on a
-#                plain ubuntu runner; no GTK / GStreamer needed.
+#   format     — whitespace hygiene (tools/fix-whitespace.py), C
+#                formatting (clang-format via tools/reformat.sh), and a
+#                check that rust/cargo-sources.json matches Cargo.lock. Runs
+#                on a plain ubuntu runner; no GTK / GStreamer needed.
 #   rust-lint  — rustfmt + `cargo clippy -D warnings`, run inside the same
 #                Fedora gtkhx-ci-base image the build uses, so the rustc /
 #                rustfmt / clippy versions match the canonical build
@@ -41,6 +42,16 @@ jobs:
       - name: whitespace hygiene
         # No tab indentation, no trailing whitespace, single final newline.
         run: python3 tools/fix-whitespace.py --check
+
+      - name: flatpak cargo sources match Cargo.lock
+        # The release Flatpak build vendors every Rust dependency from
+        # rust/cargo-sources.json, and nothing reads that file before release
+        # time, so a stale or incomplete one would only fail there. Regenerate
+        # it and compare. The generator fetches the locked commit of each git
+        # dependency, and fails on any source it can't vendor.
+        run: |
+          python3 tools/flatpak-cargo-generator.py rust/Cargo.lock
+          git diff --exit-code rust/cargo-sources.json
 
       - name: install clang-format (pinned)
         # Pin the exact version the tree was formatted with. clang-format's
