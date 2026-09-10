@@ -448,7 +448,7 @@ test('human_readable', test_human_readable,
 # fields and pin the bytes. Catches the "Oni Tracks folder hang"
 # regression (always-zero type field) and any future struct
 # rearrangement. Pulls in proto_test_deps because proto_helpers.c
-# needs the Rust hxproto staticlib.
+# needs the Rust gtkhx-proto-ffi staticlib.
 test_htxf_hdr = executable('test_htxf_hdr',
   'unit/test_htxf_hdr.c',
   '../src/proto_helpers.c',

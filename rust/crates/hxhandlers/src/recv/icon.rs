@@ -16,7 +16,7 @@ use gtkhx_core::session::{
     gtkhx_session_get_default,
 };
 #[cfg(not(test))]
-use hxproto::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
+use gtkhx_proto_ffi::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
 
 // Native reply parsers — pure Rust, identical in test and production. The C rcv
 // handlers used to round-trip through the `gtkhx_proto_parse_icon_*` C ABI; here

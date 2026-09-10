@@ -25,4 +25,5 @@ crate-type = ["rlib"]
 [dependencies]
 gtkhx-core = { path = "../gtkhx-core" }
 hxproto = { workspace = true }
+gtkhx-proto-ffi = { path = "../gtkhx-proto-ffi" }
 glib = { workspace = true }

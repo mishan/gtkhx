@@ -30,7 +30,7 @@ use std::os::raw::{c_char, c_int};
 use hxproto::build::HxChunk;
 // Native pack (no C detour): the same builder the C `hlpack_chunks` wrapper
 // called, reached directly as a Rust function.
-use hxproto::ffi::{gtkhx_proto_pack_message, gtkhx_proto_pack_message_size};
+use gtkhx_proto_ffi::ffi::{gtkhx_proto_pack_message, gtkhx_proto_pack_message_size};
 
 use crate::HtlcConn;
 

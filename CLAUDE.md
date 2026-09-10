@@ -114,7 +114,7 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 
 | Role | Crates |
 |---|---|
-| **Shared wire protocol** | `hxproto` — typed builders and parsers for every opcode, pinned from hx-libs; `gtkhx-proto-ffi` bundles its C ABI for focused protocol tests |
+| **Shared wire protocol** | `hxproto` — typed builders and parsers for every opcode, pinned from hx-libs and pure Rust; `gtkhx-proto-ffi` — GtkHx's C ABI over it (the `gtkhx_proto_*` / `hx_recv_route` / `hx_user_change_plan_resolve` shims), also a standalone staticlib for the focused protocol tests |
 | **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
 | **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
@@ -304,13 +304,15 @@ every check in sequence against process-global widget state, so a check that
 depends on what an earlier one left behind can pass, fail, and pass again. If a
 new check asserts on the live tab strip, prefer building its own widgets.
 
-- **Branches, not direct main commits.** `claude/<short-topic>`, kebab-case. Misha opens the
+- **Branches, not direct main commits.** `<short-topic>`, kebab-case, no prefix. Misha opens the
   PR, reviews, merges. Push follow-up commits to the same branch after review; don't
   force-push without asking. CI must be green to merge.
 - **Squash before opening the PR** — one commit per branch. `git reset --soft <merge-base>`.
 - **Commits** are authored as `Misha Nasledov <misha@nasledov.com>`. Descriptive bodies. No
-  `Co-Authored-By: Claude` trailer, and no `Author:` line in the body — the git author field
-  already carries it.
+  `Author:` line in the body — the git author field already carries it.
+- **No AI attribution anywhere** — not a `Co-Authored-By` trailer, not a "Generated with"
+  footer in a PR body, not in branch names, comments, or docs. This applies to every repo
+  involving Misha, not just this one.
 - **Tests fail loudly.** Never `g_test_skip` around something that didn't work; a skip looks
   like a pass in CI and masks bugs.
 - **Prefer a reproduction over a debugging session.** When a bug surfaces against a real

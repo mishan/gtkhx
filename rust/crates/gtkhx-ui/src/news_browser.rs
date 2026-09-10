@@ -56,6 +56,7 @@ const HL_ACCESS_DELETE_NEWS_BUNDLES: i32 = 37;
 
 use gtkhx_core::conn::hx_conn_access_permits;
 use gtkhx_core::session::gtkhx_session_get_default;
+use gtkhx_proto_ffi::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
 use hxhandlers::recv::news::carrier::{
     gnews_catalog_free, gnews_catalog_new, gnews_catalog_parsed, gnews_folder_free,
     gnews_folder_new, gnews_folder_parsed, news_post_body, news_post_free, news_post_target,
@@ -66,7 +67,6 @@ use hxmodel::news::node::{
     hx_news_node_body_fetching, hx_news_node_children, hx_news_node_get_type, hx_news_node_loaded,
     hx_news_node_name, hx_news_node_set_body_fetching, hx_news_node_set_loaded,
 };
-use hxproto::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
 
 extern "C" {
     fn hx_news_node_kind(node: *mut c_void) -> i32;

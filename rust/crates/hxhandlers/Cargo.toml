@@ -19,6 +19,7 @@ crate-type = ["rlib"]
 gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }
 hxproto = { workspace = true }
+gtkhx-proto-ffi = { path = "../gtkhx-proto-ffi" }
 hxhfs = { path = "../hxhfs" }
 hxmodel = { path = "../hxmodel" }
 hxtext = { path = "../hxtext" }

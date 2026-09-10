@@ -59,9 +59,13 @@ cargo = find_program('cargo')
 rust_sources = files(
   # The single-archive façade (see the rust_gtkhx_ffi_dep block below).
   'crates/gtkhx-ffi/src/lib.rs',
-  # Focused staticlib façade for the C protocol tests. The implementation
-  # itself is the pinned hxproto git dependency.
+  # The protocol C ABI, a shim over the pinned hxproto git dependency. Also
+  # built as a standalone staticlib for the C protocol tests.
   'crates/gtkhx-proto-ffi/src/lib.rs',
+  'crates/gtkhx-proto-ffi/src/dispatch.rs',
+  'crates/gtkhx-proto-ffi/src/ffi.rs',
+  'crates/gtkhx-proto-ffi/src/login.rs',
+  'crates/gtkhx-proto-ffi/src/user_change.rs',
   'crates/hxcrypto/src/lib.rs',
   'crates/hxcrypto/src/hash.rs',
   'crates/hxcrypto/src/stream.rs',
