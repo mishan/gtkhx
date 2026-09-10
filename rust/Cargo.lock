@@ -1776,6 +1776,7 @@ name = "gtkhx-ffi"
 version = "0.1.0"
 dependencies = [
  "gtkhx-core",
+ "gtkhx-proto-ffi",
  "gtkhx-ui",
  "hx-image-decode",
  "hxbookmarks",
@@ -1789,7 +1790,6 @@ dependencies = [
  "hxmacres",
  "hxmodel",
  "hxnet",
- "hxproto",
  "hxsound",
  "hxtask",
  "hxtext",
@@ -1816,6 +1816,7 @@ dependencies = [
  "glib 0.21.5",
  "gtk4",
  "gtkhx-core",
+ "gtkhx-proto-ffi",
  "hx-image-decode",
  "hxbookmarks",
  "hxchat-layout",
@@ -2030,6 +2031,7 @@ version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
  "gtkhx-core",
+ "gtkhx-proto-ffi",
  "hxhfs",
  "hxmodel",
  "hxnet",
@@ -2090,7 +2092,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=784c4d3e095588ac20546fedf0f8f8cdb15da1e9#784c4d3e095588ac20546fedf0f8f8cdb15da1e9"
+source = "git+https://github.com/mishan/hx-libs.git?rev=99ad1845e378418e66e57f56909df63eeeb05a7f#99ad1845e378418e66e57f56909df63eeeb05a7f"
 
 [[package]]
 name = "hxsound"
@@ -2106,6 +2108,7 @@ version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
  "gtkhx-core",
+ "gtkhx-proto-ffi",
  "hxproto",
 ]
 

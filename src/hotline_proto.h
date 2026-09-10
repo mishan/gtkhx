@@ -402,7 +402,7 @@ struct gtkhx_proto_history_entry {
 /* Pin the C-ABI mirror size so any padding / alignment drift across
  * compilers or targets is caught at build time rather than turning
  * into memory corruption on the Rust side (the #[repr(C)] mirror
- * HistoryEntryOut in hxproto::ffi has to
+ * HistoryEntryOut in gtkhx_proto_ffi::ffi has to
  * match exactly). Layout: u64 (8) + i64 (8) + 6×u16 (flags +
  * icon_id + nick_off + nick_len + msg_off + msg_len = 12) =
  * 28 bytes of data + 4 bytes of trailing alignment-to-8 padding
