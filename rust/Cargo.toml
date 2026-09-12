@@ -6,7 +6,6 @@ members = [
     "crates/hxbridge",
     "crates/gtkhx-core",
     "crates/gtkhx-ui",
-    "crates/hxfiles-xfer",
     "crates/hxbookmarks",
     # Settings: a typed schema over a versioned TOML file. Pure std +
     # toml_edit — no glib, no gtk — so all of it runs under `cargo test` on
@@ -82,7 +81,8 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "99ad1845e378418e66e57f56909df63eeeb05a7f" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "061d2d71a4148fc924f98d0dd71bf178497aa661" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "061d2d71a4148fc924f98d0dd71bf178497aa661" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

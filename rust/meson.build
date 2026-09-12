@@ -202,9 +202,7 @@ rust_sources = files(
   'crates/hxconfig/src/warning.rs',
   'crates/hxconfig/src/ffi.rs',
   'crates/hxconfig/src/tests.rs',
-  'crates/hxfiles-xfer/src/lib.rs',
-  'crates/hxfiles-xfer/src/ffo.rs',
-  'crates/hxfiles-xfer/src/ffi.rs',
+  'crates/gtkhx-ffi/src/files.rs',
   'crates/hxhfs/src/lib.rs',
   'crates/hxhfs/src/hfs.rs',
   'crates/hxhfs/src/hfs/tests.rs',
@@ -283,7 +281,6 @@ rust_sources = files(
   'crates/hxchat-layout/Cargo.toml',
   'crates/hxchat-view/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
-  'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
@@ -497,15 +494,13 @@ rust_hxproto_dep = declare_dependency(
   ],
 )
 
-# Files-subsystem transfer codec (see docs/rust/ROADMAP.md).
-# Pure logic, no glib/gtk — `cargo test -p hxfiles-xfer` runs headless.
-# Exposes the `gtkhx_ffo_*` FFI surface (the FFO fork-header + info-block
-# byte math behind src/xfers.c::file_recv_one). Unconditional.
+# Files-subsystem C facade over the shared hx-libs codec. The pure crate is
+# rlib-only; its `gtkhx_ffo_*` adapters belong to the consumer's one staticlib.
 rust_hxfiles_xfer_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxfiles_xfer',
+    '-lgtkhx_ffi',
   ],
 )
 
