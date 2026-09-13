@@ -7,9 +7,9 @@ license = "GPL-2.0-or-later"
 description = "Single-archive staticlib façade — bundles every FFI-exporting GtkHx crate into one .a for the C link."
 publish = false
 
-# The workspace's ONLY staticlib. Every other member is an rlib; this crate
-# pulls them all in and rustc bundles their objects (including their
-# `#[no_mangle]` C ABI symbols) into one archive. See src/lib.rs for why.
+# The application links only this staticlib. GTK-free FFI members may also
+# produce standalone archives for integration tests; this crate depends on
+# their rlibs and bundles every C ABI symbol into one application archive.
 [lib]
 crate-type = ["staticlib"]
 
