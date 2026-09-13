@@ -4,7 +4,7 @@
 # Usage:
 #   ./build.sh <container> [extra docker-build args...]
 #
-#   <container>   one of: argus, hxtrackd, mhxd, janus, socks
+#   <container>   one of: argus, hxtrackd, mhxd, janus, mobius, socks
 #
 # The image is tagged gtkhx-<container>, matching the `image:` keys in
 # docker-compose.yml and the standalone instructions in each container's
@@ -18,6 +18,7 @@
 # Extra args pass straight through to `docker build`, e.g.:
 #   ./build.sh janus --no-cache
 #   ./build.sh mhxd  --build-arg MHXD_REV=<sha>
+#   ./build.sh mobius --build-arg MOBIUS_TAG=v0.24.0
 #   ./build.sh argus --build-arg ARGUS_SHA256=<sha>
 set -eu
 
@@ -25,7 +26,7 @@ DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 if [ "$#" -lt 1 ]; then
     echo "usage: $0 <container> [docker build args...]" >&2
-    echo "  container: argus | hxtrackd | mhxd | janus | socks" >&2
+    echo "  container: argus | hxtrackd | mhxd | janus | mobius | socks" >&2
     exit 64
 fi
 
@@ -55,7 +56,7 @@ fi
 
 if [ ! -f "$DIR/$ctxdir/Dockerfile" ]; then
     echo "$0: unknown container '$container' (no $ctxdir/Dockerfile)" >&2
-    echo "  expected one of: argus, hxtrackd, mhxd, janus, socks" >&2
+    echo "  expected one of: argus, hxtrackd, mhxd, janus, mobius, socks" >&2
     exit 64
 fi
 

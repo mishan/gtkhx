@@ -43,8 +43,13 @@
 #      in APIKeys, so this just works.
 #   2. Poll the GET endpoint until the API listener is up (Janus
 #      takes ~1-2s in practice; we cap at 30s).
-#   3. PATCH admin with password "adminpass". Janus updates the
-#      bcrypt and writes a HOPEPassword field into the YAML.
+#   3. PATCH admin with password "adminpass". This writes a
+#      HOPEPassword field into the YAML and nothing else — it does
+#      NOT update the `Password:` bcrypt hash a non-HOPE login
+#      checks, which is why admin/adminpass never logged in on any
+#      path. The base image (hotline-docker/images/janus) now writes
+#      that field directly; this PATCH is only here for the HOPE
+#      blob.
 #   4. Send SIGTERM to Janus and wait for it to flush — some YAML
 #      rewrites happen on shutdown rather than synchronously
 #      inside the PATCH handler.
@@ -97,38 +102,49 @@ if [ "$api_up" = 0 ]; then
     exit 1
 fi
 
-# NOTE: deliberately leaving guest alone. Upstream ships it with an
-# empty password (bcrypt-of-empty, no HOPEPassword field) and that
-# IS the path that works for HOPE login — Janus computes
-# HMAC(key="", session_key) server-side. PATCH-ing in a non-empty
-# password produces a HOPEPassword blob that, empirically, doesn't
-# validate at login. test_hope_chacha20 uses guest with password=""
-# matching production's hotline.vespernet.net flow.
-curl -fsS -X PATCH -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -d '{"password":"adminpass"}' \
-    "$API_URL/api/v2/accounts/admin" >/dev/null
+# No account passwords are set here, and that is the fix rather than an
+# omission. Passwords come from the account YAMLs the base image ships
+# (hotline-docker/images/janus writes admin's bcrypt directly); this
+# script only boots Janus far enough to generate Server/Data and then
+# edits access bits.
+#
+# The admin REST API used to set admin's password here. It does not work:
+# an account the API has touched cannot log in at all. Measured against a
+# running container — a throwaway account created through the API with a
+# known password was rejected with "Incorrect login." for that password,
+# and PATCHing it to an empty password left has_hope_password true and
+# still rejected. `guest`, the one account the API has never touched, logs
+# in fine. So the PATCH was not merely failing to set the password, it was
+# poisoning the account, which is why admin/adminpass never worked on any
+# path including plain login.
+#
+# Whether the trigger is the HOPEPassword blob itself or something else
+# the API writes, we could not separate — so the blob gets stripped below
+# as well, restoring the shape guest is known to work with.
 
-# Explicit shutdown — Janus flushes YAML rewrites on SIGTERM
-# rather than synchronously inside the PATCH handler in some
-# code paths, so we want to wait for the process to actually
-# exit before checking the YAMLs.
+# Explicit shutdown before touching the YAMLs, so Janus is not going to
+# write them back underneath us.
 kill -TERM "$JPID"
 wait "$JPID" 2>/dev/null || true
 trap - EXIT
 
-# Fast-fail if the admin seed didn't take. (We deliberately don't
-# check guest — see the comment above the curl PATCH; guest's
-# upstream-shipped empty password IS the working path and we leave
-# the YAML alone.)
-if ! grep -q '^HOPEPassword:' "$JANUS_DIR/Users/admin.yaml"; then
-    echo "admin.yaml missing HOPEPassword after seed" >&2
-    echo "--- admin.yaml ---" >&2
-    cat "$JANUS_DIR/Users/admin.yaml" >&2
-    echo "--- janus log tail ---" >&2
-    tail -40 "$LOG" >&2
-    exit 1
-fi
+# Strip any HOPEPassword blob and require a bcrypt Password to survive.
+# Nothing in this script writes a blob now, but a future base image or a
+# stray API call would reintroduce the exact state that makes an account
+# unloggable, and that failure is invisible until someone tries to log in.
+for u in guest admin; do
+    yaml="$JANUS_DIR/Users/$u.yaml"
+    sed -i '/^HOPEPassword:/d' "$yaml"
+    if grep -q '^HOPEPassword:' "$yaml"; then
+        echo "failed to strip HOPEPassword from $yaml" >&2
+        exit 1
+    fi
+    if ! grep -q '^Password:' "$yaml"; then
+        echo "$yaml has no Password: line — the account cannot log in" >&2
+        cat "$yaml" >&2
+        exit 1
+    fi
+done
 
 # Seed VoiceChat=true onto the bundled guest + admin accounts.
 #
@@ -209,8 +225,8 @@ for u in guest admin; do
     fi
 done
 
-echo "HOPE seed OK"
-grep -E '^Login|^HOPEPassword' \
+echo "account seed OK (passwords come from the base image YAMLs)"
+grep -E '^Login|^Password' \
     "$JANUS_DIR/Users/guest.yaml" \
     "$JANUS_DIR/Users/admin.yaml"
 echo "VoiceChat seed OK (bit 55 set on guest + admin)"

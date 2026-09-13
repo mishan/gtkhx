@@ -1719,10 +1719,13 @@ test('chat_subject', test_integration_chat_subject,
      suite   : 'integration',
      timeout : 30)
 
-# news15 — threaded-news 1.5+ opcodes. HTLC_HDR_NEWSDIRLIST root
-# listing returns at least one HTLS_DATA_NEWS_DIRLIST_EXTENDED
-# chunk (mhxd ships with cat_irasshaimase pre-seeded under
-# newsdir/).
+# news15 — the threaded-news 1.5+ listing and creation opcodes,
+# fanned across every matrix entry advertising HX_TEST_CAP_NEWS_15.
+# Creates a folder, a category and a nested category, checks each
+# appears in the listing with the right kind, and removes them; on a
+# server whose account has no news write bits it asserts the refusal
+# instead. Every request has to produce a reply — the shape a
+# panicking server violates by going silent.
 test_integration_news15 = executable('test_integration_news15',
   'integration/test_news15.c',
   dependencies        : proto_test_deps,
@@ -1731,7 +1734,9 @@ test_integration_news15 = executable('test_integration_news15',
 )
 test('news15', test_integration_news15,
      suite   : 'integration',
-     timeout : 30)
+     # Fans across the matrix: one login and a handful of round-trips
+     # per server, so the budget scales with the number of entries.
+     timeout : 90)
 
 # file_put — full upload round-trip driving the PRODUCTION send state
 # machine. Sends HTLC_HDR_FILE_PUT to the seeded Uploads/ dir, streams an
@@ -1897,11 +1902,12 @@ test('msg_to_unknown_uid', test_integration_msg_to_unknown_uid,
      suite   : 'integration',
      timeout : 30)
 
-# news_catlist — list articles inside the seeded cat_irasshaimase
-# threaded-news category. The existing news15 test only covers the
-# root-level dirlist; this goes one level deeper and exercises
-# mhxd's HTLC_HDR_NEWSCATLIST + cat_to_path packed-path parser.
-# Tolerant to tnews-disabled / empty-category edge cases.
+# news_catlist — HTLC_HDR_NEWSCATLIST, one level below what news15
+# covers: the article list inside a category. Reads post_count out of
+# the reply's single HTLC_DATA_CATLIST chunk rather than counting
+# chunks, since an empty category sends that chunk too. Fanned across
+# HX_TEST_CAP_NEWS_15_FIXTURES — the entries whose container ships a
+# seeded news tree to read.
 test_integration_news_catlist = executable('test_integration_news_catlist',
   'integration/test_news_catlist.c',
   dependencies        : proto_test_deps,
@@ -1910,7 +1916,9 @@ test_integration_news_catlist = executable('test_integration_news_catlist',
 )
 test('news_catlist', test_integration_news_catlist,
      suite   : 'integration',
-     timeout : 30)
+     # Fans across the matrix: one login and a handful of round-trips
+     # per server, so the budget scales with the number of entries.
+     timeout : 90)
 
 # user_list_grows — Alice's USER_GETLIST reply count grows by one
 # when Bob logs in. Complements test_user_list (single-client

@@ -1,0 +1,41 @@
+# Mobius server config for the GtkHx Tier 3 rig.
+#
+# Trimmed to the keys the rig actually sets; everything omitted keeps the
+# upstream default from cmd/mobius-hotline-server/mobius/config.
+
+Name: GtkHx Tier 3 (Mobius)
+Description: Mobius test target for the GtkHx integration suite
+
+# Shipped by the base image at config/banner.jpg — our COPY doesn't
+# replace it, so HTLS_HDR_BANNER fires with upstream's artwork.
+BannerFile: "banner.jpg"
+FileRoot: Files
+
+# Off on purpose. mhxd and Janus already cover tracker registration from
+# two directions (hxtrackd only, and hxtrackd + Argus), and the tracker
+# Tier 3 tests assert on what those two publish. A third registrant would
+# change those listings without testing anything the other two don't.
+EnableTrackerRegistration: false
+Trackers: []
+
+# The default. File and folder names on the wire are MacRoman, which is
+# what a period-correct client sends and what the rest of the rig assumes.
+Encoding: macintosh
+
+PreserveResourceForks: false
+NewsDateFormat: ""
+NewsDelimiter: ""
+
+# No feed-backed categories: opening one would reach out to the network
+# mid-test and import articles the assertions don't know about.
+NewsFeeds: []
+
+MaxDownloads: 0
+MaxDownloadsPerClient: 0
+MaxConnectionsPerIP: 0
+
+IgnoreFiles:
+  - '^\.'
+  - '^@'
+
+EnableBonjour: false

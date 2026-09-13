@@ -61,6 +61,17 @@
 #define HX_TEST_CAP_NICK_COLORS (1u << 22) /* Colored-Nicknames     */
 #define HX_TEST_CAP_TLS (1u << 23)         /* TLS on a separate port*/
 #define HX_TEST_CAP_VOICE (1u << 24)       /* WebRTC voice extension*/
+/*
+ * Not a server capability but a rig one: this container ships a seeded
+ * threaded-news tree — one category holding at least one article — that
+ * the news read-path tests assert on. A server can implement all of 1.5
+ * news (HX_TEST_CAP_NEWS_15) and still have an empty tree, in which case
+ * "list the articles in a category" has nothing to list. Keeping the two
+ * apart is what lets the listing and creation tests fan across every
+ * threaded-news server while the article tests only visit the ones with
+ * content to read.
+ */
+#define HX_TEST_CAP_NEWS_15_FIXTURES (1u << 25)
 
 /* ---- The matrix struct ------------------------------------------ */
 
