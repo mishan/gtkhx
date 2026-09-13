@@ -1776,6 +1776,7 @@ name = "gtkhx-ffi"
 version = "0.1.0"
 dependencies = [
  "gtkhx-core",
+ "gtkhx-files-ffi",
  "gtkhx-proto-ffi",
  "gtkhx-ui",
  "hx-image-decode",
@@ -1784,7 +1785,6 @@ dependencies = [
  "hxchat-view",
  "hxconfig",
  "hxcrypto",
- "hxfiles-xfer",
  "hxhandlers",
  "hxhfs",
  "hxmacres",
@@ -1798,6 +1798,13 @@ dependencies = [
  "hxvoice-model",
  "hxvoice-runtime",
  "hxvoice-send",
+]
+
+[[package]]
+name = "gtkhx-files-ffi"
+version = "0.1.0"
+dependencies = [
+ "hxfiles-xfer",
 ]
 
 [[package]]

@@ -35,9 +35,12 @@ members = [
     "crates/hx-image-decode",
     "crates/feature-unify",
     "crates/hxsound",
-    # The workspace's single staticlib — every other member is an rlib and gets
-    # bundled into libgtkhx_ffi.a through this crate. See its src/lib.rs for the
-    # link-order / duplicate-symbol rationale.
+    # GTK-free Files adapters. The rlib is bundled into gtkhx-ffi; its
+    # standalone staticlib is reserved for integration tests.
+    "crates/gtkhx-files-ffi",
+    # The application's single staticlib — every FFI member is bundled into
+    # libgtkhx_ffi.a through this crate. A few GTK-free members additionally
+    # emit standalone archives used only by integration tests.
     "crates/gtkhx-ffi",
 ]
 

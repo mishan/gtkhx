@@ -1,0 +1,16 @@
+[package]
+name = "gtkhx-files-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+rust-version.workspace = true
+description = "GtkHx-owned C ABI over shared Files codecs"
+publish = false
+
+[lib]
+# The rlib is bundled by gtkhx-ffi for the application. The standalone
+# staticlib is linked only by the GTK-free file-transfer integration tests.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+hxfiles-xfer.workspace = true

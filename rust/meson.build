@@ -202,7 +202,9 @@ rust_sources = files(
   'crates/hxconfig/src/warning.rs',
   'crates/hxconfig/src/ffi.rs',
   'crates/hxconfig/src/tests.rs',
-  'crates/gtkhx-ffi/src/files.rs',
+  # GtkHx-owned, GTK-free C ABI over the shared Files codecs. Kept as a
+  # standalone archive for integration tests and bundled into gtkhx-ffi.
+  'crates/gtkhx-files-ffi/src/lib.rs',
   'crates/hxhfs/src/lib.rs',
   'crates/hxhfs/src/hfs.rs',
   'crates/hxhfs/src/hfs/tests.rs',
@@ -270,6 +272,8 @@ rust_sources = files(
   'crates/hxsound/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
+  'crates/gtkhx-ffi/Cargo.toml',
+  'crates/gtkhx-files-ffi/Cargo.toml',
   'crates/gtkhx-proto-ffi/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
   'crates/gtkhx-ui/Cargo.toml',
@@ -494,13 +498,14 @@ rust_hxproto_dep = declare_dependency(
   ],
 )
 
-# Files-subsystem C facade over the shared hx-libs codec. The pure crate is
-# rlib-only; its `gtkhx_ffo_*` adapters belong to the consumer's one staticlib.
+# Files-subsystem C facade over the shared hx-libs codec. Its standalone
+# archive keeps the transfer integration tests GTK-free; gtkhx-ffi bundles
+# the same crate's rlib for the application.
 rust_hxfiles_xfer_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lgtkhx_ffi',
+    '-lgtkhx_files_ffi',
   ],
 )
 

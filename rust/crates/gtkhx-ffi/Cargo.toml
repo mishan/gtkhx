@@ -15,6 +15,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 gtkhx-core = { path = "../gtkhx-core" }
+gtkhx-files-ffi = { path = "../gtkhx-files-ffi" }
 hxcrypto = { path = "../hxcrypto" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
@@ -40,7 +41,6 @@ hxtask = { path = "../hxtask" }
 # --- leaf utilities ---
 hxbookmarks = { path = "../hxbookmarks" }
 hxconfig = { path = "../hxconfig" }
-hxfiles-xfer.workspace = true
 hxhfs = { path = "../hxhfs" }
 # default-features = false: hx-image-decode's default feature is `glycin-v3`.
 # Leaving it on here would force glycin-v3 through this edge even in the
