@@ -581,7 +581,11 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
     hdr[115] = 0;
     hdr[116] = comlen as u8;
     hdr[117..117 + comlen].copy_from_slice(&fi.comment);
-    let data_hdr = ffo::pack_fork_header(b"DATA", p.data_size.wrapping_sub(p.data_pos), large);
+    let data_hdr = match ffo::pack_fork_header(b"DATA", p.data_size.wrapping_sub(p.data_pos), large)
+    {
+        Ok(header) => header,
+        Err(_) => return EFBIG,
+    };
     hdr[117 + comlen..FILP_HEADER_LEN + comlen].copy_from_slice(&data_hdr);
     if xfer_write(hx, &hdr).is_err() {
         return EIO;
@@ -609,7 +613,11 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
     // (the server may not want the resource fork), not an error. The length is
     // the remaining resource fork (rsrc_size - rsrc_pos) so a resumed upload's
     // marker matches what we actually stream below.
-    let macr_hdr = ffo::pack_fork_header(b"MACR", p.rsrc_size.wrapping_sub(p.rsrc_pos), large);
+    let macr_hdr = match ffo::pack_fork_header(b"MACR", p.rsrc_size.wrapping_sub(p.rsrc_pos), large)
+    {
+        Ok(header) => header,
+        Err(_) => return EFBIG,
+    };
     if xfer_write(hx, &macr_hdr).is_err() {
         return 0;
     }

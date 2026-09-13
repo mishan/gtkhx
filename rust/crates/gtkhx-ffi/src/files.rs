@@ -62,7 +62,9 @@ pub unsafe extern "C" fn gtkhx_ffo_pack_fork_header(
     // SAFETY: both pointer/length contracts were checked above.
     unsafe {
         core::ptr::copy_nonoverlapping(tag, wire_tag.as_mut_ptr(), wire_tag.len());
-        let value = ffo::pack_fork_header(&wire_tag, length, large != 0);
+        let Ok(value) = ffo::pack_fork_header(&wire_tag, length, large != 0) else {
+            return;
+        };
         core::ptr::copy_nonoverlapping(value.as_ptr(), out, value.len());
     }
 }
@@ -119,7 +121,7 @@ mod tests {
         assert_eq!(core::mem::size_of::<GtkhxFilpInfo>(), 288);
         assert_eq!(gtkhx_ffo_info_block_len(0, 0), 16);
         assert_eq!(gtkhx_ffo_info_block_len(1, 0x23), 0x100 + 0x23 + 16);
-        let marker = ffo::pack_fork_header(b"DATA", 0x1_4000_0000, true);
+        let marker = ffo::pack_fork_header(b"DATA", 0x1_4000_0000, true).unwrap();
         unsafe {
             assert_eq!(
                 gtkhx_ffo_fork_len(marker.as_ptr(), marker.len(), 1),
@@ -162,7 +164,7 @@ mod tests {
         info_and_data[71] = 5;
         info_and_data[78] = 3;
         info_and_data[79..82].copy_from_slice(b"abc");
-        info_and_data[84..].copy_from_slice(&ffo::pack_fork_header(b"DATA", 12, false));
+        info_and_data[84..].copy_from_slice(&ffo::pack_fork_header(b"DATA", 12, false).unwrap());
         let mut out: GtkhxFilpInfo = unsafe { core::mem::zeroed() };
         unsafe {
             gtkhx_ffo_parse_filp_info(info_and_data.as_ptr(), info_and_data.len(), 0, &mut out)
