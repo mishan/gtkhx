@@ -121,6 +121,7 @@ mod tests {
         assert_eq!(core::mem::size_of::<GtkhxFilpInfo>(), 288);
         assert_eq!(gtkhx_ffo_info_block_len(0, 0), 16);
         assert_eq!(gtkhx_ffo_info_block_len(1, 0x23), 0x100 + 0x23 + 16);
+        assert_eq!(gtkhx_ffo_info_block_len(0xb8, 0xb9), 0xb8b9 + 16);
         let marker = ffo::pack_fork_header(b"DATA", 0x1_4000_0000, true).unwrap();
         unsafe {
             assert_eq!(
@@ -159,6 +160,7 @@ mod tests {
     #[test]
     fn facade_parses_the_deployed_filp_layout_and_fails_closed() {
         let mut info_and_data = [0; 100];
+        info_and_data[..4].copy_from_slice(b"AMAC");
         info_and_data[4..8].copy_from_slice(b"TEXT");
         info_and_data[8..12].copy_from_slice(b"ttxt");
         info_and_data[71] = 5;

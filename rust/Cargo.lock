@@ -2031,7 +2031,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=865ac62e0aa7d7d41c76d1b4f11e7537e3b55c03#865ac62e0aa7d7d41c76d1b4f11e7537e3b55c03"
+source = "git+https://github.com/mishan/hx-libs.git?rev=19b5a9fc266e5b47ab450f1d85b6431c03895e05#19b5a9fc266e5b47ab450f1d85b6431c03895e05"
 
 [[package]]
 name = "hxhandlers"
@@ -2100,7 +2100,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=865ac62e0aa7d7d41c76d1b4f11e7537e3b55c03#865ac62e0aa7d7d41c76d1b4f11e7537e3b55c03"
+source = "git+https://github.com/mishan/hx-libs.git?rev=19b5a9fc266e5b47ab450f1d85b6431c03895e05#19b5a9fc266e5b47ab450f1d85b6431c03895e05"
 
 [[package]]
 name = "hxsound"
