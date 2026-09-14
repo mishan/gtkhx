@@ -1,6 +1,5 @@
 //! Round-trip + golden-byte tests for the native HFS-sidecar API.
 
-use super::format::*;
 use super::*;
 // Explicit std imports rather than leaning on the `use super::*` glob pulling in
 // hfs.rs's private `use`s (which works, but is fragile).
