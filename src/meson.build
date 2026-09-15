@@ -60,7 +60,7 @@ gtkhx_sources = files(
   'gtkurl.c',
   'gtkutil.c',
   # hfs.c retired — the HFS metadata sidecar (CAP / AppleDouble / Netatalk) is
-  # now the Rust hxhfs crate (rust_hxhfs_dep below); hfs.h keeps the struct /
+  # now the shared hxhfs crate through gtkhx-ffi; hfs.h keeps the struct /
   # macro / C-ABI decls its callers include.
   # history.c (GNU readline command-line history) retired — the chat + PM input
   # line history is now the Rust InputHistory (hxmodel::chat), reached via

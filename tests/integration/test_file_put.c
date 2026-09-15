@@ -24,7 +24,7 @@
  * the upload to the seeded Uploads/ directory.
  *
  * The transfer machines live in the hxnet crate (linked via
- * integration_harness_lib) + the hxhfs crate + the FFO codec on
+ * integration_harness_lib) + GtkHx's shared-codec facade on
  * top of integration_harness_lib. file_{send,recv}_one's GTK-shell
  * couplings are stubbed below (preview branch never runs; progress is a
  * no-op).

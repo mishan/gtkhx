@@ -1,5 +1,7 @@
 //! GtkHx's GTK-free C ABI over the shared safe file-transfer codec.
 
+mod hfs;
+
 use core::ffi::c_int;
 use hxfiles_xfer::ffo;
 

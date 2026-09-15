@@ -208,9 +208,9 @@ unsafe fn read_exact_progress(
 }
 
 /// Copy `data_len` bytes off the subchannel into `dst` (C `rd_wr_recv`).
-unsafe fn rd_wr_recv(
+unsafe fn rd_wr_recv<W: Write>(
     hx: *mut HtxfConn,
-    dst: &mut std::fs::File,
+    dst: &mut W,
     mut data_len: u64,
     p: &HxnetXferParams,
 ) -> Result<(), c_int> {
@@ -247,19 +247,25 @@ unsafe fn preview_get(
     Ok(())
 }
 
-fn make_hfsinfo(type_creator: [u8; 8], fi: &ffo::FilpInfo) -> HfsInfo {
+fn make_hfsinfo(type_creator: [u8; 8], fi: &ffo::FilpInfo, rsrclen: u64) -> HfsInfo {
     HfsInfo {
         type_creator,
         create_time: fi.create_time,
         modify_time: fi.modify_time,
-        rsrclen: 0,
+        rsrclen,
         comment: fi.comment.clone(),
     }
 }
 
 /// The `done:` tail — rewrite the sidecar with the real type/creator.
-fn finish(cfg: &hfs::Config, path: &Path, typecrea: [u8; 8], pi: &ffo::FilpInfo) -> c_int {
-    let fi = make_hfsinfo(typecrea, pi);
+fn finish(
+    cfg: &hfs::Config,
+    path: &Path,
+    typecrea: [u8; 8],
+    pi: &ffo::FilpInfo,
+    rsrclen: u64,
+) -> c_int {
+    let fi = make_hfsinfo(typecrea, pi, rsrclen);
     let _ = hfs::hfsinfo_write(cfg, path, &fi);
     0
 }
@@ -297,7 +303,7 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         Some(pb) => pb,
         None => return EINVAL,
     };
-    let cfg = hxhfs::ffi::current_config();
+    let cfg = crate::hfs_config::current();
 
     // 1. 40-byte FILP fixed header.
     let hdr = match read_exact_progress(hx, 40, p) {
@@ -323,7 +329,7 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
 
     // Early sidecar write (placeholder type "HTftHTLC"), unless preview.
     if !is_preview {
-        let fi = make_hfsinfo(*b"HTftHTLC", &pi);
+        let fi = make_hfsinfo(*b"HTftHTLC", &pi, p.rsrc_pos);
         let _ = hfs::hfsinfo_write(&cfg, &path, &fi);
     }
 
@@ -402,10 +408,10 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
                 return EIO;
             }
         }
-        return finish(&cfg, &path, typecrea, &pi);
+        return finish(&cfg, &path, typecrea, &pi, 0);
     }
     if tot_len >= p.file_budget {
-        return finish(&cfg, &path, typecrea, &pi);
+        return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos);
     }
     // 16-byte MACR fork header. The server declared more than the data fork, so
     // a MACR marker *should* follow — but some servers over-declare file_budget
@@ -443,16 +449,19 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         return EIO;
     }
     match marker_complete {
-        Ok(true) => {}                                          // full 16-byte marker
-        Ok(false) => return finish(&cfg, &path, typecrea, &pi), // no marker at all
-        Err(e) => return e,                                     // partial → desync
+        Ok(true) => {} // full 16-byte marker
+        Ok(false) => return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos), // no marker at all
+        Err(e) => return e, // partial → desync
     }
     let rfork_len = ffo::fork_len(&m, large);
     if rfork_len == 0 {
-        return finish(&cfg, &path, typecrea, &pi);
+        return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos);
     }
-    let mut opts = std::fs::OpenOptions::new();
-    opts.create(true).write(true);
+    let mut opts = hfs::ResourceOpenOptions::new();
+    opts.write(true);
+    if cfg.fork == hfs::Fork::Cap {
+        opts.create(true);
+    }
     let mut rf = match hfs::resource_open(&cfg, &path, &opts) {
         Ok(Some(f)) => f,
         Ok(None) => return EIO,
@@ -464,7 +473,10 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     if let Err(e) = rd_wr_recv(hx, &mut rf, rfork_len, p) {
         return e;
     }
-    finish(&cfg, &path, typecrea, &pi)
+    let Some(rsrclen) = p.rsrc_pos.checked_add(rfork_len) else {
+        return EFBIG;
+    };
+    finish(&cfg, &path, typecrea, &pi, rsrclen)
 }
 
 // ============================ send (upload) ================================
@@ -502,9 +514,9 @@ unsafe fn xfer_write(hx: *mut HtxfConn, buf: &[u8]) -> Result<(), c_int> {
 /// Copy `data_len` bytes from a local fork file to the subchannel (C
 /// `rd_wr_send`). A local read of 0 (EOF before the promised length) is EIO,
 /// matching the C `read(...) < 1` gate.
-unsafe fn rd_wr_send(
+unsafe fn rd_wr_send<R: Read>(
     hx: *mut HtxfConn,
-    src: &mut std::fs::File,
+    src: &mut R,
     mut data_len: u64,
     p: &HxnetXferParams,
 ) -> Result<(), c_int> {
@@ -549,7 +561,7 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         Some(pb) => pb,
         None => return EINVAL,
     };
-    let cfg = hxhfs::ffi::current_config();
+    let cfg = crate::hfs_config::current();
 
     // Large-file solo upload: raw file data only, no FFO wrapper (the server
     // reconstructs metadata from the filesystem). Folder uploads keep FFO.
@@ -628,7 +640,7 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
     if p.rsrc_size.wrapping_sub(p.rsrc_pos) == 0 {
         return 0;
     }
-    let mut ropts = std::fs::OpenOptions::new();
+    let mut ropts = hfs::ResourceOpenOptions::new();
     ropts.read(true);
     let mut rf = match hfs::resource_open(&cfg, &path, &ropts) {
         Ok(Some(f)) => f,
@@ -903,7 +915,7 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
         Some(p) => p,
         None => return EINVAL,
     };
-    let cfg = hxhfs::ffi::current_config();
+    let cfg = crate::hfs_config::current();
 
     let mut entries: Vec<PutEntry> = Vec::new();
     collect_put_entries(&base, &[], &mut entries);

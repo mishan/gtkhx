@@ -72,7 +72,6 @@ use hx_image_decode as _;
 use hxbookmarks as _;
 use hxchat_view as _;
 use hxconfig as _;
-use hxhfs as _;
 use hxmacres as _;
 use hxsound as _;
 use hxtext as _;

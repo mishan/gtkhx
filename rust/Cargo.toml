@@ -12,7 +12,6 @@ members = [
     # display-less CI. Nothing links it yet: the C mirror struct and the
     # read/write ABI arrive with the flip. See docs/preferences.md.
     "crates/hxconfig",
-    "crates/hxhfs",
     "crates/hxmacres",
     "crates/hxmodel",
     "crates/hxhandlers",
@@ -84,8 +83,9 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "a61f478ff17a0f9e55623dab317ac315088562cb" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "a61f478ff17a0f9e55623dab317ac315088562cb" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "9258b2744e8ed5e6c88e6ea2ffed0ebe5380177f" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "9258b2744e8ed5e6c88e6ea2ffed0ebe5380177f" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "9258b2744e8ed5e6c88e6ea2ffed0ebe5380177f" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

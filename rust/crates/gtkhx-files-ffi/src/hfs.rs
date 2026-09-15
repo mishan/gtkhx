@@ -1,12 +1,12 @@
-//! Thin `#[no_mangle]` C-ABI shim preserving the exact `hfs.h` surface.
+//! GtkHx's C ABI over the shared safe HFS sidecar implementation.
 //!
 //! This preserves `hfs.c`'s symbol names, the `struct hfsinfo` layout, and the
 //! process-global config (`hfs_set_config`), so C callers (`xfers.c`, `rcv.c`)
 //! link it unchanged.
 //!
 //! The shim only marshals: it converts C pointers ↔ the native
-//! [`crate::hfs`] API and holds the global [`Config`]. All real work is in the
-//! native module.
+//! [`hxhfs::hfs`] API and updates GtkHx's runtime [`Config`]. All real work is
+//! in the shared native module.
 //!
 //! Portability: the shim compiles on every target. The only platform-specific
 //! surface is path decoding, the Unix file-mode / raw open(2) flags (no-ops on
@@ -17,11 +17,10 @@
 //! existence without filling the caller's `struct stat`.
 
 use std::ffi::{c_char, c_int, c_long, c_void, CStr};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 
-use crate::hfs::{self, Config, HfsInfo};
+use hxhfs::{hfs, Config, HfsInfo};
 
 /// `errno` for the path-too-long return — the platform `ENAMETOOLONG`.
 const ENAMETOOLONG: c_int = libc::ENAMETOOLONG;
@@ -62,19 +61,8 @@ pub struct HfsInfoFfi {
 const _: () = assert!(std::mem::size_of::<HfsInfoFfi>() == 224);
 const _: () = assert!(std::mem::align_of::<HfsInfoFfi>() == 4);
 
-fn config() -> &'static Mutex<Config> {
-    static CFG: OnceLock<Mutex<Config>> = OnceLock::new();
-    CFG.get_or_init(|| Mutex::new(Config::default()))
-}
-
-/// Snapshot the global config (set by `hfs_set_config`). Recovers from a
-/// poisoned mutex (`into_inner`) rather than `unwrap`-panicking — an unwind
-/// across the `extern "C"` boundary would be UB, and the config is plain data
-/// with no invariant to protect. `pub` so in-process Rust workers (the
-/// `hxnet::xfer` transfer loop) can read the same global the C callers set,
-/// rather than threading a `Config` through the FFI.
-pub fn current_config() -> Config {
-    config().lock().unwrap_or_else(|e| e.into_inner()).clone()
+fn current_config() -> Config {
+    hxnet::hfs_config::current()
 }
 
 /// Copy a C string into an owned [`PathBuf`]. Owned (not a borrow) so the
@@ -97,11 +85,11 @@ unsafe fn path_from(ptr: *const c_char) -> Option<PathBuf> {
     }
 }
 
-/// Translate C `open(2)` `mode` flags + `perm` into an [`OpenOptions`], so the
+/// Translate C `open(2)` `mode` flags + `perm` into resource-fork options, so the
 /// caller-provided open policy (read/write/create/truncate/append + mode)
 /// passes through exactly as `hfs.c`'s `open(path, mode, perm)` did.
-fn open_options_from(mode: c_int, perm: c_int) -> OpenOptions {
-    let mut opts = OpenOptions::new();
+fn open_options_from(mode: c_int, perm: c_int) -> hfs::ResourceOpenOptions {
+    let mut opts = hfs::ResourceOpenOptions::new();
     match mode & O_ACCMODE {
         libc::O_WRONLY => {
             opts.write(true);
@@ -114,9 +102,7 @@ fn open_options_from(mode: c_int, perm: c_int) -> OpenOptions {
         }
     }
     if mode & libc::O_CREAT != 0 {
-        opts.create(true);
-        // Applies the Unix file mode; a no-op on Windows (no mode concept).
-        hfs::with_mode(&mut opts, perm as u32);
+        opts.create(true).mode(perm as u32);
     }
     if mode & libc::O_TRUNC != 0 {
         opts.truncate(true);
@@ -129,7 +115,6 @@ fn open_options_from(mode: c_int, perm: c_int) -> OpenOptions {
     // has no custom-flags escape hatch, and the C callers pass none of these.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
         let managed = O_ACCMODE | libc::O_CREAT | libc::O_TRUNC | libc::O_APPEND;
         opts.custom_flags(mode & !managed);
     }
@@ -206,11 +191,12 @@ pub unsafe extern "C" fn hfs_set_config(
     } else {
         Some(CStr::from_ptr(comment).to_bytes().to_vec())
     };
-    let mut cfg = config().lock().unwrap_or_else(|e| e.into_inner());
+    let mut cfg = current_config();
     cfg.fork = fork;
     cfg.file_perm = file_perm as u32;
     cfg.dir_perm = dir_perm as u32;
     cfg.comment = comment;
+    hxnet::hfs_config::replace(cfg);
 }
 
 // ---------- path helpers ----------
@@ -289,7 +275,7 @@ pub unsafe extern "C" fn resource_open(path: *const c_char, mode: c_int, perm: c
     };
     let opts = open_options_from(mode, perm);
     match hfs::resource_open(&current_config(), &p, &opts) {
-        Ok(Some(f)) => file_into_fd(f, mode),
+        Ok(Some(f)) => file_into_fd(f.into_file(), mode),
         _ => -1,
     }
 }
@@ -330,6 +316,10 @@ fn file_into_fd(f: File, mode: c_int) -> c_int {
     fd
 }
 
+fn saturating_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
 /// `size_t resource_len (const char *path)`
 ///
 /// # Safety
@@ -337,7 +327,7 @@ fn file_into_fd(f: File, mode: c_int) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn resource_len(path: *const c_char) -> usize {
     match path_from(path) {
-        Some(p) => hfs::resource_len(&current_config(), &p) as usize,
+        Some(p) => saturating_usize(hfs::resource_len(&current_config(), &p)),
         None => 0,
     }
 }
@@ -430,7 +420,7 @@ fn native_to_ffi(native: &HfsInfo, ffi: &mut HfsInfoFfi) {
     // Preserve the raw on-disk bytes exactly (matches the C memcpy semantics).
     ffi.create_time = u32::from_ne_bytes(native.create_time);
     ffi.modify_time = u32::from_ne_bytes(native.modify_time);
-    ffi.rsrclen = native.rsrclen;
+    ffi.rsrclen = native.rsrclen.min(u64::from(u32::MAX)) as u32;
     let n = native.comment.len().min(200);
     ffi.comlen = n as u32;
     ffi.comment = [0; 200];
@@ -446,7 +436,7 @@ fn ffi_to_native(ffi: &HfsInfoFfi) -> HfsInfo {
         type_creator,
         create_time: ffi.create_time.to_ne_bytes(),
         modify_time: ffi.modify_time.to_ne_bytes(),
-        rsrclen: ffi.rsrclen,
+        rsrclen: u64::from(ffi.rsrclen),
         comment: ffi.comment[..n].to_vec(),
     }
 }
@@ -454,6 +444,8 @@ fn ffi_to_native(ffi: &HfsInfoFfi) -> HfsInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     // Exercises the full FFI resource_open path including the platform
     // descriptor hand-off (into_raw_fd on Unix, _open_osfhandle on Windows), and
@@ -463,6 +455,8 @@ mod tests {
     #[test]
     fn resource_open_descriptor_roundtrips() {
         use std::ffi::CString;
+
+        let _lock = CONFIG_LOCK.lock().unwrap();
 
         let dir = std::env::temp_dir().join(format!("hxhfs-rsrc-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -494,23 +488,35 @@ mod tests {
         use std::io::Write as _;
         let dir = std::env::temp_dir().join(format!("hxhfs-ffi-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("t");
-        std::fs::write(&f, b"LONG-EXISTING-CONTENT").unwrap();
+        let path = dir.join("t");
+        let cfg = Config::default();
+        let resource = hfs::resource_path(&path, cfg.dir_char).unwrap();
+        std::fs::write(&resource, b"LONG-EXISTING-CONTENT").unwrap();
 
         // O_WRONLY | O_CREAT | O_TRUNC → truncates on open.
         let opts = open_options_from(libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o600);
-        opts.open(&f).unwrap().write_all(b"hi").unwrap();
-        assert_eq!(std::fs::read(&f).unwrap(), b"hi");
+        hfs::resource_open(&cfg, &path, &opts)
+            .unwrap()
+            .unwrap()
+            .write_all(b"hi")
+            .unwrap();
+        assert_eq!(std::fs::read(&resource).unwrap(), b"hi");
 
         // O_WRONLY alone → no truncate; the tail survives a short write.
-        std::fs::write(&f, b"ORIGINAL").unwrap();
+        std::fs::write(&resource, b"ORIGINAL").unwrap();
         let opts = open_options_from(libc::O_WRONLY, 0);
-        opts.open(&f).unwrap().write_all(b"NEW").unwrap();
-        assert_eq!(std::fs::read(&f).unwrap(), b"NEWGINAL");
+        hfs::resource_open(&cfg, &path, &opts)
+            .unwrap()
+            .unwrap()
+            .write_all(b"NEW")
+            .unwrap();
+        assert_eq!(std::fs::read(&resource).unwrap(), b"NEWGINAL");
 
-        // O_RDONLY on a missing file → NotFound (not created).
+        // O_RDONLY on a missing fork → absent (not created).
         let opts = open_options_from(libc::O_RDONLY, 0);
-        assert!(opts.open(dir.join("absent")).is_err());
+        assert!(hfs::resource_open(&cfg, &dir.join("absent"), &opts)
+            .unwrap()
+            .is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -521,6 +527,7 @@ mod tests {
     #[test]
     fn finderinfo_path_stats_when_requested() {
         use std::ffi::CString;
+        let _lock = CONFIG_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("hxhfs-stat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("f.fndrinfo"), b"12345").unwrap();
@@ -573,6 +580,7 @@ mod tests {
 
     #[test]
     fn struct_conversion_roundtrips() {
+        assert_eq!(saturating_usize(u64::MAX), usize::MAX);
         let native = HfsInfo {
             type_creator: *b"TEXTMSIE",
             create_time: [1, 2, 3, 4],
@@ -594,5 +602,134 @@ mod tests {
         assert_eq!(&ffi.creator, b"MSIE");
         assert_eq!(ffi.comlen, 2);
         assert_eq!(ffi_to_native(&ffi), native);
+
+        let oversized = HfsInfo {
+            rsrclen: u64::from(u32::MAX) + 1,
+            ..HfsInfo::default()
+        };
+        native_to_ffi(&oversized, &mut ffi);
+        assert_eq!(ffi.rsrclen, u32::MAX);
+    }
+
+    #[test]
+    fn pinned_sidecar_formats_keep_their_deployed_headers() {
+        let dir = std::env::temp_dir().join(format!("hxhfs-formats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let info = HfsInfo {
+            type_creator: *b"TEXTttxt",
+            create_time: [1, 2, 3, 4],
+            modify_time: [5, 6, 7, 8],
+            rsrclen: 0,
+            comment: b"compatibility".to_vec(),
+        };
+
+        let cap = dir.join("cap");
+        hfs::hfsinfo_write(&Config::default(), &cap, &info).unwrap();
+        let cap = std::fs::read(dir.join("cap.fndrinfo")).unwrap();
+        assert_eq!(cap.len(), 300);
+        assert_eq!(
+            (cap[34], cap[35], cap[36], cap[285]),
+            (0xff, 0x10, 0xda, 0xda)
+        );
+
+        for (name, fork, version) in [
+            ("double", hfs::Fork::Double, 0x0002_0000u32),
+            ("netatalk", hfs::Fork::Netatalk, 0x0001_0000u32),
+        ] {
+            let path = dir.join(name);
+            let cfg = Config {
+                fork,
+                ..Config::default()
+            };
+            hfs::hfsinfo_write(&cfg, &path, &info).unwrap();
+            let sidecar = std::fs::read(dir.join(format!("{name}.fndrinfo"))).unwrap();
+            assert_eq!(&sidecar[..4], &0x0005_1607u32.to_be_bytes());
+            assert_eq!(&sidecar[4..8], &version.to_be_bytes());
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn c_configuration_controls_transfer_worker_sidecars() {
+        use hxfiles_xfer::ffo;
+        use hxnet::htxf::HtxfConn;
+        use hxnet::xfer::{hxnet_xfer_file_recv_one, HxnetXferParams};
+        use std::io::Write as _;
+        use std::net::{TcpListener, TcpStream};
+
+        let _lock = CONFIG_LOCK.lock().unwrap();
+        let original = current_config();
+        let comment = std::ffi::CString::new("shared").unwrap();
+        unsafe { hfs_set_config(2, 0o640, 0o750, comment.as_ptr().cast_mut()) };
+
+        let body = b"configured transfer worker\n";
+        let encoded = ffo::encode(
+            &ffo::Metadata {
+                name: b"received.txt",
+                type_code: *b"TEXT",
+                creator: *b"ttxt",
+                comment: b"wire",
+                create_time: 1,
+                modify_time: 2,
+            },
+            ffo::Forks {
+                data_len: body.len() as u64,
+                data_offset: 0,
+                resource_len: 0,
+                resource_offset: 0,
+            },
+            false,
+        )
+        .unwrap();
+        let mut wire = encoded.prefix;
+        wire.extend_from_slice(body);
+        wire.extend_from_slice(&encoded.resource_header);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.write_all(&wire).unwrap();
+        });
+
+        let dir = std::env::temp_dir().join(format!("hxhfs-worker-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("received.txt");
+        let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        let mut connection = HtxfConn::new_plain_for_test(TcpStream::connect(address).unwrap());
+        extern "C" fn noop(_user: *mut c_void, _delta: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut connection,
+            path: cpath.as_ptr(),
+            file_budget: 0,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: 0,
+            rsrc_size: 0,
+        };
+        let result = unsafe { hxnet_xfer_file_recv_one(&params) };
+        drop(connection);
+        server.join().unwrap();
+        let data = std::fs::read(&path).unwrap();
+        let sidecar = std::fs::read(dir.join("received.txt.fndrinfo")).unwrap();
+
+        hxnet::hfs_config::replace(original);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(result, 0);
+        assert_eq!(data, body);
+        assert_eq!(&sidecar[..4], &0x0005_1607u32.to_be_bytes());
+        assert_eq!(&sidecar[4..8], &0x0002_0000u32.to_be_bytes());
     }
 }

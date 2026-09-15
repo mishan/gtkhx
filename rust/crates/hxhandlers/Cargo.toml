@@ -20,7 +20,6 @@ gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }
 hxproto = { workspace = true }
 gtkhx-proto-ffi = { path = "../gtkhx-proto-ffi" }
-hxhfs = { path = "../hxhfs" }
 hxmodel = { path = "../hxmodel" }
 hxtext = { path = "../hxtext" }
 # The xfers shell (src/xfer.rs) owns the transfer registry over hxnet's

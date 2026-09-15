@@ -147,6 +147,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/tracker/actions.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
+  'crates/hxnet/src/hfs_config.rs',
   'crates/hxnet/src/cipher.rs',
   'crates/hxnet/src/command.rs',
   'crates/hxnet/src/compress.rs',
@@ -205,11 +206,7 @@ rust_sources = files(
   # GtkHx-owned, GTK-free C ABI over the shared Files codecs. Kept as a
   # standalone archive for integration tests and bundled into gtkhx-ffi.
   'crates/gtkhx-files-ffi/src/lib.rs',
-  'crates/hxhfs/src/lib.rs',
-  'crates/hxhfs/src/hfs.rs',
-  'crates/hxhfs/src/hfs/tests.rs',
-  'crates/hxhfs/src/suffix.rs',
-  'crates/hxhfs/src/ffi.rs',
+  'crates/gtkhx-files-ffi/src/hfs.rs',
   # Phase-3 consolidation: the five former model crates, one module each.
   # Phase-3 consolidation: the ten former send/recv crates, one module each.
   'crates/hxhandlers/src/lib.rs',
@@ -285,7 +282,6 @@ rust_sources = files(
   'crates/hxchat-layout/Cargo.toml',
   'crates/hxchat-view/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
-  'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
@@ -538,18 +534,6 @@ rust_hxtls_trust_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtls_trust',
-  ],
-)
-
-# HFS metadata sidecar (Rust port of hfs.c). Exposes the exact hfs.h C ABI
-# (hfsinfo_read/write, resource_open/len, type_creator, comment_*,
-# finderinfo_path/resource_path, hfs_set_config) so the C callers (xfers_recv.c
-# / xfers_send.c / rcv.c) link it unchanged in place of hfs.c.
-rust_hxhfs_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxhfs',
   ],
 )
 

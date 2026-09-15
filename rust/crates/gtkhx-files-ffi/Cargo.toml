@@ -14,3 +14,6 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 hxfiles-xfer.workspace = true
+hxhfs.workspace = true
+hxnet = { path = "../hxnet" }
+libc = "0.2"

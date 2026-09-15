@@ -32,7 +32,7 @@
  *
  * The Dockerfile seeds files/test.txt with exactly "hello world\n".
  *
- * Links the hxnet + hxhfs crates (the receive copy loop + HFS sidecar) on
+ * Links hxnet plus GtkHx's shared-codec facade (the receive copy loop + HFS sidecar) on
  * top of integration_harness_lib (which already bundles htxf_io.c and the
  * hxnet channel). The worker takes the preview feed as params callbacks
  * (NULL here — opt.preview = 0), so it references no hx_preview_* symbols
