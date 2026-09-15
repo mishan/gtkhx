@@ -457,11 +457,10 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     if rfork_len == 0 {
         return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos);
     }
+    // As hfs.c's O_CREAT did: CAP creates the `.rsrc` file, and an AppleDouble
+    // fork lives in the container the early sidecar write made.
     let mut opts = hfs::ResourceOpenOptions::new();
-    opts.write(true);
-    if cfg.fork == hfs::Fork::Cap {
-        opts.create(true);
-    }
+    opts.write(true).create(true);
     let mut rf = match hfs::resource_open(&cfg, &path, &opts) {
         Ok(Some(f)) => f,
         Ok(None) => return EIO,

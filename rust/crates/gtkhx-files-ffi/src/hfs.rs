@@ -521,6 +521,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn legacy_create_flag_opens_an_appledouble_fork() {
+        use std::io::Write as _;
+        let dir = std::env::temp_dir().join(format!("hxhfs-ffi-double-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t");
+        let cfg = Config {
+            fork: hfs::Fork::Double,
+            ..Config::default()
+        };
+        hfs::hfsinfo_write(&cfg, &path, &hfs::HfsInfo::default()).unwrap();
+
+        // mhxd's receive path opens every fork O_WRONLY | O_CREAT.
+        let opts = open_options_from(libc::O_WRONLY | libc::O_CREAT, 0o600);
+        let mut fork = hfs::resource_open(&cfg, &path, &opts).unwrap().unwrap();
+        fork.write_all(b"fork").unwrap();
+        assert_eq!(fork.len(), 4);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // Exercises the `struct stat` existence probe, which is Unix-exact (the
     // non-Unix `stat_if_requested` doesn't fill the caller's struct).
     #[cfg(unix)]
