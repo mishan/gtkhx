@@ -20,9 +20,12 @@ const _: () = assert!(core::mem::offset_of!(GtkhxFilpInfo, comment) == 24);
 const _: () = assert!(core::mem::offset_of!(GtkhxFilpInfo, comment_len) == 280);
 const _: () = assert!(core::mem::offset_of!(GtkhxFilpInfo, ok) == 284);
 
+/// The bytes to read after the FILP and INFO fork headers, or 0 when the INFO
+/// length is longer than any valid INFO fork. Every valid answer includes the
+/// DATA fork header, so 0 never collides with one.
 #[no_mangle]
 pub extern "C" fn gtkhx_ffo_info_block_len(b38: u8, b39: u8) -> usize {
-    ffo::info_block_len(b38, b39)
+    ffo::info_block_len(b38, b39).unwrap_or(0)
 }
 
 /// # Safety
@@ -121,7 +124,8 @@ mod tests {
         assert_eq!(core::mem::size_of::<GtkhxFilpInfo>(), 288);
         assert_eq!(gtkhx_ffo_info_block_len(0, 0), 16);
         assert_eq!(gtkhx_ffo_info_block_len(1, 0x23), 0x100 + 0x23 + 16);
-        assert_eq!(gtkhx_ffo_info_block_len(0xb8, 0xb9), 0xb8b9 + 16);
+        // Longer than any valid INFO fork.
+        assert_eq!(gtkhx_ffo_info_block_len(0xb8, 0xb9), 0);
         let marker = ffo::pack_fork_header(b"DATA", 0x1_4000_0000, true).unwrap();
         unsafe {
             assert_eq!(
@@ -175,6 +179,15 @@ mod tests {
         assert_eq!(&out.type_creator, b"TEXTttxt");
         assert_eq!(out.data_fork_len, 12);
         assert_eq!(&out.comment[..3], b"abc");
+
+        // Windows clients and servers tag the INFO fork MWIN rather than AMAC.
+        info_and_data[..4].copy_from_slice(b"MWIN");
+        let mut windows: GtkhxFilpInfo = unsafe { core::mem::zeroed() };
+        unsafe {
+            gtkhx_ffo_parse_filp_info(info_and_data.as_ptr(), info_and_data.len(), 0, &mut windows)
+        };
+        assert_eq!(windows.ok, 1);
+        assert_eq!(&windows.type_creator, b"TEXTttxt");
 
         let mut truncated: GtkhxFilpInfo = unsafe { core::mem::zeroed() };
         unsafe { gtkhx_ffo_parse_filp_info([0; 8].as_ptr(), 8, 0, &mut truncated) };

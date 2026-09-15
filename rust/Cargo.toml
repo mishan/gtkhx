@@ -84,8 +84,8 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "19b5a9fc266e5b47ab450f1d85b6431c03895e05" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "19b5a9fc266e5b47ab450f1d85b6431c03895e05" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "a61f478ff17a0f9e55623dab317ac315088562cb" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "a61f478ff17a0f9e55623dab317ac315088562cb" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

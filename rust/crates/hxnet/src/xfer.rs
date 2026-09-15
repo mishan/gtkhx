@@ -305,7 +305,10 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         Err(e) => return e,
     };
     // 2. Variable info+comment block, length from FILP bytes 38/39.
-    let info_len = ffo::info_block_len(hdr[38], hdr[39]);
+    let info_len = match ffo::info_block_len(hdr[38], hdr[39]) {
+        Ok(n) => n,
+        Err(_) => return EIO,
+    };
     let mut tot_len: u64 = 40 + info_len as u64;
     let info = match read_exact_progress(hx, info_len, p) {
         Ok(b) => b,
