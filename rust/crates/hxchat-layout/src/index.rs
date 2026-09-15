@@ -271,9 +271,7 @@ impl HeightIndex {
     /// here and O(scrollback) in xtext.
     pub fn invalidate_all_measurements(&mut self) {
         for c in &mut self.chunks {
-            for m in &mut c.measured {
-                *m = false;
-            }
+            c.measured.fill(false);
         }
     }
 

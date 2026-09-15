@@ -1776,6 +1776,7 @@ name = "gtkhx-ffi"
 version = "0.1.0"
 dependencies = [
  "gtkhx-core",
+ "gtkhx-files-ffi",
  "gtkhx-proto-ffi",
  "gtkhx-ui",
  "hx-image-decode",
@@ -1784,9 +1785,7 @@ dependencies = [
  "hxchat-view",
  "hxconfig",
  "hxcrypto",
- "hxfiles-xfer",
  "hxhandlers",
- "hxhfs",
  "hxmacres",
  "hxmodel",
  "hxnet",
@@ -1798,6 +1797,16 @@ dependencies = [
  "hxvoice-model",
  "hxvoice-runtime",
  "hxvoice-send",
+]
+
+[[package]]
+name = "gtkhx-files-ffi"
+version = "0.1.0"
+dependencies = [
+ "hxfiles-xfer",
+ "hxhfs",
+ "hxnet",
+ "libc",
 ]
 
 [[package]]
@@ -2024,6 +2033,10 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
+source = "git+https://github.com/mishan/hx-libs.git?rev=89af495040f94fbafbd5f01d49bc168a4aacf682#89af495040f94fbafbd5f01d49bc168a4aacf682"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "hxhandlers"
@@ -2032,7 +2045,6 @@ dependencies = [
  "glib 0.21.5",
  "gtkhx-core",
  "gtkhx-proto-ffi",
- "hxhfs",
  "hxmodel",
  "hxnet",
  "hxproto",
@@ -2043,9 +2055,7 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-dependencies = [
- "libc",
-]
+source = "git+https://github.com/mishan/hx-libs.git?rev=89af495040f94fbafbd5f01d49bc168a4aacf682#89af495040f94fbafbd5f01d49bc168a4aacf682"
 
 [[package]]
 name = "hxmacres"
@@ -2092,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=99ad1845e378418e66e57f56909df63eeeb05a7f#99ad1845e378418e66e57f56909df63eeeb05a7f"
+source = "git+https://github.com/mishan/hx-libs.git?rev=89af495040f94fbafbd5f01d49bc168a4aacf682#89af495040f94fbafbd5f01d49bc168a4aacf682"
 
 [[package]]
 name = "hxsound"

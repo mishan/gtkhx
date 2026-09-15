@@ -147,6 +147,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/tracker/actions.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
+  'crates/hxnet/src/hfs_config.rs',
   'crates/hxnet/src/cipher.rs',
   'crates/hxnet/src/command.rs',
   'crates/hxnet/src/compress.rs',
@@ -202,14 +203,10 @@ rust_sources = files(
   'crates/hxconfig/src/warning.rs',
   'crates/hxconfig/src/ffi.rs',
   'crates/hxconfig/src/tests.rs',
-  'crates/hxfiles-xfer/src/lib.rs',
-  'crates/hxfiles-xfer/src/ffo.rs',
-  'crates/hxfiles-xfer/src/ffi.rs',
-  'crates/hxhfs/src/lib.rs',
-  'crates/hxhfs/src/hfs.rs',
-  'crates/hxhfs/src/hfs/tests.rs',
-  'crates/hxhfs/src/suffix.rs',
-  'crates/hxhfs/src/ffi.rs',
+  # GtkHx-owned, GTK-free C ABI over the shared Files codecs. Kept as a
+  # standalone archive for integration tests and bundled into gtkhx-ffi.
+  'crates/gtkhx-files-ffi/src/lib.rs',
+  'crates/gtkhx-files-ffi/src/hfs.rs',
   # Phase-3 consolidation: the five former model crates, one module each.
   # Phase-3 consolidation: the ten former send/recv crates, one module each.
   'crates/hxhandlers/src/lib.rs',
@@ -272,6 +269,8 @@ rust_sources = files(
   'crates/hxsound/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
+  'crates/gtkhx-ffi/Cargo.toml',
+  'crates/gtkhx-files-ffi/Cargo.toml',
   'crates/gtkhx-proto-ffi/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
   'crates/gtkhx-ui/Cargo.toml',
@@ -283,8 +282,6 @@ rust_sources = files(
   'crates/hxchat-layout/Cargo.toml',
   'crates/hxchat-view/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
-  'crates/hxfiles-xfer/Cargo.toml',
-  'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
@@ -497,15 +494,14 @@ rust_hxproto_dep = declare_dependency(
   ],
 )
 
-# Files-subsystem transfer codec (see docs/rust/ROADMAP.md).
-# Pure logic, no glib/gtk — `cargo test -p hxfiles-xfer` runs headless.
-# Exposes the `gtkhx_ffo_*` FFI surface (the FFO fork-header + info-block
-# byte math behind src/xfers.c::file_recv_one). Unconditional.
+# Files-subsystem C facade over the shared hx-libs codec. Its standalone
+# archive keeps the transfer integration tests GTK-free; gtkhx-ffi bundles
+# the same crate's rlib for the application.
 rust_hxfiles_xfer_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxfiles_xfer',
+    '-lgtkhx_files_ffi',
   ],
 )
 
@@ -538,18 +534,6 @@ rust_hxtls_trust_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtls_trust',
-  ],
-)
-
-# HFS metadata sidecar (Rust port of hfs.c). Exposes the exact hfs.h C ABI
-# (hfsinfo_read/write, resource_open/len, type_creator, comment_*,
-# finderinfo_path/resource_path, hfs_set_config) so the C callers (xfers_recv.c
-# / xfers_send.c / rcv.c) link it unchanged in place of hfs.c.
-rust_hxhfs_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxhfs',
   ],
 )
 

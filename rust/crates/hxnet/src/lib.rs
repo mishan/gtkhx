@@ -69,6 +69,7 @@ pub mod connection;
 pub mod event;
 pub mod ffi;
 pub mod frame;
+pub mod hfs_config;
 pub mod hope;
 pub mod hope_blowfish;
 pub mod hope_keys;

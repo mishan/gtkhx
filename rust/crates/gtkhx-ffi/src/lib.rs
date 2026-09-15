@@ -28,8 +28,8 @@
 //!
 //! # How it works
 //!
-//! This crate has no code of its own. It exists to name every FFI-exporting
-//! member as a dependency, which puts them in the crate graph; rustc then emits
+//! This crate owns the thin facades over shared safe crates and names every
+//! other FFI-exporting member as a dependency. Rustc then emits
 //! their object code — C ABI symbols included — into `libgtkhx_ffi.a`.
 //!
 //! The `use ... as _;` bindings below are load-bearing. A dependency that is
@@ -67,12 +67,11 @@ use hxmodel as _;
 use hxtask as _;
 
 // --- leaf utilities ---
+use gtkhx_files_ffi as _;
 use hx_image_decode as _;
 use hxbookmarks as _;
 use hxchat_view as _;
 use hxconfig as _;
-use hxfiles_xfer as _;
-use hxhfs as _;
 use hxmacres as _;
 use hxsound as _;
 use hxtext as _;

@@ -31,8 +31,6 @@ use gtkhx_core::conn::hx_conn_serverhost;
 use gtkhx_core::session::{
     gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default,
 };
-#[cfg(not(test))]
-use hxhfs::ffi::{comment_len, resource_len};
 
 #[cfg(not(test))]
 extern "C" {
@@ -93,6 +91,37 @@ extern "C" {
     /// GLib `g_free` — release the FILE_GETINFO path task label on the error path
     /// (it's `g_strdup`'d, with no task `ptr_free`).
     fn g_free(ptr: *mut c_void);
+}
+
+#[cfg(not(test))]
+unsafe fn hfs_path(path: *const c_char) -> Option<std::path::PathBuf> {
+    if path.is_null() {
+        return None;
+    }
+    let bytes = std::ffi::CStr::from_ptr(path).to_bytes();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Some(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+    }
+    #[cfg(not(unix))]
+    {
+        std::str::from_utf8(bytes)
+            .ok()
+            .map(std::path::PathBuf::from)
+    }
+}
+
+#[cfg(not(test))]
+unsafe fn resource_len(path: *const c_char) -> usize {
+    hfs_path(path).map_or(0, |path| {
+        hxnet::hfs_config::resource_len(&path).min(usize::MAX as u64) as usize
+    })
+}
+
+#[cfg(not(test))]
+unsafe fn comment_len(path: *const c_char) -> usize {
+    hfs_path(path).map_or(0, |path| hxnet::hfs_config::comment_len(&path))
 }
 
 /// Adapter matching `hx_preview_cancel_fn (void (*)(void *))`: closing the

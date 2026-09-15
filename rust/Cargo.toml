@@ -6,14 +6,12 @@ members = [
     "crates/hxbridge",
     "crates/gtkhx-core",
     "crates/gtkhx-ui",
-    "crates/hxfiles-xfer",
     "crates/hxbookmarks",
     # Settings: a typed schema over a versioned TOML file. Pure std +
     # toml_edit — no glib, no gtk — so all of it runs under `cargo test` on
     # display-less CI. Nothing links it yet: the C mirror struct and the
     # read/write ABI arrive with the flip. See docs/preferences.md.
     "crates/hxconfig",
-    "crates/hxhfs",
     "crates/hxmacres",
     "crates/hxmodel",
     "crates/hxhandlers",
@@ -36,9 +34,12 @@ members = [
     "crates/hx-image-decode",
     "crates/feature-unify",
     "crates/hxsound",
-    # The workspace's single staticlib — every other member is an rlib and gets
-    # bundled into libgtkhx_ffi.a through this crate. See its src/lib.rs for the
-    # link-order / duplicate-symbol rationale.
+    # GTK-free Files adapters. The rlib is bundled into gtkhx-ffi; its
+    # standalone staticlib is reserved for integration tests.
+    "crates/gtkhx-files-ffi",
+    # The application's single staticlib — every FFI member is bundled into
+    # libgtkhx_ffi.a through this crate. A few GTK-free members additionally
+    # emit standalone archives used only by integration tests.
     "crates/gtkhx-ffi",
 ]
 
@@ -82,7 +83,9 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "99ad1845e378418e66e57f56909df63eeeb05a7f" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "89af495040f94fbafbd5f01d49bc168a4aacf682" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "89af495040f94fbafbd5f01d49bc168a4aacf682" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "89af495040f94fbafbd5f01d49bc168a4aacf682" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

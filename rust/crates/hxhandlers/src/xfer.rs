@@ -36,8 +36,6 @@ use crate::recv::xfer::{rcv_task_file_get, rcv_task_file_put};
 #[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_has_cap;
 #[cfg(not(test))]
-use hxhfs::ffi::resource_len;
-#[cfg(not(test))]
 use hxtask::send::hlwrite_chunks;
 #[cfg(not(test))]
 use hxtask::task_new;
@@ -397,6 +395,24 @@ unsafe fn cstr_bytes<'a>(p: *const c_char) -> &'a [u8] {
     } else {
         std::ffi::CStr::from_ptr(p).to_bytes()
     }
+}
+
+#[cfg(not(test))]
+unsafe fn resource_len(path: *const c_char) -> usize {
+    if path.is_null() {
+        return 0;
+    }
+    let bytes = std::ffi::CStr::from_ptr(path).to_bytes();
+    #[cfg(unix)]
+    let path = {
+        use std::os::unix::ffi::OsStrExt;
+        std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    };
+    #[cfg(not(unix))]
+    let Ok(path) = std::str::from_utf8(bytes).map(std::path::PathBuf::from) else {
+        return 0;
+    };
+    hxnet::hfs_config::resource_len(&path).min(usize::MAX as u64) as usize
 }
 
 /// (ptr, len) → borrowed bytes (empty for NULL). Names carry any byte incl.

@@ -1654,11 +1654,11 @@ test('nick_colors', test_integration_nick_colors,
 # production hxnet::xfer::hxnet_xfer_file_recv_one and asserts the decoded
 # on-disk file is byte-for-byte the seeded 'hello world\n'. The receive machine
 # lives in the hxnet crate (linked via integration_harness_lib, which also
-# bundles the hxnet channel); this target adds the hxhfs crate (HFS
-# sidecar) and the hxfiles-xfer FFO codec. The Dockerfile seeds files/test.txt.
+# bundles the hxnet channel); this target adds GtkHx's facade over the shared
+# sidecar and FFO codecs. The Dockerfile seeds files/test.txt.
 test_integration_file_get = executable('test_integration_file_get',
   'integration/test_file_get.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
@@ -1675,7 +1675,7 @@ test('file_get', test_integration_file_get,
 # pins mhxd's server-side contract (offsets read at [46]/[62]).
 test_integration_file_resume = executable('test_integration_file_resume',
   'integration/test_file_resume.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
@@ -1738,10 +1738,10 @@ test('news15', test_integration_news15,
 # FFO-wrapped file via hxnet::xfer::hxnet_xfer_file_send_one, then downloads it
 # back through hxnet_xfer_file_recv_one and asserts byte-exact. Both machines
 # live in the hxnet crate (linked via integration_harness_lib); this target adds
-# the hxhfs crate + the FFO codec. Requires guest UPLOAD_FILES + UPLOAD_ANYWHERE.
+# GtkHx's facade over the shared codecs. Requires guest UPLOAD_FILES + UPLOAD_ANYWHERE.
 test_integration_file_put = executable('test_integration_file_put',
   'integration/test_file_put.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
@@ -2164,11 +2164,11 @@ test('folder_put', test_integration_folder_put,
 # hxnet::xfer::hxnet_xfer_folder_send_all, downloads it back through
 # hxnet_xfer_folder_recv_all, and asserts every file is byte-exact. Both folder
 # machines live in the hxnet crate (linked via integration_harness_lib, which
-# bundles the hxnet channel); this target adds the hxhfs crate + the
-# FFO codec. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
+# bundles the hxnet channel); this target adds GtkHx's facade over the shared
+# codecs. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
 test_integration_folder_roundtrip = executable('test_integration_folder_roundtrip',
   'integration/test_folder_roundtrip.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )

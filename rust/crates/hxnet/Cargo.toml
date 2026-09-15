@@ -38,8 +38,8 @@ libc = "0.2"
 # hxfiles-xfer is the FFO/FILP fork-header codec (native ffo::*); hxhfs is the
 # HFS sidecar / resource-fork I/O (native hfsinfo_write / resource_open, reading
 # the same process-global config the C callers set via hfs_set_config).
-hxfiles-xfer = { path = "../hxfiles-xfer" }
-hxhfs = { path = "../hxhfs" }
+hxfiles-xfer.workspace = true
+hxhfs.workspace = true
 # R3.3.c cipher adapters: BlowfishStream uses the Blowfish-OFB-64
 # primitive; AeadStream uses the ChaCha20-Poly1305 frame codec.
 # Both crates already live in the workspace and are linked into
