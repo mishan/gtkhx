@@ -98,12 +98,16 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     let subject: gtk::Widget = from_glib_none(hx_gchat_subject(gchat));
     let media: gtk::Widget = from_glib_none(hx_gchat_media_btn(gchat));
 
-    // Subject bar.
-    let subj_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    // Subject line: a caption over the output rather than a framed input
+    // box of its own (chrome.css). Still editable for accounts that may.
     subject.set_hexpand(true);
-    subj_hbox.append(&subject);
-    let subj_frame = gtk::Frame::new(None);
-    subj_frame.set_child(Some(&subj_hbox));
+    subject.add_css_class("gtkhx-chat-subject");
+    // Shares the pane's top-right corner with the pane controls, so it
+    // ends short of them while they're up (hx_panel.c).
+    subject.add_css_class("gtkhx-pane-reserve");
+    if let Some(entry) = subject.downcast_ref::<gtk::Entry>() {
+        entry.set_placeholder_text(Some(&tr("No subject")));
+    }
 
     // Output frame: xtext + its scrollbar.
     let out_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -144,11 +148,11 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     vstack.append(&inputframe);
 
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    vbox.set_margin_start(5);
-    vbox.set_margin_end(5);
-    vbox.set_margin_top(5);
-    vbox.set_margin_bottom(5);
-    vbox.append(&subj_frame);
+    vbox.set_margin_start(4);
+    vbox.set_margin_end(4);
+    vbox.set_margin_top(2);
+    vbox.set_margin_bottom(4);
+    vbox.append(&subject);
     vstack.set_vexpand(true);
     vbox.append(&vstack);
 
@@ -166,7 +170,24 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
         tab_bar.set_view(Some(tv));
         crate::wheel_switches_tabs(&tab_bar, tv);
     }
-    tab_bar.set_autohide(true);
+    // Autohide alone isn't enough: it doesn't count the pinned public tab
+    // as "only one", so a connection with no conversations open would show
+    // a strip holding a single icon. Hide it outright until there is
+    // somewhere else to switch to.
+    tab_bar.set_autohide(false);
+    // Top of the pane when it shows, so it makes room for the pane
+    // controls; hidden, the subject line below does instead.
+    tab_bar.add_css_class("gtkhx-pane-reserve");
+    if let Some(tv) = tab_view.downcast_ref::<adw::TabView>() {
+        let bar = tab_bar.downgrade();
+        let sync = move |tv: &adw::TabView| {
+            if let Some(bar) = bar.upgrade() {
+                bar.set_visible(tv.n_pages() > 1);
+            }
+        };
+        sync(tv);
+        tv.connect_n_pages_notify(sync);
+    }
 
     let ctitle = crate::cs(&tr("Chat"));
     gtkhx_chat_tabs_add_public(htlc, wptr(&vbox), ctitle.as_ptr());

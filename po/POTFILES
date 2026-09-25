@@ -9,6 +9,8 @@ src/files_remote_provider.c
 src/gtkhx.c
 src/gtkurl.c
 src/gtkutil.c
+src/hx_panel.c
+src/hx_split.c
 src/msg.c
 src/network.c
 src/options.c

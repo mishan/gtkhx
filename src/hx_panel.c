@@ -29,6 +29,7 @@
 #include "hx.h"      /* session typedef, required by gtkutil.h and toolbar.h */
 #include "gtkutil.h" /* init_keyaccel for undocked windows */
 #include "toolbar.h" /* toolbar_window — main-dock root comparison */
+#include "gtkhx_theme.h" /* GTKHX_SCALE_TOOLBAR for the pane switcher */
 
 #include <adwaita.h>
 
@@ -47,11 +48,40 @@ struct _HxPanel {
      * panel. */
     HxPanelCloseFunc close_func;
     gpointer close_data;
+
+    /* panel.show-actions: whether the content's action row (the widget
+     * carrying .gtkhx-panel-actions) is shown. Owned by the panel's
+     * action group. */
+    GSimpleAction *show_actions;
+    gboolean has_actions; /* the content has an action row at all */
+
+    /* The panel's own action group ("panel" to libpanel's muxer), kept
+     * so the pane controls can reach it under "pane". */
+    GSimpleActionGroup *actions;
+
+    /* Content wrapper: an overlay whose child is the dock page stack and
+     * whose one overlay is the pane controls — switcher, drag handle, menu
+     * and close — which stand in for the frame's header when it is
+     * hidden. NULL until content is set. */
+    GtkWidget *overlay;
+    GtkWidget *controls;
+    GtkWidget *switcher; /* one button per panel sharing the frame */
+    gboolean hovering;
+    gboolean focus_within; /* keyboard focus is somewhere in the pane */
+    gboolean dragging;     /* keeps the controls up while their handle drags */
+    gboolean menu_open;    /* ...and while their menu is open */
 };
 
 G_DEFINE_FINAL_TYPE (HxPanel, hx_panel, PANEL_TYPE_WIDGET)
 
 /* Forward decls */
+static void hx_panel_sync_chrome (HxPanel *self);
+static void on_panel_map (GtkWidget *widget, gpointer user_data);
+static gboolean on_libpanel_drag_cancel (GtkDragSource *src, GdkDrag *drag,
+                                         GdkDragCancelReason reason,
+                                         gpointer user_data);
+static void on_show_actions_change (GSimpleAction *action, GVariant *value,
+                                    gpointer user_data);
 static void on_undock_activate (GSimpleAction *action, GVariant *parameter,
                                 gpointer user_data);
 static gboolean on_undocked_close_request (GtkWindow *window,
@@ -114,6 +144,7 @@ hx_panel_finalize (GObject *object)
 
     g_clear_pointer (&self->id, g_free);
     g_weak_ref_clear (&self->home_frame);
+    g_clear_object (&self->actions);
 
     G_OBJECT_CLASS (hx_panel_parent_class)->finalize (object);
 }
@@ -153,6 +184,14 @@ hx_panel_init (HxPanel *self)
     g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (undock));
     g_object_unref (undock);
 
+    self->show_actions = g_simple_action_new_stateful (
+        "show-actions", NULL, g_variant_new_boolean (TRUE));
+    g_signal_connect (self->show_actions, "change-state",
+                      G_CALLBACK (on_show_actions_change), self);
+    g_action_map_add_action (G_ACTION_MAP (group),
+                             G_ACTION (self->show_actions));
+    g_object_unref (self->show_actions); /* the group holds the ref */
+
     /* Move-direction actions used to live here as panel.move-*
      * and surfaced via our own chevron-menu section. They migrated
      * to the per-frame "page.move-{left,right,up,down}" inserted
@@ -165,17 +204,42 @@ hx_panel_init (HxPanel *self)
 
     panel_widget_insert_action_group (PANEL_WIDGET (self), "panel",
                                       G_ACTION_GROUP (group));
-    g_object_unref (group);
+    self->actions = group; /* keep our ref for the pane controls */
 
-    /* Per-panel chevron menu. The only entry here is Undock; the
-     * Move Page items in the chevron come from libpanel's
+    /* A panel that moves frames lands under a different header, among
+     * different neighbors. */
+    g_signal_connect (self, "map", G_CALLBACK (on_panel_map), NULL);
+
+    /* Per-panel chevron menu: this panel's own items, then the frame's.
+     * The Move Page items in the chevron come from libpanel's
      * frame_menu template and are rerouted to our cross-frame
      * neighbour move by the per-frame "page" action group install
-     * in hx_panel_install_page_move_actions. Split + close-frame
-     * live on the small menu button on each PanelFrame's header
-     * (hx_split_install_frame_ui). */
+     * in hx_panel_install_page_move_actions.
+     *
+     * Split + close-frame live here too, resolved against the frame's
+     * "frame-ops" group up the widget tree, so a frame header carries
+     * one menu instead of two. The separate split button
+     * (hx_split_install_frame_ui) only shows on an empty frame, which
+     * has no panel and so no chevron menu. */
     menu = g_menu_new ();
-    g_menu_append (menu, _ ("Undock"), "page.panel.undock");
+    {
+        GMenu *panel_section = g_menu_new ();
+        GMenu *frame_section = g_menu_new ();
+
+        g_menu_append (panel_section, _ ("Show Toolbar"),
+                       "page.panel.show-actions");
+        g_menu_append (panel_section, _ ("Undock"), "page.panel.undock");
+        g_menu_append (frame_section, _ ("Split Horizontally"),
+                       "frame-ops.split-h");
+        g_menu_append (frame_section, _ ("Split Vertically"),
+                       "frame-ops.split-v");
+        g_menu_append (frame_section, _ ("Close Frame"),
+                       "frame-ops.close-frame");
+        g_menu_append_section (menu, NULL, G_MENU_MODEL (panel_section));
+        g_menu_append_section (menu, NULL, G_MENU_MODEL (frame_section));
+        g_object_unref (panel_section);
+        g_object_unref (frame_section);
+    }
     panel_widget_set_menu_model (PANEL_WIDGET (self), G_MENU_MODEL (menu));
     g_object_unref (menu);
 }
@@ -199,7 +263,657 @@ hx_panel_new (const char *id, HxPanelKind kind, PanelArea home_area)
      * (e.g. during dispose). */
     panel_widget_set_id (PANEL_WIDGET (self), id);
 
+    g_simple_action_set_state (
+        self->show_actions,
+        g_variant_new_boolean (!dock_layout_panel_actions_hidden (id)));
+
     return self;
+}
+
+/* Show or hide every action row under `root`. Doesn't descend into a
+ * match — a row's own children are buttons, not more rows. Returns
+ * whether it found one. */
+static gboolean
+set_action_rows_visible (GtkWidget *root, gboolean visible)
+{
+    gboolean found = FALSE;
+
+    if (gtk_widget_has_css_class (root, "gtkhx-panel-actions")) {
+        gtk_widget_set_visible (root, visible);
+        return TRUE;
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        found |= set_action_rows_visible (c, visible);
+    }
+    return found;
+}
+
+void
+hx_panel_sync_actions (HxPanel *self)
+{
+    GtkWidget *child;
+    g_autoptr (GVariant) state = NULL;
+
+    g_return_if_fail (HX_IS_PANEL (self));
+
+    child = hx_panel_get_content (self);
+    if (child == NULL) {
+        return;
+    }
+    state = g_action_get_state (G_ACTION (self->show_actions));
+    /* A panel with no action row (Chat) greys the item out rather than
+     * offering a switch that does nothing. */
+    self->has_actions
+        = set_action_rows_visible (child, g_variant_get_boolean (state));
+    g_simple_action_set_enabled (self->show_actions, self->has_actions);
+    hx_panel_sync_chrome (self);
+}
+
+/* ------------------------------------------------------------------ */
+/* Pane titles                                                         */
+/* ------------------------------------------------------------------ */
+
+/* A frame's header names what is plainly on screen, so it shows only
+ * where it has a job the pane controls can't do: on an empty frame, which
+ * has no panel to carry them and needs the header's split button. Pane
+ * Titles in the main menu puts every header back. Switching between the
+ * panels sharing a frame is the pane controls' switcher. */
+static gboolean
+frame_needs_header (PanelFrame *frame)
+{
+    return dock_layout_pane_titles_visible ()
+           || panel_frame_get_n_pages (frame) == 0;
+}
+
+/* The pixmap a panel goes by on the toolbar, so the switcher reads the
+ * same as the buttons that open the panels. NULL for a panel with no
+ * toolbar button; the switcher falls back to its title. */
+static const char *
+panel_pixmap (const char *id)
+{
+    static const struct {
+        const char *id;
+        const char *resource;
+    } map[] = {
+        { HX_PANEL_ID_CHAT, "/com/nasledov/gtkhx/pixmaps/chat.png" },
+        { HX_PANEL_ID_USERS, "/com/nasledov/gtkhx/pixmaps/users.png" },
+        { HX_PANEL_ID_FILES, "/com/nasledov/gtkhx/pixmaps/files.png" },
+        { HX_PANEL_ID_NEWS, "/com/nasledov/gtkhx/pixmaps/news.png" },
+        { HX_PANEL_ID_NEWS15, "/com/nasledov/gtkhx/pixmaps/news_folder.png" },
+        { HX_PANEL_ID_TASKS, "/com/nasledov/gtkhx/pixmaps/tasks.png" },
+    };
+
+    for (gsize i = 0; i < G_N_ELEMENTS (map); i++) {
+        if (g_strcmp0 (id, map[i].id) == 0) {
+            return map[i].resource;
+        }
+    }
+    return NULL;
+}
+
+static void
+on_switch_clicked (GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    panel_widget_raise (PANEL_WIDGET (user_data));
+}
+
+/* Rebuild the switcher from the frame's page list: one button per
+ * panel, this one marked. Hidden for a panel alone in its frame, where
+ * there is nothing to switch to. */
+static void
+hx_panel_rebuild_switcher (HxPanel *self)
+{
+    GtkWidget *frame, *child;
+    guint n;
+
+    if (self->switcher == NULL) {
+        return;
+    }
+    while ((child = gtk_widget_get_first_child (self->switcher)) != NULL) {
+        gtk_box_remove (GTK_BOX (self->switcher), child);
+    }
+    frame = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
+    n = frame != NULL ? panel_frame_get_n_pages (PANEL_FRAME (frame)) : 0;
+    gtk_widget_set_visible (self->switcher, n > 1);
+    if (n < 2) {
+        return;
+    }
+    for (guint i = 0; i < n; i++) {
+        PanelWidget *page = panel_frame_get_page (PANEL_FRAME (frame), i);
+        const char *title;
+        const char *pixmap;
+        GtkWidget *btn;
+
+        if (page == NULL || !HX_IS_PANEL (page)) {
+            continue;
+        }
+        title = panel_widget_get_title (page);
+        pixmap = panel_pixmap (HX_PANEL (page)->id);
+        if (pixmap != NULL) {
+            btn = gtkhx_pixmap_button (pixmap, title, GTKHX_SCALE_TOOLBAR,
+                                       G_CALLBACK (on_switch_clicked), page);
+        } else {
+            btn = gtk_button_new_with_label (title != NULL ? title : "?");
+            gtk_widget_add_css_class (btn, "flat");
+            g_signal_connect (btn, "clicked", G_CALLBACK (on_switch_clicked),
+                              page);
+        }
+        /* Named for screen readers (the pixmap says nothing to them),
+         * and the current one marked as such rather than only by color. */
+        gtk_accessible_update_property (GTK_ACCESSIBLE (btn),
+                                        GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                        title != NULL ? title : "", -1);
+        if (page == PANEL_WIDGET (self)) {
+            gtk_widget_add_css_class (btn, "gtkhx-switch-current");
+            gtk_accessible_update_state (GTK_ACCESSIBLE (btn),
+                                         GTK_ACCESSIBLE_STATE_PRESSED,
+                                         GTK_ACCESSIBLE_TRISTATE_TRUE, -1);
+        }
+        gtk_box_append (GTK_BOX (self->switcher), btn);
+    }
+}
+
+/* The widgets that may share the pane controls' corner: an action row,
+ * or a widget tagged to make room (the chat's subject line and its tab
+ * strip). */
+static gboolean
+is_corner_widget (GtkWidget *w)
+{
+    return gtk_widget_has_css_class (w, "gtkhx-panel-actions")
+           || gtk_widget_has_css_class (w, "gtkhx-pane-reserve");
+}
+
+/* The widget that sits in the controls' corner on one content page: the
+ * first *visible* corner widget in tree order. First, because that is the
+ * one at the top — Files has more rows below its own. Visible, because a
+ * hidden action row or an autohidden tab strip isn't there to make room
+ * in. NULL when there is none. */
+static GtkWidget *
+find_corner_widget (GtkWidget *root)
+{
+    if (!gtk_widget_get_visible (root)) {
+        return NULL;
+    }
+    if (is_corner_widget (root)) {
+        return root;
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        GtkWidget *found = find_corner_widget (c);
+        if (found != NULL) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static void
+clear_corner_margins (GtkWidget *root)
+{
+    if (is_corner_widget (root)) {
+        gtk_widget_set_margin_end (root, 0);
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        clear_corner_margins (c);
+    }
+}
+
+/* Make room for the controls on every content page — each connection has
+ * its own page in the stack, and each its own corner widget — or, with
+ * margin 0, give it all back. */
+static void
+reserve_for_controls (GtkWidget *content, int margin)
+{
+    clear_corner_margins (content);
+    if (margin <= 0) {
+        return;
+    }
+    if (GTK_IS_STACK (content)) {
+        for (GtkWidget *page = gtk_widget_get_first_child (content);
+             page != NULL; page = gtk_widget_get_next_sibling (page)) {
+            GtkWidget *corner = find_corner_widget (page);
+            if (corner != NULL) {
+                gtk_widget_set_margin_end (corner, margin);
+            }
+        }
+    } else {
+        GtkWidget *corner = find_corner_widget (content);
+        if (corner != NULL) {
+            gtk_widget_set_margin_end (corner, margin);
+        }
+    }
+}
+
+/* The page on screen: the stack's visible child, or the content itself. */
+static GtkWidget *
+visible_page (GtkWidget *content)
+{
+    if (GTK_IS_STACK (content)) {
+        return gtk_stack_get_visible_child (GTK_STACK (content));
+    }
+    return content;
+}
+
+/* Whether the frame's own chrome is out of the way: its header hidden
+ * (pane titles off), or — in an undocked window — the header's controls
+ * hidden, which takes its menu with them. Either way the pane controls
+ * are the only route to the panel's menu. */
+static gboolean
+frame_chrome_hidden (GtkWidget *frame)
+{
+    PanelFrameHeader *header;
+    GtkWidget *controls;
+
+    if (frame == NULL) {
+        return FALSE;
+    }
+    header = panel_frame_get_header (PANEL_FRAME (frame));
+    if (header == NULL) {
+        return FALSE;
+    }
+    if (!gtk_widget_get_visible (GTK_WIDGET (header))) {
+        return TRUE;
+    }
+    controls
+        = hx_panel_find_css_class_descendant (GTK_WIDGET (header), "controls");
+    return controls != NULL && !gtk_widget_get_visible (controls);
+}
+
+/* Show, hide and place the pane controls. They are up for good where
+ * there is a corner widget on the page for them to sit at the end of
+ * (which makes room for them) and something worth keeping in view — an
+ * action row, or a switcher, which would hide the very panels it exists
+ * to reveal if it only appeared on hover. Otherwise they would sit over
+ * content, so they appear on hover, or while keyboard focus is in the
+ * pane so they can be reached without a pointer. */
+static void
+hx_panel_sync_chrome (HxPanel *self)
+{
+    GtkWidget *frame, *content, *corner;
+    gboolean compact, row, pinned;
+    g_autoptr (GVariant) state = NULL;
+
+    if (self->overlay == NULL) {
+        return;
+    }
+    frame = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
+    compact = frame_chrome_hidden (frame);
+    state = g_action_get_state (G_ACTION (self->show_actions));
+    row = self->has_actions && g_variant_get_boolean (state);
+    content = gtk_overlay_get_child (GTK_OVERLAY (self->overlay));
+    corner
+        = content != NULL ? find_corner_widget (visible_page (content)) : NULL;
+    pinned = compact && corner != NULL
+             && (row || gtk_widget_get_visible (self->switcher));
+
+    gtk_widget_set_visible (self->controls,
+                            pinned
+                                || (compact
+                                    && (self->hovering || self->focus_within
+                                        || self->dragging || self->menu_open)));
+    if (pinned) {
+        int width = 0;
+
+        gtk_widget_add_css_class (self->overlay, "gtkhx-pane-inline");
+        gtk_widget_measure (self->controls, GTK_ORIENTATION_HORIZONTAL, -1,
+                            NULL, &width, NULL, NULL);
+        reserve_for_controls (content, width);
+    } else {
+        gtk_widget_remove_css_class (self->overlay, "gtkhx-pane-inline");
+        if (content != NULL) {
+            reserve_for_controls (content, 0);
+        }
+    }
+}
+
+static void
+on_pane_enter (GtkEventControllerMotion *motion, double x, double y,
+               gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    (void)motion;
+    (void)x;
+    (void)y;
+    self->hovering = TRUE;
+    hx_panel_sync_chrome (self);
+}
+
+static void
+on_pane_focus_enter (GtkEventControllerFocus *focus, gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    (void)focus;
+    self->focus_within = TRUE;
+    hx_panel_sync_chrome (self);
+}
+
+static void
+on_pane_focus_leave (GtkEventControllerFocus *focus, gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    (void)focus;
+    self->focus_within = FALSE;
+    hx_panel_sync_chrome (self);
+}
+
+/* A connection switch shows another page, with its own corner widget. */
+static void
+on_page_switched (GObject *stack, GParamSpec *pspec, gpointer user_data)
+{
+    (void)stack;
+    (void)pspec;
+    hx_panel_sync_chrome (HX_PANEL (user_data));
+}
+
+static void
+on_pane_leave (GtkEventControllerMotion *motion, gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    (void)motion;
+    self->hovering = FALSE;
+    hx_panel_sync_chrome (self);
+}
+
+/* Opening the menu moves the pointer into its popover, which is a
+ * leave as far as the pane is concerned. Controls shown on hover would
+ * hide then, taking the menu with them before it could be used. */
+static void
+on_pane_menu_active (GObject *button, GParamSpec *pspec, gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    (void)pspec;
+    self->menu_open = gtk_menu_button_get_active (GTK_MENU_BUTTON (button));
+    hx_panel_sync_chrome (self);
+}
+
+/* The pane's drag handle. It stands in for the one on the header this
+ * pane no longer shows, and speaks the same language: the drag carries
+ * the HxPanel as a PANEL_TYPE_WIDGET value, which is all the dock's drop
+ * target (hx_panel_install_drop_target_on_dock) asks of a drag, and a
+ * release over nothing undocks exactly as the header's handle does. */
+static GdkContentProvider *
+on_handle_prepare (GtkDragSource *src, double x, double y, gpointer user_data)
+{
+    (void)src;
+    (void)x;
+    (void)y;
+    return gdk_content_provider_new_typed (PANEL_TYPE_WIDGET, user_data);
+}
+
+static void
+on_handle_drag_begin (GtkDragSource *src, GdkDrag *drag, gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+    GtkWidget *chip;
+    const char *title = panel_widget_get_title (PANEL_WIDGET (self));
+
+    (void)src;
+    self->dragging = TRUE;
+
+    /* A chip naming the pane, rather than a snapshot of it: the drop
+     * highlight already shows where it will land. */
+    chip = gtk_label_new (title != NULL ? title : "");
+    gtk_widget_add_css_class (chip, "gtkhx-pane-drag-chip");
+    gtk_drag_icon_set_child (GTK_DRAG_ICON (gtk_drag_icon_get_for_drag (drag)),
+                             chip);
+}
+
+static void
+on_handle_drag_end (GtkDragSource *src, GdkDrag *drag, gboolean delete_data,
+                    gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    (void)src;
+    (void)drag;
+    (void)delete_data;
+    self->dragging = FALSE;
+    hx_panel_sync_chrome (self);
+}
+
+static GtkWidget *
+build_drag_handle (HxPanel *self)
+{
+    GtkWidget *handle
+        = gtk_image_new_from_icon_name ("list-drag-handle-symbolic");
+    GtkDragSource *src = gtk_drag_source_new ();
+
+    gtk_widget_add_css_class (handle, "gtkhx-pane-handle");
+    gtk_widget_add_css_class (handle, "dim-label");
+    gtk_widget_set_cursor_from_name (handle, "grab");
+    gtk_widget_set_tooltip_text (handle, _ ("Drag to move this pane"));
+
+    gtk_drag_source_set_actions (src, GDK_ACTION_MOVE | GDK_ACTION_COPY);
+    g_signal_connect (src, "prepare", G_CALLBACK (on_handle_prepare), self);
+    g_signal_connect (src, "drag-begin", G_CALLBACK (on_handle_drag_begin),
+                      self);
+    g_signal_connect (src, "drag-end", G_CALLBACK (on_handle_drag_end), self);
+    g_signal_connect (src, "drag-cancel", G_CALLBACK (on_libpanel_drag_cancel),
+                      NULL);
+    gtk_widget_add_controller (handle, GTK_EVENT_CONTROLLER (src));
+    return handle;
+}
+
+static GtkWidget *
+build_pane_controls (HxPanel *self)
+{
+    GtkWidget *box, *menu_btn, *close_btn;
+    GMenu *menu, *panel_section, *frame_section;
+
+    /* The chevron menu again, addressed from inside the panel: "pane"
+     * is the panel's own group (inserted on the overlay), frame-ops.*
+     * the frame's group, found up the widget tree. No Move items —
+     * the handle drags, and Alt+Shift+arrows move (hx_panel_frame.c). */
+    panel_section = g_menu_new ();
+    /* "Action Bar", not "Toolbar": the main menu's Show Toolbar is the
+     * window's pixmap row, and one string for both reads as one switch. */
+    g_menu_append (panel_section, _ ("Show Action Bar"), "pane.show-actions");
+    g_menu_append (panel_section, _ ("Undock"), "pane.undock");
+    frame_section = g_menu_new ();
+    g_menu_append (frame_section, _ ("Split Horizontally"),
+                   "frame-ops.split-h");
+    g_menu_append (frame_section, _ ("Split Vertically"), "frame-ops.split-v");
+    g_menu_append (frame_section, _ ("Close Frame"), "frame-ops.close-frame");
+    menu = g_menu_new ();
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (panel_section));
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (frame_section));
+    g_object_unref (panel_section);
+    g_object_unref (frame_section);
+
+    menu_btn = gtk_menu_button_new ();
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (menu_btn),
+                                   "pan-down-symbolic");
+    gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (menu_btn),
+                                    G_MENU_MODEL (menu));
+    gtk_widget_set_tooltip_text (menu_btn, _ ("Pane options"));
+    gtk_accessible_update_property (GTK_ACCESSIBLE (menu_btn),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                    _ ("Pane options"), -1);
+    g_signal_connect (menu_btn, "notify::active",
+                      G_CALLBACK (on_pane_menu_active), self);
+    g_object_unref (menu);
+
+    close_btn = gtk_button_new_from_icon_name ("window-close-symbolic");
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (close_btn),
+                                    "frame-ops.close-page");
+    gtk_widget_set_tooltip_text (close_btn, _ ("Close pane"));
+    gtk_accessible_update_property (GTK_ACCESSIBLE (close_btn),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                    _ ("Close pane"), -1);
+
+    box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (box, "gtkhx-pane-controls");
+    gtk_widget_set_halign (box, GTK_ALIGN_END);
+    gtk_widget_set_valign (box, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (box), menu_btn);
+    gtk_box_append (GTK_BOX (box), close_btn);
+    gtk_box_prepend (GTK_BOX (box), build_drag_handle (self));
+    self->switcher = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (self->switcher, "gtkhx-pane-switcher");
+    gtk_widget_set_visible (self->switcher, FALSE);
+    gtk_box_prepend (GTK_BOX (box), self->switcher);
+    gtk_widget_set_visible (box, FALSE);
+    return box;
+}
+
+static void
+on_panel_map (GtkWidget *widget, gpointer user_data)
+{
+    (void)user_data;
+    hx_panel_rebuild_switcher (HX_PANEL (widget));
+    hx_panel_sync_chrome (HX_PANEL (widget));
+}
+
+void
+hx_panel_set_content (HxPanel *self, GtkWidget *content)
+{
+    GtkEventController *motion, *focus;
+
+    g_return_if_fail (HX_IS_PANEL (self));
+    g_return_if_fail (self->overlay == NULL);
+
+    self->overlay = gtk_overlay_new ();
+    gtk_overlay_set_child (GTK_OVERLAY (self->overlay), content);
+    self->controls = build_pane_controls (self);
+    gtk_overlay_add_overlay (GTK_OVERLAY (self->overlay), self->controls);
+    gtk_widget_insert_action_group (self->overlay, "pane",
+                                    G_ACTION_GROUP (self->actions));
+
+    motion = gtk_event_controller_motion_new ();
+    g_signal_connect (motion, "enter", G_CALLBACK (on_pane_enter), self);
+    g_signal_connect (motion, "leave", G_CALLBACK (on_pane_leave), self);
+    gtk_widget_add_controller (self->overlay, motion);
+
+    focus = gtk_event_controller_focus_new ();
+    g_signal_connect (focus, "enter", G_CALLBACK (on_pane_focus_enter), self);
+    g_signal_connect (focus, "leave", G_CALLBACK (on_pane_focus_leave), self);
+    gtk_widget_add_controller (self->overlay, focus);
+
+    if (GTK_IS_STACK (content)) {
+        g_signal_connect_object (content, "notify::visible-child",
+                                 G_CALLBACK (on_page_switched), self,
+                                 G_CONNECT_DEFAULT);
+    }
+
+    panel_widget_set_child (PANEL_WIDGET (self), self->overlay);
+}
+
+GtkWidget *
+hx_panel_get_content (HxPanel *self)
+{
+    g_return_val_if_fail (HX_IS_PANEL (self), NULL);
+
+    if (self->overlay != NULL) {
+        return gtk_overlay_get_child (GTK_OVERLAY (self->overlay));
+    }
+    return panel_widget_get_child (PANEL_WIDGET (self));
+}
+
+static void
+frame_sync_header (PanelFrame *frame)
+{
+    PanelFrameHeader *header = panel_frame_get_header (frame);
+    guint n = panel_frame_get_n_pages (frame);
+
+    if (header != NULL) {
+        gtk_widget_set_visible (GTK_WIDGET (header),
+                                frame_needs_header (frame));
+    }
+    for (guint i = 0; i < n; i++) {
+        PanelWidget *page = panel_frame_get_page (frame, i);
+        if (page != NULL && HX_IS_PANEL (page)) {
+            hx_panel_rebuild_switcher (HX_PANEL (page));
+            hx_panel_sync_chrome (HX_PANEL (page));
+        }
+    }
+}
+
+static void
+on_frame_pages_changed (GListModel *pages, guint position, guint removed,
+                        guint added, gpointer user_data)
+{
+    (void)pages;
+    (void)position;
+    (void)removed;
+    (void)added;
+    frame_sync_header (PANEL_FRAME (user_data));
+}
+
+/* Drop the page-model connection before the frame tears its pages down:
+ * disposal removes them, each removal emits items-changed, and the
+ * handler would run on a frame half taken apart. */
+static void
+on_titled_frame_destroy (GtkWidget *frame, gpointer user_data)
+{
+    GObject *pages = g_object_get_data (G_OBJECT (frame), "hx-pane-titles");
+
+    (void)user_data;
+    if (pages != NULL) {
+        g_signal_handlers_disconnect_by_data (pages, frame);
+    }
+}
+
+void
+hx_panel_install_pane_titles_on_frame (GtkWidget *frame)
+{
+    GtkSelectionModel *pages;
+
+    g_return_if_fail (PANEL_IS_FRAME (frame));
+
+    if (g_object_get_data (G_OBJECT (frame), "hx-pane-titles") != NULL) {
+        return;
+    }
+    pages = panel_frame_get_pages (PANEL_FRAME (frame));
+    g_signal_connect_object (pages, "items-changed",
+                             G_CALLBACK (on_frame_pages_changed), frame,
+                             G_CONNECT_DEFAULT);
+    /* Holds the model — and so the connection — for the frame's life. */
+    g_object_set_data_full (G_OBJECT (frame), "hx-pane-titles", pages,
+                            g_object_unref);
+    g_signal_connect (frame, "destroy", G_CALLBACK (on_titled_frame_destroy),
+                      NULL);
+    frame_sync_header (PANEL_FRAME (frame));
+}
+
+static void
+resync_leaf_cb (HxSplit *leaf, gpointer user_data)
+{
+    PanelFrame *frame = hx_split_get_frame (leaf);
+
+    (void)user_data;
+    if (frame != NULL) {
+        frame_sync_header (frame);
+    }
+}
+
+void
+hx_panel_resync_pane_titles (void)
+{
+    HxSplit *root = dock_layout_get_dock_root ();
+
+    if (root != NULL) {
+        hx_split_foreach_leaf (root, resync_leaf_cb, NULL);
+    }
+}
+
+static void
+on_show_actions_change (GSimpleAction *action, GVariant *value,
+                        gpointer user_data)
+{
+    HxPanel *self = HX_PANEL (user_data);
+
+    g_simple_action_set_state (action, value);
+    hx_panel_sync_actions (self);
+    dock_layout_set_panel_actions_hidden (self->id,
+                                          !g_variant_get_boolean (value));
 }
 
 const char *

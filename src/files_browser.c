@@ -2143,10 +2143,7 @@ gtkhx_files_build_content (session *sess)
      * relocates to a slim GtkBox at the top of the panel content
      * with the same start/end grouping via an hexpand spacer. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (button_bar, 6);
-    gtk_widget_set_margin_end (button_bar, 6);
-    gtk_widget_set_margin_top (button_bar, 6);
-    gtk_widget_set_margin_bottom (button_bar, 4);
+    gtk_widget_add_css_class (button_bar, "gtkhx-panel-actions");
     gtk_box_append (GTK_BOX (button_bar), refresh_btn);
     gtk_box_append (GTK_BOX (button_bar), mkdir_btn);
     gtk_box_append (GTK_BOX (button_bar), preview_btn);

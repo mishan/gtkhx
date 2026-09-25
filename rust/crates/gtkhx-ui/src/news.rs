@@ -367,10 +367,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
 
     // Post on start, Find + Reload on end, hexpand spacer between.
     let button_bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    button_bar.set_margin_start(6);
-    button_bar.set_margin_end(6);
-    button_bar.set_margin_top(6);
-    button_bar.set_margin_bottom(4);
+    button_bar.add_css_class("gtkhx-panel-actions");
     button_bar.append(&post_btn);
     let spacer = gtk::Label::new(None);
     spacer.set_hexpand(true);

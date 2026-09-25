@@ -82,12 +82,13 @@ GtkWidget *toolbar_end_frame = NULL;
 GtkWidget *toolbar_bottom_frame = NULL;
 GtkWidget *toolbar_center_frame = NULL;
 
-/* status_bar is now a GtkLabel. The previous GtkStatusbar
- * was deprecated in GTK 4.10 and we never used its stack-of-messages
- * model — we always replaced the message wholesale. set_status_bar()
- * in gtkutil.c does a single gtk_label_set_text() now. The
- * status_msg / context_status globals are gone with it. */
-GtkWidget *status_bar;
+/* The header bar's title: the window title over the connection status
+ * ("Logged in to …"), which used to be a status bar of its own along the
+ * bottom edge. Hidden while the server banner stands in for it. */
+static AdwWindowTitle *window_title;
+
+/* The optional pixmap-button row under the header; app.show-toolbar. */
+static GtkWidget *main_toolbar;
 
 /* AdwToastOverlay anchors transient notifications over the
  * toolbar content. set_status_bar() pushes a toast for "Logged in"
@@ -540,6 +541,64 @@ on_action_clear_input (GSimpleAction *action, GVariant *param, gpointer data)
     }
 }
 
+/* Menu twins of the toolbar row, so hiding it costs nothing. */
+static void
+on_action_tracker (GSimpleAction *action, GVariant *param, gpointer data)
+{
+    (void)action;
+    (void)param;
+    (void)data;
+    create_tracker_window (toolbar_window, hx_active_session ());
+}
+
+static void
+on_action_broadcast (GSimpleAction *action, GVariant *param, gpointer data)
+{
+    (void)action;
+    (void)param;
+    gtkhx_broadcast_dialog_open (NULL, data);
+}
+
+/* app.show-panel::<id> — what the matching toolbar button does. */
+static void
+on_action_show_panel (GSimpleAction *action, GVariant *param, gpointer data)
+{
+    const char *id = g_variant_get_string (param, NULL);
+
+    (void)action;
+    (void)data;
+    if (g_strcmp0 (id, HX_PANEL_ID_NEWS) == 0) {
+        on_news_clicked (GTK_BUTTON (news_btn), NULL);
+    } else if (g_strcmp0 (id, HX_PANEL_ID_NEWS15) == 0) {
+        on_news15_clicked (GTK_BUTTON (news15_btn), NULL);
+    } else {
+        toolbar_present_panel (id, hx_active_session (), FALSE);
+    }
+}
+
+static void
+on_action_show_toolbar (GSimpleAction *action, GVariant *value, gpointer data)
+{
+    gboolean on = g_variant_get_boolean (value);
+
+    (void)data;
+    g_simple_action_set_state (action, value);
+    if (main_toolbar != NULL) {
+        gtk_widget_set_visible (main_toolbar, on);
+    }
+    dock_layout_set_toolbar_visible (on);
+}
+
+static void
+on_action_show_pane_titles (GSimpleAction *action, GVariant *value,
+                            gpointer data)
+{
+    (void)data;
+    g_simple_action_set_state (action, value);
+    dock_layout_set_pane_titles_visible (g_variant_get_boolean (value));
+    hx_panel_resync_pane_titles ();
+}
+
 static const GActionEntry app_actions[] = {
     { .name = "clear-input", .activate = on_action_clear_input },
     { .name = "settings", .activate = on_action_settings },
@@ -552,6 +611,17 @@ static const GActionEntry app_actions[] = {
       .parameter_type = "s" },
     { .name = "quit", .activate = on_action_quit },
     { .name = "reset_layout", .activate = on_action_reset_layout },
+    { .name = "tracker", .activate = on_action_tracker },
+    { .name = "broadcast", .activate = on_action_broadcast },
+    { .name = "show-panel",
+      .activate = on_action_show_panel,
+      .parameter_type = "s" },
+    { .name = "show-toolbar",
+      .state = "false",
+      .change_state = on_action_show_toolbar },
+    { .name = "show-pane-titles",
+      .state = "false",
+      .change_state = on_action_show_pane_titles },
 };
 
 /* live_toasts bookkeeping — remove the dismissed toast from the
@@ -686,43 +756,101 @@ toolbar_register_actions (GApplication *app, session *sess)
     if (G_IS_SIMPLE_ACTION (act)) {
         g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
     }
+
+    /* Broadcast is enabled exactly when its toolbar button is — setbtns
+     * decides that, and one decision shouldn't be made twice. */
+    act = g_action_map_lookup_action (G_ACTION_MAP (app), "broadcast");
+    if (act != NULL && broadcast_btn != NULL) {
+        g_object_bind_property (broadcast_btn, "sensitive", act, "enabled",
+                                G_BINDING_SYNC_CREATE);
+    }
+    act = g_action_map_lookup_action (G_ACTION_MAP (app), "show-toolbar");
+    if (G_IS_SIMPLE_ACTION (act)) {
+        g_simple_action_set_state (
+            G_SIMPLE_ACTION (act),
+            g_variant_new_boolean (dock_layout_toolbar_visible ()));
+    }
+    act = g_action_map_lookup_action (G_ACTION_MAP (app), "show-pane-titles");
+    if (G_IS_SIMPLE_ACTION (act)) {
+        g_simple_action_set_state (
+            G_SIMPLE_ACTION (act),
+            g_variant_new_boolean (dock_layout_pane_titles_visible ()));
+    }
 }
 
 /* build the GtkMenuButton + GMenuModel that hangs off the
- * end of the AdwHeaderBar. The connection-specific feature buttons
- * stay in the content row where the user clicks them often; the
- * menu collects the global / less-frequent actions:
+ * end of the AdwHeaderBar. The header itself carries only Connect /
+ * Disconnect and the title, so the menu is where everything else can
+ * always be found — including every button on the optional toolbar:
  *
- *   Settings
- *   About GtkHx
- *   Admin >
- *     New User...
- *     Edit User...
- *   Quit
+ *   Settings / Connections… / Tracker
+ *   Panels: Chat, Users, Files, News, News (1.5+), Tasks
+ *   Show Toolbar / Pane Titles / Reset Layout
+ *   Admin > New User…, Edit User…, Broadcast…
+ *   About GtkHx / Quit
  *
- * Admin is a submenu (separate GMenu wrapped via append_submenu)
- * because New / Edit User are sysop-only — keeping them visible
- * but tucked away from the everyday user-flow. The GActions stay
- * disabled at startup; setbtns() flips them on at login (and only
- * for accounts whose privileges actually grant admin). */
+ * Admin is a submenu because its items are privileged — visible but
+ * tucked away from the everyday user-flow. New / Edit User start
+ * disabled and setbtns() flips them on at login for accounts that may;
+ * Broadcast follows its toolbar button's sensitivity, which setbtns
+ * sets from HL_ACCESS_CAN_BROADCAST. */
 static GtkWidget *
 build_hamburger (void)
 {
-    GMenu *menu, *admin_menu;
+    GMenu *menu, *admin_menu, *prefs_section, *panels_menu, *view_section,
+        *app_section;
     GtkWidget *btn;
+    const struct {
+        const char *label;
+        const char *id;
+    } panels[] = {
+        { _ ("Chat"), HX_PANEL_ID_CHAT },
+        { _ ("Users"), HX_PANEL_ID_USERS },
+        { _ ("Files"), HX_PANEL_ID_FILES },
+        { _ ("News"), HX_PANEL_ID_NEWS },
+        { _ ("News (1.5+)"), HX_PANEL_ID_NEWS15 },
+        { _ ("Tasks"), HX_PANEL_ID_TASKS },
+    };
+
+    prefs_section = g_menu_new ();
+    g_menu_append (prefs_section, _ ("Settings"), "app.settings");
+    g_menu_append (prefs_section, _ ("Connections…"), "app.connections");
+    g_menu_append (prefs_section, _ ("Tracker"), "app.tracker");
+
+    /* In the menu itself, not a submenu: with the toolbar off by
+     * default, this is how a closed pane comes back, and it should be
+     * one click from the menu button. */
+    panels_menu = g_menu_new ();
+    for (gsize i = 0; i < G_N_ELEMENTS (panels); i++) {
+        g_autofree char *detailed
+            = g_strdup_printf ("app.show-panel::%s", panels[i].id);
+        g_menu_append (panels_menu, panels[i].label, detailed);
+    }
+    view_section = g_menu_new ();
+    g_menu_append (view_section, _ ("Show Toolbar"), "app.show-toolbar");
+    g_menu_append (view_section, _ ("Pane Titles"), "app.show-pane-titles");
+    g_menu_append (view_section, _ ("Reset Layout"), "app.reset_layout");
 
     admin_menu = g_menu_new ();
     g_menu_append (admin_menu, _ ("New User…"), "app.user_new");
     g_menu_append (admin_menu, _ ("Edit User…"), "app.user_edit");
+    g_menu_append (admin_menu, _ ("Broadcast…"), "app.broadcast");
+
+    app_section = g_menu_new ();
+    g_menu_append_submenu (app_section, _ ("Admin"), G_MENU_MODEL (admin_menu));
+    g_menu_append (app_section, _ ("About GtkHx"), "app.about");
+    g_menu_append (app_section, _ ("Quit"), "app.quit");
 
     menu = g_menu_new ();
-    g_menu_append (menu, _ ("Settings"), "app.settings");
-    g_menu_append (menu, _ ("Connections…"), "app.connections");
-    g_menu_append (menu, _ ("About GtkHx"), "app.about");
-    g_menu_append (menu, _ ("Reset Layout"), "app.reset_layout");
-    g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));
-    g_menu_append (menu, _ ("Quit"), "app.quit");
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (prefs_section));
+    g_menu_append_section (menu, _ ("Panels"), G_MENU_MODEL (panels_menu));
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (view_section));
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (app_section));
+    g_object_unref (prefs_section);
+    g_object_unref (panels_menu);
+    g_object_unref (view_section);
     g_object_unref (admin_menu);
+    g_object_unref (app_section);
 
     btn = gtk_menu_button_new ();
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");
@@ -743,6 +871,42 @@ make_pixmap_button (const char *resource_name, const char *tooltip,
 {
     return gtkhx_pixmap_button (resource_name, tooltip, GTKHX_SCALE_TOOLBAR, cb,
                                 user_data);
+}
+
+/* The banner and the window title share the header's title slot: one or
+ * the other, never both. The banner's visibility is its "there is one"
+ * flag — banner.rs shows the row when a connection has content and hides
+ * it when it has none. */
+static void
+on_header_banner_visible (GObject *object, GParamSpec *pspec, gpointer data)
+{
+    (void)pspec;
+    (void)data;
+    if (window_title != NULL) {
+        gtk_widget_set_visible (GTK_WIDGET (window_title),
+                                !gtk_widget_get_visible (GTK_WIDGET (object)));
+    }
+}
+
+void
+toolbar_set_status (const char *text)
+{
+    GtkWidget *title_box;
+
+    if (window_title == NULL) {
+        return;
+    }
+    adw_window_title_set_subtitle (window_title, text ? text : "");
+    /* The banner hides the subtitle while it shows, so the status is also
+     * the title slot's tooltip and accessible description — reachable by
+     * hovering and by screen readers either way. */
+    title_box = gtk_widget_get_parent (GTK_WIDGET (window_title));
+    if (title_box != NULL) {
+        gtk_widget_set_tooltip_text (title_box, text);
+        gtk_accessible_update_property (GTK_ACCESSIBLE (title_box),
+                                        GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
+                                        text ? text : "", -1);
+    }
 }
 
 /* rebuild the AdwSplitButton's bookmark menu. Called from
@@ -792,6 +956,7 @@ toolbar_install_panel_hooks_on_frame (GtkWidget *frame)
     hx_panel_install_drag_out_on_frame (frame);
     hx_panel_defang_drop_controls_on_frame (frame);
     hx_split_install_frame_ui (frame);
+    hx_panel_install_pane_titles_on_frame (frame);
 }
 
 /* hx_split_foreach_leaf callback. Bridges to
@@ -1110,20 +1275,13 @@ create_toolbar_window (session *sess)
 
     adw_header_bar_pack_end (ADW_HEADER_BAR (header), build_hamburger ());
 
-    /* ------------- content (feature button row) ------------- */
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
-    gtk_widget_set_margin_start (hbox, 6);
-    gtk_widget_set_margin_end (hbox, 6);
-    gtk_widget_set_margin_top (hbox, 6);
-    gtk_widget_set_margin_bottom (hbox, 6);
-    /* AdwToolbarView's content slot fills vertically, which
-     * stretches a single row of icon buttons into uncomfortably tall
-     * rectangles. Pin the row to its natural height and center it
-     * vertically so the toolbar reads as a strip of buttons rather
-     * than a wall of them. */
-    gtk_widget_set_valign (hbox, GTK_ALIGN_CENTER);
-    gtk_widget_set_vexpand (hbox, FALSE);
-
+    /* ------------- toolbar (optional row under the header) ------------- */
+    /* The classic pixmap buttons, in a slim flat row. Off by default —
+     * Show Toolbar in the main menu — because every one of them is also
+     * in that menu, and the panes switch among themselves; a user who
+     * wants the one-click row can have it. */
+    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (hbox, "gtkhx-main-toolbar");
     gtk_box_append (
         GTK_BOX (hbox),
         make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.png",
@@ -1138,10 +1296,6 @@ create_toolbar_window (session *sess)
         = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
                               _ ("News"), G_CALLBACK (on_news_clicked), NULL);
     gtk_box_append (GTK_BOX (hbox), news_btn);
-    /* News (1.5+): same shape — the entry point raises the
-     * existing panel via the registry AND triggers a NEWSDIRLIST
-     * when connected, so the user sees fresh content on each open
-     * instead of having to hit Refresh after the first build. */
     news15_btn = make_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/news_folder.png", _ ("News (1.5+)"),
         G_CALLBACK (on_news15_clicked), NULL);
@@ -1150,49 +1304,53 @@ create_toolbar_window (session *sess)
         "/com/nasledov/gtkhx/pixmaps/files.png", _ ("Files"),
         G_CALLBACK (toolbar_show_panel), (gpointer)HX_PANEL_ID_FILES);
     gtk_box_append (GTK_BOX (hbox), files_btn);
-    /* Users defaults to
-     * the END (right) area. Button raises + reveals. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/users.png",
                                         _ ("Users"),
                                         G_CALLBACK (toolbar_show_panel),
                                         (gpointer)HX_PANEL_ID_USERS));
-    /* Chat is a center-area panel
-     * resident; raise + reveal via the shared helper. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
                                         _ ("Chat"),
                                         G_CALLBACK (toolbar_show_panel),
                                         (gpointer)HX_PANEL_ID_CHAT));
-    /* Tasks defaults to
-     * the BOTTOM area. Button raises + reveals. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tasks.png",
                                         _ ("Tasks"),
                                         G_CALLBACK (toolbar_show_panel),
                                         (gpointer)HX_PANEL_ID_TASKS));
-
-    /* Broadcast — sends an admin-wide message via HTLC_HDR_MSG_BROADCAST.
-     * Icon comes from icons.rsrc cicn 220 (tools/cicndump). Always
-     * present in the toolbar; setbtns flips sensitivity based on
-     * connection state + HL_ACCESS_CAN_BROADCAST. Greyed-out beats
-     * hidden for feature discoverability — users notice the button
-     * exists, hover for the tooltip, and learn what it does even
-     * before they have permission to use it. */
+    /* Broadcast — sends an admin-wide message via
+     * HTLC_HDR_MSG_BROADCAST. Icon comes from icons.rsrc cicn 220
+     * (tools/cicndump). Always present; setbtns flips sensitivity based
+     * on connection state + HL_ACCESS_CAN_BROADCAST, and app.broadcast
+     * follows it. Greyed-out beats hidden for feature discoverability. */
     broadcast_btn = make_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/broadcast.png", _ ("Broadcast"),
         G_CALLBACK (gtkhx_broadcast_dialog_open), sess);
     gtk_widget_set_sensitive (broadcast_btn, FALSE);
     gtk_box_append (GTK_BOX (hbox), broadcast_btn);
+    main_toolbar = hbox;
 
-    /* ------------- bottom bar (status label) ------------- */
-    status_bar = gtk_label_new (_ ("Not Connected"));
-    gtk_widget_add_css_class (status_bar, "dim-label");
-    gtk_widget_set_halign (status_bar, GTK_ALIGN_START);
-    gtk_widget_set_margin_start (status_bar, 8);
-    gtk_widget_set_margin_end (status_bar, 8);
-    gtk_widget_set_margin_top (status_bar, 4);
-    gtk_widget_set_margin_bottom (status_bar, 4);
+    /* Title: the window title and connection status, or the server's
+     * banner once it has sent one. The banner is the server's own name
+     * for itself, drawn, so it replaces the title rather than sitting
+     * beside it — the header has no room for both at 468 px. The window
+     * title itself still names the server for the taskbar. */
+    {
+        GtkWidget *title_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+        GtkWidget *banner_row = banner_widget_new ();
+
+        window_title = ADW_WINDOW_TITLE (
+            adw_window_title_new ("GtkHx", _ ("Not Connected")));
+        g_object_bind_property (toolbar_window, "title", window_title, "title",
+                                G_BINDING_SYNC_CREATE);
+        gtk_widget_set_valign (banner_row, GTK_ALIGN_CENTER);
+        gtk_box_append (GTK_BOX (title_box), GTK_WIDGET (window_title));
+        gtk_box_append (GTK_BOX (title_box), banner_row);
+        g_signal_connect (banner_row, "notify::visible",
+                          G_CALLBACK (on_header_banner_visible), NULL);
+        adw_header_bar_set_title_widget (ADW_HEADER_BAR (header), title_box);
+    }
 
     /* ------------- compose ------------- */
     /* gtk_window_set_titlebar installs the AdwHeaderBar AS
@@ -1220,15 +1378,14 @@ create_toolbar_window (session *sess)
      * Default layout:
      *
      *   root  (horizontal split):
-     *   ├── left leaf  — News                  (toolbar_sidebar_frame)
+     *   ├── left leaf  — News, Tasks           (toolbar_sidebar_frame,
+     *   │                                       toolbar_bottom_frame)
      *   └── rest       (horizontal split):
-     *       ├── middle (vertical split):
-     *       │   ├── center leaf — Chat, Files,
-     *       │   │                 News 1.5      (toolbar_center_frame)
-     *       │   └── bottom leaf — Tasks         (toolbar_bottom_frame)
+     *       ├── center leaf — Chat, Files,
+     *       │                 News 1.5          (toolbar_center_frame)
      *       └── right leaf — Users              (toolbar_end_frame)
      *
-     * toolbar_*_frame pointers reference the four initial leaves'
+     * toolbar_*_frame pointers reference the initial leaves'
      * PanelFrames so static-panel factories' panel_frame_add
      * target keeps working unchanged. The pointers stay STABLE
      * across user splits — when the user splits the Chat/Files
@@ -1247,9 +1404,9 @@ create_toolbar_window (session *sess)
             &toolbar_bottom_frame, &toolbar_end_frame);
 
         if (!from_saved) {
-            PanelFrame *f_left, *f_center, *f_bottom, *f_right;
-            HxSplit *leaf_left, *leaf_center, *leaf_bottom, *leaf_right;
-            HxSplit *middle, *cb_plus_right;
+            PanelFrame *f_left, *f_center, *f_right;
+            HxSplit *leaf_left, *leaf_center, *leaf_right;
+            HxSplit *cb_plus_right;
 
 #define MAKE_LEAF_FRAME(out, var)                                              \
     do {                                                                       \
@@ -1262,18 +1419,21 @@ create_toolbar_window (session *sess)
 
             MAKE_LEAF_FRAME (toolbar_sidebar_frame, f_left);
             MAKE_LEAF_FRAME (toolbar_center_frame, f_center);
-            MAKE_LEAF_FRAME (toolbar_bottom_frame, f_bottom);
             MAKE_LEAF_FRAME (toolbar_end_frame, f_right);
 #undef MAKE_LEAF_FRAME
 
             leaf_left = hx_split_new_with_frame (f_left);
             leaf_center = hx_split_new_with_frame (f_center);
-            leaf_bottom = hx_split_new_with_frame (f_bottom);
             leaf_right = hx_split_new_with_frame (f_right);
 
-            middle = hx_split_new_internal (leaf_center, leaf_bottom,
-                                            GTK_ORIENTATION_VERTICAL);
-            cb_plus_right = hx_split_new_internal (middle, leaf_right,
+            /* Tasks shares the left column with News instead of taking
+             * a full-width strip under the chat: the queue is empty
+             * most of the time, and a transfer raises its tab (see
+             * gtask_new). The bottom role stays, pointed at the left
+             * frame, so the dock bridge still has somewhere to put it. */
+            toolbar_bottom_frame = toolbar_sidebar_frame;
+
+            cb_plus_right = hx_split_new_internal (leaf_center, leaf_right,
                                                    GTK_ORIENTATION_HORIZONTAL);
             root = hx_split_new_internal (leaf_left, cb_plus_right,
                                           GTK_ORIENTATION_HORIZONTAL);
@@ -1344,28 +1504,16 @@ create_toolbar_window (session *sess)
     dock_layout_apply_geometry (GTK_WINDOW (toolbar_window));
 
     /* AdwToolbarView: the canonical libadwaita way to stack
-     * top/bottom chrome around a content widget. Top bars get the
-     * AdwBanner (reconnect), and a horizontal row holding the
-     * button strip + the server banner. Bottom bar gets the
-     * status label. The dock fills the rest.
-     *
-     * server banner row
-     * (banner.c, hidden until an HTLS_HDR_BANNER message arrives)
-     * sits to the RIGHT of the button row rather than below it.
-     * That kept the buttons compactly clustered on the left and
-     * gives the banner the rest of the horizontal real estate. */
+     * top/bottom chrome around a content widget. Every top bar here is
+     * optional: the reconnect AdwBanner, the connection tabs and the
+     * screen-share indicator show only when they have something to say,
+     * and the pixmap toolbar only if the user keeps it on. */
     toolbar_view = adw_toolbar_view_new ();
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
                                   GTK_WIDGET (toolbar_banner));
-    {
-        GtkWidget *toprow = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-        GtkWidget *banner_row = banner_widget_new ();
-        gtk_widget_set_hexpand (banner_row, TRUE);
-        gtk_widget_set_valign (banner_row, GTK_ALIGN_CENTER);
-        gtk_box_append (GTK_BOX (toprow), hbox);
-        gtk_box_append (GTK_BOX (toprow), banner_row);
-        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), toprow);
-    }
+    gtk_widget_set_visible (main_toolbar, dock_layout_toolbar_visible ());
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
+                                  main_toolbar);
 
     /* The connection tab strip, directly above the dock it switches. Last of
      * the top bars so it sits closest to the panels whose content it swaps,
@@ -1379,8 +1527,6 @@ create_toolbar_window (session *sess)
 
     adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view),
                                   toolbar_dock);
-    adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view),
-                                     status_bar);
 
     /* AdwToastOverlay wraps the content so toolbar_show_toast()
      * can push transient notifications over the button row. Toasts

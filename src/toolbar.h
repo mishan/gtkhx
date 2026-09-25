@@ -9,11 +9,10 @@ extern GtkWidget *news15_btn;
 extern GtkWidget *news_btn;
 extern GtkWidget *broadcast_btn;
 
-/* status_bar is a GtkLabel now (was GtkStatusbar — deprecated
- * in GTK 4.10 and we never used its message-stack model). The
- * status_msg / context_status globals are gone with it; set_status_bar()
- * just calls gtk_label_set_text() on this. */
-extern GtkWidget *status_bar;
+/* Set the connection-status line — the header bar's subtitle, under the
+ * window title. set_status_bar() in gtkutil.c is the caller. Safe to call
+ * before the toolbar is built (no-op). */
+extern void toolbar_set_status (const char *text);
 
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);

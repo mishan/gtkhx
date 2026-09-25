@@ -47,10 +47,13 @@ use crate::tr::tr;
 // ------------------------------------------------------------------- //
 // Constants (mirror src/banner.c + banner_dispatch.h + hotline.h).
 
-/// Max displayed banner dimensions. Most servers ship 468×60; cap so an
-/// unusually large/tall image can't blow out the toolbar layout.
+/// Decode ceiling on each banner axis. Most servers ship 468×60.
 const BANNER_MAX_W: u32 = 600;
-const BANNER_MAX_H: i32 = 60;
+/// Display box for the banner. It is the header bar's title, so its height is
+/// the header's content height: a stock 468×60 banner shows at about 265×34.
+/// Width is capped too, so a wide banner can't push the header's buttons off.
+const BANNER_SHOW_W: i32 = 360;
+const BANNER_SHOW_H: i32 = 34;
 
 /// Sanity ceiling on the file-mode banner size advertised by the server — 1 MiB
 /// leaves headroom for unusual formats while stopping a hostile server from
@@ -329,15 +332,17 @@ pub unsafe extern "C" fn banner_widget_new() -> *mut gtk::ffi::GtkWidget {
     let root = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     root.set_margin_start(6);
     root.set_margin_end(6);
-    root.set_margin_top(4);
-    root.set_margin_bottom(4);
     root.set_visible(false);
 
     // GtkPicture (not GtkImage — which caps natural size at the icon-size CSS
     // var): renders at the paintable's natural size, bounded via size request.
     let picture = gtk::Picture::new();
-    picture.set_size_request(-1, BANNER_MAX_H);
+    picture.set_size_request(-1, BANNER_SHOW_H);
     picture.set_can_shrink(true);
+    picture.add_css_class("gtkhx-header-banner");
+    // The picture is the server's name, drawn; say so to screen readers.
+    picture.update_property(&[gtk::accessible::Property::Label(&tr("Server banner"))]);
+    picture.set_overflow(gtk::Overflow::Hidden);
     picture.set_content_fit(gtk::ContentFit::Contain);
     picture.set_visible(false);
     root.append(&picture);
@@ -641,8 +646,10 @@ fn show_caption(text: &str) {
 }
 
 /// Paint `content` (or blank, for a connection that has none) onto the one
-/// banner row. Pins the picture allocation (capped to BANNER_MAX_W/H, aspect
-/// preserved by Contain) so the layout doesn't reflow.
+/// banner row. Pins the picture allocation to the image scaled into
+/// BANNER_SHOW_W × BANNER_SHOW_H, aspect preserved, so the header doesn't
+/// reflow and the picture carries no letterbox. With an image up, the caption
+/// (the URL) moves to the tooltip: the header has no room for both.
 fn repaint(ui: &BannerUi, content: Option<&BannerContent>) {
     let Some(content) = content.filter(|c| !c.is_empty()) else {
         ui.picture.set_paintable(gtk::gdk::Paintable::NONE);
@@ -655,21 +662,117 @@ fn repaint(ui: &BannerUi, content: Option<&BannerContent>) {
 
     match &content.texture {
         Some(tex) => {
-            ui.picture.set_paintable(Some(tex));
-            ui.picture.set_size_request(
-                tex.width().min(BANNER_MAX_W as i32),
-                tex.height().min(BANNER_MAX_H),
-            );
+            let (w, h) = banner_display_size(tex.width(), tex.height());
+            ui.picture
+                .set_paintable(Some(&scaled::ScaledPaintable::new(tex, w, h)));
+            ui.picture.set_size_request(w, h);
             ui.picture.set_visible(true);
         }
         None => {
+            // No image (still loading, or it failed): nothing to show in the
+            // header's title slot, so the row stays hidden and the window
+            // title and connection status keep it. A loading note or an
+            // error there would push the status out for no picture.
             ui.picture.set_paintable(gtk::gdk::Paintable::NONE);
             ui.picture.set_visible(false);
+            ui.caption.set_text(&content.caption);
+            ui.root.set_tooltip_text(None);
+            ui.root.set_visible(false);
+            return;
         }
     }
+    // With the image up the caption (the URL) moves to the tooltip: the
+    // header has no room for both.
+    ui.caption.set_visible(false);
     ui.caption.set_text(&content.caption);
     ui.root.set_tooltip_text(content.url.as_deref());
     ui.root.set_visible(true);
+}
+
+/// A texture drawn at a fixed size of our choosing.
+///
+/// A `GtkPicture` asks for its paintable's intrinsic size, and a size request
+/// on the picture is only a floor, so a stock 468×60 banner handed over as-is
+/// would stretch the header to 60 px. This reports the display size as the
+/// intrinsic one and scales the texture into it when drawn.
+mod scaled {
+    use std::cell::{Cell, RefCell};
+
+    use gtk::gdk;
+    use gtk::glib;
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use gtk4 as gtk;
+
+    glib::wrapper! {
+        pub struct ScaledPaintable(ObjectSubclass<imp::ScaledPaintable>)
+            @implements gdk::Paintable;
+    }
+
+    impl ScaledPaintable {
+        pub fn new(texture: &gdk::Texture, width: i32, height: i32) -> Self {
+            let obj: Self = glib::Object::new();
+            obj.imp().texture.replace(Some(texture.clone()));
+            obj.imp().size.set((width, height));
+            obj
+        }
+    }
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct ScaledPaintable {
+            pub texture: RefCell<Option<gdk::Texture>>,
+            pub size: Cell<(i32, i32)>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for ScaledPaintable {
+            const NAME: &'static str = "GtkhxScaledPaintable";
+            type Type = super::ScaledPaintable;
+            type Interfaces = (gdk::Paintable,);
+        }
+
+        impl ObjectImpl for ScaledPaintable {}
+
+        impl PaintableImpl for ScaledPaintable {
+            fn intrinsic_width(&self) -> i32 {
+                self.size.get().0
+            }
+
+            fn intrinsic_height(&self) -> i32 {
+                self.size.get().1
+            }
+
+            fn flags(&self) -> gdk::PaintableFlags {
+                gdk::PaintableFlags::SIZE | gdk::PaintableFlags::CONTENTS
+            }
+
+            fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
+                if let Some(texture) = self.texture.borrow().as_ref() {
+                    texture.snapshot(snapshot, width, height);
+                }
+            }
+        }
+    }
+}
+
+/// Scale an image of `w` × `h` down (never up) into the display box, keeping
+/// its aspect ratio. Degenerate sizes come back as the box.
+fn banner_display_size(w: i32, h: i32) -> (i32, i32) {
+    if w <= 0 || h <= 0 {
+        return (BANNER_SHOW_W, BANNER_SHOW_H);
+    }
+    let scale = f64::min(
+        1.0,
+        f64::min(
+            f64::from(BANNER_SHOW_W) / f64::from(w),
+            f64::from(BANNER_SHOW_H) / f64::from(h),
+        ),
+    );
+    let fit = |v: i32| ((f64::from(v) * scale).round() as i32).max(1);
+    (fit(w), fit(h))
 }
 
 /// Show the focused connection's banner. The tab-switch entry point, and the
@@ -957,6 +1060,17 @@ fn on_banner_clicked(gesture: &gtk::GestureClick) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_size_fits_the_header() {
+        // The stock Hotline banner: height-bound.
+        assert_eq!(banner_display_size(468, 60), (265, 34));
+        // Already small enough: never upscaled.
+        assert_eq!(banner_display_size(120, 30), (120, 30));
+        // Very wide: width-bound.
+        assert_eq!(banner_display_size(1200, 40), (360, 12));
+        assert_eq!(banner_display_size(0, 60), (BANNER_SHOW_W, BANNER_SHOW_H));
+    }
 
     #[test]
     fn type_is_url_matches_padded_and_terminated() {

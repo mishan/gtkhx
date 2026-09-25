@@ -71,6 +71,26 @@ typedef enum {
 HxPanel *hx_panel_new (const char *id, HxPanelKind kind, PanelArea home_area);
 
 const char *hx_panel_get_id (HxPanel *self);
+
+/* Apply the panel's Show Toolbar setting to its content: every widget
+ * carrying the .gtkhx-panel-actions class is shown or hidden to match.
+ * Call after the content changes — a new connection's page arrives with
+ * its row showing. */
+void hx_panel_sync_actions (HxPanel *self);
+
+/* Set the panel's content: the dock page stack, wrapped in an overlay
+ * that also carries the pane controls. Once only. get_content returns
+ * what was set, not the wrapper. */
+void hx_panel_set_content (HxPanel *self, GtkWidget *content);
+GtkWidget *hx_panel_get_content (HxPanel *self);
+
+/* Pane titles. A main-dock frame showing exactly one panel hides its
+ * header unless the user has pane titles on; the panel then shows its
+ * own ▾ and × (see hx_panel.c). install_… hooks a frame's page list so
+ * the header follows its page count — call once per main-dock leaf.
+ * resync_… re-applies the setting across the dock after it changes. */
+void hx_panel_install_pane_titles_on_frame (GtkWidget *frame);
+void hx_panel_resync_pane_titles (void);
 HxPanelKind hx_panel_get_kind (HxPanel *self);
 PanelArea hx_panel_get_home_area (HxPanel *self);
 

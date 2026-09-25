@@ -1110,10 +1110,13 @@ fe_init (void)
      * respect_saved_state=TRUE so a panel the user closed is neither
      * built nor raised here — otherwise this would undo, one line later,
      * the closed state create_toolbar_window just honoured. */
+    /* Tasks first: by default it shares News's frame, and the raise that
+     * lands last wins the frame. An empty queue is the less useful thing
+     * to open on. */
+    toolbar_present_panel (HX_PANEL_ID_TASKS, sess, TRUE);
     toolbar_present_panel (HX_PANEL_ID_CHAT, sess, TRUE);
     toolbar_present_panel (HX_PANEL_ID_NEWS, sess, TRUE);
     toolbar_present_panel (HX_PANEL_ID_USERS, sess, TRUE);
-    toolbar_present_panel (HX_PANEL_ID_TASKS, sess, TRUE);
 
     /* The last word on which page each frame shows, and it has to be
      * last: the raises above run in a fixed order, so whichever of them
@@ -1301,6 +1304,21 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
         gtk_window_set_default_icon_name ("com.nasledov.gtkhx");
     }
 
+    /* Chrome density — see chrome.css. A provider of its own rather than
+     * a slice of gtkhx_css_provider, which is rebuilt wholesale on every
+     * theme change. */
+    {
+        GdkDisplay *display = gdk_display_get_default ();
+        if (display) {
+            g_autoptr (GtkCssProvider) chrome = gtk_css_provider_new ();
+            gtk_css_provider_load_from_resource (
+                chrome, "/com/nasledov/gtkhx/chrome.css");
+            gtk_style_context_add_provider_for_display (
+                display, GTK_STYLE_PROVIDER (chrome),
+                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
+    }
+
     /* fe_init() ran before g_application_run(), which means every
      * window the auto-open path created (chat / users / tasks / news,
      * plus the toolbar itself) already exists and has had show_all()
@@ -1341,6 +1359,21 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     {
         const char *quit_accels[] = { "<Control>q", NULL };
         gtk_application_set_accels_for_action (app, "app.quit", quit_accels);
+    }
+    {
+        /* Registered on the application actions the main menu uses, so
+         * the menu shows them (a popover menu labels an item with its
+         * action's application accelerator, and only that). Ctrl+T also
+         * stays in init_keyaccel's per-window controller, which catches
+         * it first where installed — including windows that aren't the
+         * application's — so it fires once either way. Ctrl+, is the
+         * GNOME convention for preferences. */
+        const char *tracker_accels[] = { "<Control>t", NULL };
+        const char *settings_accels[] = { "<Control>comma", NULL };
+        gtk_application_set_accels_for_action (app, "app.tracker",
+                                               tracker_accels);
+        gtk_application_set_accels_for_action (app, "app.settings",
+                                               settings_accels);
     }
     {
         /* Ctrl+U clears the focused text input, in any window. See

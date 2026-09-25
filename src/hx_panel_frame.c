@@ -43,6 +43,14 @@ do_move (GtkWidget *widget, GtkDirectionType dir)
     hx_panel_do_move_in_direction (HX_PANEL (visible), dir);
 }
 
+static gboolean
+move_binding (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)user_data;
+    do_move (widget, (GtkDirectionType)g_variant_get_int32 (args));
+    return TRUE;
+}
+
 static void
 move_left_action (GtkWidget *widget, const char *name, GVariant *param)
 {
@@ -263,6 +271,26 @@ hx_panel_frame_class_init (HxPanelFrameClass *klass)
                                      move_up_action);
     gtk_widget_class_install_action (widget_class, "page.move-down", NULL,
                                      move_down_action);
+
+    /* Keyboard moves, for the panel in the frame that has focus. Menu
+     * items for these went: dragging the pane does it better, and four
+     * directional entries were most of every pane menu. libpanel's own
+     * Shift+Ctrl+[ / ] still reach the left/right actions above; these
+     * cover all four directions. A callback rather than a binding to
+     * the actions, so a stale enabled state can't swallow the key —
+     * hx_panel_do_move_in_direction checks for a neighbor itself. */
+    gtk_widget_class_add_binding (widget_class, GDK_KEY_Left,
+                                  GDK_ALT_MASK | GDK_SHIFT_MASK, move_binding,
+                                  "i", GTK_DIR_LEFT);
+    gtk_widget_class_add_binding (widget_class, GDK_KEY_Right,
+                                  GDK_ALT_MASK | GDK_SHIFT_MASK, move_binding,
+                                  "i", GTK_DIR_RIGHT);
+    gtk_widget_class_add_binding (widget_class, GDK_KEY_Up,
+                                  GDK_ALT_MASK | GDK_SHIFT_MASK, move_binding,
+                                  "i", GTK_DIR_UP);
+    gtk_widget_class_add_binding (widget_class, GDK_KEY_Down,
+                                  GDK_ALT_MASK | GDK_SHIFT_MASK, move_binding,
+                                  "i", GTK_DIR_DOWN);
 }
 
 static void

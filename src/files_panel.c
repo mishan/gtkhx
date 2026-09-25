@@ -1278,10 +1278,9 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
 
     /* ---- Path row: [side dropdown] [Up] [path entry] ---- */
     path_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (path_row, 6);
-    gtk_widget_set_margin_end (path_row, 6);
-    gtk_widget_set_margin_top (path_row, 6);
-    gtk_widget_set_margin_bottom (path_row, 4);
+    /* Styled like an action row but not one: it is navigation, so a
+     * pane's Show Action Bar must not hide it. */
+    gtk_widget_add_css_class (path_row, "gtkhx-path-row");
 
     /* Side selector — only present when the caller wired a swap
      * callback. Two fixed options: "Local" (idx 0) and "Remote"

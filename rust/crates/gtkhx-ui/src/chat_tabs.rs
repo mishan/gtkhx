@@ -262,6 +262,8 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
     let page = view.append_pinned(&w);
     let t = crate::cstr(title);
     page.set_title(if t.is_empty() { "Chat" } else { &t });
+    // A pinned tab shows its icon and nothing else.
+    page.set_icon(Some(&gtk::gio::ThemedIcon::new("system-users-symbolic")));
     set_meta(
         &page,
         TabMeta {

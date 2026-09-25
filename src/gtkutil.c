@@ -418,13 +418,10 @@ setbtns (session *sess, int stat)
     }
 }
 
-/* status_bar is now a GtkLabel (was GtkStatusbar — deprecated
- * in GTK 4.10). The toolbar always replaced the message wholesale, so
- * the message-stack model the GtkStatusbar provided was overhead that
- * earned us nothing. A single gtk_label_set_text per state change
- * does what we want.
+/* The connection status is the header bar's subtitle (toolbar_set_status),
+ * replaced wholesale on each state change.
  *
- * The label shows the persistent state ("Logged in to ...") for
+ * The subtitle shows the persistent state ("Logged in to ...") for
  * ambient awareness. Important state transitions also fire an
  * AdwToast over the toolbar so the change is visible without the
  * user having to glance at the corner of the window: login success
@@ -474,7 +471,7 @@ status_bar_set (session *sess, int status, gboolean announce)
     char *toast = NULL;
     char *addr;
 
-    if (!status_bar) {
+    if (!toolbar_window) {
         return;
     }
 
@@ -524,7 +521,7 @@ status_bar_set (session *sess, int status, gboolean announce)
         return;
     }
 
-    gtk_label_set_text (GTK_LABEL (status_bar), fmt ? fmt : fixed);
+    toolbar_set_status (fmt ? fmt : fixed);
     if (toast) {
         toolbar_show_toast (toast);
     }
@@ -1108,6 +1105,13 @@ button_refresh_picture (GtkWidget *btn, gpointer unused_theme)
     } else {
         picture = gtk_picture_new ();
     }
+    /* Centered, not filled. A GtkPicture grows to whatever the button
+     * allocates it, so a button taller or wider than the art — a header
+     * bar's, or one sharing a row with a taller widget — rendered the
+     * pixmap at that size instead of the theme's, smeared by a
+     * non-integer factor. */
+    gtk_widget_set_halign (picture, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (picture, GTK_ALIGN_CENTER);
     gtkhx_widget_set_child (btn, picture);
     g_object_unref (use_pb);
 }
@@ -1119,6 +1123,7 @@ button_finish_setup (GtkWidget *btn, GtkhxScaleArea area, const char *tooltip,
                      GCallback cb, gpointer user_data)
 {
     g_object_set_data (G_OBJECT (btn), BTN_KEY_AREA, GINT_TO_POINTER (area));
+    gtk_widget_add_css_class (btn, "gtkhx-pixmap-button");
     button_refresh_picture (btn, NULL);
     g_signal_connect_object (gtkhx_theme_get_default (), "changed",
                              G_CALLBACK (button_refresh_picture), btn,

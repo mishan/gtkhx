@@ -63,6 +63,13 @@ static struct {
                                        * dock. Read by
                                        * dock_layout_panel_was_closed so
                                        * startup leaves them unbuilt. */
+    GHashTable *bare_ids;          /* char* set of panel ids whose action
+                                       * row the user has hidden. Kept
+                                       * live, not rebuilt from the
+                                       * registry at save, so a closed
+                                       * panel keeps its setting. */
+    gboolean toolbar_shown;        /* the main window's pixmap toolbar */
+    gboolean pane_titles;          /* headers on single-panel frames */
     GtkPaned **paned_order;        /* depth-first order, set by load
                                        * + apply_geometry, used by save */
     guint n_paned;
@@ -358,6 +365,71 @@ serialize_closed_panels (GKeyFile *kf)
     g_string_free (closed, TRUE);
 }
 
+/* [Chrome]: the optional chrome. Each key is written only when it
+ * differs from the default, so an absent key — a first launch, or a file
+ * from before the key existed — means the default: action rows on,
+ * toolbar and pane titles off. */
+static void
+serialize_chrome (GKeyFile *kf)
+{
+    /* These two are written when *on*: both are off by default. */
+    if (dock.toolbar_shown) {
+        g_key_file_set_boolean (kf, "Chrome", "toolbar", TRUE);
+    }
+    if (dock.pane_titles) {
+        g_key_file_set_boolean (kf, "Chrome", "pane-titles", TRUE);
+    }
+    if (dock.bare_ids != NULL && g_hash_table_size (dock.bare_ids) > 0) {
+        /* Sorted, so the file doesn't churn with hash order. */
+        GList *ids = g_list_sort (g_hash_table_get_keys (dock.bare_ids),
+                                  (GCompareFunc)g_strcmp0);
+        GString *joined = g_string_new (NULL);
+
+        for (GList *l = ids; l != NULL; l = l->next) {
+            if (joined->len > 0) {
+                g_string_append_c (joined, ';');
+            }
+            g_string_append (joined, l->data);
+        }
+        g_key_file_set_string (kf, "Chrome", "hidden-actions", joined->str);
+        g_string_free (joined, TRUE);
+        g_list_free (ids);
+    }
+}
+
+static void
+ensure_bare_ids (void)
+{
+    if (dock.bare_ids == NULL) {
+        dock.bare_ids
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    }
+}
+
+/* Read [Chrome]. Independent of the tree: a file whose tree is missing
+ * or malformed still carries the user's choice of bars. */
+static void
+load_chrome (GKeyFile *kf)
+{
+    g_autofree char *bare = NULL;
+
+    dock.toolbar_shown = g_key_file_get_boolean (kf, "Chrome", "toolbar", NULL);
+    dock.pane_titles
+        = g_key_file_get_boolean (kf, "Chrome", "pane-titles", NULL);
+
+    ensure_bare_ids ();
+    g_hash_table_remove_all (dock.bare_ids);
+    bare = g_key_file_get_string (kf, "Chrome", "hidden-actions", NULL);
+    if (bare != NULL) {
+        g_auto (GStrv) ids = g_strsplit (bare, ";", -1);
+        for (char **id = ids; *id != NULL; id++) {
+            if (**id != '\0') {
+                g_hash_table_add (dock.bare_ids, g_strdup (*id));
+            }
+        }
+    }
+}
+
 /* ----------------------------------------------------------------- */
 /* Save (coalesced)                                                  */
 /* ----------------------------------------------------------------- */
@@ -416,6 +488,7 @@ on_save_idle (gpointer user_data)
      * file just doesn't gain an [Undocked] header in that case. */
     hx_panel_registry_foreach (visit_undocked_panel, kf);
     serialize_closed_panels (kf);
+    serialize_chrome (kf);
     if (sizes->len > 0) {
         GString *sz = g_string_new (NULL);
         for (guint i = 0; i < sizes->len; i++) {
@@ -502,6 +575,8 @@ dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
         g_clear_error (&err);
         goto out;
     }
+
+    load_chrome (kf);
 
     char *tree_str = g_key_file_get_string (kf, "Dock", "tree", NULL);
     if (tree_str == NULL) {
@@ -846,6 +921,63 @@ dock_layout_panel_was_closed (const char *id)
 }
 
 /* ----------------------------------------------------------------- */
+/* Chrome                                                            */
+/* ----------------------------------------------------------------- */
+
+gboolean
+dock_layout_panel_actions_hidden (const char *id)
+{
+    return id != NULL && dock.bare_ids != NULL
+           && g_hash_table_contains (dock.bare_ids, id);
+}
+
+void
+dock_layout_set_panel_actions_hidden (const char *id, gboolean hidden)
+{
+    g_return_if_fail (id != NULL);
+
+    ensure_bare_ids ();
+    if (hidden) {
+        g_hash_table_add (dock.bare_ids, g_strdup (id));
+    } else {
+        g_hash_table_remove (dock.bare_ids, id);
+    }
+    dock_layout_request_save ();
+}
+
+gboolean
+dock_layout_toolbar_visible (void)
+{
+    return dock.toolbar_shown;
+}
+
+void
+dock_layout_set_toolbar_visible (gboolean visible)
+{
+    dock.toolbar_shown = visible;
+    dock_layout_request_save ();
+}
+
+gboolean
+dock_layout_pane_titles_visible (void)
+{
+    return dock.pane_titles;
+}
+
+void
+dock_layout_set_pane_titles_visible (gboolean visible)
+{
+    dock.pane_titles = visible;
+    dock_layout_request_save ();
+}
+
+HxSplit *
+dock_layout_get_dock_root (void)
+{
+    return dock.dock_root;
+}
+
+/* ----------------------------------------------------------------- */
 /* Reset                                                             */
 /* ----------------------------------------------------------------- */
 
@@ -871,6 +1003,11 @@ dock_layout_reset (void)
         g_hash_table_remove_all (dock.closed_ids);
     }
     dock.loaded = FALSE;
+    /* The in-memory chrome choices stay as they are for the rest of this
+     * session — the bars on screen don't change until the restart — but
+     * nothing writes them back, this session's later toggles included, so
+     * the next launch comes up with the defaults: action rows on, toolbar
+     * and pane titles off. */
 
     if (dock.save_idle_id != 0) {
         g_source_remove (dock.save_idle_id);

@@ -94,5 +94,7 @@
          shadows the GResource entry. -->
     <file>themes/default.ini</file>
     <file>themes/solarized.ini</file>
+    <!-- Chrome density rules, loaded once at activate. -->
+    <file>chrome.css</file>
   </gresource>
 </gresources>

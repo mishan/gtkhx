@@ -232,6 +232,11 @@ fn apply_tint(buf: &gtk::TextBuffer) {
     }
 }
 
+/// Alt or Shift held — a chord the history keys must leave alone.
+fn has_chord_modifier(state: gtk::gdk::ModifierType) -> bool {
+    state.intersects(gtk::gdk::ModifierType::ALT_MASK | gtk::gdk::ModifierType::SHIFT_MASK)
+}
+
 fn on_key(
     view: &gtk::TextView,
     sess: *mut c_void,
@@ -333,8 +338,10 @@ fn on_key(
         Key::Up => {
             // Only from the very start of the draft, or when already
             // stepping. Otherwise this is a cursor movement and the view
-            // should have it.
-            if point != 0 && !nav {
+            // should have it. Never with Alt or Shift held: those chords
+            // belong to others — Alt+Shift+arrows move the pane
+            // (hx_panel_frame.c), Shift extends a selection.
+            if (point != 0 && !nav) || has_chord_modifier(state) {
                 return glib::Propagation::Proceed;
             }
             let cur = buffer_cbytes(&buf);
@@ -357,7 +364,7 @@ fn on_key(
 
         Key::Down => {
             // Mirror of Up: only from the very end of the draft.
-            if point != buf.char_count() && !nav {
+            if (point != buf.char_count() && !nav) || has_chord_modifier(state) {
                 return glib::Propagation::Proceed;
             }
             let mut nt: *mut c_char = ptr::null_mut();
