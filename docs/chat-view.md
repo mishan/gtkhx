@@ -106,7 +106,10 @@ row as a system message (see grouping below for why that matters);
 Named palette slots (`HX_CHAT_INFO_COLOR`, `HX_CHAT_HIGHLIGHT_COLOR`,
 `HX_CHAT_PLACEHOLDER_COLOR`, …) exist because these were once bare numbers
 inside printf format strings, which is how a colour choice ends up
-undocumented and unsearchable.
+undocumented and unsearchable. They name theme roles, not mIRC indices, so
+the gutter — brackets, nicks, the `[hx]` tag, a mention — follows the
+theme. Nicks go through `hx_chat_nick_color`, which hashes the name onto
+the theme's `nick_colors` when it has any.
 
 ### Speaker identity is the user list's identity
 
@@ -638,11 +641,13 @@ It cannot: they are characters like any other.
 
 ### What survives
 
-The palette. Slots 32..37 are the UI roles `GtkhxTheme` fills (see
-`gtkhx_theme.h`'s matching `GTKHX_PAL_*` enum and
-`chat.c::gtkhx_apply_theme_palette`); slots 0..31 keep their historical
-mIRC index values, so a theme that already sets them keeps rendering the
-same, and the named constants above address them. `chat_view.h` is now the
+The palette. Slots 0..31 keep their historical mIRC values. After them
+come the UI roles `GtkhxTheme` fills (see `gtkhx_theme.h`'s matching
+`GTKHX_PAL_*` enum and `chat.c::gtkhx_apply_theme_palette`), then the
+per-nick colors. A fully transparent role means "follow the system": the
+view carries Adwaita's `.view` class, draws such text in its CSS color, and
+skips its background fill so the CSS background shows. That is how a theme
+with no chat fg/bg matches the window around it. `chat_view.h` is now the
 sole definition of that contract — the Rust side asserts against its
 values, so the agreement is still checked, just from the other end.
 

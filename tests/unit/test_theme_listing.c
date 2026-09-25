@@ -228,9 +228,11 @@ test_skips_unsafe_theme_names (void)
     g_free (dir);
 }
 
-/* The built-in themes (default, solarized) ride on the linked-in
- * GResource and surface through the resource_prefix arg. With an
- * empty user dir, both should appear in the sorted output.
+/* The built-in themes (default, neon-doll,
+ * solarized) ride on the
+ * linked-in GResource and surface through the resource_prefix arg.
+ * With an empty user dir, all of them should appear in the sorted
+ * output.
  * Solarized's light + dark variants live in *one* file — the
  * active variant follows the system color scheme — so there's no
  * separate solarized-dark entry. */
@@ -241,19 +243,24 @@ test_built_in_themes_from_resource (void)
 
     GPtrArray *themes
         = gtkhx_theme_list_available_at ("/com/nasledov/gtkhx/themes/", dir);
-    /* Exactly the two built-ins we ship. If a third ever lands,
-     * adjust the count — better to fail loudly than have the test
-     * silently drift. */
-    g_assert_cmpint (themes->len, ==, 2);
+    /* Exactly the built-ins we ship. If another ever lands, adjust
+     * the count — better to fail loudly than have the test silently
+     * drift. */
+    g_assert_cmpint (themes->len, ==, 3);
 
     g_assert_nonnull (entry_named (themes, "default"));
     GtkhxThemeEntry *s = entry_named (themes, "solarized");
     g_assert_nonnull (s);
     g_assert_cmpstr (s->display, ==, "Solarized");
+    GtkhxThemeEntry *n = entry_named (themes, "neon-doll");
+    g_assert_nonnull (n);
+    g_assert_cmpstr (n->display, ==, "Neon Doll");
 
-    /* default pinned first. */
+    /* default pinned first, the rest by display name. */
     GtkhxThemeEntry *e0 = g_ptr_array_index (themes, 0);
     g_assert_cmpstr (e0->name, ==, "default");
+    g_assert_cmpstr (((GtkhxThemeEntry *)g_ptr_array_index (themes, 1))->name,
+                     ==, "neon-doll");
 
     g_ptr_array_unref (themes);
     rmrf_dir (dir);
@@ -274,9 +281,9 @@ test_user_file_shadows_built_in (void)
 
     GPtrArray *themes
         = gtkhx_theme_list_available_at ("/com/nasledov/gtkhx/themes/", dir);
-    /* Still two entries (the user's solarized replaced the
-     * built-in one — no duplication). */
-    g_assert_cmpint (themes->len, ==, 2);
+    /* Still one entry per built-in (the user's solarized replaced
+     * the shipped one — no duplication). */
+    g_assert_cmpint (themes->len, ==, 3);
 
     GtkhxThemeEntry *s = entry_named (themes, "solarized");
     g_assert_nonnull (s);

@@ -581,6 +581,15 @@ changed_tray (void)
     gtkhx_tray_set_enabled (gtkhx_prefs.tray);
 }
 
+/* Settings → General → "Tint window to match theme". The chrome colors
+ * ride in the same provider as the rest of the theme CSS, so rebuilding
+ * that is the whole job. */
+static void
+changed_tint_window (void)
+{
+    gtkhx_refresh_css ();
+}
+
 #ifdef HAVE_VOICE
 /* Settings → Voice → "Input device" combobox. Pushes the user's
  * pick through to the Rust runtime via FFI; the next VoiceRuntime
@@ -727,6 +736,7 @@ static const struct pref_hook pref_hooks[] = {
     PREF_GLOBAL (CFG_THEME, changed_theme),
     PREF_GLOBAL (CFG_THEME_NAME, changed_theme_name),
     PREF_VIEW (CFG_TIMESTAMP, changed_timestamp),
+    PREF_GLOBAL (CFG_TINT_WINDOW, changed_tint_window),
     PREF_GLOBAL (CFG_TRACKER_CASE, changed_case),
     PREF_GLOBAL (CFG_TRAY, changed_tray),
 #ifdef HAVE_VOICE

@@ -89,28 +89,44 @@ double gtkhx_theme_scale (GtkhxScaleArea area);
 
 /* ---- Palette (UI-role color slots) -----------------------------------
  *
- * The xtext chat palette has 38 slots (see chat.c::colors[] and
- * xtext.h). Slots 0..31 are the mIRC palette — semantically locked
- * because servers send specific color indices and expect specific
- * colors. The remaining 6 are *UI roles* (foreground, background,
- * selection foreground / background, marker line, history-muted
- * secondary text), and these are the ones a theme can override.
+ * The chat palette (see chat.c::colors[] and chat_view.h's
+ * HX_CHAT_PAL_*) opens with the 32 mIRC slots, which are semantically
+ * locked: servers send specific color indices and expect specific
+ * colors. After them come the UI roles below, which are what a theme
+ * sets.
  *
  * Each role carries two values: a *light* variant and a *dark*
  * variant. The active one is selected by AdwStyleManager's `dark`
  * property at apply time (see chat.c::gtkhx_apply_theme_palette) so
  * the chat surface follows the system theme without the user having
- * to redo their palette twice. */
+ * to redo their palette twice.
+ *
+ * FG and BG have no built-in color: left unset, they resolve to a
+ * fully transparent GdkRGBA, which means "follow the system" — the
+ * chat view and the text surfaces then take libadwaita's view colors,
+ * so an untinted theme's chat matches the window around it. */
 
 typedef enum {
-    GTKHX_PAL_FG,            /* XTEXT_FG (slot 34): default text fg */
-    GTKHX_PAL_BG,            /* XTEXT_BG (slot 35): default text bg */
-    GTKHX_PAL_MARK_FG,       /* XTEXT_MARK_FG (slot 32): selection fg */
-    GTKHX_PAL_MARK_BG,       /* XTEXT_MARK_BG (slot 33): selection bg */
-    GTKHX_PAL_MARKER,        /* XTEXT_MARKER (slot 36): marker line */
-    GTKHX_PAL_HISTORY_MUTED, /* XTEXT_HISTORY_MUTED (slot 37): secondary */
+    GTKHX_PAL_FG,             /* default text fg */
+    GTKHX_PAL_BG,             /* default text bg */
+    GTKHX_PAL_MARK_FG,        /* selection fg */
+    GTKHX_PAL_MARK_BG,        /* selection bg */
+    GTKHX_PAL_MARKER,         /* marker line */
+    GTKHX_PAL_HISTORY_MUTED,  /* chat-history secondary text */
+    GTKHX_PAL_TIMESTAMP,      /* timestamp column; defaults to history_muted */
+    GTKHX_PAL_NICK,           /* other people's nicks; defaults to fg */
+    GTKHX_PAL_SELF_NICK,      /* your own nick; defaults to fg */
+    GTKHX_PAL_NICK_BRACKET,   /* the < > around other people's nicks */
+    GTKHX_PAL_SELF_BRACKET,   /* the < > around your own nick */
+    GTKHX_PAL_SYSTEM,         /* the "hx" in a "[hx]" status line */
+    GTKHX_PAL_SYSTEM_BRACKET, /* the [ ] around it */
+    GTKHX_PAL_HIGHLIGHT,      /* the nick on a line that mentions you */
+    GTKHX_PAL_RULE,           /* the chat's column divider; defaults to fg */
     GTKHX_PAL_N_ROLES
 } GtkhxPaletteRole;
+
+/* Upper bound on a theme's `nick_colors` list. */
+#define GTKHX_NICK_COLORS_MAX 8
 
 /* Built-in default theme: the GdkRGBA shipped for each (role, variant).
  * Independent of any loaded theme — used as the fallback when the
@@ -131,6 +147,13 @@ GdkRGBA gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark);
  * leave those surfaces at the system theme instead of forcing the
  * built-in defaults onto them. */
 gboolean gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark);
+
+/* The theme's `nick_colors` list for a variant: fills up to
+ * GTKHX_NICK_COLORS_MAX entries of `out` and returns how many. Zero
+ * when the theme has none, in which case every other person's nick
+ * takes the NICK role. */
+int gtkhx_theme_get_nick_colors (gboolean dark,
+                                 GdkRGBA out[GTKHX_NICK_COLORS_MAX]);
 
 /* ---- User-list name colors ------------------------------------------
  *
@@ -161,6 +184,47 @@ typedef enum {
  * its historical default. */
 gboolean gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark,
                                      GdkRGBA *out);
+
+/* ---- Window chrome ---------------------------------------------------
+ *
+ * A theme can tint the whole window, not just the chat: the header
+ * bar, pane headers, lists, popovers and the accent all follow it.
+ * This works by overriding libadwaita's named colors (the
+ * `--window-bg-color` family of CSS variables), so every stock widget
+ * picks the theme up without per-widget rules.
+ *
+ * Loaded from [chrome.light] / [chrome.dark]. Every key is optional.
+ * What a theme leaves out is derived: a missing `window` falls back to
+ * the chat palette's `bg`, a missing `fg` to the palette's `fg`, and
+ * the header bar / sidebar / card / popover surfaces are nudged off
+ * `window` toward `fg`. A theme that sets neither chrome keys nor the
+ * chat palette's fg/bg leaves the chrome at the system theme, which is
+ * what keeps the built-in default looking like stock GNOME. */
+
+typedef enum {
+    GTKHX_CHROME_WINDOW,       /* window background, dock gutters */
+    GTKHX_CHROME_VIEW,         /* lists, text views */
+    GTKHX_CHROME_HEADERBAR,    /* header bar, pane headers */
+    GTKHX_CHROME_SIDEBAR,      /* sidebars */
+    GTKHX_CHROME_CARD,         /* cards, boxed lists */
+    GTKHX_CHROME_POPOVER,      /* popovers, dialogs, menus */
+    GTKHX_CHROME_FG,           /* text on every surface above */
+    GTKHX_CHROME_HEADERBAR_FG, /* header-bar text; defaults to fg */
+    GTKHX_CHROME_ACCENT,       /* accent background (selection, toggles) */
+    GTKHX_CHROME_ACTION,       /* suggested-action buttons, as an outline */
+    GTKHX_CHROME_N_ROLES
+} GtkhxChromeRole;
+
+/* Resolve a chrome role for a variant — the theme's explicit value, or
+ * the derived one. Returns FALSE when the theme leaves this role to
+ * the system theme; *out is untouched in that case. */
+gboolean gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark,
+                                       GdkRGBA *out);
+
+/* The CSS that applies the active theme's chrome for a variant: a
+ * `:root` block of libadwaita color variables. Empty string when the
+ * theme doesn't tint the chrome. Caller frees. */
+char *gtkhx_theme_build_chrome_css (gboolean dark);
 
 /* Active theme name — the THEMENAME pref value, or "default" if
  * the pref is unset / empty. Never NULL. Caller does NOT free.

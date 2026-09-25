@@ -94,13 +94,29 @@ G_BEGIN_DECLS
  * values in hxchat-view (PALETTE_COLS and the PAL_* constants), so the
  * agreement is still checked — just from the other end. */
 #define HX_CHAT_PAL_MIRC_COLS 32
-#define HX_CHAT_PAL_MARK_FG 32       /* selection foreground */
-#define HX_CHAT_PAL_MARK_BG 33       /* selection background */
-#define HX_CHAT_PAL_FG 34            /* default text foreground */
-#define HX_CHAT_PAL_BG 35            /* default text background */
-#define HX_CHAT_PAL_MARKER 36        /* marker line */
-#define HX_CHAT_PAL_HISTORY_MUTED 37 /* rendered chat-history secondary text */
-#define HX_CHAT_PAL_COLS 38          /* 32 mIRC + 6 UI roles */
+#define HX_CHAT_PAL_MARK_FG 32        /* selection foreground */
+#define HX_CHAT_PAL_MARK_BG 33        /* selection background */
+#define HX_CHAT_PAL_FG 34             /* default text foreground */
+#define HX_CHAT_PAL_BG 35             /* default text background */
+#define HX_CHAT_PAL_MARKER 36         /* marker line */
+#define HX_CHAT_PAL_HISTORY_MUTED 37  /* rendered chat-history secondary text */
+#define HX_CHAT_PAL_TIMESTAMP 38      /* timestamp column */
+#define HX_CHAT_PAL_NICK 39           /* other people's nicks */
+#define HX_CHAT_PAL_SELF_NICK 40      /* your own nick */
+#define HX_CHAT_PAL_NICK_BRACKET 41   /* < > around other people's nicks */
+#define HX_CHAT_PAL_SELF_BRACKET 42   /* < > around your own nick */
+#define HX_CHAT_PAL_SYSTEM 43         /* the tag of a "[hx]" status line */
+#define HX_CHAT_PAL_SYSTEM_BRACKET 44 /* the [ ] around it */
+#define HX_CHAT_PAL_HIGHLIGHT 45      /* nick on a line that mentions you */
+#define HX_CHAT_PAL_RULE 46           /* the column divider */
+#define HX_CHAT_PAL_NICK_COLOR0 47    /* first of the per-nick colors */
+#define HX_CHAT_PAL_NICK_COLORS 8     /* how many per-nick slots follow */
+#define HX_CHAT_PAL_COLS 55           /* 32 mIRC + UI roles + nick colors */
+
+/* A UI-role slot holding a fully transparent color means "follow the
+ * system": the view draws text in its own CSS color (libadwaita's view
+ * foreground) and leaves the background to CSS. That is what a theme
+ * that sets no chat fg/bg gets. */
 
 /* ---- marks -------------------------------------------------------- *
  *
@@ -184,13 +200,12 @@ void hx_chat_view_set_autocopy_color (gboolean enabled);
 /* Named palette slots the chat code actually reaches for. These were
  * bare numbers inside printf format strings ("\00310[", "\003" "37"),
  * which is how a colour choice ends up undocumented and unsearchable.
- *
- * The values are the historical mIRC indices, kept so themes that
- * already set slots 0..31 keep rendering the same. */
-#define HX_CHAT_INFO_COLOR 3          /* "[hx]" and broadcast sender names */
-#define HX_CHAT_INFO_BRACKET_COLOR 10 /* the [ ] around them */
-#define HX_CHAT_HIGHLIGHT_COLOR 4     /* light red: a line that mentions you */
-#define HX_CHAT_PLACEHOLDER_COLOR 14  /* dark grey: inline-media alt text */
+ * They point at theme roles now, not at mIRC indices, so a theme's
+ * palette reaches the gutter. */
+#define HX_CHAT_INFO_COLOR HX_CHAT_PAL_SYSTEM /* "[hx]" */
+#define HX_CHAT_INFO_BRACKET_COLOR HX_CHAT_PAL_SYSTEM_BRACKET
+#define HX_CHAT_HIGHLIGHT_COLOR HX_CHAT_PAL_HIGHLIGHT
+#define HX_CHAT_PLACEHOLDER_COLOR HX_CHAT_PAL_HISTORY_MUTED /* media alt text */
 
 #define HX_CHAT_ATTR_NONE 0u
 #define HX_CHAT_ATTR_BOLD (1u << 0)

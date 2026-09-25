@@ -204,6 +204,20 @@ pango_to_css_props (const PangoFontDescription *fd)
                             size_pt / PANGO_SCALE, weight_s, style_s);
 }
 
+/* A palette color as CSS: its hex, or `system` when the theme left the
+ * role unset — a transparent GdkRGBA, meaning "follow the system" (see
+ * gtkhx_theme.h). */
+static gchar *
+css_color_or (const GdkRGBA *c, const char *system)
+{
+    if (c->alpha == 0.0) {
+        return g_strdup (system);
+    }
+    return g_strdup_printf ("#%02x%02x%02x", (int)(c->red * 255.0 + 0.5),
+                            (int)(c->green * 255.0 + 0.5),
+                            (int)(c->blue * 255.0 + 0.5));
+}
+
 void
 gtkhx_refresh_css (void)
 {
@@ -249,12 +263,8 @@ gtkhx_refresh_css (void)
      * variants, and we pick the variant via AdwStyleManager's `dark`
      * property — same dispatch the xtext palette uses — so the
      * applied colors always match the active light/dark mode. */
-    gchar *fghex = g_strdup_printf (
-        "#%02x%02x%02x", (int)(fg.red * 255.0 + 0.5),
-        (int)(fg.green * 255.0 + 0.5), (int)(fg.blue * 255.0 + 0.5));
-    gchar *bghex = g_strdup_printf (
-        "#%02x%02x%02x", (int)(bg.red * 255.0 + 0.5),
-        (int)(bg.green * 255.0 + 0.5), (int)(bg.blue * 255.0 + 0.5));
+    gchar *fghex = css_color_or (&fg, "@view_fg_color");
+    gchar *bghex = css_color_or (&bg, "@view_bg_color");
 
     /* .gtkhx-listview — color theming for list-shaped surfaces
      * (GtkColumnView, GtkListView, GtkListBox): tracker, tasks,
@@ -302,6 +312,15 @@ gtkhx_refresh_css (void)
      * theme that omits FG/BG (the shipped default, post-cleanup)
      * leaves the listview surfaces at the system theme. */
     GString *css_buf = g_string_new (NULL);
+    /* Window chrome first: the theme's overrides of libadwaita's named
+     * colors, so the header bar, pane headers and popovers sit in the
+     * same palette as the chat instead of stock gray around it. Empty
+     * for a theme that doesn't tint, and skipped when the user turned
+     * tinting off. */
+    if (gtkhx_prefs.tint_window) {
+        g_autofree gchar *chrome_css = gtkhx_theme_build_chrome_css (dark);
+        g_string_append (css_buf, chrome_css);
+    }
     g_string_append_printf (css_buf,
                             ".gtkhx-text, .gtkhx-text text {"
                             "  %s"
@@ -374,12 +393,8 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
     }
 
     fontprops = pango_to_css_props (fd);
-    fghex = g_strdup_printf ("#%02x%02x%02x", (int)(fg.red * 255.0 + 0.5),
-                             (int)(fg.green * 255.0 + 0.5),
-                             (int)(fg.blue * 255.0 + 0.5));
-    bghex = g_strdup_printf ("#%02x%02x%02x", (int)(bg.red * 255.0 + 0.5),
-                             (int)(bg.green * 255.0 + 0.5),
-                             (int)(bg.blue * 255.0 + 0.5));
+    fghex = css_color_or (&fg, "@view_fg_color");
+    bghex = css_color_or (&bg, "@view_bg_color");
 
     /* Font selector stays on .gtkhx-userlist itself (the users-list
      * font pref) regardless of theme — separate user pref the

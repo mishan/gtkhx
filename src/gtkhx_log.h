@@ -23,9 +23,10 @@
 #include "protocol.h"
 
 /* Palette index the "[hx]" tag renders in. Mirrors chat_view.h's
- * HX_CHAT_INFO_COLOR; duplicated rather than included so the non-widget
- * callers that pull in this header don't drag GTK along. */
-#define HX_CHAT_LOG_INFO_COLOR 3
+ * HX_CHAT_INFO_COLOR (chat.c asserts they agree); duplicated rather
+ * than included so the non-widget callers that pull in this header
+ * don't drag GTK along. */
+#define HX_CHAT_LOG_INFO_COLOR 43
 
 extern void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid,
                               const char *prefix, const char *fmt, ...)

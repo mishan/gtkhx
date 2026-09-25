@@ -64,6 +64,9 @@ struct gtkhx_prefs {
      * Settings → General → "Show tray icon" drives this. Default
      * ON; the tray module silently no-ops if no SNI host is around. */
     unsigned char tray;
+    /* Let the theme color the window chrome as well as the content.
+     * Settings → General → "Tint window to match theme". Default ON. */
+    unsigned char tint_window;
     unsigned char timestamp;
     /* Show the speaker's avatar / icon in the chat gutter. Only on the
      * first message of a run — see chat_view.h's grouping note. */
