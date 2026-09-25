@@ -268,8 +268,12 @@ chmod +x "$MACOS/GtkHx"
 # The max is computed in awk rather than `sort -V | tail -1`. macOS's sort does
 # accept -V, but a hand-rolled comparator needs no such claim to be true, and
 # comparing the version components as numbers is what we actually mean.
+#
+# The per-file scan is a function, not inlined in the $( ): macOS's stock bash
+# 3.2 takes the `)` of a case pattern inside a command substitution as the end
+# of the substitution, and the script fails to parse.
 MIN_OS_FALLBACK="14.0"
-min_os=$(
+bundle_minos_each() {
     find "$APP" -type f 2>/dev/null |
     while IFS= read -r f; do
         case "$(file -b "$f" 2>/dev/null || true)" in
@@ -278,7 +282,10 @@ min_os=$(
         esac
         vtool -show-build "$f" 2>/dev/null |
             awk '/^ *minos/ { print $2; exit }' || true
-    done |
+    done
+}
+min_os=$(
+    bundle_minos_each |
     awk '
         # major.minor[.patch] -> one comparable number, so 9.0 < 10.15 < 14.0
         # rather than whatever string order would say.
