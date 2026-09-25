@@ -90,6 +90,9 @@ extern "C" {
     /// Load a chrome icon resource through the theme resolver (gtkhx_icon.c),
     /// transfer-full GdkPixbuf.
     fn gtkhx_icon_load(resource: *const c_char) -> *mut gtk::gdk_pixbuf::ffi::GdkPixbuf;
+    /// The symbolic icon standing in for a chrome icon under the active
+    /// theme, or NULL for the classic pixmap (gtkhx_icon.c). Static string.
+    fn gtkhx_icon_symbolic_name(resource: *const c_char) -> *const c_char;
 
     // ---- C UI leaves (gtkhx_pixmap_button / apply-style / init_keyaccel come
     // from crate::ffi) ----
@@ -169,6 +172,26 @@ fn with_browser<R>(f: impl FnOnce(&NewsBrowser) -> R) -> Option<R> {
 }
 
 // ---------- Icons ----------
+
+const NEWS_FOLDER_ICON: &str = "/com/nasledov/gtkhx/pixmaps/news_folder.png";
+const NEWS_CATEGORY_ICON: &str = "/com/nasledov/gtkhx/pixmaps/news_category.png";
+const NEWS_POST_ICON: &str = "/com/nasledov/gtkhx/pixmaps/news_post.png";
+
+/// The symbolic icon for a tree row's kind when the active theme uses
+/// symbolic icons, or `None` for the classic pixmap
+/// (`gtkhx_news_icon_for_kind`). Asked per bind, so a theme change reaches
+/// rows as they rebind.
+pub(crate) fn symbolic_icon_for_kind(kind: i32) -> Option<String> {
+    let resource = match kind {
+        NB_KIND_FOLDER => NEWS_FOLDER_ICON,
+        NB_KIND_CATEGORY => NEWS_CATEGORY_ICON,
+        NB_KIND_POST => NEWS_POST_ICON,
+        _ => return None,
+    };
+    let res = crate::cs(resource);
+    let name = unsafe { gtkhx_icon_symbolic_name(res.as_ptr()) };
+    (!name.is_null()).then(|| unsafe { crate::cstr(name) })
+}
 
 fn load_icon(resource: &str) -> Option<gdk::Paintable> {
     let res = crate::cs(resource);
@@ -898,9 +921,9 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     crate::ensure_gtk_init();
 
     // ---- Cached row icons ----
-    let icon_folder = load_icon("/com/nasledov/gtkhx/pixmaps/news_folder.png");
-    let icon_category = load_icon("/com/nasledov/gtkhx/pixmaps/news_category.png");
-    let icon_post = load_icon("/com/nasledov/gtkhx/pixmaps/news_post.png");
+    let icon_folder = load_icon(NEWS_FOLDER_ICON);
+    let icon_category = load_icon(NEWS_CATEGORY_ICON);
+    let icon_post = load_icon(NEWS_POST_ICON);
 
     // ---- Breadcrumb (its own row; the panel header holds the tab title) ----
     let breadcrumb = gtk::Label::new(Some("/"));

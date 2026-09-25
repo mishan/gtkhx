@@ -38,6 +38,13 @@
     <file alias="icons/64x64/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_64.png</file>
     <file alias="icons/128x128/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_128.png</file>
     <file alias="icons/256x256/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_256.png</file>
+    <!-- The symbolic chrome icons Adwaita has no stock name for; see
+         src/icons/README.md. Found by name through the same icon-theme
+         resource path as the app icon above. -->
+    <file>icons/scalable/actions/com.nasledov.gtkhx-broadcast-symbolic.svg</file>
+    <file>icons/scalable/actions/com.nasledov.gtkhx-chat-symbolic.svg</file>
+    <file>icons/scalable/actions/com.nasledov.gtkhx-news-symbolic.svg</file>
+    <file>icons/scalable/actions/com.nasledov.gtkhx-users-symbolic.svg</file>
     <file>pixmaps/ignore.png</file>
     <file>pixmaps/info.png</file>
     <file>pixmaps/kick.png</file>
@@ -91,6 +98,7 @@
          A user .ini with the same basename in $CONFIG/themes/
          shadows the GResource entry. -->
     <file>themes/default.ini</file>
+    <file>themes/classic.ini</file>
     <file>themes/neon-doll.ini</file>
     <file>themes/solarized.ini</file>
     <!-- Chrome density rules, loaded once at activate. -->

@@ -990,6 +990,36 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
     return image;
 }
 
+/* The size a symbolic icon draws at in one of the theme's scale areas.
+ * Symbolic icons are designed at 16px, the size the classic pixmaps
+ * are drawn at too, so an area's factor means the same for both. */
+static int
+symbolic_size (GtkhxScaleArea area)
+{
+    int px = (int)(16 * gtkhx_theme_scale (area) + 0.5);
+    return px < 1 ? 1 : px;
+}
+
+GtkWidget *
+gtkhx_icon_image_new (const char *resource)
+{
+    const char *symbolic = gtkhx_icon_symbolic_name (resource);
+    GtkWidget *image;
+    GdkPixbuf *pb;
+
+    if (symbolic) {
+        image = gtk_image_new_from_icon_name (symbolic);
+        gtk_image_set_pixel_size (GTK_IMAGE (image), 16);
+        return image;
+    }
+    pb = gtkhx_icon_load (resource);
+    image = gtkhx_image_new_from_pixbuf (pb);
+    if (pb) {
+        g_object_unref (pb);
+    }
+    return image;
+}
+
 /* ---- Theme-scaled icon buttons --------------------------------
  *
  * The default toolbar / window-button pixmaps are 16x16 pixel art
@@ -1059,8 +1089,9 @@ button_load_source (GtkWidget *btn)
     return NULL;
 }
 
-/* Rebuild a button's GtkPicture child from its tracked source at the
- * current theme scale. Called once at construction and on every theme
+/* Rebuild a button's icon child at the current theme scale: the
+ * symbolic icon when the theme uses them, else a GtkPicture of the
+ * tracked pixmap. Called once at construction and on every theme
  * "changed" emission (connected swapped via g_signal_connect_object,
  * so the user_data btn arrives first and the GtkhxTheme instance
  * arrives second). Signature has to match that swapped shape even
@@ -1077,6 +1108,21 @@ button_refresh_picture (GtkWidget *btn, gpointer unused_theme)
     GdkTexture *tex;
     GtkWidget *picture;
     int w, h;
+
+    /* A theme that uses symbolic icons: a named icon, drawn in the
+     * button's CSS color so it follows the theme, at the area's size. */
+    {
+        const char *resource_name
+            = g_object_get_data (G_OBJECT (btn), BTN_KEY_RESOURCE);
+        const char *symbolic
+            = resource_name ? gtkhx_icon_symbolic_name (resource_name) : NULL;
+        if (symbolic) {
+            GtkWidget *image = gtk_image_new_from_icon_name (symbolic);
+            gtk_image_set_pixel_size (GTK_IMAGE (image), symbolic_size (area));
+            gtkhx_widget_set_child (btn, image);
+            return;
+        }
+    }
 
     src = button_load_source (btn);
     if (!src) {

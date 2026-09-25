@@ -153,17 +153,26 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
             return;
         };
 
-        let paintable = unsafe {
-            let p = gtkhx_news_icon_for_kind(browser, hx_news_node_kind(node.as_ptr().cast()));
-            if p.is_null() {
-                None
-            } else {
-                Some(from_glib_none::<_, gtk::gdk::Paintable>(p))
+        let kind = unsafe { hx_news_node_kind(node.as_ptr().cast()) };
+        if let Some(name) = crate::news_browser::symbolic_icon_for_kind(kind) {
+            // Symbolic icons are drawn at 16px; the pixel art is upscaled
+            // to 24 (see `load_icon`).
+            icon.set_icon_name(Some(&name));
+            icon.set_pixel_size(16);
+        } else {
+            let paintable = unsafe {
+                let p = gtkhx_news_icon_for_kind(browser, kind);
+                if p.is_null() {
+                    None
+                } else {
+                    Some(from_glib_none::<_, gtk::gdk::Paintable>(p))
+                }
+            };
+            icon.set_pixel_size(24);
+            match paintable {
+                Some(p) => icon.set_paintable(Some(&p)),
+                None => icon.clear(),
             }
-        };
-        match paintable {
-            Some(p) => icon.set_paintable(Some(&p)),
-            None => icon.clear(),
         }
         label.set_text(&unsafe { crate::cstr(hx_news_node_name(node.as_ptr().cast())) });
 

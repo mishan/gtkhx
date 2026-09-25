@@ -38,8 +38,13 @@ rejected (defensive against escaping the themes directory).
 
 ## Bundled icons
 
+Chrome icons are symbolic by default — named icons drawn in the theme's
+colors — or the classic 16×16 pixel art when the theme says
+`icons = classic` (see the schema below, and [theming.md](theming.md)).
+
 A directory-form theme can override any of GtkHx's chrome icons
-by dropping a same-named PNG into `<name>/icons/`. Per-icon
+by dropping a same-named PNG into `<name>/icons/`, in either style: a
+theme's own glyph replaces the symbolic icon too. Per-icon
 fallback: anything the bundle doesn't supply falls through to the
 built-in GResource pixmap (`/com/nasledov/gtkhx/pixmaps/<logical>.png`).
 A bundle that ships only `connect.png` works fine — every other icon
@@ -116,6 +121,7 @@ theme simply gives both variants the same values.
 | `THEMENAME` | Display | Description |
 |---|---|---|
 | `default` | Default | GtkHx's classic appearance. Sets no chat fg/bg, so the chat takes Adwaita's view colors in both modes and the window stays stock; the Adwaita accent blue for selection and the `[hx]` tag. Neutral gray brackets, red mentions, and nicks hashed across green, orange, purple, teal, brown and olive — all above 5:1 in light mode and 7:1 in dark. |
+| `classic` | Classic | The original GtkHx look: `icons = classic` for the pixel-art chrome icons, a light-grey-on-black chat (`#cccccc` on `#000000`; `#1d1d1d` on `#fafafa` in light mode), and the full-intensity mIRC gutter colors — blue and pink nick brackets, a green `[hx]` in cyan brackets, a red mention. Its chrome keys are `system`, so the window and the lists stay stock around the chat. |
 | `neon-doll` | Neon Doll | The palette of the Neon Doll desktop theme, so GtkHx matches the desktop around it. Dark: near-black plum page (`#0f0d14`), panels (`#16131d`), lavender ink (`#ebe6f0`). Light: plum-tinted paper (`#f7f4fa`), panels (`#ede7f3`), ink (`#1a1522`). Fuchsia (`#ff2d95` / `#c8006a`) means position — selection, the current pane, the focus ring, a line that mentions you — and purple (`#b48cff` / `#6a3fd0`) means you can act on it: nicks, the `[hx]` sigil, and suggested-action buttons, drawn as purple outlines over a purple wash that turn pink on hover. Brackets are muted and the chat divider is a hairline. No per-nick colors: two accents on purpose. |
 | `solarized` | Solarized | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette. `palette.light` holds the canonical Solarized Light values (cream `#fdf6e3` bg, `#657b83` body text); `palette.dark` holds Solarized Dark (`#002b36` bg, `#839496` body text). Picking "Solarized" gives you Solarized Light on a light desktop and Solarized Dark on a dark one — the way the palette was designed. Brackets take the emphasized-content tone, your own nick the strongest one, `[hx]` is blue (the accent), and everyone else's nick is hashed across the other accents — minus red (mentions) and blue — using only the ones legible on each background. Its `[chrome.*]` sections tint the whole window: the page color (`base3` / `base03`) for the window and content, the highlight band (`base2` / `base02`) for the header bar, cards and popovers, and Solarized blue as the accent. |
 
@@ -134,6 +140,9 @@ name = My Theme
 # `description` is documentation only — nothing in the loader or the
 # picker reads it today. Write it for whoever opens the file next.
 description = Short tagline.
+# `icons` picks the chrome icon style: `symbolic` (the default) or
+# `classic`, the original pixel-art icons. Optional.
+icons = symbolic
 
 # --- Per-area UI scales ------------------------------------------------
 # Integer percent against the *unscaled* source art (16×16 button
@@ -268,6 +277,9 @@ admin_idle = #871f1d
 #                  an action is a link.
 #
 # Every key is optional, and what is left out is derived (see below).
+# Any key may also be `system`: left to the system theme and not
+# derived either — how a theme with chat colors keeps a stock window
+# (Classic sets window, view and fg to `system`).
 [chrome.light]
 window       = #fdf6e3
 headerbar    = #eee8d5

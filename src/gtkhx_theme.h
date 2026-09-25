@@ -193,7 +193,10 @@ gboolean gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark,
  * `--window-bg-color` family of CSS variables), so every stock widget
  * picks the theme up without per-widget rules.
  *
- * Loaded from [chrome.light] / [chrome.dark]. Every key is optional.
+ * Loaded from [chrome.light] / [chrome.dark]. Every key is optional,
+ * and any key may be `system`: left to the system theme and not
+ * derived either, which is how a theme keeps stock chrome around its
+ * own chat colors.
  * What a theme leaves out is derived: a missing `window` and `fg` fall
  * back to the chat palette's `bg` and `fg` — only when the palette sets
  * both, since a window background without its text color is unreadable
@@ -233,6 +236,11 @@ char *gtkhx_theme_build_chrome_css (gboolean dark);
  * the pref is unset / empty. Never NULL. Caller does NOT free.
  * Used by gtkhx_icon to find the active theme's bundled icons. */
 const char *gtkhx_theme_active_name (void);
+
+/* TRUE when the active theme asks for the classic pixel-art chrome
+ * icons ([gtkhx-theme] icons = classic) rather than the symbolic set.
+ * See gtkhx_icon_symbolic_name. */
+gboolean gtkhx_theme_classic_icons (void);
 
 /* ---- Loader ----------------------------------------------------------
  *

@@ -55,6 +55,10 @@ struct _GtkhxTheme {
      * set" → derived at read time (see gtkhx_theme_get_chrome_color). */
     int chrome_rgb[GTKHX_CHROME_N_ROLES][2];
 
+    /* [gtkhx-theme] icons = classic: the pixel-art chrome icons rather
+     * than the symbolic ones. */
+    gboolean classic_icons;
+
     /* The [palette.*] nick_colors lists, packed the same way. */
     int nick_rgb[GTKHX_NICK_COLORS_MAX][2];
     int n_nick[2];
@@ -358,6 +362,10 @@ mix_rgb (const GdkRGBA *a, const GdkRGBA *b, double t)
 #define CHROME_STEP_HEADERBAR 0.07
 #define CHROME_STEP_POPOVER 0.09
 
+/* chrome_rgb value for a role a theme set to "system" (see
+ * load_chrome_group); -1 remains "not set". */
+#define CHROME_SYSTEM (-2)
+
 /* The chat palette stands in for the window colors only as a pair. A
  * theme that sets only a chat background would otherwise paint the
  * window with it while its text stayed the system's — dark text on a
@@ -384,6 +392,9 @@ gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
     if (self->chrome_rgb[role][v] >= 0) {
         *out = unpack_rgb (self->chrome_rgb[role][v]);
         return TRUE;
+    }
+    if (self->chrome_rgb[role][v] == CHROME_SYSTEM) {
+        return FALSE;
     }
 
     switch (role) {
@@ -600,6 +611,12 @@ gtkhx_theme_build_chrome_css (gboolean dark)
                             action);
 }
 
+gboolean
+gtkhx_theme_classic_icons (void)
+{
+    return gtkhx_theme_get_default ()->classic_icons;
+}
+
 const char *
 gtkhx_theme_active_name (void)
 {
@@ -715,6 +732,7 @@ static const char *const palette_key_name[GTKHX_PAL_N_ROLES] = {
 
 #define NICK_COLORS_KEY "nick_colors"
 
+#define META_GROUP "gtkhx-theme"
 #define SCALE_GROUP "scale"
 #define PALETTE_LIGHT_GROUP "palette.light"
 #define PALETTE_DARK_GROUP "palette.dark"
@@ -857,6 +875,13 @@ load_chrome_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
             continue;
         }
         raw = g_key_file_get_string (kf, group, chrome_key_name[r], NULL);
+        /* "system": leave the role to the system theme, and don't derive
+         * it either — the way to keep stock window chrome around a
+         * theme's chat colors. */
+        if (raw && g_ascii_strcasecmp (g_strstrip (raw), "system") == 0) {
+            self->chrome_rgb[r][variant_idx] = CHROME_SYSTEM;
+            continue;
+        }
         packed = parse_hex_color (raw);
         if (packed >= 0) {
             self->chrome_rgb[r][variant_idx] = packed;
@@ -897,12 +922,29 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     }
     self->n_nick[0] = 0;
     self->n_nick[1] = 0;
+    self->classic_icons = FALSE;
 
     /* NULL keyfile: nothing else to parse — fall through to the
      * "changed" emit so subscribers reset in lockstep. */
     if (!kf) {
         g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
         return;
+    }
+
+    /* [gtkhx-theme] icons */
+    {
+        g_autofree char *icons
+            = g_key_file_get_string (kf, META_GROUP, "icons", NULL);
+        if (icons) {
+            g_strstrip (icons);
+            if (g_ascii_strcasecmp (icons, "classic") == 0) {
+                self->classic_icons = TRUE;
+            } else if (g_ascii_strcasecmp (icons, "symbolic") != 0) {
+                g_warning ("gtkhx_theme: [%s] icons = %s: expected symbolic "
+                           "or classic",
+                           META_GROUP, icons);
+            }
+        }
     }
 
     /* [scale] */

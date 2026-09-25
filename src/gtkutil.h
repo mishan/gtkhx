@@ -144,6 +144,13 @@ extern void gtkhx_widget_destroy (GtkWidget *widget);
  */
 extern GtkWidget *gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf);
 
+/* A chrome icon as a GtkImage at 16px: the symbolic icon when the
+ * active theme uses them (see gtkhx_icon_symbolic_name), else the
+ * classic pixmap at its own size. `resource` is a logical name or a
+ * pixmap resource path. Built once — it doesn't follow a later theme
+ * change. */
+extern GtkWidget *gtkhx_icon_image_new (const char *resource);
+
 /*
  * Convert a GdkPixbuf to a GdkTexture without the deprecated
  * gdk_texture_new_for_pixbuf path. Wraps the pixbuf's pixel
