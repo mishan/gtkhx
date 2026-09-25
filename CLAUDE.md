@@ -132,7 +132,8 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 - `mhxd/` — the reference server's source, vendored for cross-reading only. Not built.
 - `po/` — translations (German, Spanish, French, Portuguese). `sounds/` — chat alert `.wav`s.
 - `src/themes/` — built-in theme files, shipped as GResource.
-- `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting.
+- `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting, and
+  `screenshot.py` (headless screenshots isolated from the desktop — see `docs/screenshots.md`).
 
 ## The model / view boundary
 
