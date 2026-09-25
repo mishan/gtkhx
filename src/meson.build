@@ -270,6 +270,11 @@ executable('gtkhx',
   gtkhx_resources,
   gtkhx_win_res,
   dependencies        : deps + rust_deps,
+  # The Rust archive reaches the link as -l flags, and the dependency on
+  # the cargo build is order-only (declare_dependency sources:), so a
+  # Rust-only change rebuilt the archive without relinking the binary.
+  # This makes the stamp a real link input.
+  link_depends        : rust_build,
   include_directories : include_directories('.'),
   install             : true,
   # GUI subsystem on Windows so double-clicking the exe doesn't pop a console
