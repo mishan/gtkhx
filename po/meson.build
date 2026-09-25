@@ -26,6 +26,8 @@ i18n.gettext(meson.project_name(),
     # `info gettext "Marking Plural Forms"` — so plural strings from
     # files_browser.c / chat.c / etc. land in gtkhx.pot.
     '--keyword=g_dngettext:2,3',
+    # C_ (glib/gi18n.h): context first, string second.
+    '--keyword=C_:1c,2',
     # The Rust half's gettext shims (rust/crates/gtkhx-ui/src/tr.rs). xgettext
     # has recognised Rust since gettext 0.25, and lexes it properly — it does
     # not mistake the `_str` tail of `push_str("…")` for a keyword — but it has

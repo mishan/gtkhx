@@ -48,6 +48,70 @@ dl_parsed_node_free (DLParsedNode *n)
     g_free (n);
 }
 
+/* NULL means "this subtree emptied and should collapse". */
+static DLParsedNode *
+drop_panel (DLParsedNode *n, const char *id, guint *split_index,
+            GArray *dropped)
+{
+    if (n->is_leaf) {
+        gboolean had_ids = n->panel_ids != NULL && n->panel_ids->len > 0;
+
+        for (guint i = 0; n->panel_ids != NULL && i < n->panel_ids->len;) {
+            if (g_strcmp0 (g_ptr_array_index (n->panel_ids, i), id) == 0) {
+                g_ptr_array_remove_index (n->panel_ids, i);
+                if (n->selected == (int)i) {
+                    n->selected = -1;
+                } else if (n->selected > (int)i) {
+                    n->selected--;
+                }
+            } else {
+                i++;
+            }
+        }
+        if (had_ids && n->panel_ids->len == 0) {
+            dl_parsed_node_free (n);
+            return NULL;
+        }
+        return n;
+    } else {
+        DLParsedNode *a = drop_panel (n->child_a, id, split_index, dropped);
+        DLParsedNode *b = drop_panel (n->child_b, id, split_index, dropped);
+        guint mine = (*split_index)++; /* post-order, like sizes= */
+
+        if (a != NULL && b != NULL) {
+            n->child_a = a;
+            n->child_b = b;
+            return n;
+        }
+        if (dropped != NULL) {
+            g_array_append_val (dropped, mine);
+        }
+        n->child_a = NULL;
+        n->child_b = NULL;
+        dl_parsed_node_free (n);
+        return a != NULL ? a : b; /* NULL when both emptied */
+    }
+}
+
+DLParsedNode *
+dl_tree_drop_panel (DLParsedNode *root, const char *id, GArray *dropped_splits)
+{
+    guint split_index = 0;
+    DLParsedNode *out;
+
+    if (root == NULL || id == NULL) {
+        return root;
+    }
+    out = drop_panel (root, id, &split_index, dropped_splits);
+    if (out == NULL) {
+        out = g_new0 (DLParsedNode, 1);
+        out->is_leaf = TRUE;
+        out->panel_ids = g_ptr_array_new_with_free_func (g_free);
+        out->selected = -1;
+    }
+    return out;
+}
+
 typedef struct {
     const char *p;
     const char *end;

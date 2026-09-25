@@ -314,10 +314,9 @@ setbtns (session *sess, int stat)
     }
 
     /* files_btn intentionally not gated on connection state — the
-     * Files panel is always resident in the dock and the button
-     * just brings it forward; even offline it can show whatever
-     * directory listing was last fetched. See toolbar.c initial-
-     * sensitivity comment. */
+     * Files window's local panel is useful offline, and its remote
+     * panel paints its own not-connected state. See toolbar.c
+     * initial-sensitivity comment. */
 
     /* Broadcast button: always present in the toolbar, greyed out
      * when unavailable. Unavailable means either the connection is

@@ -72,7 +72,6 @@ stay in C.
 | Panel        | Content shell                             | Panel id | Kind    | Home area |
 |--------------|-------------------------------------------|----------|---------|-----------|
 | Chat         | `gtkhx-ui/src/chat.rs`                    | `chat`   | CENTER  | CENTER    |
-| Files        | `gtkhx-ui/src/files.rs`                   | `files`  | CENTER  | CENTER    |
 | News 1.5     | `gtkhx-ui/src/news_browser.rs`            | `news15` | CENTER  | CENTER    |
 | News 1.0     | `gtkhx-ui/src/news.rs`                    | `news`   | SIDEBAR | START     |
 | Users        | `gtkhx-ui/src/users.rs`                   | `users`  | SIDEBAR | END       |
@@ -97,14 +96,18 @@ strip is `src/chat_tabs.h`; the implementation is Rust
 or fundamentally not server-content):
 
 - Agreement, About, user editor, post-news composer, file preview.
+- **Files** — one window per connection (`gtkhx-ui/src/files.rs`). A
+  two-panel file manager needs more width than a dock frame gives it,
+  and it is used in bursts; see `docs/files-browser.md`.
 - **Tracker** — server-discovery, not server-content. Exists *before*
   a connection (it's how the user picks one). It is a plain
   `gtk::Window` built in `rust/crates/gtkhx-ui/src/tracker/`; the panel
   registry doesn't absorb it, and there is deliberately no
   `HX_PANEL_ID_TRACKER`.
 
-The toolbar's Files / Users / Chat / Tasks buttons route through
+The toolbar's Users / Chat / Tasks buttons route through
 `toolbar_show_panel`, which does registry-lookup + re-attach + raise.
+Its Files button opens the Files window instead.
 News (1.0) and News (1.5+) keep their own entry points because they also
 need to fire a server fetch when connected.
 
@@ -151,7 +154,7 @@ root  (horizontal):
 ├── left leaf       — News, Tasks                (toolbar_sidebar_frame,
 │                                                  toolbar_bottom_frame)
 └── rest (horizontal):
-    ├── center leaf — Chat, Files, News 1.5      (toolbar_center_frame)
+    ├── center leaf — Chat, News 1.5             (toolbar_center_frame)
     └── right leaf  — Users                      (toolbar_end_frame)
 ```
 

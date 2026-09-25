@@ -37,17 +37,20 @@ pub const ID_USERS: &str = "users";
 pub const ID_TASKS: &str = "tasks";
 pub const ID_NEWS: &str = "news";
 pub const ID_NEWS15: &str = "news15";
-pub const ID_FILES: &str = "files";
 
 /// Every panel whose content belongs to one connection — the set a connection
 /// switch has to swap.
+///
+/// Files is absent because it is not a panel: each connection's browser is a
+/// window of its own (see `files.rs`), closed with the rest of the
+/// connection's content in [`gtkhx_dock_remove_session_pages`].
 ///
 /// Tasks is deliberately absent: the transfer queue is one list for the whole
 /// application, tagged per row, so switching tabs must leave it alone. See
 /// [`GLOBAL_PAGE`] and docs/multi-connection.md, "Global but tagged". The
 /// Tracker is absent for a different reason — it is a standalone window rather
 /// than a panel at all.
-pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_NEWS15, ID_FILES];
+pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_NEWS15];
 
 /// The page name a global panel lives under.
 ///
@@ -287,6 +290,9 @@ pub unsafe extern "C" fn gtkhx_dock_remove_session_pages(sess: *mut c_void) {
         let cid = crate::cs(id);
         gtkhx_dock_remove_page(cid.as_ptr(), cpage.as_ptr());
     }
+    // Not a page, but the same connection's content, with the same teardown
+    // on destroy.
+    crate::files::close_for_session(sess);
 }
 
 /// Whether `id` already holds a page for this connection. The per-connection

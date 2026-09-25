@@ -33,13 +33,8 @@
  * this is what decides the tab order within a shared leaf on first
  * launch. */
 const char *const hx_panel_static_ids[] = {
-    HX_PANEL_ID_USERS,
-    HX_PANEL_ID_TASKS,
-    HX_PANEL_ID_NEWS,
-    HX_PANEL_ID_CHAT,
-    HX_PANEL_ID_FILES,
-    HX_PANEL_ID_NEWS15,
-    NULL,
+    HX_PANEL_ID_USERS, HX_PANEL_ID_TASKS,  HX_PANEL_ID_NEWS,
+    HX_PANEL_ID_CHAT,  HX_PANEL_ID_NEWS15, NULL,
 };
 
 static GHashTable *

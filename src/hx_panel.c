@@ -338,7 +338,6 @@ panel_pixmap (const char *id)
     } map[] = {
         { HX_PANEL_ID_CHAT, "/com/nasledov/gtkhx/pixmaps/chat.png" },
         { HX_PANEL_ID_USERS, "/com/nasledov/gtkhx/pixmaps/users.png" },
-        { HX_PANEL_ID_FILES, "/com/nasledov/gtkhx/pixmaps/files.png" },
         { HX_PANEL_ID_NEWS, "/com/nasledov/gtkhx/pixmaps/news.png" },
         { HX_PANEL_ID_NEWS15, "/com/nasledov/gtkhx/pixmaps/news_folder.png" },
         { HX_PANEL_ID_TASKS, "/com/nasledov/gtkhx/pixmaps/tasks.png" },

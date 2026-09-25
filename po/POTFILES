@@ -31,6 +31,7 @@ rust/crates/gtkhx-ui/src/conn_tabs.rs
 rust/crates/gtkhx-ui/src/create_post.rs
 rust/crates/gtkhx-ui/src/emoji.rs
 rust/crates/gtkhx-ui/src/file_info.rs
+rust/crates/gtkhx-ui/src/files.rs
 rust/crates/gtkhx-ui/src/icon_picker.rs
 rust/crates/gtkhx-ui/src/inline_media_dialog.rs
 rust/crates/gtkhx-ui/src/news_browser.rs

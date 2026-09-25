@@ -66,7 +66,10 @@ G_BEGIN_DECLS
 #define HX_PANEL_ID_TASKS "tasks"
 #define HX_PANEL_ID_NEWS "news"
 #define HX_PANEL_ID_NEWS15 "news15"
-#define HX_PANEL_ID_FILES "files"
+/* No HX_PANEL_ID_FILES any more: the files browser is a window per
+ * connection (gtkhx-ui/src/files.rs). A saved layout that still names
+ * "files" has it pruned at load (dl_tree_drop_panel), so a leaf it had to
+ * itself doesn't come back as an empty pane. */
 /* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
  * not a docked panel — it has never had an HxPanel. */
 

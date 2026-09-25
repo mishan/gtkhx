@@ -419,6 +419,76 @@ test_deeply_nested (void)
 
 /* ---------- Test registration ---------------------------------------- */
 
+/* ---------- Dropping a retired panel -------------------------------- */
+
+/* Sharing a leaf: the id goes, the leaf stays, and the foreground marker
+ * follows the page it named. */
+static void
+test_drop_from_shared_leaf (void)
+{
+    g_autoptr (GArray) dropped = g_array_new (FALSE, FALSE, sizeof (guint));
+    DLParsedNode *n = dl_parse_tree ("L[chat,files,*news15:center]");
+
+    n = dl_tree_drop_panel (n, "files", dropped);
+    g_assert_true (n->is_leaf);
+    g_assert_cmpuint (n->panel_ids->len, ==, 2);
+    g_assert_cmpstr (nth_id (n, 0), ==, "chat");
+    g_assert_cmpstr (nth_id (n, 1), ==, "news15");
+    g_assert_cmpint (n->selected, ==, 1);
+    g_assert_cmpstr (n->role, ==, "center");
+    g_assert_cmpuint (dropped->len, ==, 0);
+    dl_parsed_node_free (n);
+}
+
+/* Alone in a leaf: the leaf collapses and its sibling takes the parent
+ * split's place, which is reported by its post-order index. */
+static void
+test_drop_collapses_sole_leaf (void)
+{
+    g_autoptr (GArray) dropped = g_array_new (FALSE, FALSE, sizeof (guint));
+    /* Post-order: the inner h( ) is split 0, the root split 1. */
+    DLParsedNode *n = dl_parse_tree (
+        "h(L[*chat,news15:center],h(L[*files],L[*users:end]))");
+
+    n = dl_tree_drop_panel (n, "files", dropped);
+    g_assert_false (n->is_leaf);
+    g_assert_true (n->child_a->is_leaf);
+    g_assert_cmpstr (nth_id (n->child_a, 0), ==, "chat");
+    g_assert_true (n->child_b->is_leaf);
+    g_assert_cmpstr (nth_id (n->child_b, 0), ==, "users");
+    g_assert_cmpstr (n->child_b->role, ==, "end");
+    g_assert_cmpuint (dropped->len, ==, 1);
+    g_assert_cmpuint (g_array_index (dropped, guint, 0), ==, 0);
+    dl_parsed_node_free (n);
+}
+
+/* A leaf that was empty before stays: that one was the user's. */
+static void
+test_drop_keeps_already_empty_leaf (void)
+{
+    g_autoptr (GArray) dropped = g_array_new (FALSE, FALSE, sizeof (guint));
+    DLParsedNode *n = dl_parse_tree ("h(L[*chat:center],L[])");
+
+    n = dl_tree_drop_panel (n, "files", dropped);
+    g_assert_false (n->is_leaf);
+    g_assert_cmpuint (n->child_b->panel_ids->len, ==, 0);
+    g_assert_cmpuint (dropped->len, ==, 0);
+    dl_parsed_node_free (n);
+}
+
+/* A tree holding nothing else comes back as one empty leaf. */
+static void
+test_drop_everything (void)
+{
+    DLParsedNode *n = dl_parse_tree ("L[*files]");
+
+    n = dl_tree_drop_panel (n, "files", NULL);
+    g_assert_true (n->is_leaf);
+    g_assert_cmpuint (n->panel_ids->len, ==, 0);
+    g_assert_cmpint (n->selected, ==, -1);
+    dl_parsed_node_free (n);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -483,6 +553,14 @@ main (int argc, char **argv)
     g_test_add_func ("/dock_layout_parse/punct_ids",
                      test_panel_ids_with_punctuation);
     g_test_add_func ("/dock_layout_parse/deeply_nested", test_deeply_nested);
+    g_test_add_func ("/dock_layout_parse/drop/shared_leaf",
+                     test_drop_from_shared_leaf);
+    g_test_add_func ("/dock_layout_parse/drop/collapses_sole_leaf",
+                     test_drop_collapses_sole_leaf);
+    g_test_add_func ("/dock_layout_parse/drop/keeps_already_empty_leaf",
+                     test_drop_keeps_already_empty_leaf);
+    g_test_add_func ("/dock_layout_parse/drop/everything",
+                     test_drop_everything);
 
     return g_test_run ();
 }

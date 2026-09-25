@@ -66,8 +66,7 @@ named .png into the bundle's `icons/` to override): `ban`,
 `edit_user`, `new_user`, `move`, `options`, `quit`, plus the
 file-type icons `file`, `folder`, `folder_dropbox`, `file_alias`,
 `file_app`, `file_disk`, `file_html`, `file_image`, `file_movie`,
-`file_note`, `file_sit`, `file_text`, `file_zip`, `file_move`,
-`file_move_lr`, `file_move_rl`.
+`file_note`, `file_sit`, `file_text`, `file_zip`, `file_move`.
 
 Format constraints (v1):
 

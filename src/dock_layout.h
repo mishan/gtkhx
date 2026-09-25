@@ -174,6 +174,12 @@ void dock_layout_shutdown (void);
  * Stable for the lifetime of the toolbar window (hx_split_close_leaf
  * refuses to close the root). */
 void dock_layout_set_dock_root (HxSplit *root);
+/* Size of a window that isn't a panel (the Files browser), kept in the
+ * layout file's [Windows] group by name as "W,H". get returns FALSE when
+ * none was saved; set queues a save. */
+gboolean dock_layout_get_window_size (const char *name, int *w, int *h);
+void dock_layout_set_window_size (const char *name, int w, int h);
+
 /* The root set above; NULL before the dock is built. */
 HxSplit *dock_layout_get_dock_root (void);
 

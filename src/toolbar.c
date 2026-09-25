@@ -453,6 +453,16 @@ on_action_reset_layout (GSimpleAction *action, GVariant *param,
  * staleness and not the same consequence, since none of them touches a page.
  * They are listed in docs/multi-connection.md under the app-global chrome
  * that still has to be made per-connection. */
+/* Files is a window per connection, not a panel: open the one for the
+ * connection the user is looking at. */
+static void
+on_files_clicked (GtkButton *btn, gpointer data)
+{
+    (void)btn;
+    (void)data;
+    open_files_browser (hx_active_session ());
+}
+
 /* The two news buttons build through toolbar_build_panel before
  * calling their own entry point. Both entry points are single-session
  * factories, so on their own they would give a panel that had been
@@ -543,6 +553,15 @@ on_action_clear_input (GSimpleAction *action, GVariant *param, gpointer data)
 
 /* Menu twins of the toolbar row, so hiding it costs nothing. */
 static void
+on_action_files (GSimpleAction *action, GVariant *param, gpointer data)
+{
+    (void)action;
+    (void)param;
+    (void)data;
+    open_files_browser (hx_active_session ());
+}
+
+static void
 on_action_tracker (GSimpleAction *action, GVariant *param, gpointer data)
 {
     (void)action;
@@ -612,6 +631,7 @@ static const GActionEntry app_actions[] = {
     { .name = "quit", .activate = on_action_quit },
     { .name = "reset_layout", .activate = on_action_reset_layout },
     { .name = "tracker", .activate = on_action_tracker },
+    { .name = "files", .activate = on_action_files },
     { .name = "broadcast", .activate = on_action_broadcast },
     { .name = "show-panel",
       .activate = on_action_show_panel,
@@ -783,8 +803,8 @@ toolbar_register_actions (GApplication *app, session *sess)
  * Disconnect and the title, so the menu is where everything else can
  * always be found — including every button on the optional toolbar:
  *
- *   Settings / Connections… / Tracker
- *   Panels: Chat, Users, Files, News, News (1.5+), Tasks
+ *   Settings / Connections… / Tracker / Files
+ *   Panels: Chat, Users, News, News (1.5+), Tasks
  *   Show Toolbar / Pane Titles / Reset Layout
  *   Admin > New User…, Edit User…, Broadcast…
  *   About GtkHx / Quit
@@ -806,7 +826,6 @@ build_hamburger (void)
     } panels[] = {
         { _ ("Chat"), HX_PANEL_ID_CHAT },
         { _ ("Users"), HX_PANEL_ID_USERS },
-        { _ ("Files"), HX_PANEL_ID_FILES },
         { _ ("News"), HX_PANEL_ID_NEWS },
         { _ ("News (1.5+)"), HX_PANEL_ID_NEWS15 },
         { _ ("Tasks"), HX_PANEL_ID_TASKS },
@@ -816,6 +835,7 @@ build_hamburger (void)
     g_menu_append (prefs_section, _ ("Settings"), "app.settings");
     g_menu_append (prefs_section, _ ("Connections…"), "app.connections");
     g_menu_append (prefs_section, _ ("Tracker"), "app.tracker");
+    g_menu_append (prefs_section, _ ("Files"), "app.files");
 
     /* In the menu itself, not a submenu: with the toolbar off by
      * default, this is how a closed pane comes back, and it should be
@@ -1003,8 +1023,6 @@ panel_factory_run (const char *id, session *sess)
         create_users_window (toolbar_window, sess);
     } else if (g_strcmp0 (id, HX_PANEL_ID_TASKS) == 0) {
         create_tasks_window (toolbar_window, sess);
-    } else if (g_strcmp0 (id, HX_PANEL_ID_FILES) == 0) {
-        open_files_browser (sess);
     } else if (g_strcmp0 (id, HX_PANEL_ID_NEWS15) == 0) {
         /* The news browser is a singleton and ignores its widget
          * argument; NULL is what every other caller passes. */
@@ -1300,9 +1318,9 @@ create_toolbar_window (session *sess)
         "/com/nasledov/gtkhx/pixmaps/news_folder.png", _ ("News (1.5+)"),
         G_CALLBACK (on_news15_clicked), NULL);
     gtk_box_append (GTK_BOX (hbox), news15_btn);
-    files_btn = make_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/files.png", _ ("Files"),
-        G_CALLBACK (toolbar_show_panel), (gpointer)HX_PANEL_ID_FILES);
+    files_btn
+        = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.png",
+                              _ ("Files"), G_CALLBACK (on_files_clicked), NULL);
     gtk_box_append (GTK_BOX (hbox), files_btn);
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/users.png",
@@ -1381,8 +1399,7 @@ create_toolbar_window (session *sess)
      *   ├── left leaf  — News, Tasks           (toolbar_sidebar_frame,
      *   │                                       toolbar_bottom_frame)
      *   └── rest       (horizontal split):
-     *       ├── center leaf — Chat, Files,
-     *       │                 News 1.5          (toolbar_center_frame)
+     *       ├── center leaf — Chat, News 1.5    (toolbar_center_frame)
      *       └── right leaf — Users              (toolbar_end_frame)
      *
      * toolbar_*_frame pointers reference the initial leaves'
@@ -1544,9 +1561,9 @@ create_toolbar_window (session *sess)
      * GActions.
      *
      * files_btn and news15_btn stay enabled regardless of
-     * connection state — their click just brings the (always
-     * resident) Files / News 1.5 panel forward in the dock; even
-     * disconnected the panel shows whatever it has cached. */
+     * connection state — the Files window's local panel works
+     * offline, and News 1.5 (always resident in the dock) shows
+     * whatever it has cached. */
     gtk_widget_set_sensitive (disconnect_btn, FALSE);
 
     /* Close-request → close_toolbar_window, which calls hx_quit() so

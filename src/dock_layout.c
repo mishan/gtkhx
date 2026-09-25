@@ -70,6 +70,12 @@ static struct {
                                        * panel keeps its setting. */
     gboolean toolbar_shown;        /* the main window's pixmap toolbar */
     gboolean pane_titles;          /* headers on single-panel frames */
+    GArray *dropped_splits;        /* guint post-order indices of saved
+                                       * splits that collapsed when a
+                                       * retired panel was pruned; their
+                                       * sizes= entries are skipped */
+    GHashTable *window_sizes;      /* char* name → "W,H"; windows that
+                                       * aren't panels (Files) */
     GtkPaned **paned_order;        /* depth-first order, set by load
                                        * + apply_geometry, used by save */
     guint n_paned;
@@ -379,6 +385,15 @@ serialize_chrome (GKeyFile *kf)
     if (dock.pane_titles) {
         g_key_file_set_boolean (kf, "Chrome", "pane-titles", TRUE);
     }
+    if (dock.window_sizes != NULL) {
+        GHashTableIter it;
+        gpointer k, v;
+
+        g_hash_table_iter_init (&it, dock.window_sizes);
+        while (g_hash_table_iter_next (&it, &k, &v)) {
+            g_key_file_set_string (kf, "Windows", k, v);
+        }
+    }
     if (dock.bare_ids != NULL && g_hash_table_size (dock.bare_ids) > 0) {
         /* Sorted, so the file doesn't churn with hash order. */
         GList *ids = g_list_sort (g_hash_table_get_keys (dock.bare_ids),
@@ -416,6 +431,21 @@ load_chrome (GKeyFile *kf)
     dock.toolbar_shown = g_key_file_get_boolean (kf, "Chrome", "toolbar", NULL);
     dock.pane_titles
         = g_key_file_get_boolean (kf, "Chrome", "pane-titles", NULL);
+
+    if (dock.window_sizes == NULL) {
+        dock.window_sizes
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+    }
+    g_hash_table_remove_all (dock.window_sizes);
+    {
+        g_auto (GStrv) keys = g_key_file_get_keys (kf, "Windows", NULL, NULL);
+        for (char **k = keys; k != NULL && *k != NULL; k++) {
+            char *v = g_key_file_get_string (kf, "Windows", *k, NULL);
+            if (v != NULL) {
+                g_hash_table_insert (dock.window_sizes, g_strdup (*k), v);
+            }
+        }
+    }
 
     ensure_bare_ids ();
     g_hash_table_remove_all (dock.bare_ids);
@@ -476,9 +506,10 @@ on_save_idle (gpointer user_data)
 
     GKeyFile *kf = g_key_file_new ();
 
-    /* Window size lives in gtkhxrc via gtkhx_save_window_positions
-     * and Window_Geo — don't duplicate it here. dock-layout.ini
-     * stays focused on the tree shape and paned positions. */
+    /* The main window's size lives in gtkhxrc via
+     * gtkhx_save_window_positions and Window_Geo — don't duplicate it
+     * here. The windows that aren't panels (Files) keep theirs in
+     * [Windows] below, beside the undocked panels' sizes. */
 
     g_key_file_set_string (kf, "Dock", "tree", tree->str);
     /* Walk every registered panel and serialise the ones whose
@@ -591,6 +622,16 @@ dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
                    path);
         goto out;
     }
+
+    /* Files was a dock panel and is a window now. A layout saved before
+     * that names it; a leaf it had to itself would come back empty, so
+     * prune it, and remember which splits went with it so the saved
+     * divider positions still line up with the splits that remain. */
+    if (dock.dropped_splits == NULL) {
+        dock.dropped_splits = g_array_new (FALSE, FALSE, sizeof (guint));
+    }
+    g_array_set_size (dock.dropped_splits, 0);
+    parsed = dl_tree_drop_panel (parsed, "files", dock.dropped_splits);
 
     /* Prime / reset module state. */
     if (dock.id_to_frame != NULL) {
@@ -790,13 +831,31 @@ dock_layout_apply_geometry (GtkWindow *window)
     char *sizes_str = g_key_file_get_string (kf, "Dock", "sizes", NULL);
     if (sizes_str != NULL) {
         char **parts = g_strsplit (sizes_str, ";", -1);
-        for (guint i = 0; parts[i] != NULL && i < dock.n_paned; i++) {
-            int pos = (int)g_ascii_strtoll (parts[i], NULL, 10);
+        guint i = 0; /* index into the live splits */
+        for (guint saved = 0; parts[saved] != NULL && i < dock.n_paned;
+             saved++) {
+            int pos;
+            gboolean dropped = FALSE;
+
+            /* A saved split that collapsed at load has no live paned. */
+            for (guint d = 0;
+                 dock.dropped_splits != NULL && d < dock.dropped_splits->len;
+                 d++) {
+                if (g_array_index (dock.dropped_splits, guint, d) == saved) {
+                    dropped = TRUE;
+                    break;
+                }
+            }
+            if (dropped) {
+                continue;
+            }
+            pos = (int)g_ascii_strtoll (parts[saved], NULL, 10);
             if (pos > 0 && dock.paned_order[i] != NULL) {
                 g_signal_connect (dock.paned_order[i], "notify::max-position",
                                   G_CALLBACK (on_paned_apply_saved_position),
                                   GINT_TO_POINTER (pos));
             }
+            i++;
         }
         g_strfreev (parts);
         g_free (sizes_str);
@@ -968,6 +1027,38 @@ void
 dock_layout_set_pane_titles_visible (gboolean visible)
 {
     dock.pane_titles = visible;
+    dock_layout_request_save ();
+}
+
+gboolean
+dock_layout_get_window_size (const char *name, int *w, int *h)
+{
+    const char *v;
+    int sw = 0, sh = 0;
+
+    if (name == NULL || dock.window_sizes == NULL) {
+        return FALSE;
+    }
+    v = g_hash_table_lookup (dock.window_sizes, name);
+    if (v == NULL || sscanf (v, "%d,%d", &sw, &sh) != 2 || sw <= 0 || sh <= 0) {
+        return FALSE;
+    }
+    *w = sw;
+    *h = sh;
+    return TRUE;
+}
+
+void
+dock_layout_set_window_size (const char *name, int w, int h)
+{
+    g_return_if_fail (name != NULL);
+
+    if (dock.window_sizes == NULL) {
+        dock.window_sizes
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+    }
+    g_hash_table_insert (dock.window_sizes, g_strdup (name),
+                         g_strdup_printf ("%d,%d", w, h));
     dock_layout_request_save ();
 }
 
