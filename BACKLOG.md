@@ -121,6 +121,12 @@ record.
   Warn for the video plugins.
 - hxd-ng's `xfer_port` (5521) isn't set in the rig config. Nothing uses it yet.
 
+## Legacy servers
+
+- hlserver.com eventually closes the connection, possibly on an idle timeout.
+  If that is what it is, say so rather than reporting a plain disconnect.
+- hlserver.com broadcasts "0 command(s) at a time" on login.
+
 ## hx-libs (`hxproto`)
 
 - `SdpSummary::has_vp8` is true if any line in the whole SDP matches, and the
