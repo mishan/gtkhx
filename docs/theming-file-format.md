@@ -1,7 +1,8 @@
 # Theme file format
 
 GtkHx theming state — per-area UI scales, the chat palette, the
-user-list name colours, and bundled chrome icons — lives in **theme
+user-list name colours, the window chrome colors, and bundled chrome
+icons — lives in **theme
 files**: a GKeyFile-format `.ini` per theme, loaded by `GtkhxTheme`
 at startup. The active theme is named by the `THEMENAME` key in
 `gtkhxrc`; that is the only theming knob in the user's prefs.
@@ -107,14 +108,16 @@ filesystem watch on the theme file or its icons.
 
 ## Built-in themes
 
-GtkHx ships two themes baked into the binary. Both supply distinct
-light + dark variants and let `AdwStyleManager`'s `dark` property
-(driven by Settings → Appearance → Theme) pick which one renders.
+GtkHx ships these themes baked into the binary. Each supplies light
+and dark variants and lets `AdwStyleManager`'s `dark` property (driven
+by Settings → Appearance → Theme) pick which one renders; a dark-only
+theme simply gives both variants the same values.
 
 | `THEMENAME` | Display | Description |
 |---|---|---|
-| `default` | Default | GtkHx's classic appearance. Adwaita-aligned `#fafafa`/`#1d1d1d` light + `#000`/`#cccccc` dark, with the Adwaita accent blue for selection. |
-| `solarized` | Solarized | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette. `palette.light` holds the canonical Solarized Light values (cream `#fdf6e3` bg, `#657b83` body text); `palette.dark` holds Solarized Dark (`#002b36` bg, `#839496` body text). Picking "Solarized" gives you Solarized Light on a light desktop and Solarized Dark on a dark one — the way the palette was designed. |
+| `default` | Default | GtkHx's classic appearance. Sets no chat fg/bg, so the chat takes Adwaita's view colors in both modes and the window stays stock; the Adwaita accent blue for selection and the `[hx]` tag. Neutral gray brackets, red mentions, and nicks hashed across green, orange, purple, teal, brown and olive — all above 5:1 in light mode and 7:1 in dark. |
+| `neon-doll` | Neon Doll | The palette of the Neon Doll desktop theme, so GtkHx matches the desktop around it. Dark: near-black plum page (`#0f0d14`), panels (`#16131d`), lavender ink (`#ebe6f0`). Light: plum-tinted paper (`#f7f4fa`), panels (`#ede7f3`), ink (`#1a1522`). Fuchsia (`#ff2d95` / `#c8006a`) means position — selection, the current pane, the focus ring, a line that mentions you — and purple (`#b48cff` / `#6a3fd0`) means you can act on it: nicks, the `[hx]` sigil, and suggested-action buttons, drawn as purple outlines over a purple wash that turn pink on hover. Brackets are muted and the chat divider is a hairline. No per-nick colors: two accents on purpose. |
+| `solarized` | Solarized | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette. `palette.light` holds the canonical Solarized Light values (cream `#fdf6e3` bg, `#657b83` body text); `palette.dark` holds Solarized Dark (`#002b36` bg, `#839496` body text). Picking "Solarized" gives you Solarized Light on a light desktop and Solarized Dark on a dark one — the way the palette was designed. Brackets take the emphasized-content tone, your own nick the strongest one, `[hx]` is blue (the accent), and everyone else's nick is hashed across the other accents — minus red (mentions) and blue — using only the ones legible on each background. Its `[chrome.*]` sections tint the whole window: the page color (`base3` / `base03`) for the window and content, the highlight band (`base2` / `base02`) for the header bar, cards and popovers, and Solarized blue as the accent. |
 
 The built-ins live at `src/themes/<name>.ini` in the source tree.
 Copy one to `$CONFIG/themes/my-theme.ini` and edit as a starting
@@ -148,7 +151,7 @@ userlist_text  = 125    # user-list name text
 tasks_row_icon = 200    # per-task glyph in the tasks list
 
 # --- Chat palette: light variant --------------------------------------
-# Six UI-role color slots for the chat view. The chat palette also
+# UI-role color slots for the chat view. The chat palette also
 # has 32 legacy in-band slots (0..31) that a theme cannot reach;
 # they're a private vocabulary GtkHx wrote for itself, being retired,
 # and not something a theme should be asked to define.
@@ -164,6 +167,26 @@ tasks_row_icon = 200    # per-task glyph in the tasks list
 #   mark_bg        selection background          (GTKHX_PAL_MARK_BG)
 #   marker         marker line                   (GTKHX_PAL_MARKER)
 #   history_muted  rendered chat-history text    (GTKHX_PAL_HISTORY_MUTED)
+#   timestamp      timestamp column              (GTKHX_PAL_TIMESTAMP)
+#   nick           other people's nicks          (GTKHX_PAL_NICK)
+#   self_nick      your own nick                 (GTKHX_PAL_SELF_NICK)
+#   nick_bracket   < > around others' nicks      (GTKHX_PAL_NICK_BRACKET)
+#   self_bracket   < > around your own nick      (GTKHX_PAL_SELF_BRACKET)
+#   system         the tag of a [hx] line        (GTKHX_PAL_SYSTEM)
+#   system_bracket the [ ] around it             (GTKHX_PAL_SYSTEM_BRACKET)
+#   highlight      the nick on a line that       (GTKHX_PAL_HIGHLIGHT)
+#                  mentions you
+#   rule           the chat's column divider     (GTKHX_PAL_RULE)
+#   nick_colors    up to 8 colors, separated by commas, semicolons or
+#                  spaces. Each other person's nick takes one, picked
+#                  by a stable hash of the name, so a person keeps their
+#                  color across sessions. Without it, nicks use `nick`.
+#
+# Leaving fg / bg out means "follow the system": the chat and the text
+# surfaces take libadwaita's view colors, so the chat matches the
+# window around it. timestamp falls back to history_muted, and nick /
+# self_nick / rule to fg. The bracket, system and highlight roles have
+# built-in defaults readable on Adwaita's light and dark views.
 [palette.light]
 fg            = #1d1d1d
 bg            = #fafafa
@@ -171,9 +194,10 @@ mark_fg       = #ffffff
 mark_bg       = #3584e4
 marker        = #cc0000
 history_muted = #5e5e5e
+nick_colors   = #1c71d8, #c64600, #26a269, #813d9c, #986a44
 
 # --- Chat palette: dark variant ---------------------------------------
-# Same six slots. The active variant follows AdwStyleManager's
+# Same slots. The active variant follows AdwStyleManager's
 # `dark` property (which respects the Settings → Appearance → Theme
 # combo and, on "Follow system", the desktop's color scheme).
 [palette.dark]
@@ -214,7 +238,78 @@ active     = #93a1a1
 idle       = #586e75
 admin      = #dc322f
 admin_idle = #871f1d
+
+# --- Window chrome ----------------------------------------------------
+# Colors for the window around the content: header bar, pane headers,
+# lists, popovers, dialogs and the accent. They override libadwaita's
+# named colors (window_bg_color and family), so every stock widget
+# follows without per-widget rules.
+#
+#   window       — window background, dock gutters
+#   view         — lists and text views
+#   headerbar    — header bar and pane headers
+#   sidebar      — sidebars
+#   card         — cards, boxed lists
+#   popover      — popovers, menus, dialogs
+#   fg           — text on all of the above
+#   headerbar_fg — header-bar text
+#   accent       — selection, checked toggles, focus rings, and
+#                  suggested actions unless `action` is set
+#   accent_fg    — text on the accent. Unset, black or white is picked
+#                  for contrast.
+#   accent_text  — the accent used as text (links, accent-colored
+#                  labels). Unset, libadwaita derives it from the accent,
+#                  shifting its lightness for contrast; set it when the
+#                  theme already has a readable shade.
+#   action       — suggested-action buttons (Connect, Save, Post) as an
+#                  outline in this color over a faint wash of it,
+#                  instead of a filled accent button; hover and keyboard
+#                  focus turn them the accent color. For a design where
+#                  an action is a link.
+#
+# Every key is optional, and what is left out is derived (see below).
+[chrome.light]
+window       = #fdf6e3
+headerbar    = #eee8d5
+fg           = #657b83
+accent       = #268bd2
+
+[chrome.dark]
+window       = #002b36
+headerbar    = #073642
+fg           = #839496
+accent       = #268bd2
 ```
+
+### How chrome colors are derived
+
+A theme doesn't have to set every chrome role. Each missing role
+falls back in this order:
+
+| Role | Falls back to |
+|---|---|
+| `window` | the chat palette's `bg`, if the palette also sets `fg` |
+| `fg` | the chat palette's `fg`, if the palette also sets `bg` |
+| `view` | `window` |
+| `headerbar_fg` | `fg` |
+| `sidebar` | `headerbar` |
+| `card`, `headerbar`, `popover` | `window`, stepped a few percent toward `fg` (card least, popover most) |
+| `accent` | the system accent — no derivation |
+| `accent_fg` | black or white, whichever reads on the accent |
+| `accent_text` | libadwaita's own derivation from the accent |
+| `action` | none — suggested actions stay filled with the accent |
+
+So a theme that only sets the chat palette's `fg` and `bg` still gets a
+window in the same colors as its chat. The two go together: a palette
+with only a `bg` doesn't tint the window, since the window's text would
+stay the system's color and could land dark on dark. A theme that sets neither those
+nor any `[chrome.*]` key leaves the chrome at the system theme; that
+is why the built-in default looks like stock GNOME.
+
+The user can turn chrome tinting off: Settings → General → "Tint window
+to match theme" (`appearance.tint_window` in `gtkhx.toml`, on by
+default). Off, the `[chrome.*]` sections are ignored and the window keeps
+the system colors around the themed content.
 
 The full built-in default is at `src/themes/default.ini` in the
 source tree — copy it as a starting point.

@@ -140,6 +140,12 @@ extern void chat_log_line_handler (GtkhxSession *emitter,
                                    gpointer name, gint color, gpointer body,
                                    gpointer user_data);
 extern void generate_colors (GtkWidget *widget);
+
+/* Palette slot a nick renders in: the self-nick role for our own, one
+ * of the theme's per-nick colors (picked by a stable hash of the name)
+ * when it has any, the plain nick role otherwise. */
+extern gint16 hx_chat_nick_color (const char *nick, gsize nick_len,
+                                  gboolean is_self);
 extern void create_chat (session *sess);
 /* create_chat_window is the gtkhx-ui `chat` Rust shell (dock registration via
  * dock_bridge, CENTER area); these are its C content-build + post-embed hooks,

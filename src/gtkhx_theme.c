@@ -50,6 +50,14 @@ struct _GtkhxTheme {
      * palette_rgb. -1 = "not set" → caller (users.c::user_color_gdk)
      * keeps its historical default. */
     int user_color_rgb[GTKHX_USER_COLOR_N][2];
+
+    /* Loaded [chrome.*] overrides, same packed-int shape. -1 = "not
+     * set" → derived at read time (see gtkhx_theme_get_chrome_color). */
+    int chrome_rgb[GTKHX_CHROME_N_ROLES][2];
+
+    /* The [palette.*] nick_colors lists, packed the same way. */
+    int nick_rgb[GTKHX_NICK_COLORS_MAX][2];
+    int n_nick[2];
 };
 
 G_DEFINE_FINAL_TYPE (GtkhxTheme, gtkhx_theme, G_TYPE_OBJECT)
@@ -72,31 +80,62 @@ static const int default_theme_pct[GTKHX_SCALE_N_AREAS] = {
     100, /* GTKHX_SCALE_TASKS_ROW_ICON */
 };
 
-/* Built-in default palette. Matches the historical chat.c
- * gtkhx_apply_theme_palette constants byte-for-byte. mIRC slots 0..31
- * stay in chat.c::colors[] because they're protocol-shaped, not
- * theme-shaped (servers send specific indices; users don't get to
- * remap "red"). */
+/* Built-in default palette. mIRC slots 0..31 stay in chat.c::colors[]
+ * because they're protocol-shaped, not theme-shaped (servers send
+ * specific indices; users don't get to remap "red").
+ *
+ * FG and BG are transparent: "follow the system" (see gtkhx_theme.h).
+ * TIMESTAMP, NICK, SELF_NICK and RULE are placeholders — an unset one takes
+ * the role it derives from (see derived_role) rather than these.
+ *
+ * The gutter: brackets are punctuation, so they share the neutral gray
+ * of secondary text — quiet, but at better than 6:1 against Adwaita's
+ * light and dark views, because a bracket you can't see stops the name
+ * reading as a nick. The [hx] tag is Adwaita's accent blue: it is the
+ * client speaking. Mentions are red. The old full-intensity mIRC values
+ * (#0000ff brackets on black) were close to invisible. */
 #define RGB8(r, g, b) { (r) / 255.0, (g) / 255.0, (b) / 255.0, 1.0 }
+#define SYSTEM_COLOR { 0.0, 0.0, 0.0, 0.0 }
 
 static const GdkRGBA default_palette_light[GTKHX_PAL_N_ROLES] = {
-    [GTKHX_PAL_FG] = RGB8 (0x1d, 0x1d, 0x1d),      /* near-black on white */
-    [GTKHX_PAL_BG] = RGB8 (0xfa, 0xfa, 0xfa),      /* Adwaita view bg */
+    [GTKHX_PAL_FG] = SYSTEM_COLOR,
+    [GTKHX_PAL_BG] = SYSTEM_COLOR,
     [GTKHX_PAL_MARK_FG] = RGB8 (0xff, 0xff, 0xff), /* selection contrast */
     [GTKHX_PAL_MARK_BG] = RGB8 (0x35, 0x84, 0xe4), /* Adwaita accent */
     [GTKHX_PAL_MARKER] = RGB8 (0xcc, 0x00, 0x00),  /* red marker line */
-    [GTKHX_PAL_HISTORY_MUTED] = RGB8 (0x5e, 0x5e, 0x5e), /* ~5.7:1 vs #fafafa */
+    [GTKHX_PAL_HISTORY_MUTED]
+    = RGB8 (0x5e, 0x5e, 0x5e), /* ~6:1 on a light view */
+    [GTKHX_PAL_TIMESTAMP] = SYSTEM_COLOR,
+    [GTKHX_PAL_NICK] = SYSTEM_COLOR,
+    [GTKHX_PAL_SELF_NICK] = SYSTEM_COLOR,
+    [GTKHX_PAL_NICK_BRACKET] = RGB8 (0x5e, 0x5e, 0x5e), /* 6.5:1 */
+    [GTKHX_PAL_SELF_BRACKET] = RGB8 (0x5e, 0x5e, 0x5e),
+    [GTKHX_PAL_SYSTEM] = RGB8 (0x1c, 0x71, 0xd8), /* blue 4 */
+    [GTKHX_PAL_SYSTEM_BRACKET] = RGB8 (0x5e, 0x5e, 0x5e),
+    [GTKHX_PAL_HIGHLIGHT] = RGB8 (0xc0, 0x1c, 0x28), /* red 4 */
+    [GTKHX_PAL_RULE] = SYSTEM_COLOR,
 };
 
 static const GdkRGBA default_palette_dark[GTKHX_PAL_N_ROLES] = {
-    [GTKHX_PAL_FG] = RGB8 (0xcc, 0xcc, 0xcc), /* light grey on black */
-    [GTKHX_PAL_BG] = RGB8 (0x00, 0x00, 0x00),
+    [GTKHX_PAL_FG] = SYSTEM_COLOR,
+    [GTKHX_PAL_BG] = SYSTEM_COLOR,
     [GTKHX_PAL_MARK_FG] = RGB8 (0xee, 0xee, 0xee),
     [GTKHX_PAL_MARK_BG] = RGB8 (0x20, 0x4a, 0x87), /* Tango blue, original */
     [GTKHX_PAL_MARKER] = RGB8 (0xcc, 0x00, 0x00),
-    [GTKHX_PAL_HISTORY_MUTED] = RGB8 (0x9a, 0x9a, 0x9a), /* ~7:1 vs #000 */
+    [GTKHX_PAL_HISTORY_MUTED]
+    = RGB8 (0x9a, 0x9a, 0x9a), /* ~6:1 on a dark view */
+    [GTKHX_PAL_TIMESTAMP] = SYSTEM_COLOR,
+    [GTKHX_PAL_NICK] = SYSTEM_COLOR,
+    [GTKHX_PAL_SELF_NICK] = SYSTEM_COLOR,
+    [GTKHX_PAL_NICK_BRACKET] = RGB8 (0x9a, 0x9a, 0x9a), /* 6:1 */
+    [GTKHX_PAL_SELF_BRACKET] = RGB8 (0x9a, 0x9a, 0x9a),
+    [GTKHX_PAL_SYSTEM] = RGB8 (0x78, 0xae, 0xed), /* blue 2 */
+    [GTKHX_PAL_SYSTEM_BRACKET] = RGB8 (0x9a, 0x9a, 0x9a),
+    [GTKHX_PAL_HIGHLIGHT] = RGB8 (0xf6, 0x61, 0x51), /* red 1 */
+    [GTKHX_PAL_RULE] = SYSTEM_COLOR,
 };
 
+#undef SYSTEM_COLOR
 #undef RGB8
 
 static void
@@ -130,6 +169,12 @@ gtkhx_theme_init (GtkhxTheme *self)
         self->user_color_rgb[r][0] = -1;
         self->user_color_rgb[r][1] = -1;
     }
+    for (r = 0; r < GTKHX_CHROME_N_ROLES; r++) {
+        self->chrome_rgb[r][0] = -1;
+        self->chrome_rgb[r][1] = -1;
+    }
+    self->n_nick[0] = 0;
+    self->n_nick[1] = 0;
 }
 
 GtkhxTheme *
@@ -200,6 +245,25 @@ gtkhx_theme_get_default_color (GtkhxPaletteRole role, gboolean dark)
     return dark ? default_palette_dark[role] : default_palette_light[role];
 }
 
+/* The role an unset role takes its color from, or the role itself when
+ * it has a built-in default of its own. Timestamps read as secondary
+ * text; nicks read as body text unless the theme colors them; the
+ * divider has always been drawn in the text color. */
+static GtkhxPaletteRole
+derived_role (GtkhxPaletteRole role)
+{
+    switch (role) {
+    case GTKHX_PAL_TIMESTAMP:
+        return GTKHX_PAL_HISTORY_MUTED;
+    case GTKHX_PAL_NICK:
+    case GTKHX_PAL_SELF_NICK:
+    case GTKHX_PAL_RULE:
+        return GTKHX_PAL_FG;
+    default:
+        return role;
+    }
+}
+
 GdkRGBA
 gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark)
 {
@@ -213,6 +277,10 @@ gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark)
     }
     packed = self->palette_rgb[role][dark ? 1 : 0];
     if (packed < 0) {
+        GtkhxPaletteRole parent = derived_role (role);
+        if (parent != role) {
+            return gtkhx_theme_get_color (parent, dark);
+        }
         return gtkhx_theme_get_default_color (role, dark);
     }
     rgba.red = ((packed >> 16) & 0xff) / 255.0;
@@ -232,6 +300,22 @@ gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark)
     return self->palette_rgb[role][dark ? 1 : 0] >= 0;
 }
 
+int
+gtkhx_theme_get_nick_colors (gboolean dark, GdkRGBA out[GTKHX_NICK_COLORS_MAX])
+{
+    GtkhxTheme *self = gtkhx_theme_get_default ();
+    int v = dark ? 1 : 0;
+    int i;
+
+    for (i = 0; i < self->n_nick[v]; i++) {
+        int packed = self->nick_rgb[i][v];
+        out[i] = (GdkRGBA){ ((packed >> 16) & 0xff) / 255.0,
+                            ((packed >> 8) & 0xff) / 255.0,
+                            (packed & 0xff) / 255.0, 1.0 };
+    }
+    return self->n_nick[v];
+}
+
 gboolean
 gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
 {
@@ -249,6 +333,271 @@ gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
     out->blue = ((packed) & 0xff) / 255.0;
     out->alpha = 1.0;
     return TRUE;
+}
+
+static GdkRGBA
+unpack_rgb (int packed)
+{
+    return (GdkRGBA){ ((packed >> 16) & 0xff) / 255.0,
+                      ((packed >> 8) & 0xff) / 255.0, (packed & 0xff) / 255.0,
+                      1.0 };
+}
+
+static GdkRGBA
+mix_rgb (const GdkRGBA *a, const GdkRGBA *b, double t)
+{
+    return (GdkRGBA){ a->red + (b->red - a->red) * t,
+                      a->green + (b->green - a->green) * t,
+                      a->blue + (b->blue - a->blue) * t, 1.0 };
+}
+
+/* How far each derived surface sits from the window background, as a
+ * fraction of the way toward the foreground. Small steps: the surfaces
+ * should read as layers of one color, not as different colors. */
+#define CHROME_STEP_CARD 0.05
+#define CHROME_STEP_HEADERBAR 0.07
+#define CHROME_STEP_POPOVER 0.09
+
+/* The chat palette stands in for the window colors only as a pair. A
+ * theme that sets only a chat background would otherwise paint the
+ * window with it while its text stayed the system's — dark text on a
+ * dark window, or the reverse. */
+static gboolean
+palette_pair_set (GtkhxTheme *self, int v)
+{
+    return self->palette_rgb[GTKHX_PAL_BG][v] >= 0
+           && self->palette_rgb[GTKHX_PAL_FG][v] >= 0;
+}
+
+gboolean
+gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
+{
+    GtkhxTheme *self = gtkhx_theme_get_default ();
+    int v = dark ? 1 : 0;
+    GdkRGBA window;
+    GdkRGBA fg;
+    double step;
+
+    if (role < 0 || role >= GTKHX_CHROME_N_ROLES || !out) {
+        return FALSE;
+    }
+    if (self->chrome_rgb[role][v] >= 0) {
+        *out = unpack_rgb (self->chrome_rgb[role][v]);
+        return TRUE;
+    }
+
+    switch (role) {
+    case GTKHX_CHROME_WINDOW:
+        if (!palette_pair_set (self, v)) {
+            return FALSE;
+        }
+        *out = unpack_rgb (self->palette_rgb[GTKHX_PAL_BG][v]);
+        return TRUE;
+    case GTKHX_CHROME_FG:
+        if (!palette_pair_set (self, v)) {
+            return FALSE;
+        }
+        *out = unpack_rgb (self->palette_rgb[GTKHX_PAL_FG][v]);
+        return TRUE;
+    case GTKHX_CHROME_VIEW:
+        return gtkhx_theme_get_chrome_color (GTKHX_CHROME_WINDOW, dark, out);
+    case GTKHX_CHROME_SIDEBAR:
+        return gtkhx_theme_get_chrome_color (GTKHX_CHROME_HEADERBAR, dark, out);
+    case GTKHX_CHROME_HEADERBAR_FG:
+        return gtkhx_theme_get_chrome_color (GTKHX_CHROME_FG, dark, out);
+    case GTKHX_CHROME_ACCENT:
+    case GTKHX_CHROME_ACCENT_FG:
+    case GTKHX_CHROME_ACCENT_TEXT:
+    case GTKHX_CHROME_ACTION:
+        /* No derivation: these are choices, not shades. (An unset
+         * accent_fg is picked for contrast where the CSS is built, and
+         * an unset accent_text is left to libadwaita, which derives it
+         * from the accent.) */
+        return FALSE;
+    case GTKHX_CHROME_CARD:
+        step = CHROME_STEP_CARD;
+        break;
+    case GTKHX_CHROME_HEADERBAR:
+        step = CHROME_STEP_HEADERBAR;
+        break;
+    case GTKHX_CHROME_POPOVER:
+        step = CHROME_STEP_POPOVER;
+        break;
+    case GTKHX_CHROME_N_ROLES:
+    default:
+        return FALSE;
+    }
+
+    /* The layered surfaces need a window color to step from. The
+     * direction comes from fg when the theme has one, else from the
+     * variant: lighter on dark, darker on light. */
+    if (!gtkhx_theme_get_chrome_color (GTKHX_CHROME_WINDOW, dark, &window)) {
+        return FALSE;
+    }
+    if (!gtkhx_theme_get_chrome_color (GTKHX_CHROME_FG, dark, &fg)) {
+        fg = dark ? (GdkRGBA){ 1, 1, 1, 1 } : (GdkRGBA){ 0, 0, 0, 1 };
+    }
+    *out = mix_rgb (&window, &fg, step);
+    return TRUE;
+}
+
+/* Set one libadwaita named color both ways it can be read: as the
+ * `--name-with-dashes` CSS variable stock widgets use, and as the
+ * `@name_with_underscores` color that libadwaita's variables are
+ * seeded from and that GtkHx's own chrome.css still references. */
+static void
+append_css_color (GString *vars, GString *defines, const char *name,
+                  const GdkRGBA *c)
+{
+    g_autofree char *hex = g_strdup_printf (
+        "#%02x%02x%02x", (int)(c->red * 255.0 + 0.5),
+        (int)(c->green * 255.0 + 0.5), (int)(c->blue * 255.0 + 0.5));
+    g_autofree char *var = g_strdelimit (g_strdup (name), "_", '-');
+
+    g_string_append_printf (vars, "  --%s: %s;\n", var, hex);
+    g_string_append_printf (defines, "@define-color %s %s;\n", name, hex);
+}
+
+/* Perceived brightness (Rec. 601 weights on the gamma-encoded
+ * channels) — good enough to pick black or white text on the accent. */
+static double
+rgb_brightness (const GdkRGBA *c)
+{
+    return 0.299 * c->red + 0.587 * c->green + 0.114 * c->blue;
+}
+
+/* Suggested-action buttons (Connect, Save, Post, …) restyled as an
+ * outline in the theme's action color over a faint wash of it, for a
+ * theme whose design says an action is a link, not a filled pill.
+ * Hover, keyboard focus and press are one state — they turn the accent
+ * color over a faint accent wash — so the button behaves like every
+ * other link. Empty when the
+ * theme sets no action color: Adwaita's filled button stays. Caller
+ * frees. */
+static char *
+action_css (gboolean dark)
+{
+    GdkRGBA action;
+    GdkRGBA accent;
+    g_autofree char *action_hex = NULL;
+    g_autofree char *accent_hex = NULL;
+
+    if (!gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACTION, dark, &action)) {
+        return g_strdup ("");
+    }
+    action_hex = g_strdup_printf (
+        "#%02x%02x%02x", (int)(action.red * 255.0 + 0.5),
+        (int)(action.green * 255.0 + 0.5), (int)(action.blue * 255.0 + 0.5));
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT, dark, &accent)) {
+        accent_hex
+            = g_strdup_printf ("#%02x%02x%02x", (int)(accent.red * 255.0 + 0.5),
+                               (int)(accent.green * 255.0 + 0.5),
+                               (int)(accent.blue * 255.0 + 0.5));
+    } else {
+        accent_hex = g_strdup ("@accent_bg_color");
+    }
+
+    return g_strdup_printf (
+        "button.suggested-action, button.suggested-action:checked,\n"
+        "splitbutton.suggested-action, menubutton.suggested-action {\n"
+        "  background-color: alpha(%s, 0.06);\n"
+        "  background-image: none;\n"
+        "  color: %s;\n"
+        "  box-shadow: inset 0 0 0 1px alpha(%s, 0.35);\n"
+        "}\n"
+        "button.suggested-action:hover, "
+        "button.suggested-action:focus-visible,\n"
+        "button.suggested-action:active,\n"
+        "splitbutton.suggested-action:hover,\n"
+        "splitbutton.suggested-action:focus-within,\n"
+        "menubutton.suggested-action:hover,\n"
+        "menubutton.suggested-action:focus-within {\n"
+        "  background-color: alpha(%s, 0.08);\n"
+        "  background-image: none;\n"
+        "  color: %s;\n"
+        "  box-shadow: inset 0 0 0 1px %s;\n"
+        "}\n"
+        /* The halves of a split / menu button tint themselves on hover
+         * too; left alone, that stacks on the wash above. */
+        "splitbutton.suggested-action > button,\n"
+        "splitbutton.suggested-action > menubutton > button,\n"
+        "menubutton.suggested-action > button {\n"
+        "  background-color: transparent;\n"
+        "  background-image: none;\n"
+        "}\n",
+        action_hex, action_hex, action_hex, accent_hex, accent_hex, accent_hex);
+}
+
+char *
+gtkhx_theme_build_chrome_css (gboolean dark)
+{
+    g_autoptr (GString) vars = g_string_new (NULL);
+    g_autoptr (GString) defines = g_string_new (NULL);
+    GdkRGBA c;
+
+#define SET(name) append_css_color (vars, defines, name, &c)
+    /* Each libadwaita color a role feeds. Backdrop colors (the
+     * unfocused-window variants) follow the matching surface so an
+     * unfocused window doesn't fall back to stock gray. */
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_WINDOW, dark, &c)) {
+        SET ("window_bg_color");
+        SET ("headerbar_backdrop_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_VIEW, dark, &c)) {
+        SET ("view_bg_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_HEADERBAR, dark, &c)) {
+        SET ("headerbar_bg_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_SIDEBAR, dark, &c)) {
+        SET ("sidebar_bg_color");
+        SET ("sidebar_backdrop_color");
+        SET ("secondary_sidebar_bg_color");
+        SET ("secondary_sidebar_backdrop_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_CARD, dark, &c)) {
+        SET ("card_bg_color");
+        SET ("thumbnail_bg_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_POPOVER, dark, &c)) {
+        SET ("popover_bg_color");
+        SET ("dialog_bg_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_FG, dark, &c)) {
+        SET ("window_fg_color");
+        SET ("view_fg_color");
+        SET ("sidebar_fg_color");
+        SET ("secondary_sidebar_fg_color");
+        SET ("card_fg_color");
+        SET ("popover_fg_color");
+        SET ("dialog_fg_color");
+        SET ("thumbnail_fg_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_HEADERBAR_FG, dark, &c)) {
+        SET ("headerbar_fg_color");
+    }
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT, dark, &c)) {
+        SET ("accent_bg_color");
+        if (!gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT_FG, dark, &c)) {
+            c = rgb_brightness (&c) > 0.6 ? (GdkRGBA){ 0, 0, 0, 1 }
+                                          : (GdkRGBA){ 1, 1, 1, 1 };
+        }
+        SET ("accent_fg_color");
+    }
+    /* libadwaita derives the accent-as-text color from the accent,
+     * shifting its lightness for contrast. A theme that has already
+     * picked a readable text shade sets it outright. */
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT_TEXT, dark, &c)) {
+        SET ("accent_color");
+    }
+#undef SET
+
+    g_autofree char *action = action_css (dark);
+    if (vars->len == 0) {
+        return g_steal_pointer (&action);
+    }
+    return g_strdup_printf ("%s:root {\n%s}\n%s", defines->str, vars->str,
+                            action);
 }
 
 const char *
@@ -353,13 +702,41 @@ static const char *const palette_key_name[GTKHX_PAL_N_ROLES] = {
     [GTKHX_PAL_MARK_BG] = "mark_bg",
     [GTKHX_PAL_MARKER] = "marker",
     [GTKHX_PAL_HISTORY_MUTED] = "history_muted",
+    [GTKHX_PAL_TIMESTAMP] = "timestamp",
+    [GTKHX_PAL_NICK] = "nick",
+    [GTKHX_PAL_SELF_NICK] = "self_nick",
+    [GTKHX_PAL_NICK_BRACKET] = "nick_bracket",
+    [GTKHX_PAL_SELF_BRACKET] = "self_bracket",
+    [GTKHX_PAL_SYSTEM] = "system",
+    [GTKHX_PAL_SYSTEM_BRACKET] = "system_bracket",
+    [GTKHX_PAL_HIGHLIGHT] = "highlight",
+    [GTKHX_PAL_RULE] = "rule",
 };
+
+#define NICK_COLORS_KEY "nick_colors"
 
 #define SCALE_GROUP "scale"
 #define PALETTE_LIGHT_GROUP "palette.light"
 #define PALETTE_DARK_GROUP "palette.dark"
 #define USERS_LIGHT_GROUP "users.light"
 #define USERS_DARK_GROUP "users.dark"
+#define CHROME_LIGHT_GROUP "chrome.light"
+#define CHROME_DARK_GROUP "chrome.dark"
+
+static const char *const chrome_key_name[GTKHX_CHROME_N_ROLES] = {
+    [GTKHX_CHROME_WINDOW] = "window",
+    [GTKHX_CHROME_VIEW] = "view",
+    [GTKHX_CHROME_HEADERBAR] = "headerbar",
+    [GTKHX_CHROME_SIDEBAR] = "sidebar",
+    [GTKHX_CHROME_CARD] = "card",
+    [GTKHX_CHROME_POPOVER] = "popover",
+    [GTKHX_CHROME_FG] = "fg",
+    [GTKHX_CHROME_HEADERBAR_FG] = "headerbar_fg",
+    [GTKHX_CHROME_ACCENT] = "accent",
+    [GTKHX_CHROME_ACCENT_FG] = "accent_fg",
+    [GTKHX_CHROME_ACCENT_TEXT] = "accent_text",
+    [GTKHX_CHROME_ACTION] = "action",
+};
 
 static const char *const user_color_key_name[GTKHX_USER_COLOR_N] = {
     [GTKHX_USER_COLOR_ACTIVE] = "active",
@@ -396,6 +773,38 @@ load_palette_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
         }
         g_free (raw);
     }
+
+    /* nick_colors: a list of colors, separated by commas, semicolons or
+     * spaces. A bad entry is skipped with a warning; the rest stand. */
+    if (g_key_file_has_key (kf, group, NICK_COLORS_KEY, NULL)) {
+        g_autofree char *raw
+            = g_key_file_get_value (kf, group, NICK_COLORS_KEY, NULL);
+        g_auto (GStrv) items = g_strsplit_set (raw ? raw : "", ",; \t", -1);
+        int n = 0;
+
+        for (int i = 0; items[i]; i++) {
+            int packed;
+
+            if (items[i][0] == '\0') {
+                continue;
+            }
+            packed = parse_hex_color (items[i]);
+            if (packed < 0) {
+                g_warning ("gtkhx_theme: bad color in [%s] %s: %s", group,
+                           NICK_COLORS_KEY, items[i]);
+                continue;
+            }
+            if (n == GTKHX_NICK_COLORS_MAX) {
+                g_warning ("gtkhx_theme: [%s] %s has more than %d colors; "
+                           "using the first %d",
+                           group, NICK_COLORS_KEY, GTKHX_NICK_COLORS_MAX,
+                           GTKHX_NICK_COLORS_MAX);
+                break;
+            }
+            self->nick_rgb[n++][variant_idx] = packed;
+        }
+        self->n_nick[variant_idx] = n;
+    }
 }
 
 /* Same shape as load_palette_group, but writes into user_color_rgb
@@ -431,6 +840,33 @@ load_user_color_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
     }
 }
 
+static void
+load_chrome_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
+                   int variant_idx)
+{
+    int r;
+
+    if (!g_key_file_has_group (kf, group)) {
+        return;
+    }
+    for (r = 0; r < GTKHX_CHROME_N_ROLES; r++) {
+        g_autofree char *raw = NULL;
+        int packed;
+
+        if (!g_key_file_has_key (kf, group, chrome_key_name[r], NULL)) {
+            continue;
+        }
+        raw = g_key_file_get_string (kf, group, chrome_key_name[r], NULL);
+        packed = parse_hex_color (raw);
+        if (packed >= 0) {
+            self->chrome_rgb[r][variant_idx] = packed;
+        } else {
+            g_warning ("gtkhx_theme: bad color in [%s] %s = %s", group,
+                       chrome_key_name[r], raw ? raw : "");
+        }
+    }
+}
+
 void
 gtkhx_theme_load_from_keyfile (GKeyFile *kf)
 {
@@ -455,6 +891,12 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
         self->user_color_rgb[r][0] = -1;
         self->user_color_rgb[r][1] = -1;
     }
+    for (r = 0; r < GTKHX_CHROME_N_ROLES; r++) {
+        self->chrome_rgb[r][0] = -1;
+        self->chrome_rgb[r][1] = -1;
+    }
+    self->n_nick[0] = 0;
+    self->n_nick[1] = 0;
 
     /* NULL keyfile: nothing else to parse — fall through to the
      * "changed" emit so subscribers reset in lockstep. */
@@ -499,6 +941,10 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
      * (active / idle / admin / admin_idle). */
     load_user_color_group (self, kf, USERS_LIGHT_GROUP, 0);
     load_user_color_group (self, kf, USERS_DARK_GROUP, 1);
+
+    /* [chrome.light] / [chrome.dark] — window chrome. */
+    load_chrome_group (self, kf, CHROME_LIGHT_GROUP, 0);
+    load_chrome_group (self, kf, CHROME_DARK_GROUP, 1);
 
     g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
 }

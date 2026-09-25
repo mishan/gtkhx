@@ -97,6 +97,7 @@ pub const MAP: &[(&str, Target)] = &[
     ("TIME", Drop(UPTIME)),
     ("TIMESTAMP", Path("chat.timestamp")),
     ("TIMESTAMPFORMAT", Path("chat.timestamp_format")),
+    ("TINTWINDOW", Path("appearance.tint_window")),
     ("TOOLXSIZE", Path("window.toolbar_width")),
     ("TOOLYSIZE", Path("window.toolbar_height")),
     ("TRACKER", Path("trackers.addresses")),
@@ -140,6 +141,9 @@ pub const NEW_PATHS: &[&str] = &[
     // Video chat arrived after gtkhxrc: no old profile can set it, and the
     // default (the first camera found) is what every migrated user wants.
     "voice.camera_device",
+    // Window tinting arrived with themes that color the chrome; on is the
+    // look a theme is written for.
+    "appearance.tint_window",
 ];
 
 /// Where an old key goes, or `None` if the schema has never heard of it.

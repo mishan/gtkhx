@@ -21,6 +21,48 @@ fn m() -> PangoMeasure {
     PangoMeasure::headless("Monospace 10")
 }
 
+/// The palette crosses the C/Rust seam as a bare `GdkRGBA *`: C hands
+/// over its `colors[]` array and `ffi.rs` reads `PALETTE_COLS` entries
+/// from it. Nothing at the boundary checks the length, so a slot added on
+/// one side only would read past the end of the C array in silence. Read
+/// the C definitions out of `chat_view.h` and hold the Rust constants to
+/// them.
+#[test]
+fn palette_constants_match_chat_view_h() {
+    let header = include_str!("../../../../src/chat_view.h");
+    let define = |name: &str| -> usize {
+        let prefix = format!("#define {name} ");
+        let line = header
+            .lines()
+            .find(|l| l.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("chat_view.h no longer defines {name}"));
+        line[prefix.len()..]
+            .split_whitespace()
+            .next()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("{name} is not a plain number: {line:?}"))
+    };
+    for (name, rust) in [
+        ("HX_CHAT_PAL_COLS", crate::view::PALETTE_COLS),
+        ("HX_CHAT_PAL_FG", crate::view::PAL_FG),
+        ("HX_CHAT_PAL_BG", crate::view::PAL_BG),
+        ("HX_CHAT_PAL_MARK_FG", crate::view::PAL_MARK_FG),
+        ("HX_CHAT_PAL_MARK_BG", crate::view::PAL_MARK_BG),
+        ("HX_CHAT_PAL_HISTORY_MUTED", crate::view::PAL_HISTORY_MUTED),
+        ("HX_CHAT_PAL_TIMESTAMP", crate::view::PAL_TIMESTAMP),
+        ("HX_CHAT_PAL_RULE", crate::view::PAL_RULE),
+    ] {
+        assert_eq!(define(name), rust, "{name} differs between C and Rust");
+    }
+    // The per-nick block is the palette's tail; if it isn't, a slot was
+    // added after it and the count above has to account for it.
+    assert_eq!(
+        define("HX_CHAT_PAL_NICK_COLOR0") + define("HX_CHAT_PAL_NICK_COLORS"),
+        crate::view::PALETTE_COLS,
+        "the per-nick colors should end the palette"
+    );
+}
+
 #[test]
 fn metrics_are_sane() {
     let m = m();
@@ -517,9 +559,22 @@ fn gtk_class_and_construction_smoke() {
         // unmapped widget, and mapping one means a real window and a
         // frame clock — an asynchronous dependency in a test asking a
         // synchronous question. The vfunc is the same code GTK runs.
+        //
+        // Followed by the layout pass the next frame runs: a paint that
+        // corrects the scroll position hands the new extent to the
+        // adjustment through `size_allocate`, never from the paint
+        // itself, which is what the draw-time check below pins.
         let frame = || {
             use gtk4::subclass::prelude::WidgetImpl;
+            let before = (adj.upper(), adj.value(), adj.page_size());
             view.imp_ref().snapshot(&gtk4::Snapshot::new());
+            assert_eq!(
+                before,
+                (adj.upper(), adj.value(), adj.page_size()),
+                "the paint reconfigured the adjustment; that re-lays out the \
+                 scrollbar mid-frame and GTK draws its slider unallocated"
+            );
+            holder.allocate(400, 200, -1, None);
         };
 
         for i in 0..60 {

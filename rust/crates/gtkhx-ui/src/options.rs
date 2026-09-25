@@ -332,6 +332,7 @@ pub(crate) mod cfg {
     pub const THEME_DARK: &str = "dark";
     pub const THEME_NAME: &str = "THEMENAME";
     pub const TRAY: &str = "TRAY";
+    pub const TINT_WINDOW: &str = "TINTWINDOW";
     // Chat behaviour / output
     pub const SHOWJOIN: &str = "SHOWJOIN";
     pub const OLD_NICKCOMP: &str = "OLD_NICKCOMPLETION";
@@ -460,6 +461,14 @@ pub(crate) fn page_general(page: &adw::PreferencesPage) {
         ],
     ));
     appearance.add(&gtkhx_theme_combo());
+    appearance.add(&switch_row(
+        cfg::TINT_WINDOW,
+        &tr("Tint window to match theme"),
+        Some(&tr(
+            "Colors the header bar, pane headers and menus with the GtkHx \
+             theme. Off keeps the system's window colors around the themed chat.",
+        )),
+    ));
     page.add(&appearance);
 
     let system = group(&tr("System Integration"));

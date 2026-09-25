@@ -92,6 +92,7 @@ hx_prefs_mirror_refresh (void)
     mirror_string (&gtkhx_prefs.theme, CFG_THEME);
     mirror_string (&gtkhx_prefs.theme_name, CFG_THEME_NAME);
     gtkhx_prefs.tray = hxconfig_get_bool (CFG_TRAY) ? 1 : 0;
+    gtkhx_prefs.tint_window = hxconfig_get_bool (CFG_TINT_WINDOW) ? 1 : 0;
 
     mirror_string (&gtkhx_prefs.font, CFG_FONT);
     mirror_string (&gtkhx_prefs.stamp_format, CFG_STAMP_FORMAT);

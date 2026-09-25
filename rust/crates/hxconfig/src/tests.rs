@@ -104,6 +104,7 @@ fn defaults_match_the_shipped_c_defaults() {
     assert_eq!(s.window.toolbar_height, 700);
     assert_eq!(s.appearance.color_scheme, ColorScheme::System);
     assert!(s.appearance.tray);
+    assert!(s.appearance.tint_window);
     assert_eq!(s.transfers.download_dir, ".");
     assert!(s.transfers.queue);
     assert_eq!(s.trackers.addresses, vec!["hltracker.com".to_string()]);
@@ -130,6 +131,7 @@ fn round_trip_preserves_every_field() {
     s.appearance.color_scheme = ColorScheme::Dark;
     s.appearance.theme = "midnight".into();
     s.appearance.tray = false;
+    s.appearance.tint_window = false;
     s.chat.font = "Cantarell 12".into();
     s.chat.word_wrap = true;
     s.chat.scrollback_lines = 4096;
@@ -817,6 +819,7 @@ fn every_path_round_trips_a_non_default_value() {
     // value nothing defaults to.
     for flag in [
         &mut s.appearance.tray,
+        &mut s.appearance.tint_window,
         &mut s.chat.word_wrap,
         &mut s.chat.timestamp,
         &mut s.chat.avatars,

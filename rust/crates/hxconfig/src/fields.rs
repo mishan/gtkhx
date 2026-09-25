@@ -254,6 +254,7 @@ field_table! {
     "appearance.color_scheme"       => scheme,   appearance.color_scheme;
     "appearance.theme"              => text,     appearance.theme;
     "appearance.tray"               => flag,     appearance.tray;
+    "appearance.tint_window"        => flag,     appearance.tint_window;
 
     "chat.font"                     => text,     chat.font;
     "chat.word_wrap"                => flag,     chat.word_wrap;

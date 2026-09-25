@@ -630,10 +630,11 @@ msg_output_render (session *sess, const char *name, guint16 uid,
         msg = create_msgwin (sess, uid, (char *)name);
     }
 
-    /* Pink for our own messages, light blue for incoming. Keyed on
-     * is_self rather than direction, deliberately: the colour is about
-     * *whose words* these are, which is what is_self answers. */
-    brack_col = is_self ? 13 : 12;
+    /* The theme's own-nick bracket for our messages, the other-nick one
+     * for incoming. Keyed on is_self rather than direction,
+     * deliberately: the colour is about *whose words* these are, which
+     * is what is_self answers. */
+    brack_col = is_self ? HX_CHAT_PAL_SELF_BRACKET : HX_CHAT_PAL_NICK_BRACKET;
 
     /* Validate the body bytes once. the chat view hands content to Pango,
      * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
@@ -658,13 +659,14 @@ msg_output_render (session *sess, const char *name, guint16 uid,
         const char *nl = (cur < end) ? memchr (cur, '\n', end - cur) : NULL;
         gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
         if (first) {
-            /* "<name>": brackets coloured, name in the default
-             * foreground. Same shape as chat.c's nick column, and
+            /* "<name>": the same shape as chat.c's nick column, and
              * the same three runs. */
             const char *nam = name ? name : "";
             HxChatRun gutter[3] = {
                 { "<", 1, brack_col, HX_CHAT_ATTR_NONE },
-                HX_CHAT_RUN_PLAIN (nam, (int)strlen (nam)),
+                { nam, (int)strlen (nam),
+                  hx_chat_nick_color (nam, strlen (nam), is_self),
+                  HX_CHAT_ATTR_NONE },
                 { ">", 1, brack_col, HX_CHAT_ATTR_NONE },
             };
             HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);

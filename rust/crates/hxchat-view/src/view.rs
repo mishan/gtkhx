@@ -33,13 +33,18 @@ use hxchat_layout::{
 use crate::measure::PangoMeasure;
 
 /// Palette size, matching `chat_view.h`'s `HX_CHAT_PAL_COLS`.
-pub const PALETTE_COLS: usize = 38;
+pub const PALETTE_COLS: usize = 55;
 pub const PAL_FG: usize = 34;
 pub const PAL_BG: usize = 35;
-/// `HX_CHAT_PAL_HISTORY_MUTED` — the theme's secondary text colour. The
-/// timestamp column uses it so the stamps recede behind the message
-/// text rather than competing with it.
+/// `HX_CHAT_PAL_HISTORY_MUTED` — the theme's secondary text colour.
 pub const PAL_HISTORY_MUTED: usize = 37;
+/// `HX_CHAT_PAL_TIMESTAMP` — the timestamp column. Themes default it to
+/// the secondary text colour so the stamps recede behind the message
+/// text rather than competing with it.
+pub const PAL_TIMESTAMP: usize = 38;
+/// `HX_CHAT_PAL_RULE` — the column divider. Themes default it to the text
+/// color, which is how it was always drawn.
+pub const PAL_RULE: usize = 46;
 /// `HX_CHAT_PAL_MARK_FG` / `_MARK_BG` — the selection colours, filled by
 /// the theme exactly as they were for xtext.
 pub const PAL_MARK_FG: usize = 32;
@@ -453,6 +458,11 @@ mod imp {
             // Clip rather than letting either bleed into the sibling
             // widgets.
             obj.set_overflow(gtk4::Overflow::Hidden);
+            // Adwaita's content-view colors, for palette slots the theme
+            // leaves to the system (see `HxChatView::pal`): the CSS
+            // background shows through where the view skips its fill,
+            // and `color()` supplies the text color.
+            obj.add_css_class("view");
             // Rebuild the measurer against the widget's own Pango
             // context so text is shaped with the real display's font
             // config, not the headless default the struct starts with.
@@ -615,6 +625,19 @@ impl HxChatView {
         self.queue_resize();
     }
 
+    /// A palette slot as drawn. A fully transparent slot means "follow
+    /// the system" (`chat_view.h`): text slots take the widget's CSS
+    /// color, and the background stays transparent so the `.view`
+    /// background CSS paints shows through.
+    fn pal(&self, i: usize) -> gtk4::gdk::RGBA {
+        let c = self.imp_().palette.borrow()[i.min(PALETTE_COLS - 1)];
+        if c.alpha() == 0.0 && i != PAL_BG {
+            self.color()
+        } else {
+            c
+        }
+    }
+
     pub fn set_palette(&self, palette: &[gtk4::gdk::RGBA; PALETTE_COLS]) {
         *self.imp_().palette.borrow_mut() = *palette;
         self.queue_draw();
@@ -752,8 +775,19 @@ impl HxChatView {
 
         // Inverted theme colours, so the badge contrasts on light and
         // dark without a third colour to keep in step.
-        let mut bg = imp.palette.borrow()[PAL_FG];
-        let mut fg = imp.palette.borrow()[PAL_BG];
+        let mut bg = self.pal(PAL_FG);
+        let mut fg = self.pal(PAL_BG);
+        if fg.alpha() == 0.0 {
+            // The background is the system's and there is no reading it
+            // back from CSS; black or white, whichever the foreground
+            // isn't, stands in for it.
+            let light = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue() > 0.5;
+            fg = if light {
+                gtk4::gdk::RGBA::BLACK
+            } else {
+                gtk4::gdk::RGBA::WHITE
+            };
+        }
         bg = gtk4::gdk::RGBA::new(bg.red(), bg.green(), bg.blue(), 0.85 * alpha);
         fg = gtk4::gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), alpha);
 
@@ -945,10 +979,9 @@ impl HxChatView {
     // ---- rendering ----------------------------------------------------
 
     fn resolve(&self, c: ColorRef, fallback: usize) -> gtk4::gdk::RGBA {
-        let pal = self.imp_().palette.borrow();
         match c {
-            ColorRef::Default => pal[fallback],
-            ColorRef::Palette(i) => pal[(i as usize).min(PALETTE_COLS - 1)],
+            ColorRef::Default => self.pal(fallback),
+            ColorRef::Palette(i) => self.pal(i as usize),
             ColorRef::Rgb(v) => gtk4::gdk::RGBA::new(
                 ((v >> 16) & 0xff) as f32 / 255.0,
                 ((v >> 8) & 0xff) as f32 / 255.0,
@@ -970,7 +1003,9 @@ impl HxChatView {
         // Background covers the whole allocation, padding included —
         // the inset is meant to be empty margin, not a differently
         // coloured border.
-        let bg = self.imp_().palette.borrow()[PAL_BG];
+        // Transparent when the theme leaves the background to the
+        // system, in which case the CSS `.view` background shows.
+        let bg = self.pal(PAL_BG);
         snapshot.append_color(
             &bg,
             &gtk4::graphene::Rect::new(0.0, 0.0, alloc_w as f32, alloc_h as f32),
@@ -1034,18 +1069,26 @@ impl HxChatView {
         };
 
         // The extent the scrollbar reports is stale by the same
-        // correction, so push it now rather than waiting for whatever
-        // allocates next. Leaving it would put the thumb and the drawn
-        // content on different frames, and anything that reads the
-        // adjustment in between — the scrollbar, a Page Down, a wheel
-        // event — would be working from the pre-correction numbers.
+        // correction. Reconfiguring the adjustment from here would be
+        // wrong, though: this is the paint phase, and ::changed makes the
+        // scrollbar beside us re-lay out its slider — which GTK then draws
+        // in this same frame, before any layout pass has allocated it
+        // ("Trying to snapshot GtkGizmo without a current allocation").
+        // So ask for a layout pass instead: `size_allocate` pushes the
+        // corrected extent, and the box that holds us allocates the
+        // scrollbar after us, so the slider is laid out against the new
+        // numbers before it is drawn. The thumb trails the content by
+        // one frame; the content itself is already right. So does
+        // anything else that reads the adjustment in that frame: a wheel
+        // or Page Down handled before the layout pass scrolls from the
+        // pre-correction value, a one-frame glitch accepted as the price
+        // of not re-laying out the scrollbar mid-paint.
         //
         // Gated on having actually corrected something, or this is an
-        // unconditional reconfigure-per-frame loop: the scrolled window
-        // redraws on ::changed. The frame that follows finds the rows
-        // measured, corrects nothing, and stops.
+        // unconditional relayout-per-frame loop. The frame that follows
+        // finds the rows measured, corrects nothing, and stops.
         if corrected {
-            self.sync_adjustment(height as u32);
+            self.queue_allocate();
         }
 
         // The indent separator, matching gtk_xtext_draw_sep: a full-height
@@ -1071,8 +1114,8 @@ impl HxChatView {
             // by PAD_X above.
             let x = (sx - PAD_X as f64) as f32;
             if x >= 1.0 {
-                let fg = imp.palette.borrow()[PAL_FG];
-                let bgc = imp.palette.borrow()[PAL_BG];
+                let fg = self.pal(PAL_RULE);
+                let bgc = self.pal(PAL_BG);
                 snapshot.append_color(
                     &bgc,
                     &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
@@ -1101,7 +1144,7 @@ impl HxChatView {
         let selection = *imp.selection.borrow();
         let show_stamp = imp.time_stamp.get();
         let stamp_format = imp.stamp_format.borrow().clone();
-        let muted = self.imp_().palette.borrow()[PAL_HISTORY_MUTED];
+        let stamp_color = self.pal(PAL_TIMESTAMP);
 
         for (row, row_top) in placed {
             let Some(layout) = buf.layout_at(row) else {
@@ -1126,7 +1169,7 @@ impl HxChatView {
                     draw_layout.set_text(&stamp);
                     snapshot.save();
                     snapshot.translate(&gtk4::graphene::Point::new(0.0, row_top as f32));
-                    snapshot.append_layout(&draw_layout, &muted);
+                    snapshot.append_layout(&draw_layout, &stamp_color);
                     snapshot.restore();
                 }
             }
@@ -1168,7 +1211,7 @@ impl HxChatView {
                         .max(1.0);
                     let h = (bot - top) as f32 + CODE_BOX_PAD * 2.0;
 
-                    let fgc = imp.palette.borrow()[PAL_FG];
+                    let fgc = self.pal(PAL_FG);
                     let fill =
                         gtk4::gdk::RGBA::new(fgc.red(), fgc.green(), fgc.blue(), CODE_BG_ALPHA);
                     let edge =
@@ -1443,8 +1486,8 @@ impl HxChatView {
                 .unwrap_or(Mark::None)
         };
 
-        let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
-        let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
+        let mark_fg = self.pal(PAL_MARK_FG);
+        let mark_bg = self.pal(PAL_MARK_BG);
 
         let emit = |text: &str, style: Style, mark: Mark, underline: bool, x: &mut f32| {
             if text.is_empty() {
@@ -1473,7 +1516,7 @@ impl HxChatView {
             // beneath any band, so a selected code span still reads as
             // selected.
             if style.attrs.contains(hxchat_layout::Attrs::CODE) {
-                let fgc = self.imp_().palette.borrow()[PAL_FG];
+                let fgc = self.pal(PAL_FG);
                 let tint = gtk4::gdk::RGBA::new(fgc.red(), fgc.green(), fgc.blue(), CODE_BG_ALPHA);
                 snapshot.append_color(&tint, &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32));
             }

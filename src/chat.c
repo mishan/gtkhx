@@ -32,6 +32,7 @@
 #include "hxconn.h"
 #include "gtkhx_session.h"
 #include "gtkhx_theme.h"
+#include "gtkhx_log.h"
 #include "hx_panel.h"
 #include "panel_registry.h"
 #include "toolbar.h"
@@ -215,16 +216,15 @@ hx_loading_older_sentinel (void)
 #define WORD_EMAIL 5
 
 /*
- * Phase 2.6.B: 37-entry palette laid out for the chat view.
+ * The palette laid out for the chat view.
  *
  * Slot layout (see chat_view.h's HX_CHAT_PAL_* vocabulary):
  *   0..15   mIRC colors 0..15
  *   16..31  mIRC colors 16..31 (bold/extended; HexChat duplicates 0..15)
- *   32      HX_CHAT_PAL_MARK_FG   selection foreground
- *   33      HX_CHAT_PAL_MARK_BG   selection background
- *   34      HX_CHAT_PAL_FG        default text foreground
- *   35      HX_CHAT_PAL_BG        default text background
- *   36      HX_CHAT_PAL_MARKER    marker line color
+ *   32..46  UI roles: selection, fg/bg, marker line, history text,
+ *           timestamps, nicks and their brackets, the [hx] tag, mentions,
+ *           the column divider
+ *   47..54  per-nick colors, from the theme's nick_colors list
  *
  * The previous (GTK 1.2 / XChat 1.8.5) widget only consulted slots 0..19,
  * with 16/17 = mark bg/fg and 18/19 = fg/bg.  HexChat's xtext reads
@@ -270,50 +270,41 @@ GdkRGBA colors[] = {
     RGB16 (0xffff, 0, 0xffff),      /* 29 pink */
     RGB16 (0x7777, 0x7777, 0x7777), /* 30 grey */
     RGB16 (0x9999, 0x9999, 0x9999), /* 31 light grey */
-    /* UI roles */
-    RGB16 (0xeeee, 0xeeee, 0xeeee), /* 32 HX_CHAT_PAL_MARK_FG (light) */
-    RGB16 (0x2020, 0x4a4a, 0x8787), /* 33 HX_CHAT_PAL_MARK_BG (blue) */
-    RGB16 (0xcccc, 0xcccc, 0xcccc), /* 34 HX_CHAT_PAL_FG (light) */
-    RGB16 (0, 0, 0),                /* 35 HX_CHAT_PAL_BG (black) */
-    RGB16 (0xcccc, 0, 0),           /* 36 HX_CHAT_PAL_MARKER (red) */
-    /* 37 HX_CHAT_PAL_HISTORY_MUTED — chat-history secondary text.
-     * Static default is the dark-theme value (medium grey, visible
-     * against black bg); gtkhx_apply_theme_palette recomputes it
-     * for the active light/dark scheme as soon as AdwStyleManager
-     * has settled. */
-    RGB16 (0x9a9a, 0x9a9a, 0x9a9a),
+    /* UI roles and per-nick colors: placeholders, fully transparent,
+     * until gtkhx_apply_theme_palette fills them from the active theme
+     * in gtkhx_activate. The chat view fe_init builds before that reads
+     * transparent as "follow the system", and it re-reads the palette
+     * on every draw, so nothing is drawn with a placeholder. */
+    [HX_CHAT_PAL_COLS - 1] = { 0, 0, 0, 0 },
 };
 
-/* Refresh palette slots that depend on Light / Dark and push the
- * new palette into every live xtext widget. The mIRC slots (0..31)
- * are theme-agnostic — same red is "red" in both modes, server
- * authors expect those exact values. The six UI-role slots (32..37)
- * come from the active theme (gtkhx_theme_get_color); a theme that
- * omits a slot falls back to the built-in default, which matches
- * the historical light/dark constants byte-for-byte. The historical
- * defaults for reference:
+G_STATIC_ASSERT (G_N_ELEMENTS (colors) == HX_CHAT_PAL_COLS);
+G_STATIC_ASSERT (HX_CHAT_LOG_INFO_COLOR == HX_CHAT_INFO_COLOR);
+G_STATIC_ASSERT (HX_CHAT_PAL_NICK_COLORS == GTKHX_NICK_COLORS_MAX);
+
+/* Whether the active theme has any nick_colors. The slot a nick hashes to
+ * never depends on how many (see hx_chat_nick_color), only on this. */
+static gboolean have_nick_colors;
+
+/* Refresh the UI-role slots from the active theme for the current
+ * light/dark variant and push the palette into every live chat view.
+ * The mIRC slots (0..31) are theme-agnostic — same red is "red" in both
+ * modes, server authors expect those exact values.
  *
- *   Light  HX_CHAT_PAL_FG            = #1d1d1d  (near-black on white)
- *          HX_CHAT_PAL_BG            = #fafafa  (matches Adwaita's view bg)
- *          MARK_FG             = #ffffff  (selection contrast)
- *          MARK_BG             = #3584e4  (Adwaita accent blue)
- *          HX_CHAT_PAL_HISTORY_MUTED = #5e5e5e  (~5.7:1 vs #fafafa)
- *   Dark   HX_CHAT_PAL_FG            = #cccccc
- *          HX_CHAT_PAL_BG            = #000000
- *          MARK_FG             = #eeeeee
- *          MARK_BG             = #204a87  (Tango blue, the original)
- *          HX_CHAT_PAL_HISTORY_MUTED = #9a9a9a  (~7:1 vs #000000)
+ * A role the theme leaves out takes the built-in default, which for
+ * fg/bg (and the nick roles that derive from fg) is transparent: the
+ * view then follows libadwaita's view colors. See gtkhx_theme.h.
  *
  * Called once at startup from gtkhx_activate after the
  * AdwStyleManager has settled on Light or Dark; again any time the
  * manager's `dark` property flips; and again any time the theme's
- * "changed" signal fires (theme file reload, future Settings edit). */
+ * "changed" signal fires (theme file reload, Settings theme picker). */
 void
 gtkhx_apply_theme_palette (gboolean dark)
 {
-    /* Slot ↔ role mapping. The slot numbers (32..37) are
-     * chat_view.h's HX_CHAT_PAL_* vocabulary; the roles are the
-     * theme-file-visible names. */
+    /* Slot ↔ role mapping. The slot numbers are chat_view.h's
+     * HX_CHAT_PAL_* vocabulary; the roles are the theme-file-visible
+     * names. */
     static const struct {
         int slot;
         GtkhxPaletteRole role;
@@ -324,10 +315,36 @@ gtkhx_apply_theme_palette (gboolean dark)
         { HX_CHAT_PAL_BG, GTKHX_PAL_BG },
         { HX_CHAT_PAL_MARKER, GTKHX_PAL_MARKER },
         { HX_CHAT_PAL_HISTORY_MUTED, GTKHX_PAL_HISTORY_MUTED },
+        { HX_CHAT_PAL_TIMESTAMP, GTKHX_PAL_TIMESTAMP },
+        { HX_CHAT_PAL_NICK, GTKHX_PAL_NICK },
+        { HX_CHAT_PAL_SELF_NICK, GTKHX_PAL_SELF_NICK },
+        { HX_CHAT_PAL_NICK_BRACKET, GTKHX_PAL_NICK_BRACKET },
+        { HX_CHAT_PAL_SELF_BRACKET, GTKHX_PAL_SELF_BRACKET },
+        { HX_CHAT_PAL_SYSTEM, GTKHX_PAL_SYSTEM },
+        { HX_CHAT_PAL_SYSTEM_BRACKET, GTKHX_PAL_SYSTEM_BRACKET },
+        { HX_CHAT_PAL_HIGHLIGHT, GTKHX_PAL_HIGHLIGHT },
+        { HX_CHAT_PAL_RULE, GTKHX_PAL_RULE },
     };
     for (size_t i = 0; i < G_N_ELEMENTS (role_to_slot); i++) {
         colors[role_to_slot[i].slot]
             = gtkhx_theme_get_color (role_to_slot[i].role, dark);
+    }
+
+    /* Per-nick slots. Every slot is filled — a theme's list repeats
+     * across them — because a rendered line keeps the slot number it
+     * was built with. Nicks hash over all the slots, not over the
+     * theme's count, so a light/dark flip between lists of different
+     * lengths recolors a person's old lines and new lines alike. A
+     * theme with no list fills every slot with the plain nick color. */
+    {
+        GdkRGBA list[GTKHX_NICK_COLORS_MAX];
+        int n = gtkhx_theme_get_nick_colors (dark, list);
+
+        have_nick_colors = n > 0;
+        for (int i = 0; i < HX_CHAT_PAL_NICK_COLORS; i++) {
+            colors[HX_CHAT_PAL_NICK_COLOR0 + i]
+                = n > 0 ? list[i % n] : colors[HX_CHAT_PAL_NICK];
+        }
     }
 
     /* Push the new palette into every live xtext widget. Chat /
@@ -584,6 +601,25 @@ gchat_delete (session *sess, struct gtkhx_chat *gchat)
     gchat_free (gchat);
 }
 
+gint16
+hx_chat_nick_color (const char *nick, gsize nick_len, gboolean is_self)
+{
+    guint32 h = 5381;
+
+    if (is_self) {
+        return HX_CHAT_PAL_SELF_NICK;
+    }
+    if (!have_nick_colors || !nick) {
+        return HX_CHAT_PAL_NICK;
+    }
+    /* djb2 over the bytes: stable across runs and platforms, so a
+     * person keeps their color from one session to the next. */
+    for (gsize i = 0; i < nick_len; i++) {
+        h = h * 33 + (guchar)nick[i];
+    }
+    return (gint16)(HX_CHAT_PAL_NICK_COLOR0 + h % HX_CHAT_PAL_NICK_COLORS);
+}
+
 /* Render a single chat line into an xtext buffer with the
  * HexChat-style nick column. Inputs are slices into `line`
  * (already-validated UTF-8); the caller is responsible for the
@@ -592,8 +628,8 @@ gchat_delete (session *sess, struct gtkhx_chat *gchat)
  * chat-signal path).
  *
  * `is_info` suppresses the highlight check (info lines are never
- * highlighted). `is_self` controls the bracket colour: mIRC 13
- * (pink) for our own lines, 12 (light blue) for others.
+ * highlighted). `is_self` picks the own-nick roles over the
+ * other-nick ones for the brackets and the name.
  *
  * If name_len == 0 the line is rendered without a nick column —
  * either because hx_chat_split_nick_body didn't match (emote,
@@ -674,23 +710,32 @@ xprintline_render_parts (GtkWidget *text, const char *name, gsize name_len,
                                HX_CHAT_ATTR_NONE };
             body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
         } else if (do_highlight) {
-            /* Mention: bold light-red nick, plain body. The old form
+            /* Mention: "<nick>" in the highlight color, the name bold,
+             * plain body. The brackets stay — without them a mention
+             * line's gutter doesn't read as a nick at all. The old form
              * appended a \017 reset byte to the body to stop the
              * attribute leaking into the next row; runs have no
              * running state, so there is nothing to reset. */
+            gutter[n_gutter++] = (HxChatRun){ "<", 1, HX_CHAT_HIGHLIGHT_COLOR,
+                                              HX_CHAT_ATTR_NONE };
             gutter[n_gutter++]
                 = (HxChatRun){ display_name, (int)display_name_len,
                                HX_CHAT_HIGHLIGHT_COLOR, HX_CHAT_ATTR_BOLD };
+            gutter[n_gutter++] = (HxChatRun){ ">", 1, HX_CHAT_HIGHLIGHT_COLOR,
+                                              HX_CHAT_ATTR_NONE };
             body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
         } else {
-            /* "<nick>" — brackets coloured, name in the default
-             * foreground. Pink for our own lines, light blue for
-             * everyone else's, as since Phase 5. */
-            gint16 brack = is_self ? 13 : 12;
+            /* "<nick>" — brackets and name in the theme's nick roles,
+             * which tell our own lines from everyone else's. */
+            gint16 brack
+                = is_self ? HX_CHAT_PAL_SELF_BRACKET : HX_CHAT_PAL_NICK_BRACKET;
             gutter[n_gutter++]
                 = (HxChatRun){ "<", 1, brack, HX_CHAT_ATTR_NONE };
             gutter[n_gutter++]
-                = HX_CHAT_RUN_PLAIN (display_name, (int)display_name_len);
+                = (HxChatRun){ display_name, (int)display_name_len,
+                               hx_chat_nick_color (display_name,
+                                                   display_name_len, is_self),
+                               HX_CHAT_ATTR_NONE };
             gutter[n_gutter++]
                 = (HxChatRun){ ">", 1, brack, HX_CHAT_ATTR_NONE };
             body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);

@@ -142,6 +142,10 @@ pub struct Appearance {
     /// no-ops when no SNI host is around, so it costs nothing where it can't
     /// be rendered.
     pub tray: bool,
+    /// Let the theme color the whole window — header bar, pane headers,
+    /// popovers, accent — rather than only the chat and lists. On by
+    /// default; off keeps the system's window colors around a themed chat.
+    pub tint_window: bool,
 }
 
 impl Default for Appearance {
@@ -150,6 +154,7 @@ impl Default for Appearance {
             color_scheme: ColorScheme::System,
             theme: "default".into(),
             tray: true,
+            tint_window: true,
         }
     }
 }

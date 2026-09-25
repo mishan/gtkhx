@@ -6,8 +6,8 @@ GtkHx is themable along three axes, all of which ship today:
 2. **Per-area UI scaling** — independent factors for the toolbar, other
    windows' action buttons, the user-list icon and text, and the tasks-row
    glyph.
-3. **Colours** — the chat palette's UI-role slots and the user-list name
-   colours, each with a light and a dark variant.
+3. **Colours** — the chat palette's UI-role slots, the user-list name
+   colours, and the window chrome, each with a light and a dark variant.
 
 A **theme** is one bundle carrying all three: a GKeyFile `.ini` (optionally a
 directory with an `icons/` subdir beside it), living at
@@ -103,6 +103,68 @@ Whether a theme *opted in* to a colour matters, not just what the colour is:
 is gated on it. A theme that doesn't set chat `fg`/`bg` leaves the tracker /
 users / tasks / files / news row backgrounds at the system theme instead of
 having GtkHx's own fallbacks forced onto them.
+
+### A theme colors the whole window
+
+Themes used to color only the content: the chat, the lists, the text
+surfaces. The window around them stayed stock Adwaita gray. That works
+only for palettes close to Adwaita's own; anything with a character of
+its own (Solarized's navy, or a Hotline-nostalgia theme) came out as
+colored boxes pasted onto a gray window.
+
+So a theme now also sets the window chrome, the way GNOME's terminals
+tint their header bar from the terminal palette. It does this by
+overriding libadwaita's named colors, not by styling widgets:
+`gtkhx_theme_build_chrome_css()` turns the `[chrome.*]` roles into a
+`:root` block of `--window-bg-color`-family variables plus the matching
+`@define-color`s, and `gtkhx_refresh_css` puts that at the top of the
+application provider. Every stock widget (header bar, libpanel pane
+headers, popovers, selection) follows with no per-widget rule,
+and so does GtkHx's own `chrome.css`, which reads `@accent_bg_color`
+and `@window_bg_color`. Both forms are emitted because libadwaita seeds
+its variables from the named colors, and chrome.css reads the named
+colors directly.
+
+One chrome role is a style, not a color swap: `action`. Adwaita fills
+suggested-action buttons (Connect, Save, Post) with the accent, and a
+theme gets one accent — so a design that uses its accent for position
+(selection, focus) but draws actions as links had no way to say so. A
+theme that sets `action` gets those buttons as an outline in that color,
+turning the accent on hover, keyboard focus and press, from a rule block
+`gtkhx_theme_build_chrome_css()` appends after the variables.
+
+Roles a theme leaves out are derived (window from the chat `bg`, the
+layered surfaces stepped from window toward fg), so a short theme can't
+leave half the window gray. The opt-in rule is the same as for the
+listview CSS: no chat fg/bg and no chrome keys means no chrome CSS, and
+the default theme stays stock. The "Tint window to match theme" setting
+turns the chrome CSS off for users who want system chrome around a
+themed chat; it's a user preference, not a theme key, because it's about
+the user's desktop rather than the theme.
+
+### An unset chat color follows the system
+
+The same clash ran the other way for the default theme: its chat was
+hard `#000` on a dark desktop and `#fafafa` on a light one, a box that
+matched neither Adwaita's gray window nor its view color. So chat `fg`
+and `bg` no longer have built-in colors. Left unset, they resolve to a
+transparent `GdkRGBA`, which every consumer reads as "follow the
+system": the chat view carries Adwaita's `.view` class, draws such text
+in its CSS color and skips its own background fill, and the
+`.gtkhx-text` / `.gtkhx-input` CSS names `@view_fg_color` /
+`@view_bg_color` instead of a hex value. Roles derived from fg (the
+nicks) follow along.
+
+### The chat gutter is themed
+
+The gutter used to be colored from the fixed mIRC slots — full-intensity
+blue and pink brackets, a green `[hx]`, a red mention — which no theme
+could reach, and which were close to invisible on a dark background. It
+now has roles of its own (`timestamp`, `nick`, `self_nick`, the two
+bracket roles, `system`, `system_bracket`, `highlight`) plus a
+`nick_colors` list that each nick is hashed onto. That gives the chat a
+hierarchy: timestamps and brackets recede, names stand out and tell
+people apart, and the body carries the weight.
 
 ---
 
