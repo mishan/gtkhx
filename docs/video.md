@@ -160,6 +160,25 @@ the share (608); the portal session closes when the publication ends,
 however it ends. While anything is shared the main window shows an
 `AdwBanner` — "You are sharing your screen", with a Stop button.
 
+Inside the **Flatpak sandbox** there is no `/dev/video*`, so the camera
+goes through the xdg-desktop-portal Camera interface instead. The first
+press of the camera button reads `IsCameraPresent`, calls `AccessCamera`
+(the portal asks the user once and remembers the answer), then
+`OpenPipeWireRemote`. The runtime keeps that remote and captures through
+it until a camera capture fails; then it lets go, since the remote may
+have died with a PipeWire restart, and the next press asks the portal for
+a fresh one (silently: the grant is remembered). Captures go through it
+like this: PipeWire's device provider, given the
+remote's fd, lists the cameras, and its elements are `pipewiresrc`s that
+connect through a duplicate of the same fd. A device provider too old
+to take an fd falls back to `pipewiresrc fd=…` and the remote's default
+camera. Access is never asked for earlier than that first press — not at
+startup, and not from the settings page, which until then offers only
+"First camera found". `IsCameraPresent` is also read, silently, when a
+camera button first appears, and watched from then on, so the button
+greys out on a machine without one and lights when one is plugged in. `GTKHX_CAMERA_PORTAL=1` takes the portal path on a host
+session, for testing it outside the sandbox.
+
 The **camera picker** is a Video group on the Voice settings page
 (`voice.camera_device`, a stable device path, empty for the first
 camera). Cameras are keyed by path rather than `gst::Device::name()`,
@@ -205,13 +224,13 @@ Runtime elements beyond voice's: `vpx` (vp8enc/vp8dec), `rtp`
 capture `videotestsrc` in tests, `v4l2`/`pipewire` on Linux,
 `applemedia` on macOS, `mediafoundation` and `d3d11` on Windows. Debian
 needs `gstreamer1.0-plugins-good` and `gstreamer1.0-pipewire`. The GNOME
-runtime ships all of them. In the Flatpak, screen sharing goes through
-the ScreenCast portal the manifest already talks to; the camera does not
-yet (see [BACKLOG.md](../BACKLOG.md)).
+runtime ships all of them. In the Flatpak, screen sharing and the camera
+go through the ScreenCast and Camera portals the manifest already talks
+to; neither needs a device permission.
 
 ## Known gaps
 
-Follow-ups — the Flatpak camera, untested platforms, RTX, narrower
+Follow-ups — untested platforms, RTX, narrower
 subscriptions and the rest — are tracked in [BACKLOG.md](../BACKLOG.md).
 
 ## What this is not

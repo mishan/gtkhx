@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-25 01:22-0700\n"
+"POT-Creation-Date: 2026-09-25 01:36-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: French <misha@nasledov.com>\n"
@@ -135,10 +135,10 @@ msgstr "Renommer"
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:88
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:199
 #: rust/crates/gtkhx-ui/src/options_connections.rs:486
-#: rust/crates/gtkhx-ui/src/screen_share.rs:450
+#: rust/crates/gtkhx-ui/src/screen_share.rs:280
 #: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:127
 #: rust/crates/gtkhx-ui/src/useredit.rs:344
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:814
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:855
 msgid "_Cancel"
 msgstr "_Annuler"
 
@@ -1085,6 +1085,21 @@ msgstr "_Envoyer"
 #: rust/crates/gtkhx-ui/src/broadcast.rs:160
 msgid "Message"
 msgstr "Message"
+
+#: rust/crates/gtkhx-ui/src/camera_portal.rs:114
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:669
+msgid "No camera is available"
+msgstr "Aucune caméra n'est disponible"
+
+#: rust/crates/gtkhx-ui/src/camera_portal.rs:123
+msgid ""
+"GtkHx isn't allowed to use the camera. You can change that in your system's "
+"app settings."
+msgstr "GtkHx n'est pas autorisé à utiliser la caméra. Vous pouvez modifier cela dans les paramètres des applications du système."
+
+#: rust/crates/gtkhx-ui/src/camera_portal.rs:124
+msgid "The camera request timed out."
+msgstr "La demande d'accès à la caméra a expiré."
 
 #: rust/crates/gtkhx-ui/src/chat_find.rs:90
 #: rust/crates/gtkhx-ui/src/news.rs:161
@@ -2486,43 +2501,43 @@ msgstr "Se connecter sans _chiffrement"
 msgid "Ca_ncel"
 msgstr "An_nuler"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:179
+#: rust/crates/gtkhx-ui/src/screen_share.rs:115
 msgid "The screen sharing request failed."
 msgstr "La demande de partage d'écran a échoué."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:254
+#: rust/crates/gtkhx-ui/src/screen_share.rs:116
 msgid "The screen sharing request timed out."
 msgstr "La demande de partage d'écran a expiré."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:350
-#: rust/crates/gtkhx-ui/src/screen_share.rs:355
+#: rust/crates/gtkhx-ui/src/screen_share.rs:200
+#: rust/crates/gtkhx-ui/src/screen_share.rs:205
 msgid "Nothing was chosen to share."
 msgstr "Rien n'a été choisi pour le partage."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:445
+#: rust/crates/gtkhx-ui/src/screen_share.rs:275
 msgid "Share your screen?"
 msgstr "Partager votre écran ?"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:447
+#: rust/crates/gtkhx-ui/src/screen_share.rs:277
 msgid ""
 "Everyone in this voice chat who chooses to watch will see your whole screen."
 msgstr ""
 "Toutes les personnes de ce chat vocal qui choisissent de regarder verront "
 "l'intégralité de votre écran."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:451
+#: rust/crates/gtkhx-ui/src/screen_share.rs:281
 msgid "_Share"
 msgstr "_Partager"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:469
+#: rust/crates/gtkhx-ui/src/screen_share.rs:299
 msgid "Couldn't share the screen: %s"
 msgstr "Impossible de partager l'écran : %s"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:547
+#: rust/crates/gtkhx-ui/src/screen_share.rs:383
 msgid "You are sharing your screen"
 msgstr "Vous partagez votre écran"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:548
+#: rust/crates/gtkhx-ui/src/screen_share.rs:384
 msgid "Stop Sharing"
 msgstr "Arrêter le partage"
 
@@ -2992,57 +3007,53 @@ msgstr "Réactiver votre microphone"
 msgid "Stop sending audio"
 msgstr "Couper le micro"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:658
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:664
 msgid "Video chat requires permission"
 msgstr "Le chat vidéo nécessite une autorisation"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:659
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:665
 msgid "Screen sharing requires permission"
 msgstr "Le partage d'écran nécessite une autorisation"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:663
-msgid "No camera is available"
-msgstr "Aucune caméra n'est disponible"
-
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:664
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:670
 msgid "Screen sharing isn't available on this system"
 msgstr "Le partage d'écran n'est pas disponible sur ce système"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:668
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:674
 msgid "Turn your camera on"
 msgstr "Activer votre caméra"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:669
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:675
 msgid "Turn your camera off"
 msgstr "Désactiver votre caméra"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:670
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:676
 msgid "Share your screen"
 msgstr "Partager votre écran"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:671
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:677
 msgid "Stop sharing your screen"
 msgstr "Arrêter de partager votre écran"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:807
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:848
 msgid "Voice is already in use in another chat on this connection."
 msgstr ""
 "Le chat vocal est déjà utilisé dans une autre discussion sur cette connexion."
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:809
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:850
 msgid "Voice is already in use on %s."
 msgstr "Le chat vocal est déjà utilisé sur %s."
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:813
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:854
 msgid "Leave the other voice chat?"
 msgstr "Quitter l'autre chat vocal ?"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:815
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:856
 msgid "_Leave and Join"
 msgstr "_Quitter et rejoindre"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:863
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:867
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:904
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:908
 msgid "another connection"
 msgstr "une autre connexion"
 
