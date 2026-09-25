@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-25 00:41-0700\n"
+"POT-Creation-Date: 2026-09-25 01:22-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: Japanese <misha@nasledov.com>\n"
@@ -134,10 +134,10 @@ msgstr "名前の変更"
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:88
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:199
 #: rust/crates/gtkhx-ui/src/options_connections.rs:486
-#: rust/crates/gtkhx-ui/src/screen_share.rs:381
+#: rust/crates/gtkhx-ui/src/screen_share.rs:450
 #: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:127
 #: rust/crates/gtkhx-ui/src/useredit.rs:344
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:808
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:814
 msgid "_Cancel"
 msgstr "キャンセル(_C)"
 
@@ -703,7 +703,7 @@ msgstr "TLS 上の HOPE セキュアログインは非対応 — どちらか一
 msgid "tracker: %1$s: %2$s\n"
 msgstr "トラッカー: %1$s: %2$s\n"
 
-#: src/rcv.c:701
+#: src/rcv.c:737
 #, c-format
 msgid ""
 "Received queue id (%1$d) for xfer ref %2$d\n"
@@ -712,44 +712,44 @@ msgstr ""
 "転送 ref %2$d に対するキュー ID (%1$d) を受信\n"
 "該当する転送がありません。\n"
 
-#: src/rcv.c:1217
+#: src/rcv.c:1253
 msgid "polite quit\n"
 msgstr "正常な切断\n"
 
-#: src/rcv.c:1244
+#: src/rcv.c:1280
 #, c-format
 msgid "unknown header type 0x%08x\n"
 msgstr "不明なヘッダー種別 0x%08x\n"
 
-#: src/rcv.c:1340
+#: src/rcv.c:1376
 msgid "login"
 msgstr "ログイン"
 
-#: src/rcv.c:1343
+#: src/rcv.c:1379
 msgid "failed?"
 msgstr "失敗？"
 
-#: src/rcv.c:1344
+#: src/rcv.c:1380
 msgid "successful"
 msgstr "成功"
 
-#: src/rcv.c:1458
+#: src/rcv.c:1494
 msgid "server confirmed large-file (64-bit) mode for this session\n"
 msgstr "このセッションで大容量ファイル (64 ビット) モードをサーバーが確認\n"
 
-#: src/rcv.c:1463
+#: src/rcv.c:1499
 msgid "server confirmed UTF-8 text encoding for this session\n"
 msgstr "このセッションで UTF-8 テキストエンコーディングをサーバーが確認\n"
 
-#: src/rcv.c:1468
+#: src/rcv.c:1504
 msgid "server confirmed chat-history extension for this session\n"
 msgstr "このセッションでチャット履歴拡張をサーバーが確認\n"
 
-#: src/rcv.c:1473
+#: src/rcv.c:1509
 msgid "server confirmed inline-media extension for this session\n"
 msgstr "このセッションでインラインメディア拡張をサーバーが確認\n"
 
-#: src/rcv.c:1656
+#: src/rcv.c:1692
 msgid "kick successful"
 msgstr "キック成功"
 
@@ -2444,37 +2444,41 @@ msgstr "暗号化なしで接続(_E)"
 msgid "Ca_ncel"
 msgstr "キャンセル(_N)"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:202
+#: rust/crates/gtkhx-ui/src/screen_share.rs:179
 msgid "The screen sharing request failed."
 msgstr "画面共有のリクエストに失敗しました。"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:288
-#: rust/crates/gtkhx-ui/src/screen_share.rs:293
+#: rust/crates/gtkhx-ui/src/screen_share.rs:254
+msgid "The screen sharing request timed out."
+msgstr "画面共有のリクエストがタイムアウトしました。"
+
+#: rust/crates/gtkhx-ui/src/screen_share.rs:350
+#: rust/crates/gtkhx-ui/src/screen_share.rs:355
 msgid "Nothing was chosen to share."
 msgstr "共有する対象が選択されませんでした。"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:376
+#: rust/crates/gtkhx-ui/src/screen_share.rs:445
 msgid "Share your screen?"
 msgstr "画面を共有しますか？"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:378
+#: rust/crates/gtkhx-ui/src/screen_share.rs:447
 msgid ""
 "Everyone in this voice chat who chooses to watch will see your whole screen."
 msgstr "このボイスチャットで視聴を選んだ全員に、画面全体が表示されます。"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:382
+#: rust/crates/gtkhx-ui/src/screen_share.rs:451
 msgid "_Share"
 msgstr "共有(_S)"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:395
+#: rust/crates/gtkhx-ui/src/screen_share.rs:469
 msgid "Couldn't share the screen: %s"
 msgstr "画面を共有できませんでした: %s"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:473
+#: rust/crates/gtkhx-ui/src/screen_share.rs:547
 msgid "You are sharing your screen"
 msgstr "画面を共有中です"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:474
+#: rust/crates/gtkhx-ui/src/screen_share.rs:548
 msgid "Stop Sharing"
 msgstr "共有を停止"
 
@@ -2919,76 +2923,76 @@ msgstr ""
 msgid "No Video"
 msgstr "ビデオなし"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:580
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:581
 msgid "Voice chat requires permission"
 msgstr "ボイスチャットには権限が必要です"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:582
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:583
 msgid "Leave the voice room"
 msgstr "ボイスルームから退出"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:584
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:585
 msgid "Join the voice room for this chat"
 msgstr "このチャットのボイスルームに参加"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:598
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:599
 msgid "Restore your microphone"
 msgstr "マイクのミュートを解除"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:600
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:601
 msgid "Stop sending audio"
 msgstr "音声の送信を停止"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:654
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:658
 msgid "Video chat requires permission"
 msgstr "ビデオチャットには権限が必要です"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:655
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:659
 msgid "Screen sharing requires permission"
 msgstr "画面共有には権限が必要です"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:659
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:663
 msgid "No camera is available"
 msgstr "使用できるカメラがありません"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:660
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:664
 msgid "Screen sharing isn't available on this system"
 msgstr "このシステムでは画面共有を使用できません"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:664
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:668
 msgid "Turn your camera on"
 msgstr "カメラをオンにする"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:665
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:669
 msgid "Turn your camera off"
 msgstr "カメラをオフにする"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:666
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:670
 msgid "Share your screen"
 msgstr "画面を共有"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:667
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:671
 msgid "Stop sharing your screen"
 msgstr "画面の共有を停止"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:801
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:807
 msgid "Voice is already in use in another chat on this connection."
 msgstr "この接続の別のチャットで、すでにボイスを使用中です。"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:803
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:809
 msgid "Voice is already in use on %s."
 msgstr "%s ですでにボイスを使用中です。"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:807
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:813
 msgid "Leave the other voice chat?"
 msgstr "別のボイスチャットから退出しますか？"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:809
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:815
 msgid "_Leave and Join"
 msgstr "退出して参加(_L)"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:857
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:861
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:863
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:867
 msgid "another connection"
 msgstr "別の接続"
 

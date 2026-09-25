@@ -102,12 +102,28 @@ GST_PLUGINS=(
   vpx videoconvertscale videorate app videotestsrc
   wasapi wasapi2 directsound mediafoundation d3d11
 )
+# Plugins whose absence doesn't fail the build but quietly takes a feature
+# away: without vpx or the video capture chain the client just never offers
+# video, and without mulaw or webrtc it can't hold a voice call. The rest are
+# optional or have a fallback. A missing one is a warning, not an error, so a
+# build host without video still produces a usable bundle. (A case, like the
+# macOS script, which has to run under bash 3.2.)
+gst_required_for() {
+  case "$1" in
+    vpx|videoconvertscale|videorate|app) echo video ;;
+    mulaw|webrtc) echo voice ;;
+  esac
+}
 if [ -d "$GST_SRC" ]; then
   echo ">> collecting GStreamer plugins"
   mkdir -p "$GST_DST"
   for p in "${GST_PLUGINS[@]}"; do
     dll="$GST_SRC/libgst${p}.dll"
-    [ -f "$dll" ] && cp "$dll" "$GST_DST/"
+    if [ -f "$dll" ]; then
+      cp "$dll" "$GST_DST/"
+    elif [ -n "$(gst_required_for "$p")" ]; then
+      echo "::warning:: GStreamer plugin '$p' not found — the bundle will run without $(gst_required_for "$p")"
+    fi
   done
   # gst-plugin-scanner is spawned by the registry to introspect plugins on first
   # launch; ship it beside the plugins AND fold it into the dependency closure so

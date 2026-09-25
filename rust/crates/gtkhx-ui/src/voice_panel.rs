@@ -542,7 +542,8 @@ unsafe extern "C" fn speaker_changed_cb(user_data: *mut c_void, uid: u16, is_spe
 }
 
 unsafe extern "C" fn error_cb(_user_data: *mut c_void, text: *const c_char) {
-    if text.is_null() {
+    // A server that refuses without saying why leaves nothing to show.
+    if text.is_null() || unsafe { *text } == 0 {
         return;
     }
     toolbar_show_toast(text);
@@ -629,7 +630,10 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
     ] {
         let access = unsafe { hx_htlc_video_access(htlc, wire) != 0 };
         let source = hxvoice_runtime::video::publish_available(kind);
-        btn.set_sensitive(joined && here && access && source);
+        // While the picker is open the choice is the picker's.
+        let picking =
+            kind == VideoKind::Screen && crate::screen_share::picking(dock::key_for_session(sess));
+        btn.set_sensitive(joined && here && access && source && !picking);
         let state = local(kind);
         let lit = match kind {
             VideoKind::Camera => state == Some(false),
@@ -725,6 +729,8 @@ fn on_screen_toggled(inner: &Rc<PanelInner>) {
             update_button_labels(&i);
         }
     });
+    // Insensitive until the picker answers.
+    update_button_labels(inner);
 }
 
 fn do_refresh(widget: &gtk::Widget, inner: &PanelInner, sess: *mut c_void) {

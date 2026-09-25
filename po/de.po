@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-25 00:41-0700\n"
+"POT-Creation-Date: 2026-09-25 01:22-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: German <misha@nasledov.com>\n"
@@ -135,10 +135,10 @@ msgstr "Umbenennen"
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:88
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:199
 #: rust/crates/gtkhx-ui/src/options_connections.rs:486
-#: rust/crates/gtkhx-ui/src/screen_share.rs:381
+#: rust/crates/gtkhx-ui/src/screen_share.rs:450
 #: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:127
 #: rust/crates/gtkhx-ui/src/useredit.rs:344
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:808
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:814
 msgid "_Cancel"
 msgstr "_Abbrechen"
 
@@ -712,7 +712,7 @@ msgstr ""
 msgid "tracker: %1$s: %2$s\n"
 msgstr "Tracker: %1$s: %2$s\n"
 
-#: src/rcv.c:701
+#: src/rcv.c:737
 #, c-format
 msgid ""
 "Received queue id (%1$d) for xfer ref %2$d\n"
@@ -721,44 +721,44 @@ msgstr ""
 "Warteschlangen-ID (%1$d) für Übertragungsreferenz %2$d empfangen\n"
 "Diese Übertragung gibt es nicht.\n"
 
-#: src/rcv.c:1217
+#: src/rcv.c:1253
 msgid "polite quit\n"
 msgstr "ordnungsgemäße Trennung\n"
 
-#: src/rcv.c:1244
+#: src/rcv.c:1280
 #, c-format
 msgid "unknown header type 0x%08x\n"
 msgstr "unbekannter Header-Typ 0x%08x\n"
 
-#: src/rcv.c:1340
+#: src/rcv.c:1376
 msgid "login"
 msgstr "Anmeldung"
 
-#: src/rcv.c:1343
+#: src/rcv.c:1379
 msgid "failed?"
 msgstr "fehlgeschlagen?"
 
-#: src/rcv.c:1344
+#: src/rcv.c:1380
 msgid "successful"
 msgstr "erfolgreich"
 
-#: src/rcv.c:1458
+#: src/rcv.c:1494
 msgid "server confirmed large-file (64-bit) mode for this session\n"
 msgstr "Server hat den Large-File-Modus (64 Bit) für diese Sitzung bestätigt\n"
 
-#: src/rcv.c:1463
+#: src/rcv.c:1499
 msgid "server confirmed UTF-8 text encoding for this session\n"
 msgstr "Server hat die UTF-8-Textkodierung für diese Sitzung bestätigt\n"
 
-#: src/rcv.c:1468
+#: src/rcv.c:1504
 msgid "server confirmed chat-history extension for this session\n"
 msgstr "Server hat die Chatverlauf-Erweiterung für diese Sitzung bestätigt\n"
 
-#: src/rcv.c:1473
+#: src/rcv.c:1509
 msgid "server confirmed inline-media extension for this session\n"
 msgstr "Server hat die Inline-Medien-Erweiterung für diese Sitzung bestätigt\n"
 
-#: src/rcv.c:1656
+#: src/rcv.c:1692
 msgid "kick successful"
 msgstr "Rauswurf erfolgreich"
 
@@ -2479,39 +2479,43 @@ msgstr "Ohne V_erschlüsselung verbinden"
 msgid "Ca_ncel"
 msgstr "_Abbrechen"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:202
+#: rust/crates/gtkhx-ui/src/screen_share.rs:179
 msgid "The screen sharing request failed."
 msgstr "Die Anfrage zur Bildschirmfreigabe ist fehlgeschlagen."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:288
-#: rust/crates/gtkhx-ui/src/screen_share.rs:293
+#: rust/crates/gtkhx-ui/src/screen_share.rs:254
+msgid "The screen sharing request timed out."
+msgstr "Die Anfrage zur Bildschirmfreigabe hat zu lange gedauert."
+
+#: rust/crates/gtkhx-ui/src/screen_share.rs:350
+#: rust/crates/gtkhx-ui/src/screen_share.rs:355
 msgid "Nothing was chosen to share."
 msgstr "Es wurde nichts zum Freigeben ausgewählt."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:376
+#: rust/crates/gtkhx-ui/src/screen_share.rs:445
 msgid "Share your screen?"
 msgstr "Bildschirm freigeben?"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:378
+#: rust/crates/gtkhx-ui/src/screen_share.rs:447
 msgid ""
 "Everyone in this voice chat who chooses to watch will see your whole screen."
 msgstr ""
 "Alle in diesem Sprachchat, die sich zum Zuschauen entscheiden, sehen Ihren "
 "gesamten Bildschirm."
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:382
+#: rust/crates/gtkhx-ui/src/screen_share.rs:451
 msgid "_Share"
 msgstr "_Freigeben"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:395
+#: rust/crates/gtkhx-ui/src/screen_share.rs:469
 msgid "Couldn't share the screen: %s"
 msgstr "Der Bildschirm konnte nicht freigegeben werden: %s"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:473
+#: rust/crates/gtkhx-ui/src/screen_share.rs:547
 msgid "You are sharing your screen"
 msgstr "Sie geben Ihren Bildschirm frei"
 
-#: rust/crates/gtkhx-ui/src/screen_share.rs:474
+#: rust/crates/gtkhx-ui/src/screen_share.rs:548
 msgid "Stop Sharing"
 msgstr "Freigabe beenden"
 
@@ -2962,78 +2966,78 @@ msgstr ""
 msgid "No Video"
 msgstr "Kein Video"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:580
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:581
 msgid "Voice chat requires permission"
 msgstr "Sprachchat erfordert eine Berechtigung"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:582
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:583
 msgid "Leave the voice room"
 msgstr "Den Sprachraum verlassen"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:584
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:585
 msgid "Join the voice room for this chat"
 msgstr "Dem Sprachraum dieses Chats beitreten"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:598
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:599
 msgid "Restore your microphone"
 msgstr "Mikrofon wieder aktivieren"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:600
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:601
 msgid "Stop sending audio"
 msgstr "Audioübertragung beenden"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:654
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:658
 msgid "Video chat requires permission"
 msgstr "Videochat erfordert eine Berechtigung"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:655
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:659
 msgid "Screen sharing requires permission"
 msgstr "Bildschirmfreigabe erfordert eine Berechtigung"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:659
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:663
 msgid "No camera is available"
 msgstr "Keine Kamera verfügbar"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:660
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:664
 msgid "Screen sharing isn't available on this system"
 msgstr "Bildschirmfreigabe ist auf diesem System nicht verfügbar"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:664
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:668
 msgid "Turn your camera on"
 msgstr "Kamera einschalten"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:665
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:669
 msgid "Turn your camera off"
 msgstr "Kamera ausschalten"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:666
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:670
 msgid "Share your screen"
 msgstr "Bildschirm freigeben"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:667
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:671
 msgid "Stop sharing your screen"
 msgstr "Bildschirmfreigabe beenden"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:801
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:807
 msgid "Voice is already in use in another chat on this connection."
 msgstr ""
 "Der Sprachchat wird auf dieser Verbindung bereits in einem anderen Chat "
 "verwendet."
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:803
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:809
 msgid "Voice is already in use on %s."
 msgstr "Der Sprachchat wird bereits auf %s verwendet."
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:807
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:813
 msgid "Leave the other voice chat?"
 msgstr "Den anderen Sprachchat verlassen?"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:809
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:815
 msgid "_Leave and Join"
 msgstr "Ver_lassen und beitreten"
 
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:857
-#: rust/crates/gtkhx-ui/src/voice_panel.rs:861
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:863
+#: rust/crates/gtkhx-ui/src/voice_panel.rs:867
 msgid "another connection"
 msgstr "einer anderen Verbindung"
 

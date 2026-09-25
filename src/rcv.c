@@ -434,6 +434,31 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
  * and emits one news-post line per chunk via hx_news_post_recv. The dispatch
  * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
+#ifdef HAVE_VOICE
+/* Whether `label` names a voice or video request whose refusal the voice
+ * runtime reports itself. Its state machine turns every one into an Error
+ * signal carrying the server's text, which the voice panel shows, so the
+ * generic toast would say it a second time. */
+static gboolean
+voice_reports_error (const char *label)
+{
+    static const char *const labels[] = {
+        "voice-join", "voice-leave",        "voice-sdp-answer",
+        "voice-mute", "video-start-camera", "video-start-screen",
+        "video-stop", "video-state",        "video-subscribe",
+    };
+    if (!label) {
+        return FALSE;
+    }
+    for (gsize i = 0; i < G_N_ELEMENTS (labels); i++) {
+        if (!strcmp (label, labels[i])) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+#endif /* HAVE_VOICE */
+
 void
 hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
@@ -456,6 +481,17 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
      * — otherwise every login to a server without the extension nags the
      * user about a request they never made. */
     gboolean silent_probe = tsk && tsk->str && !strcmp (tsk->str, "icon-list");
+#ifdef HAVE_VOICE
+    {
+        session *vsess = sess_from_htlc (htlc);
+        if (tsk && vsess && vsess->voice_runtime
+            && voice_reports_error (tsk->str)) {
+            /* Not a probe, but the same treatment: the voice panel
+             * shows this one. */
+            silent_probe = TRUE;
+        }
+    }
+#endif /* HAVE_VOICE */
 
     if (task_inerror (htlc, frame, frame_len)) {
         if (!silent_probe) {

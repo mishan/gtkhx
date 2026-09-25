@@ -154,6 +154,9 @@ pub struct SessionMachine {
     /// The receive set the server was last told (610). Every
     /// participant starts a room with none.
     subscribed: Vec<Stream>,
+    /// The server refused the last 610, so it may hold some other set
+    /// than `subscribed`: send the next one even if it matches.
+    subscribed_stale: bool,
     /// This client's own publications, indexed by
     /// [`VideoKind::index`]: `None` not publishing, `Some(paused)`.
     local_video: [Option<bool>; 2],
@@ -1247,6 +1250,17 @@ impl SessionMachine {
             // JOIN / SDP_ANSWER errors = no voice session. Tear
             // down with the server-supplied text.
             HTLC_HDR_VOICE_JOIN | HTLC_HDR_VOICE_SDP_ANSWER => self.fail(err.text),
+            // A refused 610 leaves the server's receive set unknown. Don't
+            // resend now — a server that refuses the set would be asked
+            // again in a loop — but let the next declaration through even
+            // if it is the same set.
+            HTLC_HDR_VIDEO_SUBSCRIBE => {
+                self.subscribed_stale = true;
+                vec![Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    payload: SignalPayload::Error { text: err.text },
+                }]
+            }
             // MUTE / ICE / LEAVE: surface as toast only, no
             // state change. We could roll mute state back here,
             // but the spec doesn't require it and "mute didn't
@@ -1315,6 +1329,7 @@ impl SessionMachine {
         self.publications.clear();
         self.wanted.clear();
         self.subscribed.clear();
+        self.subscribed_stale = false;
         self.local_video = [None; 2];
         self.local_listed = [false; 2];
     }
@@ -1322,11 +1337,12 @@ impl SessionMachine {
     /// Send the wanted receive set if the server has a different one
     /// and we're in a room that can take it.
     fn flush_subscriptions(&mut self) -> Option<Action> {
-        if !self.in_voice() || self.wanted == self.subscribed {
+        if !self.in_voice() || (self.wanted == self.subscribed && !self.subscribed_stale) {
             return None;
         }
         let cid = self.active_cid?;
         self.subscribed = self.wanted.clone();
+        self.subscribed_stale = false;
         Some(Action::SendWireFrame {
             opcode: HTLC_HDR_VIDEO_SUBSCRIBE,
             body: WireFrameBody(encode_cid_plus_streams(cid, &self.subscribed)),
@@ -3517,6 +3533,38 @@ mod tests {
         // The empty set is a real change: "no video at all".
         let acts = m.step(Event::VideoSubscriptionsWanted { streams: vec![] });
         assert_eq!(wire_frames(&acts), vec![(610, vec![0, 0, 0, 2])]);
+    }
+
+    #[test]
+    fn a_refused_subscription_is_sent_again() {
+        let mut m = connected(2);
+        m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(5)],
+        });
+        let acts = m.step(Event::ServerTaskError(ServerError {
+            origin_opcode: HTLC_HDR_VIDEO_SUBSCRIBE,
+            text: "Not now".into(),
+        }));
+        assert!(wire_frames(&acts).is_empty(), "no retry loop");
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::Error,
+                ..
+            }
+        )));
+        let acts = m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(5)],
+        });
+        assert_eq!(
+            wire_frames(&acts),
+            vec![(610, vec![0, 0, 0, 2, 0, 5, 0, 1])],
+            "the same set goes out again after a refusal"
+        );
+        let acts = m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(5)],
+        });
+        assert!(acts.is_empty(), "and only once");
     }
 
     #[test]
