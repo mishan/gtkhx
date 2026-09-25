@@ -29,12 +29,14 @@ Two design facts shaped everything else.
 GtkHx has two icon pipelines that look similar on screen and have nothing in
 common underneath.
 
-**Chrome / button icons** are PNGs in the GResource under
-`/com/nasledov/gtkhx/pixmaps/` — the small pixel-art glyphs on the toolbar and
-on the Users / Files / News / Tasks / Tracker action buttons, the task-row and
-news-thread row icons, and the file-type icons in the files browser. They are
-16×16 source art, upscaled at runtime with nearest-neighbour to keep the pixels
-crisp. They are GtkHx's own artwork and mean nothing to any server.
+**Chrome / button icons** are the glyphs on the toolbar and pane headers, on
+the Users / Files / News / Tasks / Tracker action buttons, the task-row and
+news-thread row icons, and the file-type icons in the files browser. They come
+in two styles (see "Symbolic and classic icons" below): symbolic icons, found
+by name in the icon theme, and the classic PNGs in the GResource under
+`/com/nasledov/gtkhx/pixmaps/` — 16×16 pixel art, upscaled with
+nearest-neighbour to keep the pixels crisp. Either way they are GtkHx's own
+chrome and mean nothing to any server.
 
 **Hotline user icons** are `cicn` colour icons decoded out of a Mac-classic
 resource fork by `src/cicn.c` — the avatar a user picks in Settings and that
@@ -165,6 +167,44 @@ bracket roles, `system`, `system_bracket`, `highlight`) plus a
 `nick_colors` list that each nick is hashed onto. That gives the chat a
 hierarchy: timestamps and brackets recede, names stand out and tell
 people apart, and the body carries the weight.
+
+### Symbolic and classic icons
+
+The chrome icons have a second, modern style: GNOME's symbolic icons. A
+symbolic icon is drawn in the widget's CSS color, so it follows the theme —
+Neon Doll's purple, Solarized's tones, the accent on a selected row — where
+pixel art is the same colored bitmap everywhere. Symbolic is the default; a
+theme asks for the pixel art with `icons = classic` in `[gtkhx-theme]`, and the
+built-in **Classic** theme does, along with the chat colors GtkHx always had,
+for anyone who wants the nostalgic look.
+
+The choice rides on the theme rather than on a separate setting because the
+two go together: classic icons belong with the classic chat, and a modern
+palette with the modern icons. A user who wants to mix them writes a theme.
+
+`gtkhx_icon_symbolic_name()` (src/gtkhx_icon.c) is the one decision point. Its
+table maps each classic logical name to an icon name:
+
+- **Stock Adwaita names** for anything standard — refresh, trash, up/down,
+  edit, info, the file types. They match the rest of the desktop and follow a
+  user's own icon theme. Only names outside Adwaita's `legacy/` set, which is on
+  its way out.
+- **App-prefixed names** (`com.nasledov.gtkhx-chat-symbolic`, …) for the
+  Hotline vocabulary Adwaita has no icon for: public chat, the user list, news,
+  broadcast. These are vendored in the GResource icon tree from GNOME's CC0
+  icon-development-kit, converted to plain filled paths so GTK versions before
+  4.20 recolor them correctly; `src/icons/README.md` has the provenance and the
+  conversion.
+
+It returns NULL — use the pixmap — when the theme is classic, when the theme
+ships its own PNG for that icon (a theme's glyph wins in either style), or for a
+name with no symbolic counterpart. Every place that shows a chrome icon asks it
+first: the pixmap-button helper, the task rows, the file and news-tree cells
+(per bind, so a theme change reaches rows as they rebind), and
+`gtkhx_icon_image_new()` for one-off images.
+
+Symbolic icons are drawn at 16px times the area's scale factor, the same size
+the pixel art is drawn at, so a theme's `[scale]` means the same in both styles.
 
 ---
 

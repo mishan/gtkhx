@@ -305,6 +305,102 @@ test_no_active_theme_falls_back_to_pixmaps (void)
     g_free (cfg);
 }
 
+/* Under a theme that uses symbolic icons (the default), a chrome icon
+ * resolves to its symbolic name, by logical name or by pixmap path;
+ * one with no symbolic counterpart (the app logo) keeps the pixmap. */
+static void
+test_symbolic_name_maps (void)
+{
+    char *cfg = make_tmp_config_dir ();
+    set_fixture (cfg, NULL);
+    gtkhx_theme_load_from_keyfile (NULL);
+
+    g_assert_cmpstr (gtkhx_icon_symbolic_name ("refresh"), ==,
+                     "view-refresh-symbolic");
+    g_assert_cmpstr (
+        gtkhx_icon_symbolic_name ("/com/nasledov/gtkhx/pixmaps/trash.png"), ==,
+        "user-trash-symbolic");
+    g_assert_cmpstr (gtkhx_icon_symbolic_name ("chat"), ==,
+                     "com.nasledov.gtkhx-chat-symbolic");
+    g_assert_null (gtkhx_icon_symbolic_name ("gtkhx"));
+    g_assert_null (gtkhx_icon_symbolic_name (NULL));
+
+    clear_fixture ();
+    rmrf (cfg);
+    g_free (cfg);
+}
+
+/* A theme with `icons = classic` keeps every pixmap; loading another
+ * theme brings the symbolic set back. */
+static void
+test_symbolic_name_classic_theme (void)
+{
+    char *cfg = make_tmp_config_dir ();
+    GKeyFile *kf = g_key_file_new ();
+
+    set_fixture (cfg, NULL);
+    g_key_file_set_string (kf, "gtkhx-theme", "icons", "classic");
+    gtkhx_theme_load_from_keyfile (kf);
+    gtkhx_icon_invalidate_cache ();
+    g_assert_null (gtkhx_icon_symbolic_name ("refresh"));
+    g_assert_null (gtkhx_icon_symbolic_name ("chat"));
+
+    gtkhx_theme_load_from_keyfile (NULL);
+    gtkhx_icon_invalidate_cache ();
+    g_assert_cmpstr (gtkhx_icon_symbolic_name ("refresh"), ==,
+                     "view-refresh-symbolic");
+
+    g_key_file_free (kf);
+    clear_fixture ();
+    rmrf (cfg);
+    g_free (cfg);
+}
+
+/* A theme that ships its own PNG for an icon keeps that glyph under the
+ * symbolic set too — per icon, so the rest still go symbolic. */
+static void
+test_symbolic_name_yields_to_theme_bundle (void)
+{
+    char *cfg = make_tmp_config_dir ();
+    write_theme_icon (cfg, "mybundle", "refresh.png", 1, 2, 3);
+    set_fixture (cfg, "mybundle");
+    gtkhx_theme_load_from_keyfile (NULL);
+
+    g_assert_null (gtkhx_icon_symbolic_name ("refresh"));
+    g_assert_cmpstr (gtkhx_icon_symbolic_name ("trash"), ==,
+                     "user-trash-symbolic");
+
+    clear_fixture ();
+    rmrf (cfg);
+    g_free (cfg);
+}
+
+/* Every app-prefixed name the resolver hands out has to be in the
+ * GResource icon tree, or GTK draws a missing-image placeholder. */
+static void
+test_vendored_icons_are_bundled (void)
+{
+    static const char *const logicals[]
+        = { "chat", "users", "news", "news_category", "broadcast" };
+    char *cfg = make_tmp_config_dir ();
+    set_fixture (cfg, NULL);
+    gtkhx_theme_load_from_keyfile (NULL);
+
+    for (gsize i = 0; i < G_N_ELEMENTS (logicals); i++) {
+        const char *name = gtkhx_icon_symbolic_name (logicals[i]);
+        g_assert_nonnull (name);
+        g_assert_true (g_str_has_prefix (name, "com.nasledov.gtkhx-"));
+        g_autofree char *res = g_strdup_printf (
+            "/com/nasledov/gtkhx/icons/scalable/actions/%s.svg", name);
+        g_assert_true (g_resources_get_info (res, G_RESOURCE_LOOKUP_FLAGS_NONE,
+                                             NULL, NULL, NULL));
+    }
+
+    clear_fixture ();
+    rmrf (cfg);
+    g_free (cfg);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -329,5 +425,12 @@ main (int argc, char **argv)
                      test_cache_returns_same_pixbuf_until_invalidated);
     g_test_add_func ("/icon-pack/no-active-theme-falls-back-to-pixmaps",
                      test_no_active_theme_falls_back_to_pixmaps);
+    g_test_add_func ("/icon-pack/symbolic-name-maps", test_symbolic_name_maps);
+    g_test_add_func ("/icon-pack/symbolic-name-classic-theme",
+                     test_symbolic_name_classic_theme);
+    g_test_add_func ("/icon-pack/symbolic-name-yields-to-theme-bundle",
+                     test_symbolic_name_yields_to_theme_bundle);
+    g_test_add_func ("/icon-pack/vendored-icons-are-bundled",
+                     test_vendored_icons_are_bundled);
     return g_test_run ();
 }

@@ -131,7 +131,9 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
   `tests/COMPOSE.md` describes the rig; `tests/run.sh` brings it up.
 - `mhxd/` — the reference server's source, vendored for cross-reading only. Not built.
 - `po/` — translations (German, Spanish, French, Portuguese). `sounds/` — chat alert `.wav`s.
-- `src/themes/` — built-in theme files, shipped as GResource.
+- `src/themes/` — built-in theme files, shipped as GResource. `src/icons/` — the
+  vendored app-specific symbolic icons (see its README), beside the classic
+  `src/pixmaps/`.
 - `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting, and
   `screenshot.py` (headless screenshots isolated from the desktop — see `docs/screenshots.md`).
 

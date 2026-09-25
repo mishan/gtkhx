@@ -255,6 +255,15 @@ gtask_make_icon (const char *resource_path)
      * short-lived (xfers complete) so it's not worth the bookkeeping. */
     double scale = gtkhx_theme_scale (GTKHX_SCALE_TASKS_ROW_ICON);
     int px = (int)(GTASK_ICON_SRC_SIZE * scale + 0.5);
+    const char *symbolic = gtkhx_icon_symbolic_name (resource_path);
+
+    /* A theme that uses symbolic icons: the named icon at the same
+     * size, drawn in the row's CSS color. */
+    if (symbolic) {
+        GtkWidget *image = gtk_image_new_from_icon_name (symbolic);
+        gtk_image_set_pixel_size (GTK_IMAGE (image), px);
+        return image;
+    }
 
     /* Route through the icon resolver so the active theme's bundled
      * icons (e.g. $CONFIG/themes/<theme>/icons/download.png) shadow the

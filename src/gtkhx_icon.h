@@ -28,9 +28,13 @@
  * resolver — it's loaded via gdk_pixbuf_new_from_resource directly in
  * about.c.
  *
- * PNG-only in v1. SVG-pack support is a planned follow-up routing
- * through the existing hx-image-decode (glycin) Rust crate — see
- * docs/theming.md.
+ * That is the classic style. Under a theme that uses symbolic icons
+ * (the default), gtkhx_icon_symbolic_name() names the icon to show
+ * instead, and callers ask it first; a theme's own PNG still wins.
+ *
+ * Theme bundles are PNG-only. SVG-pack support is a planned follow-up
+ * routing through the existing hx-image-decode (glycin) Rust crate —
+ * see docs/theming.md.
  *
  * See docs/theming-file-format.md for the theme bundle layout.
  */
@@ -50,6 +54,17 @@ G_BEGIN_DECLS
  * runs the lookup order above. Caller owns the returned reference;
  * g_object_unref when done. NULL on miss. */
 GdkPixbuf *gtkhx_icon_load (const char *name_or_path);
+
+/* The symbolic icon name that stands in for a chrome icon, or NULL
+ * when the classic pixmap should be used instead: the active theme
+ * asks for classic icons, the theme ships its own PNG for this icon,
+ * or the icon has no symbolic counterpart. Takes a logical name or a
+ * pixmap resource path, like gtkhx_icon_load. The string is static.
+ *
+ * Callers that get a name show it with gtk_image_set_from_icon_name
+ * (or gtk_button_set_icon_name): symbolic icons are drawn in the
+ * widget's CSS color, so they follow the theme. */
+const char *gtkhx_icon_symbolic_name (const char *name_or_path);
 
 /* Drop any cached resolved-pixbuf state. Called from the theme
  * "changed" handler in gtkhx.c so a theme switch causes buttons

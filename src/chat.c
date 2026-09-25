@@ -2463,8 +2463,6 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
     struct gtkhx_chat *gchat = gchat_with_cid (sess, hx_chat_cid (chat));
     GtkWidget *user_vbox, *userframe, *topframe, *scroll, *hbuttonbox;
     GtkWidget *msg_btn, *kick_btn, *ban_btn, *info_btn, *igno_btn, *chat_btn;
-    GtkWidget *pix;
-    GdkPixmap *icon;
 
     if (!gchat) {
         return NULL;
@@ -2485,94 +2483,51 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
     gtkhx_refresh_userlist_css (users_font_desc);
 
     msg_btn = gtk_button_new ();
-    icon = (GdkPixmap *)gtkhx_icon_load (
-        "/com/nasledov/gtkhx/pixmaps/message.png");
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (msg_btn, pix);
+    gtkhx_widget_set_child (
+        msg_btn,
+        gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/message.png"));
     g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (msg_btn, _ ("Msg"));
-    /* gtkhx_image_new_from_pixbuf wraps the pixbuf in a texture
-     * that holds its own ref on the pixbuf bytes via the GBytes
-     * free-func — the texture stays valid for the GtkImage's
-     * lifetime independent of our local reference. Drop ours so
-     * the gtkhx_icon_load ref isn't leaked. The if-guard handles
-     * the gtkhx_icon_load-returned-NULL path (g_object_unref isn't
-     * NULL-safe). */
-    if (icon) {
-        g_object_unref (icon);
-    }
-    icon = NULL;
-    pix = NULL;
 
     kick_btn = gtk_button_new ();
-    icon
-        = (GdkPixmap *)gtkhx_icon_load ("/com/nasledov/gtkhx/pixmaps/kick.png");
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (kick_btn, pix);
+    gtkhx_widget_set_child (
+        kick_btn,
+        gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/kick.png"));
     g_signal_connect (kick_btn, "clicked", G_CALLBACK (view_kick_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (kick_btn, _ ("Kick"));
-    if (icon) {
-        g_object_unref (icon);
-    }
-    icon = NULL;
-    pix = NULL;
 
     info_btn = gtk_button_new ();
-    icon
-        = (GdkPixmap *)gtkhx_icon_load ("/com/nasledov/gtkhx/pixmaps/info.png");
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (info_btn, pix);
+    gtkhx_widget_set_child (
+        info_btn,
+        gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/info.png"));
     g_signal_connect (info_btn, "clicked", G_CALLBACK (view_info_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (info_btn, _ ("User Info"));
-    if (icon) {
-        g_object_unref (icon);
-    }
-    icon = NULL;
-    pix = NULL;
 
     ban_btn = gtk_button_new ();
     g_signal_connect (ban_btn, "clicked", G_CALLBACK (view_ban_btn),
                       gchat->userlist);
-    icon = (GdkPixmap *)gtkhx_icon_load ("/com/nasledov/gtkhx/pixmaps/ban.png");
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (ban_btn, pix);
+    gtkhx_widget_set_child (
+        ban_btn, gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/ban.png"));
     gtk_widget_set_tooltip_text (ban_btn, _ ("Ban"));
-    if (icon) {
-        g_object_unref (icon);
-    }
-    icon = NULL;
-    pix = NULL;
 
     chat_btn = gtk_button_new ();
     gtk_widget_set_tooltip_text (chat_btn, _ ("Private Chat"));
     g_signal_connect (chat_btn, "clicked", G_CALLBACK (view_chat_btn),
                       gchat->userlist);
-    icon
-        = (GdkPixmap *)gtkhx_icon_load ("/com/nasledov/gtkhx/pixmaps/chat.png");
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (chat_btn, pix);
-    if (icon) {
-        g_object_unref (icon);
-    }
-    icon = NULL;
-    pix = NULL;
+    gtkhx_widget_set_child (
+        chat_btn,
+        gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/chat.png"));
 
     igno_btn = gtk_button_new ();
     gtk_widget_set_tooltip_text (igno_btn, _ ("Ignore"));
     g_signal_connect (igno_btn, "clicked", G_CALLBACK (view_igno_btn),
                       gchat->userlist);
-    icon = (GdkPixmap *)gtkhx_icon_load (
-        "/com/nasledov/gtkhx/pixmaps/ignore.png");
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (igno_btn, pix);
-    if (icon) {
-        g_object_unref (icon);
-    }
-    icon = NULL;
-    pix = NULL;
+    gtkhx_widget_set_child (
+        igno_btn,
+        gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/ignore.png"));
 
     topframe = gtk_frame_new (0);
     gtk_widget_set_size_request (topframe, -1, 30);

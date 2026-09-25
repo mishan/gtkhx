@@ -636,6 +636,67 @@ test_nick_colors (void)
     g_key_file_free (kf);
 }
 
+/* [gtkhx-theme] icons picks the classic pixmaps; anything else is the
+ * symbolic default, with a warning for a value it doesn't know. */
+static void
+test_icons_key (void)
+{
+    GKeyFile *kf = g_key_file_new ();
+
+    gtkhx_theme_load_from_keyfile (kf);
+    g_assert_false (gtkhx_theme_classic_icons ());
+
+    g_key_file_set_string (kf, "gtkhx-theme", "icons", " Classic ");
+    gtkhx_theme_load_from_keyfile (kf);
+    g_assert_true (gtkhx_theme_classic_icons ());
+
+    g_key_file_set_string (kf, "gtkhx-theme", "icons", "symbolic");
+    gtkhx_theme_load_from_keyfile (kf);
+    g_assert_false (gtkhx_theme_classic_icons ());
+
+    g_key_file_set_string (kf, "gtkhx-theme", "icons", "pixel");
+    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                           "gtkhx_theme: *icons = pixel*");
+    gtkhx_theme_load_from_keyfile (kf);
+    g_test_assert_expected_messages ();
+    g_assert_false (gtkhx_theme_classic_icons ());
+
+    g_key_file_free (kf);
+}
+
+/* A chrome key set to `system` leaves the role to the system theme and
+ * stops derivation too: a theme with chat colors keeps a stock window
+ * (Classic's shape), and a surface derived from `window` goes with it. */
+static void
+test_chrome_system_value (void)
+{
+    GKeyFile *kf = g_key_file_new ();
+    GdkRGBA out;
+    char *css;
+
+    g_key_file_set_string (kf, "palette.dark", "fg", "#cccccc");
+    g_key_file_set_string (kf, "palette.dark", "bg", "#000000");
+    g_key_file_set_string (kf, "chrome.dark", "window", "system");
+    g_key_file_set_string (kf, "chrome.dark", "fg", "system");
+    gtkhx_theme_load_from_keyfile (kf);
+
+    g_assert_false (
+        gtkhx_theme_get_chrome_color (GTKHX_CHROME_WINDOW, TRUE, &out));
+    g_assert_false (
+        gtkhx_theme_get_chrome_color (GTKHX_CHROME_VIEW, TRUE, &out));
+    g_assert_false (
+        gtkhx_theme_get_chrome_color (GTKHX_CHROME_HEADERBAR, TRUE, &out));
+    g_assert_false (gtkhx_theme_get_chrome_color (GTKHX_CHROME_FG, TRUE, &out));
+    css = gtkhx_theme_build_chrome_css (TRUE);
+    g_assert_cmpstr (css, ==, "");
+    g_free (css);
+
+    /* The chat keeps its own colors. */
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, TRUE), 0, 0, 0);
+
+    g_key_file_free (kf);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -664,6 +725,8 @@ main (int argc, char **argv)
     g_test_add_func ("/theme/chrome-palette-needs-pair",
                      test_chrome_palette_needs_pair);
     g_test_add_func ("/theme/chat-roles-derive", test_chat_roles_derive);
+    g_test_add_func ("/theme/icons-key", test_icons_key);
+    g_test_add_func ("/theme/chrome-system-value", test_chrome_system_value);
     g_test_add_func ("/theme/nick-colors", test_nick_colors);
     return g_test_run ();
 }

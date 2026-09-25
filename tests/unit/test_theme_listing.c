@@ -228,7 +228,7 @@ test_skips_unsafe_theme_names (void)
     g_free (dir);
 }
 
-/* The built-in themes (default, neon-doll, solarized) ride on the
+/* The built-in themes (default, classic, neon-doll, solarized) ride on the
  * linked-in GResource and surface through the resource_prefix arg.
  * With an empty user dir, all of them should appear in the sorted
  * output.
@@ -245,9 +245,12 @@ test_built_in_themes_from_resource (void)
     /* Exactly the built-ins we ship. If another ever lands, adjust
      * the count — better to fail loudly than have the test silently
      * drift. */
-    g_assert_cmpint (themes->len, ==, 3);
+    g_assert_cmpint (themes->len, ==, 4);
 
     g_assert_nonnull (entry_named (themes, "default"));
+    GtkhxThemeEntry *c = entry_named (themes, "classic");
+    g_assert_nonnull (c);
+    g_assert_cmpstr (c->display, ==, "Classic");
     GtkhxThemeEntry *s = entry_named (themes, "solarized");
     g_assert_nonnull (s);
     g_assert_cmpstr (s->display, ==, "Solarized");
@@ -259,6 +262,8 @@ test_built_in_themes_from_resource (void)
     GtkhxThemeEntry *e0 = g_ptr_array_index (themes, 0);
     g_assert_cmpstr (e0->name, ==, "default");
     g_assert_cmpstr (((GtkhxThemeEntry *)g_ptr_array_index (themes, 1))->name,
+                     ==, "classic");
+    g_assert_cmpstr (((GtkhxThemeEntry *)g_ptr_array_index (themes, 2))->name,
                      ==, "neon-doll");
 
     g_ptr_array_unref (themes);
@@ -282,7 +287,7 @@ test_user_file_shadows_built_in (void)
         = gtkhx_theme_list_available_at ("/com/nasledov/gtkhx/themes/", dir);
     /* Still one entry per built-in (the user's solarized replaced
      * the shipped one — no duplication). */
-    g_assert_cmpint (themes->len, ==, 3);
+    g_assert_cmpint (themes->len, ==, 4);
 
     GtkhxThemeEntry *s = entry_named (themes, "solarized");
     g_assert_nonnull (s);

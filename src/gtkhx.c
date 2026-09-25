@@ -218,6 +218,19 @@ css_color_or (const GdkRGBA *c, const char *system)
                             (int)(c->blue * 255.0 + 0.5));
 }
 
+/* Whether the list surfaces (tracker, users, tasks, files, news) take the
+ * theme's chat colors: exactly when the theme colors content views. A
+ * theme that leaves its chrome to the system (`view = system`, or no
+ * chat fg/bg at all) keeps its lists stock as well — only the chat is
+ * its own. Independent of the "tint window" preference, which governs
+ * the chrome around the content, not the content. */
+static gboolean
+theme_tints_lists (gboolean dark)
+{
+    GdkRGBA view;
+    return gtkhx_theme_get_chrome_color (GTKHX_CHROME_VIEW, dark, &view);
+}
+
 void
 gtkhx_refresh_css (void)
 {
@@ -306,11 +319,10 @@ gtkhx_refresh_css (void)
      * for, and built-in defaults are tuned for it.
      *
      * The listview-shaped surfaces only get painted when the active
-     * theme has *explicitly* set FG or BG. That gates the "force
-     * chat colors onto sidebar lists" behavior to themes that opted
-     * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
-     * theme that omits FG/BG (the shipped default, post-cleanup)
-     * leaves the listview surfaces at the system theme. */
+     * theme colors content views (theme_tints_lists): Solarized's
+     * palette fg/bg do; a theme that omits them (the shipped default)
+     * or sets `view = system` (Classic, which keeps its black chat to
+     * the chat) leaves the listview surfaces at the system theme. */
     GString *css_buf = g_string_new (NULL);
     /* Window chrome first: the theme's overrides of libadwaita's named
      * colors, so the header bar, pane headers and popovers sit in the
@@ -335,8 +347,7 @@ gtkhx_refresh_css (void)
                             "}",
                             fontprops, fghex, bghex, fghex, fghex, bghex,
                             fghex);
-    if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
-        || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+    if (theme_tints_lists (dark)) {
         /* Row selectors carry :not(:hover):not(:active) so the
          * system theme's hover overlay and click-feedback rules
          * still win for those pseudo-classes — without that
@@ -407,8 +418,7 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
      * keeps the system accent. */
     GString *css_buf = g_string_new (NULL);
     g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
-    if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
-        || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+    if (theme_tints_lists (dark)) {
         /* :not(:hover):not(:active) so the system theme's hover
          * overlay + click feedback still paint over our theme bg.
          * Same reasoning as the .gtkhx-listview rule in

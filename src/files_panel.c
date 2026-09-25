@@ -885,11 +885,22 @@ name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
         return;
     }
 
-    paintable = lookup_icon_paintable (p, hx_file_entry_get_icon_id (e));
-    if (paintable) {
-        gtk_image_set_from_paintable (icon, paintable);
-    } else {
-        gtk_image_clear (icon);
+    /* The symbolic icon when the theme uses them — asked per bind, so a
+     * theme change reaches rows as they rebind — else the cached
+     * pixmap. An id without an icon of its own is a plain file. */
+    {
+        const char *resource
+            = icon_resource_for_id (hx_file_entry_get_icon_id (e));
+        const char *symbolic = gtkhx_icon_symbolic_name (
+            resource ? resource : icon_resource_for_id (ICON_FILE));
+        if (symbolic) {
+            gtk_image_set_from_icon_name (icon, symbolic);
+        } else if ((paintable = lookup_icon_paintable (
+                        p, hx_file_entry_get_icon_id (e)))) {
+            gtk_image_set_from_paintable (icon, paintable);
+        } else {
+            gtk_image_clear (icon);
+        }
     }
 
     /* If a rebind lands while the user is mid-edit on this widget,

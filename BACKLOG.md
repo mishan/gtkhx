@@ -75,6 +75,20 @@ record.
   `voice_rejoin_media` asserts that every answer declares the send SSRC, so a
   slow audio source would fail that assertion rather than hang.
 
+## UI and theming
+
+- **Hand-review the symbolic icon picks (Misha).** The mapping from each classic
+  pixmap to its symbolic stand-in (`symbolic_icons[]` in `src/gtkhx_icon.c`) was
+  chosen by searching Adwaita's symbolic set and the icon-development-kit, not by
+  browsing them. Go through both — the Icon Library app is the easiest way — and
+  swap in anything that fits a button better. The weakest current matches:
+  kick (`system-log-out`), tasks (`view-list`), message (`mail-unread`), post
+  news (`mail-message-new`), news posts (`text-x-generic`), the drop box and
+  download (both `folder-download`), upload (`document-send`), disk images
+  (`media-optical`), and HTML files (`text-x-generic`; Adwaita has no symbolic
+  HTML icon). A kit icon has to be converted to filled paths before it's
+  vendored — see `src/icons/README.md`.
+
 ## Tests and rig
 
 - The pause check in `video_media` stops at "frames stop arriving". It never

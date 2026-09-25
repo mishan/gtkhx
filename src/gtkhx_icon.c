@@ -54,11 +54,17 @@ extern const char *gtkhx_config_dir (void);
  * the first load. */
 static GHashTable *icon_cache;
 
+/* See gtkhx_icon_symbolic_name. */
+static GHashTable *symbolic_cache;
+
 void
 gtkhx_icon_invalidate_cache (void)
 {
     if (icon_cache) {
         g_hash_table_remove_all (icon_cache);
+    }
+    if (symbolic_cache) {
+        g_hash_table_remove_all (symbolic_cache);
     }
 }
 
@@ -197,4 +203,141 @@ gtkhx_icon_load (const char *name_or_path)
     }
     g_free (logical);
     return pb;
+}
+
+/* ---- Symbolic icons ----------------------------------------------------
+ *
+ * The icon each classic pixmap stands for under a theme that uses the
+ * symbolic set. Standard actions use stock icon names, so they match the
+ * rest of the desktop and follow a user's own icon theme; the Hotline
+ * vocabulary Adwaita has no icon for (chat, the user list, news,
+ * broadcast) is vendored under the app's own prefix in the GResource
+ * icon tree — see src/icons/README.md.
+ *
+ * Only non-legacy Adwaita names: the icon theme's legacy/ set is on its
+ * way out. A logical name missing here keeps its classic pixmap. */
+#define APP_ICON(n) "com.nasledov.gtkhx-" n "-symbolic"
+
+static const struct {
+    const char *logical;
+    const char *icon;
+} symbolic_icons[] = {
+    /* Windows and panels */
+    { "chat", APP_ICON ("chat") },
+    { "users", APP_ICON ("users") },
+    { "news", APP_ICON ("news") },
+    { "news_folder", "folder-symbolic" },
+    { "files", "folder-remote-symbolic" },
+    { "tasks", "view-list-symbolic" },
+    { "tracker", "network-workgroup-symbolic" },
+    { "broadcast", APP_ICON ("broadcast") },
+    { "connect", "network-transmit-receive-symbolic" },
+    { "options", "preferences-system-symbolic" },
+    { "quit", "application-exit-symbolic" },
+    /* People */
+    { "message", "mail-unread-symbolic" },
+    { "info", "help-about-symbolic" },
+    { "kick", "system-log-out-symbolic" },
+    { "ban", "action-unavailable-symbolic" },
+    { "ignore", "view-conceal-symbolic" },
+    { "edit_user", "document-edit-symbolic" },
+    { "new_user", "contact-new-symbolic" },
+    /* Files and transfers */
+    { "refresh", "view-refresh-symbolic" },
+    { "mkdir", "folder-new-symbolic" },
+    { "preview", "view-reveal-symbolic" },
+    { "pencil", "document-edit-symbolic" },
+    { "trash", "user-trash-symbolic" },
+    { "move", "edit-cut-symbolic" },
+    { "download", "folder-download-symbolic" },
+    { "upload", "document-send-symbolic" },
+    { "start", "media-playback-start-symbolic" },
+    { "up", "go-up-symbolic" },
+    { "down", "go-down-symbolic" },
+    /* News */
+    { "news_category", APP_ICON ("news") },
+    { "news_post", "text-x-generic-symbolic" },
+    { "post_news", "mail-message-new-symbolic" },
+    /* File types */
+    { "folder", "folder-symbolic" },
+    { "folder_dropbox", "folder-download-symbolic" },
+    { "file", "text-x-generic-symbolic" },
+    { "file_text", "text-x-generic-symbolic" },
+    { "file_note", "x-office-document-symbolic" },
+    { "file_html", "text-x-generic-symbolic" },
+    { "file_image", "image-x-generic-symbolic" },
+    { "file_movie", "video-x-generic-symbolic" },
+    { "file_app", "application-x-executable-symbolic" },
+    { "file_sit", "package-x-generic-symbolic" },
+    { "file_zip", "package-x-generic-symbolic" },
+    { "file_disk", "media-optical-symbolic" },
+    { "file_alias", "insert-link-symbolic" },
+    { "file_move", "edit-cut-symbolic" },
+};
+
+#undef APP_ICON
+
+/* Does the active theme ship its own PNG for this icon? A theme's own
+ * glyph wins in either icon style — that is what the icons/ bundle is
+ * for. Checked for existence only; gtkhx_icon_load decodes. */
+static gboolean
+theme_bundles (const char *theme, const char *logical)
+{
+    if (strchr (theme, '/') || strchr (theme, '\\')) {
+        return FALSE;
+    }
+    g_autofree char *path = g_strdup_printf (
+        "%s/%s/%s/%s/%s.png", gtkhx_config_dir (), GTKHX_ICON_THEME_SUBDIR,
+        theme, GTKHX_ICON_ICONS_SUBDIR, logical);
+    if (g_file_test (path, G_FILE_TEST_IS_REGULAR)) {
+        return TRUE;
+    }
+    g_autofree char *res
+        = g_strdup_printf ("%s%s/%s/%s.png", GTKHX_ICON_THEME_PREFIX, theme,
+                           GTKHX_ICON_ICONS_SUBDIR, logical);
+    return g_resources_get_info (res, G_RESOURCE_LOOKUP_FLAGS_NONE, NULL, NULL,
+                                 NULL);
+}
+
+/* symbolic_cache (declared with icon_cache above): "<theme>/<logical>"
+ * → the answer, a static icon name or "" for "use the pixmap". Cells
+ * ask on every bind, and the bundle check touches the filesystem, so
+ * answers are kept until the next theme change. */
+
+const char *
+gtkhx_icon_symbolic_name (const char *name_or_path)
+{
+    const char *icon = NULL;
+    const char *theme;
+    gsize i;
+
+    if (!name_or_path || gtkhx_theme_classic_icons ()) {
+        return NULL;
+    }
+    g_autofree char *logical = basename_no_png (name_or_path);
+    theme = active_theme ();
+    g_autofree char *key = g_strdup_printf ("%s/%s", theme, logical);
+
+    if (symbolic_cache) {
+        const char *cached = g_hash_table_lookup (symbolic_cache, key);
+        if (cached) {
+            return *cached ? cached : NULL;
+        }
+    } else {
+        symbolic_cache
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    }
+
+    for (i = 0; i < G_N_ELEMENTS (symbolic_icons); i++) {
+        if (strcmp (symbolic_icons[i].logical, logical) == 0) {
+            icon = symbolic_icons[i].icon;
+            break;
+        }
+    }
+    if (icon && theme_bundles (theme, logical)) {
+        icon = NULL;
+    }
+    g_hash_table_insert (symbolic_cache, g_steal_pointer (&key),
+                         (gpointer)(icon ? icon : ""));
+    return icon;
 }
