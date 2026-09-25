@@ -308,6 +308,7 @@ field_table! {
 
     "voice.input_device"            => text,     voice.input_device;
     "voice.output_device"           => text,     voice.output_device;
+    "voice.camera_device"           => text,     voice.camera_device;
     "voice.ptt_enabled"             => flag,     voice.ptt_enabled;
     "voice.ptt_key"                 => text,     voice.ptt_key;
 

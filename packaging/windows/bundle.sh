@@ -92,12 +92,15 @@ GST_DST="$LIB/gstreamer-1.0"
 # is the PCMU codec the servers negotiate — without it VoiceRuntime::new fails to
 # build the send bin and the client leaves the room the instant it joins.
 # audiotestsrc is the silence/fallback source autoaudiosrc drops to when there's
-# no capture device.
+# no capture device. Video adds vpx (VP8), videoconvertscale/videorate for the
+# capture chain, app for the frame sinks, videotestsrc for the test hook,
+# mediafoundation for cameras and d3d11 for screen capture.
 GST_PLUGINS=(
   coreelements playback autodetect typefindfunctions
   audioconvert audioresample audiomixer volume level audiotestsrc
   opus mulaw rtp rtpmanager srtp dtls sctp webrtc webrtcnice nice
-  wasapi wasapi2 directsound
+  vpx videoconvertscale videorate app videotestsrc
+  wasapi wasapi2 directsound mediafoundation d3d11
 )
 if [ -d "$GST_SRC" ]; then
   echo ">> collecting GStreamer plugins"

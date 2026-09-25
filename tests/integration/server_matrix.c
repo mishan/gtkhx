@@ -142,6 +142,29 @@ const hx_test_server hx_test_server_matrix[] = {
                         * See docs/inline-media.md. */
                 | HX_TEST_CAP_INLINE_MEDIA,
     },
+    {
+        /* hxd-ng: the only server implementing the video extension
+         * (capabilities-video.md), and a voice SFU of its own —
+         * ICE-lite, str0m underneath. Built from source at a pinned
+         * revision (tests/hxd-ng/Dockerfile) and run on the host
+         * network like the rest of the rig. Its entrypoint advertises
+         * the host's IPv4 address at 5524, not loopback: libnice never
+         * gathers a loopback candidate to pair with one.
+         *
+         * It sits after Janus on purpose: the voice tests take the
+         * first VOICE row, and stay on Janus; the video tests filter
+         * on VIDEO and land here. The caps list only what the rig's
+         * config turns on and a test here relies on. */
+        .name = "hxd-ng",
+        .host = "127.0.0.1",
+        .port = 5520,
+        .xfer_port = 5521,
+        .tls_port = 0,
+        .tls_xfer_port = 0,
+        .voice_port = 5524,
+        .hl_version = 185,
+        .caps = HX_TEST_CAP_VOICE | HX_TEST_CAP_VIDEO,
+    },
 };
 
 const gsize hx_test_server_matrix_count = G_N_ELEMENTS (hx_test_server_matrix);

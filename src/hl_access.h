@@ -122,7 +122,17 @@
  *         "Access Privileges" section. */
 #define HL_ACCESS_READ_CHAT_HISTORY 56
 
-/* Bits 57-63: reserved. */
+/* Video extension (hxd-ng docs/capabilities-video.md). Bit 57 is
+ * inline media's send bit and 58 messaging's; video takes the next two.
+ * A camera and a screen share are separate trust decisions — a shared
+ * desktop can leak what a face can't — so each has its own bit, and
+ * neither implies the other. As with voice, the capability echo decides
+ * whether the control shows at all and the bit whether it is enabled.
+ * Receiving video needs no bit. */
+#define HL_ACCESS_VIDEO_CHAT 59
+#define HL_ACCESS_SCREEN_SHARE 60
+
+/* Bits 61-63: reserved. */
 
 /* ---- Accessor -------------------------------------------------- */
 

@@ -2317,6 +2317,43 @@ test('folder_roundtrip', test_integration_folder_roundtrip,
 # voice_port fields) stays compiled regardless — only these
 # end-to-end binaries are gated.
 if voice_enabled
+# Video rides voice, so its tests live inside the voice gate too. The
+# control-channel set needs no WebRTC stack; the media test drives two
+# real runtimes. Both target hxd-ng (HX_TEST_CAP_VIDEO), the only server
+# with the extension.
+test_integration_video_control = executable(
+  'test_integration_video_control',
+  'integration/test_video_control.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+  link_depends        : rust_build,
+)
+test('video_control', test_integration_video_control,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 90)
+
+test_integration_video_media = executable(
+  'test_integration_video_media',
+  'integration/test_video_media.c',
+  dependencies        : proto_test_deps + [
+    rust_hxvoice_runtime_dep,
+    gstreamer_dep,
+    gstreamer_app_dep,
+    gstreamer_audio_dep,
+    gstreamer_sdp_dep,
+    gstreamer_webrtc_dep,
+  ],
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+  link_depends        : rust_build,
+)
+test('video_media', test_integration_video_media,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 180)
+
 test_integration_voice_join = executable('test_integration_voice_join',
   'integration/test_voice_join.c',
   dependencies        : proto_test_deps,

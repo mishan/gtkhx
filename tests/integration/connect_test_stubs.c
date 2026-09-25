@@ -443,6 +443,16 @@ gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
     (void)rt;
 }
 
+/* network.c asks whether VP8 decode is installed before advertising the
+ * video capability. These binaries don't link hxvoice-runtime and test no
+ * video, so the answer is no: the LOGIN they send carries voice alone. */
+extern int gtkhx_voice_video_receive_available (void);
+int
+gtkhx_voice_video_receive_available (void)
+{
+    return 0;
+}
+
 /* hx_htlc_close sweeps this connection's in-flight transfers on disconnect.
  * The registry lives in hxhandlers, which these binaries don't link — and they
  * start no transfers, so there is nothing to sweep. */

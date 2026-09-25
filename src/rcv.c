@@ -484,8 +484,35 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
             opcode = HTLC_HDR_VOICE_SDP_ANSWER;
         } else if (!strcmp (tsk->str, "voice-mute")) {
             opcode = HTLC_HDR_VOICE_MUTE;
+        } else if (!strcmp (tsk->str, "video-stop")) {
+            opcode = HTLC_HDR_VIDEO_STOP;
+        } else if (!strcmp (tsk->str, "video-state")) {
+            opcode = HTLC_HDR_VIDEO_STATE;
+        } else if (!strcmp (tsk->str, "video-subscribe")) {
+            opcode = HTLC_HDR_VIDEO_SUBSCRIBE;
         }
-        if (opcode && sess->voice_runtime) {
+        /* A refused Video Start names its kind in the task label: the
+         * state machine has to end that publication and no other. */
+        guint16 start_kind = 0;
+        if (!strcmp (tsk->str, "video-start-camera")) {
+            start_kind = HX_VIDEO_KIND_CAMERA;
+        } else if (!strcmp (tsk->str, "video-start-screen")) {
+            start_kind = HX_VIDEO_KIND_SCREEN;
+        }
+        if (start_kind && sess && sess->voice_runtime) {
+            char err_text[256];
+            gsize err_len = 0;
+            const char *text = (task_error_extract (frame, frame_len, err_text,
+                                                    sizeof (err_text), &err_len)
+                                && err_len > 0)
+                                   ? err_text
+                                   : NULL;
+            /* send_video stores the room id in the task's data. */
+            gtkhx_voice_runtime_video_start_failed (
+                sess->voice_runtime, GPOINTER_TO_UINT (tsk->data), start_kind,
+                text);
+        }
+        if (opcode && sess && sess->voice_runtime) {
             char err_text[256];
             gsize err_len = 0;
             const char *text = (task_error_extract (frame, frame_len, err_text,
@@ -935,6 +962,40 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame,
     }
 }
 
+/* Video Status (611): the room's complete publication list, replacing
+ * whatever was known. It goes to the runtime, which owns what the video
+ * panel shows and what this client subscribes to, and to the voice
+ * model, which marks publishers in the user list whether or not anyone
+ * is watching them. */
+void
+hx_rcv_video_status (struct htlc_conn *htlc, const guint8 *frame,
+                     gsize frame_len)
+{
+    struct gtkhx_proto_video_reply r;
+    gtkhx_proto_parse_video_reply (frame, frame_len, &r);
+    debug_log ("voice", "← VIDEO_STATUS cid=%u publishers=%zu", r.cid,
+               r.publishers_len / 8);
+
+    session *sess = sess_from_htlc (htlc);
+    if (!sess) {
+        return;
+    }
+    if (sess->voice_runtime) {
+        gtkhx_voice_runtime_video_status (sess->voice_runtime, r.cid,
+                                          r.publishers_ptr, r.publishers_len);
+    }
+    /* The user list shows the room this client is in. A 611 that races
+     * a leave or a room switch would put stale flags back after the
+     * model was cleared, and no later 611 would take them down. */
+    uint32_t active_cid = 0;
+    if (sess->voice_model && sess->voice_runtime
+        && gtkhx_voice_runtime_active_cid (sess->voice_runtime, &active_cid)
+        && active_cid == r.cid) {
+        hx_voice_model_ingest_video_publishers (
+            sess->voice_model, r.publishers_ptr, r.publishers_len);
+    }
+}
+
 /* ---- Voice TASK reply handlers (client-initiated 600/601/603/606) -- */
 /*
  * The voice send wrappers in src/voice.c register one of these via
@@ -1169,6 +1230,9 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     case HX_RECV_VOICE_ROOM_STATUS:
         handler = hx_rcv_voice_room_status;
         break;
+    case HX_RECV_VIDEO_STATUS:
+        handler = hx_rcv_video_status;
+        break;
 #endif /* HAVE_VOICE */
     case HX_RECV_ICON_CHANGE:
         handler = hx_rcv_icon_change;
@@ -1342,6 +1406,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
          * htlc->caps is overwritten outright by the chunk
          * walker; these can't piggyback on that. */
         inline_media_reset_advisory_limits (htlc);
+        hx_conn_reset_video_limits (htlc);
 
         /* The LOGIN reply chunk-walk moved to the Rust hxproto crate
          * (gtkhx_proto_parse_login). It enforces the same per-field width
@@ -1407,6 +1472,37 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                 hx_printf_prefix (htlc, 0, INFOPREFIX,
                                   _ ("server confirmed inline-media extension "
                                      "for this session\n"));
+            }
+        }
+        /* Video ceilings, one field per kind the server supports. Kept
+         * on the connection and handed to the voice runtime when it is
+         * built (or now, if it already exists), so the encoder starts
+         * inside them rather than learning them by rejection. */
+        {
+            static const struct {
+                unsigned seen;
+                guint16 kind;
+            } video_kinds[] = {
+                { HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS, HX_VIDEO_KIND_CAMERA },
+                { HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS, HX_VIDEO_KIND_SCREEN },
+            };
+            for (gsize i = 0; i < G_N_ELEMENTS (video_kinds); i++) {
+                if (!(login_seen & video_kinds[i].seen)) {
+                    continue;
+                }
+                const struct gtkhx_proto_login_video_limits *vl
+                    = &li.video_limits[video_kinds[i].kind - 1];
+                hx_conn_set_video_limits (htlc, video_kinds[i].kind,
+                                          vl->max_width, vl->max_height,
+                                          vl->max_fps, vl->max_bitrate);
+#ifdef HAVE_VOICE
+                session *vs = sess_from_htlc (htlc);
+                if (vs && vs->voice_runtime) {
+                    gtkhx_voice_runtime_set_video_limits (
+                        vs->voice_runtime, video_kinds[i].kind, vl->max_width,
+                        vl->max_height, vl->max_fps, vl->max_bitrate);
+                }
+#endif
             }
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_BYTES) {

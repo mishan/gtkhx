@@ -45,6 +45,10 @@ use crate::voice_arbiter;
 const HTLC_HDR_VOICE_LEAVE: u32 = 0x0000_0259;
 const HTLC_HDR_VOICE_SDP_ANSWER: u32 = 0x0000_025b;
 const HTLC_HDR_VOICE_ICE: u32 = 0x0000_025c;
+const HTLC_HDR_VIDEO_START: u32 = 0x0000_025f;
+const HTLC_HDR_VIDEO_STOP: u32 = 0x0000_0260;
+const HTLC_HDR_VIDEO_STATE: u32 = 0x0000_0261;
+const HTLC_HDR_VIDEO_SUBSCRIBE: u32 = 0x0000_0262;
 
 const STATE_JOIN_SENT: c_int = 1;
 const STATE_OFFER_PENDING: c_int = 2;
@@ -63,6 +67,17 @@ const STATE_KEY: &str = "voice-panel-state";
 // ---------------------------------------------------------------------
 
 type SendWireFrameCb = unsafe extern "C" fn(*mut c_void, u32, *const u8, usize);
+
+/// `#[repr(C)]` mirror of `struct hx_video_limits` (hotline.h).
+#[repr(C)]
+#[derive(Default)]
+struct VideoLimits {
+    max_width: u16,
+    max_height: u16,
+    max_fps: u16,
+    present: u16,
+    max_bitrate: u32,
+}
 
 /// `#[repr(C)]` mirror of `gtkhx_voice_runtime_signal_callbacks`. Field order
 /// pinned by voice_runtime.h; read once at construction.
@@ -94,6 +109,33 @@ extern "C" {
         htlc: *mut c_void,
         cid: u32,
         muted: glib::ffi::gboolean,
+    ) -> glib::ffi::gboolean;
+    fn hx_send_video_start(htlc: *mut c_void, cid: u32, kind: u16) -> glib::ffi::gboolean;
+    fn hx_send_video_stop(htlc: *mut c_void, cid: u32, kind: u16) -> glib::ffi::gboolean;
+    fn hx_send_video_state(
+        htlc: *mut c_void,
+        cid: u32,
+        kind: u16,
+        paused: glib::ffi::gboolean,
+    ) -> glib::ffi::gboolean;
+    fn hx_send_video_subscribe(
+        htlc: *mut c_void,
+        cid: u32,
+        streams: *const u8,
+        len: usize,
+    ) -> glib::ffi::gboolean;
+    fn gtkhx_voice_runtime_set_video_limits(
+        rt: *mut c_void,
+        kind: u16,
+        max_width: u16,
+        max_height: u16,
+        max_fps: u16,
+        max_bitrate: u32,
+    );
+    fn hx_htlc_video_limits(
+        htlc: *mut c_void,
+        kind: u16,
+        out: *mut VideoLimits,
     ) -> glib::ffi::gboolean;
 
     // hxvoice-runtime — per-session runtime.
@@ -137,6 +179,8 @@ extern "C" {
     fn hx_conn_serverhost(htlc: *mut c_void) -> *const c_char;
     fn hx_htlc_voice_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
     fn hx_htlc_voice_access(htlc: *mut c_void) -> glib::ffi::gboolean;
+    fn hx_htlc_video_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
+    fn hx_htlc_video_access(htlc: *mut c_void, kind: u16) -> glib::ffi::gboolean;
     fn hx_htlc_uid(htlc: *mut c_void) -> u16;
 
     // existing app symbols.
@@ -160,6 +204,12 @@ struct PanelInner {
     cid: u32,
     join_btn: gtk::ToggleButton,
     mute_btn: gtk::ToggleButton,
+    /// Camera on/off. Off is a pause — the spec's advice for a toggle,
+    /// since it keeps the slot and costs no renegotiation. Hidden unless
+    /// the server confirmed video.
+    cam_btn: gtk::ToggleButton,
+    /// Share / stop sharing the screen. Stop releases the room's slot.
+    screen_btn: gtk::ToggleButton,
     joined: Cell<bool>,
     muted: Cell<bool>,
     /// Re-entrancy guard so a programmatic set_active inside our handler
@@ -235,10 +285,62 @@ unsafe fn ensure_voice_runtime(sess: *mut c_void) -> *mut c_void {
         // runtime belongs to one connection and keeps talking while the user
         // looks elsewhere. The fourth, `error_cb`, ignores it on purpose: a
         // toast is app-global chrome with nowhere per-connection to go.
-        rt = gtkhx_voice_runtime_new_v2(hx_session_htlc(sess), send_wire_frame_cb, &signals);
+        let htlc = hx_session_htlc(sess);
+        rt = gtkhx_voice_runtime_new_v2(htlc, send_wire_frame_cb, &signals);
         hx_session_set_voice_runtime(sess, rt);
+        // The login reply's video ceilings arrived before any runtime
+        // existed; hand them over now so the first capture starts inside
+        // them. rcv.c updates a live runtime directly.
+        if !rt.is_null() {
+            watch_video(sess);
+            for kind in [1u16, 2] {
+                let mut l = VideoLimits::default();
+                if hx_htlc_video_limits(htlc, kind, &mut l) != 0 {
+                    gtkhx_voice_runtime_set_video_limits(
+                        rt,
+                        kind,
+                        l.max_width,
+                        l.max_height,
+                        l.max_fps,
+                        l.max_bitrate,
+                    );
+                }
+            }
+            crate::video_panel::video_panel_refresh_all(sess);
+        }
     }
     rt
+}
+
+/// Keep this connection's voice panels' video buttons, and the screen
+/// share indicator, in step with the runtime: a publication can end
+/// without a click — a refused start, a failed capture, a leave.
+unsafe fn watch_video(sess: *mut c_void) {
+    let Some(rt) = crate::video_panel::runtime(sess) else {
+        return;
+    };
+    let conn = dock::key_for_session(sess);
+    rt.add_video_observer(Box::new(move |rt, notice| {
+        use hxvoice_runtime::runtime::VideoNotice;
+        match notice {
+            VideoNotice::Local(_) | VideoNotice::Session(_) => {
+                if rt
+                    .video_local(hxvoice_runtime::hxvoice::VideoKind::Screen)
+                    .is_none()
+                    && crate::screen_share::sharing(conn)
+                {
+                    crate::screen_share::ended(conn);
+                }
+                for_each_panel(|_w, inner| {
+                    if inner.conn == conn {
+                        update_button_labels(inner);
+                    }
+                });
+            }
+            _ => {}
+        }
+        true
+    }));
 }
 
 /// Bridge `Action::SendWireFrame` → the C `hx_send_voice_*` helpers.
@@ -292,6 +394,35 @@ unsafe extern "C" fn send_wire_frame_cb(
             let sent = hx_send_voice_leave(htlc, cid);
             if sent == 0 {
                 glib::g_debug!("gtkhx", "voice bridge: leave FAILED cid={cid}");
+            }
+        }
+        // Video control: the state machine owns when these go out, so
+        // unlike JOIN / MUTE they are always sent from here. Each body is
+        // the cid, then the kind (607 / 608), the kind and the paused word
+        // (609), or the packed four-byte subscription entries (610).
+        HTLC_HDR_VIDEO_START | HTLC_HDR_VIDEO_STOP if payload.len() >= 2 => {
+            let kind = u16::from_be_bytes([payload[0], payload[1]]);
+            let sent = if opcode == HTLC_HDR_VIDEO_START {
+                hx_send_video_start(htlc, cid, kind)
+            } else {
+                hx_send_video_stop(htlc, cid, kind)
+            };
+            if sent == 0 {
+                glib::g_debug!("gtkhx", "video bridge: {opcode} FAILED cid={cid}");
+            }
+        }
+        HTLC_HDR_VIDEO_STATE if payload.len() >= 4 => {
+            let kind = u16::from_be_bytes([payload[0], payload[1]]);
+            let paused = u16::from_be_bytes([payload[2], payload[3]]) != 0;
+            if hx_send_video_state(htlc, cid, kind, gbool(paused)) == 0 {
+                glib::g_debug!("gtkhx", "video bridge: state FAILED cid={cid}");
+            }
+        }
+        HTLC_HDR_VIDEO_SUBSCRIBE => {
+            // Bound first for the same reason as LEAVE above.
+            let sent = hx_send_video_subscribe(htlc, cid, payload.as_ptr(), payload.len());
+            if sent == 0 {
+                glib::g_debug!("gtkhx", "video bridge: subscribe FAILED cid={cid}");
             }
         }
         // 600 JOIN / 606 MUTE handled by the UI click handlers; other opcodes
@@ -471,6 +602,129 @@ fn update_button_labels(inner: &PanelInner) {
     inner.suppress.set(true);
     inner.mute_btn.set_active(muted);
     inner.suppress.set(false);
+
+    update_video_buttons(inner, joined);
+}
+
+/// The camera and screen buttons: shown when the server confirmed video,
+/// enabled while in voice in *this* panel's room with the account's bit
+/// and an installed source, lit while publishing.
+fn update_video_buttons(inner: &PanelInner, joined: bool) {
+    use hxvoice_runtime::hxvoice::VideoKind;
+    let sess = inner.sess();
+    let htlc = unsafe { hx_session_htlc(sess) };
+    let video = unsafe { hx_htlc_video_cap(htlc) != 0 };
+    inner.cam_btn.set_visible(video);
+    inner.screen_btn.set_visible(video);
+    if !video {
+        return;
+    }
+    let rt = unsafe { crate::video_panel::runtime(sess) };
+    let here = rt.and_then(|r| r.active_cid()) == Some(inner.cid);
+    let local = |k| rt.filter(|_| here).and_then(|r| r.video_local(k));
+
+    for (btn, kind, wire) in [
+        (&inner.cam_btn, VideoKind::Camera, 1u16),
+        (&inner.screen_btn, VideoKind::Screen, 2u16),
+    ] {
+        let access = unsafe { hx_htlc_video_access(htlc, wire) != 0 };
+        let source = hxvoice_runtime::video::publish_available(kind);
+        btn.set_sensitive(joined && here && access && source);
+        let state = local(kind);
+        let lit = match kind {
+            VideoKind::Camera => state == Some(false),
+            VideoKind::Screen => state.is_some(),
+        };
+        let (on, off) = match kind {
+            VideoKind::Camera => ("camera-video-symbolic", "camera-disabled-symbolic"),
+            VideoKind::Screen => ("screen-shared-symbolic", "video-display-symbolic"),
+        };
+        btn.set_icon_name(if lit { on } else { off });
+        if kind == VideoKind::Screen {
+            // The indicator the spec requires is the banner; this is the
+            // button's half of it.
+            if lit {
+                btn.add_css_class("destructive-action");
+            } else {
+                btn.remove_css_class("destructive-action");
+            }
+        }
+        btn.set_tooltip_text(Some(&if !access {
+            match kind {
+                VideoKind::Camera => tr("Video chat requires permission"),
+                VideoKind::Screen => tr("Screen sharing requires permission"),
+            }
+        } else if !source {
+            match kind {
+                VideoKind::Camera => tr("No camera is available"),
+                VideoKind::Screen => tr("Screen sharing isn't available on this system"),
+            }
+        } else {
+            match (kind, lit) {
+                (VideoKind::Camera, false) => tr("Turn your camera on"),
+                (VideoKind::Camera, true) => tr("Turn your camera off"),
+                (VideoKind::Screen, false) => tr("Share your screen"),
+                (VideoKind::Screen, true) => tr("Stop sharing your screen"),
+            }
+        }));
+        inner.suppress.set(true);
+        btn.set_active(lit);
+        inner.suppress.set(false);
+    }
+}
+
+fn on_camera_toggled(inner: &Rc<PanelInner>) {
+    use hxvoice_runtime::hxvoice::VideoKind;
+    if inner.suppress.get() {
+        return;
+    }
+    let sess = inner.sess();
+    let Some(rt) = (unsafe { crate::video_panel::runtime(sess) }) else {
+        update_button_labels(inner);
+        return;
+    };
+    let on = inner.cam_btn.is_active();
+    match (on, rt.video_local(VideoKind::Camera)) {
+        (true, None) => {
+            rt.video_start(VideoKind::Camera);
+            crate::video_panel::present(sess);
+        }
+        (true, Some(true)) => rt.video_pause(VideoKind::Camera, false),
+        (false, Some(false)) => rt.video_pause(VideoKind::Camera, true),
+        _ => {}
+    }
+    update_button_labels(inner);
+}
+
+fn on_screen_toggled(inner: &Rc<PanelInner>) {
+    use hxvoice_runtime::hxvoice::VideoKind;
+    if inner.suppress.get() {
+        return;
+    }
+    let sess = inner.sess();
+    let Some(rt) = (unsafe { crate::video_panel::runtime(sess) }) else {
+        update_button_labels(inner);
+        return;
+    };
+    if !inner.screen_btn.is_active() {
+        crate::screen_share::stop(sess);
+        update_button_labels(inner);
+        return;
+    }
+    if rt.video_local(VideoKind::Screen).is_some() {
+        return;
+    }
+    // Back off until the user has chosen: the button lights when the
+    // publication actually starts.
+    inner.suppress.set(true);
+    inner.screen_btn.set_active(false);
+    inner.suppress.set(false);
+    let weak = Rc::downgrade(inner);
+    crate::screen_share::start(sess, inner.screen_btn.upcast_ref(), move |_| {
+        if let Some(i) = weak.upgrade() {
+            update_button_labels(&i);
+        }
+    });
 }
 
 fn do_refresh(widget: &gtk::Widget, inner: &PanelInner, sess: *mut c_void) {
@@ -758,6 +1012,17 @@ fn autojoin_unmute(w: &Weak<PanelInner>) -> glib::ControlFlow {
                 }
                 glib::g_debug!("gtkhx", "AUTOJOIN: unmuted (cid={})", inner.cid);
             }
+            // Headless video hook: turn the camera on through the button,
+            // so the whole GUI path runs. Pair it with
+            // GTKHX_VOICE_TEST_VIDEO_SRC for a device-free publisher.
+            if std::env::var_os("GTKHX_VIDEO_AUTOSTART").is_some() {
+                inner.cam_btn.set_active(true);
+            }
+            // And a watcher's half: bring the Video panel forward, which
+            // is what subscribes it to the room.
+            if std::env::var_os("GTKHX_VIDEO_AUTOPRESENT").is_some() {
+                crate::video_panel::present(inner.sess());
+            }
         }
     }
     glib::ControlFlow::Break
@@ -818,14 +1083,22 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
     let panel = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     let join_btn = gtk::ToggleButton::new();
     let mute_btn = gtk::ToggleButton::new();
+    let cam_btn = gtk::ToggleButton::new();
+    let screen_btn = gtk::ToggleButton::new();
+    cam_btn.set_visible(false);
+    screen_btn.set_visible(false);
     panel.append(&join_btn);
     panel.append(&mute_btn);
+    panel.append(&cam_btn);
+    panel.append(&screen_btn);
 
     let inner = Rc::new(PanelInner {
         conn: dock::key_for_session(sess),
         cid,
         join_btn: join_btn.clone(),
         mute_btn: mute_btn.clone(),
+        cam_btn: cam_btn.clone(),
+        screen_btn: screen_btn.clone(),
         joined: Cell::new(false),
         muted: Cell::new(false),
         suppress: Cell::new(false),
@@ -849,6 +1122,20 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
         mute_btn.connect_toggled(move |_| {
             if let Some(i) = w.upgrade() {
                 on_mute_toggled(&i);
+            }
+        });
+    }
+    {
+        let w = Rc::downgrade(&inner);
+        cam_btn.connect_toggled(move |_| {
+            if let Some(i) = w.upgrade() {
+                on_camera_toggled(&i);
+            }
+        });
+        let w = Rc::downgrade(&inner);
+        screen_btn.connect_toggled(move |_| {
+            if let Some(i) = w.upgrade() {
+                on_screen_toggled(&i);
             }
         });
     }

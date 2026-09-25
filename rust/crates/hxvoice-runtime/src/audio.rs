@@ -153,13 +153,14 @@ impl AudioDevice {
 /// caller's accumulated buffer of `device-added` notifications, which
 /// the monitor only collects when started.
 fn enumerate_class(class_filter: &str) -> Vec<AudioDevice> {
-    // Caller is responsible for running `crate::init()` (which calls
-    // `gst::init()`) before reaching here — production paths go
-    // through the C-side `gtkhx_voice_init` in `main`, and tests
-    // call `init()` in their `#[test]` setup. If they didn't, the
-    // DeviceMonitor returns an empty list and GStreamer logs the
-    // condition to stderr; we just hand the caller a clean empty
-    // Vec rather than panic.
+    // Initialize here rather than trusting the caller to have: the
+    // settings page lists devices and can be built before anything else
+    // has touched GStreamer, and `DeviceMonitor::new` asserts otherwise.
+    // `gst::init` is idempotent. A GStreamer that can't start is an empty
+    // list, not a panic.
+    if gst::init().is_err() {
+        return Vec::new();
+    }
     let monitor = gst::DeviceMonitor::new();
     // Empty caps == any caps. The class string is the load-bearing
     // filter ("Audio/Source" or "Audio/Sink").

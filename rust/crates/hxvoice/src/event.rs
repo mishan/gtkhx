@@ -92,6 +92,51 @@ pub enum Event {
     /// as a toast.
     ServerTaskError(ServerError),
 
+    // ---- Video ----
+    /// Server sent Video Status (611): the room's complete
+    /// publication list, replacing whatever was known before.
+    /// `self_uid` is this client's user id when known; a publication
+    /// of ours the server has listed and then drops is one it ended.
+    VideoStatusReceived {
+        cid: u32,
+        publications: Vec<crate::video::Publication>,
+        self_uid: Option<u16>,
+    },
+
+    /// The UI's desired receive set changed. Complete, not a delta:
+    /// the machine sends it as one 610 when it differs from the last
+    /// set the server was given.
+    VideoSubscriptionsWanted { streams: Vec<crate::video::Stream> },
+
+    /// The user asked to publish a stream of this kind (607).
+    VideoStartRequested { kind: crate::video::VideoKind },
+
+    /// The user asked to end a publication (608), releasing its slot.
+    VideoStopRequested { kind: crate::video::VideoKind },
+
+    /// The user paused or resumed a publication (609). No
+    /// renegotiation; the capture stops while paused.
+    VideoPauseRequested {
+        kind: crate::video::VideoKind,
+        paused: bool,
+    },
+
+    /// The server refused a Video Start. The publication never
+    /// existed; the voice session is untouched. `cid` is the room
+    /// the start was sent for; a refusal for another room is stale.
+    VideoStartFailed {
+        cid: u32,
+        kind: crate::video::VideoKind,
+        text: String,
+    },
+
+    /// The local capture for a publication failed. The spec's rule:
+    /// drop the publication, keep the call, tell the user.
+    VideoCaptureFailed {
+        kind: crate::video::VideoKind,
+        text: String,
+    },
+
     // ---- WebRTC ----
     /// `webrtcbin::pad-added` fired with a sink pad bound to the
     /// given mid label (`"send"` or `"user-N"`). The runtime

@@ -186,6 +186,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * fields directly (and matches the pattern history_max_*
      * uses one line up). */
     inline_media_reset_advisory_limits (htlc);
+    hx_conn_reset_video_limits (htlc);
 
     /* GIF-icons probe state — drop the watchdog timer (if still armed)
      * and reset to UNKNOWN so a reconnect re-probes cleanly. Inlined
@@ -645,6 +646,13 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     /* Only advertise voice when the runtime is actually compiled in —
      * otherwise a server would offer voice we can't honour. */
     caps |= HTLC_CAP_VOICE;
+    /* Video depends on voice (bit 10 never goes out without bit 2) and
+     * on the VP8 decoder being installed: a runtime question, answered
+     * here rather than by a build option, so a build on a host without
+     * gst-plugins-good's vpx still negotiates voice cleanly. */
+    if (gtkhx_voice_video_receive_available ()) {
+        caps |= HTLC_CAP_VIDEO;
+    }
 #endif
     /* HOPE sends the display name in step 2; the plaintext paths defer
      * it to a post-login USER_CHANGE, so they omit the name here. */

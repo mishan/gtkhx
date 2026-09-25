@@ -30,6 +30,7 @@ use std::os::raw::c_int;
 
 use hxproto::build::HxChunk;
 use hxproto::messages::ClientHdr;
+use hxproto::video::{self, VideoKind};
 use hxproto::voice;
 
 // Wire opcodes — the single source of truth is hxproto::messages::
@@ -39,6 +40,10 @@ const HTLC_HDR_VOICE_LEAVE: u32 = ClientHdr::VoiceLeave as u32;
 const HTLC_HDR_VOICE_SDP_ANSWER: u32 = ClientHdr::VoiceSdpAnswer as u32;
 const HTLC_HDR_VOICE_ICE: u32 = ClientHdr::VoiceIce as u32;
 const HTLC_HDR_VOICE_MUTE: u32 = ClientHdr::VoiceMute as u32;
+const HTLC_HDR_VIDEO_START: u32 = ClientHdr::VideoStart as u32;
+const HTLC_HDR_VIDEO_STOP: u32 = ClientHdr::VideoStop as u32;
+const HTLC_HDR_VIDEO_STATE: u32 = ClientHdr::VideoState as u32;
+const HTLC_HDR_VIDEO_SUBSCRIBE: u32 = ClientHdr::VideoSubscribe as u32;
 
 /// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores —
 /// `(htlc, frame, frame_len, ptr, data)`. `hx_rcv_task` hands the registered
@@ -51,8 +56,9 @@ type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_
 // block), so the extern declarations are gated off to avoid a name clash.
 #[cfg(not(test))]
 extern "C" {
-    // voice_bridge.c — htlc->caps & HTLC_CAP_VOICE.
+    // voice_bridge.c — htlc->caps & HTLC_CAP_VOICE / HTLC_CAP_VIDEO.
     fn hx_htlc_voice_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
+    fn hx_htlc_video_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
 
     // tasks.c / network.c — the send-path primitives. hlwrite_chunks takes the
     // native HxChunk (repr(C), layout-pinned identical to C's struct hx_chunk).
@@ -87,7 +93,8 @@ extern "C" {
 // the cargo-test build resolves without linking network.c / tasks.c / rcv.c.
 #[cfg(test)]
 use tests::{
-    hlwrite_chunks, hx_htlc_voice_cap, rcv_task_voice_join, rcv_task_voice_simple_ack, task_new,
+    hlwrite_chunks, hx_htlc_video_cap, hx_htlc_voice_cap, rcv_task_voice_join,
+    rcv_task_voice_simple_ack, task_new,
 };
 
 /// `GUINT_TO_POINTER` for a u32.
@@ -295,6 +302,177 @@ pub unsafe extern "C" fn hx_send_voice_mute(
     );
     hlwrite_chunks(htlc, HTLC_HDR_VOICE_MUTE, 0, chunks.as_ptr(), hc as c_int);
     glib::ffi::GTRUE
+}
+
+// ---- Video (607-610) -------------------------------------------------
+//
+// The video extension's control transactions ride the voice gate plus
+// their own: every send is a no-op unless the server echoed
+// HTLC_CAP_VIDEO. Replies are empty successes; an error reaches the
+// state machine through rcv.c's task-error path, keyed by the task
+// label — which for a start carries the kind, because a refused start
+// has to end the right publication.
+
+/// Cap gate for video: voice and video both echoed.
+unsafe fn video_cap_ok(htlc: *mut c_void) -> bool {
+    if !cap_ok(htlc) {
+        return false;
+    }
+    if hx_htlc_video_cap(htlc) == glib::ffi::GFALSE {
+        glib::g_debug!("gtkhx", "skip video send: server didn't echo CAP_VIDEO");
+        return false;
+    }
+    true
+}
+
+/// Register the empty-success reply task and write the frame.
+unsafe fn send_video(
+    htlc: *mut c_void,
+    opcode: u32,
+    cid: u32,
+    label: &std::ffi::CStr,
+    chunks: &[HxChunk],
+) -> glib::ffi::gboolean {
+    task_new(
+        htlc,
+        rcv_task_voice_simple_ack,
+        to_ptr(opcode),
+        to_ptr(cid),
+        label.as_ptr(),
+    );
+    hlwrite_chunks(htlc, opcode, 0, chunks.as_ptr(), chunks.len() as c_int);
+    glib::ffi::GTRUE
+}
+
+/// `gboolean hx_send_video_start(struct htlc_conn *htlc, guint32 cid,
+/// guint16 kind)` — 607. `kind` is 1 (camera) or 2 (screen).
+///
+/// # Safety
+/// `htlc` is NULL or a valid `htlc_conn *`; main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn hx_send_video_start(
+    htlc: *mut c_void,
+    cid: u32,
+    kind: u16,
+) -> glib::ffi::gboolean {
+    let Some(kind) = VideoKind::from_wire(kind) else {
+        return glib::ffi::GFALSE;
+    };
+    if !video_cap_ok(htlc) {
+        return glib::ffi::GFALSE;
+    }
+    let mut chunks = [HxChunk::EMPTY; 2];
+    let mut scratch = [0u8; 6];
+    let hc = video::build_video_start_chunks(cid, kind, &mut chunks, &mut scratch);
+    let label = match kind {
+        VideoKind::Camera => c"video-start-camera",
+        VideoKind::Screen => c"video-start-screen",
+    };
+    send_video(htlc, HTLC_HDR_VIDEO_START, cid, label, &chunks[..hc])
+}
+
+/// `gboolean hx_send_video_stop(struct htlc_conn *htlc, guint32 cid,
+/// guint16 kind)` — 608. `kind` 0 stops every publication in the room.
+///
+/// # Safety
+/// As [`hx_send_video_start`].
+#[no_mangle]
+pub unsafe extern "C" fn hx_send_video_stop(
+    htlc: *mut c_void,
+    cid: u32,
+    kind: u16,
+) -> glib::ffi::gboolean {
+    let kind = match kind {
+        0 => None,
+        k => match VideoKind::from_wire(k) {
+            Some(k) => Some(k),
+            None => return glib::ffi::GFALSE,
+        },
+    };
+    if !video_cap_ok(htlc) {
+        return glib::ffi::GFALSE;
+    }
+    let mut chunks = [HxChunk::EMPTY; 2];
+    let mut scratch = [0u8; 6];
+    let hc = video::build_video_stop_chunks(cid, kind, &mut chunks, &mut scratch);
+    send_video(htlc, HTLC_HDR_VIDEO_STOP, cid, c"video-stop", &chunks[..hc])
+}
+
+/// `gboolean hx_send_video_state(struct htlc_conn *htlc, guint32 cid,
+/// guint16 kind, gboolean paused)` — 609.
+///
+/// # Safety
+/// As [`hx_send_video_start`].
+#[no_mangle]
+pub unsafe extern "C" fn hx_send_video_state(
+    htlc: *mut c_void,
+    cid: u32,
+    kind: u16,
+    paused: glib::ffi::gboolean,
+) -> glib::ffi::gboolean {
+    let Some(kind) = VideoKind::from_wire(kind) else {
+        return glib::ffi::GFALSE;
+    };
+    if !video_cap_ok(htlc) {
+        return glib::ffi::GFALSE;
+    }
+    let mut chunks = [HxChunk::EMPTY; 3];
+    let mut scratch = [0u8; 8];
+    let hc = video::build_video_state_chunks(
+        cid,
+        kind,
+        paused != glib::ffi::GFALSE,
+        &mut chunks,
+        &mut scratch,
+    );
+    send_video(
+        htlc,
+        HTLC_HDR_VIDEO_STATE,
+        cid,
+        c"video-state",
+        &chunks[..hc],
+    )
+}
+
+/// `gboolean hx_send_video_subscribe(struct htlc_conn *htlc, guint32 cid,
+/// const guint8 *streams, gsize len)` — 610. `streams` is the packed
+/// four-byte `uid | kind` array, the client's complete desired set;
+/// empty is "no video at all".
+///
+/// # Safety
+/// `streams` is NULL or valid for `len`; `htlc` as above.
+#[no_mangle]
+pub unsafe extern "C" fn hx_send_video_subscribe(
+    htlc: *mut c_void,
+    cid: u32,
+    streams: *const u8,
+    len: usize,
+) -> glib::ffi::gboolean {
+    if !video_cap_ok(htlc) {
+        return glib::ffi::GFALSE;
+    }
+    // Re-read through the same parser a server uses, so an entry of a
+    // kind this revision doesn't define never reaches the wire.
+    let set: Vec<video::Stream> =
+        video::parse_video_subscriptions(slice_or_empty(streams, len)).collect();
+    let mut chunks = [HxChunk::EMPTY; 2];
+    let mut scratch = vec![0u8; video::video_subscribe_scratch_len(set.len())];
+    let hc = video::build_video_subscribe_chunks(cid, &set, &mut chunks, &mut scratch);
+    if hc == 0 {
+        glib::g_debug!(
+            "gtkhx",
+            "VIDEO_SUBSCRIBE builder failed ({} streams)",
+            set.len()
+        );
+        return glib::ffi::GFALSE;
+    }
+    send_video(
+        htlc,
+        HTLC_HDR_VIDEO_SUBSCRIBE,
+        cid,
+        c"video-subscribe",
+        &chunks[..hc],
+    )
 }
 
 #[cfg(test)]

@@ -55,6 +55,19 @@ gboolean hx_htlc_voice_cap (struct htlc_conn *htlc);
  * panel greys out until the bit is actually set.) */
 gboolean hx_htlc_voice_access (struct htlc_conn *htlc);
 
+/* HTLC_CAP_VIDEO echoed (and, as the spec requires, HTLC_CAP_VOICE with
+ * it); NULL-safe. */
+gboolean hx_htlc_video_cap (struct htlc_conn *htlc);
+
+/* The access bit for publishing kind (1 camera: bit 59, 2 screen:
+ * bit 60); NULL-safe. Receiving needs no bit. */
+gboolean hx_htlc_video_access (struct htlc_conn *htlc, guint16 kind);
+
+/* The LOGIN reply's DATA_VIDEO_LIMITS for kind, if the server sent one. */
+struct hx_video_limits;
+gboolean hx_htlc_video_limits (struct htlc_conn *htlc, guint16 kind,
+                               struct hx_video_limits *out);
+
 /* htlc->uid — our own user id, for the runtime's self-uid + the voice
  * model's self-exclusion. */
 guint16 hx_htlc_uid (struct htlc_conn *htlc);

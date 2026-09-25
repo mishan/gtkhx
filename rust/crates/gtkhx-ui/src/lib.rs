@@ -64,6 +64,10 @@ pub mod users_voice_col;
 // `voice` feature — its C callers (chat.c / users_bridge.c / gtkutil.c) are
 // #ifdef HAVE_VOICE, so no voice-off stub is needed. Exports voice_panel_*.
 #[cfg(feature = "voice")]
+pub mod screen_share;
+#[cfg(feature = "voice")]
+pub mod video_panel;
+#[cfg(feature = "voice")]
 pub mod voice_panel;
 // Who owns the microphone. One voice chat at a time anywhere, so the token is
 // process-global even though the runtimes it arbitrates are per-connection.

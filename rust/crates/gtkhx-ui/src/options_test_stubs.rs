@@ -297,7 +297,7 @@ pub unsafe extern "C" fn gtkhx_dock_show_page(
     glib::ffi::GFALSE
 }
 
-// ---- voice (hxvoice-runtime, voice_ptt_keyspec.c) -----------------------
+// ---- voice (voice_ptt_keyspec.c) -----------------------------------------
 //
 // Only referenced in a voice build, and gated to match so the stub set
 // doesn't drift out of step with the feature it shadows.
@@ -306,34 +306,8 @@ pub unsafe extern "C" fn gtkhx_dock_show_page(
 mod voice {
     use super::*;
 
-    #[no_mangle]
-    pub unsafe extern "C" fn gtkhx_voice_list_input_devices() -> *mut c_void {
-        std::ptr::null_mut()
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn gtkhx_voice_list_output_devices() -> *mut c_void {
-        std::ptr::null_mut()
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn gtkhx_voice_device_list_len(_list: *mut c_void) -> usize {
-        0
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn gtkhx_voice_device_list_name(
-        _list: *mut c_void,
-        _i: usize,
-    ) -> *const c_char {
-        std::ptr::null()
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn gtkhx_voice_device_list_display_name(
-        _list: *mut c_void,
-        _i: usize,
-    ) -> *const c_char {
-        std::ptr::null()
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn gtkhx_voice_device_list_free(_list: *mut c_void) {}
+    // The device lists are the runtime's own exports: the UI links
+    // hxvoice-runtime for the video panel, so the real ones are here.
 
     #[no_mangle]
     pub unsafe extern "C" fn hx_voice_ptt_keyspec_parse(

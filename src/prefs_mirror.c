@@ -166,6 +166,7 @@ hx_prefs_mirror_refresh (void)
 
     mirror_string (&gtkhx_prefs.voice_input_device, CFG_VOICE_INPUT_DEVICE);
     mirror_string (&gtkhx_prefs.voice_output_device, CFG_VOICE_OUTPUT_DEVICE);
+    mirror_string (&gtkhx_prefs.voice_camera_device, CFG_VOICE_CAMERA_DEVICE);
     gtkhx_prefs.voice_ptt_enabled
         = hxconfig_get_bool (CFG_VOICE_PTT_ENABLED) ? 1 : 0;
     mirror_string (&gtkhx_prefs.voice_ptt_key, CFG_VOICE_PTT_KEY);

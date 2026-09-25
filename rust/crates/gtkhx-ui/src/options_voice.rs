@@ -102,6 +102,32 @@ fn device_group(page: &adw::PreferencesPage) {
     page.add(&grp);
 }
 
+/// The camera picker. Listed from the runtime's own device scan, so the
+/// names match what the capture resolves; screen-cast nodes PipeWire lists
+/// as video sources are left out.
+fn video_group(page: &adw::PreferencesPage) {
+    let grp = group(&tr("Video"));
+    grp.set_description(Some(&tr(
+        "The camera your video chat uses. Your camera stays off until you \
+         turn it on in a voice room.",
+    )));
+    let mut pairs = vec![(String::new(), tr("First camera found"))];
+    pairs.extend(
+        hxvoice_runtime::video::list_cameras()
+            .into_iter()
+            .map(|c| (c.name, c.display_name)),
+    );
+    let values: Vec<&str> = pairs.iter().map(|(v, _)| v.as_str()).collect();
+    let labels: Vec<&str> = pairs.iter().map(|(_, l)| l.as_str()).collect();
+    grp.add(&combo_row(
+        cfg::VOICE_CAMERA_DEVICE,
+        &tr("Camera"),
+        &values,
+        &labels,
+    ));
+    page.add(&grp);
+}
+
 // ------------------------------------------------------------ push-to-talk --
 
 /// The row's subtitle: the current bind, or an invitation to set one.
@@ -259,5 +285,6 @@ fn ptt_group(page: &adw::PreferencesPage) {
 
 pub(crate) fn build(page: &adw::PreferencesPage) {
     device_group(page);
+    video_group(page);
     ptt_group(page);
 }

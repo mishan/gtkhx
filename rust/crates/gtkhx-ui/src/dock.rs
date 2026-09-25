@@ -37,6 +37,7 @@ pub const ID_USERS: &str = "users";
 pub const ID_TASKS: &str = "tasks";
 pub const ID_NEWS: &str = "news";
 pub const ID_NEWS15: &str = "news15";
+pub const ID_VIDEO: &str = "video";
 
 /// Every panel whose content belongs to one connection — the set a connection
 /// switch has to swap.
@@ -50,7 +51,7 @@ pub const ID_NEWS15: &str = "news15";
 /// [`GLOBAL_PAGE`] and docs/multi-connection.md, "Global but tagged". The
 /// Tracker is absent for a different reason — it is a standalone window rather
 /// than a panel at all.
-pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_NEWS15];
+pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_NEWS15, ID_VIDEO];
 
 /// The page name a global panel lives under.
 ///

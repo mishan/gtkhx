@@ -5,7 +5,8 @@ carried it forward to GTK 4 + libadwaita and has been rewriting it in Rust ever 
 
 **This document is the product roadmap: what is left to build, and the decisions that
 constrain how.** The port itself — which C files remain and in what order they move to
-Rust — lives in [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). Subsystem references are in
+Rust — lives in [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). Smaller known gaps and
+review follow-ups are in [BACKLOG.md](BACKLOG.md). Subsystem references are in
 [docs/](docs/README.md); working notes for the codebase are in [CLAUDE.md](CLAUDE.md).
 
 ---
@@ -33,7 +34,7 @@ extension is allowed to degrade the legacy path.
 | **Language** | Hybrid C + Rust, with Rust now the larger half. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
 | **Protocol** | 1.2 / 1.5 / 1.9 compatible. Connect, HOPE negotiation and the ciphers (Blowfish OFB-64, ChaCha20-Poly1305 AEAD) all run in Rust. RC4 retired. Compression is implemented but not currently negotiated — see the defects below. |
 | **Transport security** | TLS on a dedicated port, TOFU trust with fingerprint pinning. [docs/tls.md](docs/tls.md) |
-| **Extensions** | Voice chat, inline media, GIF icons, chat history, colored nicknames, emoji shortcodes, tracker v3. |
+| **Extensions** | Voice chat, video chat and screen sharing, inline media, GIF icons, chat history, colored nicknames, emoji shortcodes, tracker v3. |
 | **Platforms** | Linux, macOS, Windows. Flatpak manifest + AppStream metadata are Flathub-ready. |
 | **Testing** | Three tiers — unit, wire-fixture, and end-to-end integration against a Docker rig. Static analysis and sanitizers run in CI. |
 

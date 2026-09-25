@@ -106,6 +106,7 @@ pub const MAP: &[(&str, Target)] = &[
     ("USERYSIZE", Drop(PANEL_SIZE)),
     ("VOICEINPUTDEVICE", Path("voice.input_device")),
     ("VOICEOUTPUTDEVICE", Path("voice.output_device")),
+    ("VOICECAMERADEVICE", Path("voice.camera_device")),
     ("VOICEPTTENABLED", Path("voice.ptt_enabled")),
     ("VOICEPTTKEY", Path("voice.ptt_key")),
     ("WORDWRAP", Path("chat.word_wrap")),
@@ -126,14 +127,20 @@ const PANEL_LATCH: &str =
 const UPTIME: &str = "accumulated state rather than a preference; it went with the /stats command";
 const RETIRED: &str = "retired before the current table, and already ignored on load";
 
-/// Paths in the new schema that no old key feeds, and so are new settings
-/// rather than renamed ones. Empty today — the schema deliberately shipped as
-/// a rearrangement of `cfgvars[]` and nothing more.
+/// Paths in the new schema that no old profile can have set, and so are new
+/// settings rather than renamed ones. The schema shipped as a rearrangement
+/// of `cfgvars[]` and nothing more; what is listed here came after. (Such a
+/// setting still has a name in [`MAP`], because the settings UI reads and
+/// writes by name; no gtkhxrc will ever carry it.)
 ///
 /// It exists so the coverage test can be exhaustive in *both* directions: a
 /// path added to the schema without a migration source has to be listed here
 /// on purpose, rather than quietly defaulting for everyone who upgrades.
-pub const NEW_PATHS: &[&str] = &[];
+pub const NEW_PATHS: &[&str] = &[
+    // Video chat arrived after gtkhxrc: no old profile can set it, and the
+    // default (the first camera found) is what every migrated user wants.
+    "voice.camera_device",
+];
 
 /// Where an old key goes, or `None` if the schema has never heard of it.
 pub fn target_of(key: &str) -> Option<Target> {

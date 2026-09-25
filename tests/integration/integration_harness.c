@@ -288,18 +288,19 @@ orch_pack_header (guint8 *dst, guint32 type, guint32 trans, guint32 flag,
  * delivers, exactly as the GUI's rcv path sees it. */
 static int
 orch_open_login (struct htlc_conn *htlc, const char *host, int port,
-                 const char *login, const char *display_name, guint16 icon,
-                 guint16 caps)
+                 const char *login, const char *password,
+                 const char *display_name, guint16 icon, guint16 caps)
 {
     if (!login) {
         login = "guest";
     }
+    const char *pass = password ? password : ""; /* guest: empty */
     const char *name = (display_name && *display_name) ? display_name : "";
     hxnet_connection *h = hxnet_connection_open_plaintext_polling (
         (const guint8 *)host, strlen (host), (guint16)port,
-        (const guint8 *)login, strlen (login), (const guint8 *)"",
-        0, /* guest: empty password */
-        (const guint8 *)name, strlen (name), icon, /*version=*/185, caps,
+        (const guint8 *)login, strlen (login), (const guint8 *)pass,
+        strlen (pass), (const guint8 *)name, strlen (name), icon,
+        /*version=*/185, caps,
         /*trans=*/1,
         /*proxy_uri=*/NULL, /*proxy_uri_len=*/0);
     if (!h) {
@@ -1377,6 +1378,37 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
             dh_end ();
         }
 
+        /* The video limits go through the parser rcv.c's login handler
+         * uses, so a video test checks what production stores. */
+        if (type == HTLS_HDR_TASK) {
+            struct gtkhx_proto_login li;
+            uint8_t name[64];
+            unsigned seen = gtkhx_proto_parse_login (hx_test_in (htlc)->buf,
+                                                     hx_test_in (htlc)->pos,
+                                                     name, sizeof (name), &li);
+            static const struct {
+                unsigned seen;
+                guint16 kind;
+            } kinds[] = {
+                { HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS, HX_VIDEO_KIND_CAMERA },
+                { HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS, HX_VIDEO_KIND_SCREEN },
+            };
+            for (gsize i = 0; i < G_N_ELEMENTS (kinds); i++) {
+                if (!(seen & kinds[i].seen)) {
+                    continue;
+                }
+                const struct gtkhx_proto_login_video_limits *pl
+                    = &li.video_limits[kinds[i].kind - 1];
+                struct hx_video_limits *vl
+                    = &htlc->video_limits[kinds[i].kind - 1];
+                vl->max_width = pl->max_width;
+                vl->max_height = pl->max_height;
+                vl->max_fps = pl->max_fps;
+                vl->max_bitrate = pl->max_bitrate;
+                vl->present = 1;
+            }
+        }
+
         if (type == HTLS_HDR_USER_SELFINFO) {
             return type; /* success */
         }
@@ -1400,8 +1432,8 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
         g_test_fail_printf ("no default test server configured.");
         return -1;
     }
-    int fd = orch_open_login (htlc, srv->host, srv->port, "guest", display_name,
-                              icon, /*caps=*/0);
+    int fd = orch_open_login (htlc, srv->host, srv->port, "guest", NULL,
+                              display_name, icon, /*caps=*/0);
     if (fd < 0) {
         return -1;
     }
@@ -1498,6 +1530,15 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
                                         const char *display_name, guint16 icon,
                                         guint16 caps)
 {
+    return integration_open_login_account_caps_or_skip (
+        srv, htlc, "guest", NULL, display_name, icon, caps);
+}
+
+int
+integration_open_login_account_caps_or_skip (
+    const hx_test_server *srv, struct htlc_conn *htlc, const char *login,
+    const char *password, const char *display_name, guint16 icon, guint16 caps)
+{
     g_return_val_if_fail (srv != NULL, -1);
     memset (htlc, 0, sizeof (*htlc));
 
@@ -1505,8 +1546,8 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
      * advertising the requested capabilities so cap-aware servers
      * (Janus) echo the agreed bits back in the LOGIN reply — the drain
      * below stashes that echo into htlc->caps. */
-    int fd = orch_open_login (htlc, srv->host, srv->port, "guest", display_name,
-                              icon, caps);
+    int fd = orch_open_login (htlc, srv->host, srv->port, login, password,
+                              display_name, icon, caps);
     if (fd < 0) {
         return -1;
     }

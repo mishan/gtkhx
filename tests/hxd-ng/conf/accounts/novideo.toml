@@ -1,0 +1,10 @@
+# Voice but neither video bit: the access-refusal tests log in here.
+name = "novideo"
+password = "novideo"
+
+[access]
+read_chat = true
+send_chat = true
+get_user_info = true
+use_any_name = true
+voice_chat = true

@@ -66,7 +66,15 @@ mod voice_impl {
         /// voice_model.c — computed indicator for a uid (0 NONE / 1 IN_VOICE
         /// / 2 SPEAKING / 3 MUTED).
         fn hx_voice_model_get_indicator(model: *mut c_void, uid: u16) -> u32;
+        /// voice_model.c — HX_VOICE_VIDEO_* flags for a uid (0 when it
+        /// publishes nothing).
+        fn hx_voice_model_get_video(model: *mut c_void, uid: u16) -> u32;
     }
+
+    const VIDEO_CAMERA: u32 = 1 << 0;
+    const VIDEO_SCREEN: u32 = 1 << 1;
+    const VIDEO_CAMERA_PAUSED: u32 = 1 << 2;
+    const VIDEO_SCREEN_PAUSED: u32 = 1 << 3;
 
     /// Per-cell subscription state. The cell holds a strong ref to the model
     /// so the disconnect at finalize is always safe (cells outlive
@@ -76,6 +84,10 @@ mod voice_impl {
     struct VoiceCellData {
         model: glib::Object,
         handler: Option<glib::SignalHandlerId>,
+        video_handler: Option<glib::SignalHandlerId>,
+        /// The speaker glyph and, beside it, the camera or screen glyph.
+        voice: gtk::Image,
+        video: gtk::Image,
         /// Currently-bound row uid; 0 when unbound. The signal closure reads
         /// this to filter frames for other rows.
         uid: Cell<u16>,
@@ -84,6 +96,9 @@ mod voice_impl {
     impl Drop for VoiceCellData {
         fn drop(&mut self) {
             if let Some(id) = self.handler.take() {
+                self.model.disconnect(id);
+            }
+            if let Some(id) = self.video_handler.take() {
                 self.model.disconnect(id);
             }
         }
@@ -131,10 +146,52 @@ mod voice_impl {
         }
     }
 
+    /// Show who is publishing, whether or not anyone here is watching:
+    /// the spec asks clients to, so a voice-only participant can at least
+    /// know a camera is on. A screen share outranks a camera; paused
+    /// publications are drawn dim.
+    fn video_cell_refresh(img: &gtk::Image, model: &glib::Object, uid: u16) {
+        let f = unsafe { hx_voice_model_get_video(model.as_ptr() as *mut c_void, uid) };
+        let shown = if f & VIDEO_SCREEN != 0 {
+            Some((
+                "screen-shared-symbolic",
+                f & VIDEO_SCREEN_PAUSED != 0,
+                crate::tr::tr("Sharing their screen"),
+            ))
+        } else if f & VIDEO_CAMERA != 0 {
+            Some((
+                "camera-video-symbolic",
+                f & VIDEO_CAMERA_PAUSED != 0,
+                crate::tr::tr("Camera on"),
+            ))
+        } else {
+            None
+        };
+        match shown {
+            Some((icon, paused, tip)) => {
+                img.set_icon_name(Some(icon));
+                img.set_tooltip_text(Some(&tip));
+                img.set_visible(true);
+                if paused {
+                    img.add_css_class("dim-label");
+                } else {
+                    img.remove_css_class("dim-label");
+                }
+            }
+            None => {
+                img.clear();
+                img.set_visible(false);
+            }
+        }
+    }
+
     /// Recover this cell's `VoiceCellData` (installed at setup). None when the
     /// session had no voice model.
-    fn cell_data(img: &gtk::Image) -> Option<&VoiceCellData> {
-        unsafe { img.data::<VoiceCellData>(CELL_DATA_KEY).map(|p| p.as_ref()) }
+    fn cell_data(cell: &gtk::Box) -> Option<&VoiceCellData> {
+        unsafe {
+            cell.data::<VoiceCellData>(CELL_DATA_KEY)
+                .map(|p| p.as_ref())
+        }
     }
 
     pub(super) unsafe fn build_column(sess: *mut c_void) -> *mut gtk::ffi::GtkColumnViewColumn {
@@ -156,20 +213,41 @@ mod voice_impl {
             img.set_valign(gtk::Align::Center);
             img.add_css_class("dim-label");
             img.set_visible(false); // hidden until a bind reveals an indicator
+            let vimg = gtk::Image::new();
+            vimg.set_pixel_size(12);
+            vimg.set_valign(gtk::Align::Center);
+            vimg.set_visible(false);
+            let cell = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+            cell.set_halign(gtk::Align::Center);
+            cell.append(&img);
+            cell.append(&vimg);
 
             if !model_ptr.is_null() {
                 let model: glib::Object =
                     unsafe { from_glib_none(model_ptr as *mut glib::gobject_ffi::GObject) };
-                let img_weak = img.downgrade();
+                let cell_weak = cell.downgrade();
                 // Fires whenever ANY uid's indicator flips; this cell only
                 // cares about its currently-bound row.
                 let handler = model.connect_local("indicator-changed", false, move |args| {
                     let changed = args.get(1).and_then(|v| v.get::<u32>().ok()).unwrap_or(0) as u16;
-                    if let Some(img) = img_weak.upgrade() {
-                        if let Some(data) = cell_data(&img) {
+                    if let Some(cell) = cell_weak.upgrade() {
+                        if let Some(data) = cell_data(&cell) {
                             let bound = data.uid.get();
                             if bound != 0 && bound == changed {
-                                voice_cell_refresh(&img, &data.model, bound);
+                                voice_cell_refresh(&data.voice, &data.model, bound);
+                            }
+                        }
+                    }
+                    None
+                });
+                let cell_weak = cell.downgrade();
+                let video_handler = model.connect_local("video-changed", false, move |args| {
+                    let changed = args.get(1).and_then(|v| v.get::<u32>().ok()).unwrap_or(0) as u16;
+                    if let Some(cell) = cell_weak.upgrade() {
+                        if let Some(data) = cell_data(&cell) {
+                            let bound = data.uid.get();
+                            if bound != 0 && bound == changed {
+                                video_cell_refresh(&data.video, &data.model, bound);
                             }
                         }
                     }
@@ -178,42 +256,48 @@ mod voice_impl {
                 let data = VoiceCellData {
                     model,
                     handler: Some(handler),
+                    video_handler: Some(video_handler),
+                    voice: img.clone(),
+                    video: vimg.clone(),
                     uid: Cell::new(0),
                 };
-                unsafe { img.set_data(CELL_DATA_KEY, data) };
+                unsafe { cell.set_data(CELL_DATA_KEY, data) };
             }
 
-            item.set_child(Some(&img));
+            item.set_child(Some(&cell));
         });
 
         factory.connect_bind(move |_f, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let Some(img) = item.child().and_downcast::<gtk::Image>() else {
+            let Some(cell) = item.child().and_downcast::<gtk::Box>() else {
                 return;
             };
-            stash_list_item(img.upcast_ref(), item);
+            stash_list_item(cell.upcast_ref(), item);
             let uid = item
                 .item()
                 .map(|row| unsafe {
                     crate::user_row::hx_user_row_get_uid(row.as_ptr() as *mut c_void)
                 })
                 .unwrap_or(0);
-            if let Some(data) = cell_data(&img) {
+            if let Some(data) = cell_data(&cell) {
                 data.uid.set(uid);
-                voice_cell_refresh(&img, &data.model, uid);
+                voice_cell_refresh(&data.voice, &data.model, uid);
+                video_cell_refresh(&data.video, &data.model, uid);
             }
         });
 
         factory.connect_unbind(move |_f, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let Some(img) = item.child().and_downcast::<gtk::Image>() else {
+            let Some(cell) = item.child().and_downcast::<gtk::Box>() else {
                 return;
             };
-            if let Some(data) = cell_data(&img) {
+            if let Some(data) = cell_data(&cell) {
                 data.uid.set(0);
+                for img in [&data.voice, &data.video] {
+                    img.clear();
+                    img.set_visible(false);
+                }
             }
-            img.clear();
-            img.set_visible(false);
         });
 
         // Header glyph: a single speaker emoji as a compact column label.
@@ -221,7 +305,8 @@ mod voice_impl {
             Some("\u{1F508}"),
             Some(factory.upcast::<gtk::ListItemFactory>()),
         );
-        col.set_fixed_width(22);
+        // Room for the speaker and a camera beside it.
+        col.set_fixed_width(36);
         col.set_resizable(false);
         // Transfer full — users_view.rs consumes the ref via from_glib_full.
         ToGlibPtr::to_glib_full(&col)

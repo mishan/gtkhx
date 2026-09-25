@@ -217,6 +217,33 @@ pub struct LoginOut {
     pub history_max_days: u32,
     pub uid: u16,
     pub version: u16,
+    /// `DATA_VIDEO_LIMITS`, camera then screen; each valid when its
+    /// `HX_LOGIN_SEEN_VIDEO_*_LIMITS` bit is set.
+    pub video_limits: [LoginVideoLimits; 2],
+}
+
+/// One kind's `DATA_VIDEO_LIMITS` in [`LoginOut`].
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct LoginVideoLimits {
+    pub max_width: u16,
+    pub max_height: u16,
+    pub max_fps: u16,
+    pub max_per_room: u16,
+    pub max_bitrate: u32,
+}
+
+impl From<Option<hxproto::video::Limits>> for LoginVideoLimits {
+    fn from(l: Option<hxproto::video::Limits>) -> Self {
+        l.map(|l| LoginVideoLimits {
+            max_width: l.max_width,
+            max_height: l.max_height,
+            max_fps: l.max_fps,
+            max_per_room: l.max_per_room,
+            max_bitrate: l.max_bitrate,
+        })
+        .unwrap_or_default()
+    }
 }
 
 /// Parse the LOGIN task reply. Fills `*out` and writes the sanitised server
@@ -260,6 +287,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_login(
     (*out).history_max_days = li.history_max_days;
     (*out).uid = li.uid;
     (*out).version = li.version;
+    (*out).video_limits = [li.video_camera.into(), li.video_screen.into()];
     li.seen
 }
 
@@ -4456,6 +4484,10 @@ pub unsafe extern "C" fn gtkhx_proto_parse_voice_participants(
 pub const GTKHX_PROTO_VOICE_MID_INVALID: u32 = 0;
 pub const GTKHX_PROTO_VOICE_MID_SEND: u32 = 1;
 pub const GTKHX_PROTO_VOICE_MID_USER: u32 = 2;
+pub const GTKHX_PROTO_VOICE_MID_CAM_SEND: u32 = 3;
+pub const GTKHX_PROTO_VOICE_MID_SCR_SEND: u32 = 4;
+pub const GTKHX_PROTO_VOICE_MID_CAM_USER: u32 = 5;
+pub const GTKHX_PROTO_VOICE_MID_SCR_USER: u32 = 6;
 
 /// Parse an SDP `a=mid:` label.
 ///
@@ -4464,6 +4496,10 @@ pub const GTKHX_PROTO_VOICE_MID_USER: u32 = 2;
 ///   `*out_uid` is left untouched.
 /// - [`GTKHX_PROTO_VOICE_MID_USER`] (2) on `user-N`; `*out_uid` is
 ///   set to N.
+/// - [`GTKHX_PROTO_VOICE_MID_CAM_SEND`] (3) / [`GTKHX_PROTO_VOICE_MID_SCR_SEND`]
+///   (4) on the video extension's own-camera and own-screen labels.
+/// - [`GTKHX_PROTO_VOICE_MID_CAM_USER`] (5) / [`GTKHX_PROTO_VOICE_MID_SCR_USER`]
+///   (6) on `cam-user-N` / `scr-user-N`; `*out_uid` is set to N.
 /// - [`GTKHX_PROTO_VOICE_MID_INVALID`] (0) on parse failure or NULL
 ///   pointers; `*out_uid` is left untouched.
 ///
@@ -4483,15 +4519,22 @@ pub unsafe extern "C" fn gtkhx_proto_parse_voice_mid_label(
         return GTKHX_PROTO_VOICE_MID_INVALID;
     }
     let s = as_slice(label_ptr, label_len);
-    match hxproto::voice::parse_voice_mid_label(s) {
-        Some(hxproto::voice::MidLabel::Send) => GTKHX_PROTO_VOICE_MID_SEND,
-        Some(hxproto::voice::MidLabel::User(uid)) => {
-            if !out_uid.is_null() {
-                *out_uid = uid;
-            }
-            GTKHX_PROTO_VOICE_MID_USER
+    use hxproto::voice::MidLabel;
+    let Some(label) = hxproto::voice::parse_voice_mid_label(s) else {
+        return GTKHX_PROTO_VOICE_MID_INVALID;
+    };
+    if let Some(uid) = label.user_id() {
+        if !out_uid.is_null() {
+            *out_uid = uid;
         }
-        None => GTKHX_PROTO_VOICE_MID_INVALID,
+    }
+    match label {
+        MidLabel::Send => GTKHX_PROTO_VOICE_MID_SEND,
+        MidLabel::User(_) => GTKHX_PROTO_VOICE_MID_USER,
+        MidLabel::CamSend => GTKHX_PROTO_VOICE_MID_CAM_SEND,
+        MidLabel::ScrSend => GTKHX_PROTO_VOICE_MID_SCR_SEND,
+        MidLabel::CamUser(_) => GTKHX_PROTO_VOICE_MID_CAM_USER,
+        MidLabel::ScrUser(_) => GTKHX_PROTO_VOICE_MID_SCR_USER,
     }
 }
 
@@ -4752,6 +4795,56 @@ pub unsafe extern "C" fn gtkhx_proto_build_voice_ice_json(
     let buf = slice::from_raw_parts_mut(out_buf, out_cap);
     buf[..json.len()].copy_from_slice(json.as_bytes());
     json.len()
+}
+
+/// C-ABI view of a video reply or Video Status (611) body: the chat id,
+/// the kind (on a 607 reply), and borrowed slices of the codec name and
+/// the `DATA_VIDEO_PUBLISHERS` blob. The slices point into the caller's
+/// buffer and are valid only as long as it is. A field that was absent
+/// has a NULL pointer; `kind` is 0 when absent.
+#[repr(C)]
+pub struct VideoReplyOut {
+    pub cid: u32,
+    pub kind: u16,
+    pub codec_ptr: *const u8,
+    pub codec_len: usize,
+    pub publishers_ptr: *const u8,
+    pub publishers_len: usize,
+}
+
+/// Parse a video reply / 611 body. Returns false only on NULL `out`.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL with `len == 0`); `out` a valid
+/// writable `VideoReplyOut` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_video_reply(
+    buf: *const u8,
+    len: usize,
+    out: *mut VideoReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    let r = hxproto::video::parse_video_reply(s, s.len());
+    let (codec_ptr, codec_len) = r
+        .codec
+        .map(|c| (c.as_ptr(), c.len()))
+        .unwrap_or((std::ptr::null(), 0));
+    let (publishers_ptr, publishers_len) = r
+        .publishers
+        .map(|p| (p.as_ptr(), p.len()))
+        .unwrap_or((std::ptr::null(), 0));
+    *out = VideoReplyOut {
+        cid: r.cid,
+        kind: r.kind.unwrap_or(0),
+        codec_ptr,
+        codec_len,
+        publishers_ptr,
+        publishers_len,
+    };
+    true
 }
 
 /// C-ABI scalar fields from a parsed voice reply / notification body

@@ -314,6 +314,8 @@ struct hl_user_data {
  *   bit 3  CAP_INLINE_MEDIA    inline image attachments
  *   bit 4  CAP_CHAT_HISTORY    server-side chat-history retrieval
  *   bit 5  CAP_EXTENDED_PRIV   128-bit access bitmap
+ *   bit 10 CAP_VIDEO           camera and screen video in voice rooms
+ *                              (only ever alongside bit 2)
  *
  * Wire field is a big-endian unsigned integer; spec says variable
  * width, "typically 2 bytes, expandable to 8 bytes." We send 2
@@ -331,6 +333,7 @@ struct hl_user_data {
 #define HTLC_CAP_INLINE_MEDIA ((guint16)0x0008)
 #define HTLC_CAP_CHAT_HISTORY ((guint16)0x0010)
 #define HTLC_CAP_EXTENDED_PRIV ((guint16)0x0020)
+#define HTLC_CAP_VIDEO ((guint16)0x0400)
 
 /* 64-bit companion fields for the Large-File extension. Sent
  * alongside the legacy 32-bit chunks in large-file mode; legacy
@@ -705,6 +708,49 @@ struct hl_user_data {
 #define HTLC_DATA_VOICE_MUTED ((guint16)0x01f8)
 #define HTLS_DATA_VOICE_MUTED ((guint16)0x01f8)
 #define HTLS_DATA_VOICE_PARTICIPANTS ((guint16)0x01f9)
+
+/* Video extension (hxd-ng docs/capabilities-video.md, in fogWraith's
+ * shape). Layered on voice: the same peer connection, the same 602-604
+ * SDP and ICE transactions, the same room. 607-611 continue the voice
+ * block; 612-619 are reserved. Gated on HTLC_CAP_VIDEO (bit 10), which
+ * is only ever negotiated alongside HTLC_CAP_VOICE. The canonical typed
+ * definitions live in hxproto::messages and hxproto::video. */
+#define HTLC_HDR_VIDEO_START ((guint32)0x0000025f)     /* 607 client->server */
+#define HTLC_HDR_VIDEO_STOP ((guint32)0x00000260)      /* 608 client->server */
+#define HTLC_HDR_VIDEO_STATE ((guint32)0x00000261)     /* 609 client->server */
+#define HTLC_HDR_VIDEO_SUBSCRIBE ((guint32)0x00000262) /* 610 client->server */
+#define HTLS_HDR_VIDEO_STATUS ((guint32)0x00000263)    /* 611 server->client */
+
+/* Video data field IDs, 0x0220-0x023F reserved to the extension.
+ *
+ *   DATA_VIDEO_KIND           UInt16: 1 camera, 2 screen (0 invalid).
+ *   DATA_VIDEO_PAUSED         UInt16: 0 live, 1 paused.
+ *   DATA_VIDEO_PUBLISHERS     Packed 8-byte entries: u16 uid, u16 kind,
+ *                             u16 flags (bit 0 paused), u16 codec id.
+ *   DATA_VIDEO_CODEC          The room's video codec name, "VP8".
+ *   DATA_VIDEO_LIMITS         One kind's ceiling (16 bytes, repeated
+ *                             once per kind in the LOGIN reply).
+ *   DATA_VIDEO_SUBSCRIPTIONS  Packed 4-byte entries: u16 uid, u16 kind;
+ *                             the complete desired receive set. */
+#define HTLC_DATA_VIDEO_KIND ((guint16)0x0220)
+#define HTLC_DATA_VIDEO_PAUSED ((guint16)0x0221)
+#define HTLS_DATA_VIDEO_PUBLISHERS ((guint16)0x0222)
+#define HTLS_DATA_VIDEO_CODEC ((guint16)0x0223)
+#define HTLS_DATA_VIDEO_LIMITS ((guint16)0x0224)
+#define HTLC_DATA_VIDEO_SUBSCRIPTIONS ((guint16)0x0225)
+#define HX_VIDEO_KIND_CAMERA 1
+#define HX_VIDEO_KIND_SCREEN 2
+
+/* One kind's DATA_VIDEO_LIMITS as the connection stores it (Rust
+ * gtkhx_core::conn::VideoLimits). present is 0 until a LOGIN reply
+ * carried the field for the kind. */
+struct hx_video_limits {
+    guint16 max_width;
+    guint16 max_height;
+    guint16 max_fps;
+    guint16 present;
+    guint32 max_bitrate;
+};
 
 #define HTLC_DATA_HASH_MD5 ((guint16)0x0e80)
 #define HTLC_DATA_HASH_HAVAL ((guint16)0x0e81)

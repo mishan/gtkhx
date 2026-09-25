@@ -342,6 +342,101 @@ test_build_voice_ice_json_rejects_null_required_keys (void)
     g_assert_nonnull (strstr ((const char *)buf, "\"sdpMid\":\"send\""));
 }
 
+/* ---------- video extension ---------- */
+
+static void
+test_parse_video_mid_labels (void)
+{
+    uint16_t uid = 0;
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"cam-send", 8, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_CAM_SEND);
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"scr-send", 8, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_SCR_SEND);
+    g_assert_cmpuint (uid, ==, 0);
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"cam-user-12", 11, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_CAM_USER);
+    g_assert_cmpuint (uid, ==, 12);
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"scr-user-65535", 14, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_SCR_USER);
+    g_assert_cmpuint (uid, ==, 65535);
+    /* Screen audio is reserved, not defined; past 16 bytes is rejected. */
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"sca-send", 8, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_INVALID);
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"cam-user-12345678", 17, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_INVALID);
+}
+
+/* A Video Status (611) body: CHAT_ID + PUBLISHERS + CODEC. The slices
+ * the parser hands back point into the frame. */
+static void
+test_parse_video_status (void)
+{
+    guint8 buf[128];
+    memset (buf, 0, sizeof (buf));
+    gsize off = SIZEOF_HL_HDR;
+    guint8 cid_be[4] = { 0, 0, 0, 9 };
+    pack_chunk (buf, &off, HTLC_DATA_CHAT_ID, cid_be, 4);
+    /* uid 4's live camera, uid 4's paused screen. */
+    guint8 pubs[16] = { 0, 4, 0, 1, 0, 0, 0, 0, 0, 4, 0, 2, 0, 1, 0, 0 };
+    pack_chunk (buf, &off, HTLS_DATA_VIDEO_PUBLISHERS, pubs, sizeof (pubs));
+    const guint8 codec[] = "VP8";
+    pack_chunk (buf, &off, HTLS_DATA_VIDEO_CODEC, codec, 3);
+
+    struct gtkhx_proto_video_reply r;
+    g_assert_true (gtkhx_proto_parse_video_reply (buf, off, &r));
+    g_assert_cmpuint (r.cid, ==, 9);
+    g_assert_cmpuint (r.kind, ==, 0);
+    g_assert_cmpuint (r.publishers_len, ==, 16);
+    g_assert_true (r.publishers_ptr == buf + SIZEOF_HL_HDR + 8 + 4);
+    g_assert_cmpmem (r.codec_ptr, r.codec_len, "VP8", 3);
+    g_assert_false (gtkhx_proto_parse_video_reply (buf, off, NULL));
+}
+
+/* The LOGIN reply's repeated DATA_VIDEO_LIMITS land per kind, each with
+ * its own seen bit. */
+static void
+test_parse_login_video_limits (void)
+{
+    guint8 buf[128];
+    memset (buf, 0, sizeof (buf));
+    gsize off = SIZEOF_HL_HDR;
+    const guint8 cam[16] = { 0,    1,    0x05, 0x00, 0x02, 0xd0, 0, 30,
+                             0x00, 0x16, 0xe3, 0x60, 0,    8,    0, 0 };
+    pack_chunk (buf, &off, HTLS_DATA_VIDEO_LIMITS, cam, sizeof (cam));
+
+    struct gtkhx_proto_login li;
+    unsigned seen = gtkhx_proto_parse_login (buf, off, NULL, 0, &li);
+    g_assert_cmphex (seen, ==, HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS);
+    g_assert_cmpuint (li.video_limits[0].max_width, ==, 1280);
+    g_assert_cmpuint (li.video_limits[0].max_height, ==, 720);
+    g_assert_cmpuint (li.video_limits[0].max_fps, ==, 30);
+    g_assert_cmpuint (li.video_limits[0].max_bitrate, ==, 1500000);
+    g_assert_cmpuint (li.video_limits[0].max_per_room, ==, 8);
+
+    /* Repeated, one per kind: the screen's lands in its own slot with its
+     * own seen bit, and a longer field from a later revision still parses. */
+    const guint8 scr[20]
+        = { 0,    2,    0x07, 0x80, 0x04, 0x38, 0, 15, 0x00, 0x26,
+            0x25, 0xa0, 0,    1,    0,    0,    9, 9,  9,    9 };
+    pack_chunk (buf, &off, HTLS_DATA_VIDEO_LIMITS, scr, sizeof (scr));
+    seen = gtkhx_proto_parse_login (buf, off, NULL, 0, &li);
+    g_assert_cmphex (seen, ==,
+                     HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS
+                         | HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS);
+    g_assert_cmpuint (li.video_limits[0].max_width, ==, 1280);
+    g_assert_cmpuint (li.video_limits[1].max_width, ==, 1920);
+    g_assert_cmpuint (li.video_limits[1].max_height, ==, 1080);
+    g_assert_cmpuint (li.video_limits[1].max_fps, ==, 15);
+    g_assert_cmpuint (li.video_limits[1].max_bitrate, ==, 2500000);
+    g_assert_cmpuint (li.video_limits[1].max_per_room, ==, 1);
+}
+
 /* ---------- main ---------- */
 
 int
@@ -371,6 +466,11 @@ main (int argc, char **argv)
         test_parse_voice_ice_json_rejects_missing_required_keys);
     g_test_add_func ("/proto/voice/send/ice-json-rejects-null-required-keys",
                      test_build_voice_ice_json_rejects_null_required_keys);
+    g_test_add_func ("/proto/video/parse/mid-labels",
+                     test_parse_video_mid_labels);
+    g_test_add_func ("/proto/video/parse/status", test_parse_video_status);
+    g_test_add_func ("/proto/video/parse/login-limits",
+                     test_parse_login_video_limits);
 
     return g_test_run ();
 }

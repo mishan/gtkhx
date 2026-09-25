@@ -54,6 +54,11 @@ pub mod audio;
 pub mod debug;
 pub mod ffi;
 pub mod runtime;
+pub mod video;
+
+/// The state machine's vocabulary (`VideoKind`, `Stream`, …), for callers
+/// that drive the runtime's Rust API without a direct dependency on it.
+pub use hxvoice;
 
 /// Initialise the GStreamer subsystem.
 ///

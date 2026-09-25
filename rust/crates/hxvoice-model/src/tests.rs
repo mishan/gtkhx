@@ -214,3 +214,55 @@ fn join_leave_sounds() {
     m.ingest_participants(&blob(&[(13, 0), (14, 0), (16, 0)]));
     assert_eq!(chime_count(&chimes, true), 0);
 }
+
+fn pubs(entries: &[(u16, u16, bool)]) -> Vec<u8> {
+    let mut v = Vec::new();
+    for &(uid, kind, paused) in entries {
+        v.extend_from_slice(&uid.to_be_bytes());
+        v.extend_from_slice(&kind.to_be_bytes());
+        v.extend_from_slice(&(paused as u16).to_be_bytes());
+        v.extend_from_slice(&0u16.to_be_bytes());
+    }
+    v
+}
+
+#[test]
+fn video_flags_follow_the_publication_list() {
+    let m = HxVoiceModel::new();
+    let seen: Rc<RefCell<Vec<(u32, u32)>>> = Rc::default();
+    {
+        let seen = seen.clone();
+        m.connect_local("video-changed", false, move |args| {
+            let uid: u32 = args[1].get().unwrap();
+            let flags: u32 = args[2].get().unwrap();
+            seen.borrow_mut().push((uid, flags));
+            None
+        });
+    }
+    // uid 4: camera live and screen paused; uid 9: camera paused.
+    m.ingest_video_publishers(&pubs(&[(4, 1, false), (4, 2, true), (9, 1, true)]));
+    assert_eq!(
+        m.get_video(4),
+        VIDEO_CAMERA | VIDEO_SCREEN | VIDEO_SCREEN_PAUSED
+    );
+    assert_eq!(m.get_video(9), VIDEO_CAMERA | VIDEO_CAMERA_PAUSED);
+    assert_eq!(seen.borrow().len(), 2);
+
+    // Same list again: nothing moved, nothing emitted.
+    seen.borrow_mut().clear();
+    m.ingest_video_publishers(&pubs(&[(4, 1, false), (4, 2, true), (9, 1, true)]));
+    assert!(seen.borrow().is_empty());
+
+    // Complete, not a delta: uid 9 is gone, uid 4 resumed its screen.
+    m.ingest_video_publishers(&pubs(&[(4, 1, false), (4, 2, false)]));
+    let mut got = seen.borrow().clone();
+    got.sort();
+    assert_eq!(got, vec![(4, VIDEO_CAMERA | VIDEO_SCREEN), (9, 0)]);
+    assert_eq!(m.get_video(9), 0);
+
+    // clear() drops everything, with a signal per uid.
+    seen.borrow_mut().clear();
+    m.clear();
+    assert_eq!(m.get_video(4), 0);
+    assert_eq!(seen.borrow().as_slice(), &[(4, 0)]);
+}

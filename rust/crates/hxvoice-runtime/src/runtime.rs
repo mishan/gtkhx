@@ -185,6 +185,9 @@ use gstreamer_webrtc::WebRTCSDPType;
 use hxvoice::action::{Action, SignalKind, SignalPayload};
 use hxvoice::event::{ConnectionState, Event, Timeout};
 use hxvoice::state::{SessionMachine, SessionState};
+use hxvoice::video::{Publication, Stream, Track, VideoKind};
+
+use crate::video::{FrameStore, Limits, ScreenSource, StreamKey, VideoFrame};
 
 /// Monotonically increasing id for each `VoiceRuntime` ever built
 /// on this process. Used as the key into [`MAIN_THREAD_RUNTIMES`] so
@@ -603,8 +606,15 @@ impl Backend for CallbackBackend {
             // so RoomStatus is informational from this signal's
             // POV. Drop silently.
             _ => {
+                // Video notices reach the UI through the runtime's own
+                // observers (`add_video_observer`), not the C table.
                 debug_assert!(
-                    matches!(kind, SignalKind::RoomStatus),
+                    matches!(
+                        kind,
+                        SignalKind::RoomStatus
+                            | SignalKind::VideoStatus
+                            | SignalKind::VideoLocalChanged
+                    ),
                     "unexpected (SignalKind, SignalPayload) pair: \
                      ({kind:?}, payload-omitted)"
                 );
@@ -645,6 +655,172 @@ impl Backend for RecordingBackend {
     }
 }
 
+/// What changed, for a video observer. Observers re-read whatever they
+/// care about from the runtime; the notice only says where to look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoNotice {
+    /// The room's publication list changed (a 611 arrived).
+    Publications,
+    /// New frames are waiting in the store; take them with
+    /// [`VoiceRuntime::take_video_frame`].
+    Frames,
+    /// A remote stream's receive leg went away; its tile has nothing
+    /// more to show.
+    StreamEnded(StreamKey),
+    /// This client's own publication of a kind changed.
+    Local(VideoKind),
+    /// The voice session changed state; a UI clears its tiles when
+    /// the session leaves.
+    Session(SessionState),
+}
+
+/// A video observer. Returning `false` unregisters it, which is how a
+/// widget that has gone away detaches without the runtime holding it.
+pub type VideoObserver = Box<dyn Fn(&VoiceRuntime, &VideoNotice) -> bool>;
+
+/// SSRC → mid, from the `a=ssrc` lines of the last remote offer.
+///
+/// A receive pad's transceiver is not a reliable name for what the pad
+/// carries: with every section bundled and no MID header extension
+/// negotiated, webrtcbin can expose a stream on the pad of a different
+/// section — a camera arriving on the pad of that user's silent audio
+/// section, say. The SSRC, though, is on the pad's caps, and the spec
+/// requires the offer to declare which section each SSRC belongs to. So
+/// the mid a receive pad is handled as comes from here first.
+pub(crate) type SsrcMids = Arc<std::sync::Mutex<HashMap<u32, String>>>;
+
+/// Rebuild `map` from an offer: every `a=ssrc:<n>` and every member of an
+/// `a=ssrc-group:FID`, keyed to the section's mid.
+fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) {
+    let mut fresh: HashMap<u32, String> = HashMap::new();
+    let mut mid: Option<String> = None;
+    let mut pending: Vec<u32> = Vec::new();
+    let mut flush = |mid: &mut Option<String>, pending: &mut Vec<u32>| {
+        if let Some(m) = mid.take() {
+            for ssrc in pending.drain(..) {
+                fresh.insert(ssrc, m.clone());
+            }
+        }
+        pending.clear();
+    };
+    for line in sdp.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.starts_with("m=") {
+            flush(&mut mid, &mut pending);
+        } else if let Some(m) = line.strip_prefix("a=mid:") {
+            mid = Some(m.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("a=ssrc-group:FID ") {
+            pending.extend(v.split_whitespace().filter_map(|n| n.parse::<u32>().ok()));
+        } else if let Some(v) = line.strip_prefix("a=ssrc:") {
+            if let Some(n) = v
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<u32>().ok())
+            {
+                pending.push(n);
+            }
+        }
+    }
+    flush(&mut mid, &mut pending);
+    if let Ok(mut m) = map.lock() {
+        *m = fresh;
+    }
+}
+
+/// The mid a receive pad carries: by its SSRC when the offer declared
+/// one, else by its transceiver.
+fn resolve_pad_mid(pad: &gstreamer::Pad, ssrc_mids: &SsrcMids) -> Option<String> {
+    let by_ssrc = pad
+        .current_caps()
+        .and_then(|c| c.structure(0).and_then(|s| s.get::<u32>("ssrc").ok()))
+        .and_then(|ssrc| ssrc_mids.lock().ok()?.get(&ssrc).cloned());
+    by_ssrc.or_else(|| lookup_pad_mid(pad))
+}
+
+/// The runtime's video state: per-kind capture legs, the frame store,
+/// and the server's ceilings. The frame store and the observers outlive
+/// pipeline rebuilds; the legs do not.
+struct VideoRt {
+    frames: Arc<FrameStore>,
+    /// Whether the machine wants a publication of each kind bound.
+    publishing: [bool; 2],
+    paused: [bool; 2],
+    /// The capture bin feeding each kind's send section, while live.
+    send_bins: [Option<gstreamer::Bin>; 2],
+    /// The webrtcbin sink pad bound to each kind's send transceiver.
+    /// Kept across pause and stop, so a resume or a restart relinks to
+    /// the same section rather than asking for another.
+    send_pads: [Option<gstreamer::Pad>; 2],
+    /// The SSRC each kind's payloader stamps, fixed for the pipeline's
+    /// life so the `a=ssrc` the server was told stays true.
+    ssrc: [u32; 2],
+    /// Each kind's RTP timestamp base, fixed alongside the SSRC, and the
+    /// sequence number the next capture bin continues from. See
+    /// [`crate::video::RtpContinuity`].
+    ts_base: [u32; 2],
+    next_seq: [Option<u16>; 2],
+    limits: [Limits; 2],
+    /// What a screen share captures, once the user has picked it.
+    screen_source: Option<ScreenSource>,
+    observers: Vec<Rc<VideoObserver>>,
+    /// See [`SsrcMids`]. Outlives pipeline rebuilds, like the frames.
+    ssrc_mids: SsrcMids,
+}
+
+impl VideoRt {
+    fn new() -> Self {
+        VideoRt {
+            frames: Arc::new(FrameStore::default()),
+            publishing: [false; 2],
+            paused: [false; 2],
+            send_bins: [None, None],
+            send_pads: [None, None],
+            ssrc: [random_ssrc(), random_ssrc()],
+            ts_base: [random_ssrc(), random_ssrc()],
+            next_seq: [None, None],
+            limits: [
+                Limits::spec_default(VideoKind::Camera),
+                Limits::spec_default(VideoKind::Screen),
+            ],
+            screen_source: None,
+            observers: Vec::new(),
+            ssrc_mids: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Forget every per-pipeline leg. The bins themselves go with the
+    /// pipeline they belong to.
+    fn reset_legs(&mut self) {
+        self.publishing = [false; 2];
+        self.paused = [false; 2];
+        self.send_bins = [None, None];
+        self.send_pads = [None, None];
+        self.ssrc = [random_ssrc(), random_ssrc()];
+        self.ts_base = [random_ssrc(), random_ssrc()];
+        self.next_seq = [None, None];
+        self.screen_source = None;
+        self.frames.clear();
+        if let Ok(mut m) = self.ssrc_mids.lock() {
+            m.clear();
+        }
+    }
+}
+
+/// A fresh random SSRC. RFC 3550 wants them random; the spec wants the
+/// one declared in the answer to be the one on the wire, which is why
+/// the runtime picks it rather than letting the payloader do so.
+fn random_ssrc() -> u32 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    (h.finish() as u32).max(1)
+}
+
 /// Per-session owner of the WebRTC pipeline and the state machine
 /// it drives. Cheap to clone (it's just two `Rc<RefCell<…>>`s),
 /// which lets signal closures hold weak references back without
@@ -675,6 +851,15 @@ pub struct VoiceRuntime {
 
 struct Inner {
     machine: SessionMachine,
+    /// Video legs, frame store and observers.
+    video: VideoRt,
+    /// Whether the microphone's send bin is bound to the offer's
+    /// `send` section yet. It is bound after the first offer is set,
+    /// by mid, rather than before any offer exists: a sink pad
+    /// requested up front attaches to whichever audio section comes
+    /// first, and servers that list other users' sections before
+    /// `send` would find our microphone on someone else's.
+    mic_bound: bool,
     /// `Some` once the GStreamer pipeline has been constructed.
     /// `None` for the pipeline-less test path. Holds the
     /// `webrtcbin` element as a child (added in `new()`).
@@ -1087,10 +1272,13 @@ impl VoiceRuntime {
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, RuntimeError> {
         gstreamer::init().map_err(RuntimeError::GstInitFailed)?;
         let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
-        let bits = build_pipeline_bits(runtime_id)?;
+        let video = VideoRt::new();
+        let bits = build_pipeline_bits(runtime_id, &video.frames, &video.ssrc_mids)?;
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
+                video,
+                mic_bound: false,
                 pipeline: Some(bits.pipeline),
                 webrtcbin: Some(bits.webrtcbin),
                 armed_timer_sources: HashMap::new(),
@@ -1140,6 +1328,8 @@ impl VoiceRuntime {
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
+                video: VideoRt::new(),
+                mic_bound: false,
                 pipeline: None,
                 webrtcbin: None,
                 armed_timer_sources: HashMap::new(),
@@ -1209,7 +1399,11 @@ struct PipelineBits {
 ///
 /// Returns the freshly-allocated handles; the caller stores them
 /// in `Inner`.
-fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
+fn build_pipeline_bits(
+    runtime_id: u64,
+    frames: &Arc<FrameStore>,
+    ssrc_mids: &SsrcMids,
+) -> Result<PipelineBits, RuntimeError> {
     let pipeline = gstreamer::Pipeline::builder()
         .name("hxvoice-pipeline")
         .build();
@@ -1313,10 +1507,10 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
         );
         RuntimeError::WebrtcbinUnavailable
     })?;
-    // Request a sink pad on webrtcbin and link the send bin's
-    // src ghost pad to it. `sink_%u` returns a new sink pad
-    // backed by a fresh transceiver — webrtcbin picks the
-    // mline index. We DO NOT pre-add a transceiver via
+    // History: the send bin used to be linked here, to a
+    // `sink_%u` request pad backed by a fresh transceiver whose
+    // mline webrtcbin picked at the first offer — the first audio
+    // section, whatever its mid. We DO NOT pre-add a transceiver via
     // `add-transceiver` because that creates a second,
     // unwired transceiver: SDP negotiation matches our
     // pre-added one to mline 0 (a=mid:send) leaving its
@@ -1334,30 +1528,14 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
     // webrtcbin auto-creates a recvonly transceiver (with a
     // src pad) for every `a=mid:user-N` line in the offer.
     //
-    // The link must happen BEFORE pipeline.set_state(Playing)
-    // so the negotiation sees a populated transceiver
-    // direction when create-answer fires later.
-    let webrtc_sink = webrtcbin.request_pad_simple("sink_%u").ok_or_else(|| {
-        gstreamer::warning!(
-            gstreamer::CAT_RUST,
-            "hxvoice: webrtcbin refused to grant a sink_%u pad"
-        );
-        RuntimeError::WebrtcbinUnavailable
-    })?;
-    let send_src = send_bin.static_pad("src").ok_or_else(|| {
-        gstreamer::warning!(
-            gstreamer::CAT_RUST,
-            "hxvoice: send_bin missing its ghost src pad"
-        );
-        RuntimeError::WebrtcbinUnavailable
-    })?;
-    send_src.link(&webrtc_sink).map_err(|e| {
-        gstreamer::warning!(
-            gstreamer::CAT_RUST,
-            "hxvoice: failed to link send_bin → webrtcbin sink: {e:?}"
-        );
-        RuntimeError::WebrtcbinUnavailable
-    })?;
+    // Binding by mid after the offer is set (see `bind_mic`)
+    // replaces both: the offer's own transceivers exist by then,
+    // and the one whose mid is `send` is the one to feed.
+    // The send bin stays out of the stream until the first offer
+    // tells us which section is `send`: `bind_mic` links it there, by
+    // mid. Locked, so the pipeline going to Playing doesn't start a
+    // live source that has nowhere to push yet.
+    send_bin.set_locked_state(true);
     // Note: we deliberately do NOT pre-add a Recvonly
     // transceiver here, even though the receive pad-added
     // misfire suggests it might help.
@@ -1425,6 +1603,8 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
         &pipeline,
         runtime_id,
         Arc::clone(&rtp_buffers_received),
+        Arc::clone(frames),
+        Arc::clone(ssrc_mids),
     );
     connect_pad_removed(&webrtcbin, runtime_id);
     connect_connection_state_notify(&webrtcbin, runtime_id);
@@ -1563,7 +1743,7 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
     // explicitly below — we do NOT wait for the transition to
     // land before continuing, see the comment at the set_state
     // call.
-    let (pipeline, runtime_id) = {
+    let (pipeline, runtime_id, frames, ssrc_mids) = {
         let mut inner = runtime.inner.borrow_mut();
         // Drop the receive-bin map first so the streaming-thread
         // probes attached to them release their `Arc` clones of
@@ -1573,7 +1753,12 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         inner.receive_bins.clear();
         inner.recv_bin_uid_cache.clear();
         inner.pending_pads.clear();
-        inner.answer_generation = 0;
+        inner.video.reset_legs();
+        inner.mic_bound = false;
+        // `answer_generation` keeps counting across rebuilds: a deferred
+        // answer or a create-answer promise from the old pipeline
+        // captured the old value, and a reset would let it match the new
+        // session's first offer and answer with the old credentials.
         inner.last_seen_peer_state = None;
         inner.has_been_connected_since_join = false;
         // Cancel every armed timer source. The state machine's
@@ -1616,7 +1801,12 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         // Null transition lands.
         let pipeline = inner.pipeline.take();
         let runtime_id = inner.runtime_id;
-        (pipeline, runtime_id)
+        (
+            pipeline,
+            runtime_id,
+            Arc::clone(&inner.video.frames),
+            Arc::clone(&inner.video.ssrc_mids),
+        )
     };
 
     let Some(pipeline) = pipeline else {
@@ -1667,7 +1857,7 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
     // Rebuild. Failure here means the next session can't drive
     // voice, but the state machine is already in Leaving and
     // the user will see the error toast that fail() emitted.
-    let bits = match build_pipeline_bits(runtime_id) {
+    let bits = match build_pipeline_bits(runtime_id, &frames, &ssrc_mids) {
         Ok(b) => b,
         Err(e) => {
             gstreamer::warning!(
@@ -2174,7 +2364,27 @@ impl VoiceRuntime {
                 self.backend.borrow_mut().send_wire_frame(opcode, &body.0);
             }
             Action::EmitSignal { kind, payload } => {
+                let notice = match (&kind, &payload) {
+                    (SignalKind::VideoStatus, _) => Some(VideoNotice::Publications),
+                    (
+                        SignalKind::VideoLocalChanged,
+                        SignalPayload::VideoLocalChanged { kind, .. },
+                    ) => Some(VideoNotice::Local(*kind)),
+                    (SignalKind::StateChanged, SignalPayload::StateChanged { new_state }) => {
+                        Some(VideoNotice::Session(*new_state))
+                    }
+                    _ => None,
+                };
                 self.backend.borrow_mut().emit_signal(kind, payload);
+                if let Some(n) = notice {
+                    self.notify_video(n);
+                }
+            }
+            Action::SetVideoPublishing { kind, publishing } => {
+                self.set_video_publishing(kind, publishing);
+            }
+            Action::SetVideoPaused { kind, paused } => {
+                self.set_video_paused(kind, paused);
             }
             Action::TearDown => {
                 self.backend.borrow_mut().tear_down();
@@ -2281,6 +2491,7 @@ impl VoiceRuntime {
                 // produces a fresh generation, and the in-flight
                 // promise's eventual resolution is correctly
                 // dropped as stale.
+                index_offer_ssrcs(&sdp, &self.inner.borrow().video.ssrc_mids);
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
                     inner.answer_generation = inner.answer_generation.wrapping_add(1);
@@ -2397,7 +2608,13 @@ impl VoiceRuntime {
                 // the `level` element's RMS bus messages
                 // (`handle_level_message`), not from here, so this
                 // path only needs the global wedge-watchdog counter.
-                if let Some(bin) = start_receive_bin(&pipeline, &pad, &mid, &counter) {
+                let (frames, runtime_id) = {
+                    let inner = self.inner.borrow();
+                    (Arc::clone(&inner.video.frames), inner.runtime_id)
+                };
+                if let Some(bin) =
+                    start_receive_bin(&pipeline, &pad, &mid, &counter, &frames, runtime_id)
+                {
                     // Replay any per-user playback gain the user set
                     // earlier this session so a rejoin keeps their
                     // chosen level.
@@ -2452,6 +2669,12 @@ impl VoiceRuntime {
                         );
                         stop_receive_bin(&pipeline, &bin);
                     }
+                }
+                if let Some(Track::Video(user_id, kind)) = hxvoice::video::parse_mid(&mid) {
+                    let key = StreamKey { user_id, kind };
+                    let frames = Arc::clone(&self.inner.borrow().video.frames);
+                    frames.remove(key);
+                    self.notify_video(VideoNotice::StreamEnded(key));
                 }
             }
 
@@ -2622,7 +2845,11 @@ fn apply_remote_offer_and_chain_answer(
                 }
                 let webrtcbin = rt.inner.borrow().webrtcbin.clone();
                 if let Some(bin) = webrtcbin {
-                    create_answer(&bin, runtime_id, generation);
+                    // The offer's transceivers exist now. Feed the ones
+                    // we send on before the answer is written, so it
+                    // declares their direction and SSRC.
+                    let fresh = rt.bind_local_senders(&bin);
+                    answer_once_senders_have_caps(&bin, fresh, runtime_id, generation);
                 }
             });
         });
@@ -2915,6 +3142,8 @@ fn connect_pad_added(
     pipeline: &gstreamer::Pipeline,
     runtime_id: u64,
     rtp_buffers_received: Arc<AtomicU64>,
+    frames: Arc<FrameStore>,
+    ssrc_mids: SsrcMids,
 ) {
     let main_ctx = gstreamer::glib::MainContext::default();
     let pipeline = pipeline.clone();
@@ -2924,7 +3153,7 @@ fn connect_pad_added(
             // through this signal too; nothing to do with them.
             return;
         }
-        let mid = match lookup_pad_mid(pad) {
+        let mid = match resolve_pad_mid(pad, &ssrc_mids) {
             Some(m) => m,
             None => {
                 crate::debug::log!(
@@ -2949,10 +3178,11 @@ fn connect_pad_added(
         // silent-failure that bit us in the multi-client test.
         crate::debug::log!(
             "voice-pipe",
-            "pad-added pad={} mid={} dir={:?}",
+            "pad-added pad={} mid={} dir={:?} caps={:?}",
             pad.name(),
             mid,
-            pad.direction()
+            pad.direction(),
+            pad.current_caps()
         );
 
         // SYNCHRONOUS receive-bin build + link, BEFORE we return
@@ -2986,7 +3216,14 @@ fn connect_pad_added(
         // thread and own the `per_user_voice_activity` map directly,
         // so `start_receive_bin` only needs the global wedge-watchdog
         // counter on this path.
-        let recv_bin = start_receive_bin(&pipeline, pad, &mid, &rtp_buffers_received);
+        let recv_bin = start_receive_bin(
+            &pipeline,
+            pad,
+            &mid,
+            &rtp_buffers_received,
+            &frames,
+            runtime_id,
+        );
         let pad = pad.clone();
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
@@ -3260,6 +3497,7 @@ fn connect_on_new_transceiver(webrtcbin: &gstreamer::Element) {
         .field("payload", 0i32)
         .field("clock-rate", 8000i32)
         .build();
+    let vp8_caps = crate::video::vp8_codec_caps();
     // Use `connect_closure` with the cross-thread `closure!`
     // macro from glib. We can't use `closure_local!` (the
     // single-thread variant) because the signal fires from
@@ -3276,14 +3514,21 @@ fn connect_on_new_transceiver(webrtcbin: &gstreamer::Element) {
         glib::closure!(
             move |_bin: &gstreamer::Element,
                   transceiver: &gstreamer_webrtc::WebRTCRTPTransceiver| {
-                transceiver.set_property("codec-preferences", &pcmu_caps);
+                // A transceiver created from an offer section already
+                // knows its media kind here: a video section gets VP8 at
+                // PT 96, everything else keeps the PCMU pin. Pinning PCMU
+                // on a video section would answer it with no codec.
+                let video = transceiver_is_video(transceiver);
+                let caps = if video { &vp8_caps } else { &pcmu_caps };
+                transceiver.set_property("codec-preferences", caps);
                 let dir: gstreamer_webrtc::WebRTCRTPTransceiverDirection =
                     transceiver.property("direction");
                 let mid: Option<String> = transceiver.property("mid");
                 crate::debug::log!(
                     "voice-pipe",
-                    "on-new-transceiver: pinned PCMU codec-preferences \
-                     on transceiver direction={dir:?} mid={mid:?}"
+                    "on-new-transceiver: pinned {} codec-preferences \
+                     on transceiver direction={dir:?} mid={mid:?}",
+                    if video { "VP8" } else { "PCMU" }
                 );
             }
         ),
@@ -3705,6 +3950,15 @@ fn attach_pipeline_bus_watch(
                         err.error(),
                         err.debug()
                     );
+                    // A capture that fails ends that publication, not the
+                    // call: the spec's "losing video is a degradation,
+                    // losing the call is a failure".
+                    if let Some(kind) = crate::video::kind_of_send_path(&src) {
+                        let text = err.error().to_string();
+                        with_main_thread_runtime(runtime_id, |rt| {
+                            rt.capture_failed(kind, &src, text);
+                        });
+                    }
                 }
                 MessageView::Warning(w) => {
                     let src = w
@@ -3752,6 +4006,8 @@ fn start_receive_bin(
     src_pad: &gstreamer::Pad,
     mid: &str,
     rtp_buffers_received: &Arc<AtomicU64>,
+    frames: &Arc<FrameStore>,
+    runtime_id: u64,
 ) -> Option<gstreamer::Bin> {
     // Diagnostic: probe webrtcbin's src_0 BEFORE we link the
     // depay bin to it. If this probe never fires while the
@@ -3779,7 +4035,33 @@ fn start_receive_bin(
     }
     let bin_name = recv_bin_name(mid, src_pad.name().as_str());
     let output_device = crate::audio::output_device();
-    let bin = match crate::audio::make_receive_bin(&bin_name, output_device.as_deref()) {
+    // What the mid names decides the bin. `send` stays audio: Janus
+    // labels the receive legs it bundles onto our microphone's section
+    // with it. A mid this client doesn't recognize gets a bin that
+    // discards its stream — the spec says mirror it, never play it.
+    let built = match hxvoice::video::parse_mid(mid) {
+        Some(Track::Video(user_id, kind)) => {
+            let key = StreamKey { user_id, kind };
+            let frames = Arc::clone(frames);
+            crate::video::make_receive_bin(&bin_name, move |frame| {
+                if frames.put(key, frame) {
+                    schedule_frames_notice(runtime_id);
+                }
+            })
+        }
+        Some(Track::Mic | Track::Audio(_)) => {
+            crate::audio::make_receive_bin(&bin_name, output_device.as_deref())
+        }
+        Some(Track::VideoSend(_)) | None => {
+            crate::debug::log!(
+                "voice-pipe",
+                "receive pad for mid={mid} carries nothing this client \
+                 plays; discarding its stream"
+            );
+            crate::video::make_discard_bin(&bin_name)
+        }
+    };
+    let bin = match built {
         Some(b) => b,
         None => {
             gstreamer::warning!(
@@ -4330,6 +4612,664 @@ impl std::error::Error for RuntimeError {
             RuntimeError::GstInitFailed(err) => Some(err),
             RuntimeError::WebrtcbinUnavailable => None,
         }
+    }
+}
+
+// ---- Video ---------------------------------------------------------
+
+/// Whether a transceiver carries video. Read from its `kind`, which
+/// webrtcbin fills in from the offer section before `on-new-transceiver`
+/// fires; compared by nick so the check needs no 1.20 binding feature.
+fn transceiver_is_video(t: &gstreamer_webrtc::WebRTCRTPTransceiver) -> bool {
+    if t.find_property("kind").is_none() {
+        return false;
+    }
+    gstreamer::glib::EnumValue::from_value(&t.property_value("kind"))
+        .is_some_and(|(_, v)| v.nick() == "video")
+}
+
+/// Every transceiver webrtcbin holds, in index order.
+fn transceivers(webrtcbin: &gstreamer::Element) -> Vec<gstreamer_webrtc::WebRTCRTPTransceiver> {
+    let mut out = Vec::new();
+    for i in 0..i32::MAX {
+        match webrtcbin.emit_by_name::<Option<gstreamer_webrtc::WebRTCRTPTransceiver>>(
+            "get-transceiver",
+            &[&i],
+        ) {
+            Some(t) => out.push(t),
+            None => break,
+        }
+    }
+    out
+}
+
+fn transceiver_mid(t: &gstreamer_webrtc::WebRTCRTPTransceiver) -> Option<String> {
+    t.property::<Option<String>>("mid")
+}
+
+/// The direction attribute the remote offer gave section `mline`.
+fn offered_direction(webrtcbin: &gstreamer::Element, mline: u32) -> Option<String> {
+    let desc = webrtcbin
+        .property::<Option<gstreamer_webrtc::WebRTCSessionDescription>>("remote-description")?;
+    let media = desc.sdp().media(mline)?;
+    media.attributes().map(|a| a.key().to_string()).find(|k| {
+        matches!(
+            k.as_str(),
+            "sendrecv" | "sendonly" | "recvonly" | "inactive"
+        )
+    })
+}
+
+/// How long an answer waits for freshly bound senders to show their caps.
+/// Past it the answer goes out regardless: a sender that never produces
+/// caps (a camera that failed to open) must not hold up the call.
+const SENDER_CAPS_WAIT_MS: u64 = 1500;
+
+/// Create the answer once every pad in `fresh` has seen its caps event.
+///
+/// A sender bound moments ago hasn't pushed a buffer yet, and webrtcbin
+/// writes a send section's `a=ssrc` from the caps its sink pad has
+/// received — so an answer written straight away would declare no SSRC
+/// for the microphone or the camera. The voice spec requires the
+/// declaration on `send`, and the video spec has the server reject a
+/// video send section without one, so the answer waits for the caps
+/// (tens of milliseconds for a live source) or the timeout, whichever
+/// comes first. The generation check drops it if a newer offer has
+/// superseded this one meanwhile.
+fn answer_once_senders_have_caps(
+    webrtcbin: &gstreamer::Element,
+    fresh: Vec<gstreamer::Pad>,
+    runtime_id: u64,
+    generation: u64,
+) {
+    let waiting: Vec<gstreamer::Pad> = fresh
+        .into_iter()
+        .filter(|p| p.current_caps().is_none())
+        .collect();
+    crate::debug::log!(
+        "voice-pipe",
+        "answer waits on {} sender pad(s) for caps",
+        waiting.len()
+    );
+    if waiting.is_empty() {
+        create_answer(webrtcbin, runtime_id, generation);
+        return;
+    }
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(waiting.len()));
+    let answer = {
+        let done = Arc::clone(&done);
+        move || {
+            if done.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            gstreamer::glib::MainContext::default().invoke(move || {
+                with_main_thread_runtime(runtime_id, |rt| {
+                    if rt.inner.borrow().answer_generation != generation {
+                        return;
+                    }
+                    let bin = rt.inner.borrow().webrtcbin.clone();
+                    if let Some(bin) = bin {
+                        create_answer(&bin, runtime_id, generation);
+                    }
+                });
+            });
+        }
+    };
+    let answer = Arc::new(answer);
+    for pad in waiting {
+        let counted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let arrive = {
+            let remaining = Arc::clone(&remaining);
+            let answer = Arc::clone(&answer);
+            let counted = Arc::clone(&counted);
+            move || {
+                if !counted.swap(true, Ordering::AcqRel)
+                    && remaining.fetch_sub(1, Ordering::AcqRel) == 1
+                {
+                    answer();
+                }
+            }
+        };
+        let on_probe = arrive.clone();
+        pad.add_probe(
+            gstreamer::PadProbeType::EVENT_DOWNSTREAM,
+            move |_pad, info| {
+                if let Some(gstreamer::PadProbeData::Event(ev)) = &info.data {
+                    if ev.type_() == gstreamer::EventType::Caps {
+                        crate::debug::log!("voice-pipe", "sender caps arrived: {ev:?}");
+                        on_probe();
+                        return gstreamer::PadProbeReturn::Remove;
+                    }
+                }
+                gstreamer::PadProbeReturn::Ok
+            },
+        );
+        // The caps may have landed between the filter above and the
+        // probe going in.
+        if pad.current_caps().is_some() {
+            arrive();
+        }
+    }
+    gstreamer::glib::timeout_add_local_once(
+        std::time::Duration::from_millis(SENDER_CAPS_WAIT_MS),
+        move || answer(),
+    );
+}
+
+/// Post a frames notice to the main thread. Called from an appsink's
+/// streaming thread only when the store says none is on its way, so a
+/// burst of frames across every stream costs one main-loop wakeup.
+fn schedule_frames_notice(runtime_id: u64) {
+    gstreamer::glib::MainContext::default().invoke(move || {
+        with_main_thread_runtime(runtime_id, |rt| {
+            let frames = Arc::clone(&rt.inner.borrow().video.frames);
+            frames.clear_pending();
+            rt.notify_video(VideoNotice::Frames);
+        });
+    });
+}
+
+impl VoiceRuntime {
+    /// Bind this client's senders to the sections of the offer just
+    /// set: the microphone to `send` once, and each wanted, unpaused
+    /// video publication to its `cam-send` / `scr-send`. Runs before
+    /// `create-answer`, so the answer describes what we actually send.
+    ///
+    /// Returns the webrtcbin sink pads it linked, so the caller can hold
+    /// the answer until their caps arrive.
+    fn bind_local_senders(&self, webrtcbin: &gstreamer::Element) -> Vec<gstreamer::Pad> {
+        let mut fresh = Vec::new();
+        if !self.inner.borrow().mic_bound {
+            fresh.extend(self.bind_mic(webrtcbin));
+        }
+        for kind in VideoKind::ALL {
+            let wanted = {
+                let inner = self.inner.borrow();
+                let v = &inner.video;
+                v.publishing[kind.index()]
+                    && !v.paused[kind.index()]
+                    && v.send_bins[kind.index()].is_none()
+            };
+            if wanted {
+                fresh.extend(self.bind_video_sender(webrtcbin, kind));
+            }
+        }
+        fresh
+    }
+
+    /// Link the microphone's send bin to the `send` section's
+    /// transceiver. Its direction mirrors what the server offered:
+    /// `recvonly` is answered `sendonly`, and a `sendrecv` section —
+    /// Janus bundles the room's audio onto ours when we are alone in it
+    /// — is answered `sendrecv` so that audio still arrives.
+    fn bind_mic(&self, webrtcbin: &gstreamer::Element) -> Option<gstreamer::Pad> {
+        use gstreamer_webrtc::WebRTCRTPTransceiverDirection as Dir;
+        let all = transceivers(webrtcbin);
+        let target = all
+            .iter()
+            .find(|t| transceiver_mid(t).as_deref() == Some("send"))
+            .or_else(|| {
+                // No `send` section at all: fall back to the first audio
+                // section the server receives on, which is where the old
+                // bind-before-offer path would have landed.
+                all.iter().find(|t| {
+                    !transceiver_is_video(t)
+                        && matches!(
+                            offered_direction(webrtcbin, t.property::<u32>("mlineindex"))
+                                .as_deref(),
+                            Some("recvonly") | Some("sendrecv")
+                        )
+                })
+            })
+            .cloned();
+        let Some(t) = target else {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: offer has no section for our microphone; sending nothing"
+            );
+            return None;
+        };
+        let mline: u32 = t.property("mlineindex");
+        let dir = match offered_direction(webrtcbin, mline).as_deref() {
+            Some("sendrecv") => Dir::Sendrecv,
+            _ => Dir::Sendonly,
+        };
+        t.set_property("direction", dir);
+        let pipeline = self.inner.borrow().pipeline.clone();
+        let pipeline = pipeline?;
+        let send_bin = pipeline
+            .by_name(crate::audio::SEND_BIN_NAME)
+            .and_then(|e| e.downcast::<gstreamer::Bin>().ok())?;
+        let Some(sink) = webrtcbin.request_pad_simple(&format!("sink_{mline}")) else {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: webrtcbin refused sink_{mline} for the microphone"
+            );
+            return None;
+        };
+        let linked = send_bin
+            .static_pad("src")
+            .is_some_and(|src| src.link(&sink).is_ok());
+        if !linked {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to link the microphone to sink_{mline}"
+            );
+            return None;
+        }
+        send_bin.set_locked_state(false);
+        let _ = send_bin.sync_state_with_parent();
+        self.inner.borrow_mut().mic_bound = true;
+        crate::debug::log!(
+            "voice-pipe",
+            "microphone bound to mid={:?} (mline {mline}, {dir:?})",
+            transceiver_mid(&t)
+        );
+        Some(sink)
+    }
+
+    /// Bind a capture bin for `kind` to its send section, requesting the
+    /// section's sink pad the first time. Needs the offer to carry the
+    /// section; until one does, this is a no-op and the next offer's
+    /// `bind_local_senders` tries again.
+    fn bind_video_sender(
+        &self,
+        webrtcbin: &gstreamer::Element,
+        kind: VideoKind,
+    ) -> Option<gstreamer::Pad> {
+        use gstreamer_webrtc::WebRTCRTPTransceiverDirection as Dir;
+        let existing = self.inner.borrow().video.send_pads[kind.index()].clone();
+        let pad = match existing {
+            Some(p) => p,
+            None => {
+                let all = transceivers(webrtcbin);
+                let Some(t) = all
+                    .iter()
+                    .find(|t| transceiver_mid(t).as_deref() == Some(kind.send_mid()))
+                    .cloned()
+                else {
+                    crate::debug::log!(
+                        "voice-pipe",
+                        "no {} transceiver yet among {:?}",
+                        kind.send_mid(),
+                        all.iter().map(transceiver_mid).collect::<Vec<_>>()
+                    );
+                    return None;
+                };
+                let mline: u32 = t.property("mlineindex");
+                // webrtcbin refuses a sink pad for a recvonly transceiver,
+                // so the direction has to change first.
+                t.set_property("direction", Dir::Sendonly);
+                let Some(pad) = webrtcbin.request_pad_simple(&format!("sink_{mline}")) else {
+                    gstreamer::warning!(
+                        gstreamer::CAT_RUST,
+                        "hxvoice: webrtcbin refused sink_{mline} for {}",
+                        kind.send_mid()
+                    );
+                    crate::debug::log!(
+                        "voice-pipe",
+                        "webrtcbin refused sink_{mline} for {}; pads: {:?}",
+                        kind.send_mid(),
+                        webrtcbin
+                            .pads()
+                            .iter()
+                            .map(|p| p.name())
+                            .collect::<Vec<_>>()
+                    );
+                    return None;
+                };
+                self.inner.borrow_mut().video.send_pads[kind.index()] = Some(pad.clone());
+                pad
+            }
+        };
+        if let Some(t) =
+            pad.property::<Option<gstreamer_webrtc::WebRTCRTPTransceiver>>("transceiver")
+        {
+            t.set_property("direction", Dir::Sendonly);
+        }
+        self.attach_capture(kind, &pad).then_some(pad)
+    }
+
+    /// Build the capture bin for `kind` and link it to `pad`. A capture
+    /// that can't be built — no camera, no portal stream — fails the
+    /// publication and leaves the call alone.
+    fn attach_capture(&self, kind: VideoKind, pad: &gstreamer::Pad) -> bool {
+        let (pipeline, target, rtp, screen, frames, runtime_id) = {
+            let inner = self.inner.borrow();
+            let v = &inner.video;
+            (
+                inner.pipeline.clone(),
+                v.limits[kind.index()].target(kind),
+                crate::video::RtpContinuity {
+                    ssrc: v.ssrc[kind.index()],
+                    timestamp_base: v.ts_base[kind.index()],
+                    next_seqnum: v.next_seq[kind.index()],
+                },
+                v.screen_source.clone(),
+                Arc::clone(&v.frames),
+                inner.runtime_id,
+            )
+        };
+        let ssrc = rtp.ssrc;
+        let Some(pipeline) = pipeline else {
+            return false;
+        };
+        let preview_key = crate::video::self_key(kind);
+        let bin = crate::video::make_send_bin(
+            crate::video::send_bin_name(kind),
+            kind,
+            screen.as_ref(),
+            target,
+            rtp,
+            move |frame| {
+                if frames.put(preview_key, frame) {
+                    schedule_frames_notice(runtime_id);
+                }
+            },
+        );
+        let linked = match bin.as_ref() {
+            None => {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: could not build the {kind:?} capture bin"
+                );
+                false
+            }
+            Some(bin) => {
+                if let Err(e) = pipeline.add(bin) {
+                    gstreamer::warning!(
+                        gstreamer::CAT_RUST,
+                        "hxvoice: could not add the {kind:?} capture bin: {e}"
+                    );
+                    false
+                } else {
+                    match bin.static_pad("src").map(|src| src.link(pad)) {
+                        Some(Ok(_)) => true,
+                        other => {
+                            gstreamer::warning!(
+                                gstreamer::CAT_RUST,
+                                "hxvoice: could not link the {kind:?} capture to {}: {other:?}",
+                                pad.name()
+                            );
+                            crate::debug::log!(
+                                "voice-pipe",
+                                "{kind:?} capture link to {} failed: {other:?}",
+                                pad.name()
+                            );
+                            let _ = pipeline.remove(bin);
+                            false
+                        }
+                    }
+                }
+            }
+        };
+        let Some(bin) = bin.filter(|_| linked) else {
+            let what = match kind {
+                VideoKind::Camera => "No camera could be opened.",
+                VideoKind::Screen => "The screen could not be captured.",
+            };
+            self.handle_event(Event::VideoCaptureFailed {
+                kind,
+                text: what.into(),
+            });
+            return false;
+        };
+        if crate::debug::category_enabled("voice-flow") {
+            if let Some(src) = bin.static_pad("src") {
+                let n = std::sync::atomic::AtomicU64::new(0);
+                src.add_probe(gstreamer::PadProbeType::BUFFER, move |_, _| {
+                    let c = n.fetch_add(1, Ordering::Relaxed) + 1;
+                    if c == 1 || c % 30 == 0 {
+                        crate::debug::log!("voice-flow", "{kind:?} capture: RTP buffer #{c}");
+                    }
+                    gstreamer::PadProbeReturn::Ok
+                });
+            }
+        }
+        let _ = bin.sync_state_with_parent();
+        crate::debug::log!(
+            "voice-pipe",
+            "{kind:?} capture linked: {}x{} @{} fps, {} b/s, ssrc {ssrc}",
+            target.width,
+            target.height,
+            target.fps,
+            target.bitrate
+        );
+        self.inner.borrow_mut().video.send_bins[kind.index()] = Some(bin);
+        true
+    }
+
+    /// Stop and remove the capture bin for `kind`, keeping its sink pad
+    /// and so its section. Stopping the source is what turns a camera's
+    /// light off, which is the spec's reason for stopping on pause.
+    fn detach_capture(&self, kind: VideoKind) {
+        let (pipeline, bin, frames) = {
+            let mut inner = self.inner.borrow_mut();
+            let bin = inner.video.send_bins[kind.index()].take();
+            (inner.pipeline.clone(), bin, Arc::clone(&inner.video.frames))
+        };
+        if let Some(bin) = bin {
+            // Where the next capture's payloader has to carry on from.
+            if let Some(pay) = bin.by_name(crate::video::PAYLOADER_NAME) {
+                let last = pay.property::<u32>("seqnum") as u16;
+                self.inner.borrow_mut().video.next_seq[kind.index()] = Some(last.wrapping_add(1));
+            }
+            let _ = bin.set_state(gstreamer::State::Null);
+            if let Some(src) = bin.static_pad("src") {
+                if let Some(peer) = src.peer() {
+                    let _ = src.unlink(&peer);
+                }
+            }
+            if let Some(pipeline) = pipeline {
+                let _ = pipeline.remove(&bin);
+            }
+        }
+        let key = crate::video::self_key(kind);
+        frames.remove(key);
+        self.notify_video(VideoNotice::StreamEnded(key));
+    }
+
+    fn set_video_publishing(&self, kind: VideoKind, publishing: bool) {
+        {
+            let mut inner = self.inner.borrow_mut();
+            inner.video.publishing[kind.index()] = publishing;
+            inner.video.paused[kind.index()] = false;
+        }
+        if publishing {
+            // A restart after a stop finds its section already bound;
+            // it goes live now rather than at the next offer.
+            let pad = self.inner.borrow().video.send_pads[kind.index()].clone();
+            let webrtcbin = self.inner.borrow().webrtcbin.clone();
+            if let (Some(_), Some(bin)) = (pad, webrtcbin) {
+                self.bind_video_sender(&bin, kind);
+            }
+        } else {
+            self.detach_capture(kind);
+            let pad = self.inner.borrow().video.send_pads[kind.index()].clone();
+            if let Some(t) = pad.and_then(|p| {
+                p.property::<Option<gstreamer_webrtc::WebRTCRTPTransceiver>>("transceiver")
+            }) {
+                t.set_property(
+                    "direction",
+                    gstreamer_webrtc::WebRTCRTPTransceiverDirection::Inactive,
+                );
+            }
+        }
+    }
+
+    fn set_video_paused(&self, kind: VideoKind, paused: bool) {
+        let (pad, publishing) = {
+            let mut inner = self.inner.borrow_mut();
+            inner.video.paused[kind.index()] = paused;
+            (
+                inner.video.send_pads[kind.index()].clone(),
+                inner.video.publishing[kind.index()],
+            )
+        };
+        if paused {
+            self.detach_capture(kind);
+        } else if let (Some(pad), true) = (pad, publishing) {
+            if self.inner.borrow().video.send_bins[kind.index()].is_none() {
+                self.attach_capture(kind, &pad);
+            }
+        }
+    }
+
+    /// A capture bin posted an error. Only a live publication's current
+    /// bin counts: an error from a bin already torn down for a pause or
+    /// a stop is the teardown's echo, not a failure.
+    fn capture_failed(&self, kind: VideoKind, src: &str, text: String) {
+        let live = {
+            let inner = self.inner.borrow();
+            inner.video.send_bins[kind.index()].is_some()
+                && inner.machine.local_video(kind) == Some(false)
+        };
+        if !live {
+            return;
+        }
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: {kind:?} capture failed at {src}: {text}"
+        );
+        self.detach_capture(kind);
+        let what = match kind {
+            VideoKind::Camera => "The camera stopped",
+            VideoKind::Screen => "Screen sharing stopped",
+        };
+        self.handle_event(Event::VideoCaptureFailed {
+            kind,
+            text: format!("{what}: {text}"),
+        });
+    }
+
+    /// Tell every video observer, dropping the ones that decline.
+    fn notify_video(&self, notice: VideoNotice) {
+        let observers: Vec<Rc<VideoObserver>> = self.inner.borrow().video.observers.clone();
+        if observers.is_empty() {
+            return;
+        }
+        let mut dead: Vec<Rc<VideoObserver>> = Vec::new();
+        for o in &observers {
+            if !(o)(self, &notice) {
+                dead.push(Rc::clone(o));
+            }
+        }
+        if !dead.is_empty() {
+            self.inner
+                .borrow_mut()
+                .video
+                .observers
+                .retain(|o| !dead.iter().any(|d| Rc::ptr_eq(o, d)));
+        }
+    }
+
+    // ---- Video API ----
+
+    /// A process-unique id for this runtime. `VoiceRuntime` is a cheap
+    /// handle (clones share one runtime), so a handle's address is not an
+    /// identity; this is.
+    pub fn id(&self) -> u64 {
+        self.inner.borrow().runtime_id
+    }
+
+    /// Register an observer for video changes. It is called on the main
+    /// thread; returning `false` unregisters it.
+    pub fn add_video_observer(&self, observer: VideoObserver) {
+        self.inner
+            .borrow_mut()
+            .video
+            .observers
+            .push(Rc::new(observer));
+    }
+
+    /// The room's publications, as the last 611 described them.
+    pub fn video_publications(&self) -> Vec<Publication> {
+        self.inner.borrow().machine.publications().to_vec()
+    }
+
+    /// The receive set the server was last given.
+    pub fn video_subscriptions(&self) -> Vec<Stream> {
+        self.inner.borrow().machine.subscriptions().to_vec()
+    }
+
+    /// This client's own publication of `kind`: `None` when not
+    /// publishing, `Some(paused)` otherwise.
+    pub fn video_local(&self, kind: VideoKind) -> Option<bool> {
+        self.inner.borrow().machine.local_video(kind)
+    }
+
+    /// The newest frame of a stream, if one arrived since the last take.
+    /// [`crate::video::self_key`] names this client's own preview.
+    pub fn take_video_frame(&self, key: StreamKey) -> Option<VideoFrame> {
+        let frames = Arc::clone(&self.inner.borrow().video.frames);
+        frames.take(key)
+    }
+
+    /// Frames decoded for a stream so far. The Tier 3 media test's
+    /// assertion; the UI has no use for it.
+    pub fn video_frames_received(&self, key: StreamKey) -> u64 {
+        let frames = Arc::clone(&self.inner.borrow().video.frames);
+        frames.count(key)
+    }
+
+    /// The size of the newest decoded frame of a stream, if any arrived.
+    pub fn video_frame_size(&self, key: StreamKey) -> Option<(u32, u32)> {
+        let frames = Arc::clone(&self.inner.borrow().video.frames);
+        frames.size(key)
+    }
+
+    /// Record the server's ceiling for `kind`, from the login reply.
+    /// Takes effect at the next capture bin built.
+    pub fn set_video_limits(&self, kind: VideoKind, limits: Limits) {
+        self.inner.borrow_mut().video.limits[kind.index()] = limits;
+    }
+
+    /// The server's ceiling for `kind`, as recorded.
+    pub fn video_limits(&self, kind: VideoKind) -> Limits {
+        self.inner.borrow().video.limits[kind.index()]
+    }
+
+    /// What the next screen share captures. Set after the user has
+    /// consented through the platform picker, before
+    /// [`Self::video_start`] for the screen kind.
+    pub fn set_screen_source(&self, source: Option<ScreenSource>) {
+        self.inner.borrow_mut().video.screen_source = source;
+    }
+
+    /// Declare the complete set of streams to receive.
+    pub fn video_subscribe(&self, streams: Vec<Stream>) {
+        self.handle_event(Event::VideoSubscriptionsWanted { streams });
+    }
+
+    /// Start publishing `kind` in the current room.
+    pub fn video_start(&self, kind: VideoKind) {
+        self.handle_event(Event::VideoStartRequested { kind });
+    }
+
+    /// End the publication of `kind`, releasing its slot.
+    pub fn video_stop(&self, kind: VideoKind) {
+        self.handle_event(Event::VideoStopRequested { kind });
+    }
+
+    /// Pause or resume the publication of `kind`.
+    pub fn video_pause(&self, kind: VideoKind, paused: bool) {
+        self.handle_event(Event::VideoPauseRequested { kind, paused });
+    }
+
+    /// Feed a 611: the room's complete publication list.
+    pub fn video_status(&self, cid: u32, publications: Vec<Publication>) {
+        let self_uid = self.inner.borrow().self_uid;
+        self.handle_event(Event::VideoStatusReceived {
+            cid,
+            publications,
+            self_uid,
+        });
+    }
+
+    /// The server refused a Video Start of `kind` sent for room `cid`.
+    pub fn video_start_failed(&self, cid: u32, kind: VideoKind, text: String) {
+        self.handle_event(Event::VideoStartFailed { cid, kind, text });
     }
 }
 

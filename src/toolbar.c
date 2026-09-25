@@ -43,6 +43,7 @@
 #include "cfgkeys.h"
 #ifdef HAVE_VOICE
 #include "voice_ptt.h"
+#include "video_panel.h"
 #endif
 #include "connect.h"
 #include "files.h"
@@ -829,6 +830,9 @@ build_hamburger (void)
         { _ ("News"), HX_PANEL_ID_NEWS },
         { _ ("News (1.5+)"), HX_PANEL_ID_NEWS15 },
         { _ ("Tasks"), HX_PANEL_ID_TASKS },
+#ifdef HAVE_VOICE
+        { _ ("Video"), HX_PANEL_ID_VIDEO },
+#endif
     };
 
     prefs_section = g_menu_new ();
@@ -1027,6 +1031,10 @@ panel_factory_run (const char *id, session *sess)
         /* The news browser is a singleton and ignores its widget
          * argument; NULL is what every other caller passes. */
         open_news_browser (NULL, sess);
+#ifdef HAVE_VOICE
+    } else if (g_strcmp0 (id, HX_PANEL_ID_VIDEO) == 0) {
+        create_video_window (toolbar_window, sess);
+#endif
     } else {
         g_warning ("toolbar_build_panel: no factory for panel id '%s'", id);
         return FALSE;
@@ -1531,6 +1539,14 @@ create_toolbar_window (session *sess)
     gtk_widget_set_visible (main_toolbar, dock_layout_toolbar_visible ());
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
                                   main_toolbar);
+#ifdef HAVE_VOICE
+    /* The screen-sharing indicator the video spec requires: revealed for
+     * as long as any connection shares a screen, with a Stop button. A
+     * banner rather than a toast, because the failure it guards against
+     * is forgetting the share is on. */
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
+                                  gtkhx_screen_share_banner_new ());
+#endif
 
     /* The connection tab strip, directly above the dock it switches. Last of
      * the top bars so it sits closest to the panels whose content it swaps,

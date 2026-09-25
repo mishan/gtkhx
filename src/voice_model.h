@@ -120,6 +120,23 @@ extern void hx_voice_model_ingest_participants (HxVoiceModel *self,
                                                 const uint8_t *blob,
                                                 size_t len);
 
+/* Video flags per uid, from Video Status (611). A publication sets its
+ * kind's bit; a paused one sets its paused bit as well. */
+#define HX_VOICE_VIDEO_CAMERA (1u << 0)
+#define HX_VOICE_VIDEO_SCREEN (1u << 1)
+#define HX_VOICE_VIDEO_CAMERA_PAUSED (1u << 2)
+#define HX_VOICE_VIDEO_SCREEN_PAUSED (1u << 3)
+
+/* Replace every uid's video flags from a DATA_VIDEO_PUBLISHERS blob (the
+ * 8-byte-per-entry packed list). Emits "video-changed" (uid, flags) for
+ * each uid whose flags moved; a uid the list omits drops to 0. */
+extern void hx_voice_model_ingest_video_publishers (HxVoiceModel *self,
+                                                    const uint8_t *blob,
+                                                    size_t len);
+
+/* HX_VOICE_VIDEO_* flags for uid; 0 when it publishes nothing. */
+extern guint32 hx_voice_model_get_video (HxVoiceModel *self, uint16_t uid);
+
 /* Update the speaking flag for `uid`. Used by the
  * SignalCallbacks::speaker_changed bridge in voice_panel.c.
  *

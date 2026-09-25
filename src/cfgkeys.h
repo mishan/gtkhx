@@ -176,6 +176,9 @@
  * loudly. */
 #define CFG_VOICE_INPUT_DEVICE "VOICEINPUTDEVICE"
 #define CFG_VOICE_OUTPUT_DEVICE "VOICEOUTPUTDEVICE"
+/* The camera a video publication captures from, same conventions: empty is
+ * "the first camera found". */
+#define CFG_VOICE_CAMERA_DEVICE "VOICECAMERADEVICE"
 
 /* Phase 8.E follow-up: push-to-talk. CFG_VOICE_PTT_ENABLED is a
  * BOOLEAN toggle. CFG_VOICE_PTT_KEY is the canonical key spec

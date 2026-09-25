@@ -99,6 +99,22 @@ pub enum Action {
     /// resumes them.
     SetSendPipelineMute { muted: bool },
 
+    // ---- Video pipeline (managed by hxvoice-runtime) ----
+    /// Whether this client means to publish a stream of `kind`. When
+    /// true, the runtime binds a capture source to the kind's send
+    /// section the next time an offer carries it; when false, it
+    /// unbinds and stops the capture now.
+    SetVideoPublishing {
+        kind: crate::video::VideoKind,
+        publishing: bool,
+    },
+    /// Pause or resume the capture for a publication without touching
+    /// its section, so the camera's indicator light goes off.
+    SetVideoPaused {
+        kind: crate::video::VideoKind,
+        paused: bool,
+    },
+
     // ---- GtkhxSession signals (model → view bridge) ----
     /// Emit a GtkhxSession signal so the UI updates without the
     /// state machine knowing anything about GLib. The runtime
@@ -211,6 +227,12 @@ pub enum SignalKind {
     /// `SignalCallbacks` struct have the same vocabulary, even
     /// though the producer is different from the rest.
     SpeakerChanged,
+    /// The room's publication list changed (a 611 arrived). The
+    /// runtime reads the list from `SessionMachine::publications`.
+    VideoStatus,
+    /// This client's own publication of a kind started, paused,
+    /// resumed or stopped.
+    VideoLocalChanged,
 }
 
 /// Typed payload carried with an `EmitSignal` action. Variants
@@ -248,6 +270,16 @@ pub enum SignalPayload {
     SpeakerChanged {
         uid: u16,
         is_speaking: bool,
+    },
+    VideoStatus {
+        cid: u32,
+    },
+    /// `publishing == false` means stopped; `paused` is meaningful
+    /// only while publishing.
+    VideoLocalChanged {
+        kind: crate::video::VideoKind,
+        publishing: bool,
+        paused: bool,
     },
 }
 

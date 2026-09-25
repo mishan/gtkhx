@@ -142,6 +142,9 @@ struct gtkhx_prefs {
      * the user saves a different pick in Settings → Voice. */
     char *voice_input_device;
     char *voice_output_device;
+    /* The camera for video publications (CFG_VOICE_CAMERA_DEVICE), pushed
+     * to the runtime through gtkhx_voice_set_camera_device. */
+    char *voice_camera_device;
     /* Phase 8.E follow-up: push-to-talk.
      *
      *   voice_ptt_enabled — switch row in Settings → Voice.
