@@ -649,6 +649,13 @@ where
         .property("max-rate", target.fps as i32)
         .build()
         .ok()?;
+    // Cap the rate, never make frames up. PipeWire cameras stamp their
+    // first buffer far from the segment start, and a videorate free to
+    // duplicate fills that gap at the source's rate — hundreds of
+    // thousands of copies ahead of the first real frame, which is a
+    // camera that takes ages to appear.
+    set_if_present(&rate, "drop-only", true);
+    set_if_present(&rate, "skip-to-first", true);
     let raw_caps = gst::ElementFactory::make("capsfilter")
         .property(
             "caps",
