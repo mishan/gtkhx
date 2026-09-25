@@ -286,11 +286,12 @@ mod portal {
             .map_err(|e| e.to_string())?;
 
         let created = portal_request(&conn, "CreateSession", QUICK, |tok| {
-            (options(&[
+            // Not `(options(..),).to_variant()`: a tuple holding a Variant
+            // serializes as `(v)`, and the portal wants `(a{sv})`.
+            glib::Variant::tuple_from_iter([options(&[
                 ("handle_token", tok.to_variant()),
                 ("session_handle_token", token().to_variant()),
-            ]),)
-                .to_variant()
+            ])])
         })
         .await?;
         // The spec types the handle as a string; some portals send an
