@@ -517,9 +517,22 @@ fn gtk_class_and_construction_smoke() {
         // unmapped widget, and mapping one means a real window and a
         // frame clock — an asynchronous dependency in a test asking a
         // synchronous question. The vfunc is the same code GTK runs.
+        //
+        // Followed by the layout pass the next frame runs: a paint that
+        // corrects the scroll position hands the new extent to the
+        // adjustment through `size_allocate`, never from the paint
+        // itself, which is what the draw-time check below pins.
         let frame = || {
             use gtk4::subclass::prelude::WidgetImpl;
+            let before = (adj.upper(), adj.value(), adj.page_size());
             view.imp_ref().snapshot(&gtk4::Snapshot::new());
+            assert_eq!(
+                before,
+                (adj.upper(), adj.value(), adj.page_size()),
+                "the paint reconfigured the adjustment; that re-lays out the \
+                 scrollbar mid-frame and GTK draws its slider unallocated"
+            );
+            holder.allocate(400, 200, -1, None);
         };
 
         for i in 0..60 {

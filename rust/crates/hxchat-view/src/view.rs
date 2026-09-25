@@ -1069,18 +1069,22 @@ impl HxChatView {
         };
 
         // The extent the scrollbar reports is stale by the same
-        // correction, so push it now rather than waiting for whatever
-        // allocates next. Leaving it would put the thumb and the drawn
-        // content on different frames, and anything that reads the
-        // adjustment in between — the scrollbar, a Page Down, a wheel
-        // event — would be working from the pre-correction numbers.
+        // correction. Reconfiguring the adjustment from here would be
+        // wrong, though: this is the paint phase, and ::changed makes the
+        // scrollbar beside us re-lay out its slider — which GTK then draws
+        // in this same frame, before any layout pass has allocated it
+        // ("Trying to snapshot GtkGizmo without a current allocation").
+        // So ask for a layout pass instead: `size_allocate` pushes the
+        // corrected extent, and the box that holds us allocates the
+        // scrollbar after us, so the slider is laid out against the new
+        // numbers before it is drawn. The thumb trails the content by
+        // one frame; the content itself is already right.
         //
         // Gated on having actually corrected something, or this is an
-        // unconditional reconfigure-per-frame loop: the scrolled window
-        // redraws on ::changed. The frame that follows finds the rows
-        // measured, corrects nothing, and stops.
+        // unconditional relayout-per-frame loop. The frame that follows
+        // finds the rows measured, corrects nothing, and stops.
         if corrected {
-            self.sync_adjustment(height as u32);
+            self.queue_allocate();
         }
 
         // The indent separator, matching gtk_xtext_draw_sep: a full-height
