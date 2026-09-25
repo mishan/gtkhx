@@ -11,7 +11,7 @@
 # AppStream metainfo, and OARS content_rating in
 # data/com.nasledov.gtkhx.metainfo.xml all line up with what
 # Flathub's review bot looks for. To submit, swap the `dir` source
-# below for a `git` source pointing at github.com/nasledov/gtkhx
+# below for a `git` source pointing at github.com/mishan/gtkhx
 # at a tagged commit; the rest of the manifest stays put.
 #
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life

@@ -1,9 +1,10 @@
 # Multi-connection
 
-This is a design survey for `MAX_CONN > 1` — the long-deferred ability to be
-connected to several Hotline servers at once. It is a **plan, not a record**:
-almost none of it is built. It exists to make the trade-offs legible before
-anyone commits, and to record the decisions that are deliberately still open.
+This began as a design survey for `MAX_CONN > 1` — the long-deferred ability
+to be connected to several Hotline servers at once — and most of it has since
+shipped: several connections at once, one tab each, under Model A. Struck-through
+headings below are done. What is still open is the `hx_active_session()` sweep,
+the `gtkhx-ui` singletons, and the Model B question.
 
 Companion reading: [docking.md](docking.md) (the dock the UI would extend),
 [preferences.md](preferences.md) (which owns the connection collection and the

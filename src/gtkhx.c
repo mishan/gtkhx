@@ -582,11 +582,10 @@ gtkhx_get_application (void)
  * free. Subsequent calls return the cached path.
  *
  * Subdirectories used by the rest of the codebase:
- *   $CONFIG/gtkhxrc      — main prefs file
- *   $CONFIG/bookmarks/   — connect.c bookmarks (replaces ~/.hx/bookmarks)
- *   $CONFIG/logs/        — log.c (replaces ~/.hx/logs)
- *   $CONFIG/icons/       — auto-discovered Mac classic icon resources (.rsrc)
- *   $CONFIG/sounds/      — user-supplied chat sound effects
+ *   $CONFIG/gtkhx.toml     — settings (hxconfig)
+ *   $CONFIG/bookmarks.toml — saved connections (hxbookmarks)
+ *   $CONFIG/icons/         — auto-discovered Mac classic icon resources (.rsrc)
+ *   $CONFIG/sounds/        — user-supplied chat sound effects
  */
 const char *
 gtkhx_config_dir (void)
@@ -666,10 +665,6 @@ hx_quit (void)
             hx_htlc_close (s->htlc, 1);
         }
     }
-
-#if 0 /* XXX */
-    close_logs();
-#endif
 
     if (gtkhx_app) {
         g_application_quit (G_APPLICATION (gtkhx_app));

@@ -1,3 +1,39 @@
+## 1.4.0-dev
+
+- Video
+  - Video chat and screen sharing, on servers that support the video extension
+  - A dockable Video panel tiles everyone's camera and screen, with your own preview
+  - Camera and screen-share buttons in the Voice panel, and a video indicator in the user list
+  - Screen sharing on Linux goes through the desktop's screen-sharing portal
+  - Choose a camera in Settings → Voice
+- Voice
+  - Fixed incoming audio occasionally attaching to the wrong stream
+  - Fixed a rejoin occasionally answering with the previous session's credentials
+- Files
+  - The file browser is now its own window, one per connection, instead of a docked panel
+  - Download, Upload or Copy from a labeled button under each side
+  - Right-click (or Shift+F10) on a file for Open, Preview, Get Info, Move, Rename, Delete and more
+  - Wider name column, rounded sizes with the exact size as a tooltip, and an optional Kind column
+- User Interface
+  - Slimmer window chrome, so chat gets much more of the window
+  - The server banner and connection status now sit in the header bar
+  - The status bar is gone, and the button toolbar is optional (off by default)
+  - Each pane has its own compact controls: switch, drag, menu and close
+  - Pane titles and each pane's action bar can be hidden
+  - Tasks shares the News column, and a new transfer brings it to the front
+  - The chat tab strip hides until there is a second conversation
+  - Settings opens with Ctrl+,
+- Hotline Protocol
+  - The protocol and file-transfer code is now shared with the hxd-ng server
+  - Accept the file-transfer headers that Windows clients and servers send
+- Build
+  - Fixed Flatpak builds, which could not fetch the shared protocol code offline
+  - Fixed a rebuild not relinking the app when only Rust code had changed
+  - The macOS app now asks for camera and microphone access
+  - The macOS app declares the macOS version it really needs, instead of crashing on older ones
+- Translations
+  - Translated the new strings
+
 ## 1.3.2
 
 - Fixed issue with Linux Flatpak and bundled library paths

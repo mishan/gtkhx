@@ -226,7 +226,7 @@ hx_panel_init (HxPanel *self)
         GMenu *panel_section = g_menu_new ();
         GMenu *frame_section = g_menu_new ();
 
-        g_menu_append (panel_section, _ ("Show Toolbar"),
+        g_menu_append (panel_section, _ ("Show Action Bar"),
                        "page.panel.show-actions");
         g_menu_append (panel_section, _ ("Undock"), "page.panel.undock");
         g_menu_append (frame_section, _ ("Split Horizontally"),

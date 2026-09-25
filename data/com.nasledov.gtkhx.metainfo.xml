@@ -31,7 +31,10 @@
       yet, but they must be present and well-formed.
 
     - <releases> wants at least one entry. Keep these in
-      reverse-chronological order. Bump on each tagged release.
+      reverse-chronological order, and add one on each tagged
+      release. The entry at the top of a -dev tree carries
+      type="development"; stamping the release drops that and sets
+      the real date.
 -->
 <component type="desktop-application">
   <id>com.nasledov.gtkhx</id>
@@ -58,11 +61,13 @@
     <ul>
       <li>Public chat with formatted text and color-coded users</li>
       <li>Private messages and private chat rooms</li>
+      <li>Voice chat, video chat and screen sharing, on servers that support them</li>
+      <li>Connections to several servers at once, each in its own tab</li>
       <li>News (1.0 flat-file and 1.5+ threaded categories)</li>
-      <li>File browser, downloads, uploads, and previews</li>
+      <li>A two-panel file browser, with downloads, uploads, and previews</li>
       <li>Tracker browsing for finding active servers</li>
-      <li>Bookmark manager for quick reconnects</li>
-      <li>HOPE secure-login with Blowfish or ChaCha20-Poly1305 link encryption</li>
+      <li>Saved connections, each with its own nickname and icon if you like</li>
+      <li>TLS with fingerprint pinning, and HOPE secure login with Blowfish or ChaCha20-Poly1305 link encryption</li>
     </ul>
     <p>
       GtkHx was originally written in 2000 against GTK+ 1.2 and
@@ -73,9 +78,9 @@
 
   <launchable type="desktop-id">com.nasledov.gtkhx.desktop</launchable>
 
-  <url type="homepage">https://github.com/nasledov/gtkhx</url>
-  <url type="bugtracker">https://github.com/nasledov/gtkhx/issues</url>
-  <url type="vcs-browser">https://github.com/nasledov/gtkhx</url>
+  <url type="homepage">https://github.com/mishan/gtkhx</url>
+  <url type="bugtracker">https://github.com/mishan/gtkhx/issues</url>
+  <url type="vcs-browser">https://github.com/mishan/gtkhx</url>
 
   <categories>
     <category>Network</category>
@@ -103,15 +108,15 @@
   <screenshots>
     <screenshot type="default">
       <caption>The main toolbar and chat window</caption>
-      <image>https://raw.githubusercontent.com/nasledov/gtkhx/main/data/screenshots/chat.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/chat.png</image>
     </screenshot>
     <screenshot>
       <caption>Browsing files on a Hotline server</caption>
-      <image>https://raw.githubusercontent.com/nasledov/gtkhx/main/data/screenshots/files.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/files.png</image>
     </screenshot>
     <screenshot>
       <caption>The Hotline tracker — finding servers</caption>
-      <image>https://raw.githubusercontent.com/nasledov/gtkhx/main/data/screenshots/tracker.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/tracker.png</image>
     </screenshot>
   </screenshots>
 
@@ -133,17 +138,47 @@
   </content_rating>
 
   <releases>
-    <release version="1.0.0-dev" date="2026-05-09">
+    <release version="1.4.0" date="2026-09-25" type="development">
       <description>
-        <p>
-          Phase 4 milestone: full GTK 4 + libadwaita port. New
-          Adwaita-styled connect / settings / preferences dialogs,
-          AdwHeaderBar across every window, dark-theme awareness
-          via AdwStyleManager, sound playback through GSound,
-          GtkApplication / GIOChannel-based main loop, and the
-          start of a three-tier (unit / proto / integration) test
-          suite that runs against a containerised mhxd server.
-        </p>
+        <p>Video chat and screen sharing, a slimmer main window, and a new file browser.</p>
+        <ul>
+          <li>Video chat and screen sharing on servers that support the video extension, in a new dockable Video panel</li>
+          <li>The file browser is its own window, one per connection, with labeled transfer buttons and a right-click menu</li>
+          <li>Slimmer window chrome: the banner and connection status move into the header bar, the status bar is gone, and the toolbar is optional</li>
+          <li>Each pane has compact controls of its own, and pane titles and action bars can be hidden</li>
+          <li>Flatpak builds work offline again</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.2" date="2026-09-04">
+      <description>
+        <ul>
+          <li>Fixed the Flatpak's bundled library paths</li>
+          <li>News: fixed a double load, and creating a new folder</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.1" date="2026-08-06">
+      <description>
+        <ul>
+          <li>The macOS and Windows packages bundle their fonts and translations</li>
+          <li>More built-in servers for new users</li>
+          <li>Fixed chat not scrolling to the bottom after a multi-line message</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.0" date="2026-08-04">
+      <description>
+        <p>Multiple connections, a rewritten chat view, and macOS and Windows builds.</p>
+        <ul>
+          <li>Connect to several servers at once and switch between them with tabs</li>
+          <li>Bookmarks become Settings → Connections, each able to override your nickname and icon</li>
+          <li>A new chat view: faster, with Markdown, speaker icons and grouping, and search with Ctrl+F</li>
+          <li>Settings and connections are now stored as TOML, migrated from the old files</li>
+          <li>GtkHx is now available for macOS and Windows</li>
+          <li>Fixed resuming file transfers</li>
+          <li>Japanese translation, and updated translations</li>
+        </ul>
       </description>
     </release>
   </releases>

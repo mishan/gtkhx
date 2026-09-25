@@ -29,9 +29,10 @@ extension is allowed to degrade the legacy path.
 
 | | |
 |---|---|
-| **Toolkit** | GTK 4 + libadwaita + libpanel. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, threaded news and files are dockable panels in a persistable split layout; the tracker and the file preview are standalone windows. |
+| **Toolkit** | GTK 4 + libadwaita + libpanel. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, threaded news, voice and video are dockable panels in a persistable split layout; the file browser (one per connection), the tracker and the file preview are standalone windows. |
 | **Build** | Meson + Cargo. Autotools, the RPM spec and the old `debian/` tree are gone. |
 | **Language** | Hybrid C + Rust, with Rust now the larger half. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
+| **Connections** | Several servers at once, one tab each. Settings and connections live in TOML files owned by Rust (`hxconfig`, `hxbookmarks`). |
 | **Protocol** | 1.2 / 1.5 / 1.9 compatible. Connect, HOPE negotiation and the ciphers (Blowfish OFB-64, ChaCha20-Poly1305 AEAD) all run in Rust. RC4 retired. Compression is implemented but not currently negotiated — see the defects below. |
 | **Transport security** | TLS on a dedicated port, TOFU trust with fingerprint pinning. [docs/tls.md](docs/tls.md) |
 | **Extensions** | Voice chat, video chat and screen sharing, inline media, GIF icons, chat history, colored nicknames, emoji shortcodes, tracker v3. |
@@ -47,63 +48,34 @@ is the record of how; the subsystem docs are the record of what.
 
 ## Open work
 
-### Multi-server connections
+### Multi-connection follow-through
 
-The one long-promised feature that has never landed. The original code shipped a
-`MAX_CONN` array that always returned element zero; that fiction has been replaced with an
-honest single-session model plus a routing seam, so "which session" is now an explicit
-question at every call site rather than an assumption.
+Several simultaneous connections shipped in 1.3.0, under the tab-switched layout
+(Model A): a tab per connection, each with its own panel set, identity overrides from
+Settings → Connections, and an arbiter deciding which connection owns the microphone.
+The transport, the signals and the connection-scoped keys all carry the connection now.
 
-The network stack is already ready for it — the connection actor, the connection struct
-and the wire transaction counter are all per-instance, and the receive layer routes by
-connection. The hard stop is elsewhere: the transport bridge holds a single process-wide
-connection handle and **refuses a second simultaneous connect outright**, so nothing can
-be exercised until that moves onto the connection struct. After that the work is a set of
-signals that carry no connection identity, three flat key namespaces that collide across
-servers, and a long mechanical tail of UI code that asks "which connection?" of a global.
+What is left is making the rest of the UI stop asking "which connection has focus?" when
+it means "which connection is this for?":
 
-Two decisions remain genuinely open: **when** this lands relative to the Rust port, and
-**how** per-connection panels relate to the docking layout.
+- **Readers that still route through `hx_active_session()`.** The GIF avatar caches are
+  keyed per connection, but user-list cell drawing looks them up through the focused
+  session, so a background connection can draw the focused one's face for a colliding
+  uid. The Rust UI reaches its connection through `gtkhx_active_htlc()` and friends in
+  the news dialogs, the user editor, chat input, file info, the voice panel and the
+  compose windows.
+- **`thread_local` singletons in `gtkhx-ui`** that hold per-connection state: the
+  threaded news browser and its in-flight fetches, the flat news view, the banner and the
+  create-post window. `useredit.rs`, an id-keyed map, is the shape they all want.
 
-Two things are now settled, and both have shipped. The bookmarks list **is** the
-connection collection, under Settings → Connections — because once several servers can be
-open at once, the list of servers is configuration. And identity becomes a global default
-with per-connection overrides, resolved live so that changing the global still reaches
-every server you have not specialised; `/nick` and `/icon` change the running connection
-only and never persist. That rework is a net simplification at one connection and fixes an
-existing bug where `/nick` silently rewrites the stored global nickname, so it is worth
-doing ahead of the rest.
-
-Full survey — the blocker inventory, the panel-scope trichotomy, the voice-exclusivity
-arbiter, and the two layout models costed against the code:
+Coexisting per-connection panels (Model B) remain undecided. Full survey:
 [docs/multi-connection.md](docs/multi-connection.md).
-
-### Settings in Rust, and a TOML config file
-
-The preferences system is a static table of pointers into a global C struct, persisted
-as a GKeyFile with SHOUTING_CASE keys. It loses unknown keys and user comments on every
-save, grows an escape level on any value containing a backslash, turns malformed numbers
-into zero without a diagnostic, and has no round-trip test at all. Two of its entries
-don't have storage of their own — they alias the live connection's wire fields, which is
-why `/nick` currently rewrites your saved global nickname.
-
-The plan is a Rust `hxconfig` crate owning a versioned TOML file, with C keeping a
-read-only mirror struct until its last reader is ported. Connections stay in their own
-file: it holds plaintext passwords, and it deliberately refuses to save when corrupt
-where settings should fall back to defaults.
-
-The crate exists — schema, file format, atomic write, version check, all tested — and
-nothing links it yet, so none of the defects above are fixed in a running client. What
-remains is the migration from `gtkhxrc`, and then the flip: `hxconfig` becomes the owner
-at startup and `cfgvars[]` goes. Full design, including the per-connection identity model
-it delivers: [docs/preferences.md](docs/preferences.md).
 
 ### Chat and message logging
 
-Still pending, and further from done than it looks. The original `log.c` was deleted rather
-than carried forward; the preference survives but both its change hook and the one call
-site that would have written a line are inside `#if 0`. `$CONFIG/logs/` is named in a
-comment and nowhere else — nothing resolves or creates it. This is a fresh implementation.
+Still pending, and a fresh implementation: the original `log.c` was deleted rather than
+carried forward, and its preference was dropped in the move to `hxconfig`. Nothing
+resolves or creates a log directory.
 
 Note this is a different feature from the chat-history extension, which replays
 server-held scrollback on join. Local logging persists what *this* client saw, including
@@ -125,10 +97,9 @@ them — a list of dead servers is worse than no list.
 
 ### Ship useful defaults
 
-Related, and cheaper. The bookmark list is bootstrapped with a single built-in and the
-tracker list defaults to a single address — enough that neither list is empty, not enough
-to be useful, and both point at hosts that may not have survived. Ship a handful of each,
-and check they still answer before shipping them.
+Half done. The connection list now seeds several built-in servers, but the tracker list
+still defaults to a single address, which may not have survived. Ship a handful of
+trackers, and check they still answer before shipping them.
 
 ### Help
 
@@ -139,9 +110,17 @@ the desktop compositor, which a shortcuts window could at least explain.
 
 ### Publish to Flathub
 
-The manifest, AppStream metadata and desktop file are all validated at test time and
-Flathub-ready. What's left is swapping the local source for a tagged git source and adding
-screenshots.
+The manifest, AppStream metadata and desktop file are validated at test time. What's
+left: swap the local `dir` source for a tagged git source, and take the screenshots the
+metainfo already names — `data/screenshots/` doesn't exist yet, so those URLs 404.
+
+Inside the sandbox, video can share a screen but finds no camera; see
+[BACKLOG.md](BACKLOG.md).
+
+### README
+
+The README needs rewriting to explain the project to someone who has never heard of
+Hotline: what it is, what servers are still out there, and how to get the client.
 
 ### Plugin system
 
@@ -201,9 +180,9 @@ These are settled. Don't reopen them without a strong new reason.
    cannot be relicensed even if we wanted to; see [docs/rust/crate-layout.md](docs/rust/crate-layout.md).
 4. **The plugin ABI was broken deliberately.** If a plugin system returns it will be a new
    design, not a revival of `MODULE_IFACE_VER 2`.
-5. **Single-session during the ports.** Do not add multi-connection abstractions
-   speculatively; do the ports against one session and refactor to N against a smaller
-   codebase.
+5. **Single-session during the ports.** *(Superseded, kept for the record.)* The ports
+   were done against one session and refactored to N afterwards; multi-connection shipped
+   in 1.3.0 under the tab-switched layout.
 6. **RC4 is retired.** Removed from the cipher offer list and the connect dropdown.
    Advertising it under a "Secure" label gave users false confidence. Its protocol slot
    stays reserved so the integer is never reused.
