@@ -56,6 +56,8 @@
 #include "banner.h"
 #include "chat_history.h"
 #include "inline_media.h"
+#include "sound.h"
+#include "text_util.h"
 #include "gif_icons.h"
 #include "hl_access.h"
 #ifdef HAVE_VOICE
@@ -457,6 +459,25 @@ voice_reports_error (const char *label)
     }
     return FALSE;
 }
+
+/* The server's text for a refused voice or video request, as UTF-8, or NULL
+ * when it gave none. The runtime takes C strings as UTF-8, and a Mac server's
+ * text is MacRoman, so convert here as toolbar_show_toast would have: once
+ * the runtime has read it, the bytes it couldn't decode are already gone. */
+static char *
+voice_error_text (const guint8 *frame, gsize frame_len)
+{
+    char buf[8192 + 1];
+    gsize len = 0;
+    if (!task_error_extract (frame, frame_len, buf, sizeof (buf), &len)
+        || len == 0) {
+        return NULL;
+    }
+    if (g_utf8_validate (buf, -1, NULL)) {
+        return g_strdup (buf);
+    }
+    return gtkhx_text_to_utf8 (buf, strlen (buf), NULL);
+}
 #endif /* HAVE_VOICE */
 
 void
@@ -535,28 +556,20 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
         } else if (!strcmp (tsk->str, "video-start-screen")) {
             start_kind = HX_VIDEO_KIND_SCREEN;
         }
-        if (start_kind && sess && sess->voice_runtime) {
-            char err_text[256];
-            gsize err_len = 0;
-            const char *text = (task_error_extract (frame, frame_len, err_text,
-                                                    sizeof (err_text), &err_len)
-                                && err_len > 0)
-                                   ? err_text
-                                   : NULL;
-            /* send_video stores the room id in the task's data. */
-            gtkhx_voice_runtime_video_start_failed (
-                sess->voice_runtime, GPOINTER_TO_UINT (tsk->data), start_kind,
-                text);
-        }
-        if (opcode && sess && sess->voice_runtime) {
-            char err_text[256];
-            gsize err_len = 0;
-            const char *text = (task_error_extract (frame, frame_len, err_text,
-                                                    sizeof (err_text), &err_len)
-                                && err_len > 0)
-                                   ? err_text
-                                   : NULL;
-            gtkhx_voice_runtime_task_error (sess->voice_runtime, opcode, text);
+        if ((start_kind || opcode) && sess && sess->voice_runtime) {
+            g_autofree char *text = voice_error_text (frame, frame_len);
+            if (start_kind) {
+                /* send_video stores the room id in the task's data. */
+                gtkhx_voice_runtime_video_start_failed (
+                    sess->voice_runtime, GPOINTER_TO_UINT (tsk->data),
+                    start_kind, text);
+            } else {
+                gtkhx_voice_runtime_task_error (sess->voice_runtime, opcode,
+                                                text);
+            }
+            /* The generic path was skipped for these; its toast is the
+             * voice panel's to show, but the alert is still ours. */
+            play_sound (ERROR);
         }
     }
 #endif /* HAVE_VOICE */

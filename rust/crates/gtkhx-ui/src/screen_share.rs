@@ -60,13 +60,8 @@ thread_local! {
 /// descriptor, so Linux only. Elsewhere there is no system picker and a
 /// share holds no portal session.
 #[cfg(target_os = "linux")]
-mod portal {
-    use std::cell::RefCell;
-    use std::future::Future;
+mod screencast {
     use std::os::fd::AsRawFd;
-    use std::pin::Pin;
-    use std::rc::Rc;
-    use std::task::{Context, Poll, Waker};
 
     use gtk4::gio;
     use gtk4::glib;
@@ -74,10 +69,9 @@ mod portal {
 
     use hxvoice_runtime::video::ScreenSource;
 
+    use crate::portal::{self, options, RequestError, DIALOG, PORTAL_BUS, QUICK};
     use crate::tr::tr;
 
-    const PORTAL_BUS: &str = "org.freedesktop.portal.Desktop";
-    const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
     const SCREENCAST: &str = "org.freedesktop.portal.ScreenCast";
 
     /// A live portal share: the session and the PipeWire remote it
@@ -115,161 +109,12 @@ mod portal {
         }
     }
 
-    // ---------------------------------------------------------------------
-    // A single-shot future fed by a D-Bus signal.
-    // ---------------------------------------------------------------------
-
-    #[derive(Default)]
-    struct Slot {
-        value: Option<glib::Variant>,
-        waker: Option<Waker>,
-    }
-
-    struct Response(Rc<RefCell<Slot>>);
-
-    impl Future for Response {
-        type Output = glib::Variant;
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<glib::Variant> {
-            let mut slot = self.0.borrow_mut();
-            match slot.value.take() {
-                Some(v) => Poll::Ready(v),
-                None => {
-                    slot.waker = Some(cx.waker().clone());
-                    Poll::Pending
-                }
-            }
-        }
-    }
-
-    /// The request object path the portal will answer on for `token`.
-    fn request_path(conn: &gio::DBusConnection, token: &str) -> String {
-        let sender = conn
-            .unique_name()
-            .map(|n| n.trim_start_matches(':').replace('.', "_"))
-            .unwrap_or_default();
-        format!("{PORTAL_PATH}/request/{sender}/{token}")
-    }
-
-    fn token() -> String {
-        format!("gtkhx{}", glib::random_int())
-    }
-
-    /// How long a request that shows nothing may take to answer.
-    const QUICK: std::time::Duration = std::time::Duration::from_secs(30);
-    /// How long one that shows the picker may take: long enough to choose
-    /// in, short enough that a backend that died doesn't leave the share
-    /// button waiting for good.
-    const PICKER: std::time::Duration = std::time::Duration::from_secs(180);
-
-    /// Why a portal request didn't answer with results.
-    enum RequestError {
-        /// The user canceled the picker: not an error to show.
-        Canceled,
-        /// The portal answered with a failure.
-        Refused,
-        /// Anything else, already worded for the user.
-        Other(String),
-    }
-
-    /// The message to show; empty for a cancel, which shows none.
-    impl From<RequestError> for String {
-        fn from(e: RequestError) -> String {
-            match e {
-                RequestError::Canceled => String::new(),
-                RequestError::Refused => tr("The screen sharing request failed."),
-                RequestError::Other(m) => m,
-            }
-        }
-    }
-
-    /// Call a portal method that answers through a Request, and wait for the
-    /// answer. `args` receives the handle token to put in its options.
-    async fn portal_request(
-        conn: &gio::DBusConnection,
-        method: &str,
-        wait: std::time::Duration,
-        args: impl FnOnce(&str) -> glib::Variant,
-    ) -> Result<glib::VariantDict, RequestError> {
-        let token = token();
-        let path = request_path(conn, &token);
-        let slot = Rc::new(RefCell::new(Slot::default()));
-        let subscribe = |path: &str| {
-            let slot = Rc::clone(&slot);
-            conn.subscribe_to_signal(
-                Some(PORTAL_BUS),
-                Some("org.freedesktop.portal.Request"),
-                Some("Response"),
-                Some(path),
-                None,
-                gio::DBusSignalFlags::NONE,
-                move |sig| {
-                    let mut s = slot.borrow_mut();
-                    s.value = Some(sig.parameters.clone());
-                    if let Some(w) = s.waker.take() {
-                        w.wake();
-                    }
-                },
-            )
-        };
-        let _sub = subscribe(&path);
-        let reply = conn
-            .call_future(
-                Some(PORTAL_BUS),
-                PORTAL_PATH,
-                SCREENCAST,
-                method,
-                Some(&args(&token)),
-                None,
-                gio::DBusCallFlags::NONE,
-                -1,
-            )
-            .await
-            .map_err(|e| RequestError::Other(e.to_string()))?;
-        // A portal older than 0.9 doesn't build the request path from the
-        // token, and answers on the one it returns instead. The answer can
-        // beat this subscription there; the timeout below covers that.
-        let request = reply
-            .child_value(0)
-            .get::<glib::variant::ObjectPath>()
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| path.clone());
-        let _late_sub = (request != path).then(|| subscribe(&request));
-        let Ok(reply) = glib::future_with_timeout(wait, Response(slot)).await else {
-            // Closing the request takes down a picker that is still up, so a
-            // choice made after this can't start a share nobody is waiting
-            // for.
-            conn.call(
-                Some(PORTAL_BUS),
-                &request,
-                "org.freedesktop.portal.Request",
-                "Close",
-                None,
-                None,
-                gio::DBusCallFlags::NONE,
-                -1,
-                gio::Cancellable::NONE,
-                |_| {},
-            );
-            return Err(RequestError::Other(tr(
-                "The screen sharing request timed out.",
-            )));
-        };
-        let (code, results) = reply
-            .get::<(u32, glib::VariantDict)>()
-            .ok_or_else(|| RequestError::Other("malformed portal response".to_string()))?;
-        match code {
-            0 => Ok(results),
-            1 => Err(RequestError::Canceled),
-            _ => Err(RequestError::Refused),
-        }
-    }
-
-    fn options(pairs: &[(&str, glib::Variant)]) -> glib::Variant {
-        let d = glib::VariantDict::new(None);
-        for (k, v) in pairs {
-            d.insert_value(k, v);
-        }
-        d.end()
+    /// A request's failure, worded for screen sharing.
+    fn failed(e: RequestError) -> String {
+        e.message(
+            || tr("The screen sharing request failed."),
+            || tr("The screen sharing request timed out."),
+        )
     }
 
     fn object_path(p: &str) -> Result<glib::Variant, String> {
@@ -285,15 +130,16 @@ mod portal {
             .await
             .map_err(|e| e.to_string())?;
 
-        let created = portal_request(&conn, "CreateSession", QUICK, |tok| {
+        let created = portal::request(&conn, SCREENCAST, "CreateSession", QUICK, |tok| {
             // Not `(options(..),).to_variant()`: a tuple holding a Variant
             // serializes as `(v)`, and the portal wants `(a{sv})`.
             glib::Variant::tuple_from_iter([options(&[
                 ("handle_token", tok.to_variant()),
-                ("session_handle_token", token().to_variant()),
+                ("session_handle_token", portal::token().to_variant()),
             ])])
         })
-        .await?;
+        .await
+        .map_err(failed)?;
         // The spec types the handle as a string; some portals send an
         // object path.
         let handle = created
@@ -327,25 +173,36 @@ mod portal {
                 glib::Variant::tuple_from_iter([session, options(&opts)])
             }
         };
-        match portal_request(&conn, "SelectSources", PICKER, select(true)).await {
+        // Ask for the cursor only where the backend lists it: one that can't
+        // draw it rejects the option outright, as a D-Bus error on the call
+        // rather than a failed response.
+        let cursor = portal::property(&conn, SCREENCAST, "AvailableCursorModes")
+            .await
+            .and_then(|v| v.get::<u32>())
+            .is_none_or(|modes| modes & 2 != 0);
+        match portal::request(&conn, SCREENCAST, "SelectSources", DIALOG, select(cursor)).await {
             Ok(_) => {}
-            // A refusal may be a portal that doesn't draw cursors into the
-            // stream and rejects the option; the share is still worth having
-            // without one. A cancel or a timeout is final.
-            Err(RequestError::Refused) => {
-                portal_request(&conn, "SelectSources", PICKER, select(false)).await?;
+            // A backend that didn't say, or said wrong, may still reject the
+            // cursor, as a failed response or as an error on the call; the
+            // share is still worth having without one. A cancel or a timeout
+            // is final.
+            Err(RequestError::Refused | RequestError::Other(_)) if cursor => {
+                portal::request(&conn, SCREENCAST, "SelectSources", DIALOG, select(false))
+                    .await
+                    .map_err(failed)?;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(failed(e)),
         }
 
-        let started = portal_request(&conn, "Start", PICKER, |tok| {
+        let started = portal::request(&conn, SCREENCAST, "Start", DIALOG, |tok| {
             glib::Variant::tuple_from_iter([
                 session.clone(),
                 "".to_variant(),
                 options(&[("handle_token", tok.to_variant())]),
             ])
         })
-        .await?;
+        .await
+        .map_err(failed)?;
         let streams = started
             .lookup_value("streams", None)
             .ok_or_else(|| tr("Nothing was chosen to share."))?;
@@ -355,32 +212,12 @@ mod portal {
             .and_then(|s| s.child_value(0).get::<u32>())
             .ok_or_else(|| tr("Nothing was chosen to share."))?;
 
-        let (reply, fds) = conn
-            .call_with_unix_fd_list_future(
-                Some(PORTAL_BUS),
-                PORTAL_PATH,
-                SCREENCAST,
-                "OpenPipeWireRemote",
-                Some(&glib::Variant::tuple_from_iter([
-                    session.clone(),
-                    options(&[]),
-                ])),
-                None,
-                gio::DBusCallFlags::NONE,
-                -1,
-                None::<&gio::UnixFDList>,
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        let index = reply
-            .child_value(0)
-            .get::<glib::variant::Handle>()
-            .map(|h| h.0)
-            .ok_or_else(|| "the portal returned no PipeWire remote".to_string())?;
-        let fd = fds
-            .ok_or_else(|| "the portal returned no PipeWire remote".to_string())?
-            .get(index)
-            .map_err(|e| e.to_string())?;
+        let fd = portal::open_pipewire_remote(
+            &conn,
+            SCREENCAST,
+            glib::Variant::tuple_from_iter([session.clone(), options(&[])]),
+        )
+        .await?;
         let raw = fd.as_raw_fd();
         Ok((
             PortalSession {
@@ -393,7 +230,7 @@ mod portal {
 }
 
 #[cfg(target_os = "linux")]
-use portal::PortalSession;
+use screencast::PortalSession;
 
 /// Off Linux a share has no portal session to hold.
 #[cfg(not(target_os = "linux"))]
@@ -427,7 +264,7 @@ pub(crate) fn start(sess: *mut c_void, parent: &gtk::Widget, done: impl Fn(bool)
         // The portal parents its own picker.
         let _ = parent;
         glib::MainContext::default().spawn_local(async move {
-            match portal::portal_pick().await {
+            match screencast::portal_pick().await {
                 Ok((portal, source)) => done(begin(conn, Some(portal), source)),
                 Err(e) => {
                     if !e.is_empty() {

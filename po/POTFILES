@@ -23,6 +23,7 @@ rust/crates/gtkhx-ui/src/about.rs
 rust/crates/gtkhx-ui/src/agreement.rs
 rust/crates/gtkhx-ui/src/banner.rs
 rust/crates/gtkhx-ui/src/broadcast.rs
+rust/crates/gtkhx-ui/src/camera_portal.rs
 rust/crates/gtkhx-ui/src/chat_find.rs
 rust/crates/gtkhx-ui/src/chat_invite.rs
 rust/crates/gtkhx-ui/src/chat.rs

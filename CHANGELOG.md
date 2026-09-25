@@ -5,6 +5,7 @@
   - A dockable Video panel tiles everyone's camera and screen, with your own preview
   - Camera and screen-share buttons in the Voice panel, and a video indicator in the user list
   - Screen sharing on Linux goes through the desktop's screen-sharing portal
+  - In the Flatpak, the camera goes through the desktop's camera portal, which asks once for permission
   - Choose a camera in Settings → Voice
 - Voice
   - Fixed incoming audio occasionally attaching to the wrong stream

@@ -9,10 +9,6 @@ record.
 
 ### Gaps
 
-- **Camera inside the Flatpak.** The sandbox shows no `/dev/video*`, and capture
-  doesn't go through the Camera portal (`org.freedesktop.portal.Camera`, which
-  hands back a PipeWire remote the way screen sharing does). So a Flatpak build
-  can share a screen but finds no camera.
 - **Screen sharing on macOS and Windows** is wired up but untested. So is a Linux
   desktop without a ScreenCast portal, which has no `ximagesrc` fallback.
 - **RTX and NACK on receive** (`do-nack`), and REMB. The SSRC map already

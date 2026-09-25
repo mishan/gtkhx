@@ -5006,6 +5006,9 @@ impl VoiceRuntime {
             }
         };
         let Some(bin) = bin.filter(|_| linked) else {
+            if kind == VideoKind::Camera {
+                crate::video::forget_camera_remote();
+            }
             let what = match kind {
                 VideoKind::Camera => "No camera could be opened.",
                 VideoKind::Screen => "The screen could not be captured.",
@@ -5153,6 +5156,9 @@ impl VoiceRuntime {
             "hxvoice: {kind:?} capture failed at {src}: {text}"
         );
         self.detach_capture(kind);
+        if kind == VideoKind::Camera {
+            crate::video::forget_camera_remote();
+        }
         let what = match kind {
             VideoKind::Camera => "The camera stopped",
             VideoKind::Screen => "Screen sharing stopped",

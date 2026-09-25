@@ -60,6 +60,12 @@ pub mod users_view;
 // Behind the `voice` feature; a NULL stub otherwise. Exports
 // gtkhx_users_voice_column_new that users_view.rs appends.
 pub mod users_voice_col;
+// xdg-desktop-portal requests, shared by screen sharing and the camera,
+// and the camera's access flow for the Flatpak sandbox.
+#[cfg(feature = "voice")]
+mod camera_portal;
+#[cfg(all(feature = "voice", target_os = "linux"))]
+mod portal;
 // the per-chat voice toolbar (was voice_panel.c). Wholly behind the
 // `voice` feature — its C callers (chat.c / users_bridge.c / gtkutil.c) are
 // #ifdef HAVE_VOICE, so no voice-off stub is needed. Exports voice_panel_*.

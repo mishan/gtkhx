@@ -620,6 +620,9 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
     if !video {
         return;
     }
+    // Inside the sandbox, whether there is a camera at all is the portal's
+    // to say; ask once, and refresh the buttons with its answer.
+    crate::camera_portal::probe(|| for_each_panel(|_w, i| update_button_labels(i)));
     let rt = unsafe { crate::video_panel::runtime(sess) };
     let here = rt.and_then(|r| r.active_cid()) == Some(inner.cid);
     let local = |k| rt.filter(|_| here).and_then(|r| r.video_local(k));
@@ -630,9 +633,12 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
     ] {
         let access = unsafe { hx_htlc_video_access(htlc, wire) != 0 };
         let source = hxvoice_runtime::video::publish_available(kind);
-        // While the picker is open the choice is the picker's.
-        let picking =
-            kind == VideoKind::Screen && crate::screen_share::picking(dock::key_for_session(sess));
+        // While the picker or the camera access dialog is open the choice
+        // is theirs.
+        let picking = match kind {
+            VideoKind::Screen => crate::screen_share::picking(dock::key_for_session(sess)),
+            VideoKind::Camera => crate::camera_portal::pending(),
+        };
         btn.set_sensitive(joined && here && access && source && !picking);
         let state = local(kind);
         let lit = match kind {
@@ -689,15 +695,50 @@ fn on_camera_toggled(inner: &Rc<PanelInner>) {
     };
     let on = inner.cam_btn.is_active();
     match (on, rt.video_local(VideoKind::Camera)) {
-        (true, None) => {
-            rt.video_start(VideoKind::Camera);
-            crate::video_panel::present(sess);
+        (true, None) if crate::camera_portal::needed() => {
+            // Back off until the portal has answered: the button lights
+            // when the publication actually starts.
+            inner.suppress.set(true);
+            inner.cam_btn.set_active(false);
+            inner.suppress.set(false);
+            let weak = Rc::downgrade(inner);
+            crate::camera_portal::ensure(move |result| {
+                let Some(inner) = weak.upgrade() else {
+                    return;
+                };
+                match result {
+                    Ok(()) => start_camera(&inner),
+                    Err(msg) if !msg.is_empty() => {
+                        let msg = crate::cs(&msg);
+                        unsafe { toolbar_show_toast(msg.as_ptr()) };
+                    }
+                    Err(_) => {}
+                }
+                for_each_panel(|_w, i| update_button_labels(i));
+            });
         }
+        (true, None) => start_camera(inner),
         (true, Some(true)) => rt.video_pause(VideoKind::Camera, false),
         (false, Some(false)) => rt.video_pause(VideoKind::Camera, true),
         _ => {}
     }
     update_button_labels(inner);
+}
+
+/// Start publishing the camera from `inner`'s connection, if it is still
+/// in voice there: access through the portal can take long enough for the
+/// call to have ended.
+fn start_camera(inner: &PanelInner) {
+    use hxvoice_runtime::hxvoice::VideoKind;
+    let sess = inner.sess();
+    let Some(rt) = (unsafe { crate::video_panel::runtime(sess) }) else {
+        return;
+    };
+    if rt.active_cid() != Some(inner.cid) || rt.video_local(VideoKind::Camera).is_some() {
+        return;
+    }
+    rt.video_start(VideoKind::Camera);
+    crate::video_panel::present(sess);
 }
 
 fn on_screen_toggled(inner: &Rc<PanelInner>) {

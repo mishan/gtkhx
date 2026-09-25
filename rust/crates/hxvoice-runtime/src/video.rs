@@ -248,6 +248,9 @@ pub fn publish_available(kind: VideoKind) -> bool {
         // The UI asks on every button refresh, so this must not start a
         // device monitor: autovideosrc is a factory lookup, and the
         // enumeration is only consulted as it was last seen.
+        VideoKind::Camera if camera_via_portal() => {
+            gst::ElementFactory::find("pipewiresrc").is_some() && camera_portal_present()
+        }
         VideoKind::Camera => gst::ElementFactory::find("autovideosrc").is_some() || cameras_seen(),
         VideoKind::Screen => screen_source_factory().is_some(),
     }
@@ -463,15 +466,132 @@ fn cameras_seen() -> bool {
     }
 }
 
-fn camera_devices() -> Vec<gst::Device> {
-    let monitor = gst::DeviceMonitor::new();
-    monitor.add_filter(Some("Video/Source"), None);
-    if monitor.start().is_err() {
-        CAMERAS_SEEN.store(1, std::sync::atomic::Ordering::Relaxed);
+// ---------------------------------------------------------------------
+// Cameras through the Camera portal.
+// ---------------------------------------------------------------------
+
+/// Test hook: take the Camera portal path outside a sandbox too, so the
+/// flow can be exercised on a host session.
+pub const CAMERA_PORTAL_ENV: &str = "GTKHX_CAMERA_PORTAL";
+
+/// Whether cameras have to come through the Camera portal: inside the
+/// Flatpak sandbox there is no `/dev/video*`, and the portal's PipeWire
+/// remote is the only way to a camera. Everywhere else the device
+/// monitor sees the cameras directly.
+pub fn camera_via_portal() -> bool {
+    cfg!(target_os = "linux")
+        && (std::path::Path::new("/.flatpak-info").exists()
+            || std::env::var_os(CAMERA_PORTAL_ENV).is_some())
+}
+
+/// The PipeWire remote the Camera portal opened, once access is granted.
+/// Held until a capture through it fails: `pipewiresrc` and the device
+/// provider each connect through a duplicate of it, and the portal
+/// remembers the grant, so while it works there is nothing to gain by
+/// asking again. A failure may be the remote itself gone dead, with the
+/// PipeWire service restarted under it, and nothing through it would
+/// work again; see [`forget_camera_remote`].
+static CAMERA_REMOTE: Mutex<Option<std::os::fd::OwnedFd>> = Mutex::new(None);
+
+/// Hand over the Camera portal's PipeWire remote.
+#[cfg(unix)]
+pub fn set_camera_remote(fd: std::os::fd::OwnedFd) {
+    if let Ok(mut r) = CAMERA_REMOTE.lock() {
+        *r = Some(fd);
+    }
+    // What the remote shows is a fresh answer to "is there a camera".
+    CAMERAS_SEEN.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Let go of the Camera portal's remote after a camera capture failed, so
+/// the next start asks the portal for a fresh one. The grant is
+/// remembered, so asking again shows nothing. Off the portal path there
+/// is no remote and this does nothing.
+pub fn forget_camera_remote() {
+    if let Ok(mut r) = CAMERA_REMOTE.lock() {
+        *r = None;
+    }
+}
+
+/// Whether the Camera portal has granted access and opened a remote.
+pub fn camera_remote_open() -> bool {
+    camera_remote_fd().is_some()
+}
+
+#[cfg(unix)]
+fn camera_remote_fd() -> Option<i32> {
+    use std::os::fd::AsRawFd;
+    CAMERA_REMOTE
+        .lock()
+        .ok()
+        .and_then(|r| r.as_ref().map(|fd| fd.as_raw_fd()))
+}
+
+#[cfg(not(unix))]
+fn camera_remote_fd() -> Option<i32> {
+    None
+}
+
+/// The portal's `IsCameraPresent`: 0 not asked yet, 1 no, 2 yes.
+static CAMERA_PORTAL_PRESENT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Record the portal's `IsCameraPresent`.
+pub fn set_camera_portal_present(present: bool) {
+    CAMERA_PORTAL_PRESENT.store(
+        if present { 2 } else { 1 },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Until the portal has been asked, assume a camera: the button then
+/// offers to try, and the attempt says if there is none.
+fn camera_portal_present() -> bool {
+    CAMERA_PORTAL_PRESENT.load(std::sync::atomic::Ordering::Relaxed) != 1
+}
+
+/// The cameras on the portal's remote, through PipeWire's device
+/// provider. Its elements are `pipewiresrc`s that connect through the
+/// same fd, so each capture reaches its camera without device access.
+fn portal_camera_devices() -> Vec<gst::Device> {
+    let Some(fd) = camera_remote_fd() else {
+        return Vec::new();
+    };
+    let Some(provider) =
+        gst::DeviceProviderFactory::find("pipewiredeviceprovider").and_then(|f| f.get())
+    else {
+        return Vec::new();
+    };
+    if provider.find_property("fd").is_none() {
         return Vec::new();
     }
-    let devices = monitor
+    provider.set_property("fd", fd);
+    if provider.start().is_err() {
+        return Vec::new();
+    }
+    let devices = provider
         .devices()
+        .into_iter()
+        .filter(|d| d.has_classes("Video/Source"))
+        .collect();
+    provider.stop();
+    devices
+}
+
+fn camera_devices() -> Vec<gst::Device> {
+    let devices = if camera_via_portal() {
+        portal_camera_devices()
+    } else {
+        let monitor = gst::DeviceMonitor::new();
+        monitor.add_filter(Some("Video/Source"), None);
+        if monitor.start().is_err() {
+            CAMERAS_SEEN.store(1, std::sync::atomic::Ordering::Relaxed);
+            return Vec::new();
+        }
+        let devices = monitor.devices().into_iter().collect::<Vec<_>>();
+        monitor.stop();
+        devices
+    };
+    let devices = devices
         .into_iter()
         // PipeWire lists screen-cast nodes as video sources too; a
         // camera picker must not offer somebody's desktop.
@@ -481,7 +601,6 @@ fn camera_devices() -> Vec<gst::Device> {
                 .is_none_or(|role| role != "Screen")
         })
         .collect::<Vec<_>>();
-    monitor.stop();
     // The same camera turns up once per provider (v4l2, libcamera,
     // PipeWire); keep the first of each name.
     let mut seen = std::collections::HashSet::new();
@@ -574,6 +693,16 @@ fn make_camera_source() -> Option<gst::Element> {
     };
     if let Some(el) = pick.and_then(|d| d.create_element(None).ok()) {
         return Some(el);
+    }
+    if camera_via_portal() {
+        // No device provider to list with: the remote's default camera.
+        // And no remote, no camera — autovideosrc would only find the
+        // sandbox's empty /dev.
+        let fd = camera_remote_fd()?;
+        return gst::ElementFactory::make("pipewiresrc")
+            .property("fd", fd)
+            .build()
+            .ok();
     }
     make("autovideosrc")
 }
