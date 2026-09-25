@@ -1,0 +1,62 @@
+# CodeQL, as an advanced setup so results can be filtered before upload.
+#
+# The repository's default setup scanned the same languages, but it uploads
+# everything, test code included. Dismissing test-code alerts by hand does not
+# last: an alert is matched to its dismissal by a fingerprint of the nearby
+# code, so a crate move or an edit near a test reopens the set under new
+# numbers. Here the SARIF goes through tools/codeql-drop-test-results.py
+# first, so results in tests/, crate tests/ and benches/, and #[cfg(test)]
+# items never become alerts.
+#
+# The categories match the ones default setup used, so alerts outside test
+# code carry over with their history and dismissals intact. Default setup
+# must be switched off in the repository settings for these uploads to be
+# accepted.
+
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, c-cpp, python, rust]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+          output: sarif
+          upload: never
+
+      - name: drop results in test code
+        run: python3 tools/codeql-drop-test-results.py sarif/*.sarif
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif
+          category: /language:${{ matrix.language }}
