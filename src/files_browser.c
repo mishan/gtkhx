@@ -127,6 +127,19 @@ struct browser {
      * etc. results without an interrupting dialog. */
     AdwToastOverlay *toast;
 
+    /* Each panel's transfer button, in its footer: labeled for what it
+     * does to the selection given both panels' sides (Download, Upload,
+     * Copy). */
+    GtkWidget *left_xfer;
+    GtkWidget *right_xfer;
+
+    /* The rows' right-click menu, one per panel (a popover needs a
+     * parent), and the entry it opened on, for Open — the entry, not its
+     * row index, which a reload while the menu is up would repoint. */
+    GtkWidget *left_menu;
+    GtkWidget *right_menu;
+    HxFileEntry *menu_entry; /* full ref, or NULL */
+
     /* The session this browser was built for. Never hx_active_session(): a
      * browser shows one server's files, and asking which server the user is
      * *looking at* is the wrong question the moment there are two. Borrowed —
@@ -342,6 +355,8 @@ attach_panel_focus_tracking (struct browser *br, files_panel *p)
  * files_panel_get_provider(panel), which returns the current
  * provider. After a swap, the type check answers the new
  * reality on the next button click. */
+static void update_transfer_buttons (struct browser *br);
+
 static void
 on_panel_swap_request (files_panel *p, gboolean want_local, gpointer user_data)
 {
@@ -373,6 +388,8 @@ on_panel_swap_request (files_panel *p, gboolean want_local, gpointer user_data)
 
     files_panel_set_provider (p, new_prov);
     g_object_unref (new_prov);
+    /* The verbs depend on both panels' sides. */
+    update_transfer_buttons (br);
 }
 
 /* ---- Actions (scoped to active panel) ---- */
@@ -832,11 +849,11 @@ cleanup:
 static void copy_entries_and_toast (struct browser *br, files_panel *src,
                                     files_panel *dst, GPtrArray *entries);
 
-/* Directional cross-pane copy — fires from the Copy → and Copy ←
- * buttons in the center column. Source / destination are baked
- * into the handler (not inferred from active-panel state) so the
- * gesture is unambiguous: click Copy → and the left pane's
- * selection lands in the right pane's current path. The same
+/* Directional cross-pane copy — fires from each panel's footer
+ * transfer button and the row menu. Source / destination are baked
+ * into the call (not inferred from active-panel state) so the
+ * gesture is unambiguous: a panel's button sends that panel's
+ * selection to the other pane's current path. The same
  * machinery the existing direction-aware F5 / drag-drop path uses
  * (copy_entries_and_toast) handles the per-entry transfer,
  * cross-side fan-out (local ↔ remote = xfer_new), and toasts. */
@@ -855,20 +872,409 @@ do_directional_copy (struct browser *br, files_panel *src, files_panel *dst)
     }
 }
 
-static void
-on_copy_lr_clicked (GtkButton *btn, gpointer user_data)
+static files_panel *
+other_panel (struct browser *br, files_panel *p)
 {
-    struct browser *br = user_data;
-    (void)btn;
-    do_directional_copy (br, br->left, br->right);
+    return p == br->left ? br->right : br->left;
+}
+
+/* What moving `src`'s selection to `dst` is, in Hotline terms: a
+ * download or an upload across the local/remote line, a copy within
+ * one side. */
+static const char *
+transfer_verb (files_panel *src, files_panel *dst)
+{
+    gboolean src_local
+        = HX_IS_LOCAL_FILES_PROVIDER (files_panel_get_provider (src));
+    gboolean dst_local
+        = HX_IS_LOCAL_FILES_PROVIDER (files_panel_get_provider (dst));
+
+    if (!src_local && dst_local) {
+        return C_ ("files transfer", "Download");
+    }
+    if (src_local && !dst_local) {
+        return C_ ("files transfer", "Upload");
+    }
+    return C_ ("files transfer", "Copy");
+}
+
+/* Both panels on a server: Hotline has no server-side copy
+ * (hx_files_ops_copy refuses it), so the transfer has nothing to do. */
+static gboolean
+transfer_impossible (files_panel *src, files_panel *dst)
+{
+    return !HX_IS_LOCAL_FILES_PROVIDER (files_panel_get_provider (src))
+           && !HX_IS_LOCAL_FILES_PROVIDER (files_panel_get_provider (dst));
 }
 
 static void
-on_copy_rl_clicked (GtkButton *btn, gpointer user_data)
+update_transfer_button (struct browser *br, files_panel *p, GtkWidget *btn)
+{
+    GtkWidget *label;
+    GPtrArray *sel;
+    guint n;
+
+    if (btn == NULL) {
+        return;
+    }
+    label = g_object_get_data (G_OBJECT (btn), "label");
+    gtk_label_set_text (GTK_LABEL (label),
+                        transfer_verb (p, other_panel (br, p)));
+    sel = files_panel_get_selected_entries (p);
+    n = sel != NULL ? sel->len : 0;
+    if (sel != NULL) {
+        g_ptr_array_unref (sel);
+    }
+    if (transfer_impossible (p, other_panel (br, p))) {
+        gtk_widget_set_sensitive (btn, FALSE);
+        gtk_widget_set_tooltip_text (
+            btn, _ ("Hotline servers can't copy between two remote folders; "
+                    "use Move (F6) instead"));
+        return;
+    }
+    gtk_widget_set_tooltip_text (
+        btn, _ ("Send this panel's selection to the other panel's folder"));
+    gtk_widget_set_sensitive (btn, n > 0);
+}
+
+static void
+update_transfer_buttons (struct browser *br)
+{
+    update_transfer_button (br, br->left, br->left_xfer);
+    update_transfer_button (br, br->right, br->right_xfer);
+}
+
+static void
+on_transfer_clicked (GtkButton *btn, gpointer user_data)
 {
     struct browser *br = user_data;
-    (void)btn;
-    do_directional_copy (br, br->right, br->left);
+    files_panel *src
+        = g_object_get_data (G_OBJECT (btn), "left") ? br->left : br->right;
+
+    do_directional_copy (br, src, other_panel (br, src));
+}
+
+/* A window closing destroys the buttons before the models they follow
+ * stop emitting — teardown clears the listings and the models report it —
+ * and the browser's own teardown runs after its children are gone. Each
+ * button forgets itself instead, and update_transfer_button skips a
+ * forgotten one. */
+static void
+on_transfer_button_destroy (GtkWidget *btn, gpointer user_data)
+{
+    struct browser *br = user_data;
+
+    if (br->left_xfer == btn) {
+        br->left_xfer = NULL;
+    }
+    if (br->right_xfer == btn) {
+        br->right_xfer = NULL;
+    }
+}
+
+/* The footer button that sends a panel's selection to the other panel,
+ * replacing the pair of arrow buttons that sat between the panels: it
+ * says what it will do, in words, and sits with the selection it acts
+ * on. The arrow points at the other panel. */
+static GtkWidget *
+build_transfer_button (struct browser *br, gboolean left)
+{
+    GtkWidget *btn = gtk_button_new ();
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *label = gtk_label_new (NULL);
+    GtkWidget *arrow = gtk_image_new_from_icon_name (
+        left ? "go-next-symbolic" : "go-previous-symbolic");
+
+    if (left) {
+        gtk_box_append (GTK_BOX (box), label);
+        gtk_box_append (GTK_BOX (box), arrow);
+    } else {
+        gtk_box_append (GTK_BOX (box), arrow);
+        gtk_box_append (GTK_BOX (box), label);
+    }
+    gtk_button_set_child (GTK_BUTTON (btn), box);
+    gtk_widget_add_css_class (btn, "gtkhx-files-transfer");
+    g_object_set_data (G_OBJECT (btn), "label", label);
+    g_object_set_data (G_OBJECT (btn), "left", GINT_TO_POINTER (left));
+    g_signal_connect (btn, "clicked", G_CALLBACK (on_transfer_clicked), br);
+    g_signal_connect (btn, "destroy", G_CALLBACK (on_transfer_button_destroy),
+                      br);
+    return btn;
+}
+
+/* Selection changes and new listings both: a listing replaces the items
+ * without a selection-changed, and can empty the selection with it. */
+static void
+on_panel_selection_changed (GtkSelectionModel *model, guint position,
+                            guint n_items, gpointer user_data)
+{
+    (void)model;
+    (void)position;
+    (void)n_items;
+    update_transfer_buttons (user_data);
+}
+
+static void
+on_panel_items_changed (GListModel *model, guint position, guint removed,
+                        guint added, gpointer user_data)
+{
+    (void)model;
+    (void)position;
+    (void)removed;
+    (void)added;
+    update_transfer_buttons (user_data);
+}
+
+/* ---- Row context menu ---- */
+
+static void
+on_menu_open (GSimpleAction *a, GVariant *v, gpointer user_data)
+{
+    struct browser *br = user_data;
+    (void)a;
+    (void)v;
+    GListModel *model;
+    guint n;
+
+    if (br->active == NULL || br->menu_entry == NULL) {
+        return;
+    }
+    /* The same path as a double-click — descend into a folder, open a
+     * file — at wherever the entry sits now. */
+    model = G_LIST_MODEL (gtk_column_view_get_model (
+        GTK_COLUMN_VIEW (files_panel_get_column_view (br->active))));
+    n = g_list_model_get_n_items (model);
+    for (guint i = 0; i < n; i++) {
+        g_autoptr (GObject) item = g_list_model_get_item (model, i);
+        if (item == G_OBJECT (br->menu_entry)) {
+            g_signal_emit_by_name (files_panel_get_column_view (br->active),
+                                   "activate", i);
+            return;
+        }
+    }
+}
+
+static void
+on_menu_transfer (GSimpleAction *a, GVariant *v, gpointer user_data)
+{
+    struct browser *br = user_data;
+    (void)a;
+    (void)v;
+    if (br->active != NULL) {
+        do_directional_copy (br, br->active, other_panel (br, br->active));
+    }
+}
+
+#define MENU_FORWARD(name, handler)                                            \
+    static void name (GSimpleAction *a, GVariant *v, gpointer user_data)       \
+    {                                                                          \
+        (void)a;                                                               \
+        (void)v;                                                               \
+        handler (NULL, user_data);                                             \
+    }
+static void on_mkdir_clicked (GtkButton *btn, gpointer user_data);
+static void on_delete_clicked (GtkButton *btn, gpointer user_data);
+static void on_move_clicked (GtkButton *btn, gpointer user_data);
+MENU_FORWARD (on_menu_preview, on_preview_clicked)
+MENU_FORWARD (on_menu_info, on_get_info_clicked)
+MENU_FORWARD (on_menu_rename, on_rename_clicked)
+MENU_FORWARD (on_menu_delete, on_delete_clicked)
+MENU_FORWARD (on_menu_mkdir, on_mkdir_clicked)
+MENU_FORWARD (on_menu_reload, on_refresh_clicked)
+MENU_FORWARD (on_menu_move, on_move_clicked)
+#undef MENU_FORWARD
+
+static const GActionEntry menu_actions[] = {
+    { .name = "open", .activate = on_menu_open },
+    { .name = "transfer", .activate = on_menu_transfer },
+    { .name = "move", .activate = on_menu_move },
+    { .name = "preview", .activate = on_menu_preview },
+    { .name = "info", .activate = on_menu_info },
+    { .name = "rename", .activate = on_menu_rename },
+    { .name = "delete", .activate = on_menu_delete },
+    { .name = "mkdir", .activate = on_menu_mkdir },
+    { .name = "reload", .activate = on_menu_reload },
+};
+
+/* Built per popup: the transfer item's verb depends on both panels'
+ * sides, and a click on empty space offers only what makes sense with
+ * nothing picked. */
+static GMenuModel *
+build_row_menu (struct browser *br, files_panel *p, gboolean on_row)
+{
+    GMenu *menu = g_menu_new ();
+    GMenu *top = g_menu_new ();
+    GMenu *mid = g_menu_new ();
+    GMenu *bottom = g_menu_new ();
+
+    if (on_row) {
+        g_menu_append (top, _ ("Open"), "files.open");
+        /* Left out rather than offered and refused where it can't work
+         * (both panels remote); Move covers that case. */
+        if (!transfer_impossible (p, other_panel (br, p))) {
+            g_menu_append (top, transfer_verb (p, other_panel (br, p)),
+                           "files.transfer");
+        }
+        g_menu_append (top, _ ("Preview"), "files.preview");
+        g_menu_append (top, _ ("Get Info"), "files.info");
+        g_menu_append (mid, _ ("Move…"), "files.move");
+        g_menu_append (mid, _ ("Rename…"), "files.rename");
+        g_menu_append (mid, _ ("Delete…"), "files.delete");
+        g_menu_append_section (menu, NULL, G_MENU_MODEL (top));
+        g_menu_append_section (menu, NULL, G_MENU_MODEL (mid));
+    }
+    g_menu_append (bottom, _ ("New Folder…"), "files.mkdir");
+    g_menu_append (bottom, _ ("Reload"), "files.reload");
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (bottom));
+    g_object_unref (top);
+    g_object_unref (mid);
+    g_object_unref (bottom);
+    return G_MENU_MODEL (menu);
+}
+
+/* Open the row menu on `p` pointing at `at` (column-view coordinates),
+ * for `e` — the entry it acts on, already selected — or for empty space
+ * when `e` is NULL. */
+static void
+popup_row_menu (struct browser *br, files_panel *p, HxFileEntry *e,
+                const GdkRectangle *at)
+{
+    GtkWidget *popover = p == br->left ? br->left_menu : br->right_menu;
+    g_autoptr (GMenuModel) model = NULL;
+
+    set_active (br, p);
+    g_clear_object (&br->menu_entry);
+    if (e != NULL) {
+        br->menu_entry = g_object_ref (e);
+    }
+    model = build_row_menu (br, p, e != NULL);
+    gtk_popover_menu_set_menu_model (GTK_POPOVER_MENU (popover), model);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), at);
+    gtk_popover_popup (GTK_POPOVER (popover));
+}
+
+static void
+on_panel_secondary_click (GtkGestureClick *gesture, int n_press, double x,
+                          double y, gpointer user_data)
+{
+    struct browser *br = user_data;
+    GtkWidget *view
+        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    files_panel *p
+        = view == files_panel_get_column_view (br->left) ? br->left : br->right;
+    GtkSelectionModel *sel = gtk_column_view_get_model (GTK_COLUMN_VIEW (view));
+    GdkRectangle at = { (int)x, (int)y, 1, 1 };
+    guint pos = 0;
+    HxFileEntry *e;
+
+    (void)n_press;
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+
+    /* A right-click on a row acts on that row: it joins the selection
+     * if already part of it, and replaces it otherwise — what every
+     * file manager does, so the menu never acts on rows the user can't
+     * see are picked. */
+    e = files_panel_entry_at (p, x, y, &pos);
+    if (e != NULL && !gtk_selection_model_is_selected (sel, pos)) {
+        gtk_selection_model_select_item (sel, pos, TRUE);
+    }
+    popup_row_menu (br, p, e, &at);
+}
+
+/* Shift+F10 / Menu: the row menu from the keyboard, at the focused row
+ * of the active panel. */
+static gboolean
+on_menu_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    struct browser *br = user_data;
+    GtkSelectionModel *sel;
+    GdkRectangle at = { 0, 0, 1, 1 };
+    guint pos = 0;
+    HxFileEntry *e;
+
+    (void)widget;
+    (void)args;
+    if (br->active == NULL) {
+        return FALSE;
+    }
+    e = files_panel_focused_entry (br->active, &pos, &at);
+    sel = gtk_column_view_get_model (
+        GTK_COLUMN_VIEW (files_panel_get_column_view (br->active)));
+    if (e != NULL && !gtk_selection_model_is_selected (sel, pos)) {
+        gtk_selection_model_select_item (sel, pos, TRUE);
+    }
+    popup_row_menu (br, br->active, e, &at);
+    return TRUE;
+}
+
+/* A popover given a parent with gtk_widget_set_parent has to be given
+ * back before that parent is finalized, or GTK warns and the popover
+ * outlives it holding a dangling parent. The browser's own teardown runs
+ * too late — the column views are gone by then — so this rides on each
+ * view's destroy. */
+static void
+on_menu_parent_destroy (GtkWidget *view, gpointer popover)
+{
+    (void)view;
+    gtk_widget_unparent (GTK_WIDGET (popover));
+}
+
+static void
+attach_panel_menu (struct browser *br, files_panel *p)
+{
+    GtkWidget *view = files_panel_get_column_view (p);
+    GtkWidget *popover = gtk_popover_menu_new_from_model (NULL);
+    GtkGesture *click = gtk_gesture_click_new ();
+
+    gtk_widget_set_parent (popover, view);
+    g_signal_connect (view, "destroy", G_CALLBACK (on_menu_parent_destroy),
+                      popover);
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_widget_set_halign (popover, GTK_ALIGN_START);
+    if (p == br->left) {
+        br->left_menu = popover;
+    } else {
+        br->right_menu = popover;
+    }
+
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+                                   GDK_BUTTON_SECONDARY);
+    g_signal_connect (click, "pressed", G_CALLBACK (on_panel_secondary_click),
+                      br);
+    gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (click));
+}
+
+/* The two panels start level. A fixed position (it used to be 460px,
+ * tuned for a 980px window with a button column in the middle) lands
+ * lopsided at any other width; half the paned's span is right at all of
+ * them.
+ *
+ * On a tick rather than the first allocation: a window's
+ * first allocations arrive in steps (natural size first, then the
+ * default size), and splitting on the first one halves the wrong width.
+ * This waits until the width holds across two frames, splits once, and
+ * leaves the divider to the user from then on; both sides resizing
+ * keeps it in proportion. */
+static gboolean
+on_paned_settle_tick (GtkWidget *widget, GdkFrameClock *clock,
+                      gpointer user_data)
+{
+    int width = gtk_widget_get_width (widget);
+    int last = GPOINTER_TO_INT (
+        g_object_get_data (G_OBJECT (widget), "hx-last-width"));
+
+    (void)clock;
+    (void)user_data;
+    g_object_set_data (G_OBJECT (widget), "hx-last-width",
+                       GINT_TO_POINTER (width));
+    if (width <= 0 || width != last) {
+        return G_SOURCE_CONTINUE;
+    }
+    /* Half the width, not half of max-position: max-position is the
+     * width less the end panel's minimum, so halving it lands left of
+     * center. GtkPaned clamps the result to what both minimums allow. */
+    gtk_paned_set_position (GTK_PANED (widget), width / 2);
+    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -1846,13 +2252,19 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
  * something to transition from. */
 static const char *active_css
     = ".files-panel {\n"
-      "  border-radius: 8px;\n"
+      "  border-radius: 6px;\n"
       "}\n"
       ".files-panel-active {\n"
-      "  box-shadow: inset 0 0 0 3px @accent_color,\n"
-      "              0 0 8px 0 alpha(@accent_color, 0.35);\n"
-      "  background-color: alpha(@accent_bg_color, 0.08);\n"
-      "  border-radius: 8px;\n"
+      "  box-shadow: inset 0 0 0 1px alpha(@accent_color, 0.8);\n"
+      "  border-radius: 6px;\n"
+      "}\n"
+      "columnview.gtkhx-files-list > listview > row > cell {\n"
+      "  padding-top: 3px;\n"
+      "  padding-bottom: 3px;\n"
+      "}\n"
+      "button.gtkhx-files-transfer {\n"
+      "  padding: 2px 10px;\n"
+      "  min-height: 24px;\n"
       "}\n";
 
 static void
@@ -1909,6 +2321,7 @@ browser_teardown (GtkWidget *content, gpointer user_data)
         br->file_update_handler = 0;
     }
 
+    g_clear_object (&br->menu_entry);
     files_panel_free (br->left);
     files_panel_free (br->right);
     g_clear_object (&br->left_provider);
@@ -1951,6 +2364,13 @@ on_connection_state (GtkhxSession *sess, struct htlc_conn *htlc, guint state,
     if (state != GTKHX_CONNECTION_DISCONNECTED
         && state != GTKHX_CONNECTION_LOGIN_READY) {
         return;
+    }
+
+    /* The server has named itself by the time login is ready; the
+     * window's title should say so rather than the address it opened
+     * with. */
+    if (state == GTKHX_CONNECTION_LOGIN_READY) {
+        gtkhx_files_window_refresh_title (br->sess);
     }
 
     /* On DISCONNECTED, drop the remote panel's stale listing and
@@ -2019,25 +2439,23 @@ on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
     }
 }
 
-/* Content build for the Rust Files window shell (gtkhx-ui `files`). The dock
- * registration moved to Rust via dock_bridge; this builds the whole browser +
- * its two-panel content and returns the content box. br->window points at that
- * content box (a widget in the panel's tree once embedded) so the
- * adw_dialog_present parenting, gtk_widget_get_root walks, the shortcut
- * controller, and init_keyaccel all keep working — the Rust shell owns the
- * dock panel.
+/* Content build for the Files window (gtkhx-ui `files`): builds the whole
+ * browser + its two-panel content and returns the content box, which the
+ * window hosts. br->window points at that content box — a widget in the
+ * window's tree — so adw_dialog_present parenting, gtk_widget_get_root walks
+ * and the shortcut controller all work from it; the window itself installs
+ * the app-wide accelerators (init_keyaccel), since Ctrl+W has to find a
+ * GtkWindow.
  *
- * Returns NULL when there is nothing to embed, which covers two cases the
- * caller treats identically: a browser already exists (the shell's
- * raise-if-open handles that), or `sess` was NULL, which also logs. */
+ * Returns NULL when there is nothing to build, which covers two cases: a
+ * browser already exists for `sess`, or `sess` was NULL, which also logs. */
 GtkWidget *
 gtkhx_files_build_content (session *sess)
 {
     struct browser *br;
-    GtkWidget *button_bar, *content_vbox;
-    GtkWidget *paned, *right_side, *center_col, *refresh_btn, *mkdir_btn,
-        *copy_lr_btn, *copy_rl_btn, *preview_btn, *info_btn, *rename_btn,
-        *delete_btn;
+    GtkWidget *header_start, *header_end, *content_vbox;
+    GtkWidget *paned, *refresh_btn, *mkdir_btn, *preview_btn, *info_btn,
+        *rename_btn, *delete_btn;
     GtkEventController *shortcuts;
     GtkShortcut *sh;
 
@@ -2050,9 +2468,8 @@ gtkhx_files_build_content (session *sess)
      * silently-wrong argument is hardest to trace back to. */
     g_return_val_if_fail (sess != NULL, NULL);
 
-    /* Nothing to build for: this session already has a browser, and the
-     * shell has a page to show. A different session asking is a different
-     * browser, which is the whole of what changed here. */
+    /* Nothing to build for: this session already has a browser, and its
+     * window is up. A different session asking is a different browser. */
     if (browser_for (sess)) {
         return NULL;
     }
@@ -2062,43 +2479,19 @@ gtkhx_files_build_content (session *sess)
 
     install_css ();
 
-    /* Headerbar:
-     *   pack_start: Refresh, New Folder, Preview, Get Info
-     *   pack_end:   Delete, Rename
+    /* Single-panel actions, for the window's header bar (see
+     * header_start / header_end below). The cross-panel transfer is each
+     * panel's footer button instead, and the right-click menu has all of
+     * it.
      *
-     * Cross-pane Copy + Move are NOT in the headerbar — they're
-     * the three buttons in the vertical column between the two
-     * panels (see center_col below). That position matches the
-     * user's mental model: the actions transfer between panes,
-     * so the buttons that fire them sit between the panes. The
-     * single-panel actions (refresh, mkdir, preview, info, rename,
-     * delete) stay in the headerbar.
-     *
-     * Icons:
-     *   Rename:  pencil.png — a yellow pencil glyph (also used
-     *            by news_browser's New Post button). Renamed
-     *            from news_reply.png to match its actual
-     *            visual content; "pencil" is the cross-app
-     *            shorthand for "edit name" and reads better
-     *            than the previous generic person-with-pencil
-     *            edituser.png.
-     *   Copy →:  file_move_lr.png — cicn 219, a stacked-paper
-     *            glyph with a right-pointing arrow. Copy ← uses
-     *            file_move_rl.png, the same icon flipped along
-     *            the vertical axis. Both extracted via
-     *            tools/cicndump and committed under src/pixmaps.
-     *            The filenames still say "move" — they were
-     *            originally drawn for the Move action and reused
-     *            verbatim when the center column flipped to Copy
-     *            semantics. Rename of the PNGs deferred to keep
-     *            this diff focused on UX rather than asset moves. */
+     * Icons: Rename is pencil.png, a yellow pencil glyph (also used by
+     * news_browser's New Post button) — "pencil" is the cross-app
+     * shorthand for "edit name". */
 #define FB_BTN(resource)                                                       \
     gtkhx_pixmap_button ((resource), NULL, GTKHX_SCALE_WINDOW_BUTTONS, NULL,   \
                          NULL)
     refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.png");
     mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.png");
-    copy_lr_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/file_move_lr.png");
-    copy_rl_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/file_move_rl.png");
     preview_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/preview.png");
     info_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/info.png");
     rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/pencil.png");
@@ -2109,10 +2502,6 @@ gtkhx_files_build_content (session *sess)
                                  _ ("Reload active panel (Ctrl+R)"));
     gtk_widget_set_tooltip_text (mkdir_btn,
                                  _ ("New folder in active panel (F7, Ctrl+N)"));
-    gtk_widget_set_tooltip_text (copy_lr_btn,
-                                 _ ("Copy left selection to the right panel"));
-    gtk_widget_set_tooltip_text (copy_rl_btn,
-                                 _ ("Copy right selection to the left panel"));
     gtk_widget_set_tooltip_text (preview_btn,
                                  _ ("Preview selected file (F3, Ctrl+P)"));
     gtk_widget_set_tooltip_text (info_btn,
@@ -2125,10 +2514,6 @@ gtkhx_files_build_content (session *sess)
     g_signal_connect (refresh_btn, "clicked", G_CALLBACK (on_refresh_clicked),
                       br);
     g_signal_connect (mkdir_btn, "clicked", G_CALLBACK (on_mkdir_clicked), br);
-    g_signal_connect (copy_lr_btn, "clicked", G_CALLBACK (on_copy_lr_clicked),
-                      br);
-    g_signal_connect (copy_rl_btn, "clicked", G_CALLBACK (on_copy_rl_clicked),
-                      br);
     g_signal_connect (preview_btn, "clicked", G_CALLBACK (on_preview_clicked),
                       br);
     g_signal_connect (info_btn, "clicked", G_CALLBACK (on_get_info_clicked),
@@ -2138,26 +2523,18 @@ gtkhx_files_build_content (session *sess)
     g_signal_connect (delete_btn, "clicked", G_CALLBACK (on_delete_clicked),
                       br);
 
-    /* the AdwHeaderBar (Refresh /
-     * MkDir / Preview / Info on start, Rename / Delete on end)
-     * relocates to a slim GtkBox at the top of the panel content
-     * with the same start/end grouping via an hexpand spacer. */
-    button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (button_bar, 6);
-    gtk_widget_set_margin_end (button_bar, 6);
-    gtk_widget_set_margin_top (button_bar, 6);
-    gtk_widget_set_margin_bottom (button_bar, 4);
-    gtk_box_append (GTK_BOX (button_bar), refresh_btn);
-    gtk_box_append (GTK_BOX (button_bar), mkdir_btn);
-    gtk_box_append (GTK_BOX (button_bar), preview_btn);
-    gtk_box_append (GTK_BOX (button_bar), info_btn);
-    {
-        GtkWidget *spacer = gtk_label_new (NULL);
-        gtk_widget_set_hexpand (spacer, TRUE);
-        gtk_box_append (GTK_BOX (button_bar), spacer);
-    }
-    gtk_box_append (GTK_BOX (button_bar), rename_btn);
-    gtk_box_append (GTK_BOX (button_bar), delete_btn);
+    /* The window's header bar carries these (gtkhx-ui/src/files.rs packs
+     * them): Refresh / New Folder / Preview / Get Info at the start,
+     * Rename / Delete at the end. Handed over on the content box rather
+     * than packed into it, so the browser adds no row of its own. */
+    header_start = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_append (GTK_BOX (header_start), refresh_btn);
+    gtk_box_append (GTK_BOX (header_start), mkdir_btn);
+    gtk_box_append (GTK_BOX (header_start), preview_btn);
+    gtk_box_append (GTK_BOX (header_start), info_btn);
+    header_end = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_append (GTK_BOX (header_end), rename_btn);
+    gtk_box_append (GTK_BOX (header_end), delete_btn);
 
     /* L = local FS (XDG_DOWNLOAD_DIR by default).
      * R = remote Hotline server. The remote provider sits idle
@@ -2194,69 +2571,40 @@ gtkhx_files_build_content (session *sess)
         = g_signal_connect (gtkhx_session_get_default (), "file-update",
                             G_CALLBACK (on_file_update), br);
 
-    /* Center column: two explicit-direction Copy buttons (→ and ←)
-     * live between the two panels. Norton / Krusader / Total
-     * Commander all place cross-pane buttons here for the same
-     * reason: the action transfers items between panes, so the
-     * buttons that fire it should physically sit between them.
-     *
-     * Direction is baked into each button (its icon and its
-     * handler), so the user doesn't have to inspect the active-
-     * panel marker to know what will happen — clicking Copy →
-     * always copies the LEFT pane's selection into the RIGHT
-     * pane's current path, and vice versa. F5 still fires the
-     * direction-aware active-panel Copy for keyboard users.
-     *
-     * Move isn't represented in the column — cross-side move
-     * doesn't work and same-side move is rarely a copy-button-
-     * replacement gesture. The F6 destination-picker dialog
-     * covers the rare case.
-     *
-     * valign=CENTER keeps the buttons floating at the vertical
-     * midpoint of the window: easy to reach without eye-tracking
-     * up to the headerbar, and out of the way of any particular
-     * file row most of the time. */
-    center_col = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_valign (center_col, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_start (center_col, 4);
-    gtk_widget_set_margin_end (center_col, 4);
-    gtk_box_append (GTK_BOX (center_col), copy_lr_btn);
-    gtk_box_append (GTK_BOX (center_col), copy_rl_btn);
-
-    /* Layout: outer GtkPaned [left_panel, right_side]
-     *           right_side = horizontal GtkBox [center_col, right_panel]
-     *
-     * The user can drag the paned divider to resize the left
-     * panel; right_panel takes the remaining space minus the
-     * center column's fixed width. The center column itself
-     * doesn't reflow on drag — keeping the buttons at a
-     * stable horizontal anchor right next to the divider.
-     *
-     * The position-set workaround the previous GtkPaned-only
-     * layout used (setting position=490 to avoid a focus-drift
-     * bug from repeated allocation passes) still applies here:
-     * without it, the divider recomputes on every items-changed,
-     * which steals focus mid-population. The starting split is
-     * tuned for the 980px default window with the center column
-     * taking ~60px in the middle. */
+    /* Two panels, level to start with (on_paned_settle_tick) and
+     * resizing together. The copy direction lives in each panel's footer
+     * now (build_transfer_button), not in a column between them. */
     paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
     gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
-    gtk_paned_set_position (GTK_PANED (paned), 460);
-
-    right_side = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    {
-        GtkWidget *right_widget = files_panel_get_widget (br->right);
-        gtk_widget_set_hexpand (right_widget, TRUE);
-        gtk_box_append (GTK_BOX (right_side), center_col);
-        gtk_box_append (GTK_BOX (right_side), right_widget);
-    }
-
     gtk_paned_set_start_child (GTK_PANED (paned),
                                files_panel_get_widget (br->left));
-    gtk_paned_set_end_child (GTK_PANED (paned), right_side);
+    gtk_paned_set_end_child (GTK_PANED (paned),
+                             files_panel_get_widget (br->right));
+    gtk_widget_add_tick_callback (paned, on_paned_settle_tick, NULL, NULL);
+
+    br->left_xfer = build_transfer_button (br, TRUE);
+    br->right_xfer = build_transfer_button (br, FALSE);
+    gtk_box_append (GTK_BOX (files_panel_get_footer (br->left)), br->left_xfer);
+    gtk_box_append (GTK_BOX (files_panel_get_footer (br->right)),
+                    br->right_xfer);
+    g_signal_connect (gtk_column_view_get_model (GTK_COLUMN_VIEW (
+                          files_panel_get_column_view (br->left))),
+                      "selection-changed",
+                      G_CALLBACK (on_panel_selection_changed), br);
+    g_signal_connect (gtk_column_view_get_model (GTK_COLUMN_VIEW (
+                          files_panel_get_column_view (br->right))),
+                      "selection-changed",
+                      G_CALLBACK (on_panel_selection_changed), br);
+    g_signal_connect (gtk_column_view_get_model (GTK_COLUMN_VIEW (
+                          files_panel_get_column_view (br->left))),
+                      "items-changed", G_CALLBACK (on_panel_items_changed), br);
+    g_signal_connect (gtk_column_view_get_model (GTK_COLUMN_VIEW (
+                          files_panel_get_column_view (br->right))),
+                      "items-changed", G_CALLBACK (on_panel_items_changed), br);
+    update_transfer_buttons (br);
 
     /* Wrap in a toast overlay so the Copy action (and future
      * polish-phase actions) have somewhere to surface transient
@@ -2266,15 +2614,25 @@ gtkhx_files_build_content (session *sess)
     adw_toast_overlay_set_child (br->toast, paned);
 
     content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append (GTK_BOX (content_vbox), button_bar);
     gtk_box_append (GTK_BOX (content_vbox), GTK_WIDGET (br->toast));
+    g_object_set_data_full (G_OBJECT (content_vbox), "hx-files-header-start",
+                            g_object_ref_sink (header_start), g_object_unref);
+    g_object_set_data_full (G_OBJECT (content_vbox), "hx-files-header-end",
+                            g_object_ref_sink (header_end), g_object_unref);
+    {
+        GSimpleActionGroup *group = g_simple_action_group_new ();
+        g_action_map_add_action_entries (G_ACTION_MAP (group), menu_actions,
+                                         G_N_ELEMENTS (menu_actions), br);
+        gtk_widget_insert_action_group (content_vbox, "files",
+                                        G_ACTION_GROUP (group));
+        g_object_unref (group);
+    }
     gtk_widget_set_vexpand (GTK_WIDGET (br->toast), TRUE);
 
-    /* br->window points at the content box, not the dock panel (the Rust
-     * shell owns that). It only needs to be a widget in the panel's tree so
-     * adw_dialog_present parents, gtk_widget_get_root() walks, and the
-     * shortcut controller + init_keyaccel route — content_vbox is exactly that
-     * once embedded. */
+    /* br->window points at the content box, not the window around it. It
+     * only needs to be a widget in the window's tree so adw_dialog_present
+     * parents, gtk_widget_get_root() walks and the shortcut controller
+     * routes — content_vbox is exactly that once hosted. */
     br->window = content_vbox;
 
     /* Track which panel has focus / was clicked so the headerbar
@@ -2289,6 +2647,10 @@ gtkhx_files_build_content (session *sess)
      * button uses. Same-panel drops are a no-op. */
     attach_panel_dnd (br, br->left);
     attach_panel_dnd (br, br->right);
+
+    /* Right-click on a row: what can be done to it, in words. */
+    attach_panel_menu (br, br->left);
+    attach_panel_menu (br, br->right);
 
     /* Window-level keyboard shortcuts.
      *
@@ -2338,6 +2700,16 @@ gtkhx_files_build_content (session *sess)
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F2, 0),
         gtk_callback_action_new (on_rename_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* Shift+F10 and the Menu key = the row menu, at the focused row —
+     * the keyboard's right-click. */
+    sh = gtk_shortcut_new (
+        gtk_alternative_trigger_new (
+            gtk_keyval_trigger_new (GDK_KEY_F10, GDK_SHIFT_MASK),
+            gtk_keyval_trigger_new (GDK_KEY_Menu, 0)),
+        gtk_callback_action_new (on_menu_shortcut, br, NULL));
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 
@@ -2435,10 +2807,10 @@ gtkhx_files_build_content (session *sess)
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 
-    /* The teardown point is the content box's destruction — which is what the
-     * dock does when this connection's Files page is removed. (Not a
-     * close-request: that belongs to GtkWindow, and the panel itself persists
-     * and uses libpanel's own close-page machinery.) */
+    /* The teardown point is the content box's destruction, which is what
+     * closing the Files window does, and what closing the connection does
+     * (it destroys the window). Not the window's close-request: a
+     * destroyed window emits none. */
     g_signal_connect (content_vbox, "destroy", G_CALLBACK (browser_teardown),
                       br);
 
@@ -2446,13 +2818,6 @@ gtkhx_files_build_content (session *sess)
         browsers = g_hash_table_new (g_direct_hash, g_direct_equal);
     }
     g_hash_table_insert (browsers, sess, br);
-
-    /* Standard window accelerators — Ctrl+W close, Ctrl+Q quit,
-     * Ctrl+K connect, Ctrl+T tracker. Same set every other
-     * window in the app picks up via init_keyaccel. Capture
-     * phase means the column views' internal focus chain
-     * doesn't swallow them. */
-    init_keyaccel (br->window);
 
     /* Initial focus on the left panel so the user has a working
      * active selection right away. */

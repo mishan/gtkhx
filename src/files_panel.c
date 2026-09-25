@@ -50,6 +50,8 @@ struct _files_panel {
     GtkSortListModel *sort_model;
 
     GtkWidget *status_label; /* footer: "N items" / "M of N selected" */
+    GtkWidget *footer;       /* status row; the browser adds its transfer
+                              * button here */
 
     HxFilesProvider *provider;
     gulong navigated_handler;
@@ -812,10 +814,9 @@ name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     gtk_widget_set_halign (lbl, GTK_ALIGN_START);
     gtk_widget_set_valign (lbl, GTK_ALIGN_CENTER);
 
-    /* XPMs are 16x16; scaled 1.5x = 24x24. Match that with
-     * pixel_size so GtkImage's icon-size clamp doesn't shrink
-     * them back down. */
-    gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
+    /* The icons are 16x16 pixel art: shown at their own size they stay
+     * crisp, and the rows stay dense enough to scan a long listing. */
+    gtk_image_set_pixel_size (GTK_IMAGE (icon), 16);
 
     gtk_box_append (GTK_BOX (row), icon);
     gtk_box_append (GTK_BOX (row), lbl);
@@ -942,9 +943,22 @@ size_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     (void)f;
     (void)d;
 
+    /* The row index lookup the context menu uses (see
+     * files_panel_entry_at). */
+    g_object_set_data (G_OBJECT (lbl), "list-item", item);
     txt = e ? hx_file_entry_format_size (e) : g_strdup ("");
     gtk_label_set_text (lbl, txt);
     g_free (txt);
+    /* The column shows the rounded size; the exact byte count is a
+     * hover away. */
+    if (e != NULL && !hx_file_entry_is_dir (e)) {
+        g_autofree char *exact = g_format_size_full (
+            hx_file_entry_get_size (e),
+            G_FORMAT_SIZE_IEC_UNITS | G_FORMAT_SIZE_LONG_FORMAT);
+        gtk_widget_set_tooltip_text (GTK_WIDGET (lbl), exact);
+    } else {
+        gtk_widget_set_tooltip_text (GTK_WIDGET (lbl), NULL);
+    }
 }
 
 static void
@@ -956,6 +970,7 @@ modified_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     (void)f;
     (void)d;
 
+    g_object_set_data (G_OBJECT (lbl), "list-item", item);
     txt = e ? hx_file_entry_format_modified (e) : g_strdup ("");
     gtk_label_set_text (lbl, txt);
     g_free (txt);
@@ -968,6 +983,7 @@ kind_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     HxFileEntry *e = gtk_list_item_get_item (item);
     (void)f;
     (void)d;
+    g_object_set_data (G_OBJECT (lbl), "list-item", item);
     gtk_label_set_text (lbl, e ? hx_file_entry_get_kind (e) : "");
 }
 
@@ -1211,7 +1227,7 @@ on_up_clicked (GtkButton *btn, gpointer user_data)
 
 /* ---- Construction ---- */
 
-static void
+static GtkColumnViewColumn *
 add_column (GtkColumnView *view, const char *title,
             void (*setup) (GtkSignalListItemFactory *, GtkListItem *, gpointer),
             void (*bind) (GtkSignalListItemFactory *, GtkListItem *, gpointer),
@@ -1243,7 +1259,8 @@ add_column (GtkColumnView *view, const char *title,
         gtk_column_view_sort_by_column (view, col, GTK_SORT_ASCENDING);
     }
 
-    g_object_unref (col);
+    g_object_unref (col); /* the view holds it; returned borrowed */
+    return col;
 }
 
 /* Forward decls — these live below files_panel_new so they can
@@ -1251,6 +1268,14 @@ add_column (GtkColumnView *view, const char *title,
  * needing their own forward decls in turn. */
 static void panel_detach_provider (files_panel *p);
 static void panel_attach_provider (files_panel *p, HxFilesProvider *provider);
+
+static void
+on_show_kind_change (GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    g_simple_action_set_state (action, value);
+    gtk_column_view_column_set_visible (GTK_COLUMN_VIEW_COLUMN (user_data),
+                                        g_variant_get_boolean (value));
+}
 static void on_side_dropdown_changed (GObject *obj, GParamSpec *pspec,
                                       gpointer user_data);
 
@@ -1278,10 +1303,9 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
 
     /* ---- Path row: [side dropdown] [Up] [path entry] ---- */
     path_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (path_row, 6);
-    gtk_widget_set_margin_end (path_row, 6);
-    gtk_widget_set_margin_top (path_row, 6);
-    gtk_widget_set_margin_bottom (path_row, 4);
+    /* Styled like an action row but not one: it is navigation, so a
+     * pane's Show Action Bar must not hide it. */
+    gtk_widget_add_css_class (path_row, "gtkhx-path-row");
 
     /* Side selector — only present when the caller wired a swap
      * callback. Two fixed options: "Local" (idx 0) and "Remote"
@@ -1348,17 +1372,49 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
         gtk_column_view_set_show_column_separators (
             GTK_COLUMN_VIEW (p->column_view), FALSE);
 
-        add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Name"), name_setup,
-                    name_bind, p, cmp_name, 240, TRUE, TRUE);
-        add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Size"),
-                    text_setup_right, size_bind, NULL, cmp_size, 96, FALSE,
-                    FALSE);
-        add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Modified"),
-                    text_setup_right, modified_bind, NULL, cmp_modified, 120,
-                    FALSE, FALSE);
-        add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Kind"),
-                    text_setup_left, kind_bind, NULL, cmp_kind, 120, FALSE,
-                    FALSE);
+        /* Name takes whatever width is left rather than claiming a
+         * fixed 240px of its own: with Size and Modified at their fixed
+         * widths, a half-window panel now fits all three. Kind starts
+         * hidden — the icon already says folder or file, and the column
+         * mostly repeated it. */
+        GtkColumnViewColumn *cols[4];
+        GMenu *header_menu;
+        GSimpleActionGroup *group;
+        GSimpleAction *show_kind;
+
+        cols[0]
+            = add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Name"),
+                          name_setup, name_bind, p, cmp_name, -1, TRUE, TRUE);
+        cols[1] = add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Size"),
+                              text_setup_right, size_bind, NULL, cmp_size, 84,
+                              FALSE, FALSE);
+        cols[2] = add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Modified"),
+                              text_setup_right, modified_bind, NULL,
+                              cmp_modified, 110, FALSE, FALSE);
+        cols[3] = add_column (GTK_COLUMN_VIEW (p->column_view), _ ("Kind"),
+                              text_setup_left, kind_bind, NULL, cmp_kind, 110,
+                              FALSE, FALSE);
+        gtk_column_view_column_set_visible (cols[3], FALSE);
+        gtk_widget_add_css_class (p->column_view, "gtkhx-files-list");
+
+        /* Kind back on demand: right-click any column header. */
+        show_kind = g_simple_action_new_stateful (
+            "show-kind", NULL, g_variant_new_boolean (FALSE));
+        g_signal_connect (show_kind, "change-state",
+                          G_CALLBACK (on_show_kind_change), cols[3]);
+        group = g_simple_action_group_new ();
+        g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (show_kind));
+        g_object_unref (show_kind);
+        gtk_widget_insert_action_group (p->column_view, "fpanel",
+                                        G_ACTION_GROUP (group));
+        g_object_unref (group);
+        header_menu = g_menu_new ();
+        g_menu_append (header_menu, _ ("Show Kind Column"), "fpanel.show-kind");
+        for (gsize i = 0; i < G_N_ELEMENTS (cols); i++) {
+            gtk_column_view_column_set_header_menu (cols[i],
+                                                    G_MENU_MODEL (header_menu));
+        }
+        g_object_unref (header_menu);
 
         /* Hand the column view's sort model to our GtkSortListModel
          * so header clicks re-sort the model the selection sits
@@ -1400,11 +1456,12 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
     gtk_box_append (GTK_BOX (p->root), p->frame);
 
     /* ---- Status footer ---- */
-    footer = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    footer = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_margin_start (footer, 12);
-    gtk_widget_set_margin_end (footer, 12);
+    gtk_widget_set_margin_end (footer, 6);
     gtk_widget_set_margin_top (footer, 4);
     gtk_widget_set_margin_bottom (footer, 6);
+    p->footer = footer;
     p->status_label = gtk_label_new ("");
     gtk_label_set_xalign (GTK_LABEL (p->status_label), 0.0f);
     gtk_widget_add_css_class (p->status_label, "dim-label");
@@ -1566,6 +1623,97 @@ GtkWidget *
 files_panel_get_widget (files_panel *p)
 {
     return p ? p->root : NULL;
+}
+
+GtkWidget *
+files_panel_get_footer (files_panel *p)
+{
+    return p ? p->footer : NULL;
+}
+
+HxFileEntry *
+files_panel_entry_at (files_panel *p, double x, double y, guint *pos_out)
+{
+    GtkWidget *w;
+
+    if (p == NULL || p->column_view == NULL) {
+        return NULL;
+    }
+    /* Every cell's bind stashes its GtkListItem on the cell's child, so
+     * walking up from whatever was hit finds the row it belongs to. A hit
+     * in a cell's padding lands on the cell itself, above that child, so
+     * each step also looks one level down. */
+    w = gtk_widget_pick (p->column_view, x, y, GTK_PICK_DEFAULT);
+    for (; w != NULL && w != p->column_view; w = gtk_widget_get_parent (w)) {
+        GtkWidget *probe[2] = { w, gtk_widget_get_first_child (w) };
+        for (int i = 0; i < 2; i++) {
+            GtkListItem *item;
+            if (probe[i] == NULL) {
+                continue;
+            }
+            item = g_object_get_data (G_OBJECT (probe[i]), "list-item");
+            if (item != NULL && gtk_list_item_get_item (item) != NULL) {
+                if (pos_out != NULL) {
+                    *pos_out = gtk_list_item_get_position (item);
+                }
+                return gtk_list_item_get_item (item);
+            }
+        }
+    }
+    return NULL;
+}
+
+/* The first cell child carrying a "list-item" under `root`. */
+static GtkListItem *
+find_list_item (GtkWidget *root)
+{
+    GtkListItem *item = g_object_get_data (G_OBJECT (root), "list-item");
+
+    if (item != NULL) {
+        return item;
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        item = find_list_item (c);
+        if (item != NULL) {
+            return item;
+        }
+    }
+    return NULL;
+}
+
+HxFileEntry *
+files_panel_focused_entry (files_panel *p, guint *pos_out, GdkRectangle *rect)
+{
+    GtkRoot *root;
+    GtkWidget *focus;
+    GtkListItem *item;
+    graphene_rect_t bounds;
+
+    if (p == NULL || p->column_view == NULL) {
+        return NULL;
+    }
+    root = gtk_widget_get_root (p->column_view);
+    focus = root != NULL ? gtk_root_get_focus (root) : NULL;
+    if (focus == NULL || !gtk_widget_is_ancestor (focus, p->column_view)) {
+        return NULL;
+    }
+    /* The focus sits on a row; its cells' children carry the item. */
+    item = find_list_item (focus);
+    if (item == NULL || gtk_list_item_get_item (item) == NULL) {
+        return NULL;
+    }
+    if (pos_out != NULL) {
+        *pos_out = gtk_list_item_get_position (item);
+    }
+    if (rect != NULL
+        && gtk_widget_compute_bounds (focus, p->column_view, &bounds)) {
+        rect->x = (int)bounds.origin.x + 24;
+        rect->y = (int)(bounds.origin.y + bounds.size.height);
+        rect->width = 1;
+        rect->height = 1;
+    }
+    return gtk_list_item_get_item (item);
 }
 
 GtkWidget *

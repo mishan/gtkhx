@@ -131,6 +131,23 @@ void dock_layout_apply_selection (void);
  * the panel anyway. */
 gboolean dock_layout_panel_was_closed (const char *id);
 
+/* Optional chrome, persisted in the layout file's [Chrome] group.
+ *
+ * A panel's action row — the button strip at its top — can be hidden per
+ * panel id; the setting outlives the panel being closed, and rows default
+ * to shown. The main window's pixmap toolbar is one switch, off by
+ * default. The setters queue a save. */
+gboolean dock_layout_panel_actions_hidden (const char *id);
+void dock_layout_set_panel_actions_hidden (const char *id, gboolean hidden);
+gboolean dock_layout_toolbar_visible (void);
+void dock_layout_set_toolbar_visible (gboolean visible);
+
+/* Pane titles: whether a frame showing a single panel keeps its header.
+ * Off by default — the one [Chrome] setting that is — so it is written
+ * only when on. */
+gboolean dock_layout_pane_titles_visible (void);
+void dock_layout_set_pane_titles_visible (gboolean visible);
+
 /* Delete the saved file and reset the in-memory map so the next
  * launch comes up with defaults. Wired into the hamburger menu's
  * Reset Layout action. */
@@ -157,6 +174,14 @@ void dock_layout_shutdown (void);
  * Stable for the lifetime of the toolbar window (hx_split_close_leaf
  * refuses to close the root). */
 void dock_layout_set_dock_root (HxSplit *root);
+/* Size of a window that isn't a panel (the Files browser), kept in the
+ * layout file's [Windows] group by name as "W,H". get returns FALSE when
+ * none was saved; set queues a save. */
+gboolean dock_layout_get_window_size (const char *name, int *w, int *h);
+void dock_layout_set_window_size (const char *name, int w, int h);
+
+/* The root set above; NULL before the dock is built. */
+HxSplit *dock_layout_get_dock_root (void);
 
 G_END_DECLS
 

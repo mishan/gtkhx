@@ -657,7 +657,7 @@ hx_path_complete_attach (GtkEntry *entry)
     gtk_widget_add_controller (GTK_WIDGET (entry), c->key_controller);
 
     /* The entry can be destroyed before the completer is freed — that is the
-     * ordinary case when a connection's Files page is removed, since the
+     * ordinary case when a connection's Files window closes, since the
      * browser's teardown runs from the content box's own "destroy".
      *
      * Two things have to happen then, and neither can wait: the popover is

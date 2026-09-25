@@ -72,7 +72,6 @@ stay in C.
 | Panel        | Content shell                             | Panel id | Kind    | Home area |
 |--------------|-------------------------------------------|----------|---------|-----------|
 | Chat         | `gtkhx-ui/src/chat.rs`                    | `chat`   | CENTER  | CENTER    |
-| Files        | `gtkhx-ui/src/files.rs`                   | `files`  | CENTER  | CENTER    |
 | News 1.5     | `gtkhx-ui/src/news_browser.rs`            | `news15` | CENTER  | CENTER    |
 | News 1.0     | `gtkhx-ui/src/news.rs`                    | `news`   | SIDEBAR | START     |
 | Users        | `gtkhx-ui/src/users.rs`                   | `users`  | SIDEBAR | END       |
@@ -97,14 +96,18 @@ strip is `src/chat_tabs.h`; the implementation is Rust
 or fundamentally not server-content):
 
 - Agreement, About, user editor, post-news composer, file preview.
+- **Files** — one window per connection (`gtkhx-ui/src/files.rs`). A
+  two-panel file manager needs more width than a dock frame gives it,
+  and it is used in bursts; see `docs/files-browser.md`.
 - **Tracker** — server-discovery, not server-content. Exists *before*
   a connection (it's how the user picks one). It is a plain
   `gtk::Window` built in `rust/crates/gtkhx-ui/src/tracker/`; the panel
   registry doesn't absorb it, and there is deliberately no
   `HX_PANEL_ID_TRACKER`.
 
-The toolbar's Files / Users / Chat / Tasks buttons route through
+The toolbar's Users / Chat / Tasks buttons route through
 `toolbar_show_panel`, which does registry-lookup + re-attach + raise.
+Its Files button opens the Files window instead.
 News (1.0) and News (1.5+) keep their own entry points because they also
 need to fire a server fetch when connected.
 
@@ -148,15 +151,23 @@ The first-launch tree, built in `toolbar.c::create_toolbar_window`:
 
 ```
 root  (horizontal):
-├── left leaf       — News                       (toolbar_sidebar_frame)
+├── left leaf       — News, Tasks                (toolbar_sidebar_frame,
+│                                                  toolbar_bottom_frame)
 └── rest (horizontal):
-    ├── middle (vertical):
-    │   ├── center leaf  — Chat, Files, News 1.5 (toolbar_center_frame)
-    │   └── bottom leaf  — Tasks                 (toolbar_bottom_frame)
-    └── right leaf       — Users                 (toolbar_end_frame)
+    ├── center leaf — Chat, News 1.5             (toolbar_center_frame)
+    └── right leaf  — Users                      (toolbar_end_frame)
 ```
 
-The four `toolbar_*_frame` pointers point at the four initial
+Tasks has no leaf of its own: the queue is empty most of the time, and
+a full-width strip under the chat cost that much height for nothing.
+It shares the News column, and a new transfer raises its tab
+(`gtask_new`) unless the user has closed the panel. The *bottom* role
+still exists — the dock bridge addresses Tasks by it — and simply
+names the same frame as *start*. One frame holding several roles is
+normal: the saved-layout loader does the same for any role a file
+doesn't name, and closing such a frame reseats every role it held.
+
+The four `toolbar_*_frame` pointers point at the initial
 leaves' `PanelFrame`s and stay **stable** when the user splits
 those leaves — `hx_split_split` leaves the original frame in
 place and manufactures a sibling. The dock-embed bridge uses these
@@ -194,7 +205,10 @@ API:
 ### Per-frame menu button
 
 Each `PanelFrame` carries a small `GtkMenuButton` suffix on its
-header (`panel_frame_header_add_suffix`). The button uses
+header (`panel_frame_header_add_suffix`), **shown only while the frame
+is empty** (bound to `PanelFrame:empty`). A frame with a panel offers
+the same three items from the panel's chevron menu instead, so a
+populated header carries one menu, not two. The button uses
 `view-split-symbolic` and pops three items:
 
 - **Split horizontally** → `frame-ops.split-h`
@@ -211,7 +225,9 @@ frame widget itself via `gtk_widget_insert_action_group` — no
   close so the newly-non-root original leaf flips from greyed to
   enabled (and back, when a collapse promotes a leaf to root).
 
-Empty frames also show the button — the discoverability fix.
+Empty frames show the button — the discoverability fix, and the
+only way to split or close a frame with no panel (see *libpanel's
+chevron menu does not surface empty-frame actions*).
 
 ### `frame-ops.close-page` and the header's X
 
@@ -279,13 +295,93 @@ The libpanel chevron (the `pan-down-symbolic` button on each
   direction). See *Appendix A* for the full mechanism, the two attempts
   that *didn't* work, and the hook points that re-fire enabled state
   past libpanel's same-frame disables.
+- **Show Action Bar** — `panel.show-actions`, stateful. (Not "Show
+  Toolbar", which in the main menu is the window's pixmap row.) Shows or hides
+  the panel's action row: whatever in its content carries the
+  `.gtkhx-panel-actions` CSS class. `hx_panel_sync_actions` walks the
+  content for it, and runs again whenever a connection adds a page,
+  so a new page arrives matching. A panel with no such row (Chat)
+  greys the item out. Persisted per panel id — see *Optional chrome*.
 - **Undock** — `panel.undock`. Per-instance GAction routed via
   `PanelActionMuxer` at `page.panel.undock`.
+- **Split Horizontally / Vertically, Close Frame** — the frame's
+  `frame-ops.*` actions, resolved up the widget tree from the popover.
+  The same items live on the per-frame button, which only appears
+  on an empty frame.
 
-Split + Close moved to the frame-level menu so they're available
-on empty frames too. Move stays per-panel — it operates on a
-specific panel and only makes sense when there's a panel to
-move.
+### Moving by keyboard
+
+Alt+Shift+←/→/↑/↓ moves the focused frame's visible panel to the
+neighboring leaf in that direction (`hx_panel_frame.c`, bound as a
+class binding on `HxPanelFrame`, calling `hx_panel_do_move_in_direction`
+directly so a stale action-enabled state can't swallow the key).
+libpanel's own Shift+Ctrl+[ / ] still reach the left/right actions.
+
+### Pane titles
+
+A pane's title names what is plainly on screen, so by default no
+main-dock frame shows libpanel's header except an empty one, which
+needs it for the split button. Each panel carries its own chrome
+instead: the **pane controls**, an overlay in its top-right corner
+(`hx_panel.c`) reading, left to right:
+
+- **Switcher** — only when the frame holds more than one panel: one
+  button per panel in the frame, using the same pixmap as that panel's
+  toolbar button, the current one lit. Clicking raises that panel.
+  This is the job the header's title dropdown used to do, done in
+  view. Rebuilt from the frame's page list whenever it changes. Each
+  button carries its panel's title as its accessible label, and the
+  current one the pressed state.
+- **Drag handle** — see below.
+- **▾** — Show Action Bar and Undock from the panel's own group (inserted
+  on the overlay as `pane`), Split / Close Frame from `frame-ops`. No
+  Move items: the handle drags, and the keyboard moves (below). While
+  this menu is open the controls stay up even in hover mode — opening
+  it moves the pointer into its popover, which reads as leaving the
+  pane, and hiding the controls then took the menu with them.
+- **×** — `frame-ops.close-page`.
+
+The controls stay up for good when the page on screen has a *corner
+widget* for them to sit at the end of — the first visible widget
+tagged `.gtkhx-panel-actions` or `.gtkhx-pane-reserve` (the chat's
+subject line, and its tab strip when that shows) — and there is
+something worth keeping in view: an action row, or a switcher, which
+would hide the very panels it exists to reveal if it only appeared on
+hover. The corner widget gets an end margin of the controls' measured
+width, so nothing sits under them; every connection's page makes room
+on its own corner widget, and a connection switch re-checks. First,
+because that is the one at the top — Files has more rows below its
+own, and reserving on each added the controls' width to its minimum
+once per row. Visible, because a hidden action row isn't there to make
+room in.
+
+Otherwise the controls would sit over content, so they appear on
+hover, and while keyboard focus is anywhere in the pane — which is
+what makes them reachable without a pointer: Tab into the pane and
+they are there.
+
+The header follows the frame's page count through its page model's
+`items-changed` (`hx_panel_install_pane_titles_on_frame`, one of the
+per-leaf hooks), and a panel re-checks on `map`, which is when a move
+lands it among different neighbors. **Pane Titles** in the main menu
+(`app.show-pane-titles`) puts every header back and the pane controls
+away. Undocked windows keep their headers, but hide the header's
+controls (see *Undocked windows*), so there too the pane controls
+stand in for the menu; Split / Close Frame show greyed, since an
+undocked frame has no split tree. A frame drops its page-model
+connection on `destroy`, before disposal removes its pages.
+
+The pane controls carry a drag handle of their own (⋮⋮ ▾ ×), standing
+in for the header's. It needs no libpanel internals: its
+`GtkDragSource` offers the `HxPanel` as a `PANEL_TYPE_WIDGET` value,
+which is all the dock-level drop target reads, and it shares the
+header handle's `drag-cancel` hook, so a release over nothing undocks.
+The drag image is a chip with the pane's title. The controls stay up
+for the length of a drag even after the pointer leaves the pane, so
+the source widget isn't hidden mid-drag.
+
+`HxPanel`'s child is therefore the overlay, not the page stack; use
+`hx_panel_get_content` for the stack.
 
 ### `PanelDock` as a thin wrapper
 
@@ -502,6 +598,29 @@ closed=files;news15
 Whitespace between tokens is tolerated so the file can be hand-edited.
 Panel ids are anything that isn't a separator character (`,` `]` `:` or
 whitespace) — no quoting needed for the ids we actually have.
+
+### Optional chrome
+
+A `[Chrome]` group records the optional chrome. Each key is written
+only when it differs from its default, so a missing key — a first
+launch, or a file from before the group existed — means the default:
+action rows on, toolbar and pane titles off.
+
+```ini
+[Chrome]
+# The main window's pixmap toolbar (app.show-toolbar). Off by
+# default, so written only when on.
+toolbar=true
+# Panels whose action row is hidden (panel.show-actions).
+hidden-actions=news;users
+# Headers on single-panel frames (app.show-pane-titles). Off by
+# default, so this one is written only when on.
+pane-titles=true
+```
+
+The hidden set is kept live in `dock_layout.c` rather than rebuilt
+from the registry at save, so a panel that is closed keeps its setting.
+Reset Layout drops the group with the rest of the file.
 
 ### The foreground-page marker
 

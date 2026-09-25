@@ -948,10 +948,7 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     };
 
     let button_bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    button_bar.set_margin_start(6);
-    button_bar.set_margin_end(6);
-    button_bar.set_margin_top(6);
-    button_bar.set_margin_bottom(4);
+    button_bar.add_css_class("gtkhx-panel-actions");
     button_bar.append(&btn_refresh);
     button_bar.append(&btn_new_folder);
     button_bar.append(&btn_new_category);

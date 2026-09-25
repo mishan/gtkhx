@@ -148,8 +148,9 @@ dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
      * dock_pages.h. `page` names the connection this first page belongs to;
      * at one connection the stack holds exactly that one and behaves as the
      * old single child did. */
-    panel_widget_set_child (PANEL_WIDGET (panel),
-                            hx_dock_pages_new (page, content));
+    hx_panel_set_content (panel, hx_dock_pages_new (page, content));
+
+    hx_panel_sync_actions (panel);
 
     panel_frame_add (PANEL_FRAME (home_frame), PANEL_WIDGET (panel));
     hx_panel_set_home_frame (panel, home_frame);
@@ -266,7 +267,7 @@ panel_content (const char *id)
     if (panel == NULL) {
         return NULL;
     }
-    return panel_widget_get_child (PANEL_WIDGET (panel));
+    return hx_panel_get_content (panel);
 }
 
 gboolean
@@ -281,6 +282,12 @@ gtkhx_dock_add_page (const char *id, const char *page, GtkWidget *content)
         g_object_ref_sink (content);
         g_object_unref (content);
         return FALSE;
+    }
+    {
+        HxPanel *panel = hx_panel_registry_lookup (id);
+        if (panel != NULL) {
+            hx_panel_sync_actions (panel);
+        }
     }
     return TRUE;
 }

@@ -43,6 +43,7 @@
 #include <gtk/gtk.h>
 #include <libpanel.h>
 
+#include "gtkhx_theme.h" /* GtkhxScaleArea, for the pixmap-button stub */
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
 #include "hx_split.h"
@@ -63,6 +64,26 @@ GtkWidget *toolbar_center_frame;
 void toolbar_install_panel_hooks_on_frame (GtkWidget *frame);
 void init_keyaccel (GtkWidget *widget);
 const char *gtkhx_config_dir (void);
+GtkWidget *gtkhx_pixmap_button (const char *resource_name, const char *tooltip,
+                                GtkhxScaleArea area, GCallback cb,
+                                gpointer user_data);
+
+/* The pane switcher's buttons (hx_panel.c) — a plain button is all the
+ * fixture needs; the pixmap and theme scaling live in gtkutil.c. */
+GtkWidget *
+gtkhx_pixmap_button (const char *resource_name, const char *tooltip,
+                     GtkhxScaleArea area, GCallback cb, gpointer user_data)
+{
+    GtkWidget *btn = gtk_button_new ();
+
+    (void)resource_name;
+    (void)area;
+    gtk_widget_set_tooltip_text (btn, tooltip);
+    if (cb != NULL) {
+        g_signal_connect (btn, "clicked", cb, user_data);
+    }
+    return btn;
+}
 
 void
 toolbar_install_panel_hooks_on_frame (GtkWidget *frame)

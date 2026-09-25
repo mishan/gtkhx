@@ -74,6 +74,20 @@ DLParsedNode *dl_parse_tree (const char *text);
 
 void dl_parsed_node_free (DLParsedNode *n);
 
+/* Remove panel `id` from every leaf of `root`, for a panel that no longer
+ * exists (Files, once a dock panel, is a window now). A leaf left empty by
+ * the removal collapses — its parent split gives way to the sibling — so
+ * an old layout doesn't restore a pane with nothing in it; a leaf that was
+ * already empty stays, since that was the user's. A root left empty stays
+ * as one empty leaf.
+ *
+ * Consumes `root` and returns the tree to use. `dropped_splits`, if
+ * non-NULL, gets the post-order index (the order of the saved sizes= list)
+ * of every internal split that collapsed, in the numbering of the tree as
+ * passed in. */
+DLParsedNode *dl_tree_drop_panel (DLParsedNode *root, const char *id,
+                                  GArray *dropped_splits);
+
 G_END_DECLS
 
 #endif /* GTKHX_DOCK_LAYOUT_PARSE_H */

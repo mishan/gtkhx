@@ -76,8 +76,6 @@
     <file>pixmaps/file_html.png</file>
     <file>pixmaps/file_image.png</file>
     <file>pixmaps/file_move.png</file>
-    <file>pixmaps/file_move_lr.png</file>
-    <file>pixmaps/file_move_rl.png</file>
     <file>pixmaps/file_movie.png</file>
     <file>pixmaps/file_note.png</file>
     <file>pixmaps/file_sit.png</file>
@@ -94,5 +92,7 @@
          shadows the GResource entry. -->
     <file>themes/default.ini</file>
     <file>themes/solarized.ini</file>
+    <!-- Chrome density rules, loaded once at activate. -->
+    <file>chrome.css</file>
   </gresource>
 </gresources>

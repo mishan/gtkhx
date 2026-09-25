@@ -75,6 +75,21 @@ extern GtkWidget *files_panel_get_widget (files_panel *p);
  * here to detect "is this panel the active one". */
 extern GtkWidget *files_panel_get_column_view (files_panel *p);
 
+/* The status row along the panel's bottom edge; the browser appends its
+ * transfer button to it. */
+extern GtkWidget *files_panel_get_footer (files_panel *p);
+
+/* The entry under (x, y) in the column view's coordinates, or NULL for
+ * empty space or the header. Borrowed. *pos_out gets its row index. */
+extern HxFileEntry *files_panel_entry_at (files_panel *p, double x, double y,
+                                          guint *pos_out);
+
+/* The entry on the row that has keyboard focus, or NULL if focus isn't on
+ * a row of this panel. Borrowed. *rect gets a point just under that row,
+ * in the column view's coordinates, to hang a menu from. */
+extern HxFileEntry *files_panel_focused_entry (files_panel *p, guint *pos_out,
+                                               GdkRectangle *rect);
+
 /* Provider accessor — the browser's action handlers operate
  * through this. */
 extern HxFilesProvider *files_panel_get_provider (files_panel *p);

@@ -798,14 +798,23 @@ on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
      * default-leaf frames the closing leaf is about to destroy,
      * those globals would dangle after hx_split_close_leaf
      * returns. Reseat the relevant global on the surviving
-     * sibling frame BEFORE the close. */
+     * sibling frame BEFORE the close.
+     *
+     * Each role on its own: one frame can hold several. The default
+     * layout gives Tasks the News column rather than a leaf of its
+     * own, and the saved-layout loader points every role a file
+     * doesn't name at the first leaf. An else-if chain moved only the
+     * first match and left the rest dangling. */
     if (frame == toolbar_sidebar_frame) {
         toolbar_sidebar_frame = GTK_WIDGET (sibling_frame);
-    } else if (frame == toolbar_end_frame) {
+    }
+    if (frame == toolbar_end_frame) {
         toolbar_end_frame = GTK_WIDGET (sibling_frame);
-    } else if (frame == toolbar_bottom_frame) {
+    }
+    if (frame == toolbar_bottom_frame) {
         toolbar_bottom_frame = GTK_WIDGET (sibling_frame);
-    } else if (frame == toolbar_center_frame) {
+    }
+    if (frame == toolbar_center_frame) {
         toolbar_center_frame = GTK_WIDGET (sibling_frame);
     }
 
@@ -1051,6 +1060,14 @@ hx_split_install_frame_ui (GtkWidget *frame)
     gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (button),
                                     G_MENU_MODEL (menu));
     g_object_unref (menu);
+
+    /* Only while the frame is empty. A frame with a panel in it offers
+     * the same items from the panel's chevron menu (hx_panel.c), and a
+     * second menu button on every header was the costlier way to say
+     * it. An empty frame has no chevron, so this is its only way to
+     * split or close. */
+    g_object_bind_property (frame, "empty", button, "visible",
+                            G_BINDING_SYNC_CREATE);
 
     header = panel_frame_get_header (PANEL_FRAME (frame));
     if (header != NULL) {

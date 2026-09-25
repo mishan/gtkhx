@@ -40,6 +40,7 @@
 #include "tasks.h"
 #include "session_registry.h"
 #include "panel_registry.h"
+#include "hx_panel.h" /* HxPanel — raising the queue on a new transfer */
 
 /* Phase 5 task-row polish: each row is now an Adwaita-shaped
  * action-row layout — icon column on the left, then a vbox with
@@ -415,12 +416,22 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     GtkWidget *title_row;   /* inner hbox: title (hexpand) | queue badge */
     GtkWidget *icon, *title, *subtitle, *pbar, *queue, *listitem, *tag;
     struct gtask *gtsk;
+    gboolean transfer_is_first;
 
     /* `conn` must be a real connection serial (>= 1) unless the caller is
      * building one of the tracker's rows, which ask for CONN_NONE by name.
      * Anything else arriving with CONN_NONE is building a row that no
      * disconnect will ever sweep, because the sweep is per connection and
      * this one belongs to none. */
+    /* Whether a transfer row already exists, before this one joins. */
+    transfer_is_first = TRUE;
+    for (struct gtask *t = gtask_list; t != NULL; t = t->prev) {
+        if (t->htxf != NULL) {
+            transfer_is_first = FALSE;
+            break;
+        }
+    }
+
     gtsk = g_malloc (sizeof (struct gtask));
     gtsk->next = 0;
     gtsk->prev = gtask_list;
@@ -550,6 +561,28 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     /* Initial queue-badge state if the htxf came in pre-queued. */
     gtask_refresh_queue_badge (gtsk);
     gtkhx_tasks_refresh_tags ();
+
+    /* A transfer brings the queue forward. Tasks shares a frame by
+     * default (it has no leaf of its own), so without this a download
+     * started from Files would progress out of sight. Only:
+     *   - transfers, not previews: a login, news fetch or preview is too
+     *     brief to be worth switching tabs for;
+     *   - the connection the user is looking at, not one in the
+     *     background;
+     *   - the first transfer of a burst: a folder download or a queue
+     *     of files would otherwise pull Tasks forward again every time
+     *     the user went back to what they were reading;
+     *   - a panel that is docked: one the user closed stays closed. */
+    if (htxf != NULL && !hx_htxf_opt_preview (htxf) && transfer_is_first
+        && hx_active_session () != NULL
+        && conn == hx_conn_serial (hx_active_session ()->htlc)) {
+        HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_TASKS);
+        if (panel != NULL
+            && gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
+                   != NULL) {
+            panel_widget_raise (PANEL_WIDGET (panel));
+        }
+    }
 
     return gtsk;
 }
@@ -1230,10 +1263,7 @@ gtkhx_tasks_build_content (session *sess)
      * relocate to a slim top-of-content GtkBox with an hexpand spacer
      * keeping the start/end grouping the old headerbar implied. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (button_bar, 6);
-    gtk_widget_set_margin_end (button_bar, 6);
-    gtk_widget_set_margin_top (button_bar, 6);
-    gtk_widget_set_margin_bottom (button_bar, 4);
+    gtk_widget_add_css_class (button_bar, "gtkhx-panel-actions");
     gtk_box_append (GTK_BOX (button_bar), stopbtn);
     gtk_box_append (GTK_BOX (button_bar), gobtn);
     {

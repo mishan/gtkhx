@@ -6,11 +6,37 @@ window-per-directory browser and is the only files UI — the legacy path
 (`open_files`, the per-path list cache, the `file_samewin` preference) is gone,
 leaving `src/files.c` as wire senders plus the Get Info dialog plumbing.
 
-The implementation: `src/files_browser.c` (toplevel window, shared chrome,
-drag-and-drop, keyboard, active-panel state), `src/files_panel.c` (one panel —
-path row, `GtkColumnView`, status footer), `src/files_ops.c` (cross-panel copy
-/ move orchestration), and the two providers, `src/files_local_provider.c` (GIO)
-and `src/files_remote_provider.c` (Hotline).
+The implementation: `rust/crates/gtkhx-ui/src/files.rs` (the window),
+`src/files_browser.c` (the content: shared actions, transfer buttons, the row
+menu, drag-and-drop, keyboard, active-panel state), `src/files_panel.c` (one
+panel — path row, `GtkColumnView`, status footer), `src/files_ops.c`
+(cross-panel copy / move orchestration), and the two providers,
+`src/files_local_provider.c` (GIO) and `src/files_remote_provider.c`
+(Hotline).
+
+### A window, not a dock panel
+
+The browser is a window of its own, one per connection, titled with the
+server's name — not a panel in the main window's dock. A two-panel file
+manager wants more width than a dock frame gives it (docked, it shared the
+center frame with Chat at about 450px, and neither panel could show more than
+names), and it is used in bursts: browse, queue transfers, leave. Transfers
+carry on in the Tasks panel, so closing the window costs nothing, and closing
+it closes the browser — the content's destroy is the browser's teardown.
+
+The window opens from the main menu (Files) or the toolbar's Files button,
+for the connection the user is looking at; a second request raises the open
+one. Its title is retitled at login, when the server has named itself. Its
+size is saved to the dock layout file's `[Windows]` group (`files=W,H`) as
+the user changes it — not at close, since a connection closing destroys the
+window without a close-request and quitting destroys nothing. A connection
+that goes away takes its window with it (`gtkhx_dock_remove_session_pages`).
+The window installs the app-wide accelerators itself, so Ctrl+W closes it.
+
+A layout saved while Files was a dock panel still names it. The loader
+prunes the id (`dl_tree_drop_panel`); a leaf Files had to itself collapses
+rather than coming back as an empty pane, and the saved divider positions
+skip the splits that went with it.
 
 ---
 
@@ -22,23 +48,20 @@ implicitly addressed as "from the active panel to the other one". The Hotline
 adaptation is that one side is a remote server whose "copy" is a file transfer.
 
 ```
-┌─ Files ──────────────────────────────────────[ ⟳ ✎ 🗑 ☰ ]─┐
-│ ┌─ Local ▾ ─────────────┐   ┌─ Remote ▾ ──────────────┐  │
-│ │ [~/Downloads        ] │   │ [/Music/Albums        ] │  │
-│ ├───────────────────────┤   ├─────────────────────────┤  │
-│ │ ▴ name      size mod  │ ⟩ │ ▴ name      size   mod  │  │
-│ │ ──────────────────────│ ⟨ │ ────────────────────────│  │
-│ │ Album.zip  142 M  Tue │ ⇄ │ ▸ Albums  (7 items) 2024│  │
-│ │ song.flac   31 M  Mon │   │ ▸ Singles (3 items) 2024│  │
-│ │ …                     │   │ ▶ song2.mp3  4.8M   Wed │  │
-│ ├───────────────────────┤   ├─────────────────────────┤  │
-│ │ 0 of 12 selected      │   │ 1 of 47 selected        │  │
-│ └───────────────────────┘   └─────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
+┌─[ ⟳ 📁 👁 ℹ ]──────── Files — Server ─────────[ ✎ 🗑 ]─┐
+│ [Local ▾][↑][~/Downloads    ] [Remote ▾][↑][/Music    ] │
+│ ┌──────────────────────────┐ ┌──────────────────────────┐ │
+│ │ Name        Size  Modif. │ │ Name          Size Modif.│ │
+│ │ Album.zip  142 M     Tue │ │ Albums    (7 items)  2024│ │
+│ │ song.flac   31 M     Mon │ │ song2.mp3   4.8 M     Wed│ │
+│ └──────────────────────────┘ └──────────────────────────┘ │
+│ 0 of 12 selected  [Upload ›] 1 of 47 selected [‹ Download]│
+└───────────────────────────────────────────────────────────┘
 ```
 
-The active panel carries an accent highlight; `▶` marks the cursor row. The
-buttons between the panels are the cross-panel Copy / Move directions.
+The active panel carries a thin accent outline. Each panel's footer has its
+transfer button, which says in words what it does to that panel's selection
+(see *Transfer buttons*).
 
 ### Function keys to Hotline operations
 
@@ -57,6 +80,7 @@ behaviour is identical whether you pressed the key or clicked the icon.
 | F8 | Delete, Ctrl+D | Delete | `HTLC_HDR_FILE_DELETE` |
 | — | Ctrl+I | Get Info | `HTLC_HDR_FILE_GETINFO` |
 | — | Ctrl+R | Reload | re-list |
+| Shift+F10 | Menu | Row menu at the focused row | — |
 | Tab | — | Switch active panel | — |
 | Backspace | — | Up one directory | — |
 
@@ -87,12 +111,48 @@ focus controller covers the clicks the column view fully consumes.
 
 ### Shared chrome
 
-One toplevel, one headerbar, one button bar — the panels share the chrome rather
-than each carrying their own. Single-panel actions (refresh, new folder,
-preview, get info, rename, delete) live in the shared bar; the cross-panel Copy
-and Move directions live in the column of buttons between the two panels, where
-the direction is visually obvious. Per-panel chrome is just the path row and the
-side selector.
+One window, one header bar — the panels share the chrome rather than each
+carrying their own. The single-panel actions (refresh, new folder, preview, get
+info at the start; rename, delete at the end) sit in the window's header bar:
+the content builds them and hands them over on its content box
+(`hx-files-header-start` / `-end`), and `files.rs` packs them. Per-panel chrome
+is the path row, the side selector, and the footer.
+
+### Transfer buttons
+
+Each panel's footer ends in a button that sends its selection to the other
+panel's folder. It is labelled with what that is, from the two panels' sides:
+**Download** (remote to local), **Upload** (local to remote) or **Copy** (both
+local), with an arrow toward the other panel, and it is insensitive with
+nothing selected. With both panels remote it stays insensitive, its tooltip
+pointing at Move (F6): Hotline has no server-side copy. The label and state
+follow selection changes, new listings, and side swaps. It replaced a column of two arrow buttons between the
+panels, whose direction was clear and whose meaning wasn't — and which ate the
+middle of the window. F5 still copies from the active panel.
+
+### Row menu
+
+Right-click on a row acts on that row: it joins the selection if already in
+it, and replaces the selection otherwise, so the menu never acts on rows the
+user can't see are picked. The menu offers Open, the transfer (with the same
+verb as the footer button, and left out when both panels are remote),
+Preview, Get Info, Move, Rename, Delete, New Folder and Reload; on empty
+space, only the last two. Shift+F10 or the Menu key opens it at the focused
+row. Open acts on the entry the menu opened on, found again at open time,
+so a reload underneath doesn't retarget it. The row under the pointer is found
+through the `GtkListItem` every cell's bind stashes on its widget
+(`files_panel_entry_at`).
+
+### Layout
+
+The two panels start level — half the paned's width, applied once the
+window's width has held across two frames, since a window's first allocations
+arrive in steps (`on_paned_settle_tick`) — and resize together from then on.
+Name takes whatever width Size and Modified leave; Kind starts hidden, because
+the icon already says folder or file, and comes back from any column header's
+right-click menu. Row icons show at their native 16px.
+Sizes are rounded in the column, with the exact byte count as the cell's
+tooltip.
 
 ### Decisions
 
@@ -104,7 +164,8 @@ side selector.
    ("Local" / "Remote") that swaps the panel's provider, so both panels can show
    remote directories at once. The dropdown tracks provider identity rather than
    driving it: the selection is set from the actual provider after a swap.
-3. **One browser window**, matching the news browser. `file_samewin` is retired.
+3. **One browser window per connection**, a window rather than a dock panel
+   (see *A window, not a dock panel*). `file_samewin` is retired.
 4. **Buttons first, keyboard second.** Every operation is reachable by click;
    the F-keys and Ctrl-equivalents are accelerators onto the same handlers.
 5. **Local default root** is `XDG_DOWNLOAD_DIR`; **`GtkColumnView`** for the

@@ -71,9 +71,10 @@ hx_file_entry_format_size (HxFileEntry *e)
         }
         return g_strdup ("—");
     }
+    /* Rounded: the Size column is narrow, and the exact byte count is
+     * the cell's tooltip (files_panel.c). */
     return g_format_size_full (hx_file_entry_get_size (e),
-                               G_FORMAT_SIZE_IEC_UNITS
-                                   | G_FORMAT_SIZE_LONG_FORMAT);
+                               G_FORMAT_SIZE_IEC_UNITS);
 }
 
 /* Modified-time column.

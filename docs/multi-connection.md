@@ -516,7 +516,8 @@ Three tiers fall out naturally.
 - Users list
 - News, both the 1.0 and the threaded 1.5 trees. Each server's news is its own;
   this settles the "a News window per server?" question as **yes**.
-- Files browser
+- Files browser — a window per connection rather than a dock panel (see
+  `docs/files-browser.md`), but per-connection all the same
 
 **Global** — things that exist before and across connections:
 
