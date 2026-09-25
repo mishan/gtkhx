@@ -1465,6 +1465,17 @@ init (int argc, char **argv)
      * hook — a lookup against a (possibly empty) hash table, cheap
      * enough to leave unconditionally. */
     debug_init ();
+#ifdef HAVE_VOICE
+    /* libcamera logs its camera enumeration — every camera found, every
+     * pixel format it can't use — at INFO and WARN straight to stderr,
+     * from inside GStreamer's device scan. None of it is actionable for a
+     * user. Keep only its errors unless voice debugging is on, and leave
+     * an explicit LIBCAMERA_LOG_LEVELS alone. Has to be set before
+     * GStreamer loads libcamera, which is why it lives here. */
+    if (!debug_category_enabled ("voice")) {
+        g_setenv ("LIBCAMERA_LOG_LEVELS", "*:ERROR", FALSE);
+    }
+#endif
     /* gtk_set_locale() was removed in GTK 3 — gtk_init() now handles
      * setlocale() itself. */
     setlocale (LC_ALL, "");

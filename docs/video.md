@@ -182,7 +182,16 @@ session, for testing it outside the sandbox.
 The **camera picker** is a Video group on the Voice settings page
 (`voice.camera_device`, a stable device path, empty for the first
 camera). Cameras are keyed by path rather than `gst::Device::name()`,
-which libcamera leaves NULL.
+which libcamera leaves NULL. The page is built the first time it is
+selected, not when Settings opens, so the camera scan — which wakes every
+GStreamer device provider — happens only when someone actually looks at
+the picker.
+
+libcamera, one of those providers, logs its enumeration (each camera it
+adds, each pixel format it can't use) at INFO and WARN on stderr. `main`
+sets `LIBCAMERA_LOG_LEVELS=*:ERROR` before GStreamer loads unless
+`GTKHX_DEBUG` includes `voice` (or `all`), so users see only its errors;
+an explicit `LIBCAMERA_LOG_LEVELS` in the environment is left alone.
 
 ## Tests
 
