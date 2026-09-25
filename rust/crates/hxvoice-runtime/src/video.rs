@@ -490,7 +490,9 @@ pub fn camera_via_portal() -> bool {
 /// remembers the grant, so while it works there is nothing to gain by
 /// asking again. A failure may be the remote itself gone dead, with the
 /// PipeWire service restarted under it, and nothing through it would
-/// work again; see [`forget_camera_remote`].
+/// work again; see [`forget_camera_remote`]. A file descriptor, so Unix
+/// only; elsewhere there is no portal and never a remote.
+#[cfg(unix)]
 static CAMERA_REMOTE: Mutex<Option<std::os::fd::OwnedFd>> = Mutex::new(None);
 
 /// Hand over the Camera portal's PipeWire remote.
@@ -508,6 +510,7 @@ pub fn set_camera_remote(fd: std::os::fd::OwnedFd) {
 /// remembered, so asking again shows nothing. Off the portal path there
 /// is no remote and this does nothing.
 pub fn forget_camera_remote() {
+    #[cfg(unix)]
     if let Ok(mut r) = CAMERA_REMOTE.lock() {
         *r = None;
     }
