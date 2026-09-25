@@ -116,7 +116,7 @@ theme simply gives both variants the same values.
 | `THEMENAME` | Display | Description |
 |---|---|---|
 | `default` | Default | GtkHx's classic appearance. Sets no chat fg/bg, so the chat takes Adwaita's view colors in both modes and the window stays stock; the Adwaita accent blue for selection and the `[hx]` tag. Neutral gray brackets, red mentions, and nicks hashed across green, orange, purple, teal, brown and olive — all above 5:1 in light mode and 7:1 in dark. |
-| `neon-doll` | Neon Doll | Near-black plum page (`#0f0d14`), panels one step up (`#16131d`), lavender ink (`#ebe6f0`). Fuchsia (`#ff2d95`) means position — selection, the current pane, the focus ring, a line that mentions you — and purple (`#b48cff`) means you can act on it: nicks, the `[hx]` sigil, and suggested-action buttons, drawn as purple outlines that turn pink on hover. Brackets take the muted tone and the chat divider is a hairline. No per-nick colors: two accents on purpose. Dark-only, so both variants are the same. |
+| `neon-doll` | Neon Doll | The palette of the Neon Doll desktop theme, so GtkHx matches the desktop around it. Dark: near-black plum page (`#0f0d14`), panels (`#16131d`), lavender ink (`#ebe6f0`). Light: plum-tinted paper (`#f7f4fa`), panels (`#ede7f3`), ink (`#1a1522`). Fuchsia (`#ff2d95` / `#c8006a`) means position — selection, the current pane, the focus ring, a line that mentions you — and purple (`#b48cff` / `#6a3fd0`) means you can act on it: nicks, the `[hx]` sigil, and suggested-action buttons, drawn as purple outlines over a purple wash that turn pink on hover. Brackets are muted and the chat divider is a hairline. No per-nick colors: two accents on purpose. |
 | `solarized` | Solarized | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette. `palette.light` holds the canonical Solarized Light values (cream `#fdf6e3` bg, `#657b83` body text); `palette.dark` holds Solarized Dark (`#002b36` bg, `#839496` body text). Picking "Solarized" gives you Solarized Light on a light desktop and Solarized Dark on a dark one — the way the palette was designed. Brackets take the emphasized-content tone, your own nick the strongest one, `[hx]` is blue (the accent), and everyone else's nick is hashed across the other accents — minus red (mentions) and blue — using only the ones legible on each background. Its `[chrome.*]` sections tint the whole window: the page color (`base3` / `base03`) for the window and content, the highlight band (`base2` / `base02`) for the header bar, cards and popovers, and Solarized blue as the accent. |
 
 The built-ins live at `src/themes/<name>.ini` in the source tree.
@@ -255,10 +255,17 @@ admin_idle = #871f1d
 #   headerbar_fg — header-bar text
 #   accent       — selection, checked toggles, focus rings, and
 #                  suggested actions unless `action` is set
+#   accent_fg    — text on the accent. Unset, black or white is picked
+#                  for contrast.
+#   accent_text  — the accent used as text (links, accent-colored
+#                  labels). Unset, libadwaita derives it from the accent,
+#                  shifting its lightness for contrast; set it when the
+#                  theme already has a readable shade.
 #   action       — suggested-action buttons (Connect, Save, Post) as an
-#                  outline in this color instead of a filled accent
-#                  button; hover and keyboard focus turn them the accent
-#                  color. For a design where an action is a link.
+#                  outline in this color over a faint wash of it,
+#                  instead of a filled accent button; hover and keyboard
+#                  focus turn them the accent color. For a design where
+#                  an action is a link.
 #
 # Every key is optional, and what is left out is derived (see below).
 [chrome.light]
@@ -281,17 +288,21 @@ falls back in this order:
 
 | Role | Falls back to |
 |---|---|
-| `window` | the chat palette's `bg` |
-| `fg` | the chat palette's `fg` |
+| `window` | the chat palette's `bg`, if the palette also sets `fg` |
+| `fg` | the chat palette's `fg`, if the palette also sets `bg` |
 | `view` | `window` |
 | `headerbar_fg` | `fg` |
 | `sidebar` | `headerbar` |
 | `card`, `headerbar`, `popover` | `window`, stepped a few percent toward `fg` (card least, popover most) |
 | `accent` | the system accent — no derivation |
+| `accent_fg` | black or white, whichever reads on the accent |
+| `accent_text` | libadwaita's own derivation from the accent |
 | `action` | none — suggested actions stay filled with the accent |
 
 So a theme that only sets the chat palette's `fg` and `bg` still gets a
-window in the same colors as its chat. A theme that sets neither those
+window in the same colors as its chat. The two go together: a palette
+with only a `bg` doesn't tint the window, since the window's text would
+stay the system's color and could land dark on dark. A theme that sets neither those
 nor any `[chrome.*]` key leaves the chrome at the system theme; that
 is why the built-in default looks like stock GNOME.
 

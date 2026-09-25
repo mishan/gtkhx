@@ -43,7 +43,7 @@ pub const PAL_HISTORY_MUTED: usize = 37;
 /// text rather than competing with it.
 pub const PAL_TIMESTAMP: usize = 38;
 /// `HX_CHAT_PAL_RULE` — the column divider. Themes default it to the text
-/// colour, which is how it was always drawn.
+/// color, which is how it was always drawn.
 pub const PAL_RULE: usize = 46;
 /// `HX_CHAT_PAL_MARK_FG` / `_MARK_BG` — the selection colours, filled by
 /// the theme exactly as they were for xtext.
@@ -1078,7 +1078,11 @@ impl HxChatView {
         // corrected extent, and the box that holds us allocates the
         // scrollbar after us, so the slider is laid out against the new
         // numbers before it is drawn. The thumb trails the content by
-        // one frame; the content itself is already right.
+        // one frame; the content itself is already right. So does
+        // anything else that reads the adjustment in that frame: a wheel
+        // or Page Down handled before the layout pass scrolls from the
+        // pre-correction value, a one-frame glitch accepted as the price
+        // of not re-laying out the scrollbar mid-paint.
         //
         // Gated on having actually corrected something, or this is an
         // unconditional relayout-per-frame loop. The frame that follows

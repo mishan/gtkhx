@@ -648,8 +648,10 @@ per-nick colors. A fully transparent role means "follow the system": the
 view carries Adwaita's `.view` class, draws such text in its CSS color, and
 skips its background fill so the CSS background shows. That is how a theme
 with no chat fg/bg matches the window around it. `chat_view.h` is now the
-sole definition of that contract — the Rust side asserts against its
-values, so the agreement is still checked, just from the other end.
+sole definition of that contract. Nothing at the FFI boundary checks the
+palette's length — `ffi.rs` reads `PALETTE_COLS` entries from the C array —
+so an hxchat-view test reads the defines out of `chat_view.h` and fails if
+the Rust constants disagree with them.
 
 **One dead remnant remains, flagged rather than removed.**
 `src/proto_helpers.c` still holds a copy of the old `[hx]` prefix and

@@ -194,12 +194,13 @@ gboolean gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark,
  * picks the theme up without per-widget rules.
  *
  * Loaded from [chrome.light] / [chrome.dark]. Every key is optional.
- * What a theme leaves out is derived: a missing `window` falls back to
- * the chat palette's `bg`, a missing `fg` to the palette's `fg`, and
- * the header bar / sidebar / card / popover surfaces are nudged off
- * `window` toward `fg`. A theme that sets neither chrome keys nor the
- * chat palette's fg/bg leaves the chrome at the system theme, which is
- * what keeps the built-in default looking like stock GNOME. */
+ * What a theme leaves out is derived: a missing `window` and `fg` fall
+ * back to the chat palette's `bg` and `fg` — only when the palette sets
+ * both, since a window background without its text color is unreadable
+ * — and the header bar / sidebar / card / popover surfaces are nudged
+ * off `window` toward `fg`. A theme that sets neither chrome keys nor
+ * the chat palette's fg/bg leaves the chrome at the system theme, which
+ * is what keeps the built-in default looking like stock GNOME. */
 
 typedef enum {
     GTKHX_CHROME_WINDOW,       /* window background, dock gutters */
@@ -211,6 +212,8 @@ typedef enum {
     GTKHX_CHROME_FG,           /* text on every surface above */
     GTKHX_CHROME_HEADERBAR_FG, /* header-bar text; defaults to fg */
     GTKHX_CHROME_ACCENT,       /* accent background (selection, toggles) */
+    GTKHX_CHROME_ACCENT_FG,    /* text on the accent; picked if unset */
+    GTKHX_CHROME_ACCENT_TEXT,  /* the accent as text (links, labels) */
     GTKHX_CHROME_ACTION,       /* suggested-action buttons, as an outline */
     GTKHX_CHROME_N_ROLES
 } GtkhxChromeRole;

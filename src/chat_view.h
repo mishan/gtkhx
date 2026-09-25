@@ -90,9 +90,11 @@ G_BEGIN_DECLS
  *
  * This is now the sole definition. It used to mirror xtext.h's XTEXT_*
  * constants, with G_STATIC_ASSERTs in chat_view.c checking the two
- * agreed; both are gone with xtext. The Rust side asserts against these
- * values in hxchat-view (PALETTE_COLS and the PAL_* constants), so the
- * agreement is still checked — just from the other end. */
+ * agreed; both are gone with xtext. hxchat-view's tests read these
+ * defines out of this file and hold its PALETTE_COLS and PAL_* constants
+ * to them (palette_constants_match_chat_view_h), so the agreement is
+ * still checked — just from the other end. Keep each one a plain
+ * number: the test parses them. */
 #define HX_CHAT_PAL_MIRC_COLS 32
 #define HX_CHAT_PAL_MARK_FG 32        /* selection foreground */
 #define HX_CHAT_PAL_MARK_BG 33        /* selection background */

@@ -358,6 +358,17 @@ mix_rgb (const GdkRGBA *a, const GdkRGBA *b, double t)
 #define CHROME_STEP_HEADERBAR 0.07
 #define CHROME_STEP_POPOVER 0.09
 
+/* The chat palette stands in for the window colors only as a pair. A
+ * theme that sets only a chat background would otherwise paint the
+ * window with it while its text stayed the system's — dark text on a
+ * dark window, or the reverse. */
+static gboolean
+palette_pair_set (GtkhxTheme *self, int v)
+{
+    return self->palette_rgb[GTKHX_PAL_BG][v] >= 0
+           && self->palette_rgb[GTKHX_PAL_FG][v] >= 0;
+}
+
 gboolean
 gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
 {
@@ -377,13 +388,13 @@ gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
 
     switch (role) {
     case GTKHX_CHROME_WINDOW:
-        if (self->palette_rgb[GTKHX_PAL_BG][v] < 0) {
+        if (!palette_pair_set (self, v)) {
             return FALSE;
         }
         *out = unpack_rgb (self->palette_rgb[GTKHX_PAL_BG][v]);
         return TRUE;
     case GTKHX_CHROME_FG:
-        if (self->palette_rgb[GTKHX_PAL_FG][v] < 0) {
+        if (!palette_pair_set (self, v)) {
             return FALSE;
         }
         *out = unpack_rgb (self->palette_rgb[GTKHX_PAL_FG][v]);
@@ -395,8 +406,13 @@ gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
     case GTKHX_CHROME_HEADERBAR_FG:
         return gtkhx_theme_get_chrome_color (GTKHX_CHROME_FG, dark, out);
     case GTKHX_CHROME_ACCENT:
+    case GTKHX_CHROME_ACCENT_FG:
+    case GTKHX_CHROME_ACCENT_TEXT:
     case GTKHX_CHROME_ACTION:
-        /* No sensible derivation: these are choices, not shades. */
+        /* No derivation: these are choices, not shades. (An unset
+         * accent_fg is picked for contrast where the CSS is built, and
+         * an unset accent_text is left to libadwaita, which derives it
+         * from the accent.) */
         return FALSE;
     case GTKHX_CHROME_CARD:
         step = CHROME_STEP_CARD;
@@ -451,10 +467,11 @@ rgb_brightness (const GdkRGBA *c)
 }
 
 /* Suggested-action buttons (Connect, Save, Post, …) restyled as an
- * outline in the theme's action color, for a theme whose design says
- * an action is a link, not a filled pill. Hover, keyboard focus and
- * press are one state — they turn the accent color over a faint accent
- * wash — so the button behaves like every other link. Empty when the
+ * outline in the theme's action color over a faint wash of it, for a
+ * theme whose design says an action is a link, not a filled pill.
+ * Hover, keyboard focus and press are one state — they turn the accent
+ * color over a faint accent wash — so the button behaves like every
+ * other link. Empty when the
  * theme sets no action color: Adwaita's filled button stays. Caller
  * frees. */
 static char *
@@ -483,10 +500,10 @@ action_css (gboolean dark)
     return g_strdup_printf (
         "button.suggested-action, button.suggested-action:checked,\n"
         "splitbutton.suggested-action, menubutton.suggested-action {\n"
-        "  background-color: transparent;\n"
+        "  background-color: alpha(%s, 0.06);\n"
         "  background-image: none;\n"
         "  color: %s;\n"
-        "  box-shadow: inset 0 0 0 1px %s;\n"
+        "  box-shadow: inset 0 0 0 1px alpha(%s, 0.35);\n"
         "}\n"
         "button.suggested-action:hover, "
         "button.suggested-action:focus-visible,\n"
@@ -508,7 +525,7 @@ action_css (gboolean dark)
         "  background-color: transparent;\n"
         "  background-image: none;\n"
         "}\n",
-        action_hex, action_hex, accent_hex, accent_hex, accent_hex);
+        action_hex, action_hex, action_hex, accent_hex, accent_hex, accent_hex);
 }
 
 char *
@@ -560,12 +577,18 @@ gtkhx_theme_build_chrome_css (gboolean dark)
         SET ("headerbar_fg_color");
     }
     if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT, dark, &c)) {
-        /* libadwaita derives the standalone accent_color from the
-         * background one, so only text-on-accent needs choosing. */
         SET ("accent_bg_color");
-        c = rgb_brightness (&c) > 0.6 ? (GdkRGBA){ 0, 0, 0, 1 }
-                                      : (GdkRGBA){ 1, 1, 1, 1 };
+        if (!gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT_FG, dark, &c)) {
+            c = rgb_brightness (&c) > 0.6 ? (GdkRGBA){ 0, 0, 0, 1 }
+                                          : (GdkRGBA){ 1, 1, 1, 1 };
+        }
         SET ("accent_fg_color");
+    }
+    /* libadwaita derives the accent-as-text color from the accent,
+     * shifting its lightness for contrast. A theme that has already
+     * picked a readable text shade sets it outright. */
+    if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_ACCENT_TEXT, dark, &c)) {
+        SET ("accent_color");
     }
 #undef SET
 
@@ -710,6 +733,8 @@ static const char *const chrome_key_name[GTKHX_CHROME_N_ROLES] = {
     [GTKHX_CHROME_FG] = "fg",
     [GTKHX_CHROME_HEADERBAR_FG] = "headerbar_fg",
     [GTKHX_CHROME_ACCENT] = "accent",
+    [GTKHX_CHROME_ACCENT_FG] = "accent_fg",
+    [GTKHX_CHROME_ACCENT_TEXT] = "accent_text",
     [GTKHX_CHROME_ACTION] = "action",
 };
 

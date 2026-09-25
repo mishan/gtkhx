@@ -228,8 +228,7 @@ test_skips_unsafe_theme_names (void)
     g_free (dir);
 }
 
-/* The built-in themes (default, neon-doll,
- * solarized) ride on the
+/* The built-in themes (default, neon-doll, solarized) ride on the
  * linked-in GResource and surface through the resource_prefix arg.
  * With an empty user dir, all of them should appear in the sorted
  * output.

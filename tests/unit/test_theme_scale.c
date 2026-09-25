@@ -483,7 +483,10 @@ test_chrome_action_css (void)
 
     css = gtkhx_theme_build_chrome_css (TRUE);
     g_assert_nonnull (strstr (css, "splitbutton.suggested-action"));
-    g_assert_nonnull (strstr (css, "box-shadow: inset 0 0 0 1px #b48cff;"));
+    g_assert_nonnull (strstr (css, "alpha(#b48cff, 0.06)"));
+    g_assert_nonnull (
+        strstr (css, "box-shadow: inset 0 0 0 1px alpha(#b48cff, 0.35);"));
+    g_assert_nonnull (strstr (css, "box-shadow: inset 0 0 0 1px #ff2d95;"));
     g_assert_nonnull (strstr (css, "button.suggested-action:focus-visible"));
     g_assert_nonnull (strstr (css, "alpha(#ff2d95, 0.08)"));
     g_free (css);
@@ -501,6 +504,62 @@ test_chrome_action_css (void)
     gtkhx_theme_load_from_keyfile (kf);
     css = gtkhx_theme_build_chrome_css (TRUE);
     g_assert_null (strstr (css, "suggested-action"));
+    g_free (css);
+
+    g_key_file_free (kf);
+}
+
+/* accent_fg replaces the contrast pick for text on the accent, and
+ * accent_text sets libadwaita's accent-as-text color outright instead
+ * of letting it shift the accent's lightness. */
+static void
+test_chrome_accent_keys (void)
+{
+    GKeyFile *kf = g_key_file_new ();
+    char *css;
+
+    g_key_file_set_string (kf, "chrome.dark", "accent", "#ff2d95");
+    g_key_file_set_string (kf, "chrome.dark", "accent_fg", "#0f0d14");
+    g_key_file_set_string (kf, "chrome.dark", "accent_text", "#ff2d95");
+    g_key_file_set_string (kf, "chrome.light", "accent", "#ff2d95");
+    gtkhx_theme_load_from_keyfile (kf);
+
+    css = gtkhx_theme_build_chrome_css (TRUE);
+    g_assert_nonnull (strstr (css, "--accent-fg-color: #0f0d14;"));
+    g_assert_nonnull (strstr (css, "--accent-color: #ff2d95;"));
+    g_assert_nonnull (strstr (css, "@define-color accent_color #ff2d95;"));
+    g_free (css);
+
+    /* Unset: text on the accent is picked for contrast, and the
+     * accent-as-text color is left to libadwaita. */
+    css = gtkhx_theme_build_chrome_css (FALSE);
+    g_assert_nonnull (strstr (css, "--accent-fg-color: #ffffff;"));
+    g_assert_null (strstr (css, "--accent-color:"));
+    g_free (css);
+
+    g_key_file_free (kf);
+}
+
+/* The chat palette stands in for the window colors only as a pair: a
+ * background alone would tint the window and leave the system's text
+ * color on it. */
+static void
+test_chrome_palette_needs_pair (void)
+{
+    GKeyFile *kf = g_key_file_new ();
+    GdkRGBA out;
+    char *css;
+
+    g_key_file_set_string (kf, "palette.light", "bg", "#000000");
+    g_key_file_set_string (kf, "palette.dark", "fg", "#ffffff");
+    gtkhx_theme_load_from_keyfile (kf);
+
+    for (int r = 0; r < GTKHX_CHROME_N_ROLES; r++) {
+        g_assert_false (gtkhx_theme_get_chrome_color (r, FALSE, &out));
+        g_assert_false (gtkhx_theme_get_chrome_color (r, TRUE, &out));
+    }
+    css = gtkhx_theme_build_chrome_css (FALSE);
+    g_assert_cmpstr (css, ==, "");
     g_free (css);
 
     g_key_file_free (kf);
@@ -601,6 +660,9 @@ main (int argc, char **argv)
                      test_chrome_explicit_keys_win);
     g_test_add_func ("/theme/chrome-css", test_chrome_css);
     g_test_add_func ("/theme/chrome-action-css", test_chrome_action_css);
+    g_test_add_func ("/theme/chrome-accent-keys", test_chrome_accent_keys);
+    g_test_add_func ("/theme/chrome-palette-needs-pair",
+                     test_chrome_palette_needs_pair);
     g_test_add_func ("/theme/chat-roles-derive", test_chat_roles_derive);
     g_test_add_func ("/theme/nick-colors", test_nick_colors);
     return g_test_run ();

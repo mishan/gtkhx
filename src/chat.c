@@ -270,9 +270,11 @@ GdkRGBA colors[] = {
     RGB16 (0xffff, 0, 0xffff),      /* 29 pink */
     RGB16 (0x7777, 0x7777, 0x7777), /* 30 grey */
     RGB16 (0x9999, 0x9999, 0x9999), /* 31 light grey */
-    /* UI roles and per-nick colors: placeholders only.
-     * gtkhx_apply_theme_palette fills every one of them from the active
-     * theme before the first chat view exists. */
+    /* UI roles and per-nick colors: placeholders, fully transparent,
+     * until gtkhx_apply_theme_palette fills them from the active theme
+     * in gtkhx_activate. The chat view fe_init builds before that reads
+     * transparent as "follow the system", and it re-reads the palette
+     * on every draw, so nothing is drawn with a placeholder. */
     [HX_CHAT_PAL_COLS - 1] = { 0, 0, 0, 0 },
 };
 
@@ -280,9 +282,9 @@ G_STATIC_ASSERT (G_N_ELEMENTS (colors) == HX_CHAT_PAL_COLS);
 G_STATIC_ASSERT (HX_CHAT_LOG_INFO_COLOR == HX_CHAT_INFO_COLOR);
 G_STATIC_ASSERT (HX_CHAT_PAL_NICK_COLORS == GTKHX_NICK_COLORS_MAX);
 
-/* How many of the per-nick slots the active theme filled; 0 when it has
- * no nick_colors, and every nick takes HX_CHAT_PAL_NICK. */
-static int n_nick_colors;
+/* Whether the active theme has any nick_colors. The slot a nick hashes to
+ * never depends on how many (see hx_chat_nick_color), only on this. */
+static gboolean have_nick_colors;
 
 /* Refresh the UI-role slots from the active theme for the current
  * light/dark variant and push the palette into every live chat view.
@@ -328,13 +330,21 @@ gtkhx_apply_theme_palette (gboolean dark)
             = gtkhx_theme_get_color (role_to_slot[i].role, dark);
     }
 
-    /* Per-nick slots. The unused tail repeats the plain nick color, so
-     * a stale index can never paint a nick with a leftover theme's
-     * color. */
-    n_nick_colors
-        = gtkhx_theme_get_nick_colors (dark, &colors[HX_CHAT_PAL_NICK_COLOR0]);
-    for (int i = n_nick_colors; i < HX_CHAT_PAL_NICK_COLORS; i++) {
-        colors[HX_CHAT_PAL_NICK_COLOR0 + i] = colors[HX_CHAT_PAL_NICK];
+    /* Per-nick slots. Every slot is filled — a theme's list repeats
+     * across them — because a rendered line keeps the slot number it
+     * was built with. Nicks hash over all the slots, not over the
+     * theme's count, so a light/dark flip between lists of different
+     * lengths recolors a person's old lines and new lines alike. A
+     * theme with no list fills every slot with the plain nick color. */
+    {
+        GdkRGBA list[GTKHX_NICK_COLORS_MAX];
+        int n = gtkhx_theme_get_nick_colors (dark, list);
+
+        have_nick_colors = n > 0;
+        for (int i = 0; i < HX_CHAT_PAL_NICK_COLORS; i++) {
+            colors[HX_CHAT_PAL_NICK_COLOR0 + i]
+                = n > 0 ? list[i % n] : colors[HX_CHAT_PAL_NICK];
+        }
     }
 
     /* Push the new palette into every live xtext widget. Chat /
@@ -599,7 +609,7 @@ hx_chat_nick_color (const char *nick, gsize nick_len, gboolean is_self)
     if (is_self) {
         return HX_CHAT_PAL_SELF_NICK;
     }
-    if (n_nick_colors <= 0 || !nick) {
+    if (!have_nick_colors || !nick) {
         return HX_CHAT_PAL_NICK;
     }
     /* djb2 over the bytes: stable across runs and platforms, so a
@@ -607,7 +617,7 @@ hx_chat_nick_color (const char *nick, gsize nick_len, gboolean is_self)
     for (gsize i = 0; i < nick_len; i++) {
         h = h * 33 + (guchar)nick[i];
     }
-    return (gint16)(HX_CHAT_PAL_NICK_COLOR0 + h % (guint32)n_nick_colors);
+    return (gint16)(HX_CHAT_PAL_NICK_COLOR0 + h % HX_CHAT_PAL_NICK_COLORS);
 }
 
 /* Render a single chat line into an xtext buffer with the
