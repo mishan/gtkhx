@@ -84,6 +84,18 @@ extern void hx_conn_set_media_max_duration_ms (struct htlc_conn *h, guint32 v);
 /* Reset all six advisory limits to 0 ("use client defaults"). */
 extern void hx_conn_reset_media_limits (struct htlc_conn *h);
 
+/* Video extension: the per-kind DATA_VIDEO_LIMITS from the LOGIN reply
+ * (kind 1 camera, 2 screen). The getter returns FALSE, leaving *out
+ * alone, for a kind the server didn't describe. Reset before each LOGIN
+ * reply is read, so a kind a server omits never inherits a ceiling. */
+struct hx_video_limits;
+extern void hx_conn_set_video_limits (struct htlc_conn *h, guint16 kind,
+                                      guint16 max_width, guint16 max_height,
+                                      guint16 max_fps, guint32 max_bitrate);
+extern gboolean hx_conn_video_limits (const struct htlc_conn *h, guint16 kind,
+                                      struct hx_video_limits *out);
+extern void hx_conn_reset_video_limits (struct htlc_conn *h);
+
 /* ---- Server endpoint identity --------------------------------------------
  *
  * Populated at hx_connect time and read by the HTXF-subchannel setup, the TLS

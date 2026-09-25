@@ -59,7 +59,9 @@ extern crate alloc;
 pub mod action;
 pub mod event;
 pub mod state;
+pub mod video;
 
 pub use action::{Action, SignalKind, TimerKind};
 pub use event::{ConnectionState, Event, Participant, ServerError, Timeout};
 pub use state::{SessionMachine, SessionState};
+pub use video::{Publication, Stream, Track, VideoKind};

@@ -6,9 +6,21 @@ transactions on the existing Hotline TCP control channel. Media is
 PCMU over DTLS-SRTP.
 
 Spec: fogWraith `Docs/Protocol/Capabilities-Voice.md`, pinned at commit
-`525e94e`. **The spec is not vendored in this repository** and many
-source files cite it with no in-repo target, so the contract section
-below is the closest thing the tree has to it.
+`7abb9f3` (2026-09-17). **The spec is not vendored in this repository**
+and many source files cite it with no in-repo target, so the contract
+section below is the closest thing the tree has to it.
+
+The spec makes normative `a=inactive` for a departed participant, stable
+mids and back-to-back renegotiations, and three of its rules shape the
+client: the answer's `send` section MUST declare the microphone's SSRC;
+a section with a mid the client doesn't recognize MUST be mirrored but
+never played; and the server is ICE-lite, so the client is always the
+controlling agent. It also defines a plain-RTP transport
+(`DATA_VOICE_TRANSPORT`, `0x01FB`) for clients with no TLS stack; a
+client that can do DTLS-SRTP must not ask for it, so GtkHx never sends
+the field.
+
+Video rides this session; see [video.md](video.md).
 
 ## Build gate
 
@@ -116,6 +128,18 @@ means that uid. The server may also send a consolidated follow-up offer
 immediately after our answer, so consecutive offer/answer cycles have
 to work back to back.
 
+**A receive pad is named by its SSRC, not its transceiver.** With every
+section bundled and no MID header extension, `webrtcbin` can expose a
+stream on the pad of a *different* section — seen in practice as a
+camera arriving on the pad of that user's silent audio section. The
+spec requires the offer to declare each forwarded section's SSRC, and
+the pad's caps carry the SSRC, so the runtime keeps an SSRC → mid map
+from each offer (FID groups included) and resolves a pad through it,
+falling back to the transceiver's mid only when the SSRC isn't
+declared. What the mid names picks the bin: audio for `send` / `user-N`,
+VP8 for the video mids, and a discarding bin for anything else — the
+spec's "mirror it, never play it".
+
 ## Where it lives
 
 ### Rust
@@ -159,7 +183,8 @@ callbacks, pad-added) can reach main-thread state.
 ```
 webrtcbin name=webrtc bundle-policy=max-bundle
 
-  # send leg
+  # send leg, linked to the `send` section's sink_<mline> once the first
+  # offer is set
   autoaudiosrc ! audioconvert ! audioresample
               ! audio/x-raw,rate=8000,channels=1
               ! mulawenc ! rtppcmupay
@@ -170,6 +195,20 @@ webrtcbin name=webrtc bundle-policy=max-bundle
   webrtc. ! rtppcmudepay ! mulawdec
          ! audioconvert ! level ! audioresample ! autoaudiosink
 ```
+
+**The microphone is bound after the offer, by mid.** The send bin is
+built with the pipeline but held out of the stream (locked state) until
+the first offer is set; then the runtime finds the transceiver whose mid
+is `send`, gives it the direction the offer implies (`sendonly` to a
+`recvonly` section, `sendrecv` to Janus's bundled `sendrecv` one),
+requests `sink_<its mline>` and links the bin there. A `sink_%u` pad
+requested before any offer attaches to whichever audio section comes
+*first*, so a server that lists other users' sections before `send`
+(hxd-ng does, as the spec's example does) would find the microphone on
+someone else's section, with `send` answered `inactive` and no SSRC. The answer then waits, briefly, for the freshly linked
+sender's caps event: `webrtcbin` writes a send section's `a=ssrc` from
+the caps its sink pad has received, and an answer created the moment
+the bin is linked carries none.
 
 Receive bins additionally carry a `volume` element, so per-remote
 playback gain is settable per uid and replayed onto a rebuilt bin
@@ -457,7 +496,9 @@ load-bearing content in this document.
 
 - **Not peer-to-peer.** The spec rules out a mesh; the server routes
   everything.
-- **Not video.** PCMU audio only.
+- **Not video by itself.** The voice session carries PCMU; camera and
+  screen video are an extension layered on the same peer connection —
+  see [video.md](video.md).
 - **Not a new protocol.** Voice rides the existing Hotline 1.x wire
   protocol via new transaction opcodes.
 - **Not coupled to TLS.** Voice signalling rides whatever the control
@@ -469,8 +510,9 @@ load-bearing content in this document.
 
 ## Test targets
 
-Janus (VesperNet) is the only known server-side implementation and is
-the integration target. The container runs with host networking so
+Janus (VesperNet) is the voice integration target; hxd-ng is the video
+one ([video.md](video.md)), and its media tests exercise voice against
+an ICE-lite SFU as a matter of course. The container runs with host networking so
 libnice can negotiate ICE against localhost — Docker's default bridge
 strips the kernel route the server-reflexive candidate path needs — and
 because host networking makes the container's listen ports the host

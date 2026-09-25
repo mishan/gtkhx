@@ -609,6 +609,14 @@ changed_voice_output_device (void)
 {
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 }
+
+/* Settings → Voice → "Camera". Takes effect the next time a camera
+ * publication starts or resumes, since the capture bin is built then. */
+static void
+changed_voice_camera_device (void)
+{
+    gtkhx_voice_set_camera_device (gtkhx_prefs.voice_camera_device);
+}
 #endif /* HAVE_VOICE */
 
 /* changefunc for the active-theme name. A change here (manually
@@ -727,6 +735,7 @@ static const struct pref_hook pref_hooks[] = {
      * that push the value into the Rust runtime are conditional. */
     PREF_GLOBAL (CFG_VOICE_INPUT_DEVICE, changed_voice_input_device),
     PREF_GLOBAL (CFG_VOICE_OUTPUT_DEVICE, changed_voice_output_device),
+    PREF_GLOBAL (CFG_VOICE_CAMERA_DEVICE, changed_voice_camera_device),
 #endif
     PREF_VIEW (CFG_WORDWRAP, changed_xtext),
     PREF_VIEW (CFG_XBUF_MAX, changed_xtext),

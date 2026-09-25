@@ -47,6 +47,7 @@
 #include "banner.h"
 #ifdef HAVE_VOICE
 #include "voice_panel.h"
+#include "video_panel.h"
 #endif
 #include "inline_media_attach.h"
 #include "panel_registry.h"
@@ -369,6 +370,9 @@ setbtns (session *sess, int stat)
      * (stat==0), the refresh hides them again — htlc->caps will
      * have been cleared by network.c. */
     voice_panel_refresh_all_chats (sess);
+    /* The Video panel's empty state says why it is empty — no video on
+     * this server, not in voice — and both change here. */
+    video_panel_refresh_all (sess);
 #endif /* HAVE_VOICE */
 
     /* Same gating discipline for the Phase 9.C inline-media

@@ -61,6 +61,38 @@ hx_htlc_voice_access (struct htlc_conn *htlc)
     return htlc && hx_conn_access_has (htlc, HL_ACCESS_VOICE_CHAT);
 }
 
+gboolean
+hx_htlc_video_cap (struct htlc_conn *htlc)
+{
+    /* The spec never lets bit 10 stand without bit 2; don't trust a
+     * server that echoes it alone. */
+    return htlc && hx_conn_has_cap (htlc, HTLC_CAP_VOICE)
+           && hx_conn_has_cap (htlc, HTLC_CAP_VIDEO);
+}
+
+gboolean
+hx_htlc_video_access (struct htlc_conn *htlc, guint16 kind)
+{
+    if (!htlc) {
+        return FALSE;
+    }
+    switch (kind) {
+    case HX_VIDEO_KIND_CAMERA:
+        return hx_conn_access_has (htlc, HL_ACCESS_VIDEO_CHAT);
+    case HX_VIDEO_KIND_SCREEN:
+        return hx_conn_access_has (htlc, HL_ACCESS_SCREEN_SHARE);
+    default:
+        return FALSE;
+    }
+}
+
+gboolean
+hx_htlc_video_limits (struct htlc_conn *htlc, guint16 kind,
+                      struct hx_video_limits *out)
+{
+    return htlc && hx_conn_video_limits (htlc, kind, out);
+}
+
 guint16
 hx_htlc_uid (struct htlc_conn *htlc)
 {

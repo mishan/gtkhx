@@ -48,6 +48,7 @@ extern size_t hx_conn_offsetof_bridge_handle (void);
 extern size_t hx_conn_offsetof_caps (void);
 extern size_t hx_conn_offsetof_serial (void);
 extern size_t hx_conn_offsetof_ping_timer (void);
+extern size_t hx_conn_offsetof_video_limits (void);
 
 static void
 test_size_and_alignment_match (void)
@@ -77,6 +78,8 @@ test_field_offsets_match (void)
                       offsetof (struct htlc_conn, serial));
     g_assert_cmpuint (hx_conn_offsetof_ping_timer (), ==,
                       offsetof (struct htlc_conn, ping_timer));
+    g_assert_cmpuint (hx_conn_offsetof_video_limits (), ==,
+                      offsetof (struct htlc_conn, video_limits));
 }
 
 /* The field this test was written for. It went into what was then tail

@@ -64,6 +64,7 @@ use core::mem;
 
 use crate::action::{Action, SignalKind, SignalPayload, TimerKind, WireFrameBody};
 use crate::event::{ConnectionState, Event, Participant, ServerError, Timeout};
+use crate::video::{self, Publication, Stream, VideoKind};
 use hashbrown::HashMap;
 
 /// What the machine is currently doing.
@@ -140,11 +141,26 @@ pub struct SessionMachine {
     /// `0` is a valid cid (public chat), so we use `Option<u32>`
     /// rather than a sentinel.
     active_cid: Option<u32>,
-    /// `a=mid:user-N` label → user_id map, populated from the
-    /// last SDP we accepted. Looked up by `WebrtcPadAdded` so we
-    /// know which user a receive leg corresponds to. Cleared on
-    /// teardown.
+    /// Receive mid (`user-N`, `cam-user-N`, `scr-user-N`) → user_id
+    /// map, populated from the last SDP we accepted. Looked up by
+    /// `WebrtcPadAdded` so we know which user a receive leg
+    /// corresponds to. Cleared on teardown.
     mid_to_user: HashMap<String, u16>,
+    /// The room's publications as the last 611 described them.
+    /// Replaced wholesale on every 611, cleared with the room.
+    publications: Vec<Publication>,
+    /// The receive set the UI wants, sorted and deduplicated.
+    wanted: Vec<Stream>,
+    /// The receive set the server was last told (610). Every
+    /// participant starts a room with none.
+    subscribed: Vec<Stream>,
+    /// This client's own publications, indexed by
+    /// [`VideoKind::index`]: `None` not publishing, `Some(paused)`.
+    local_video: [Option<bool>; 2],
+    /// Whether a 611 has listed each of our own publications. Only a
+    /// publication the server has acknowledged this way can be read as
+    /// ended when a later 611 leaves it out.
+    local_listed: [bool; 2],
     /// Last seen participant list, indexed by user_id. Updated
     /// on `ParticipantsUpdated`; consumed by the runtime layer
     /// via [`SessionMachine::participants`] when it builds the
@@ -229,6 +245,32 @@ impl SessionMachine {
         self.participants.len()
     }
 
+    /// The room's publications, as the last 611 reported them.
+    pub fn publications(&self) -> &[Publication] {
+        &self.publications
+    }
+
+    /// The receive set the server was last given.
+    pub fn subscriptions(&self) -> &[Stream] {
+        &self.subscribed
+    }
+
+    /// This client's own publication of `kind`: `None` when not
+    /// publishing, `Some(paused)` otherwise.
+    pub fn local_video(&self, kind: VideoKind) -> Option<bool> {
+        self.local_video[kind.index()]
+    }
+
+    /// True in the states where the client is in a voice room as far
+    /// as the server is concerned, which is where video requests are
+    /// legal.
+    fn in_voice(&self) -> bool {
+        matches!(
+            self.state,
+            SessionState::OfferPending | SessionState::Connecting | SessionState::Connected
+        )
+    }
+
     /// Drive one transition.
     ///
     /// Returns the list of side effects the runtime should
@@ -242,6 +284,7 @@ impl SessionMachine {
                 self.active_cid = Some(cid);
                 self.mid_to_user.clear();
                 self.participants.clear();
+                self.reset_video();
                 self.queued_offer = None;
                 self.set_state(SessionState::JoinSent, |actions| {
                     actions.push(Action::SendWireFrame {
@@ -295,6 +338,7 @@ impl SessionMachine {
                 self.active_cid = Some(cid);
                 self.mid_to_user.clear();
                 self.participants.clear();
+                self.reset_video();
                 self.queued_offer = None;
                 self.muted = false;
                 self.set_state(SessionState::JoinSent, |actions| {
@@ -365,6 +409,7 @@ impl SessionMachine {
                 self.active_cid = None;
                 self.mid_to_user.clear();
                 self.participants.clear();
+                self.reset_video();
                 self.muted = false;
                 self.set_state(SessionState::Idle, |actions| {
                     // Cancel every kind the spec arms — the runtime
@@ -416,7 +461,7 @@ impl SessionMachine {
                 self.cache_offer_mids(&sdp);
                 let inactive = Self::inactive_recv_mids(&sdp);
                 self.bind_cid_for_offer(cid);
-                self.set_state(SessionState::OfferPending, move |actions| {
+                let mut acts = self.set_state(SessionState::OfferPending, move |actions| {
                     actions.push(Action::CancelTimer {
                         kind: TimerKind::JoinReply,
                     });
@@ -425,7 +470,11 @@ impl SessionMachine {
                     }
                     actions.push(Action::SetRemoteDescription { sdp });
                     actions.push(Action::CreateAnswer);
-                })
+                });
+                // Now in voice: a receive set the UI declared before
+                // the join finished goes out.
+                acts.extend(self.flush_subscriptions());
+                acts
             }
 
             // Renegotiation: a new offer arrived after our own
@@ -718,6 +767,173 @@ impl SessionMachine {
                 }]
             }
 
+            // ---- Video ----
+
+            // 611: the room's complete publication list. Accepted from
+            // JoinSent on, since the server sends it straight after the
+            // join reply. Replaces, never merges.
+            (
+                SessionState::JoinSent
+                | SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected,
+                Event::VideoStatusReceived {
+                    cid,
+                    publications,
+                    self_uid,
+                },
+            ) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
+                self.publications = publications;
+                let mut actions = Vec::new();
+                // The server may end a publication itself (a stalled
+                // stream, a moderator). Once a 611 has shown ours, a
+                // later one without it means it is gone: stop capturing
+                // rather than publish into a slot we no longer hold.
+                if let Some(uid) = self_uid {
+                    for kind in VideoKind::ALL {
+                        let i = kind.index();
+                        if self.local_video[i].is_none() {
+                            continue;
+                        }
+                        let listed = self
+                            .publications
+                            .iter()
+                            .any(|p| p.user_id == uid && p.kind == kind);
+                        if listed {
+                            self.local_listed[i] = true;
+                        } else if self.local_listed[i] {
+                            self.local_video[i] = None;
+                            self.local_listed[i] = false;
+                            actions.push(Action::SetVideoPublishing {
+                                kind,
+                                publishing: false,
+                            });
+                            actions.push(local_changed(kind, None));
+                        }
+                    }
+                }
+                actions.push(Action::EmitSignal {
+                    kind: SignalKind::VideoStatus,
+                    payload: SignalPayload::VideoStatus { cid },
+                });
+                actions
+            }
+
+            // The UI's receive set. Recorded in any state and sent once
+            // in voice; an unchanged set sends nothing, so a burst of
+            // identical recomputations costs no renegotiation.
+            (_, Event::VideoSubscriptionsWanted { mut streams }) => {
+                streams.sort_unstable();
+                streams.dedup();
+                self.wanted = streams;
+                self.flush_subscriptions().into_iter().collect()
+            }
+
+            (_, Event::VideoStartRequested { kind }) => {
+                if !self.in_voice() || self.local_video[kind.index()].is_some() {
+                    return Vec::new();
+                }
+                self.local_video[kind.index()] = Some(false);
+                self.local_listed[kind.index()] = false;
+                let cid = self.active_cid.unwrap_or(0);
+                vec![
+                    Action::SetVideoPublishing {
+                        kind,
+                        publishing: true,
+                    },
+                    Action::SendWireFrame {
+                        opcode: HTLC_HDR_VIDEO_START,
+                        body: WireFrameBody(encode_cid_plus_kind(cid, kind)),
+                    },
+                    local_changed(kind, Some(false)),
+                ]
+            }
+
+            (_, Event::VideoStopRequested { kind }) => {
+                if !self.in_voice() || self.local_video[kind.index()].is_none() {
+                    return Vec::new();
+                }
+                self.local_video[kind.index()] = None;
+                let cid = self.active_cid.unwrap_or(0);
+                vec![
+                    Action::SetVideoPublishing {
+                        kind,
+                        publishing: false,
+                    },
+                    Action::SendWireFrame {
+                        opcode: HTLC_HDR_VIDEO_STOP,
+                        body: WireFrameBody(encode_cid_plus_kind(cid, kind)),
+                    },
+                    local_changed(kind, None),
+                ]
+            }
+
+            (_, Event::VideoPauseRequested { kind, paused }) => {
+                if !self.in_voice() {
+                    return Vec::new();
+                }
+                match self.local_video[kind.index()] {
+                    Some(p) if p != paused => {}
+                    _ => return Vec::new(),
+                }
+                self.local_video[kind.index()] = Some(paused);
+                let cid = self.active_cid.unwrap_or(0);
+                vec![
+                    Action::SetVideoPaused { kind, paused },
+                    Action::SendWireFrame {
+                        opcode: HTLC_HDR_VIDEO_STATE,
+                        body: WireFrameBody(encode_cid_kind_paused(cid, kind, paused)),
+                    },
+                    local_changed(kind, Some(paused)),
+                ]
+            }
+
+            // The server refused the start: the publication never
+            // existed, so there is nothing to stop on the wire. The
+            // voice session is untouched either way.
+            (_, Event::VideoStartFailed { cid, kind, text }) => {
+                let mut actions = Vec::new();
+                if self.active_cid == Some(cid) && self.local_video[kind.index()].take().is_some() {
+                    actions.push(Action::SetVideoPublishing {
+                        kind,
+                        publishing: false,
+                    });
+                    actions.push(local_changed(kind, None));
+                }
+                actions.push(Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    payload: SignalPayload::Error { text },
+                });
+                actions
+            }
+
+            // The capture broke under a live publication. Stop it on the
+            // wire so the slot is released, keep the call.
+            (_, Event::VideoCaptureFailed { kind, text }) => {
+                if self.local_video[kind.index()].take().is_none() {
+                    return Vec::new();
+                }
+                let mut actions = vec![Action::SetVideoPublishing {
+                    kind,
+                    publishing: false,
+                }];
+                if let (true, Some(cid)) = (self.in_voice(), self.active_cid) {
+                    actions.push(Action::SendWireFrame {
+                        opcode: HTLC_HDR_VIDEO_STOP,
+                        body: WireFrameBody(encode_cid_plus_kind(cid, kind)),
+                    });
+                }
+                actions.push(local_changed(kind, None));
+                actions.push(Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    payload: SignalPayload::Error { text },
+                });
+                actions
+            }
+
             // ---- Mute toggle ----
 
             // Client-driven mute / unmute. Accepted from any
@@ -980,6 +1196,7 @@ impl SessionMachine {
         let cid_to_leave = self.active_cid;
         self.active_cid = None;
         self.queued_offer = None;
+        self.reset_video();
         let prior_state = mem::replace(&mut self.state, SessionState::Leaving);
         let mut actions = vec![Action::CancelTimer {
             kind: TimerKind::JoinReply,
@@ -1041,31 +1258,22 @@ impl SessionMachine {
         }
     }
 
-    /// Walk the SDP for `a=mid:user-N` labels and populate the
-    /// `mid_to_user` cache. Pure-shape parse — anything that
-    /// isn't `user-N` (notably `send`) is skipped.
+    /// Walk the SDP for receive mids (`user-N`, `cam-user-N`,
+    /// `scr-user-N`) and populate the `mid_to_user` cache. `send`,
+    /// the video send mids and anything unrecognized are skipped.
     fn cache_offer_mids(&mut self, sdp: &str) {
         self.mid_to_user.clear();
         for line in sdp.lines() {
             let line = line.trim_end_matches('\r');
             if let Some(rest) = line.strip_prefix("a=mid:") {
-                if let Some(uid_str) = rest.strip_prefix("user-") {
-                    // Reject leading zeros (spec violation) and
-                    // out-of-range values.
-                    if uid_str.starts_with('0') {
-                        continue;
-                    }
-                    if let Ok(uid) = uid_str.parse::<u32>() {
-                        if (1..=u16::MAX as u32).contains(&uid) {
-                            self.mid_to_user.insert(rest.to_string(), uid as u16);
-                        }
-                    }
+                if let Some(uid) = video::parse_mid(rest).and_then(|t| t.user_id()) {
+                    self.mid_to_user.insert(rest.to_string(), uid);
                 }
             }
         }
     }
 
-    /// `user-N` mids in the offer whose media section is `a=inactive`
+    /// Receive mids in the offer whose media section is `a=inactive`
     /// — the spec's departed-participant marker (Capabilities-Voice.md,
     /// Track-to-User Mapping: on leave the section keeps its `mid` but
     /// goes `a=inactive`, port stays 9; "a section is live only while
@@ -1092,13 +1300,37 @@ impl SessionMachine {
                 cur_mid = Some(rest.to_string());
             } else if line == "a=inactive" {
                 if let Some(mid) = &cur_mid {
-                    if mid.starts_with("user-") {
+                    if video::parse_mid(mid).is_some_and(|t| t.is_receive()) {
                         out.push(mid.clone());
                     }
                 }
             }
         }
         out
+    }
+
+    /// Drop every piece of per-room video state. The runtime's
+    /// `TearDown` takes the capture and receive bins with it.
+    fn reset_video(&mut self) {
+        self.publications.clear();
+        self.wanted.clear();
+        self.subscribed.clear();
+        self.local_video = [None; 2];
+        self.local_listed = [false; 2];
+    }
+
+    /// Send the wanted receive set if the server has a different one
+    /// and we're in a room that can take it.
+    fn flush_subscriptions(&mut self) -> Option<Action> {
+        if !self.in_voice() || self.wanted == self.subscribed {
+            return None;
+        }
+        let cid = self.active_cid?;
+        self.subscribed = self.wanted.clone();
+        Some(Action::SendWireFrame {
+            opcode: HTLC_HDR_VIDEO_SUBSCRIBE,
+            body: WireFrameBody(encode_cid_plus_streams(cid, &self.subscribed)),
+        })
     }
 
     /// Update `active_cid` when an offer arrives. Defensive: the
@@ -1141,6 +1373,42 @@ fn encode_cid_plus_ice(cid: u32, candidate_json: &str) -> Vec<u8> {
     v.extend_from_slice(&cid.to_be_bytes());
     v.extend_from_slice(candidate_json.as_bytes());
     v
+}
+
+fn encode_cid_plus_kind(cid: u32, kind: VideoKind) -> Vec<u8> {
+    let mut v = Vec::with_capacity(6);
+    v.extend_from_slice(&cid.to_be_bytes());
+    v.extend_from_slice(&kind.wire().to_be_bytes());
+    v
+}
+
+fn encode_cid_kind_paused(cid: u32, kind: VideoKind, paused: bool) -> Vec<u8> {
+    let mut v = encode_cid_plus_kind(cid, kind);
+    v.extend_from_slice(&(paused as u16).to_be_bytes());
+    v
+}
+
+/// `cid` then the packed four-byte `uid | kind` entries of
+/// `DATA_VIDEO_SUBSCRIPTIONS`, ready to be split by the sender.
+fn encode_cid_plus_streams(cid: u32, streams: &[Stream]) -> Vec<u8> {
+    let mut v = Vec::with_capacity(4 + streams.len() * 4);
+    v.extend_from_slice(&cid.to_be_bytes());
+    for st in streams {
+        v.extend_from_slice(&st.user_id.to_be_bytes());
+        v.extend_from_slice(&st.kind.wire().to_be_bytes());
+    }
+    v
+}
+
+fn local_changed(kind: VideoKind, state: Option<bool>) -> Action {
+    Action::EmitSignal {
+        kind: SignalKind::VideoLocalChanged,
+        payload: SignalPayload::VideoLocalChanged {
+            kind,
+            publishing: state.is_some(),
+            paused: state.unwrap_or(false),
+        },
+    }
 }
 
 fn encode_cid_plus_muted(cid: u32, muted: bool) -> Vec<u8> {
@@ -1189,6 +1457,10 @@ const HTLC_HDR_VOICE_LEAVE: u32 = 601;
 const HTLC_HDR_VOICE_SDP_ANSWER: u32 = 603;
 const HTLC_HDR_VOICE_ICE: u32 = 604;
 const HTLC_HDR_VOICE_MUTE: u32 = 606;
+const HTLC_HDR_VIDEO_START: u32 = 607;
+const HTLC_HDR_VIDEO_STOP: u32 = 608;
+const HTLC_HDR_VIDEO_STATE: u32 = 609;
+const HTLC_HDR_VIDEO_SUBSCRIBE: u32 = 610;
 
 // ---- Timeout values ----
 //
@@ -2742,6 +3014,10 @@ mod tests {
         assert_eq!(HTLC_HDR_VOICE_SDP_ANSWER, 603);
         assert_eq!(HTLC_HDR_VOICE_ICE, 604);
         assert_eq!(HTLC_HDR_VOICE_MUTE, 606);
+        assert_eq!(HTLC_HDR_VIDEO_START, 607);
+        assert_eq!(HTLC_HDR_VIDEO_STOP, 608);
+        assert_eq!(HTLC_HDR_VIDEO_STATE, 609);
+        assert_eq!(HTLC_HDR_VIDEO_SUBSCRIBE, 610);
     }
 
     // ---- Wrong-cid SDP offer guards (Copilot review #3) ----
@@ -3090,5 +3366,448 @@ mod tests {
             sdp: "v=0\n".into(),
         });
         assert_eq!(m.state(), SessionState::Connecting);
+    }
+
+    // ---- Video ----
+
+    fn cam(uid: u16) -> Stream {
+        Stream {
+            user_id: uid,
+            kind: VideoKind::Camera,
+        }
+    }
+
+    fn scr(uid: u16) -> Stream {
+        Stream {
+            user_id: uid,
+            kind: VideoKind::Screen,
+        }
+    }
+
+    /// A machine in `Connected` for `cid`.
+    fn connected(cid: u32) -> SessionMachine {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid });
+        m.step(Event::SdpOfferReceived {
+            cid,
+            sdp: "a=mid:send\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+        m
+    }
+
+    fn wire_frames(acts: &[Action]) -> Vec<(u32, Vec<u8>)> {
+        acts.iter()
+            .filter_map(|a| match a {
+                Action::SendWireFrame { opcode, body } => Some((*opcode, body.0.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn video_mids_map_to_users_and_inactive_ones_stop() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        let sdp = "v=0\n\
+                   m=audio 9 x\na=mid:user-5\na=sendonly\n\
+                   m=audio 9 x\na=mid:send\na=recvonly\n\
+                   m=video 9 x\na=mid:cam-user-5\na=inactive\n\
+                   m=video 9 x\na=mid:scr-user-9\na=sendonly\n\
+                   m=video 9 x\na=mid:cam-send\na=recvonly\n\
+                   m=video 9 x\na=mid:sca-user-9\na=inactive\n";
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: sdp.into(),
+        });
+        assert_eq!(m.mid_to_user.get("user-5").copied(), Some(5));
+        assert_eq!(m.mid_to_user.get("cam-user-5").copied(), Some(5));
+        assert_eq!(m.mid_to_user.get("scr-user-9").copied(), Some(9));
+        assert_eq!(m.mid_to_user.get("cam-send"), None);
+        // Only a recognized receive section is torn down; the reserved
+        // screen-audio mid is mirrored and otherwise left alone.
+        let stops: Vec<_> = acts
+            .iter()
+            .filter_map(|a| match a {
+                Action::StopReceivePipeline { mid } => Some(mid.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stops, vec!["cam-user-5"]);
+        let acts = m.step(Event::WebrtcPadAdded {
+            mid: "scr-user-9".into(),
+        });
+        assert_eq!(
+            acts,
+            vec![Action::StartReceivePipeline {
+                mid: "scr-user-9".into(),
+                user_id: 9
+            }]
+        );
+    }
+
+    #[test]
+    fn video_status_replaces_the_room_view() {
+        let mut m = connected(3);
+        let pubs = vec![
+            Publication {
+                user_id: 4,
+                kind: VideoKind::Camera,
+                paused: false,
+            },
+            Publication {
+                user_id: 4,
+                kind: VideoKind::Screen,
+                paused: true,
+            },
+        ];
+        let acts = m.step(Event::VideoStatusReceived {
+            cid: 3,
+            publications: pubs.clone(),
+            self_uid: None,
+        });
+        assert_eq!(m.publications(), &pubs[..]);
+        assert_eq!(
+            acts,
+            vec![Action::EmitSignal {
+                kind: SignalKind::VideoStatus,
+                payload: SignalPayload::VideoStatus { cid: 3 },
+            }]
+        );
+        // Complete, never a delta.
+        m.step(Event::VideoStatusReceived {
+            cid: 3,
+            publications: vec![],
+            self_uid: None,
+        });
+        assert!(m.publications().is_empty());
+        // Another room's status is dropped.
+        let acts = m.step(Event::VideoStatusReceived {
+            cid: 99,
+            publications: pubs,
+            self_uid: None,
+        });
+        assert!(acts.is_empty());
+        assert!(m.publications().is_empty());
+    }
+
+    #[test]
+    fn subscriptions_send_the_whole_set_once() {
+        let mut m = connected(2);
+        let acts = m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![scr(9), cam(5), cam(5)],
+        });
+        assert_eq!(
+            wire_frames(&acts),
+            vec![(610, vec![0, 0, 0, 2, 0, 5, 0, 1, 0, 9, 0, 2])],
+            "sorted, deduplicated, one request"
+        );
+        assert_eq!(m.subscriptions(), &[cam(5), scr(9)][..]);
+        // The same set again, in another order, costs nothing.
+        let acts = m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(5), scr(9)],
+        });
+        assert!(acts.is_empty());
+        // The empty set is a real change: "no video at all".
+        let acts = m.step(Event::VideoSubscriptionsWanted { streams: vec![] });
+        assert_eq!(wire_frames(&acts), vec![(610, vec![0, 0, 0, 2])]);
+    }
+
+    #[test]
+    fn subscriptions_wait_for_the_room() {
+        let mut m = machine();
+        // Before any join: remembered, not sent.
+        let acts = m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(5)],
+        });
+        assert!(acts.is_empty());
+        m.step(Event::JoinRequested { cid: 1 });
+        // The join itself resets per-room state, so the UI's next
+        // declaration is what counts.
+        let acts = m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(5)],
+        });
+        assert!(acts.is_empty(), "JoinSent is not yet in voice");
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "a=mid:send\n".into(),
+        });
+        assert_eq!(
+            wire_frames(&acts),
+            vec![(610, vec![0, 0, 0, 1, 0, 5, 0, 1])],
+            "flushed once the first offer puts us in the room"
+        );
+    }
+
+    #[test]
+    fn leaving_forgets_every_video_fact() {
+        let mut m = connected(2);
+        m.step(Event::VideoStatusReceived {
+            cid: 2,
+            publications: vec![Publication {
+                user_id: 4,
+                kind: VideoKind::Camera,
+                paused: false,
+            }],
+            self_uid: None,
+        });
+        m.step(Event::VideoSubscriptionsWanted {
+            streams: vec![cam(4)],
+        });
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        m.step(Event::LeaveRequested { cid: 2 });
+        assert!(m.publications().is_empty());
+        assert!(m.subscriptions().is_empty());
+        assert_eq!(m.local_video(VideoKind::Camera), None);
+        // Rejoining starts from "no video at all": the old set is not
+        // replayed into the new room.
+        m.step(Event::JoinRequested { cid: 2 });
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 2,
+            sdp: "a=mid:send\n".into(),
+        });
+        assert!(wire_frames(&acts).iter().all(|(op, _)| *op != 610));
+    }
+
+    #[test]
+    fn camera_start_pause_stop() {
+        let mut m = connected(7);
+        let acts = m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        assert_eq!(
+            acts,
+            vec![
+                Action::SetVideoPublishing {
+                    kind: VideoKind::Camera,
+                    publishing: true
+                },
+                Action::SendWireFrame {
+                    opcode: 607,
+                    body: WireFrameBody(vec![0, 0, 0, 7, 0, 1]),
+                },
+                Action::EmitSignal {
+                    kind: SignalKind::VideoLocalChanged,
+                    payload: SignalPayload::VideoLocalChanged {
+                        kind: VideoKind::Camera,
+                        publishing: true,
+                        paused: false
+                    },
+                },
+            ]
+        );
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+        // A second start is a no-op: one publication per kind.
+        assert!(m
+            .step(Event::VideoStartRequested {
+                kind: VideoKind::Camera
+            })
+            .is_empty());
+
+        let acts = m.step(Event::VideoPauseRequested {
+            kind: VideoKind::Camera,
+            paused: true,
+        });
+        assert_eq!(
+            wire_frames(&acts),
+            vec![(609, vec![0, 0, 0, 7, 0, 1, 0, 1])]
+        );
+        assert!(acts.contains(&Action::SetVideoPaused {
+            kind: VideoKind::Camera,
+            paused: true
+        }));
+        // No change, no frame.
+        assert!(m
+            .step(Event::VideoPauseRequested {
+                kind: VideoKind::Camera,
+                paused: true
+            })
+            .is_empty());
+
+        let acts = m.step(Event::VideoStopRequested {
+            kind: VideoKind::Camera,
+        });
+        assert_eq!(wire_frames(&acts), vec![(608, vec![0, 0, 0, 7, 0, 1])]);
+        assert!(acts.contains(&Action::SetVideoPublishing {
+            kind: VideoKind::Camera,
+            publishing: false
+        }));
+        assert_eq!(m.local_video(VideoKind::Camera), None);
+        // Pausing or stopping what isn't published does nothing.
+        assert!(m
+            .step(Event::VideoPauseRequested {
+                kind: VideoKind::Camera,
+                paused: false
+            })
+            .is_empty());
+        assert!(m
+            .step(Event::VideoStopRequested {
+                kind: VideoKind::Camera
+            })
+            .is_empty());
+    }
+
+    #[test]
+    fn video_requests_need_a_room() {
+        let mut m = machine();
+        assert!(m
+            .step(Event::VideoStartRequested {
+                kind: VideoKind::Screen
+            })
+            .is_empty());
+        m.step(Event::JoinRequested { cid: 1 });
+        assert!(
+            m.step(Event::VideoStartRequested {
+                kind: VideoKind::Screen
+            })
+            .is_empty(),
+            "the server refuses 607 outside voice; JoinSent is not voice yet"
+        );
+    }
+
+    #[test]
+    fn a_refused_start_keeps_the_call() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Screen,
+        });
+        let acts = m.step(Event::VideoStartFailed {
+            cid: 1,
+            kind: VideoKind::Screen,
+            text: "Someone else is already sharing.".into(),
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+        assert_eq!(m.local_video(VideoKind::Screen), None);
+        assert!(wire_frames(&acts).is_empty(), "nothing to stop on the wire");
+        assert!(acts.contains(&Action::SetVideoPublishing {
+            kind: VideoKind::Screen,
+            publishing: false
+        }));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                payload: SignalPayload::Error { text },
+                ..
+            } if text.starts_with("Someone else")
+        )));
+    }
+
+    #[test]
+    fn a_refusal_for_another_room_is_stale() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        let acts = m.step(Event::VideoStartFailed {
+            cid: 9,
+            kind: VideoKind::Camera,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+        assert!(!acts
+            .iter()
+            .any(|a| matches!(a, Action::SetVideoPublishing { .. })));
+    }
+
+    fn own(uid: u16, kind: VideoKind) -> Publication {
+        Publication {
+            user_id: uid,
+            kind,
+            paused: false,
+        }
+    }
+
+    #[test]
+    fn a_publication_the_server_ends_stops_the_capture() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        // Not listed yet: the 611 that races the start says nothing
+        // about it.
+        let acts = m.step(Event::VideoStatusReceived {
+            cid: 1,
+            publications: vec![],
+            self_uid: Some(7),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+        assert!(!acts
+            .iter()
+            .any(|a| matches!(a, Action::SetVideoPublishing { .. })));
+        m.step(Event::VideoStatusReceived {
+            cid: 1,
+            publications: vec![own(7, VideoKind::Camera), own(8, VideoKind::Camera)],
+            self_uid: Some(7),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+        // Listed, then dropped: the server ended it.
+        let acts = m.step(Event::VideoStatusReceived {
+            cid: 1,
+            publications: vec![own(8, VideoKind::Camera)],
+            self_uid: Some(7),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), None);
+        assert!(acts.contains(&Action::SetVideoPublishing {
+            kind: VideoKind::Camera,
+            publishing: false
+        }));
+        assert!(wire_frames(&acts).is_empty(), "the server already ended it");
+        // A fresh start is honored again.
+        let acts = m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        assert_eq!(wire_frames(&acts).len(), 1);
+    }
+
+    #[test]
+    fn a_capture_failure_stops_the_publication_not_the_call() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        let acts = m.step(Event::VideoCaptureFailed {
+            kind: VideoKind::Camera,
+            text: "camera unplugged".into(),
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+        assert_eq!(wire_frames(&acts), vec![(608, vec![0, 0, 0, 1, 0, 1])]);
+        assert!(!acts.contains(&Action::TearDown));
+        // A second report of the same failure has nothing left to stop.
+        assert!(m
+            .step(Event::VideoCaptureFailed {
+                kind: VideoKind::Camera,
+                text: "again".into()
+            })
+            .is_empty());
+    }
+
+    #[test]
+    fn a_video_offer_while_one_is_pending_queues_like_voice() {
+        let mut m = connected(1);
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "a=mid:send\na=mid:cam-send\n".into(),
+        });
+        assert_eq!(m.state(), SessionState::OfferPending);
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "a=mid:send\na=mid:cam-send\na=mid:cam-user-4\n".into(),
+        });
+        assert!(acts.is_empty(), "queued behind the outstanding answer");
+        let acts = m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        assert!(acts.iter().any(
+            |a| matches!(a, Action::SetRemoteDescription { sdp } if sdp.contains("cam-user-4"))
+        ));
+        assert_eq!(m.mid_to_user.get("cam-user-4").copied(), Some(4));
     }
 }

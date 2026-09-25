@@ -761,6 +761,251 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_task_error(
     }));
 }
 
+// ---- Video ----------------------------------------------------------
+
+fn kind_from_c(kind: u16) -> Option<hxvoice::VideoKind> {
+    hxvoice::VideoKind::from_wire(kind)
+}
+
+/// 1 when this installation can receive video (VP8 decode and the
+/// frame sink), which is what decides whether `HTLC_CAP_VIDEO` is
+/// advertised; 0 otherwise.
+#[no_mangle]
+pub extern "C" fn gtkhx_voice_video_receive_available() -> i32 {
+    crate::video::receive_available() as i32
+}
+
+/// 1 when this installation can publish a stream of `kind` (1 camera,
+/// 2 screen): an encoder plus a source for the kind.
+#[no_mangle]
+pub extern "C" fn gtkhx_voice_video_publish_available(kind: u16) -> i32 {
+    kind_from_c(kind).is_some_and(crate::video::publish_available) as i32
+}
+
+/// Set the preferred camera by device name; NULL or empty picks the
+/// first camera found.
+///
+/// # Safety
+/// `name` is NULL or a NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_set_camera_device(name: *const c_char) {
+    let name = unsafe { cstr_to_string(name) };
+    crate::video::set_camera_device(Some(name.as_str()));
+}
+
+/// Feed a Video Status (611): the room's complete publication list, as
+/// the packed eight-byte-an-entry `DATA_VIDEO_PUBLISHERS` blob.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime; `blob` is valid for `len` bytes or
+/// NULL with `len == 0`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_status(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+    blob: *const u8,
+    len: usize,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    let bytes: &[u8] = if blob.is_null() || len == 0 || len > isize::MAX as usize {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(blob, len) }
+    };
+    // Bounded by the room's slot counts on any honest server; cap the
+    // list so a hostile one can't make us allocate its whole frame.
+    const MAX_PUBLICATIONS: usize = 256;
+    let publications = hxproto::video::parse_video_publishers(bytes)
+        .take(MAX_PUBLICATIONS)
+        .filter_map(|p| {
+            Some(hxvoice::Publication {
+                user_id: p.user_id,
+                kind: hxvoice::VideoKind::from_wire(p.kind.wire())?,
+                paused: p.is_paused(),
+            })
+        })
+        .collect();
+    rt.video_status(cid, publications);
+}
+
+/// The server refused a Video Start (607) of `kind`. `text` is its
+/// error string, shown to the user verbatim.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime; `text` is NULL or a C string.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_start_failed(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+    kind: u16,
+    text: *const c_char,
+) {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return;
+    };
+    let text = unsafe { cstr_to_string(text) };
+    rt.video_start_failed(cid, kind, text);
+}
+
+/// Record the server's `DATA_VIDEO_LIMITS` ceiling for `kind`.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_set_video_limits(
+    rt: *mut VoiceRuntime,
+    kind: u16,
+    max_width: u16,
+    max_height: u16,
+    max_fps: u16,
+    max_bitrate: u32,
+) {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return;
+    };
+    rt.set_video_limits(
+        kind,
+        crate::video::Limits {
+            max_width,
+            max_height,
+            max_fps,
+            max_bitrate,
+        },
+    );
+}
+
+/// Start publishing `kind` in the current room (607).
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_start(rt: *mut VoiceRuntime, kind: u16) {
+    if let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) {
+        rt.video_start(kind);
+    }
+}
+
+/// End the publication of `kind` (608).
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_stop(rt: *mut VoiceRuntime, kind: u16) {
+    if let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) {
+        rt.video_stop(kind);
+    }
+}
+
+/// Pause (`paused != 0`) or resume the publication of `kind` (609).
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_pause(
+    rt: *mut VoiceRuntime,
+    kind: u16,
+    paused: i32,
+) {
+    if let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) {
+        rt.video_pause(kind, paused != 0);
+    }
+}
+
+/// Declare the complete receive set (610): `n` streams, each a uid from
+/// `uids` and a kind from `kinds`. `n == 0` is "no video at all".
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime; `uids` and `kinds` are each valid
+/// for `n` elements, or NULL with `n == 0`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_subscribe(
+    rt: *mut VoiceRuntime,
+    uids: *const u16,
+    kinds: *const u16,
+    n: usize,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    let mut streams = Vec::new();
+    if n > 0 && !uids.is_null() && !kinds.is_null() && n <= isize::MAX as usize / 2 {
+        let uids = unsafe { slice::from_raw_parts(uids, n) };
+        let kinds = unsafe { slice::from_raw_parts(kinds, n) };
+        for (u, k) in uids.iter().zip(kinds) {
+            if let Some(kind) = kind_from_c(*k) {
+                streams.push(hxvoice::Stream { user_id: *u, kind });
+            }
+        }
+    }
+    rt.video_subscribe(streams);
+}
+
+/// Frames decoded so far for `uid`'s stream of `kind`; uid 0 is this
+/// client's own preview. For the Tier 3 media test.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_frames_received(
+    rt: *mut VoiceRuntime,
+    uid: u16,
+    kind: u16,
+) -> u64 {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return 0;
+    };
+    rt.video_frames_received(crate::video::StreamKey { user_id: uid, kind })
+}
+
+/// The size of the newest decoded frame of `uid`'s `kind` stream: 1 and
+/// `*width`/`*height` set when one has arrived, else 0.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime; `width` and `height` are NULL or
+/// writable.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_frame_size(
+    rt: *mut VoiceRuntime,
+    uid: u16,
+    kind: u16,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return 0;
+    };
+    if width.is_null() || height.is_null() {
+        return 0;
+    }
+    match rt.video_frame_size(crate::video::StreamKey { user_id: uid, kind }) {
+        Some((w, h)) => {
+            unsafe {
+                *width = w;
+                *height = h;
+            }
+            1
+        }
+        None => 0,
+    }
+}
+
+/// 1 while this client publishes `kind` (paused or not), else 0.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_publishing(
+    rt: *mut VoiceRuntime,
+    kind: u16,
+) -> i32 {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return 0;
+    };
+    rt.video_local(kind).is_some() as i32
+}
+
 /// Copy a C string into a Rust `String`. NULL → empty. Invalid
 /// UTF-8 → replaced via `String::from_utf8_lossy`.
 ///

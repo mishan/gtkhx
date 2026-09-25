@@ -84,6 +84,17 @@ enum {
     HX_LOGIN_SEEN_MEDIA_MAX_DURATION_MS = 1u << 9,
     HX_LOGIN_SEEN_HISTORY_MAX_MSGS = 1u << 10,
     HX_LOGIN_SEEN_HISTORY_MAX_DAYS = 1u << 11,
+    HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS = 1u << 12,
+    HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS = 1u << 13,
+};
+
+/* One kind's DATA_VIDEO_LIMITS (mirror of LoginVideoLimits). */
+struct gtkhx_proto_login_video_limits {
+    uint16_t max_width;
+    uint16_t max_height;
+    uint16_t max_fps;
+    uint16_t max_per_room;
+    uint32_t max_bitrate;
 };
 
 struct gtkhx_proto_login {
@@ -98,6 +109,9 @@ struct gtkhx_proto_login {
     uint32_t history_max_days;
     uint16_t uid;
     uint16_t version;
+    /* Camera then screen; each valid when its
+     * HX_LOGIN_SEEN_VIDEO_*_LIMITS bit is set. */
+    struct gtkhx_proto_login_video_limits video_limits[2];
 };
 
 /* Parse the LOGIN task reply. Fills *out and writes the CR2LF'd +
@@ -1442,10 +1456,14 @@ gtkhx_proto_parse_voice_participants (const uint8_t *blob_ptr, size_t blob_len,
 #define GTKHX_PROTO_VOICE_MID_INVALID 0
 #define GTKHX_PROTO_VOICE_MID_SEND 1
 #define GTKHX_PROTO_VOICE_MID_USER 2
+#define GTKHX_PROTO_VOICE_MID_CAM_SEND 3
+#define GTKHX_PROTO_VOICE_MID_SCR_SEND 4
+#define GTKHX_PROTO_VOICE_MID_CAM_USER 5
+#define GTKHX_PROTO_VOICE_MID_SCR_USER 6
 
 /* Parse an SDP a=mid: label. Returns one of the GTKHX_PROTO_VOICE_MID_*
- * constants. For the USER variant, *out_uid is set to the parsed uid;
- * for SEND and INVALID, *out_uid is left untouched. */
+ * constants. For the USER, CAM_USER and SCR_USER variants, *out_uid is
+ * set to the parsed uid; for the rest, *out_uid is left untouched. */
 extern uint32_t gtkhx_proto_parse_voice_mid_label (const uint8_t *label_ptr,
                                                    size_t label_len,
                                                    uint16_t *out_uid);
@@ -1541,6 +1559,19 @@ struct gtkhx_proto_voice_reply {
 
 extern bool gtkhx_proto_parse_voice_reply (const uint8_t *buf, size_t len,
                                            struct gtkhx_proto_voice_reply *out);
+
+/* Video reply / Video Status (611) body. The slices borrow `buf`; an
+ * absent field has a NULL pointer, an absent kind is 0. */
+struct gtkhx_proto_video_reply {
+    uint32_t cid;
+    uint16_t kind;
+    const uint8_t *codec_ptr;
+    size_t codec_len;
+    const uint8_t *publishers_ptr;
+    size_t publishers_len;
+};
+extern bool gtkhx_proto_parse_video_reply (const uint8_t *buf, size_t len,
+                                           struct gtkhx_proto_video_reply *out);
 
 /* Per-field accessor for the variable-length payloads. `field`:
  *   0 = SDP, 1 = ICE, 2 = codec name, 3 = participants blob.
@@ -1780,6 +1811,7 @@ typedef enum {
     HX_RECV_VOICE_ROOM_STATUS = 15,
     HX_RECV_ICON_CHANGE = 16,
     HX_RECV_UNKNOWN = 17,
+    HX_RECV_VIDEO_STATUS = 18,
 } hx_recv_handler_kind;
 
 extern hx_recv_handler_kind hx_recv_route (guint32 opcode);

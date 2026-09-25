@@ -52,6 +52,9 @@ extern void hx_rcv_voice_ice (struct htlc_conn *htlc, const guint8 *frame,
                               gsize frame_len);
 extern void hx_rcv_voice_room_status (struct htlc_conn *htlc,
                                       const guint8 *frame, gsize frame_len);
+/* 611 VIDEO_STATUS: the room's complete publication list. */
+extern void hx_rcv_video_status (struct htlc_conn *htlc, const guint8 *frame,
+                                 gsize frame_len);
 
 /* TASK-reply handlers for the client-initiated 600/601/603/606
  * transactions. The voice send wrappers in src/voice.c register

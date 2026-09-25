@@ -1,0 +1,14 @@
+# The account the integration harness logs in as (empty login). Voice
+# and both video bits, so every video test can publish.
+name = "guest"
+
+[access]
+read_chat = true
+send_chat = true
+create_pchats = true
+send_msgs = true
+get_user_info = true
+use_any_name = true
+voice_chat = true
+video_chat = true
+screen_share = true

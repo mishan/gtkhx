@@ -26,6 +26,8 @@ struct Sent {
 
 thread_local! {
     static CAP: Cell<bool> = const { Cell::new(false) };
+    static VIDEO_CAP: Cell<bool> = const { Cell::new(false) };
+    static LAST_LABEL: RefCell<Option<String>> = const { RefCell::new(None) };
     static LAST_SEND: RefCell<Option<Sent>> = const { RefCell::new(None) };
 }
 
@@ -33,6 +35,14 @@ thread_local! {
 
 pub(crate) unsafe extern "C" fn hx_htlc_voice_cap(_htlc: *mut c_void) -> glib::ffi::gboolean {
     if CAP.with(|c| c.get()) {
+        glib::ffi::GTRUE
+    } else {
+        glib::ffi::GFALSE
+    }
+}
+
+pub(crate) unsafe extern "C" fn hx_htlc_video_cap(_htlc: *mut c_void) -> glib::ffi::gboolean {
+    if VIDEO_CAP.with(|c| c.get()) {
         glib::ffi::GTRUE
     } else {
         glib::ffi::GFALSE
@@ -64,8 +74,18 @@ pub(crate) unsafe extern "C" fn task_new(
     _rcv: RcvTaskFn,
     _ptr: *mut c_void,
     _data: *mut c_void,
-    _str_: *const c_char,
+    str_: *const c_char,
 ) -> *mut c_void {
+    let label = if str_.is_null() {
+        None
+    } else {
+        Some(
+            std::ffi::CStr::from_ptr(str_)
+                .to_string_lossy()
+                .into_owned(),
+        )
+    };
+    LAST_LABEL.with(|l| *l.borrow_mut() = label);
     std::ptr::null_mut()
 }
 
@@ -207,4 +227,105 @@ fn send_mute_normalises_to_zero_or_one() {
         .find(|(tag, _)| *tag == TAG_VOICE_MUTED)
         .expect("VOICE_MUTED chunk");
     assert_eq!(muted.1, vec![0, 1]); // u16 BE = 1
+}
+
+// ---- Video ----
+
+const TAG_VIDEO_KIND: u16 = 0x0220;
+const TAG_VIDEO_PAUSED: u16 = 0x0221;
+const TAG_VIDEO_SUBSCRIPTIONS: u16 = 0x0225;
+
+fn video_setup(voice: bool, video: bool) {
+    CAP.with(|c| c.set(voice));
+    VIDEO_CAP.with(|c| c.set(video));
+    LAST_SEND.with(|s| *s.borrow_mut() = None);
+    LAST_LABEL.with(|l| *l.borrow_mut() = None);
+}
+
+/// A captured send: the opcode and each chunk's (tag, bytes).
+type SentFrame = (u32, Vec<(u16, Vec<u8>)>);
+
+fn last_video() -> Option<SentFrame> {
+    last().map(|x| (x.ty, x.chunks))
+}
+
+fn label() -> Option<String> {
+    LAST_LABEL.with(|l| l.borrow().clone())
+}
+
+#[test]
+fn video_sends_need_both_caps() {
+    unsafe {
+        video_setup(true, false);
+        assert_eq!(hx_send_video_start(htlc(), 1, 1), glib::ffi::GFALSE);
+        video_setup(false, true);
+        assert_eq!(hx_send_video_start(htlc(), 1, 1), glib::ffi::GFALSE);
+        assert!(last_video().is_none());
+    }
+}
+
+#[test]
+fn video_start_carries_the_kind_in_frame_and_label() {
+    unsafe {
+        video_setup(true, true);
+        assert_eq!(hx_send_video_start(htlc(), 9, 2), glib::ffi::GTRUE);
+        let (ty, chunks) = last_video().unwrap();
+        assert_eq!(ty, 607);
+        assert_eq!(chunks[0], (TAG_CHAT_ID, 9u32.to_be_bytes().to_vec()));
+        assert_eq!(chunks[1], (TAG_VIDEO_KIND, vec![0, 2]));
+        assert_eq!(label().as_deref(), Some("video-start-screen"));
+        // Kind 0 and the reserved kinds never reach the wire.
+        video_setup(true, true);
+        assert_eq!(hx_send_video_start(htlc(), 9, 0), glib::ffi::GFALSE);
+        assert_eq!(hx_send_video_start(htlc(), 9, 3), glib::ffi::GFALSE);
+        assert!(last_video().is_none());
+    }
+}
+
+#[test]
+fn video_stop_with_and_without_kind() {
+    unsafe {
+        video_setup(true, true);
+        hx_send_video_stop(htlc(), 4, 0);
+        let (ty, chunks) = last_video().unwrap();
+        assert_eq!(ty, 608);
+        assert_eq!(chunks.len(), 1, "kind 0 omits the field: stop everything");
+        hx_send_video_stop(htlc(), 4, 1);
+        let (_, chunks) = last_video().unwrap();
+        assert_eq!(chunks[1], (TAG_VIDEO_KIND, vec![0, 1]));
+    }
+}
+
+#[test]
+fn video_state_normalizes_paused() {
+    unsafe {
+        video_setup(true, true);
+        hx_send_video_state(htlc(), 4, 1, 7);
+        let (ty, chunks) = last_video().unwrap();
+        assert_eq!(ty, 609);
+        assert_eq!(chunks[2], (TAG_VIDEO_PAUSED, vec![0, 1]));
+        hx_send_video_state(htlc(), 4, 1, 0);
+        let (_, chunks) = last_video().unwrap();
+        assert_eq!(chunks[2], (TAG_VIDEO_PAUSED, vec![0, 0]));
+    }
+}
+
+#[test]
+fn video_subscribe_drops_undefined_kinds() {
+    unsafe {
+        video_setup(true, true);
+        // uid 5 camera, uid 6 screen-audio (reserved), uid 7 screen.
+        let blob = [0u8, 5, 0, 1, 0, 6, 0, 3, 0, 7, 0, 2];
+        hx_send_video_subscribe(htlc(), 3, blob.as_ptr(), blob.len());
+        let (ty, chunks) = last_video().unwrap();
+        assert_eq!(ty, 610);
+        assert_eq!(
+            chunks[1],
+            (TAG_VIDEO_SUBSCRIPTIONS, vec![0, 5, 0, 1, 0, 7, 0, 2])
+        );
+        // The empty set is sent, as an empty field.
+        hx_send_video_subscribe(htlc(), 3, std::ptr::null(), 0);
+        let (_, chunks) = last_video().unwrap();
+        assert_eq!(chunks[1], (TAG_VIDEO_SUBSCRIPTIONS, vec![]));
+    }
 }

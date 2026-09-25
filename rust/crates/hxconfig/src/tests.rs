@@ -1125,8 +1125,13 @@ fn the_real_profile_drops_exactly_what_it_should() {
         item.is_value()
     };
 
-    // Every path the schema has must be present — the profile sets every key.
-    for path in crate::PATHS {
+    // Every path the schema has must be present — the profile sets every key
+    // that existed when it was written. A setting added since is in NEW_PATHS
+    // and defaults.
+    for path in crate::PATHS
+        .iter()
+        .filter(|p| !migrate::NEW_PATHS.contains(p))
+    {
         assert!(
             resolves(path),
             "{path} is missing from the migrated document"

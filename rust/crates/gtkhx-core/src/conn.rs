@@ -109,6 +109,23 @@ pub struct HtlcConn {
     /// The login task has to be registered under it, so it is per-connection
     /// for the same reason the transaction counter beside it is.
     login_reply_trans: u32,
+    /// The video extension's per-kind ceilings from the LOGIN reply
+    /// (`DATA_VIDEO_LIMITS`, repeated once per kind), camera then screen.
+    /// A kind the server didn't describe stays unset, so it can't inherit
+    /// the other's numbers or a previous server's.
+    video_limits: [VideoLimits; 2],
+}
+
+/// One kind's `DATA_VIDEO_LIMITS`, as stored on the connection. `present`
+/// is 0 until the LOGIN reply carried the field.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VideoLimits {
+    pub max_width: u16,
+    pub max_height: u16,
+    pub max_fps: u16,
+    pub present: u16,
+    pub max_bitrate: u32,
 }
 
 /// All fields are POD (integers, byte arrays, and null-valid raw pointers), so a
@@ -403,6 +420,74 @@ pub unsafe extern "C" fn hx_conn_reset_media_limits(h: *mut HtlcConn) {
     (*h).media_max_duration_ms = 0;
 }
 
+// ---- Video limits ----------------------------------------------------------
+
+/// Slot for a wire kind (1 camera, 2 screen); `None` for anything else.
+fn video_slot(kind: u16) -> Option<usize> {
+    match kind {
+        1 => Some(0),
+        2 => Some(1),
+        _ => None,
+    }
+}
+
+/// Record the server's ceiling for `kind` (1 camera, 2 screen).
+///
+/// # Safety
+/// `h` must be a non-null, live `*mut HtlcConn` obtained from `hx_conn_new`
+/// and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_set_video_limits(
+    h: *mut HtlcConn,
+    kind: u16,
+    max_width: u16,
+    max_height: u16,
+    max_fps: u16,
+    max_bitrate: u32,
+) {
+    if let Some(i) = video_slot(kind) {
+        (*h).video_limits[i] = VideoLimits {
+            max_width,
+            max_height,
+            max_fps,
+            present: 1,
+            max_bitrate,
+        };
+    }
+}
+
+/// Read the server's ceiling for `kind` into `out`. FALSE, leaving `out`
+/// untouched, when the server sent none for the kind.
+///
+/// # Safety
+/// `h` as for [`hx_conn_set_video_limits`]; `out` is a valid writable
+/// `VideoLimits` (`struct hx_video_limits`).
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_video_limits(
+    h: *const HtlcConn,
+    kind: u16,
+    out: *mut VideoLimits,
+) -> glib::ffi::gboolean {
+    let Some(i) = video_slot(kind) else {
+        return glib::ffi::GFALSE;
+    };
+    let l = (*h).video_limits[i];
+    if l.present == 0 || out.is_null() {
+        return glib::ffi::GFALSE;
+    }
+    *out = l;
+    glib::ffi::GTRUE
+}
+
+/// Forget both kinds' ceilings. Called before every LOGIN reply is read.
+///
+/// # Safety
+/// `h` as for [`hx_conn_set_video_limits`].
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_reset_video_limits(h: *mut HtlcConn) {
+    (*h).video_limits = [VideoLimits::default(); 2];
+}
+
 // ---- Capability bitmask ---------------------------------------------------
 
 /// TRUE iff the connection advertises capability bit(s) `cap`.
@@ -680,6 +765,7 @@ offsetof_export! {
     hx_conn_offsetof_caps => caps,
     hx_conn_offsetof_serial => serial,
     hx_conn_offsetof_ping_timer => ping_timer,
+    hx_conn_offsetof_video_limits => video_limits,
 }
 
 /// The size Rust believes the struct is, for the same comparison.
@@ -697,7 +783,7 @@ pub extern "C" fn hx_conn_alignof() -> usize {
 /// Pin the layout: if this fires, `HtlcConn` and the C mirror in
 /// `hxconn_layout.h` have drifted. The C side pins the same value with
 /// `_Static_assert (sizeof (struct htlc_conn) == HXCONN_SIZEOF)`.
-pub const HXCONN_SIZEOF: usize = 784;
+pub const HXCONN_SIZEOF: usize = 808;
 const _: () = assert!(std::mem::size_of::<HtlcConn>() == HXCONN_SIZEOF);
 
 #[cfg(test)]

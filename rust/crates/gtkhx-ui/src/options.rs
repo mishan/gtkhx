@@ -362,6 +362,8 @@ pub(crate) mod cfg {
     #[cfg(feature = "voice")]
     pub const VOICE_OUTPUT_DEVICE: &str = "VOICEOUTPUTDEVICE";
     #[cfg(feature = "voice")]
+    pub const VOICE_CAMERA_DEVICE: &str = "VOICECAMERADEVICE";
+    #[cfg(feature = "voice")]
     pub const VOICE_PTT_ENABLED: &str = "VOICEPTTENABLED";
     #[cfg(feature = "voice")]
     pub const VOICE_PTT_KEY: &str = "VOICEPTTKEY";

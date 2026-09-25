@@ -4,9 +4,10 @@
 #
 #   unit         — pure-function tests, no GTK / network. Fast.
 #   proto        — wire-format parsers driven from canned fixtures.
-#   integration  — end-to-end against the mhxd + Janus + Argus +
+#   integration  — end-to-end against the mhxd + Janus + hxd-ng + Argus +
 #                  hxtrackd Docker containers in tests/mhxd/,
-#                  tests/janus/, tests/argus/, and tests/hxtrackd/.
+#                  tests/janus/, tests/hxd-ng/, tests/argus/, and
+#                  tests/hxtrackd/.
 #
 # ONE job, ordered to fail fast:
 #
@@ -17,7 +18,8 @@
 #   2. Snapshot that container (docker commit) so the integration run reuses
 #      the installed deps AND the compiled tree — no second dnf install, no
 #      recompile.
-#   3. Build + start the mhxd / Janus / Argus / hxtrackd / socks containers.
+#   3. Build + start the mhxd / Janus / hxd-ng / Argus / hxtrackd / socks
+#      containers.
 #   4. Run the integration suite against them, off the snapshot.
 #
 # Fedora (not Ubuntu) because GtkHx needs libadwaita >= 1.6, which Ubuntu's
@@ -239,6 +241,19 @@ jobs:
           cache-from: type=gha,scope=janus
           cache-to: type=gha,mode=max,scope=janus
 
+      - name: build hxd-ng test container
+        # hxd-ng from source at the revision pinned in tests/hxd-ng/Dockerfile
+        # — the only server with the video extension, so the video tests'
+        # target. A full cargo release build the first time; the gha layer
+        # cache makes it a no-op until the pin or the rig config changes.
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/hxd-ng
+          tags: gtkhx-hxd-ng
+          load: true
+          cache-from: type=gha,scope=hxd-ng
+          cache-to: type=gha,mode=max,scope=hxd-ng
+
       - name: build hxtrackd test container
         # hxtrackd is mhxd's bundled pre-spec v1 tracker — coverage for the
         # probe-then-fallback path in network.c. See tests/hxtrackd/README.md.
@@ -273,13 +288,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=socks
 
       - name: start rig (compose)
-        # One `compose up` starts all five test containers, every one on host
+        # One `compose up` starts every test container, each one on host
         # networking. The images were just built (build-push-action above) with
         # the same gtkhx-<name> tags the compose file references, so compose
         # reuses them and never rebuilds. Host ports match server_matrix.c /
         # tracker_matrix.c:
         #   mhxd     5500/5501
         #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice)
+        #   hxd-ng   5520 + 5524/udp (voice + video; advertises the runner's
+        #            primary IPv4, see tests/hxd-ng/entrypoint.sh)
         #   hxtrackd 5498 + 5499/udp        (its hardcoded HTRK ports)
         #   argus    5698 + 6498 (TLS via stunnel) + 5699/udp
         #   socks    1080 (forwards CONNECTs to 127.0.0.1:5500)
@@ -306,6 +323,7 @@ jobs:
           }
           wait_tcp 5500   # mhxd HTLS
           wait_tcp 5510   # janus HTLS
+          wait_tcp 5520   # hxd-ng HTLS (video)
           wait_tcp 5498   # hxtrackd listing
           wait_tcp 5698   # argus listing
           wait_tcp 6498   # argus TLS (stunnel)
@@ -352,7 +370,7 @@ jobs:
 
       - name: dump rig logs on failure
         if: failure()
-        # All five test containers' stdout/stderr in one stream.
+        # Every test container's stdout/stderr in one stream.
         run: docker compose $COMPOSE_FILES logs --no-color || true
 
       - name: upload meson test logs

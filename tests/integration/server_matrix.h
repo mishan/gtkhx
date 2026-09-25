@@ -48,6 +48,7 @@
 /* (1u << 2) reserved — CAPABILITY_DATE_FORMAT in protocol.h */
 #define HX_TEST_CAP_INLINE_MEDIA (1u << 3) /* fogWraith spec        */
 #define HX_TEST_CAP_CHAT_HISTORY (1u << 4) /* fogWraith spec        */
+#define HX_TEST_CAP_VIDEO (1u << 10)       /* camera/screen video   */
 
 /* Non-wire test-only bits live in the high half. */
 #define HX_TEST_CAP_HOPE (1u << 16)        /* HOPE handshake        */

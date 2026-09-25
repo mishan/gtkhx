@@ -70,6 +70,7 @@ G_BEGIN_DECLS
  * connection (gtkhx-ui/src/files.rs). A saved layout that still names
  * "files" has it pruned at load (dl_tree_drop_panel), so a leaf it had to
  * itself doesn't come back as an empty pane. */
+#define HX_PANEL_ID_VIDEO "video"
 /* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
  * not a docked panel — it has never had an HxPanel. */
 

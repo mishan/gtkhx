@@ -371,6 +371,9 @@ pub struct Voice {
     /// resolves through `autoaudiosrc` / `autoaudiosink`.
     pub input_device: String,
     pub output_device: String,
+    /// The camera a video publication captures from, by stable device
+    /// name. Empty means the first camera found.
+    pub camera_device: String,
     pub ptt_enabled: bool,
     /// Canonical key name, e.g. `Pause`, `F8`, `<Control>F12`. Empty means the
     /// user turned push-to-talk on but hasn't picked a key yet.

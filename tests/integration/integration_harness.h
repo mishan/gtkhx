@@ -295,6 +295,16 @@ extern int integration_open_login_to_caps_or_skip (const hx_test_server *srv,
                                                    guint16 icon, guint16 caps);
 
 /*
+ * As integration_open_login_to_caps_or_skip, logging in as `login` with
+ * `password` (NULL for none) instead of the guest account. For tests of
+ * per-account access bits, which need an account the server configures
+ * without them.
+ */
+extern int integration_open_login_account_caps_or_skip (
+    const hx_test_server *srv, struct htlc_conn *htlc, const char *login,
+    const char *password, const char *display_name, guint16 icon, guint16 caps);
+
+/*
  * TLS sibling of integration_open_login_or_skip: connect + magic +
  * guest LOGIN + drain-to-SELFINFO over TLS-from-byte-zero, driven by the
  * production rustls transport (the GnuTLS GIOStream harness was retired).

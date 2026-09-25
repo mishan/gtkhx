@@ -76,11 +76,14 @@ GST_DST="$FW/gstreamer-1.0"
 # is the PCMU codec the servers negotiate — without it VoiceRuntime::new fails to
 # build the send bin and the client leaves the room the instant it joins.
 # audiotestsrc is the silence/fallback source autoaudiosrc drops to when there's
-# no capture device.
+# no capture device. Video adds vpx (VP8), videoconvertscale/videorate for the
+# capture chain, app for the frame sinks, and videotestsrc for the test hook;
+# applemedia already carries avfvideosrc, which captures cameras and the screen.
 GST_PLUGINS=(
   coreelements playback autodetect typefindfunctions
   audioconvert audioresample audiomixer volume level audiotestsrc
   opus mulaw rtp rtpmanager srtp dtls sctp webrtc webrtcnice nice
+  vpx videoconvertscale videorate app videotestsrc
   osxaudio applemedia
 )
 if [ -d "$GST_SRC" ]; then
@@ -296,6 +299,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>LSMinimumSystemVersion</key>    <string>$min_os</string>
   <key>NSHighResolutionCapable</key>   <true/>
+  <key>NSCameraUsageDescription</key>
+  <string>GtkHx uses the camera when you turn it on in a voice chat.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>GtkHx uses the microphone when you join a voice chat.</string>
 </dict>
 </plist>
 PLIST

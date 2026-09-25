@@ -54,6 +54,31 @@ pub const INDICATOR_MUTED: u32 = 3;
 /// `HX_VOICE_MODEL_MAX_PARTICIPANTS`.)
 const MAX_PARTICIPANTS: usize = 1024;
 
+/// Video flags for a uid, from Video Status (611). A publication, live or
+/// paused, sets its kind's bit; a paused one sets its paused bit too.
+/// (Mirror voice_model.h's HX_VOICE_VIDEO_*.)
+pub const VIDEO_CAMERA: u32 = 1 << 0;
+pub const VIDEO_SCREEN: u32 = 1 << 1;
+pub const VIDEO_CAMERA_PAUSED: u32 = 1 << 2;
+pub const VIDEO_SCREEN_PAUSED: u32 = 1 << 3;
+
+/// Project a publication list onto per-uid flags.
+fn video_flags(blob: &[u8]) -> HashMap<u16, u32> {
+    let mut out: HashMap<u16, u32> = HashMap::new();
+    for p in hxproto::video::parse_video_publishers(blob).take(MAX_PARTICIPANTS) {
+        let (on, paused) = match p.kind {
+            hxproto::video::VideoKind::Camera => (VIDEO_CAMERA, VIDEO_CAMERA_PAUSED),
+            hxproto::video::VideoKind::Screen => (VIDEO_SCREEN, VIDEO_SCREEN_PAUSED),
+        };
+        let f = out.entry(p.user_id).or_default();
+        *f |= on;
+        if p.is_paused() {
+            *f |= paused;
+        }
+    }
+    out
+}
+
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Entry {
     in_voice: bool,
@@ -95,6 +120,8 @@ mod imp {
         /// a join/clear seeds silently (no chime burst for people already
         /// present); subsequent ingests chime. Re-armed by `clear`.
         pub(crate) seeded: Cell<bool>,
+        /// uid → `VIDEO_*` flags, from the last Video Status. Absent is 0.
+        pub(crate) video: RefCell<HashMap<u16, u32>>,
     }
 
     #[glib::object_subclass]
@@ -122,6 +149,13 @@ mod imp {
                         .build(),
                     Signal::builder("voice-presence-chime")
                         .param_types([u32::static_type(), bool::static_type()])
+                        .build(),
+                    // "video-changed" (uid: u32, flags: u32) — a uid's
+                    // `VIDEO_*` flags flipped. The user list shows who is
+                    // publishing whether or not anyone is watching them,
+                    // which is what the spec asks of a client.
+                    Signal::builder("video-changed")
+                        .param_types([u32::static_type(), u32::static_type()])
                         .build(),
                 ]
             })
@@ -272,9 +306,40 @@ impl HxVoiceModel {
         self.recompute_and_maybe_emit(uid);
     }
 
+    /// Replace every uid's video flags from a `DATA_VIDEO_PUBLISHERS` blob,
+    /// emitting `"video-changed"` for each uid whose flags moved. The list
+    /// is complete, never a delta: a uid it omits publishes nothing.
+    pub fn ingest_video_publishers(&self, blob: &[u8]) {
+        let fresh = video_flags(blob);
+        let changed: Vec<(u16, u32)> = {
+            let old = self.imp().video.borrow();
+            let mut changed: Vec<(u16, u32)> = fresh
+                .iter()
+                .filter(|(u, f)| old.get(u).copied().unwrap_or(0) != **f)
+                .map(|(u, f)| (*u, *f))
+                .collect();
+            changed.extend(
+                old.keys()
+                    .filter(|u| !fresh.contains_key(u))
+                    .map(|u| (*u, 0)),
+            );
+            changed
+        };
+        *self.imp().video.borrow_mut() = fresh;
+        for (uid, flags) in changed {
+            self.emit_by_name::<()>("video-changed", &[&(uid as u32), &flags]);
+        }
+    }
+
+    /// `VIDEO_*` flags for `uid`; 0 when it publishes nothing.
+    pub fn get_video(&self, uid: u16) -> u32 {
+        self.imp().video.borrow().get(&uid).copied().unwrap_or(0)
+    }
+
     /// Clear all per-uid state, transitioning every active uid back to NONE
     /// (with per-uid signals) and re-arming the seed gate.
     pub fn clear(&self) {
+        self.ingest_video_publishers(&[]);
         let uids: Vec<u16> = self.imp().by_uid.borrow().keys().copied().collect();
         for uid in uids {
             {
@@ -406,3 +471,37 @@ pub unsafe extern "C" fn hx_voice_model_get_indicator(self_: *mut c_void, uid: u
 
 #[cfg(test)]
 mod tests;
+
+/// Replace the per-uid video flags from a `DATA_VIDEO_PUBLISHERS` blob.
+///
+/// # Safety
+/// `self_` is a valid `HxVoiceModel *` or NULL; `blob` is valid for `len`
+/// bytes or NULL with `len == 0`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_voice_model_ingest_video_publishers(
+    self_: *mut c_void,
+    blob: *const u8,
+    len: usize,
+) {
+    if self_.is_null() {
+        return;
+    }
+    let bytes: &[u8] = if blob.is_null() || len == 0 || len > isize::MAX as usize {
+        &[]
+    } else {
+        std::slice::from_raw_parts(blob, len)
+    };
+    borrow(self_).ingest_video_publishers(bytes);
+}
+
+/// `VIDEO_*` flags for `uid`; 0 for NULL or an unknown uid.
+///
+/// # Safety
+/// `self_` is a valid `HxVoiceModel *` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_voice_model_get_video(self_: *mut c_void, uid: u16) -> u32 {
+    if self_.is_null() {
+        return 0;
+    }
+    borrow(self_).get_video(uid)
+}

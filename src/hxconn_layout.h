@@ -197,9 +197,12 @@ struct htlc_conn {
     guint ping_timer;
     guint post_login_timer;
     guint32 login_reply_trans;
+    /* Video extension: DATA_VIDEO_LIMITS from the LOGIN reply, camera
+     * then screen. Read through hx_conn_video_limits. */
+    struct hx_video_limits video_limits[2];
 };
 
-_Static_assert (sizeof (struct htlc_conn) == 784,
+_Static_assert (sizeof (struct htlc_conn) == 808,
                 "struct htlc_conn layout drifted from Rust HtlcConn "
                 "(rust/crates/gtkhx-core/src/conn.rs)");
 

@@ -432,6 +432,74 @@ extern void gtkhx_voice_runtime_task_error (gtkhx_voice_runtime *rt,
                                             uint32_t origin_opcode,
                                             const char *text);
 
+/*
+ * Video. Video rides the voice session: the same peer connection and
+ * room, five more transactions (607-611). Kinds are the wire values,
+ * 1 camera and 2 screen; uid 0 in the frame counter names this
+ * client's own preview.
+ */
+
+/* 1 when VP8 decode and the frame sink are installed, which is what
+ * decides whether HTLC_CAP_VIDEO is advertised. */
+extern int gtkhx_voice_video_receive_available (void);
+
+/* 1 when an encoder and a source for kind are installed. */
+extern int gtkhx_voice_video_publish_available (uint16_t kind);
+
+/* Preferred camera by device name; NULL or empty picks the first. */
+extern void gtkhx_voice_set_camera_device (const char *name);
+
+/* Feed a Video Status (611). blob+len is DATA_VIDEO_PUBLISHERS, eight
+ * bytes an entry. */
+extern void gtkhx_voice_runtime_video_status (gtkhx_voice_runtime *rt,
+                                              uint32_t cid, const uint8_t *blob,
+                                              size_t len);
+
+/* The server refused a Video Start of kind sent for room cid; text is
+ * its error string. A refusal for a room the runtime has left is
+ * ignored. */
+extern void gtkhx_voice_runtime_video_start_failed (gtkhx_voice_runtime *rt,
+                                                    uint32_t cid, uint16_t kind,
+                                                    const char *text);
+
+/* The login reply's DATA_VIDEO_LIMITS for kind. */
+extern void
+gtkhx_voice_runtime_set_video_limits (gtkhx_voice_runtime *rt, uint16_t kind,
+                                      uint16_t max_width, uint16_t max_height,
+                                      uint16_t max_fps, uint32_t max_bitrate);
+
+/* Start (607), stop (608), pause/resume (609) a publication. */
+extern void gtkhx_voice_runtime_video_start (gtkhx_voice_runtime *rt,
+                                             uint16_t kind);
+extern void gtkhx_voice_runtime_video_stop (gtkhx_voice_runtime *rt,
+                                            uint16_t kind);
+extern void gtkhx_voice_runtime_video_pause (gtkhx_voice_runtime *rt,
+                                             uint16_t kind, int paused);
+
+/* Declare the complete receive set (610): n streams, uids[i] of
+ * kinds[i]. n == 0 is "no video at all". */
+extern void gtkhx_voice_runtime_video_subscribe (gtkhx_voice_runtime *rt,
+                                                 const uint16_t *uids,
+                                                 const uint16_t *kinds,
+                                                 size_t n);
+
+/* Frames decoded so far for uid's stream of kind (uid 0: own
+ * preview). */
+extern uint64_t
+gtkhx_voice_runtime_video_frames_received (gtkhx_voice_runtime *rt,
+                                           uint16_t uid, uint16_t kind);
+
+/* The size of the newest decoded frame of uid's stream of kind: 1 and
+ * *width / *height set once one has arrived, else 0. */
+extern int gtkhx_voice_runtime_video_frame_size (gtkhx_voice_runtime *rt,
+                                                 uint16_t uid, uint16_t kind,
+                                                 uint32_t *width,
+                                                 uint32_t *height);
+
+/* 1 while this client publishes kind, paused or not. */
+extern int gtkhx_voice_runtime_video_publishing (gtkhx_voice_runtime *rt,
+                                                 uint16_t kind);
+
 #ifdef __cplusplus
 }
 #endif

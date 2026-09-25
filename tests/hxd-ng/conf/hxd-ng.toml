@@ -1,0 +1,22 @@
+# hxd-ng for the GtkHx Tier 3 rig: the one server that speaks the video
+# extension. Ports sit clear of mhxd (5500) and Janus (5510) on the
+# host network the whole rig shares; see tests/COMPOSE.md.
+
+[server]
+bind = "0.0.0.0:5520"
+name = "GtkHx test hxd-ng"
+
+[paths]
+accounts = "/var/lib/hxd-ng/accounts"
+
+[voice]
+bind = "0.0.0.0:5524"
+# ICE-lite: the server offers only these as its candidates, so they must
+# be addresses the test clients reach. The entrypoint replaces this line
+# with the host's own addresses at start; see entrypoint.sh for why
+# loopback won't do.
+advertise = ["127.0.0.1:5524"]
+
+# Present = video on, with the spec's default ceilings. One screen slot
+# a room, so the second-sharer refusal is testable.
+[voice.video]
