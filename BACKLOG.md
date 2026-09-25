@@ -64,13 +64,14 @@ record.
 
 ## Voice
 
-- **`voice_rejoin_media` against Janus is intermittent.** B sometimes stays in
-  ICE Connecting after a rejoin or a concurrent join, and `vad_speaker`
-  sometimes misses A's speaking flag. Both happen on `main` too, and the rate
-  didn't change when a stale-answer race in the runtime was fixed. The rig's
-  Janus is an old pinned build, and the snapshot it came from is no longer
-  published. Moving the rig to a current Janus comes first; if the flake
-  survives that, it's ours.
+- **`voice_rejoin_media` against Janus was intermittent.** B sometimes stayed
+  in ICE Connecting after a rejoin or a concurrent join, and `vad_speaker`
+  sometimes missed A's speaking flag. The rate didn't change when a
+  stale-answer race in the runtime was fixed, which pointed at the rig's old
+  pinned Janus build. With the rig moved to a current Janus (September 2026),
+  repeated runs of `voice_rejoin_media`, `voice_participants` and
+  `video_media` all passed. Keep an eye on CI; if the flake comes back, it's
+  ours. The test's wall time still varies widely between runs.
 - **Every first answer now waits for the microphone's caps**, up to 1500 ms.
   `voice_rejoin_media` asserts that every answer declares the send SSRC, so a
   slow audio source would fail that assertion rather than hang.
