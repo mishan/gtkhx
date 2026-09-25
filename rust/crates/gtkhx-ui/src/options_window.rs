@@ -287,13 +287,25 @@ fn present(page: Option<&str>) {
     listbox.set_selection_mode(gtk::SelectionMode::Single);
     listbox.add_css_class("navigation-sidebar");
 
+    // Pages are built the first time they're selected, not here. Some are
+    // not free to build: Voice scans the audio devices and the cameras,
+    // which wakes every GStreamer device provider (libcamera among them)
+    // on each Settings open, whether or not anyone looks at that page.
+    let pages: std::rc::Rc<Vec<glib::WeakRef<adw::PreferencesPage>>> = std::rc::Rc::new(
+        entries
+            .iter()
+            .map(|entry| {
+                let page = adw::PreferencesPage::new();
+                page.set_title(&tr(entry.title));
+                stack.add_named(&page, Some(entry.name));
+                page.downgrade()
+            })
+            .collect(),
+    );
+    let drawn = std::rc::Rc::new(std::cell::RefCell::new(vec![false; entries.len()]));
+
     for entry in entries.iter() {
         let title = tr(entry.title);
-
-        let page = adw::PreferencesPage::new();
-        page.set_title(&title);
-        (entry.draw)(&page);
-        stack.add_named(&page, Some(entry.name));
 
         let rbox = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         rbox.set_margin_start(6);
@@ -349,9 +361,18 @@ fn present(page: Option<&str>) {
             return;
         };
         let idx = row.index();
-        let Some(entry) = usize::try_from(idx).ok().and_then(|i| for_select.get(i)) else {
+        let Some(i) = usize::try_from(idx).ok() else {
             return;
         };
+        let Some(entry) = for_select.get(i) else {
+            return;
+        };
+        if !drawn.borrow()[i] {
+            if let Some(page) = pages[i].upgrade() {
+                (entry.draw)(&page);
+                drawn.borrow_mut()[i] = true;
+            }
+        }
         if let Some(stack) = stack_weak.upgrade() {
             stack.set_visible_child_name(entry.name);
         }
