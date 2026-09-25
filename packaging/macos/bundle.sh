@@ -86,12 +86,28 @@ GST_PLUGINS=(
   vpx videoconvertscale videorate app videotestsrc
   osxaudio applemedia
 )
+# Plugins whose absence doesn't fail the build but quietly takes a feature
+# away: without vpx or the video capture chain the client just never offers
+# video, and without mulaw or webrtc it can't hold a voice call. The rest are
+# optional or have a fallback. A missing one is a warning, not an error, so a
+# build host without video still produces a usable bundle. (A case rather than
+# an associative array: macOS ships bash 3.2.)
+gst_required_for() {
+  case "$1" in
+    vpx|videoconvertscale|videorate|app) echo video ;;
+    mulaw|webrtc) echo voice ;;
+  esac
+}
 if [ -d "$GST_SRC" ]; then
   echo ">> collecting GStreamer plugins"
   mkdir -p "$GST_DST"
   for p in "${GST_PLUGINS[@]}"; do
     dylib="$GST_SRC/libgst${p}.dylib"
-    [ -f "$dylib" ] && cp "$dylib" "$GST_DST/"
+    if [ -f "$dylib" ]; then
+      cp "$dylib" "$GST_DST/"
+    elif [ -n "$(gst_required_for "$p")" ]; then
+      echo "::warning:: GStreamer plugin '$p' not found — the bundle will run without $(gst_required_for "$p")"
+    fi
   done
   # gst-plugin-scanner is spawned to build the registry; ship it too.
   scanner="$BREW/libexec/gstreamer-1.0/gst-plugin-scanner"

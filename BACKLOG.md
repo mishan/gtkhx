@@ -42,42 +42,21 @@ record.
 
 ### Robustness
 
-- **Screen-share portal flow.**
-  - The wait for a Request's `Response` ignores the handle the call returns and
-    has no timeout. A portal older than 0.9 that answers on another path, or a
-    backend that dies, leaves the flow waiting forever.
-  - A second Share click while the picker is open starts a second flow. The
-    button should be insensitive while a pick is pending.
-- **Closing the Video panel may leave the server streaming** (unconfirmed). Unmap
-  schedules the debounced 610, and destroy cancels the timer. If both happen in
-  the same turn, the empty subscription set never goes out. Sending it
-  synchronously on destroy would close the gap.
-- **Refused 610 and 609 aren't retried.** The machine records the subscription
-  set, and the paused bit, before the server confirms them. After a refusal, the
-  same set isn't sent again until it changes. A `ServerTaskError` for those
-  opcodes should mark them dirty.
+- **A refused 609 isn't rolled back.** The machine records the paused bit
+  before the server confirms it, so after a refusal the local state and the
+  server's disagree until the next toggle. The error carries only the opcode, so
+  telling a camera refusal from a screen one needs the kind in the task label,
+  the way 607 does it.
 - **A late 607 refusal can clear a newer publication in the same room.** The
   refusal now carries its room, so one from a room the client has left is
   ignored. A start → stop → start inside one round trip can still have the first
   refusal end the second. A start generation (or the transaction id) in the
   event would settle it.
-- **Toasts for refused requests.** A refused 607 toasts twice: once from
-  `task_error` and once from the machine's `Error` signal. It toasts an empty
-  message when the server sends no text. Voice task errors double up the same
-  way.
 - **The caps wait has no recovery.** If an answer goes out on the 1500 ms
   timeout without a sender's `a=ssrc`, the next offer sees that pad as already
   bound and answers immediately, again without it. Either wait on every bound
   sender that has no caps, or fail the publication when its SSRC is missing from
   the answer.
-- **A stale capture error can end its replacement.** The bus watch matches a
-  capture error by bin name, which every capture of a kind shares. A queued
-  error from the old bin can therefore tear down the new one. The fix is to
-  check that the message source sits inside the current bin.
-- **`detach_capture` reads the payloader's sequence number before it stops the
-  bin.** Packets still queued can be sent after the read, so the next capture
-  repeats a sequence number or two on the same SSRC. Read it after
-  `set_state(Null)`.
 - **Frames outlive their streams.** `pad-removed` doesn't remove a video mid's
   frames or send `StreamEnded`. `reset_legs` clears the frame store before the
   old pipeline reaches Null, so the old appsinks can put frames back, including
@@ -86,10 +65,6 @@ record.
   before `set-remote-description` has indexed the offer falls back to the
   transceiver's mid, which is the misrouting the map exists to prevent. The map
   also isn't restored if that call fails.
-- **The screen source's fd is borrowed.** `ScreenSource::PipeWire` holds a raw fd
-  that the UI's portal session owns, and the runtime keeps it after the
-  publication ends. Clear it when publishing stops, or dup it into an `OwnedFd`
-  the runtime owns.
 
 ## Voice
 
@@ -116,9 +91,6 @@ record.
   loopback-only host, and the media tests then fail with "never reached
   CONNECTED". The README and the compose comment say "addresses" where only one
   is advertised.
-- The macOS and Windows bundle scripts skip a missing plugin silently. A bundle
-  without `vpx` or `videoconvertscale` ships with no video and nothing says so.
-  Warn for the video plugins.
 - hxd-ng's `xfer_port` (5521) isn't set in the rig config. Nothing uses it yet.
 
 ## Legacy servers

@@ -3955,8 +3955,9 @@ fn attach_pipeline_bus_watch(
                     // losing the call is a failure".
                     if let Some(kind) = crate::video::kind_of_send_path(&src) {
                         let text = err.error().to_string();
+                        let origin = err.src().cloned();
                         with_main_thread_runtime(runtime_id, |rt| {
-                            rt.capture_failed(kind, &src, text);
+                            rt.capture_failed(kind, origin.as_ref(), &src, text);
                         });
                     }
                 }
@@ -5050,12 +5051,17 @@ impl VoiceRuntime {
             (inner.pipeline.clone(), bin, Arc::clone(&inner.video.frames))
         };
         if let Some(bin) = bin {
-            // Where the next capture's payloader has to carry on from.
+            let _ = bin.set_state(gstreamer::State::Null);
+            // Where the next capture's payloader has to carry on from. Read
+            // once the bin is stopped: before that, packets still queued
+            // behind the payloader can go out after the read, and the next
+            // capture would repeat their sequence numbers on the same SSRC.
+            // The payloader only picks a fresh base on its way back up, so
+            // the value survives the stop.
             if let Some(pay) = bin.by_name(crate::video::PAYLOADER_NAME) {
                 let last = pay.property::<u32>("seqnum") as u16;
                 self.inner.borrow_mut().video.next_seq[kind.index()] = Some(last.wrapping_add(1));
             }
-            let _ = bin.set_state(gstreamer::State::Null);
             if let Some(src) = bin.static_pad("src") {
                 if let Some(peer) = src.peer() {
                     let _ = src.unlink(&peer);
@@ -5118,11 +5124,25 @@ impl VoiceRuntime {
 
     /// A capture bin posted an error. Only a live publication's current
     /// bin counts: an error from a bin already torn down for a pause or
-    /// a stop is the teardown's echo, not a failure.
-    fn capture_failed(&self, kind: VideoKind, src: &str, text: String) {
+    /// a stop is the teardown's echo, not a failure. Every capture of a
+    /// kind has the same bin name, so the path alone can't tell the old
+    /// bin from its replacement; `origin`, the element that posted, has to
+    /// sit inside the current one.
+    fn capture_failed(
+        &self,
+        kind: VideoKind,
+        origin: Option<&gstreamer::Object>,
+        src: &str,
+        text: String,
+    ) {
         let live = {
             let inner = self.inner.borrow();
-            inner.video.send_bins[kind.index()].is_some()
+            inner.video.send_bins[kind.index()]
+                .as_ref()
+                .zip(origin)
+                .is_some_and(|(bin, o)| {
+                    o == bin.upcast_ref::<gstreamer::Object>() || o.has_as_ancestor(bin)
+                })
                 && inner.machine.local_video(kind) == Some(false)
         };
         if !live {

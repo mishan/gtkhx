@@ -497,6 +497,12 @@ fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
                 if let Some(id) = p.subscribe_timer.borrow_mut().take() {
                     id.remove();
                 }
+                // Closing the panel unmaps and destroys it in the same turn,
+                // so the unmap's debounced send never runs. Say "nothing"
+                // now, or the server keeps streaming to a panel that is gone.
+                if let Some(rt) = unsafe { runtime(p.sess()) } {
+                    rt.video_subscribe(Vec::new());
+                }
                 p.observing.set(0);
             }
         });

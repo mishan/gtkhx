@@ -25,7 +25,7 @@
 //! the signal is subscribed to before the call that triggers it.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 
 use gtk4 as gtk;
@@ -51,6 +51,9 @@ thread_local! {
     static SHARES: RefCell<HashMap<dock::ConnKey, Option<PortalSession>>> =
         RefCell::new(HashMap::new());
     static BANNER: RefCell<Option<adw::Banner>> = const { RefCell::new(None) };
+    /// Connections with a picker or a confirmation open. A second request
+    /// while one is would start a second flow.
+    static PICKING: RefCell<HashSet<dock::ConnKey>> = RefCell::new(HashSet::new());
 }
 
 /// The freedesktop ScreenCast portal: D-Bus with a passed file
@@ -151,23 +154,52 @@ mod portal {
         format!("gtkhx{}", glib::random_int())
     }
 
+    /// How long a request that shows nothing may take to answer.
+    const QUICK: std::time::Duration = std::time::Duration::from_secs(30);
+    /// How long one that shows the picker may take: long enough to choose
+    /// in, short enough that a backend that died doesn't leave the share
+    /// button waiting for good.
+    const PICKER: std::time::Duration = std::time::Duration::from_secs(180);
+
+    /// Why a portal request didn't answer with results.
+    enum RequestError {
+        /// The user canceled the picker: not an error to show.
+        Canceled,
+        /// The portal answered with a failure.
+        Refused,
+        /// Anything else, already worded for the user.
+        Other(String),
+    }
+
+    /// The message to show; empty for a cancel, which shows none.
+    impl From<RequestError> for String {
+        fn from(e: RequestError) -> String {
+            match e {
+                RequestError::Canceled => String::new(),
+                RequestError::Refused => tr("The screen sharing request failed."),
+                RequestError::Other(m) => m,
+            }
+        }
+    }
+
     /// Call a portal method that answers through a Request, and wait for the
     /// answer. `args` receives the handle token to put in its options.
     async fn portal_request(
         conn: &gio::DBusConnection,
         method: &str,
+        wait: std::time::Duration,
         args: impl FnOnce(&str) -> glib::Variant,
-    ) -> Result<glib::VariantDict, String> {
+    ) -> Result<glib::VariantDict, RequestError> {
         let token = token();
         let path = request_path(conn, &token);
         let slot = Rc::new(RefCell::new(Slot::default()));
-        let sub = {
+        let subscribe = |path: &str| {
             let slot = Rc::clone(&slot);
             conn.subscribe_to_signal(
                 Some(PORTAL_BUS),
                 Some("org.freedesktop.portal.Request"),
                 Some("Response"),
-                Some(&path),
+                Some(path),
                 None,
                 gio::DBusSignalFlags::NONE,
                 move |sig| {
@@ -179,27 +211,56 @@ mod portal {
                 },
             )
         };
-        conn.call_future(
-            Some(PORTAL_BUS),
-            PORTAL_PATH,
-            SCREENCAST,
-            method,
-            Some(&args(&token)),
-            None,
-            gio::DBusCallFlags::NONE,
-            -1,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        let reply = Response(slot).await;
-        drop(sub);
+        let _sub = subscribe(&path);
+        let reply = conn
+            .call_future(
+                Some(PORTAL_BUS),
+                PORTAL_PATH,
+                SCREENCAST,
+                method,
+                Some(&args(&token)),
+                None,
+                gio::DBusCallFlags::NONE,
+                -1,
+            )
+            .await
+            .map_err(|e| RequestError::Other(e.to_string()))?;
+        // A portal older than 0.9 doesn't build the request path from the
+        // token, and answers on the one it returns instead. The answer can
+        // beat this subscription there; the timeout below covers that.
+        let request = reply
+            .child_value(0)
+            .get::<glib::variant::ObjectPath>()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| path.clone());
+        let _late_sub = (request != path).then(|| subscribe(&request));
+        let Ok(reply) = glib::future_with_timeout(wait, Response(slot)).await else {
+            // Closing the request takes down a picker that is still up, so a
+            // choice made after this can't start a share nobody is waiting
+            // for.
+            conn.call(
+                Some(PORTAL_BUS),
+                &request,
+                "org.freedesktop.portal.Request",
+                "Close",
+                None,
+                None,
+                gio::DBusCallFlags::NONE,
+                -1,
+                gio::Cancellable::NONE,
+                |_| {},
+            );
+            return Err(RequestError::Other(tr(
+                "The screen sharing request timed out.",
+            )));
+        };
         let (code, results) = reply
             .get::<(u32, glib::VariantDict)>()
-            .ok_or_else(|| "malformed portal response".to_string())?;
+            .ok_or_else(|| RequestError::Other("malformed portal response".to_string()))?;
         match code {
             0 => Ok(results),
-            1 => Err(String::new()), // the user canceled: not an error to show
-            _ => Err(tr("The screen sharing request failed.")),
+            1 => Err(RequestError::Canceled),
+            _ => Err(RequestError::Refused),
         }
     }
 
@@ -224,7 +285,7 @@ mod portal {
             .await
             .map_err(|e| e.to_string())?;
 
-        let created = portal_request(&conn, "CreateSession", |tok| {
+        let created = portal_request(&conn, "CreateSession", QUICK, |tok| {
             (options(&[
                 ("handle_token", tok.to_variant()),
                 ("session_handle_token", token().to_variant()),
@@ -265,17 +326,18 @@ mod portal {
                 glib::Variant::tuple_from_iter([session, options(&opts)])
             }
         };
-        if let Err(e) = portal_request(&conn, "SelectSources", select(true)).await {
-            // A cancel is final. Anything else may be a portal that doesn't
-            // draw cursors into the stream and refuses the option; the share
-            // is still worth having without one.
-            if e.is_empty() {
-                return Err(e);
+        match portal_request(&conn, "SelectSources", PICKER, select(true)).await {
+            Ok(_) => {}
+            // A refusal may be a portal that doesn't draw cursors into the
+            // stream and rejects the option; the share is still worth having
+            // without one. A cancel or a timeout is final.
+            Err(RequestError::Refused) => {
+                portal_request(&conn, "SelectSources", PICKER, select(false)).await?;
             }
-            portal_request(&conn, "SelectSources", select(false)).await?;
+            Err(e) => return Err(e.into()),
         }
 
-        let started = portal_request(&conn, "Start", |tok| {
+        let started = portal_request(&conn, "Start", PICKER, |tok| {
             glib::Variant::tuple_from_iter([
                 session.clone(),
                 "".to_variant(),
@@ -345,6 +407,13 @@ enum PortalSession {}
 /// `done(false)` if the user declined or it could not start.
 pub(crate) fn start(sess: *mut c_void, parent: &gtk::Widget, done: impl Fn(bool) + 'static) {
     let conn = dock::key_for_session(sess);
+    if !PICKING.with(|p| p.borrow_mut().insert(conn)) {
+        return;
+    }
+    let done = move |ok: bool| {
+        PICKING.with(|p| p.borrow_mut().remove(&conn));
+        done(ok);
+    };
     // Test hook: with the runtime's test source standing in for every
     // capture there is nothing to pick, and a headless run has no portal
     // to pick with.
@@ -388,6 +457,11 @@ pub(crate) fn start(sess: *mut c_void, parent: &gtk::Widget, done: impl Fn(bool)
         });
         dialog.present(Some(parent));
     }
+}
+
+/// Whether `conn` has a picker or a confirmation open.
+pub(crate) fn picking(conn: dock::ConnKey) -> bool {
+    PICKING.with(|p| p.borrow().contains(&conn))
 }
 
 #[cfg(target_os = "linux")]
@@ -443,6 +517,12 @@ pub(crate) fn prune(conn: dock::ConnKey, rt: Option<&hxvoice_runtime::runtime::V
 /// The publication is gone, however it went: close the portal session and
 /// take the indicator down if nothing else is shared.
 pub(crate) fn ended(conn: dock::ConnKey) {
+    // The runtime's screen source borrows the portal's PipeWire fd, so take
+    // it back before the session that owns the fd closes it.
+    let sess = unsafe { hx_session_with_serial(conn) };
+    if let Some(rt) = unsafe { crate::video_panel::runtime(sess) } {
+        rt.set_screen_source(None);
+    }
     // Dropping the removed session is what closes it.
     SHARES.with(|s| s.borrow_mut().remove(&conn));
     update_banner();
