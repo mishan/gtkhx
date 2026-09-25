@@ -74,12 +74,19 @@ test_inc = include_directories('../src')
 # Tier 1 — unit/
 # -----------------------------------------------------------------------------
 
+# Every executable below carries `link_depends : rust_build`. The Rust
+# archives reach the link as -l flags through the dependency lists above,
+# whose edge on the cargo build is order-only, so without it a Rust-only
+# change rebuilt the archives and left the test binaries stale. Harmless
+# on the few that link no Rust: they relink when Rust changes.
+
 # hl_access.h is header-only (static inline hl_access_has) so we can
 # compile the test program without linking any of GtkHx's source.
 test_hl_access = executable('test_hl_access',
   'unit/test_hl_access.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hl_access', test_hl_access,
      suite : 'unit')
@@ -98,6 +105,7 @@ test_byte_swap = executable('test_byte_swap',
   'unit/test_byte_swap.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('byte_swap', test_byte_swap,
      suite : 'unit')
@@ -117,6 +125,7 @@ test_proto_names = executable('test_proto_names',
   '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('proto_names', test_proto_names,
      suite : 'unit')
@@ -128,6 +137,7 @@ test_text_sanitisers = executable('test_text_sanitisers',
   'unit/test_text_sanitisers.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('text_sanitisers', test_text_sanitisers,
      suite : 'unit')
@@ -143,6 +153,7 @@ test_hmac = executable('test_hmac',
   'unit/test_hmac.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hmac', test_hmac,
      suite : 'unit')
@@ -159,6 +170,7 @@ test_safe_local_basename = executable('test_safe_local_basename',
   '../src/files_provider.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('safe_local_basename', test_safe_local_basename,
      suite : 'unit')
@@ -173,6 +185,7 @@ test_pict_embed = executable('test_pict_embed',
   '../src/pict_embed.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('pict_embed', test_pict_embed,
      suite : 'unit')
@@ -185,6 +198,7 @@ test_theme_scale = executable('test_theme_scale',
   '../src/gtkhx_theme.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('theme_scale', test_theme_scale,
      suite : 'unit')
@@ -201,6 +215,7 @@ test_theme_listing = executable('test_theme_listing',
   gtkhx_resources,
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('theme_listing', test_theme_listing,
      suite : 'unit')
@@ -217,6 +232,7 @@ test_icon_pack = executable('test_icon_pack',
   gtkhx_resources,
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('icon_pack', test_icon_pack,
      suite : 'unit')
@@ -235,6 +251,7 @@ test_hxnet_ffi = executable('test_hxnet_ffi',
   'unit/test_hxnet_ffi.c',
   dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hxnet_ffi', test_hxnet_ffi,
      suite : 'unit')
@@ -247,6 +264,7 @@ test_htxf_layout = executable('test_htxf_layout',
   'unit/test_htxf_layout.c',
   dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('htxf_layout', test_htxf_layout,
      suite : 'unit')
@@ -263,6 +281,7 @@ test_htxf_cancel = executable('test_htxf_cancel',
   '../src/debug.c',
   dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('htxf_cancel', test_htxf_cancel,
      suite : 'unit')
@@ -282,6 +301,7 @@ test_dock_pages = executable('test_dock_pages',
   '../src/dock_pages.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('dock_pages', test_dock_pages,
      suite : 'unit')
@@ -303,6 +323,7 @@ test_frame_close_button = executable('test_frame_close_button',
   '../src/debug.c',
   dependencies        : test_deps + [adw_dep, panel_dep],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('frame_close_button', test_frame_close_button,
      suite : 'unit')
@@ -314,6 +335,7 @@ test_hxconn_layout = executable('test_hxconn_layout',
   'unit/test_hxconn_layout.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hxconn_layout', test_hxconn_layout,
      suite : 'unit')
@@ -325,6 +347,7 @@ test_hxnet_bridge = executable('test_hxnet_bridge',
   '../src/proto_helpers.c',
   dependencies        : test_deps + [rust_hxproto_dep],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hxnet_bridge', test_hxnet_bridge,
      suite : 'unit')
@@ -346,6 +369,7 @@ test_hotline_url = executable('test_hotline_url',
   '../src/hotline_url.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hotline_url', test_hotline_url,
      suite : 'unit')
@@ -368,6 +392,7 @@ test_dock_layout_parse = executable('test_dock_layout_parse',
   '../src/dock_layout_parse.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('dock_layout_parse', test_dock_layout_parse,
      suite : 'unit')
@@ -382,6 +407,7 @@ test_msgwin_hash = executable('test_msgwin_hash',
   'unit/test_msgwin_hash.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('msgwin_hash', test_msgwin_hash,
      suite : 'unit')
@@ -395,6 +421,7 @@ test_chat_hash = executable('test_chat_hash',
   'unit/test_chat_hash.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('chat_hash', test_chat_hash,
      suite : 'unit')
@@ -408,6 +435,7 @@ test_gchat_hash = executable('test_gchat_hash',
   'unit/test_gchat_hash.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('gchat_hash', test_gchat_hash,
      suite : 'unit')
@@ -423,6 +451,7 @@ test_uniquify_path = executable('test_uniquify_path',
   '../src/uniquify_path.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('uniquify_path', test_uniquify_path,
      suite : 'unit')
@@ -439,6 +468,7 @@ test_human_readable = executable('test_human_readable',
   '../src/human_readable.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('human_readable', test_human_readable,
      suite : 'unit')
@@ -455,6 +485,7 @@ test_htxf_hdr = executable('test_htxf_hdr',
   '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('htxf_hdr', test_htxf_hdr,
      suite : 'unit')
@@ -469,6 +500,7 @@ test_path_hldir = executable('test_path_hldir',
   '../src/path_hldir.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('path_hldir', test_path_hldir,
      suite : 'unit')
@@ -487,6 +519,7 @@ test_hl_code = executable('test_hl_code',
   '../src/hl_code.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hl_code', test_hl_code,
      suite : 'unit')
@@ -504,6 +537,7 @@ test_host_port = executable('test_host_port',
   '../src/host_port.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('host_port', test_host_port,
      suite : 'unit')
@@ -517,6 +551,7 @@ test_hx_user_hash = executable('test_hx_user_hash',
   'unit/test_hx_user_hash.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('hx_user_hash', test_hx_user_hash,
      suite : 'unit')
@@ -536,6 +571,7 @@ test_voice_ptt_keyspec = executable('test_voice_ptt_keyspec',
   '../src/voice_ptt_keyspec.c',
   dependencies        : test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('voice_ptt_keyspec', test_voice_ptt_keyspec,
      suite : 'unit')
@@ -573,6 +609,7 @@ test_inline_media_decode = executable('test_inline_media_decode',
     lcms2_dep,
   ],
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('inline_media_decode', test_inline_media_decode,
      suite : 'unit')
@@ -605,6 +642,7 @@ test_task_error = executable('test_task_error',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('task_error', test_task_error,
      suite : 'proto')
@@ -621,6 +659,7 @@ test_selfinfo = executable('test_selfinfo',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('selfinfo', test_selfinfo,
      suite : 'proto')
@@ -636,6 +675,7 @@ test_chat_proto = executable('test_chat_proto',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('chat', test_chat_proto,
      suite : 'proto')
@@ -653,6 +693,7 @@ test_msg_proto = executable('test_msg_proto',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('msg', test_msg_proto,
      suite : 'proto')
@@ -669,6 +710,7 @@ test_banner = executable('test_banner',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('banner', test_banner,
      suite : 'proto')
@@ -688,6 +730,7 @@ test_tracker_parser = executable('test_tracker_parser',
   '../src/tracker_parser.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('tracker_parser', test_tracker_parser,
      suite : 'proto')
@@ -703,6 +746,7 @@ test_tracker_v3 = executable('test_tracker_v3',
   '../src/tracker_v3.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('tracker_v3', test_tracker_v3,
      suite : 'proto')
@@ -720,6 +764,7 @@ test_tracker_v3_meta = executable('test_tracker_v3_meta',
   '../src/tracker_v3_meta.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
+  link_depends        : rust_build,
 )
 test('tracker_v3_meta', test_tracker_v3_meta,
      suite : 'proto')
@@ -736,6 +781,7 @@ test_hlwrite = executable('test_hlwrite',
   '../src/hl_code.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
+  link_depends        : rust_build,
 )
 test('hlwrite', test_hlwrite,
      suite : 'proto')
@@ -750,6 +796,7 @@ test_small_handlers = executable('test_small_handlers',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('small_handlers', test_small_handlers,
      suite : 'proto')
@@ -764,6 +811,7 @@ test_user_change = executable('test_user_change',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('user_change', test_user_change,
      suite : 'proto')
@@ -777,6 +825,7 @@ test_xfer_queue = executable('test_xfer_queue',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('xfer_queue', test_xfer_queue,
      suite : 'proto')
@@ -792,6 +841,7 @@ test_news_post = executable('test_news_post',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('news_post', test_news_post,
      suite : 'proto')
@@ -806,6 +856,7 @@ test_agreement = executable('test_agreement',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('agreement', test_agreement,
      suite : 'proto')
@@ -820,6 +871,7 @@ test_news_file = executable('test_news_file',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('news_file', test_news_file,
      suite : 'proto')
@@ -842,6 +894,7 @@ test_chat_event = executable('test_chat_event',
   '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
+  link_depends        : rust_build,
 )
 test('chat_event', test_chat_event,
      suite : 'proto')
@@ -866,6 +919,7 @@ test_folder_xfer = executable('test_folder_xfer',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('folder_xfer', test_folder_xfer,
      suite : 'proto')
@@ -884,6 +938,7 @@ test_capabilities = executable('test_capabilities',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('capabilities', test_capabilities,
      suite : 'proto')
@@ -902,6 +957,7 @@ test_chat_history = executable('test_chat_history',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('chat_history', test_chat_history,
      suite : 'proto')
@@ -922,6 +978,7 @@ test_voice = executable('test_voice',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('voice', test_voice,
      suite : 'proto')
@@ -943,6 +1000,7 @@ test_inline_media = executable('test_inline_media',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('inline_media', test_inline_media,
      suite : 'proto')
@@ -962,6 +1020,7 @@ test_large_file = executable('test_large_file',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
   link_with           : wire_fixture_lib,
+  link_depends        : rust_build,
 )
 test('large_file', test_large_file,
      suite : 'proto')
@@ -977,6 +1036,7 @@ test_msg_event = executable('test_msg_event',
   '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
+  link_depends        : rust_build,
 )
 test('msg_event', test_msg_event,
      suite : 'proto')
@@ -1061,6 +1121,7 @@ test_integration_handshake = executable('test_integration_handshake',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('handshake', test_integration_handshake,
      suite   : 'integration',
@@ -1098,6 +1159,7 @@ test_integration_real_connect = executable(
   '../src/hl_code.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
+  link_depends        : rust_build,
 )
 test('real_connect', test_integration_real_connect,
      suite   : 'integration',
@@ -1135,6 +1197,7 @@ test_integration_tracker_signals = executable(
   '../src/hl_code.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
+  link_depends        : rust_build,
 )
 test('tracker_signals', test_integration_tracker_signals,
      suite   : 'integration',
@@ -1151,6 +1214,7 @@ test_integration_orchestrator_harness = executable(
   'integration/test_orchestrator_harness.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
+  link_depends        : rust_build,
 )
 test('orchestrator_harness', test_integration_orchestrator_harness,
      suite   : 'integration',
@@ -1166,6 +1230,7 @@ test_integration_socks = executable(
   'integration/test_integration_socks.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
+  link_depends        : rust_build,
 )
 test('socks', test_integration_socks,
      suite   : 'integration',
@@ -1205,6 +1270,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/hl_code.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
+  link_depends        : rust_build,
 )
 test('real_htxf_connect', test_integration_real_htxf_connect,
      suite       : 'integration',
@@ -1228,6 +1294,7 @@ test_integration_real_tls_login = executable('test_integration_real_tls_login',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 # Janus-only, is_parallel: false per the per-IP connect-rate caveat.
 test('real_tls_login', test_integration_real_tls_login,
@@ -1251,6 +1318,7 @@ test_integration_real_tls_banner = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('real_tls_banner', test_integration_real_tls_banner,
      suite       : 'integration',
@@ -1288,6 +1356,7 @@ test_integration_tracker_v3 = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('tracker_v3_listing', test_integration_tracker_v3,
      suite       : 'integration',
@@ -1315,6 +1384,7 @@ test_integration_tracker_v3_tls = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('tracker_v3_tls_listing', test_integration_tracker_v3_tls,
      suite       : 'integration',
@@ -1335,6 +1405,7 @@ test_integration_tracker_fetch = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('tracker_fetch', test_integration_tracker_fetch,
      suite       : 'integration',
@@ -1373,6 +1444,7 @@ test_integration_tracker_v1 = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('tracker_v1_listing', test_integration_tracker_v1,
      suite       : 'integration',
@@ -1388,6 +1460,7 @@ test_integration_server_matrix = executable('test_integration_server_matrix',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('server_matrix', test_integration_server_matrix,
      suite   : 'integration',
@@ -1402,6 +1475,7 @@ test_integration_login = executable('test_integration_login',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('login', test_integration_login,
      suite   : 'integration',
@@ -1415,6 +1489,7 @@ test_integration_chat = executable('test_integration_chat',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_roundtrip', test_integration_chat,
      suite   : 'integration',
@@ -1428,6 +1503,7 @@ test_integration_user_list = executable('test_integration_user_list',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('user_list', test_integration_user_list,
      suite   : 'integration',
@@ -1442,6 +1518,7 @@ test_integration_ping = executable('test_integration_ping',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('ping', test_integration_ping,
      suite   : 'integration',
@@ -1455,6 +1532,7 @@ test_integration_file_list = executable('test_integration_file_list',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('file_list', test_integration_file_list,
      suite   : 'integration',
@@ -1468,6 +1546,7 @@ test_integration_news_fetch = executable('test_integration_news_fetch',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('news_fetch', test_integration_news_fetch,
      suite   : 'integration',
@@ -1482,6 +1561,7 @@ test_integration_two_client_chat = executable('test_integration_two_client_chat'
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('two_client_chat', test_integration_two_client_chat,
      suite   : 'integration',
@@ -1496,6 +1576,7 @@ test_integration_emoji_roundtrip = executable('test_integration_emoji_roundtrip'
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('emoji_roundtrip', test_integration_emoji_roundtrip,
      suite   : 'integration',
@@ -1510,6 +1591,7 @@ test_integration_gif_icons = executable('test_integration_gif_icons',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('gif_icons', test_integration_gif_icons,
      suite   : 'integration',
@@ -1523,6 +1605,7 @@ test_integration_msg = executable('test_integration_msg',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('msg_roundtrip', test_integration_msg,
      suite   : 'integration',
@@ -1536,6 +1619,7 @@ test_integration_user_info = executable('test_integration_user_info',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('user_info', test_integration_user_info,
      suite   : 'integration',
@@ -1561,6 +1645,7 @@ test_integration_user_account = executable('test_integration_user_account',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('user_account', test_integration_user_account,
      suite       : 'integration',
@@ -1576,6 +1661,7 @@ test_integration_user_change = executable('test_integration_user_change',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('user_change_broadcast', test_integration_user_change,
      suite   : 'integration',
@@ -1590,6 +1676,7 @@ test_integration_news_post = executable('test_integration_news_post',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('news_post', test_integration_news_post,
      suite   : 'integration',
@@ -1604,6 +1691,7 @@ test_integration_chat_create = executable('test_integration_chat_create',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_create', test_integration_chat_create,
      suite   : 'integration',
@@ -1618,6 +1706,7 @@ test_integration_user_rename = executable('test_integration_user_rename',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('user_rename', test_integration_user_rename,
      suite   : 'integration',
@@ -1641,6 +1730,7 @@ test_integration_nick_colors = executable('test_integration_nick_colors',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('nick_colors', test_integration_nick_colors,
      suite       : 'integration',
@@ -1661,6 +1751,7 @@ test_integration_file_get = executable('test_integration_file_get',
   dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('file_get', test_integration_file_get,
      suite   : 'integration',
@@ -1678,6 +1769,7 @@ test_integration_file_resume = executable('test_integration_file_resume',
   dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('file_resume', test_integration_file_resume,
      suite   : 'integration',
@@ -1700,6 +1792,7 @@ test_integration_banner = executable('test_integration_banner',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('banner', test_integration_banner,
      suite       : 'integration',
@@ -1714,6 +1807,7 @@ test_integration_chat_subject = executable('test_integration_chat_subject',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_subject', test_integration_chat_subject,
      suite   : 'integration',
@@ -1728,6 +1822,7 @@ test_integration_news15 = executable('test_integration_news15',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('news15', test_integration_news15,
      suite   : 'integration',
@@ -1744,6 +1839,7 @@ test_integration_file_put = executable('test_integration_file_put',
   dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('file_put', test_integration_file_put,
      suite   : 'integration',
@@ -1757,6 +1853,7 @@ test_integration_file_info = executable('test_integration_file_info',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('file_info', test_integration_file_info,
      suite   : 'integration',
@@ -1771,6 +1868,7 @@ test_integration_file_list_subdir = executable('test_integration_file_list_subdi
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('file_list_subdir', test_integration_file_list_subdir,
      suite   : 'integration',
@@ -1786,6 +1884,7 @@ test_integration_chat_join = executable('test_integration_chat_join',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_join', test_integration_chat_join,
      suite   : 'integration',
@@ -1801,6 +1900,7 @@ test_integration_chat_decline = executable('test_integration_chat_decline',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_decline', test_integration_chat_decline,
      suite   : 'integration',
@@ -1815,6 +1915,7 @@ test_integration_chat_part = executable('test_integration_chat_part',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_part', test_integration_chat_part,
      suite   : 'integration',
@@ -1829,6 +1930,7 @@ test_integration_login_bad = executable('test_integration_login_bad',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('login_bad', test_integration_login_bad,
      suite   : 'integration',
@@ -1844,6 +1946,7 @@ test_integration_msg_self = executable('test_integration_msg_self',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('msg_self', test_integration_msg_self,
      suite   : 'integration',
@@ -1860,6 +1963,7 @@ test_integration_chat_in_pchat = executable('test_integration_chat_in_pchat',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_in_pchat', test_integration_chat_in_pchat,
      suite   : 'integration',
@@ -1877,6 +1981,7 @@ test_integration_unauthorized_opcode = executable('test_integration_unauthorized
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('unauthorized_opcode', test_integration_unauthorized_opcode,
      suite   : 'integration',
@@ -1892,6 +1997,7 @@ test_integration_msg_to_unknown_uid = executable('test_integration_msg_to_unknow
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('msg_to_unknown_uid', test_integration_msg_to_unknown_uid,
      suite   : 'integration',
@@ -1907,6 +2013,7 @@ test_integration_news_catlist = executable('test_integration_news_catlist',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('news_catlist', test_integration_news_catlist,
      suite   : 'integration',
@@ -1921,6 +2028,7 @@ test_integration_user_list_grows = executable('test_integration_user_list_grows'
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('user_list_grows', test_integration_user_list_grows,
      suite   : 'integration',
@@ -1935,6 +2043,7 @@ test_integration_chat_long = executable('test_integration_chat_long',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('chat_long', test_integration_chat_long,
      suite   : 'integration',
@@ -1953,6 +2062,7 @@ test_integration_folder_get = executable('test_integration_folder_get',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('folder_get', test_integration_folder_get,
      suite   : 'integration',
@@ -1971,6 +2081,7 @@ test_integration_chat_history = executable('test_integration_chat_history',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 
 # hope_chacha20 — Tier 3 coverage for the HOPE-Secure-Login +
@@ -1985,6 +2096,7 @@ test_integration_hope_chacha20 = executable('test_integration_hope_chacha20',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 # is_parallel: false on every Janus-only test. Janus has an internal
 # per-IP cap on simultaneous connections that we can't fully disable
@@ -2015,6 +2127,7 @@ test_integration_hope_hmac = executable('test_integration_hope_hmac',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('hope_hmac', test_integration_hope_hmac,
      suite   : 'integration',
@@ -2033,6 +2146,7 @@ test_integration_hope_blowfish = executable('test_integration_hope_blowfish',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('hope_blowfish', test_integration_hope_blowfish,
      suite   : 'integration',
@@ -2051,6 +2165,7 @@ test_integration_hope_chacha20_chat_history = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('hope_chacha20_chat_history', test_integration_hope_chacha20_chat_history,
      suite       : 'integration',
@@ -2070,6 +2185,7 @@ test_integration_hope_chacha20_banner = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('hope_chacha20_banner', test_integration_hope_chacha20_banner,
      suite       : 'integration',
@@ -2090,6 +2206,7 @@ test_integration_hope_blowfish_chat_history = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 # Stream-cipher × {chat_history, banner} matrices route to Janus
 # (mhxd advertises neither CHAT_HISTORY nor — since the matrix-fix
@@ -2108,6 +2225,7 @@ test_integration_hope_blowfish_banner = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('hope_blowfish_banner', test_integration_hope_blowfish_banner,
      suite       : 'integration',
@@ -2137,6 +2255,7 @@ test_integration_inline_media = executable('test_integration_inline_media',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('inline_media', test_integration_inline_media,
      suite       : 'integration',
@@ -2154,6 +2273,7 @@ test_integration_folder_put = executable('test_integration_folder_put',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('folder_put', test_integration_folder_put,
      suite   : 'integration',
@@ -2171,6 +2291,7 @@ test_integration_folder_roundtrip = executable('test_integration_folder_roundtri
   dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('folder_roundtrip', test_integration_folder_roundtrip,
      suite   : 'integration',
@@ -2201,6 +2322,7 @@ test_integration_voice_join = executable('test_integration_voice_join',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_join', test_integration_voice_join,
      suite       : 'integration',
@@ -2213,6 +2335,7 @@ test_integration_voice_sdp_roundtrip = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_sdp_roundtrip', test_integration_voice_sdp_roundtrip,
      suite       : 'integration',
@@ -2225,6 +2348,7 @@ test_integration_voice_ice_trickle = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_ice_trickle', test_integration_voice_ice_trickle,
      suite       : 'integration',
@@ -2236,6 +2360,7 @@ test_integration_voice_mute = executable('test_integration_voice_mute',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_mute', test_integration_voice_mute,
      suite       : 'integration',
@@ -2248,6 +2373,7 @@ test_integration_voice_implicit_leave = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_implicit_leave', test_integration_voice_implicit_leave,
      suite       : 'integration',
@@ -2260,6 +2386,7 @@ test_integration_voice_participants = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_participants', test_integration_voice_participants,
      suite       : 'integration',
@@ -2272,6 +2399,7 @@ test_integration_voice_disconnect_cleanup = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 # Longer meson timeout than the other voice binaries: the post-
 # disconnect 605 update arrives on a Janus housekeeping tick, not
@@ -2289,6 +2417,7 @@ test_integration_voice_rejoin_cycle = executable(
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_rejoin_cycle', test_integration_voice_rejoin_cycle,
      suite       : 'integration',
@@ -2314,6 +2443,7 @@ test_integration_voice_rejoin_media = executable(
   ],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
+  link_depends        : rust_build,
 )
 test('voice_rejoin_media', test_integration_voice_rejoin_media,
      suite       : 'integration',
