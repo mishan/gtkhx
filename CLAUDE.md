@@ -282,10 +282,12 @@ cd rust && cargo fmt --all --check
 ```
 
 **C does not grow.** `check-c-growth.sh` fails a branch that adds more lines of
-C to `src/` than it removes; CI runs it on every pull request. If the feature
+C to `src/` than it removes; CI runs it on every pull request to `main`, and
+locally it wants a fresh `git fetch origin main` first. If the feature
 you are building needs real changes to C content, port that content first. When
-growth is genuinely the right call, a `C-Growth: <reason>` trailer in the commit
-message records the exception. Reasoning in `docs/rust/ROADMAP.md`, "How the
+growth is genuinely the right call, a `C-Growth: <reason>` trailer in a commit
+message on the branch records the exception — an empty follow-up commit
+carrying it works, and avoids a force-push. Reasoning in `docs/rust/ROADMAP.md`, "How the
 rest of the port gets done".
 
 Then, **both** voice configurations — CI builds each, and `#ifdef HAVE_VOICE`

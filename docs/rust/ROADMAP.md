@@ -510,6 +510,7 @@ makes the remaining port bigger. The rules below exist to reverse that.
 ### The rules
 
 1. **C does not grow.** `tools/check-c-growth.sh` runs on every pull request
+   to `main`
    and fails if the branch adds net lines of C to `src/`. When a feature needs
    substantial changes to C content, port that content first, so the feature
    lands in Rust. When growth is genuinely the right call — a bridge shim that
@@ -526,10 +527,16 @@ makes the remaining port bigger. The rules below exist to reverse that.
    layer ports.
 
 3. **Measure the seam, not just the C.** The second number to watch is the
-   FFI surface between the languages:
+   FFI surface between the languages, in both directions — the functions
+   Rust exports to C and the C functions Rust declares and calls:
 
    ```sh
-   grep -rE 'extern "C" fn' rust/crates --include=*.rs | wc -l
+   # exported to C
+   grep -r '#\[no_mangle\]' rust/crates --include=*.rs | wc -l
+   # imported from C: functions inside `extern "C" { … }` blocks
+   awk '/extern "C" \{/{b=1;next} b&&/^[[:space:]]*\}/{b=0}
+        b&&/^[[:space:]]*(pub )?(unsafe )?fn /{n++} END{print n}' \
+       $(git ls-files 'rust/crates/*.rs')
    ```
 
    A feature port should bring it down. A port that moves code to Rust but
@@ -661,7 +668,13 @@ servers. A change to a shared crate needs both projects' suites green before
 either pin moves.
 
 The rule from [`crate-layout.md`](crate-layout.md) §5 still holds: code moves
-to hx-libs when a real second consumer needs it, not before. The candidates
+to hx-libs when a real second consumer needs it, not before.
+
+hxd-ng's own roadmap has not caught up with this. It still names
+`hotline-rs` as the home for shared crates and says to share "knowledge and
+fixtures first, code later if ever" — written before hx-libs existed and
+before the two projects shared a pin. Updating it to match is part of the
+first move below. The candidates
 that now have one, most valuable first:
 
 1. **The tracker codec** (HTRK v1 and v3). GtkHx parses it in C for fetch;
@@ -710,8 +723,9 @@ Keeping the "if it ever happens" pile separate from the actual plan.
 - **Plugin system reincarnation.** The dlopen ABI stays dead. If we reintroduce
   scripting hooks (Lua / Wasmtime), that's a fresh design conversation, not a
   port goal.
-- **Mobile targets.** Windows and macOS are no longer on this list: both build
-  in CI and ship as packages (`build-packages.yml`), with the Linux-only
+- **Mobile targets.** Windows and macOS are no longer on this list: both are
+  built and packaged by the release and snapshot workflows
+  (`build-packages.yml`), with the Linux-only
   pieces — glycin's sandbox and its `libseccomp` dependency, the `/exec`
   command — compiled out. iOS and Android remain out of scope. hx-ng, the
   browser client for hxd-ng's Hotline-ng wire, already covers phones.

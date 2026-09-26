@@ -261,10 +261,11 @@ one, and their order, are in [ROADMAP.md](ROADMAP.md#shared-code-with-hxd-ng).
   ```
 
   An external Rust consumer wants none of the `#[no_mangle]` surface, and
-  worse, two crates in one dependency tree both exporting `gtkhx_proto_*` would
-  collide. The module structure already supports the gate — `ffi.rs` is cleanly
-  separated in every candidate crate, and `hxmacres` / `hxhfs` would then have
-  essentially no dependencies at all (their only glib use is inside `ffi.rs`).
+  worse, two crates in one dependency tree exporting the same symbols would
+  collide. The crates already in hx-libs got there by moving their C ABI out
+  instead — `gtkhx-proto-ffi` and `gtkhx-files-ffi` hold it on the GtkHx side
+  — which is the pattern to follow for the rest. `hxmacres` still carries its
+  `ffi.rs`, and would have essentially no dependencies without it.
 
   The rest of the publish prep: rename reusable crates for what they do
   (`hxproto` is already right;
