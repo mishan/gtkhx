@@ -1,0 +1,35 @@
+{
+  "categories": [
+    {"name": "Announcements", "articles": [
+      {"title": "New server hardware is live", "poster": "ada", "at": "2026-06-10T18:04:00Z",
+       "body": "We moved to the new machine last night. Downloads should be noticeably faster, and the file library has room to grow.\n\nIf anything looks off, post here.",
+       "replies": [
+         {"title": "Re: New server hardware is live", "poster": "jonas", "at": "2026-06-10T19:12:00Z",
+          "body": "Much faster here. Thanks for doing this."}
+       ]},
+      {"title": "Summer meetup recap", "poster": "lena", "at": "2026-06-02T08:30:00Z",
+       "body": "Thanks to everyone who came out. Photos are in Photos/Autumn Walk (yes, the name is a joke)."}
+    ]},
+    {"name": "Photography", "articles": [
+      {"title": "Settings for low light?", "poster": "priya", "at": "2026-06-12T21:15:00Z",
+       "body": "I keep ending up with muddy shots at dusk. What do people start with for the harbor after sunset? I'd rather not push ISO past 1600.",
+       "replies": [
+         {"title": "Tripod and a slow shutter", "poster": "marco", "at": "2026-06-12T21:40:00Z",
+          "body": "Tripod and a slow shutter. Two to four seconds at f/8 and ISO 200 keeps the water smooth and the lights sharp.",
+          "replies": [
+            {"title": "Re: Tripod and a slow shutter", "poster": "priya", "at": "2026-06-12T22:05:00Z",
+             "body": "Trying that Saturday. Thanks!"}
+          ]},
+         {"title": "Shoot RAW", "poster": "ada", "at": "2026-06-13T07:50:00Z",
+          "body": "Also shoot RAW. You can pull a lot of detail back out of the shadows later."}
+       ]},
+      {"title": "Favorite walk routes", "poster": "jonas", "at": "2026-06-08T12:00:00Z",
+       "body": "Collecting routes for the next few walks. The lighthouse loop is about 5 km and flat."}
+    ]},
+    {"name": "Events", "articles": [
+      {"title": "Photo walk: Saturday 9am", "poster": "ada", "at": "2026-06-13T09:00:00Z",
+       "body": "Meet by the pier. Bring something warm; the fog doesn't lift until ten."}
+    ]}
+  ],
+  "open": ["Photography", "Settings for low light?"]
+}

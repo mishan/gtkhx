@@ -335,6 +335,8 @@ impl PanelInner {
             for (key, paused, label) in &want {
                 let tile = tiles.entry(*key).or_insert_with(|| {
                     let t = Tile::new(key.kind);
+                    // The grid sorts on this; see tile_uid.
+                    t.root.set_widget_name(&format!("hx-video-{}", key.user_id));
                     match key.kind {
                         VideoKind::Screen => self.stage.append(&t.root),
                         VideoKind::Camera => self.grid.append(&t.root),
@@ -436,6 +438,18 @@ impl PanelInner {
     }
 }
 
+fn sort_tiles(a: &gtk::FlowBoxChild, b: &gtk::FlowBoxChild) -> gtk::Ordering {
+    tile_uid(a).cmp(&tile_uid(b)).into()
+}
+
+/// The user a grid child's tile shows, from the name `refresh` gave it.
+fn tile_uid(child: &gtk::FlowBoxChild) -> u16 {
+    child
+        .child()
+        .and_then(|w| w.widget_name().strip_prefix("hx-video-")?.parse().ok())
+        .unwrap_or(u16::MAX)
+}
+
 fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.set_hexpand(true);
@@ -464,6 +478,10 @@ fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     grid.set_margin_top(6);
     grid.set_margin_bottom(6);
     grid.set_valign(gtk::Align::Start);
+    // By user, not by arrival: the order publications first reach this
+    // client varies, and tiles shouldn't swap places between sessions.
+    // This client's own preview (uid 0) comes first.
+    grid.set_sort_func(sort_tiles);
 
     let tiles_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     tiles_box.append(&stage);
@@ -660,5 +678,21 @@ pub(crate) mod tests {
 
         relabel(&tiles, 0, "Me");
         assert_eq!(name(0, VideoKind::Camera), "You");
+    }
+
+    /// Camera tiles sit in user order whatever order they arrive in, this
+    /// client's own preview first. Driven by `crate::gtk_tests`.
+    pub(crate) fn check_tiles_sort_by_user() {
+        let grid = gtk::FlowBox::new();
+        grid.set_sort_func(sort_tiles);
+        for uid in [5u16, 2, 0, 9] {
+            let t = Tile::new(VideoKind::Camera);
+            t.root.set_widget_name(&format!("hx-video-{uid}"));
+            grid.append(&t.root);
+        }
+        let order: Vec<u16> = (0..4)
+            .map(|i| tile_uid(&grid.child_at_index(i).expect("a child")))
+            .collect();
+        assert_eq!(order, [0, 2, 5, 9]);
     }
 }

@@ -1,0 +1,61 @@
+{
+  "name": "Northwind Commons",
+  "description": "A friendly server for photographers, musicians and makers",
+  "agreement": "Welcome to Northwind Commons.\n\nBe kind, keep files legal, and ask in chat if you get stuck. Uploads go in Uploads; a moderator will move them somewhere sensible.\n\nThe photo walk meets Saturdays at 9am by the pier.",
+  "you": {
+    "nick": "Robin",
+    "icon": 191,
+    "color": "#2f7fb8",
+    "avatar": {
+      "bg": "#2f7fb8",
+      "fg": "#ffffff",
+      "letter": "R"
+    }
+  },
+  "users": [
+    {
+      "nick": "ada",
+      "icon": 128,
+      "color": "#c2410c",
+      "avatar": {
+        "bg": "#f97316",
+        "fg": "#ffffff",
+        "letter": "A"
+      }
+    },
+    {
+      "nick": "marco",
+      "icon": 129,
+      "color": "#15803d",
+      "avatar": {
+        "bg": "#22c55e",
+        "fg": "#ffffff",
+        "letter": "M"
+      }
+    },
+    {
+      "nick": "priya",
+      "icon": 130,
+      "color": "#7c3aed",
+      "avatar": {
+        "bg": "#8b5cf6",
+        "fg": "#ffffff",
+        "letter": "P"
+      }
+    },
+    {
+      "nick": "jonas",
+      "icon": 136,
+      "color": "#0e7490"
+    },
+    {
+      "nick": "lena",
+      "icon": 142,
+      "color": "#be185d"
+    },
+    {
+      "nick": "sam",
+      "icon": 139
+    }
+  ]
+}

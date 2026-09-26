@@ -1078,6 +1078,11 @@ fn autojoin_unmute(w: &Weak<PanelInner>) -> glib::ControlFlow {
             if std::env::var_os("GTKHX_VIDEO_AUTOSTART").is_some() {
                 inner.cam_btn.set_active(true);
             }
+            // The same for a screen share. With the test source set
+            // there is no portal picker to answer.
+            if std::env::var_os("GTKHX_SCREEN_AUTOSTART").is_some() {
+                inner.screen_btn.set_active(true);
+            }
             // And a watcher's half: bring the Video panel forward, which
             // is what subscribes it to the room.
             if std::env::var_os("GTKHX_VIDEO_AUTOPRESENT").is_some() {

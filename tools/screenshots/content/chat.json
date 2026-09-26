@@ -1,0 +1,10 @@
+[
+  {"nick": "ada",   "text": "the photo walk is still on for Saturday, 9am at the pier"},
+  {"nick": "marco", "text": "I'll bring the spare tripod"},
+  {"nick": "priya", "text": "uploaded last week's shots to Photos/Harbor"},
+  {"nick": "jonas", "text": "those came out *really* well. the fog helped"},
+  {"nick": "marco", "text": "this one's my favorite", "image": "harbor.png"},
+  {"nick": "lena",  "text": "that light! what settings?"},
+  {"nick": "marco", "text": "f/8, 1/250, ISO 200. nothing fancy"},
+  {"nick": "ada",   "text": "{nick}: you coming Saturday?"}
+]

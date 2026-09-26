@@ -403,9 +403,16 @@ pub(crate) fn make_discard_bin(name: &str) -> Option<gst::Bin> {
 
 /// Test hook: when set, every capture source is a live `videotestsrc`
 /// (the value, if a pattern nick like `ball` or `smpte`, picks the
-/// pattern). The Tier 3 video media test sets it so a publisher needs
-/// no camera. Never set in production.
+/// pattern), or with `image:PATH`, a PNG held as a live picture. The
+/// Tier 3 video media test sets it so a publisher needs no camera, and
+/// the screenshot scenes use a picture so a tile shows the same thing
+/// every run. Never set in production.
 pub const TEST_SRC_ENV: &str = "GTKHX_VOICE_TEST_VIDEO_SRC";
+
+/// Test hook: a screen share's own source, in the same form as
+/// [`TEST_SRC_ENV`], so a publisher's screen and camera can show
+/// different things. Unset, a screen share uses [`TEST_SRC_ENV`]'s.
+pub const TEST_SCREEN_SRC_ENV: &str = "GTKHX_VOICE_TEST_SCREEN_SRC";
 
 static CAMERA_PREF: Mutex<Option<String>> = Mutex::new(None);
 
@@ -632,13 +639,17 @@ pub fn list_cameras() -> Vec<Camera> {
         .collect()
 }
 
-fn test_source() -> Option<gst::Element> {
+fn test_source(env: &str) -> Option<gst::Element> {
+    let value = std::env::var(env).unwrap_or_default();
+    if let Some(path) = value.strip_prefix("image:") {
+        return image_source(path);
+    }
     let src = gst::ElementFactory::make("videotestsrc")
         .property("is-live", true)
         .build()
         .ok()?;
     // The hook's value picks the pattern when it names one.
-    let pattern = std::env::var(TEST_SRC_ENV).unwrap_or_default();
+    let pattern = value;
     if let Some(pspec) = src.find_property("pattern") {
         if let Some(class) = glib::EnumClass::with_type(pspec.value_type()) {
             if let Some(v) = class.value_by_nick(&pattern) {
@@ -647,6 +658,26 @@ fn test_source() -> Option<gst::Element> {
         }
     }
     Some(src)
+}
+
+/// A PNG as a live source: `filesrc ! pngdec ! imagefreeze`, in a bin.
+fn image_source(path: &str) -> Option<gst::Element> {
+    let bin = gst::Bin::new();
+    let file = gst::ElementFactory::make("filesrc")
+        .property("location", path)
+        .build()
+        .ok()?;
+    let dec = gst::ElementFactory::make("pngdec").build().ok()?;
+    let freeze = gst::ElementFactory::make("imagefreeze")
+        .property("is-live", true)
+        .build()
+        .ok()?;
+    bin.add_many([&file, &dec, &freeze]).ok()?;
+    gst::Element::link_many([&file, &dec, &freeze]).ok()?;
+    let ghost = gst::GhostPad::with_target(&freeze.static_pad("src")?).ok()?;
+    ghost.set_active(true).ok()?;
+    bin.add_pad(&ghost).ok()?;
+    Some(bin.upcast())
 }
 
 /// The element factory a screen share captures with on this platform,
@@ -683,7 +714,7 @@ pub enum ScreenSource {
 
 fn make_camera_source() -> Option<gst::Element> {
     if std::env::var_os(TEST_SRC_ENV).is_some() {
-        return test_source();
+        return test_source(TEST_SRC_ENV);
     }
     let wanted = camera_device();
     let devices = camera_devices();
@@ -711,8 +742,11 @@ fn make_camera_source() -> Option<gst::Element> {
 }
 
 fn make_screen_source(src: Option<&ScreenSource>) -> Option<gst::Element> {
+    if std::env::var_os(TEST_SCREEN_SRC_ENV).is_some() {
+        return test_source(TEST_SCREEN_SRC_ENV);
+    }
     if std::env::var_os(TEST_SRC_ENV).is_some() {
-        return test_source();
+        return test_source(TEST_SRC_ENV);
     }
     match src? {
         ScreenSource::PipeWire { fd, node } => {
@@ -1019,6 +1053,40 @@ mod pipeline_tests {
         assert_eq!(pay.property::<u32>("ssrc"), 1234);
         assert_eq!(pay.property::<u32>("timestamp-offset"), 99);
         assert_eq!(pay.property::<i32>("seqnum-offset"), 7);
+    }
+
+    /// The `image:` form of the test hook: a PNG, held as a live source,
+    /// comes out as frames of its own size.
+    #[test]
+    fn a_picture_is_a_live_source() {
+        gst::init().unwrap();
+        let path = std::env::temp_dir().join(format!("hx-test-{}.png", std::process::id()));
+        let pipe = gst::parse::launch(&format!(
+            "videotestsrc num-buffers=1 ! video/x-raw,width=8,height=6 ! pngenc ! filesink location={}",
+            path.display()
+        ))
+        .unwrap();
+        pipe.set_state(gst::State::Playing).unwrap();
+        let bus = pipe.bus().unwrap();
+        bus.timed_pop_filtered(gst::ClockTime::from_seconds(5), &[gst::MessageType::Eos])
+            .expect("the PNG was written");
+        pipe.set_state(gst::State::Null).unwrap();
+
+        let src = image_source(path.to_str().unwrap()).expect("the source builds");
+        let sink = gst_app::AppSink::builder().build();
+        let pipeline = gst::Pipeline::new();
+        pipeline.add_many([&src, sink.upcast_ref()]).unwrap();
+        src.link(&sink).unwrap();
+        pipeline.set_state(gst::State::Playing).unwrap();
+        let sample = sink
+            .try_pull_sample(gst::ClockTime::from_seconds(5))
+            .expect("a frame");
+        let caps = sample.caps().unwrap();
+        let s = caps.structure(0).unwrap();
+        assert_eq!(s.get::<i32>("width").unwrap(), 8);
+        assert_eq!(s.get::<i32>("height").unwrap(), 6);
+        pipeline.set_state(gst::State::Null).unwrap();
+        let _ = std::fs::remove_file(path);
     }
 
     /// Push a capture bin to Playing into a fakesink and count what comes

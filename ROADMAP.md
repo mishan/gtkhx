@@ -110,9 +110,10 @@ the desktop compositor, which a shortcuts window could at least explain.
 
 ### Publish to Flathub
 
-The manifest, AppStream metadata and desktop file are validated at test time. What's
-left: swap the local `dir` source for a tagged git source, and take the screenshots the
-metainfo already names — `data/screenshots/` doesn't exist yet, so those URLs 404.
+The manifest, AppStream metadata and desktop file are validated at test time, and the
+screenshots the metainfo names are generated reproducibly by `tools/screenshots.sh`
+(see [docs/screenshots.md](docs/screenshots.md)). What's left: swap the local `dir`
+source for a tagged git source.
 
 Inside the sandbox, video can share a screen but finds no camera; see
 [BACKLOG.md](BACKLOG.md).

@@ -107,16 +107,28 @@
 
   <screenshots>
     <screenshot type="default">
-      <caption>The main toolbar and chat window</caption>
+      <caption>Chat on a Hotline server</caption>
       <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/chat.png</image>
     </screenshot>
     <screenshot>
-      <caption>Browsing files on a Hotline server</caption>
+      <caption>Threaded news</caption>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/news.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Browsing a server's files</caption>
       <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/files.png</image>
     </screenshot>
     <screenshot>
-      <caption>The Hotline tracker — finding servers</caption>
+      <caption>Finding servers on a tracker</caption>
       <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/tracker.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Video chat and screen sharing</caption>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/video.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The Classic theme, with the original pixel-art icons</caption>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/classic.png</image>
     </screenshot>
   </screenshots>
 
