@@ -160,4 +160,5 @@ rust/rust-workspace.stamp
 /.cargo-home/
 
 .claude
-tools/__pycache__
+__pycache__/
+/build-screenshots/

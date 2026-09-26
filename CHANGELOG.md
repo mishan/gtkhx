@@ -4,6 +4,7 @@
   - Video chat and screen sharing, on servers that support it
   - A dockable Video panel shows everyone's camera and screen, plus your own preview
   - Choose a camera in Settings → Voice
+  - Camera tiles keep the same order, by user, instead of shuffling between calls
 - Voice
   - Fixed occasional audio problems after joining or rejoining voice
 - Themes and Icons

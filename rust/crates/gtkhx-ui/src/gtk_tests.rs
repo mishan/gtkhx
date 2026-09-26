@@ -36,4 +36,6 @@ fn display_backed() {
     crate::video_panel::tests::check_tile_shows_a_frame();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_relabel_follows_a_nick_change();
+    #[cfg(feature = "voice")]
+    crate::video_panel::tests::check_tiles_sort_by_user();
 }

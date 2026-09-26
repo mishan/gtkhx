@@ -1,0 +1,10 @@
+[
+  {"name": "Northwind Commons", "desc": "A friendly server for photographers, musicians and makers", "addr": "198.51.100.24", "port": 5500, "users": 18},
+  {"name": "Harbor Lights", "desc": "Photography, film and darkroom talk", "addr": "203.0.113.7", "port": 5500, "users": 9},
+  {"name": "The Reading Room", "desc": "Books, zines and a quiet chat", "addr": "198.51.100.61", "port": 5500, "users": 5},
+  {"name": "Open Studio", "desc": "Share works in progress and get feedback", "addr": "203.0.113.42", "port": 5500, "users": 12},
+  {"name": "Night Owls", "desc": "For the late shift and the insomniacs", "addr": "198.51.100.90", "port": 5500, "users": 7},
+  {"name": "Synth Garage", "desc": "Modular synths, patches and recordings", "addr": "203.0.113.118", "port": 5500, "users": 14},
+  {"name": "Trailhead", "desc": "Hiking routes, maps and gear swaps", "addr": "198.51.100.133", "port": 5500, "users": 4},
+  {"name": "Pixel Kitchen", "desc": "Recipes, food photos and cooking nights", "addr": "203.0.113.201", "port": 5500, "users": 11}
+]

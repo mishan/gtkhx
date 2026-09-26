@@ -1,5 +1,80 @@
 # Screenshots
 
+There are two tools here. `tools/screenshots.sh` takes the pictures the README and the AppStream
+metadata show, and takes them the same way every time. `tools/screenshot.py` is for everything
+else: a quick picture of a theme, a PR description, a look at a change.
+
+## The README and AppStream pictures
+
+```sh
+tools/screenshots.sh              # every scene, into data/screenshots/
+tools/screenshots.sh chat news    # just these
+tools/screenshots.sh --check      # take them afresh; fail if any changed
+```
+
+It needs Docker and a [shotbox](https://github.com/mishan/shotbox) checkout beside this one
+(`../shotbox`, or wherever `SHOTBOX_DIR` points).
+Everything else is in the image `tools/screenshots/Dockerfile` builds, and the image is what
+makes the pictures the same on any machine: it pins the toolkit, the fonts and the renderer (the
+CI base image, by digest), the Hotline servers (Janus by digest, hxd-ng by the rig's revision),
+and ImageMagick. GtkHx is built from the working tree inside it, into a Docker volume that keeps
+the build between runs. Bumping a digest changes pictures; regenerate them in the same commit.
+
+### What's in a scene
+
+Each scene starts from nothing: a fresh server, seeded from `tools/screenshots/content/`, a fresh
+GtkHx configuration, and a sealed shotbox session.
+
+- **The server** is Northwind Commons, an invented community. Janus serves most scenes, because
+  it has the extensions the pictures show off: colored names, GIF avatars and inline images.
+  Its file library, message board and threaded news are written straight to disk with fixed
+  dates, not posted, so no date depends on when the run happened. The video scene uses hxd-ng,
+  the one server with video.
+- **The people** are scripted users (`hotline.py`), a few lines of Hotline each. They log in
+  before GtkHx, in a fixed order, so the user ids come out the same every run. The pictures
+  they show are drawn with ImageMagick at run time rather than committed.
+- **The tracker** is a stand-in in `hotline.py` that answers with a fixed v1 listing, under a
+  name from the reserved `example.org` domain.
+- **Video** comes from two more GtkHx instances in sessions of their own, publishing a drawn
+  picture through the test hooks `GTKHX_VOICE_TEST_VIDEO_SRC=image:PATH` and
+  `GTKHX_VOICE_TEST_SCREEN_SRC`, with `GTKHX_SCREEN_AUTOSTART` to share the screen.
+
+Each scene also picks its look. News, the tracker and video are in the dark scheme, the rest
+light. The news and video scenes start from a dock layout of their own, written into the fresh
+configuration as `dock-layout.ini`, so the picture has only what it's about: threaded news
+without the message board beside it, chat and video without an empty column.
+
+A scene drives GtkHx the way a person would, with shotbox's `click`, `drag`, `key` and `type`,
+and waits for the things it can see (a window, a user arriving, a voice session in the server's
+log). Where it can only wait on the clock, the wait is for something that has certainly finished.
+`scenes.py` explains the waits that aren't obvious: the login toast, which pauses while the
+pointer rests on it; the message board, whose resting scroll position depends on timing until
+it is sent to the top.
+
+To find where something is on screen, the `explore` scene logs in and then runs `$EXPLORE`, a
+`;`-separated list of `click:X,Y`, `dclick:X,Y`, `drag:X1,Y1,X2,Y2`, `key:CHORD`, `type:TEXT`
+or `wait:SECS` steps, each optionally `@WINDOW-RE`, capturing the screen after each:
+
+```sh
+EXPLORE='click:1138,28@GtkHx.*;wait:1' tools/screenshots.sh explore
+```
+
+The captures land in `build-screenshots/`, as does a picture of the screen when a scene gives
+up waiting for something (`NAME-failed.png`).
+
+### How identical is identical
+
+The scenes come out byte for byte the same run after run, with two known exceptions, which is
+why `--check` compares pixels with a small tolerance rather than bytes:
+
+- Now and then the scaled server banner in the header lands one level off in a handful of
+  pixels, a rounding difference that depends on the order the window was laid out in. The check
+  forgives exactly one level.
+- The video tiles are VP8 at a constant bitrate, and how the encoder spends its bits depends on
+  live timing. The check forgives up to 5%; the differences seen stay under 4%.
+
+## Quick pictures
+
 `tools/screenshot.py` runs GtkHx headlessly and screenshots it, sealed off from the machine it
 runs on. It exists for pictures that have to be comparable — theme work, docs, PR descriptions
 — where a screenshot of a desktop session shows that desktop as much as it shows GtkHx.

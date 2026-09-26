@@ -1,0 +1,49 @@
+{
+  "date": "2026-06-14T09:30:00Z",
+  "tree": {
+    "Welcome.txt": 1840,
+    "Documents": {
+      "Club Handbook.md": 18422,
+      "Meetup Schedule.pdf": 96310,
+      "Membership Form.pdf": 41288
+    },
+    "Music": {
+      "Sessions": {
+        "Harbor Session 01.flac": 38400512,
+        "Harbor Session 02.flac": 41203712
+      },
+      "setlist.md": 912
+    },
+    "Photos": {
+      "Autumn Walk": {
+        "IMG_4410.jpg": 4812930,
+        "IMG_4412.jpg": 5102844,
+        "IMG_4418.jpg": 4390118
+      },
+      "Harbor": {
+        "dawn-01.jpg": 6211870,
+        "dawn-02.jpg": 5930421,
+        "fog-over-the-pier.jpg": 7402311,
+        "lighthouse.jpg": 5518203,
+        "nets.jpg": 4920117
+      },
+      "contact-sheet.pdf": 2381742
+    },
+    "Software": {
+      "Camera Profiles.zip": 12880021,
+      "Lens Calibration.dmg": 30512640,
+      "RAW Converter Setup.exe": 48203776
+    },
+    "Uploads": {}
+  },
+  "local": {
+    "date": "2026-06-13T18:20:00Z",
+    "tree": {
+      "harbor-edit-01.jpg": 3412877,
+      "harbor-edit-02.jpg": 3288104,
+      "lighthouse-crop.jpg": 2104551,
+      "walk-route.png": 412330,
+      "meetup-notes.txt": 2210
+    }
+  }
+}
