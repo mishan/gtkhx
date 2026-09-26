@@ -37,3 +37,10 @@ hkdf = "0.12"
 flate2 = "1"
 lz4_flex = { version = "0.11", optional = true }
 zstd = { version = "0.13", optional = true, default-features = false }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "crypto"
+harness = false
