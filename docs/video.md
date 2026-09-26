@@ -247,8 +247,8 @@ an explicit `LIBCAMERA_LOG_LEVELS` in the environment is left alone.
   `videotestsrc` (its value names the pattern) and skips the screen
   picker.
 
-The rig's hxd-ng (`tests/hxd-ng`, port 5520, media on 5524/udp) is built
-from a pinned revision and advertises the host's primary IPv4 address:
+The rig's hxd-ng (`tests/hxd-ng`, port 5520, media on 5524/udp) is its
+published GHCR image at a pinned digest, and advertises the host's primary IPv4 address:
 it is ICE-lite, and libnice never gathers a loopback candidate, so
 `127.0.0.1` is an advertisement no check reaches.
 

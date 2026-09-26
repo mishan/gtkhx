@@ -145,8 +145,8 @@ const hx_test_server hx_test_server_matrix[] = {
     {
         /* hxd-ng: the only server implementing the video extension
          * (capabilities-video.md), and a voice SFU of its own —
-         * ICE-lite, str0m underneath. Built from source at a pinned
-         * revision (tests/hxd-ng/Dockerfile) and run on the host
+         * ICE-lite, str0m underneath. Its published image at a pinned
+         * digest (tests/hxd-ng/Dockerfile), run on the host
          * network like the rest of the rig. Its entrypoint advertises
          * the host's IPv4 address at 5524, not loopback: libnice never
          * gathers a loopback candidate to pair with one.

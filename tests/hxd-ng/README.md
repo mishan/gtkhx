@@ -1,10 +1,10 @@
 # hxd-ng test server
 
-[hxd-ng](https://github.com/mishan/hxd-ng) built from source at a pinned
-revision, configured for GtkHx's Tier 3 rig. It is here for one reason:
-it is the only Hotline server that implements the video extension
-(`docs/capabilities-video.md` in its tree), so every video test runs
-against it. It also serves voice — ICE-lite, on str0m — which the video
+[hxd-ng](https://github.com/mishan/hxd-ng) from the image its CI
+publishes to GHCR (`ghcr.io/mishan/hxd-ng`), configured for GtkHx's Tier
+3 rig. It is here for one reason: it is the only Hotline server that
+implements the video extension (`docs/capabilities-video.md` in its
+tree), so every video test runs against it. It also serves voice — ICE-lite, on str0m — which the video
 media tests use as a matter of course.
 
 ## Build
@@ -14,11 +14,18 @@ docker build -t gtkhx-hxd-ng tests/hxd-ng
 # or: tests/build.sh hxd-ng
 ```
 
-A full release build of `hxd` (a few minutes; cargo's registry and target
-directories are BuildKit cache mounts, so a rebuild is quicker). The
-revision is the `HXD_NG_REV` build argument at the top of the Dockerfile.
+Nothing compiles: the Dockerfile starts `FROM` the published image,
+pinned by its `sha-<commit>` tag and digest, and adds only `conf/` and
+`entrypoint.sh`. hxd-ng's CI publishes an image for every
+commit on its main, so bumping the pin means picking the new commit's
+tag, resolving its digest (`docker buildx imagetools inspect
+ghcr.io/mishan/hxd-ng:sha-<commit>`), and updating the `FROM` line.
 Bump it on purpose, with the video and voice tests run against the new
 one.
+
+The published image runs as an unprivileged user (uid 10001), which owns
+`/var/lib/hxd-ng` and `/run/hxd-ng`, where the entrypoint writes its
+config.
 
 ## Run
 
