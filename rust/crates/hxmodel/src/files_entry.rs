@@ -23,6 +23,8 @@
 
 mod populate;
 
+pub use populate::gtkhx_files_populate_from_reply;
+
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, CStr, CString};
 use std::os::raw::c_void;

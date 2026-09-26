@@ -75,7 +75,7 @@ looking for code in the wrong place.
 | **Entry point** | `gtkhx.c` (`main()`, GtkApplication, signal-handler wiring) |
 | **Dock / layout** | `hx_panel.c`, `hx_panel_frame.c`, `hx_split.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `dock_bridge.c`, `toolbar.c` |
 | **Settings** | `options.c` (change hooks, identity resolution, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `prefs_parser.c`, `icon_enum.c` (icon IDs for the Rust picker) |
-| **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c`, `chat_bench.c` |
+| **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c` |
 | **Files** | `files_browser.c`, `files_panel.c`, `files.c`, `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_complete.c`, `files_ops.c`, `files_entry.c` |
 | **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the frame-dispatch switch, the transaction correlator), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
@@ -134,8 +134,9 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 - `src/themes/` — built-in theme files, shipped as GResource. `src/icons/` — the
   vendored app-specific symbolic icons (see its README), beside the classic
   `src/pixmaps/`.
-- `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting,
-  `check-c-growth.sh` (the no-net-C-growth gate, below),
+- `tools/` — `coverage.sh`, `analyze.sh`, `uibench.sh` (the in-app UI benchmarks — see
+  `docs/performance.md`), whitespace linting, `check-c-growth.sh` (the
+  no-net-C-growth gate, below),
   `isolated-run.sh` (runs a test command sealed off from the desktop — see "Before
   calling anything done"), and `screenshot.py` (headless screenshots isolated from
   the desktop — see `docs/screenshots.md`).
@@ -226,7 +227,7 @@ GTKHX_DEBUG=all
 
 Output goes to stderr, prefixed `[<category>]`. Categories in use include `proto`, `news`,
 `tracker`, `voice`, `xfer`, `files`, `media`, `icon`, `dock`, `layout`, `dnd`, `startup`,
-`name`, and `bench`. Adding one takes no registration — `debug_log ("newcat", "…")` just
+and `name`. Adding one takes no registration — `debug_log ("newcat", "…")` just
 works. Infrastructure in `src/debug.{c,h}`; the wire trace in `src/proto_trace.{c,h}`.
 
 The protocol trace is the fastest way to diagnose "the server doesn't like X": match

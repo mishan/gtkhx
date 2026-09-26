@@ -1933,6 +1933,7 @@ dependencies = [
  "hx-image-decode",
  "hxbookmarks",
  "hxchat-layout",
+ "hxchat-view",
  "hxconfig",
  "hxhandlers",
  "hxmodel",

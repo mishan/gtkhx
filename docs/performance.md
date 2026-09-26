@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | a harness generalized from `src/chat_bench.c` | Chat only (`tools/chatbench.sh`) |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -73,21 +73,47 @@ Still to add:
 
 ### Tier 3 — UI scenarios
 
-Generalize `chat_bench.c` into one harness selected by environment variable,
-run under `tools/isolated-run.sh`:
+```sh
+tools/uibench.sh                              # chat=20000,files=10000, 3 repeats
+tools/uibench.sh files=10000 5                # one scenario, 5 repeats
+GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
+```
 
-- Chat: the existing ingest + paint, relayout and scroll phases, plus the
-  memory measurement the chat-view benchmark had to drop, done properly
-  (heaptrack or `mallinfo2`, not an RSS delta).
-- Users: login to a large server; a `USER_CHANGE` burst; every GIF icon
-  arriving at once.
-- Files: open, sort and filter a 10k-entry remote folder; a large local one.
-- Tracker window: fill with a large listing; filter-typing latency.
-- Chat history replay on join, interleaved with live messages.
-- Animated media scrolled out of view — the acceptance test for the known
-  offscreen-animation defect.
-- Video: per-frame texture upload with four and nine tiles.
-- Startup: first window, dock-layout restore, connected.
+The harness is `rust/crates/gtkhx-ui/src/bench/`. `hx_bench_maybe_start`,
+called once the main window's chat view exists, reads `GTKHX_BENCH` and runs
+the scenarios in order; each prints a report. Scenario code awaits the frame
+clock — the next tick for sampling frame intervals, `after-paint` for "until
+this work is on screen" — so a scenario reads as a sequence of steps.
+
+A frame wait gives up after a few seconds — frames stop for a closed or
+hidden window — and the report then carries a failed check rather than
+hanging. Closing the Files window mid-run ends that scenario the same way.
+
+Every report leads with the **idle frame interval**, measured before the
+scenario does anything: the refresh interval on a real display, and the
+floor under every frame number that follows. It has already caught one bug
+in the harness itself — a first paint reported below it, because the paint
+was being timed to the wrong point of the frame.
+
+Run it with a scratch configuration so the app neither reads nor changes
+yours, and cannot auto-connect anywhere:
+
+```sh
+T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
+  tools/uibench.sh
+```
+
+| Scenario | Measures | Checks |
+|---|---|---|
+| `chat[=N]` | The phases of the original chat-view benchmark: ingest + first paint, relayout after a font change, scrolling. | The idle frame. |
+| `files[=N]` | The real `files_panel` in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider. | Row count equals N; rows actually in size order after the sort. |
+
+The panel has no filter, so none is measured.
+
+Still to add: users (a large login, a `USER_CHANGE` burst, every GIF icon
+at once); the tracker window (a large listing, filter typing); chat-history
+replay on join; animated media scrolled out of view — the acceptance test
+for the known offscreen-animation defect; video tiles; startup.
 
 ### Tier 4 — end to end
 
@@ -99,7 +125,7 @@ manually refcounted FFI objects.
 ### Profiling
 
 sysprof (it shows GTK's frame marks), perf with hotspot, heaptrack for
-memory. `GTKHX_DEBUG=bench` is the timing category.
+memory.
 
 ### CI
 
@@ -159,10 +185,42 @@ The instrument check passes: Blowfish OFB-64 runs at the raw block cipher's
 rate, so the per-byte XOR loop costs nothing measurable and Blowfish itself
 is the ceiling — far above any Hotline link.
 
+### UI scenarios
+
+**2026-09-26**, same machine, under `tools/isolated-run.sh` (Xvfb, software
+rendering) — so the frame numbers are Xvfb's, not a desktop compositor's,
+and the next baseline worth recording is one from a real display. Median of
+three runs; the first run of a session is consistently slower (cold caches)
+and is the spread to expect.
+
+| Chat, 20,000 messages | |
+|---|---|
+| idle frame | 16.7 ms |
+| ingest + paint | 69 ms |
+| relayout, worst frame | 16.9 ms — one idle frame; the whole-scrollback re-wrap is gone |
+| scroll p95 | 16.7 ms — at the frame floor |
+
+| Files panel, 10,000 entries | |
+|---|---|
+| idle frame | 16.7 ms |
+| remote populate (UI frozen) | **1.32 s** |
+| remote populate + paint | 1.36 s |
+| sort by size: call / until painted | 9.4 ms / 23 ms |
+| sort by name: call / until painted | 65 ms / 72 ms |
+| scroll p95 | 16.9 ms |
+| local listing of a 10,000-file directory (UI frozen) | **3.4 s** |
+
+Two numbers here are unsettled. The first sort that brings files to the
+top, and the scroll that follows, sometimes take 170–190 ms instead of the
+~23 ms and ~17 ms above: once in three runs here, and in every run of a
+reviewer's 2,000-entry check. Something paid once per process on first
+display would fit — loading icon textures for kinds not yet shown is the
+leading guess — but it is not yet explained.
+
 ## Findings
 
 What the measurements have turned up. Findings 1 and 2 are fixed; the rest
-are leads.
+are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -205,3 +263,20 @@ are leads.
    throughput; it is allocator churn on the transfer path, and small
    records (75–93 MiB/s at 128 bytes) are dominated by fixed per-record
    cost.
+6. **Populating the Files panel appends one row at a time.** Both providers
+   do it — `fill` in `hxmodel`'s file-list decode, and the local provider's
+   `do_list` — and every append fires `items-changed`, which the panel
+   answers with a status-footer update and the sort model with an insert.
+   10,000 entries freeze the UI for 1.32 s. Collecting the rows and adding
+   them with one `splice` brings that to about 0.2 s (checked with the
+   change applied locally; not yet made). The remaining time is building
+   the entries and one sort.
+7. **The local listing is synchronous.** A 10,000-file directory freezes the
+   UI for 3.4 s: enumeration, a content-type description per file, and the
+   per-row appends above. `files_local_provider.c` already says so in a
+   comment and defers incremental listing. Batching the appends is the
+   cheap half; enumerating off the main thread is the other.
+8. **Sorting by name costs 65 ms at 10,000 rows**, against 9 ms by size.
+   `cmp_name` calls `g_utf8_collate` on every comparison, which re-derives a
+   collation key each time. Precomputing a key per entry
+   (`g_utf8_collate_key`) is the usual fix.
