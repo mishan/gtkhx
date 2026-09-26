@@ -38,9 +38,11 @@ Three motivations, locked in during the kickoff conversation:
    The C of 2003 is not.
 
 **Shared protocol code is now an explicit goal.** The leaf-up extraction yielded
-`hxproto`, and GtkHx and hxd-ng consume the same revision from
-[hx-libs](https://github.com/mishan/hx-libs). The dependency remains
-`publish = false` at `0.1.0`: git revisions, coordinated changes, and both
+`hxproto`, `hxfiles-xfer` and `hxhfs`, and GtkHx and hxd-ng consume the same
+revision of each from [hx-libs](https://github.com/mishan/hx-libs). What moves
+there next is in [Shared code with hxd-ng](#shared-code-with-hxd-ng). The
+dependency remains `publish = false` at `0.1.0`: git revisions, coordinated
+changes, and both
 projects' CI are the compatibility contract while the public API is still
 evolving. Publishing and a semver commitment remain separate decisions.
 
@@ -57,8 +59,9 @@ for us too.
 ## Locked-in decisions
 
 These were settled before planning began. Re-litigating them mid-port costs
-more than the gain. Two have since been superseded by events and are marked as
-such rather than deleted, because the reasoning is still worth knowing.
+more than the gain. Some have since been amended or superseded by events and
+are marked as such rather than deleted, because the reasoning is still worth
+knowing.
 
 1. **Build system: Meson stays primary, invokes Cargo for the Rust workspace.**
    The Rust code lives under `rust/` as a Cargo workspace; `rust/meson.build`
@@ -120,10 +123,13 @@ such rather than deleted, because the reasoning is still worth knowing.
    Rust list widget is a `GtkColumnView` / `GtkListView` / `GtkListBox` from
    the start.
 
-8. **Single-connection during the port.** `MAX_CONN > 1` and the tabbed UI wait
-   until the port is far enough along that a multi-conn refactor lands against
-   mostly-Rust code, not half-Rust-half-C state machines. See
-   [multi-connection](#multi-connection--tabbed-ui) below.
+8. ~~**Single-connection during the port.**~~ **Superseded.** The plan was for
+   `MAX_CONN > 1` and the tabbed UI to wait until the port was far enough along
+   that a multi-conn refactor landed against mostly-Rust code, not
+   half-Rust-half-C state machines. Multi-connection shipped in 1.3.0 anyway,
+   with the C still in place; see
+   [multi-connection](#multi-connection--tabbed-ui) below for what that leaves
+   the port to clean up.
 
 9. **License stays GPL-2.0-or-later.** Every Rust crate we pull in must be
    GPL-2-compatible: MIT, Apache-2.0, BSD, LGPL. RustCrypto is dual
@@ -450,9 +456,18 @@ Ports late; some of it may never need to.
   `.gtkhx-*` style appliers. Pervasive; each helper migrates when its last C
   caller does.
 - `notify.c` (desktop notifications), `gtkurl.c` (URL click handling),
-  `sound.c` (the thin shim over `hxsound`), `gtkhx_theme.c` / `gtkhx_icon.c`
-  (theming singletons), `gtkhx_log.c` (the `hx_printf` → session-signal shim; not a
-  transcript logger).
+  `sound.c` (the thin shim over `hxsound`), `gtkhx_log.c` (the `hx_printf` →
+  session-signal shim; not a transcript logger).
+- `gtkhx_theme.c` / `gtkhx_icon.c` — the theming singletons. These grew
+  substantially with whole-app theming. The theme file parser and the palette
+  model need no GTK and can split out into a crate that tests without a
+  display; only the code that applies a theme to live widgets has to stay near
+  GTK.
+- The tracker wire codec: `tracker_v3.c`, `tracker_v3_meta.c`,
+  `tracker_parser.c`. Pure encoders and parsers with no I/O and no GTK. These
+  should port into hx-libs rather than into a GtkHx crate, because hxd-ng
+  hand-rolls the same format for registration — see
+  [Shared code with hxd-ng](#shared-code-with-hxd-ng).
 - The remaining model-side C: `rcv.c` (now the generic dispatch plus the
   post-LOGIN state machine), `network.c`, `commands.c` (the slash-command
   parser — never a wire-protocol file), `proto_helpers.c`, `proto_trace.c`
@@ -477,11 +492,82 @@ Ports late; some of it may never need to.
 
 ---
 
+## How the rest of the port gets done
+
+### Where it stands
+
+Over July the port removed about a third of the C in `src/`. Then it stopped.
+Since early August no C file has been deleted, and feature work has been adding
+C back: video, whole-app theming, the Files browser redesign and the slimmer
+window chrome. Most of it went into the files at the top of the port list:
+`hx_panel.c`, `files_browser.c`, `gtkhx_theme.c`, `toolbar.c`, `dock_layout.c`.
+
+That is not a lapse in discipline. It is what happens by default: a feature
+lands in whichever language the code it touches is written in, and the code a
+feature touches is exactly the code that is still C. Left alone, every feature
+makes the remaining port bigger. The rules below exist to reverse that.
+
+### The rules
+
+1. **C does not grow.** `tools/check-c-growth.sh` runs on every pull request
+   to `main`
+   and fails if the branch adds net lines of C to `src/`. When a feature needs
+   substantial changes to C content, port that content first, so the feature
+   lands in Rust. When growth is genuinely the right call — a bridge shim that
+   lets a larger port land, say — a `C-Growth: <reason>` trailer in the commit
+   message records it where the reviewer reads, and the check passes.
+
+2. **Port a feature end to end, not a file at a time.** Leaf-up drained the
+   leaves; what is left is the trunk, and porting trunk code one file at a time
+   leaves a bridge behind at every step. A feature port takes the feature's
+   view, its controller glue, its receive handlers in `rcv.c` and its signal
+   adapters in `gtkhx.c` together, and ends by deleting the bridges it made
+   redundant. The [permanent seams](#permanent-seams-not-todos) still hold —
+   each stays until the layer behind it ports. A feature port is how that
+   layer ports.
+
+3. **Measure the seam, not just the C.** The second number to watch is the
+   FFI surface between the languages, in both directions — the functions
+   Rust exports to C and the C functions Rust declares and calls:
+
+   ```sh
+   # exported to C
+   grep -r '#\[no_mangle\]' rust/crates --include=*.rs | wc -l
+   # imported from C: functions inside `extern "C" { … }` blocks
+   awk '/extern "C" \{/{b=1;next} b&&/^[[:space:]]*\}/{b=0}
+        b&&/^[[:space:]]*(pub )?(unsafe )?fn /{n++} END{print n}' \
+       $(git ls-files 'rust/crates/*.rs')
+   ```
+
+   A feature port should bring it down. A port that moves code to Rust but
+   adds exports for the C left behind has moved the problem, not solved it.
+
+4. **Route by connection while porting.** Each reader that ports takes its
+   connection explicitly instead of asking `hx_active_session()` or
+   `gtkhx_active_htlc()` which one has focus, and each `thread_local`
+   singleton holding per-connection state becomes an id-keyed map, the shape
+   `useredit.rs` already has. That is the
+   [multi-connection follow-through](#multi-connection--tabbed-ui), and doing
+   it during the port means touching the code once.
+
+5. **Break the circular waits.** Three items are each waiting on another: the
+   Users controller waits for the C session structs; the toolbar waits for
+   `main()`; `main()` is scheduled last. One way out, **not yet decided**:
+   move `main()` into Rust early and have it call the existing C startup and
+   toolbar construction as a library. The signal adapters in `gtkhx.c` then
+   dissolve one at a time as their handlers port, instead of all at the end,
+   and the toolbar stops blocking on the app crate. The cost is paying the
+   build-system change (Cargo producing the binary) early instead of late.
+   See the [`main()` section](#main-and-gtkapplication-in-rust).
+
+---
+
 ## `main()` and `GtkApplication` in Rust
 
 **Goal:** delete the last meaningful C and ship a Rust binary. `gtkhx.c`'s
-`main()`, the `GtkApplication` activate handler, the signal-connect calls and
-the GIOChannel-based fd watches all move into a new application crate.
+`main()`, the `GtkApplication` activate handler and the signal-connect calls
+move into a new application crate. (The GIOChannel socket watches this used to
+list are already gone; the one left is the Unix-only `/exec` output pipe.)
 
 Work items:
 
@@ -496,7 +582,10 @@ Work items:
 4. Replace Meson's `executable()` with `cargo build --release --bin gtkhx` plus
    an install rule — or keep the meson-driven C build for one more cycle and
    have a small C `main.c` call into a Rust staticlib. Pick the lower-risk
-   option at the time.
+   option at the time. Doing this step *first*, with the Rust `main()`
+   calling the remaining C as a library, is the option rule 5 of
+   [How the rest of the port gets done](#how-the-rest-of-the-port-gets-done)
+   describes.
 5. CI adds a standalone `cargo build` step to catch crate-only breakage early.
 
 Gotchas:
@@ -521,64 +610,47 @@ Badmoon, chat / files / news / tracker all functional, Tier 3 green.
 
 ## Multi-connection & tabbed UI
 
-**Goal:** honour the long-deferred `MAX_CONN > 1` ask, now that the codebase is
-amenable to it. Tabs across the top of the main window (`AdwTabView`), one
-connection per tab, independent transfer queues, shared preferences and
-bookmarks.
+**Shipped in 1.3.0**, ahead of the port rather than after it (see locked-in
+decision 8). Several connections run at once, one tab each, under the
+tab-switched layout. The transport, the session signals and the
+connection-scoped keys all carry the connection. The design and the open
+question of coexisting per-connection panels are in
+[`../multi-connection.md`](../multi-connection.md).
 
-This is the root `ROADMAP.md`'s multi-conn work, finally done — and cheap,
-because the networking work made a connection a struct, the UI work made the
-interface a tree of widgets, and the protocol work made the wire format
-reusable across instances. Detailed design lives in
-`docs/multi-connection.md`.
-
-Work items:
-
-1. The app owns a collection of connection tabs. Each pairs an `hxnet`
-   connection actor with a UI subtree (chat, users, news, files) for that
-   connection.
-2. `AdwTabView` in the toolbar window holds the tabs. "Connect" opens a new
-   tab; closing a tab disconnects the underlying connection.
-3. The transfer window stays global — it lists every connection's in-flight
-   work — with a per-row tag for which connection.
-4. Bookmarks gain an "open in new tab" affordance.
-5. The connection-loss banner becomes per-tab.
-
-Gotchas:
-
-- Each tab needs its own `GtkhxSession` instance, not the global singleton. We
-  either reify the session into one-per-connection at that point, or keep the
-  global and add a connection id to every signal payload. The former is
-  cleaner, and that is the right moment for it.
-- `AdwTabView`'s reordering and detach affordances are good, but the
-  persistence story (restore tabs across launches) needs design.
-
-**Exit criteria:** open two tabs to two different servers, chat in both at
-once, transfer a file in each, see both progress, switch tabs, close one
-without disrupting the other.
+What it leaves for the port is the code that still asks "which connection has
+focus?" when it means "which connection is this for?": readers that route
+through `hx_active_session()` or `gtkhx_active_htlc()`, and the
+`thread_local` singletons in `gtkhx-ui` that hold per-connection state. The
+root [`ROADMAP.md`](../../ROADMAP.md) lists them. Rule 4 of
+[How the rest of the port gets done](#how-the-rest-of-the-port-gets-done) is
+the plan: fix each one as the code around it ports.
 
 ---
 
 ## Suggested next concrete step
 
-The frontier is the **content behind the shells**, plus the remaining larger
-standalone windows. Two pools, both leaf-up:
+In order:
 
-1. **Content ports** (inventory §B) — the main pool, in rough order of value:
-   the **Files** two-panel browser (biggest by a distance, and the model half
-   is already Rust so it is a view port rather than a rewrite), the **Chat**
-   render/output path and window construction, the **Tasks** `gtask` list, and
-   the `msg.c` private-message model. Each mirrors the user-list port: build
-   the tree in gtk4-rs, keep genuinely-C leaves behind FFI.
-
-2. **The larger standalone windows** (inventory §A) — **`tray.c`** and
-   **`files_complete.c`** are both self-contained and unblocked. **`preview.c`**
-   waits on the poppler / sourceview crate alignment.
-
-Deliberately deferred, and why: the **Users controller glue** waits for the
-remaining C session structs it is tied to; **`toolbar.c` and the dock infra**
-port with or after `main()`, since the toolbar owns the `PanelDock` every shell
-registers into and the dock itself stays C by design.
+1. **Move the tracker codec into hx-libs** and delete `tracker_v3.c`,
+   `tracker_v3_meta.c` and `tracker_parser.c`. Small, self-contained, and the
+   first piece of shared code with a server-side consumer waiting for it — see
+   [Shared code with hxd-ng](#shared-code-with-hxd-ng).
+2. **Port Files end to end.** The largest content port by a distance, and the
+   one feature work most recently added C to. The model and wire halves are
+   already Rust (`hxmodel::files`, the FILE_LIST populate and decode, the Get
+   Info dialog), so it is a view and controller port rather than a rewrite:
+   the two `files_panel` column views, the three providers, `files_ops.c`,
+   `files_entry.c`, `files_complete.c`, the sub-dialogs, drag and drop, and
+   the `rcv.c` handlers and `gtkhx.c` adapters that serve them.
+3. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
+   the whole-app theming work is fresh.
+4. **The rest of inventory §B**, one feature at a time: Chat's render and
+   output path and window construction, the Tasks list, `msg.c`, and the
+   Users controller once the Chat and Users slices have taken the session
+   structs it depends on with them.
+5. **The standalone windows**: `tray.c` is unblocked; `preview.c` waits on the
+   poppler / sourceview crate alignment.
+6. **Decide on `main()`** — last, as planned, or early, as rule 5 describes.
 
 There is also a standing cleanup item worth folding into whatever touches it:
 the crate boundaries that still talk over `extern "C"` where a Cargo dependency
@@ -587,36 +659,82 @@ irreducible.
 
 ---
 
+## Shared code with hxd-ng
+
+[hxd-ng](https://github.com/mishan/hxd-ng) is a Hotline server written in
+Rust. It consumes `hxproto`, `hxfiles-xfer` and `hxhfs` from hx-libs at the
+same revision GtkHx does, and GtkHx's Tier 3 rig runs it as one of the test
+servers. A change to a shared crate needs both projects' suites green before
+either pin moves.
+
+The rule from [`crate-layout.md`](crate-layout.md) §5 still holds: code moves
+to hx-libs when a real second consumer needs it, not before.
+
+hxd-ng's own roadmap has not caught up with this. It still names
+`hotline-rs` as the home for shared crates and says to share "knowledge and
+fixtures first, code later if ever" — written before hx-libs existed and
+before the two projects shared a pin. Updating it to match is part of the
+first move below. The candidates
+that now have one, most valuable first:
+
+1. **The tracker codec** (HTRK v1 and v3). GtkHx parses it in C for fetch;
+   hxd-ng builds it by hand in its registration code. One sans-IO crate serves
+   both, deletes C here, and removes duplicate code there.
+2. **`hxcrypto` and a sans-IO HOPE handshake.** hxd-ng refuses HOPE logins
+   today. A handshake state machine in hx-libs that can play either role, with
+   `hxnet` keeping the I/O, lets the server accept HOPE without writing it a
+   second time — and gives GtkHx a server it controls to fix the
+   compression-negotiation defect against. The hx-libs README already expects
+   `hxcrypto` to move. Check the provenance notes in `crate-layout.md` §4
+   first; it stays GPL either way.
+3. **Smaller pieces for `hxproto`**: the access-bit table, and the
+   text-encoding helpers that GtkHx's `hxtext` and hxd-ng's `TextEncoding`
+   each implement.
+
+Beyond code:
+
+- **Extension specs in one place.** The extension documents are spread across
+  both projects' `docs/`, and only hxd-ng's video capability document is
+  written as a spec. A `specs/` directory in hx-libs, holding normative
+  versions of the extensions both projects implement, gives each a single
+  reference to argue with.
+- **A shared conformance corpus.** Wire fixtures from GtkHx's Tier 2 tests and
+  hxd-ng's integration suites, kept in hx-libs and run by both CIs. hxd-ng's
+  roadmap asks for the same thing.
+- **Cheaper pin bumps.** Three pins move by hand: hx-libs in each project,
+  hxd-ng in GtkHx's rig, and hx-ng in hxd-ng's end-to-end suite. Tagging
+  hx-libs revisions and having hx-libs CI build both consumers would take
+  most of the "run everything in both apps" cost out of a bump.
+- **More of GtkHx's Tier 3 against hxd-ng.** Only the video tests use it
+  today. It now implements chat history, inline media, GIF icons, TLS and
+  tracker registration, and running voice against it as well as Janus would
+  separate server-side SFU defects from client ones.
+
+---
+
 ## Out of scope — things we're explicitly not doing
 
 Keeping the "if it ever happens" pile separate from the actual plan.
 
-- **A reusable `libhotline` crate API.** We're producing one structurally, but
-  we are not committing to API stability for outside consumers. See the
-  motivations section above and `crate-layout.md` §5 for what would have to
-  change.
+- **A published, semver-stable Hotline crate API.** hx-libs is shared with
+  hxd-ng, but as git revisions of `publish = false` crates; nothing commits to
+  stability for outside consumers. See `crate-layout.md` §5 for what would
+  have to change.
 - **Plugin system reincarnation.** The dlopen ABI stays dead. If we reintroduce
   scripting hooks (Lua / Wasmtime), that's a fresh design conversation, not a
   port goal.
-- **Windows / macOS / iOS targets.** The current binary is Linux-Wayland, and
-  full cross-platform support is not a committed phase. Some groundwork has
-  landed opportunistically as the Rust rewrite makes it cheap:
-  `.github/workflows/ports.yml` probes Windows (MSYS2 UCRT64) and macOS builds,
-  and the leaf crates are being kept compilable off-Linux — `hx-image-decode`
-  gained a pure-Rust `image` backend for the glycin-less platforms, and
-  `hxnet`'s raw-fd FFI surface was removed. On the latter: the production
-  connect paths already resolve and connect **inside Rust**, so no OS socket fd
-  ever crossed the FFI in the running client; all that remained was test
-  support — a few fd-adopting entries and some unconditional
-  `std::os::unix::io` imports that broke the Windows compile — and those are
-  gone (the tests inject via loopback or the real connect entry points).
-  **Remaining `hxnet` follow-up:** it still depends on `glib` (via `hxbridge`'s
-  shared tokio runtime and the FFI logging), so it is validated through
-  `ports.yml`'s full-app build rather than the bare no-GTK portability
-  tripwire; decoupling that logging and runtime seam behind injected callbacks
-  would let it join the tripwire. The whole-app port (the C GIOChannel
-  plumbing, the Linux-only `libseccomp` dependency) remains an open question
-  for later.
+- **Mobile targets.** Windows and macOS are no longer on this list: both are
+  built and packaged by the release and snapshot workflows
+  (`build-packages.yml`), with the Linux-only
+  pieces — glycin's sandbox and its `libseccomp` dependency, the `/exec`
+  command — compiled out. iOS and Android remain out of scope. hx-ng, the
+  browser client for hxd-ng's Hotline-ng wire, already covers phones.
+
+  One portability follow-up stays open: `hxnet` still depends on `glib`,
+  through `hxbridge`'s shared tokio runtime and the `g_critical!` calls on its
+  FFI error paths. Decoupling that behind injected callbacks would let it
+  build with no GTK stack at all, which is also what a server-side consumer of
+  its HOPE or HTXF code would need.
 
 ---
 

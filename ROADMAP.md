@@ -16,8 +16,11 @@ review follow-ups are in [BACKLOG.md](BACKLOG.md). Subsystem references are in
 **Full backward compatibility with the Hotline 1.2 and 1.5 wire protocols is a hard
 requirement at every stage.** There are only a handful of servers left in the wild and
 some of them have not been touched in twenty years. A feature that needs the server to
-change is not a feature we can ship unilaterally; it is a proposal, and it belongs in the
-"needs ecosystem cooperation" bucket at the bottom of this file.
+change is not a feature we can ship unilaterally; it is a proposal. The difference now is
+that there is a server to prototype it in: [hxd-ng](https://github.com/mishan/hxd-ng), the
+Rust server that shares GtkHx's protocol crates. A proposal can be built on both ends,
+written up as a spec, and offered to the rest of the ecosystem with a working
+implementation behind it.
 
 This is why the extensions GtkHx has adopted are all either negotiated (a capability bit
 that legacy servers simply never set) or probed with a timeout and silently abandoned. No
@@ -31,7 +34,8 @@ extension is allowed to degrade the legacy path.
 |---|---|
 | **Toolkit** | GTK 4 + libadwaita + libpanel. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, threaded news, voice and video are dockable panels in a persistable split layout; the file browser (one per connection), the tracker and the file preview are standalone windows. |
 | **Build** | Meson + Cargo. Autotools, the RPM spec and the old `debian/` tree are gone. |
-| **Language** | Hybrid C + Rust, with Rust now the larger half. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
+| **Language** | Hybrid C + Rust, with Rust now the larger half. C no longer grows: a CI check fails any pull request that adds net lines of C. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
+| **Shared code** | The wire protocol, the file-transfer codec and the HFS sidecars come from [hx-libs](https://github.com/mishan/hx-libs), shared with the hxd-ng server. |
 | **Connections** | Several servers at once, one tab each. Settings and connections live in TOML files owned by Rust (`hxconfig`, `hxbookmarks`). |
 | **Protocol** | 1.2 / 1.5 / 1.9 compatible. Connect, HOPE negotiation and the ciphers (Blowfish OFB-64, ChaCha20-Poly1305 AEAD) all run in Rust. RC4 retired. Compression is implemented but not currently negotiated — see the defects below. |
 | **Transport security** | TLS on a dedicated port, TOFU trust with fingerprint pinning. [docs/tls.md](docs/tls.md) |
@@ -118,11 +122,6 @@ source for a tagged git source.
 Inside the sandbox, video can share a screen but finds no camera; see
 [BACKLOG.md](BACKLOG.md).
 
-### README
-
-The README needs rewriting to explain the project to someone who has never heard of
-Hotline: what it is, what servers are still out there, and how to get the client.
-
 ### Plugin system
 
 The original dlopen ABI was deleted rather than ported, and nothing replaced it. The
@@ -141,6 +140,20 @@ filter stays regardless, because v1 trackers cannot search at all. See
 A "tracker of trackers" — a server-discovered metadirectory rather than a user-managed
 list of tracker addresses — is a bigger swing and remains undecided.
 
+### Working with hxd-ng
+
+hxd-ng is a Hotline server in Rust. It shares GtkHx's protocol crates through hx-libs and
+implements most of the same extensions from the other end. It is in the test rig, but
+only the video tests use it so far. What is left:
+
+- **Point more of Tier 3 at it**: chat history, inline media, GIF icons, TLS, tracker
+  registration, and voice alongside Janus. hxd-ng's own roadmap asks for the chat-history
+  suite in particular.
+- **Keep its pin current.** The rig builds a fixed hxd-ng revision, and it falls behind.
+- **Share more code**: the tracker codec first, then HOPE. The plan and the order are in
+  [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md#shared-code-with-hxd-ng).
+- **One home for extension specs**, and a wire-fixture corpus both projects run.
+
 ### Code modernization
 
 Ongoing, opportunistic rather than swept: better module boundaries and more reuse, and
@@ -154,7 +167,9 @@ These are real, reproduced, and unfixed. Each is described in full in its subjec
 
 - **Compression is never negotiated.** The Rust connect orchestrator offers an empty
   compression-algorithm list, so zlib compression is available in the implementation but
-  never turned on against a server that would accept it. [docs/rust/networking.md](docs/rust/networking.md)
+  never turned on against a server that would accept it. There is no server in the rig to
+  test it against; HOPE support in hxd-ng would give it one.
+  [docs/rust/networking.md](docs/rust/networking.md)
 - **Animated media has no offscreen gating.** The chat view installs a frame tick whenever
   any media in the buffer is animated, with no visibility test, so scrolled-away GIFs keep
   costing frames. An earlier design had this gating; it did not survive the chat-view
@@ -208,17 +223,32 @@ These are settled. Don't reopen them without a strong new reason.
 
 ---
 
-## Parked: a modernized Hotline protocol
+## Longer term: Hotline-ng
 
-Every so often the question comes up of designing a successor wire protocol — one with
+Every so often the question came up of designing a successor wire protocol — one with
 real transport security, sane framing, and Unicode by construction, instead of extensions
-bolted onto a 1996 format.
+bolted onto a 1996 format. It stayed parked for a social reason, not a technical one: a
+new protocol needs servers, and the server population is small, mostly unmaintained, and
+partly closed-source.
 
-It stays parked, and the reason is not technical. A new protocol needs servers to
-implement it, and the server population is small, mostly unmaintained, and partly
-closed-source. This is a social problem, not an engineering one. The productive version of
-this instinct has been the extension route: TLS on a dedicated port needed no protocol
-changes at all and works against real servers today, and the capability-negotiated
+That has changed. hxd-ng serves **Hotline-ng**, a JSON protocol over WebSocket, next to
+the legacy wire. GtkHx speaking it is a real possibility and a longer-term goal, but not
+current work: Hotline-ng client development is focused on
+[hx-ng](https://github.com/mishan/hx-ng), the browser client, because a client that runs
+anywhere with nothing to install is what best shows what the protocol is for.
+
+When GtkHx does take it on, the plan has to respect:
+
+- **The legacy wire stays the priority.** Hotline-ng would be a second protocol GtkHx
+  offers, never a replacement, and nothing in the 1.2/1.5 path may depend on it.
+- **What it would unlock** that the extension route cannot: detach and resume, push,
+  and the identity and moderation work hxd-ng is building.
+- **Where the code lives.** A Rust Hotline-ng client library would belong in hx-libs,
+  beside the legacy codec, with hx-ng's TypeScript client as the reference behavior.
+- **The port comes first.** It is far cheaper to add a second protocol to a Rust
+  connection layer than to one still threaded through `rcv.c` and `network.c`, so the
+  remaining model-side port is effectively a prerequisite.
+
+The extension route remains the right one for anything the legacy servers can adopt: TLS on
+a dedicated port needed no protocol changes at all, and the capability-negotiated
 extensions degrade cleanly on servers that never heard of them.
-
-If it ever becomes worth attempting, the reference server is the natural first target.
