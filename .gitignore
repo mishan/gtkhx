@@ -158,3 +158,6 @@ rust/rust-workspace.stamp
 # that layout locally; never committed.
 /rust-cargo-target/
 /.cargo-home/
+
+.claude
+tools/__pycache__
