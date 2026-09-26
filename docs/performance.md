@@ -217,10 +217,17 @@ reviewer's 2,000-entry check. Something paid once per process on first
 display would fit — loading icon textures for kinds not yet shown is the
 leading guess — but it is not yet explained.
 
+After batching the populate (finding 6), same setup, median of three:
+
+| Files panel, 10,000 entries | Before | After |
+|---|---|---|
+| remote populate (UI frozen) | 1.32 s | 165 ms |
+| local listing (UI frozen) | 3.4 s | 238 ms |
+
 ## Findings
 
-What the measurements have turned up. Findings 1 and 2 are fixed; the rest
-are leads. Findings 6 onwards are from the UI scenarios.
+What the measurements have turned up. Findings 1, 2 and 6 are fixed; the
+rest are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -267,15 +274,16 @@ are leads. Findings 6 onwards are from the UI scenarios.
    do it — `fill` in `hxmodel`'s file-list decode, and the local provider's
    `do_list` — and every append fires `items-changed`, which the panel
    answers with a status-footer update and the sort model with an insert.
-   10,000 entries freeze the UI for 1.32 s. Collecting the rows and adding
-   them with one `splice` brings that to about 0.2 s (checked with the
-   change applied locally; not yet made). The remaining time is building
+   10,000 entries froze the UI for 1.32 s. **Fixed:** both providers now
+   collect the rows and replace the store's contents with one `splice`,
+   one `items-changed` however large the folder. The remote populate is
+   down to 165 ms and the local listing to 238 ms; what remains is building
    the entries and one sort.
-7. **The local listing is synchronous.** A 10,000-file directory freezes the
+7. **The local listing is synchronous.** A 10,000-file directory froze the
    UI for 3.4 s: enumeration, a content-type description per file, and the
-   per-row appends above. `files_local_provider.c` already says so in a
-   comment and defers incremental listing. Batching the appends is the
-   cheap half; enumerating off the main thread is the other.
+   per-row appends above. With the appends batched it is 238 ms, still on
+   the main thread; enumerating off it is the remaining half, and scales
+   with directory size in a way the batching doesn't.
 8. **Sorting by name costs 65 ms at 10,000 rows**, against 9 ms by size.
    `cmp_name` calls `g_utf8_collate` on every comparison, which re-derives a
    collation key each time. Precomputing a key per entry

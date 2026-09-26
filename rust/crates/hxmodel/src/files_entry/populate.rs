@@ -16,6 +16,7 @@
 use std::ffi::{c_char, CStr, CString};
 use std::slice;
 
+use gio::prelude::ListModelExt;
 use glib::translate::from_glib_none;
 
 use crate::files_entry::HxFileEntry;
@@ -80,10 +81,16 @@ fn kind_for(ftype_be: [u8; 4]) -> String {
     }
 }
 
-/// Append the entries parsed from `data` to `store` (already cleared by the
-/// caller). Split out from the FFI shell so the unit tests can drive it with
-/// a real `gio::ListStore` and no raw pointers.
+/// Replace `store`'s contents with the entries parsed from `data`, in one
+/// `splice`. Split out from the FFI shell so the unit tests can drive it
+/// with a real `gio::ListStore` and no raw pointers.
+///
+/// One splice, not an append per entry: every change to the store emits
+/// `items-changed`, and the Files panel answers each one with a sort-model
+/// insert and a status-footer update. Row by row, a 10,000-entry folder
+/// froze the UI for over a second (docs/performance.md).
 fn fill(store: &gio::ListStore, data: &[u8]) {
+    let mut rows: Vec<HxFileEntry> = Vec::new();
     let mut off = 0usize;
     while let Some((entry, next)) = hxproto::parse::parse_file_list_entry(data, off) {
         let ftype_be = entry.ftype.to_be_bytes();
@@ -97,13 +104,15 @@ fn fill(store: &gio::ListStore, data: &[u8]) {
         // Folders carry a child count in fsize (rendered "(N items)"); files
         // carry a byte count. No mtime on the wire (0).
         let obj = HxFileEntry::build(&name, is_dir, entry.fsize as u64, 0, &kind, icon);
-        store.append(&obj);
+        rows.push(obj);
         off = next;
     }
+    store.splice(0, store.n_items(), &rows);
 }
 
-/// Clear `store` and repopulate it from the FILE_LIST reply bytes `fh`
-/// (`fhlen` bytes). NULL / empty `fh` just clears. NULL `store` is a no-op.
+/// Replace `store`'s contents with the entries in the FILE_LIST reply bytes
+/// `fh` (`fhlen` bytes), as one change. NULL / empty `fh` just clears. NULL
+/// `store` is a no-op.
 ///
 /// # Safety
 /// `store`, when non-null, must be a live `GListStore` whose item type is
@@ -119,13 +128,14 @@ pub unsafe extern "C" fn gtkhx_files_populate_from_reply(
         return;
     }
     let store: gio::ListStore = from_glib_none(store);
-    store.remove_all();
     if fh.is_null() || fhlen == 0 {
+        store.remove_all();
         return;
     }
     // Guard the documented `from_raw_parts` ceiling (a length past isize::MAX
     // is instant UB); real replies are tiny.
     if fhlen > isize::MAX as usize {
+        store.remove_all();
         return;
     }
     let data = slice::from_raw_parts(fh, fhlen);
@@ -191,8 +201,7 @@ mod tests {
         fill(&store, &chunk(b"TEXT", 1, b"a.txt"));
         assert_eq!(store.n_items(), 1);
 
-        // A second populate must replace, not append — exercise the FFI shell
-        // which does the remove_all.
+        // A second populate must replace, not append.
         let buf = chunk(b"fldr", 0, b"Docs");
         unsafe {
             gtkhx_files_populate_from_reply(store.as_ptr(), buf.as_ptr(), buf.len());
@@ -200,6 +209,29 @@ mod tests {
         assert_eq!(store.n_items(), 1);
         let only = store.item(0).unwrap().downcast::<HxFileEntry>().unwrap();
         assert_eq!(only.imp().name.borrow().to_str().unwrap(), "Docs");
+    }
+
+    /// A whole listing lands as one `items-changed` that replaces the old
+    /// rows, however many entries it holds. Per-row signals are what made a
+    /// large folder freeze the Files panel.
+    #[test]
+    fn a_listing_is_one_change() {
+        let store = make_store();
+        fill(&store, &chunk(b"TEXT", 1, b"old.txt"));
+        let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = changes.clone();
+        store.connect_items_changed(move |_, pos, removed, added| {
+            seen.borrow_mut().push((pos, removed, added));
+        });
+        let mut buf = Vec::new();
+        for i in 0..500 {
+            buf.extend(chunk(b"TEXT", i, format!("f{i}").as_bytes()));
+        }
+        unsafe {
+            gtkhx_files_populate_from_reply(store.as_ptr(), buf.as_ptr(), buf.len());
+        }
+        assert_eq!(*changes.borrow(), vec![(0, 1, 500)]);
+        assert_eq!(store.n_items(), 500);
     }
 
     #[test]

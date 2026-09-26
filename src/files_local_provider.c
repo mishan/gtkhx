@@ -148,12 +148,11 @@ hx_local_files_provider_get_label (HxLocalFilesProvider *self)
 /* Read `path` via GIO and replace listing's contents. Errors are
  * surfaced via the "error" signal. `path` must be absolute.
  *
- * Why blocking GIO rather than the async enumerate? Local file
- * enumeration in practice completes in <1 ms for normal dir sizes,
- * and async adds either a cancellable / completion-callback dance
- * or a g_idle_add round-trip. >10k-entry directories would want
- * incremental rendering — deferred. The remote backend already
- * runs async on the slow path. */
+ * Blocking GIO rather than the async enumerate: normal directories list
+ * in well under a millisecond, and async adds a cancellable/callback
+ * dance. Huge ones still block (docs/performance.md) — the rows land in
+ * one splice, since each items-changed costs the panel a sort insert and
+ * a status update, but enumeration off the main thread is deferred. */
 static void
 do_list (HxLocalFilesProvider *self, const char *path)
 {
@@ -161,6 +160,8 @@ do_list (HxLocalFilesProvider *self, const char *path)
     GFileEnumerator *enumer;
     GFileInfo *info;
     GError *err = NULL;
+    g_autoptr (GPtrArray) rows
+        = g_ptr_array_new_with_free_func (g_object_unref);
 
     if (!path || !*path) {
         g_signal_emit_by_name (self, "error", _ ("No path to list"));
@@ -187,8 +188,6 @@ do_list (HxLocalFilesProvider *self, const char *path)
         g_object_unref (dir);
         return;
     }
-
-    g_list_store_remove_all (self->listing);
 
     while ((info = g_file_enumerator_next_file (enumer, NULL, &err))) {
         const char *name;
@@ -236,11 +235,15 @@ do_list (HxLocalFilesProvider *self, const char *path)
          * content_type to richer icons (image/audio/archive) the
          * same way the remote provider does for Hotline FourCCs. */
         entry = hx_file_entry_new (name, is_dir, size, (gint64)mtime, kind, 0);
-        g_list_store_append (self->listing, entry);
-        g_object_unref (entry);
+        g_ptr_array_add (rows, entry);
         g_free (kind);
         g_object_unref (info);
     }
+
+    g_list_store_splice (
+        self->listing, 0,
+        g_list_model_get_n_items (G_LIST_MODEL (self->listing)), rows->pdata,
+        rows->len);
 
     if (err) {
         /* Partial-read error — keep what we got and tell the user. */
