@@ -52,11 +52,11 @@ proto_test_deps = test_deps + [
   rust_gtkhx_core_dep,
   # Phase R4.2: the boxed payload value-types (HxMsgEvent, HxChatEvent +
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
-  # proto_helpers.c / tracker_event.c / tracker_v3_meta.c into the
+  # proto_helpers.c / tracker_event.c into the
   # self-contained gtkhx-core::boxed module. Proto tests that link those
   # producers and exercise the boxed copy/free (e.g. test_msg_event /
   # test_chat_event call hx_*_event_copy/_free; the tracker tests'
-  # meta_free call sites) resolve them against this archive. It's
+  # meta_new/_free call sites) resolve them against this archive. It's
   # self-contained, so pulling those symbols never drags gtkhx-core's
   # C externs in.
   rust_gtkhx_core_dep,
@@ -719,55 +719,9 @@ test('banner', test_banner,
 # to Rust (gtkhx-ui::banner, folded in with banner.c); its coverage lives in
 # that module's #[cfg(test)] unit tests now.
 
-# tracker_parser — pure HTRK reply parsers carved out of
-# network.c's async tracker fetch state machine. Four small
-# helpers (reply header / padding sentinel / fixed record / text
-# normalize), each pinned against canned byte fixtures. The
-# byte ordering invariants and the reserved-bytes-ignored
-# contract are the bits most worth a regression net.
-test_tracker_parser = executable('test_tracker_parser',
-  'proto/test_tracker_parser.c',
-  '../src/tracker_parser.c',
-  dependencies        : proto_test_deps,
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('tracker_parser', test_tracker_parser,
-     suite : 'proto')
-
-# tracker_v3 — pure encoders / parsers for the Hotline tracker v3
-# wire format (fogWraith spec). Phase A floor: handshake encoder,
-# 6/8-byte response detection, listing-request encoder, response
-# header, variable-length server records (IPv4 / IPv6 / hostname),
-# TLV walker. Pinned against synthesized byte fixtures so we don't
-# need a live (or mock) v3 tracker to catch regressions.
-test_tracker_v3 = executable('test_tracker_v3',
-  'proto/test_tracker_v3.c',
-  '../src/tracker_v3.c',
-  dependencies        : proto_test_deps,
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('tracker_v3', test_tracker_v3,
-     suite : 'proto')
-
-# tracker_v3_meta — Tier 2 coverage for the typed TLV-trailer
-# accessor in src/tracker_v3_meta.c (Phase B of tracker v3).
-# Pins one canonical decode per TLV type (string, u8, u16, i16,
-# u32, bool), the closed-vocab clamping for MATURITY and
-# LISTING_CATEGORY, the unknown-id forward-compat skip, malformed-
-# input rejection, UTF-8 sanitisation, deep-copy semantics. Pure
-# function under test; no GIO / no network.
-test_tracker_v3_meta = executable('test_tracker_v3_meta',
-  'proto/test_tracker_v3_meta.c',
-  '../src/tracker_v3.c',
-  '../src/tracker_v3_meta.c',
-  dependencies        : proto_test_deps,
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('tracker_v3_meta', test_tracker_v3_meta,
-     suite : 'proto')
+# The tracker listing codec and the v3 metadata decoder are hxproto's
+# (hx-libs), tested there; the C ABI over the metadata is tested in
+# gtkhx-core::boxed::tracker.
 
 # hlwrite — round-trip the wire packer (hlpack, extracted from
 # hlwrite() in network.c) through the dh_start walker. Proves the
@@ -1152,9 +1106,6 @@ test_integration_real_connect = executable(
   # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
-  '../src/tracker_parser.c',
-  '../src/tracker_v3.c',
-  '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
@@ -1190,9 +1141,6 @@ test_integration_tracker_signals = executable(
   '../src/proto_trace.c',
   '../src/gtkhx_log.c',
   '../src/debug.c',
-  '../src/tracker_parser.c',
-  '../src/tracker_v3.c',
-  '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
@@ -1263,9 +1211,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
-  '../src/tracker_parser.c',
-  '../src/tracker_v3.c',
-  '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
@@ -1327,7 +1272,7 @@ test('real_tls_banner', test_integration_real_tls_banner,
 
 # tracker_v3_listing — Tier 3 coverage for the tracker v3 client
 # against any v3-capable target in the matrix. Drives the
-# production tracker_v3.c encoders + parsers over a real TCP
+# tracker listing codec (hxproto, via tracker_wire.c) over a real TCP
 # connection, pinning the 8-byte handshake → 4-byte listing
 # request → 10-byte response header → variable-length records
 # flow against software we didn't write.
@@ -1351,8 +1296,7 @@ test('real_tls_banner', test_integration_real_tls_banner,
 test_integration_tracker_v3 = executable(
   'test_integration_tracker_v3',
   'integration/test_tracker_v3.c',
-  '../src/tracker_v3.c',
-  '../src/tracker_v3_meta.c',
+  'integration/tracker_wire.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
@@ -1379,8 +1323,7 @@ test('tracker_v3_listing', test_integration_tracker_v3,
 test_integration_tracker_v3_tls = executable(
   'test_integration_tracker_v3_tls',
   'integration/test_tracker_v3_tls.c',
-  '../src/tracker_v3.c',
-  '../src/tracker_v3_meta.c',
+  'integration/tracker_wire.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
@@ -1424,9 +1367,9 @@ test('tracker_fetch', test_integration_tracker_fetch,
 # a future v1-only tracker added to the matrix exercises the
 # generic flow without needing test changes.
 #
-# Uses src/tracker_parser.c on real wire bytes from a real tracker
-# — complements the canned-fixture coverage in tests/proto/
-# test_tracker_parser.c. Asserts at the wire-parser layer rather
+# Uses the listing codec (hxproto, via tracker_wire.c) on real wire
+# bytes from a real tracker — complements hxproto's canned-fixture
+# tests. Asserts at the wire-parser layer rather
 # than driving the main-loop state machine (which would need a
 # GMainLoop test harness this binary doesn't ship); the production
 # machine's v1 path is the same byte sequence either way.
@@ -1440,7 +1383,7 @@ test('tracker_fetch', test_integration_tracker_fetch,
 test_integration_tracker_v1 = executable(
   'test_integration_tracker_v1',
   'integration/test_tracker_v1.c',
-  '../src/tracker_parser.c',
+  'integration/tracker_wire.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,

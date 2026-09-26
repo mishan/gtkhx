@@ -274,13 +274,11 @@ The mechanics, which are the part to copy when adding a new payload type:
 - **Copy and free go through glib's allocator** (`g_malloc0` + `g_strndup` /
   `g_free`), so a value made by a C `hx_*_new` and one made by a Rust `_copy`
   release through the same path.
-- **A wide struct can be modelled opaquely.** The tracker v3 metadata carries
-  dozens of fields; rather than transcribe them, `gtkhx-core` models it as a
-  correctly-sized, correctly-aligned buffer whose copy/free fix up only its
-  owned `char *` fields **by byte offset**, with the size and every offset
-  pinned by `_Static_assert`s on the C side. The UI crate separately carries a
-  fully typed mirror of the same memory, because the tracker window needs to
-  *read* the fields. Two intentional views, both const-asserted.
+- **One typed mirror, not two views.** The tracker v3 metadata once lived as
+  an opaque, offset-patched buffer in `gtkhx-core` beside a typed mirror in
+  `gtkhx-ui`, because C built it and each crate needed a different slice of
+  it. Once its constructor moved to Rust, the typed mirror moved into
+  `gtkhx-core` and became the only one; copy and free read named fields.
 
 ### Cross-thread lifecycle and cancellation
 
@@ -463,11 +461,9 @@ Ports late; some of it may never need to.
   model need no GTK and can split out into a crate that tests without a
   display; only the code that applies a theme to live widgets has to stay near
   GTK.
-- The tracker wire codec: `tracker_v3.c`, `tracker_v3_meta.c`,
-  `tracker_parser.c`. Pure encoders and parsers with no I/O and no GTK. These
-  should port into hx-libs rather than into a GtkHx crate, because hxd-ng
-  hand-rolls the same format for registration — see
-  [Shared code with hxd-ng](#shared-code-with-hxd-ng).
+- `tracker_event.c` — the `HxTrackerServer` signal payload's constructors
+  (address formatting, the v1 Mac Roman transcode). The wire codec under it
+  is `hxproto::tracker`, shared with hxd-ng.
 - The remaining model-side C: `rcv.c` (now the generic dispatch plus the
   post-LOGIN state machine), `network.c`, `commands.c` (the slash-command
   parser — never a wire-protocol file), `proto_helpers.c`, `proto_trace.c`
@@ -631,26 +627,22 @@ the plan: fix each one as the code around it ports.
 
 In order:
 
-1. **Move the tracker codec into hx-libs** and delete `tracker_v3.c`,
-   `tracker_v3_meta.c` and `tracker_parser.c`. Small, self-contained, and the
-   first piece of shared code with a server-side consumer waiting for it — see
-   [Shared code with hxd-ng](#shared-code-with-hxd-ng).
-2. **Port Files end to end.** The largest content port by a distance, and the
+1. **Port Files end to end.** The largest content port by a distance, and the
    one feature work most recently added C to. The model and wire halves are
    already Rust (`hxmodel::files`, the FILE_LIST populate and decode, the Get
    Info dialog), so it is a view and controller port rather than a rewrite:
    the two `files_panel` column views, the three providers, `files_ops.c`,
    `files_entry.c`, `files_complete.c`, the sub-dialogs, drag and drop, and
    the `rcv.c` handlers and `gtkhx.c` adapters that serve them.
-3. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
+2. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
    the whole-app theming work is fresh.
-4. **The rest of inventory §B**, one feature at a time: Chat's render and
+3. **The rest of inventory §B**, one feature at a time: Chat's render and
    output path and window construction, the Tasks list, `msg.c`, and the
    Users controller once the Chat and Users slices have taken the session
    structs it depends on with them.
-5. **The standalone windows**: `tray.c` is unblocked; `preview.c` waits on the
+4. **The standalone windows**: `tray.c` is unblocked; `preview.c` waits on the
    poppler / sourceview crate alignment.
-6. **Decide on `main()`** — last, as planned, or early, as rule 5 describes.
+5. **Decide on `main()`** — last, as planned, or early, as rule 5 describes.
 
 There is also a standing cleanup item worth folding into whatever touches it:
 the crate boundaries that still talk over `extern "C"` where a Cargo dependency
@@ -670,24 +662,23 @@ either pin moves.
 The rule from [`crate-layout.md`](crate-layout.md) §5 still holds: code moves
 to hx-libs when a real second consumer needs it, not before.
 
-hxd-ng's own roadmap has not caught up with this. It still names
-`hotline-rs` as the home for shared crates and says to share "knowledge and
-fixtures first, code later if ever" — written before hx-libs existed and
-before the two projects shared a pin. Updating it to match is part of the
-first move below. The candidates
-that now have one, most valuable first:
+**Done: the tracker protocol.** `hxproto::tracker` covers every role —
+the registration hxd-ng sends, the acknowledgment it reads, the listing
+GtkHx fetches — with one typed `TrackerMeta` for the v3 fields both sides
+speak. GtkHx's C tracker codec and hxd-ng's hand-built registrations are
+gone, and hxd-ng's roadmap now names hx-libs as the home for shared
+crates.
 
-1. **The tracker codec** (HTRK v1 and v3). GtkHx parses it in C for fetch;
-   hxd-ng builds it by hand in its registration code. One sans-IO crate serves
-   both, deletes C here, and removes duplicate code there.
-2. **`hxcrypto` and a sans-IO HOPE handshake.** hxd-ng refuses HOPE logins
+The candidates that have a second consumer, most valuable first:
+
+1. **`hxcrypto` and a sans-IO HOPE handshake.** hxd-ng refuses HOPE logins
    today. A handshake state machine in hx-libs that can play either role, with
    `hxnet` keeping the I/O, lets the server accept HOPE without writing it a
    second time — and gives GtkHx a server it controls to fix the
    compression-negotiation defect against. The hx-libs README already expects
    `hxcrypto` to move. Check the provenance notes in `crate-layout.md` §4
    first; it stays GPL either way.
-3. **Smaller pieces for `hxproto`**: the access-bit table, and the
+2. **Smaller pieces for `hxproto`**: the access-bit table, and the
    text-encoding helpers that GtkHx's `hxtext` and hxd-ng's `TextEncoding`
    each implement.
 

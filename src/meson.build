@@ -123,9 +123,6 @@ gtkhx_sources = files(
   # user editor). usermod.c is now the wire senders + access table only.
   'gtkhx_ui_bridge.c',
   'tracker_event.c',
-  'tracker_parser.c',
-  'tracker_v3.c',
-  'tracker_v3_meta.c',
   'tray.c',
   'uniquify_path.c',
   'usermod.c',

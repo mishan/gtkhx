@@ -76,7 +76,7 @@
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
-#include "tracker_v3.h"
+#include "tracker_wire.h"
 #include "tracker_v3_meta.h"
 #include "tracker_matrix.h"
 #include "integration_harness.h"

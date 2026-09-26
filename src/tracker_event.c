@@ -258,3 +258,36 @@ _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_bytes) == 48,
                 "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, meta) == 56, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, total) == 64, "field offset");
+
+/* HxTrackerV3Meta is built and freed in Rust (gtkhx-core::boxed::tracker);
+ * pin the layout both sides share. */
+_Static_assert (sizeof (HxTrackerV3Meta) == 216,
+                "HxTrackerV3Meta size must match gtkhx-core::boxed::tracker");
+/* The same offsets gtkhx-core pins: the ten owned strings, and a few
+ * scalars so a resized gboolean or enum trips the build. */
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, server_software) == 0,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, country_code) == 8,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, region) == 16,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, language) == 24,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, rules_url) == 48,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, banner_url) == 56,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, icon_url) == 64,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, contact_url) == 88,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, tags) == 112,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, hope_ciphers) == 152,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, max_users) == 32,
+                "meta scalar offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, protocol_version) == 120,
+                "meta scalar offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, verified_online) == 208,
+                "meta scalar offset");

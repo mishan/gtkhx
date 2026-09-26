@@ -66,8 +66,6 @@
 #include "hotline_proto.h"
 #include "hl_code.h"
 #include "proto_helpers.h"
-#include "tracker_parser.h"
-#include "tracker_v3.h"
 #include "tracker_event.h"
 
 /* `server_addr` and `connected` are gone. Both were one slot for the whole
