@@ -55,7 +55,7 @@ port).
 
 | Doc | Subject |
 |---|---|
-| [rust/ROADMAP.md](rust/ROADMAP.md) | The live inventory of what is still C, in what order it moves, and the seams that are permanent rather than pending. |
+| [rust/ROADMAP.md](rust/ROADMAP.md) | The live inventory of what is still C, in what order it moves, the seams that are permanent rather than pending, the rules that keep C from growing, and what moves to hx-libs next. |
 | [rust/networking.md](rust/networking.md) | The `hxnet` stack: connect lifecycle, the three silent-failure axes, proxy support, tracker fetch. |
 | [rust/network-endgame.md](rust/network-endgame.md) | What Rust owns of the connection struct today, and the ordered plan for the receive handlers still in C. |
 | [rust/glib-interop.md](rust/glib-interop.md) | The Rust↔GLib conventions: reference borrowing across signal emits, the tokio runtime, channels, and what is not allowed. |

@@ -114,13 +114,13 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 
 | Role | Crates |
 |---|---|
-| **Shared wire protocol** | `hxproto` — typed builders and parsers for every opcode, pinned from hx-libs and pure Rust; `gtkhx-proto-ffi` — GtkHx's C ABI over it (the `gtkhx_proto_*` / `hx_recv_route` / `hx_user_change_plan_resolve` shims), also a standalone staticlib for the focused protocol tests |
+| **Shared with hxd-ng** (from hx-libs) | `hxproto` — typed builders and parsers for every opcode, pure Rust; `hxfiles-xfer` (fork-header and HTXF codec); `hxhfs` (resource-fork sidecars). All three are git dependencies pinned in `rust/Cargo.toml`. GtkHx's C ABI over them lives here: `gtkhx-proto-ffi` (the `gtkhx_proto_*` / `hx_recv_route` / `hx_user_change_plan_resolve` shims) and `gtkhx-files-ffi`, each also a standalone staticlib for the focused tests |
 | **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
 | **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window), `hxchat-view` (the GTK4 chat widget), `hxchat-layout` (its layout engine — **dependency-free**: no gtk, glib, or pango) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
-| **Media / files** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn), `hxhfs` (resource-fork sidecars), `hxfiles-xfer` (fork-header codec) |
+| **Media** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn) |
 | **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and the TOML file — the owner of every preference value at runtime), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
 | **Link façade** | `gtkhx-ffi` — bundles every FFI-exporting crate into a single `libgtkhx_ffi.a`, so the binary links exactly one archive instead of a hand-ordered list. Several crates also build a standalone `staticlib` on the side, purely so the test suite can link one crate at a time. See `docs/rust/crate-layout.md`. |
 
@@ -135,6 +135,7 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
   vendored app-specific symbolic icons (see its README), beside the classic
   `src/pixmaps/`.
 - `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting,
+  `check-c-growth.sh` (the no-net-C-growth gate, below),
   `isolated-run.sh` (runs a test command sealed off from the desktop — see "Before
   calling anything done"), and `screenshot.py` (headless screenshots isolated from
   the desktop — see `docs/screenshots.md`).
@@ -276,8 +277,16 @@ one CI asks.
 tools/reformat.sh --check          # clang-format, every C file
 python3 tools/fix-whitespace.py --check
 tools/check-potfiles.sh            # needs gettext 0.25+ for Rust support
+tools/check-c-growth.sh            # no net lines of C added to src/
 cd rust && cargo fmt --all --check
 ```
+
+**C does not grow.** `check-c-growth.sh` fails a branch that adds more lines of
+C to `src/` than it removes; CI runs it on every pull request. If the feature
+you are building needs real changes to C content, port that content first. When
+growth is genuinely the right call, a `C-Growth: <reason>` trailer in the commit
+message records the exception. Reasoning in `docs/rust/ROADMAP.md`, "How the
+rest of the port gets done".
 
 Then, **both** voice configurations — CI builds each, and `#ifdef HAVE_VOICE`
 mistakes are invisible in whichever one you happen to be in:

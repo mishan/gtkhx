@@ -1,6 +1,6 @@
 # GtkHx lint / formatting checks — runs on every push and pull request.
 #
-# Two jobs:
+# Three jobs:
 #
 #   format     — whitespace hygiene (tools/fix-whitespace.py), C
 #                formatting (clang-format via tools/reformat.sh), and a
@@ -11,6 +11,9 @@
 #                rustfmt / clippy versions match the canonical build
 #                environment exactly (avoids "formatted with a different
 #                rustfmt" drift).
+#   c-growth   — pull requests only: fails if the branch adds net lines of C
+#                to src/ (tools/check-c-growth.sh). A `C-Growth:` commit
+#                trailer records a deliberate exception.
 #
 # Branch protection on `main` can require these green before merge, alongside
 # the `tests` workflow.
@@ -64,6 +67,22 @@ jobs:
 
       - name: clang-format (C sources)
         run: tools/reformat.sh --check
+
+  c-growth:
+    name: no net C growth
+    # Pull requests only: on a push to main the growth has already merged, and
+    # the reviewer's call (a `C-Growth:` trailer) was made on the PR.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          # The merge base and the branch's commit messages are both needed.
+          fetch-depth: 0
+
+      - name: C lines in src/ do not grow
+        run: tools/check-c-growth.sh "origin/${{ github.base_ref }}"
 
   rust-lint:
     name: rustfmt + clippy

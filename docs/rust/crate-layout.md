@@ -241,10 +241,13 @@ over an existing crate to justify a public API and its maintenance.
 
 ## 5. Shared-crate status and open work
 
-`hxproto` now lives in [hx-libs](https://github.com/mishan/hx-libs) and GtkHx pins it as a git
-dependency. hxd-ng consumes the same crate, so protocol changes land once and
-are validated by both applications. The remaining candidates stay local until
-a real second consumer justifies moving them.
+`hxproto`, `hxfiles-xfer` and `hxhfs` now live in
+[hx-libs](https://github.com/mishan/hx-libs), and GtkHx pins them as git
+dependencies. hxd-ng consumes the same crates, so protocol changes land once and
+are validated by both applications. GtkHx's C ABI over them stayed here, in
+`gtkhx-proto-ffi` and `gtkhx-files-ffi`. The remaining candidates stay local
+until a real second consumer justifies moving them; the ones that now have
+one, and their order, are in [ROADMAP.md](ROADMAP.md#shared-code-with-hxd-ng).
 
 - **Relicense** `hx-image-decode` and `hxtls-trust` to `MIT OR Apache-2.0`
   after the file-by-file read-through above. Blocks the packaging work.
