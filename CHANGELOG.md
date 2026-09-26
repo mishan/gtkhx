@@ -1,4 +1,4 @@
-## 1.4.0-dev
+## 1.4.0
 
 - Video
   - Video chat and screen sharing, on servers that support it
