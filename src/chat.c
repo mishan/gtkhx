@@ -47,7 +47,6 @@
 #include "inline_media.h"
 #include "gtkutil.h"
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
-#include "chat_bench.h"
 #include "chat_members.h"
 #include "chat_view.h"
 #include "users.h"
@@ -66,6 +65,9 @@
 #include "connect.h"
 #include "debug.h"
 #include "compat.h" /* _() i18n macro */
+
+/* gtkhx-ui bench module: runs the GTKHX_BENCH scenarios, if any. */
+extern void hx_bench_maybe_start (GtkWidget *chat_view);
 
 /* The per-conversation view aggregate. Opaque outside this file (see the
  * forward decl in session.h); moved here so a stray gchat->field access
@@ -2082,12 +2084,11 @@ gtkhx_chat_build_leaves (session *sess)
         return NULL;
     }
 
-    /* Arm the A/B benchmark if GTKHX_CHATVIEW_BENCH is set. Here rather
-     * than in create_chat because the tick callback it installs needs a
-     * frame clock, which the view only has once it is in a mapped
-     * window — and build_leaves runs on the way there. No-op otherwise.
-     * See chat_bench.c. */
-    hx_chat_bench_maybe_start (gchat->output);
+    /* Start any benchmarks GTKHX_BENCH asks for. Here rather than in
+     * create_chat because they wait on the view's frame clock, which it
+     * only has once it is in a mapped window — and build_leaves runs on
+     * the way there. No-op otherwise. See gtkhx-ui's bench module. */
+    hx_bench_maybe_start (gchat->output);
 
     gchat->subject = gtk_entry_new ();
     {

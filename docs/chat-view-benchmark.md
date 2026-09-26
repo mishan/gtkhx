@@ -29,7 +29,10 @@ binary, in the same window, by the same append path. `GTKHX_CHATVIEW`
 selected the backend and was the only difference between runs.
 
 Harness: `src/chat_bench.c`, armed by `GTKHX_CHATVIEW_BENCH=<n>`, driven
-by `tools/chatbench.sh`.
+by `tools/chatbench.sh`. Both have since been replaced: the same phases now
+run as the `chat` scenario of the in-app benchmark harness
+(`rust/crates/gtkhx-ui/src/bench/`), driven by `tools/uibench.sh`. See
+[performance.md](performance.md).
 
 ## 2. Environment
 

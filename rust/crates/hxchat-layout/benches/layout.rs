@@ -1,10 +1,11 @@
-//! Layout-engine microbenchmarks: the CPU half of what `src/chat_bench.c`
-//! measures through the real frame clock.
+//! Layout-engine microbenchmarks: the CPU half of what the in-app chat
+//! benchmark (`gtkhx-ui`'s `bench` module) measures through the real frame
+//! clock.
 //!
 //! These run headless against [`FixedMeasure`], so they time the engine —
 //! wrapping, the height index, anchoring, search — and not Pango's text
 //! shaping. A regression here is a regression in our code; a regression
-//! that only shows in `tools/chatbench.sh` is somewhere else.
+//! that only shows in `tools/uibench.sh` is somewhere else.
 //!
 //! The scrollback sizes are the instrument check. The engine's central
 //! claim is that a frame costs O(visible), not O(scrollback), so
@@ -45,7 +46,7 @@ const WORDS: &[&str] = &[
     "news",
     "brb",
 ];
-/// Five nick widths, as `chat_bench.c` cycles, so the gutter settles early
+/// Five nick widths, as the in-app chat benchmark cycles, so the gutter settles early
 /// and the wrap path sees varied lengths.
 const NICKS: &[&str] = &["al", "misha", "hx_fan_1999", "zed", "somebody_longer"];
 
