@@ -200,13 +200,13 @@ test_v3_handshake_and_listing (void)
      * pins that all records decode cleanly and the cursor lands
      * exactly at total_size.
      *
-     * Phase B addition: every record's TLV trailer is run through
-     * the production typed decoder (hx_tracker_v3_meta_new). Two
+     * Every record's TLV trailer is also run through the
+     * production typed decoder (hx_tracker_v3_meta_new). Two
      * regression nets:
      *   1. The decoder accepts every TLV blob the picked tracker
      *      emits — i.e. no exotic TLV id, no length-prefix encoding
      *      we missed, no oversized count tripping the bounds check.
-     *      The Tier 2 tests in test_tracker_v3_meta.c pin individual
+     *      hxproto's and gtkhx-core's unit tests pin individual
      *      shapes against synthesised bytes; this is the "actual
      *      tracker software in the wild" cross-check.
      *   2. For the Argus seed, meta->is_promoted must be TRUE.

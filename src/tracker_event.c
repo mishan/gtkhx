@@ -261,7 +261,7 @@ _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, total) == 64, "field offset");
 
 /* HxTrackerV3Meta is built and freed in Rust (gtkhx-core::boxed::tracker);
  * pin the layout both sides share. */
-_Static_assert (sizeof (HxTrackerV3Meta) == 216,
+_Static_assert (sizeof (HxTrackerV3Meta) == 224,
                 "HxTrackerV3Meta size must match gtkhx-core::boxed::tracker");
 /* The same offsets gtkhx-core pins: the ten owned strings, and a few
  * scalars so a resized gboolean or enum trips the build. */
@@ -289,5 +289,7 @@ _Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, max_users) == 32,
                 "meta scalar offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, protocol_version) == 120,
                 "meta scalar offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, verified_online) == 208,
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, total_file_size) == 176,
+                "meta scalar offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, verified_online) == 216,
                 "meta scalar offset");

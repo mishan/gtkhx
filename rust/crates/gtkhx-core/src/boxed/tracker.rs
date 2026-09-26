@@ -89,7 +89,7 @@ pub struct HxTrackerV3Meta {
     pub news_count: u32,          // 0x0450
     pub msgboard_count: u32,      // 0x0451
     pub files_count: u32,         // 0x0452
-    pub total_file_size: u32,     // 0x0453
+    pub total_file_size: u64,     // 0x0453
     pub last_news_timestamp: u32, // 0x0454
     pub last_chat_timestamp: u32, // 0x0455
 
@@ -105,7 +105,7 @@ pub struct HxTrackerV3Meta {
 
 // Layout pins, matching the _Static_asserts in tracker_event.c.
 const _: () = {
-    assert!(size_of::<HxTrackerV3Meta>() == 216);
+    assert!(size_of::<HxTrackerV3Meta>() == 224);
     assert!(align_of::<HxTrackerV3Meta>() == 8);
     assert!(offset_of!(HxTrackerV3Meta, server_software) == 0);
     assert!(offset_of!(HxTrackerV3Meta, country_code) == 8);
@@ -119,7 +119,8 @@ const _: () = {
     assert!(offset_of!(HxTrackerV3Meta, tags) == 112);
     assert!(offset_of!(HxTrackerV3Meta, protocol_version) == 120);
     assert!(offset_of!(HxTrackerV3Meta, hope_ciphers) == 152);
-    assert!(offset_of!(HxTrackerV3Meta, verified_online) == 208);
+    assert!(offset_of!(HxTrackerV3Meta, total_file_size) == 176);
+    assert!(offset_of!(HxTrackerV3Meta, verified_online) == 216);
 };
 
 impl HxTrackerV3Meta {
@@ -151,8 +152,9 @@ impl HxTrackerV3Meta {
     }
 }
 
-/// A glib copy of `s`, or NULL. Like the C decoder's `g_strndup`, it ends
-/// at the first NUL: a C string can't carry one.
+/// A glib copy of `s`, or NULL, ending at the first NUL: a C string can't
+/// carry one. (The C decoder this replaced turned an embedded NUL and
+/// everything after it into U+FFFD instead.)
 unsafe fn dup(s: &Option<String>) -> *mut c_char {
     match s {
         None => ptr::null_mut(),
@@ -488,6 +490,118 @@ mod tests {
             assert!((*m).region.is_null(), "absent is NULL");
             assert_eq!((*m).has_max_users + (*m).supports_voice, 1);
             hx_tracker_v3_meta_free(m);
+        }
+    }
+
+    /// Every field at once, each with a value no other field has, so a
+    /// mapping that reads the wrong member fails here.
+    #[test]
+    fn meta_new_maps_every_field() {
+        let s = |id: u16, v: &str| tlv(id, v.as_bytes());
+        let n16 = |id: u16, v: u16| tlv(id, &v.to_be_bytes());
+        let n32 = |id: u16, v: u32| tlv(id, &v.to_be_bytes());
+        let on = |id: u16| tlv(id, &[1]);
+        let blob = [
+            s(0x0200, "software"),
+            s(0x0201, "NO"),
+            s(0x0202, "region"),
+            s(0x0203, "nb"),
+            n16(0x0204, 11),
+            tlv(0x0205, &[1]),
+            n32(0x0206, 12),
+            s(0x0207, "rules"),
+            s(0x0208, "banner"),
+            s(0x0209, "icon"),
+            n32(0x020a, 13),
+            n32(0x020b, 14),
+            tlv(0x020c, &(-15i16).to_be_bytes()),
+            s(0x020d, "contact"),
+            n32(0x020e, 16),
+            n16(0x0210, 17),
+            n16(0x0211, 18),
+            n16(0x0212, 19),
+            n16(0x0300, 20),
+            on(0x0301),
+            on(0x0302),
+            n16(0x0303, 21),
+            on(0x0304),
+            on(0x0305),
+            on(0x0306),
+            on(0x0307),
+            s(0x0309, "ciphers"),
+            s(0x0310, "tags"),
+            n32(0x0450, 22),
+            n32(0x0451, 23),
+            n32(0x0452, 24),
+            tlv(0x0453, &5_000_000_000u64.to_be_bytes()),
+            n32(0x0454, 26),
+            n32(0x0455, 27),
+            on(0x0500),
+            tlv(0x0501, &[12]),
+            on(0x0502),
+            on(0x0600),
+            n32(0x0601, 28),
+            n32(0x0602, 29),
+            on(0x0603),
+        ];
+        let count = blob.len() as u16;
+        let blob = blob.concat();
+        unsafe {
+            let m = hx_tracker_v3_meta_new(blob.as_ptr(), blob.len(), count);
+            assert!(!m.is_null());
+            let m = &*m;
+            let strings = [
+                (m.server_software, "software"),
+                (m.country_code, "NO"),
+                (m.region, "region"),
+                (m.language, "nb"),
+                (m.rules_url, "rules"),
+                (m.banner_url, "banner"),
+                (m.icon_url, "icon"),
+                (m.contact_url, "contact"),
+                (m.hope_ciphers, "ciphers"),
+                (m.tags, "tags"),
+            ];
+            for (p, want) in strings {
+                assert_eq!(cstr(p), want);
+            }
+            assert_eq!((m.max_users, m.has_max_users), (11, 1));
+            assert_eq!(m.maturity, MATURITY_TEEN);
+            assert_eq!(m.uptime_secs, 12);
+            assert_eq!((m.link_down_mbit, m.link_up_mbit), (13, 14));
+            assert_eq!((m.timezone_offset_min, m.has_timezone_offset), (-15, 1));
+            assert_eq!(m.server_launched, 16);
+            assert_eq!((m.min_proto_version, m.peak_24h, m.avg_24h), (17, 18, 19));
+            assert_eq!((m.protocol_version, m.tls_port), (20, 21));
+            let caps = [
+                m.supports_hope,
+                m.supports_tls,
+                m.supports_inline_media,
+                m.supports_voice,
+                m.supports_large_files,
+                m.supports_ipv6,
+            ];
+            assert_eq!(caps, [1; 6]);
+            assert_eq!(
+                (m.news_count, m.msgboard_count, m.files_count),
+                (22, 23, 24)
+            );
+            assert_eq!(m.total_file_size, 5_000_000_000, "u64, past u32::MAX");
+            assert_eq!((m.last_news_timestamp, m.last_chat_timestamp), (26, 27));
+            assert_eq!(
+                (m.private_listing, m.listing_category, m.language_strict),
+                (1, CATEGORY_CREATIVE, 1)
+            );
+            assert_eq!(
+                (
+                    m.is_promoted,
+                    m.first_seen,
+                    m.last_heartbeat,
+                    m.verified_online
+                ),
+                (1, 28, 29, 1)
+            );
+            hx_tracker_v3_meta_free(m as *const _ as *mut _);
         }
     }
 

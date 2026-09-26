@@ -52,8 +52,8 @@ proto_test_deps = test_deps + [
   rust_gtkhx_core_dep,
   # Phase R4.2: the boxed payload value-types (HxMsgEvent, HxChatEvent +
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
-  # proto_helpers.c / tracker_event.c into the
-  # self-contained gtkhx-core::boxed module. Proto tests that link those
+  # proto_helpers.c / tracker_event.c into the self-contained
+  # gtkhx-core::boxed module. Proto tests that link those
   # producers and exercise the boxed copy/free (e.g. test_msg_event /
   # test_chat_event call hx_*_event_copy/_free; the tracker tests'
   # meta_new/_free call sites) resolve them against this archive. It's

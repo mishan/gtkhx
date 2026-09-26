@@ -24,10 +24,10 @@
  *     tracker elicits a clean response: 6-byte magic echo, then
  *     the 14-byte v1 response header (with nservers at offset
  *     [10..11]), then the v1 records back-to-back.
- *   - The pure parsers in src/tracker_parser.c decode every
+ *   - hxproto's v1 parsers (through tracker_wire.c) decode every
  *     piece (reply header, padding sentinel, fixed record
  *     prefix) against real wire bytes from a real tracker — not
- *     just the canned fixtures in tests/proto/test_tracker_parser.c.
+ *     just the canned fixtures in hxproto's own tests.
  *   - When the picked target is hxtrackd specifically: one
  *     record matches the seeded "hxtrackd test server" entry
  *     that tests/hxtrackd/seed-tracker.py registers via UDP at
@@ -158,8 +158,7 @@ test_v1_fallback_listing (void)
      * misaligning record reads downstream. */
     g_assert_cmpmem (reply_hdr, HTRK_MAGIC_LEN, HTRK_MAGIC, HTRK_MAGIC_LEN);
 
-    /* nservers lives at offset [10..11] (u16 BE) per the pure
-     * helper in src/tracker_parser.c. */
+    /* nservers lives at offset [10..11] (u16 BE). */
     guint16 nservers = 0xffff;
     g_assert_true (hx_tracker_reply_parse_header (reply_hdr, sizeof (reply_hdr),
                                                   &nservers));

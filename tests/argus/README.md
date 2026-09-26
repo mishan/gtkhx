@@ -108,10 +108,9 @@ The record parser (`hxproto`'s `parse_tracker_v3_record`, in hx-libs)
 handles all three address-type bytes (`0x04`/`0x06`/`0x48`)
 cleanly, pinned by its `tracker_v3_record_hostname_basic` test.
 
-The view side (`src/tracker.c::tracker_server_create`) routes all
-three through the same string-keyed dedup tree — added in the
-Phase E rewrite that landed on `claude/tracker-v3-phase-a` —
-so hostname records flow to the UI exactly like IPv4 records.
+The view side (`tracker_server_create` in gtkhx-ui's tracker window)
+routes all three through the same string-keyed dedup tree, so
+hostname records flow to the UI exactly like IPv4 records.
 `hx_connect` takes a host string and `getaddrinfo` resolves
 literal IPv4 / IPv6 / hostnames transparently.
 

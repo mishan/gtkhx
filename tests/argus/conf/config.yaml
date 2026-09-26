@@ -87,10 +87,10 @@ promoted_dedup: true
 # Three pinned entries — deterministic content for the integration
 # tests. Argus renders all promoted_servers entries as v3 0x48
 # (hostname) records on the wire, regardless of whether the address
-# is an IP literal or a real hostname. The client-side parser
-# (src/tracker_v3.c::hx_tracker_v3_parse_record) handles all three
+# is an IP literal or a real hostname. The record parser (hxproto's
+# parse_tracker_v3_record, in hx-libs) handles all three
 # address-type bytes (0x04 / 0x06 / 0x48); the view side
-# (src/tracker.c::tracker_server_create) routes all three through
+# (gtkhx-ui's tracker window, tracker_server_create) routes all three through
 # the same string-keyed dedup tree, so 0x48 records flow through
 # to the UI just like IPv4 records do. The Tier 3 test asserts at
 # the parser layer for offset-math regression coverage; see

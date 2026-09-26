@@ -226,7 +226,7 @@ the record's `addr_type` byte:
 | `0x0450` | `NEWS_COUNT` | u32 |
 | `0x0451` | `MSGBOARD_COUNT` | u32 |
 | `0x0452` | `FILES_COUNT` | u32 |
-| `0x0453` | `TOTAL_FILE_SIZE` | u32 |
+| `0x0453` | `TOTAL_FILE_SIZE` | u64 (4-byte values predate the spec's correction and are still read) |
 | `0x0454` | `LAST_NEWS_TIMESTAMP` | u32 unix ts; 0 = never |
 | `0x0455` | `LAST_CHAT_TIMESTAMP` | u32 unix ts; public chat only per spec |
 

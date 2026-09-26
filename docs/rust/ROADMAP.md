@@ -665,9 +665,9 @@ to hx-libs when a real second consumer needs it, not before.
 **Done: the tracker protocol.** `hxproto::tracker` covers every role —
 the registration hxd-ng sends, the acknowledgment it reads, the listing
 GtkHx fetches — with one typed `TrackerMeta` for the v3 fields both sides
-speak. GtkHx's C tracker codec and hxd-ng's hand-built registrations are
-gone, and hxd-ng's roadmap now names hx-libs as the home for shared
-crates.
+speak. GtkHx's C tracker codec is gone; hxd-ng's hand-built registrations
+go with its matching change, which also updates its roadmap to name hx-libs
+as the home for shared crates.
 
 The candidates that have a second consumer, most valuable first:
 

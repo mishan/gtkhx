@@ -100,7 +100,7 @@ struct _HxTrackerV3Meta {
     guint32 news_count;          /* 0x0450 */
     guint32 msgboard_count;      /* 0x0451 */
     guint32 files_count;         /* 0x0452 */
-    guint32 total_file_size;     /* 0x0453 */
+    guint64 total_file_size;     /* 0x0453 — bytes; u64 per spec */
     guint32 last_news_timestamp; /* 0x0454 — 0 = never */
     guint32 last_chat_timestamp; /* 0x0455 — public-chat only per spec */
 

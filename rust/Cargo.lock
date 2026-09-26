@@ -2142,7 +2142,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=739b94d3f7eeb31751d4a6283cb434209dd6fd17#739b94d3f7eeb31751d4a6283cb434209dd6fd17"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5#e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5"
 dependencies = [
  "sha2",
 ]
@@ -2164,7 +2164,7 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=739b94d3f7eeb31751d4a6283cb434209dd6fd17#739b94d3f7eeb31751d4a6283cb434209dd6fd17"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5#e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5"
 
 [[package]]
 name = "hxmacres"
@@ -2211,7 +2211,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=739b94d3f7eeb31751d4a6283cb434209dd6fd17#739b94d3f7eeb31751d4a6283cb434209dd6fd17"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5#e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5"
 
 [[package]]
 name = "hxsound"
