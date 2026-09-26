@@ -227,7 +227,7 @@ GTKHX_DEBUG=all
 
 Output goes to stderr, prefixed `[<category>]`. Categories in use include `proto`, `news`,
 `tracker`, `voice`, `xfer`, `files`, `media`, `icon`, `dock`, `layout`, `dnd`, `startup`,
-`name`, and `bench`. Adding one takes no registration — `debug_log ("newcat", "…")` just
+and `name`. Adding one takes no registration — `debug_log ("newcat", "…")` just
 works. Infrastructure in `src/debug.{c,h}`; the wire trace in `src/proto_trace.{c,h}`.
 
 The protocol trace is the fastest way to diagnose "the server doesn't like X": match

@@ -35,11 +35,24 @@ fi
 
 echo "uibench: $SCENARIOS, $REPEATS repeats, $BIN"
 
+# GTK's own stderr chatter is noise here, but when the app fails (a bad
+# scenario list, a crash) its stderr is the only explanation.
+errlog=$(mktemp)
+trap 'rm -f "$errlog"' EXIT
+
 i=1
 while [ "$i" -le "$REPEATS" ]; do
     echo
     echo "--- run $i/$REPEATS ---"
+    rc=0
     GTKHX_BENCH="$SCENARIOS" GTKHX_BENCH_QUIT=1 \
-        "$BIN" 2>/dev/null | sed -n '/^=== /,/^====/p'
+        "$BIN" 2>"$errlog" >"$errlog.out" || rc=$?
+    sed -n '/^=== /,/^====/p' "$errlog.out"
+    rm -f "$errlog.out"
+    if [ "$rc" -ne 0 ]; then
+        echo "uibench: $BIN exited with status $rc:" >&2
+        tail -n 20 "$errlog" >&2
+        exit "$rc"
+    fi
     i=$((i + 1))
 done

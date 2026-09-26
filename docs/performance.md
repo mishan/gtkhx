@@ -85,6 +85,10 @@ the scenarios in order; each prints a report. Scenario code awaits the frame
 clock — the next tick for sampling frame intervals, `after-paint` for "until
 this work is on screen" — so a scenario reads as a sequence of steps.
 
+A frame wait gives up after a few seconds — frames stop for a closed or
+hidden window — and the report then carries a failed check rather than
+hanging. Closing the Files window mid-run ends that scenario the same way.
+
 Every report leads with the **idle frame interval**, measured before the
 scenario does anything: the refresh interval on a real display, and the
 floor under every frame number that follows. It has already caught one bug
@@ -205,6 +209,13 @@ and is the spread to expect.
 | sort by name: call / until painted | 65 ms / 72 ms |
 | scroll p95 | 16.9 ms |
 | local listing of a 10,000-file directory (UI frozen) | **3.4 s** |
+
+Two numbers here are unsettled. The first sort that brings files to the
+top, and the scroll that follows, sometimes take 170–190 ms instead of the
+~23 ms and ~17 ms above: once in three runs here, and in every run of a
+reviewer's 2,000-entry check. Something paid once per process on first
+display would fit — loading icon textures for kinds not yet shown is the
+leading guess — but it is not yet explained.
 
 ## Findings
 

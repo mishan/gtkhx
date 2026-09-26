@@ -32,7 +32,9 @@ Harness: `src/chat_bench.c`, armed by `GTKHX_CHATVIEW_BENCH=<n>`, driven
 by `tools/chatbench.sh`. Both have since been replaced: the same phases now
 run as the `chat` scenario of the in-app benchmark harness
 (`rust/crates/gtkhx-ui/src/bench/`), driven by `tools/uibench.sh`. See
-[performance.md](performance.md).
+[performance.md](performance.md). First paint is now timed to the end of
+the paint rather than the next frame tick, so the first-paint figures below
+read up to one refresh interval higher than the new harness reports.
 
 ## 2. Environment
 

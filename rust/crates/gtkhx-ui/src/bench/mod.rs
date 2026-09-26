@@ -91,9 +91,16 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
     let Ok(spec) = std::env::var("GTKHX_BENCH") else {
         return;
     };
+    let quit = std::env::var_os("GTKHX_BENCH_QUIT").is_some();
     let requests = match parse_requests(&spec) {
         Ok(r) => r,
         Err(e) => {
+            // A scripted run waits for the app to exit; with nothing to
+            // run, it never would.
+            if quit {
+                eprintln!("GTKHX_BENCH: {e}");
+                std::process::exit(2);
+            }
             glib::g_warning!("gtkhx", "GTKHX_BENCH: {e}");
             return;
         }
@@ -104,7 +111,6 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
     } else {
         Some(glib::translate::from_glib_none(chat_view))
     };
-    let quit = std::env::var_os("GTKHX_BENCH_QUIT").is_some();
     glib::spawn_future_local(async move {
         for r in requests {
             match r.name.as_str() {
@@ -128,10 +134,41 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
 
 // ---- waiting on the frame clock ------------------------------------------
 
+/// How long to wait for a frame before giving up on it. Generous: a frame
+/// normally comes within a refresh interval, and even the slowest paint
+/// measured so far is a fraction of this.
+const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+thread_local! {
+    /// Set when a frame wait timed out, and reported as a failed check.
+    /// Frames stop for an unmapped widget — a window closed or minimized,
+    /// a pane in a hidden tab — and a wait that hung there would stall
+    /// every later scenario and the exit.
+    static STALLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 #[derive(Default)]
 struct FrameState {
     at: Option<i64>,
     waker: Option<Waker>,
+    /// The tick, after-paint or timeout that got here first; the others
+    /// then do nothing.
+    fired: bool,
+    /// The after-paint connection, so a timeout can drop it.
+    paint: Option<(gtk::gdk::FrameClock, glib::SignalHandlerId)>,
+}
+
+impl FrameState {
+    fn fire(&mut self) {
+        if self.fired {
+            return;
+        }
+        self.fired = true;
+        self.at = Some(glib::monotonic_time());
+        if let Some(w) = self.waker.take() {
+            w.wake();
+        }
+    }
 }
 
 /// Which point of a frame to wait for.
@@ -169,6 +206,12 @@ impl Future for FrameWait {
     type Output = i64;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<i64> {
+        // One wait has already timed out in this scenario: the report will
+        // say so, and waiting out a timeout per remaining frame would only
+        // delay it.
+        if !self.armed && STALLED.get() {
+            return Poll::Ready(glib::monotonic_time());
+        }
         {
             let mut st = self.state.borrow_mut();
             if let Some(t) = st.at.take() {
@@ -178,38 +221,43 @@ impl Future for FrameWait {
         }
         if !self.armed {
             self.armed = true;
-            let state = self.state.clone();
-            let fire = move || {
-                let mut st = state.borrow_mut();
-                st.at = Some(glib::monotonic_time());
-                if let Some(w) = st.waker.take() {
-                    w.wake();
-                }
-            };
             match self.point {
                 FramePoint::Tick => {
+                    let state = self.state.clone();
                     self.widget.add_tick_callback(move |_, _| {
-                        fire();
+                        state.borrow_mut().fire();
                         glib::ControlFlow::Break
                     });
                 }
                 FramePoint::AfterPaint => {
-                    let Some(clock) = self.widget.frame_clock() else {
-                        // Not realized: there is no frame to wait for.
-                        return Poll::Ready(glib::monotonic_time());
-                    };
-                    let id: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::default();
-                    let id2 = id.clone();
-                    let handler = clock.connect_after_paint(move |clock| {
-                        fire();
-                        if let Some(id) = id2.borrow_mut().take() {
-                            clock.disconnect(id);
-                        }
-                    });
-                    id.replace(Some(handler));
-                    self.widget.queue_draw();
+                    if let Some(clock) = self.widget.frame_clock() {
+                        let state = self.state.clone();
+                        let handler = clock.connect_after_paint(move |clock| {
+                            let mut st = state.borrow_mut();
+                            st.fire();
+                            if let Some((_, id)) = st.paint.take() {
+                                clock.disconnect(id);
+                            }
+                        });
+                        self.state.borrow_mut().paint = Some((clock, handler));
+                        self.widget.queue_draw();
+                    }
+                    // Unrealized: no frame will come, and the timeout
+                    // below reports it.
                 }
             }
+            let state = self.state.clone();
+            glib::timeout_add_local_once(FRAME_TIMEOUT, move || {
+                let mut st = state.borrow_mut();
+                if st.fired {
+                    return;
+                }
+                if let Some((clock, id)) = st.paint.take() {
+                    clock.disconnect(id);
+                }
+                STALLED.set(true);
+                st.fire();
+            });
         }
         Poll::Pending
     }
@@ -332,7 +380,16 @@ impl Report {
         self.lines.push(format!("{label:<24}{value}{note}"));
     }
 
-    fn print(&self) {
+    /// Print the report. A frame wait that timed out during the scenario
+    /// is reported here as a failed check, and cleared for the next one.
+    fn print(&mut self) {
+        if STALLED.replace(false) {
+            self.line(
+                "CHECK FAILED",
+                "",
+                "a frame never came; timings after it are meaningless",
+            );
+        }
         let rule = "=".repeat(60);
         println!();
         println!("=== {} {}", self.title, &rule[self.title.len().min(55)..]);
