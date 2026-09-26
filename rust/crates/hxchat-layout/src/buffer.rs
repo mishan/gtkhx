@@ -55,7 +55,15 @@ pub struct ChatBuffer {
     /// that actually matters. (xtext did a full linear scan *per*
     /// lookup — `gtk_xtext_find_media_entry_by_token`, xtext.c:6386 —
     /// so even the unamortised path is no worse.)
+    ///
+    /// Trimming is the exception. It only ever removes rows from the front,
+    /// which shifts every surviving position down by the same amount, so
+    /// instead of rebuilding it drops the trimmed ids and raises
+    /// `pos_base`. A stored value is the row position plus `pos_base`. At
+    /// the scrollback cap every append trims, and a rebuild there would
+    /// make each new message cost O(scrollback).
     pos: HashMap<MessageId, usize>,
+    pos_base: usize,
     pos_dirty: bool,
 
     params: LayoutParams,
@@ -94,6 +102,7 @@ impl ChatBuffer {
             index: HeightIndex::new(),
             next_id: 1,
             pos: HashMap::new(),
+            pos_base: 0,
             pos_dirty: false,
             params,
             generation,
@@ -157,7 +166,7 @@ impl ChatBuffer {
             // should take `&mut self` and call `reindex` first.
             return self.rows.iter().position(|r| r.id == id);
         }
-        self.pos.get(&id).copied()
+        self.pos.get(&id).map(|p| p - self.pos_base)
     }
 
     /// The layout params as the estimator should see them, with the
@@ -176,6 +185,7 @@ impl ChatBuffer {
             return;
         }
         self.pos.clear();
+        self.pos_base = 0;
         for (i, r) in self.rows.iter().enumerate() {
             self.pos.insert(r.id, i);
         }
@@ -198,7 +208,7 @@ impl ChatBuffer {
         });
         self.index.push_back(h, false);
         if !self.pos_dirty {
-            self.pos.insert(id, self.rows.len() - 1);
+            self.pos.insert(id, self.pos_base + self.rows.len() - 1);
         }
         self.trim(measure);
         id
@@ -240,15 +250,16 @@ impl ChatBuffer {
         self.pos_dirty = true;
         // An insert splits whatever run spanned this point: the new row
         // may continue the one above, and the row below may no longer
-        // continue what is now two rows up.
-        self.regroup_from(at, measure);
+        // continue what is now two rows up. Nothing further down moves
+        // relative to its predecessor.
+        self.regroup_rows(at..at + 2, measure);
         id
     }
 
     /// Remove the row `id` names. `false` if the mark was already stale,
     /// which is not an error — it is how a caller learns the row was
     /// trimmed.
-    pub fn remove(&mut self, id: MessageId) -> bool {
+    pub fn remove(&mut self, id: MessageId, measure: &dyn TextMeasure) -> bool {
         self.reindex();
         let Some(row) = self.row_of(id) else {
             return false;
@@ -256,6 +267,10 @@ impl ChatBuffer {
         self.rows.remove(row);
         self.index.remove(row);
         self.pos_dirty = true;
+        // The row that moved up has a new predecessor. Removing a run's
+        // head would otherwise leave the next row suppressing a nick that
+        // nothing above it shows.
+        self.regroup_rows(row..row + 1, measure);
         if self.anchor.message == Some(id) {
             // Re-anchor to the row that took its place, so removing the
             // "Load older" sentinel from under the viewport doesn't
@@ -343,6 +358,7 @@ impl ChatBuffer {
         self.rows.clear();
         self.index = HeightIndex::new();
         self.pos.clear();
+        self.pos_base = 0;
         self.pos_dirty = false;
         self.anchor = ScrollAnchor::bottom();
         self.reset_indent();
@@ -354,13 +370,22 @@ impl ChatBuffer {
         }
         let excess = self.rows.len() - self.max_rows;
         for _ in 0..excess {
-            self.rows.pop_front();
+            if let Some(row) = self.rows.pop_front() {
+                // A dirty map is rebuilt from `rows` on the next lookup,
+                // so it has nothing to keep in step.
+                if !self.pos_dirty {
+                    self.pos.remove(&row.id);
+                }
+            }
         }
         self.index.drain_front(excess);
-        self.pos_dirty = true;
+        if !self.pos_dirty {
+            self.pos_base += excess;
+        }
         // The trimmed rows may have included a run's head. Whatever is
-        // at the front now cannot be a continuation of anything.
-        self.regroup_from(0, measure);
+        // at the front now cannot be a continuation of anything; every
+        // other row keeps the predecessor it had.
+        self.regroup_rows(0..1, measure);
     }
 
     /// Grouping controls. 0 disables it; rows already in the buffer are
@@ -371,7 +396,7 @@ impl ChatBuffer {
             return;
         }
         self.group_gap_secs = secs.max(0);
-        self.regroup_from(0, measure);
+        self.regroup_rows(0..self.rows.len(), measure);
     }
 
     pub fn group_gap_secs(&self) -> i64 {
@@ -412,15 +437,20 @@ impl ChatBuffer {
         (0..=self.group_gap_secs).contains(&dt)
     }
 
-    /// Recompute the GROUPED flag from `row` to the end.
+    /// Recompute the GROUPED flag for `rows` (clamped to the buffer).
     ///
     /// Needed because the flag is a property of a message's *neighbours*.
     /// Trimming can delete a run's head, leaving rows that suppress their
     /// nick with nothing above them to have shown it — a speaker's
     /// messages appearing anonymously. Inserting can split a run the same
     /// way.
-    fn regroup_from(&mut self, row: usize, measure: &dyn TextMeasure) {
-        for i in row..self.rows.len() {
+    ///
+    /// The flag depends only on the row directly above
+    /// (`groups_with_previous`), so a change touches at most the rows whose
+    /// predecessor changed. Callers pass exactly those; walking to the end
+    /// made every trim and every history insert cost O(scrollback).
+    fn regroup_rows(&mut self, rows: std::ops::Range<usize>, measure: &dyn TextMeasure) {
+        for i in rows.start..rows.end.min(self.rows.len()) {
             let want = {
                 let msg = &self.rows[i].msg;
                 self.groups_with_previous(msg, i)
@@ -1308,20 +1338,21 @@ impl ChatBuffer {
     /// The scroll adjustment value the current anchor implies.
     pub fn scroll_offset(&mut self, viewport_height: u32) -> u64 {
         self.reindex();
-        let pos = std::mem::take(&mut self.pos);
-        let v = AnchorResolver::to_pixels(&self.anchor, &mut self.index, viewport_height, |id| {
-            pos.get(&id).copied()
-        });
-        self.pos = pos;
-        v
+        let pos = &self.pos;
+        let base = self.pos_base;
+        AnchorResolver::to_pixels(&self.anchor, &mut self.index, viewport_height, |id| {
+            pos.get(&id).map(|p| p - base)
+        })
     }
 
     /// Re-anchor from a pixel position — a scrollbar drag.
     pub fn scroll_to(&mut self, y: u64, viewport_height: u32, follow_slop: u32) {
-        let ids: Vec<MessageId> = self.rows.iter().map(|r| r.id).collect();
+        // Borrow the rows rather than collecting their ids: a copy here
+        // made every scroll cost O(scrollback).
+        let rows = &self.rows;
         self.anchor =
             AnchorResolver::from_pixels(y, &mut self.index, viewport_height, follow_slop, |row| {
-                ids.get(row).copied()
+                rows.get(row).map(|r| r.id)
             });
     }
 

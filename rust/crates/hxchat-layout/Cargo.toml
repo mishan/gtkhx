@@ -13,6 +13,9 @@ publish = false
 # staticlib target before there is a linker asking for one would just
 # lengthen the build.
 crate-type = ["rlib"]
+# The benches are criterion targets; without this, `cargo bench` also runs
+# the lib under libtest, which rejects criterion's flags.
+bench = false
 
 # Deliberately no dependencies.
 #
@@ -23,3 +26,12 @@ crate-type = ["rlib"]
 # supplies a Pango-backed implementation in C2 and the tests here supply
 # a deterministic fixed-width one. See docs/chat-view.md.
 [dependencies]
+
+# Benchmarks only. The "no dependencies" rule above is about what the
+# engine links; a dev-dependency never reaches the widget or the binary.
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "layout"
+harness = false

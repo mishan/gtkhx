@@ -118,6 +118,11 @@ gstreamer-rtp = "0.24"
 tokio = { version = "1.40", default-features = false }
 async-channel = "2.3"
 
+# Microbenchmarks (`cargo bench`). Dev-dependency only: nothing that ships
+# links it. Default features off drops the rayon and plotters stacks, which
+# the text report doesn't need. See docs/performance.md.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
 # --- Compile-speed profile tuning --------------------------------------------
 # These settings change neither the wire format nor any runtime behavior — they
 # only trade a little debuginfo fidelity for faster codegen + link, which is

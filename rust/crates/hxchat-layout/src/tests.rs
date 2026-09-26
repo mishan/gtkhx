@@ -9,7 +9,7 @@ use crate::buffer::ChatBuffer;
 use crate::index::HeightIndex;
 use crate::markdown::{self, RawBlock};
 use crate::measure::{FixedMeasure, TextMeasure};
-use crate::message::{Block, ImageSize, Message, Speaker};
+use crate::message::{Block, ImageSize, Message, MessageId, Speaker};
 use crate::span::{Attrs, ParsedText, Style};
 use crate::wrap::{estimate_height, layout_message, LayoutGeneration, LayoutParams};
 
@@ -861,8 +861,8 @@ fn buffer_stale_mark_is_inert_not_fatal() {
     let m = FixedMeasure::new(8);
     let mut b = ChatBuffer::new(params(400));
     let id = b.append(Message::system(ParsedText::plain("x")), &m);
-    assert!(b.remove(id));
-    assert!(!b.remove(id), "second remove is a no-op, not a crash");
+    assert!(b.remove(id, &m));
+    assert!(!b.remove(id, &m), "second remove is a no-op, not a crash");
     assert_eq!(b.row_of(id), None);
     assert!(b.message(id).is_none());
 }
@@ -878,6 +878,48 @@ fn buffer_trim_drops_oldest() {
     assert_eq!(b.len(), 50);
     assert_eq!(b.message_at(0).unwrap().to_plain_text(), "150");
     assert_eq!(b.message_at(49).unwrap().to_plain_text(), "199");
+}
+
+/// Trimming keeps the id → position map in step by offset rather than by
+/// rebuild. Check every mark against the rows themselves after trims mixed
+/// with the operations that do dirty the map, in both of its states.
+#[test]
+fn buffer_positions_survive_trims() {
+    fn check(b: &mut ChatBuffer, ids: &[MessageId]) {
+        for &id in ids {
+            let scan = (0..b.len()).find(|&r| b.id_at(r) == Some(id));
+            assert_eq!(b.row_of(id), scan, "row_of({id:?}) disagrees with the rows");
+        }
+    }
+    let m = FixedMeasure::new(8);
+    let mut b = ChatBuffer::new(params(400));
+    b.set_max_rows(20, &m);
+    let mut ids = Vec::new();
+    for i in 0..300 {
+        ids.push(b.append(Message::system(ParsedText::plain(format!("{i}"))), &m));
+        match i % 37 {
+            // Dirty the map, then keep trimming before anything reads it.
+            5 => {
+                let front = b.id_at(0);
+                ids.push(b.insert_before(front, Message::system(ParsedText::plain("old")), &m));
+            }
+            // Remove from the middle; `remove` reindexes first.
+            11 => {
+                let mid = b.id_at(b.len() / 2).unwrap();
+                assert!(b.remove(mid, &m));
+            }
+            // A read in the clean state, between trims.
+            23 => b.reindex(),
+            _ => {}
+        }
+        if i % 7 == 0 {
+            check(&mut b, &ids);
+        }
+    }
+    check(&mut b, &ids);
+    b.clear();
+    ids.push(b.append(Message::system(ParsedText::plain("fresh")), &m));
+    check(&mut b, &ids);
 }
 
 #[test]
@@ -2510,6 +2552,22 @@ fn a_different_speaker_or_a_long_gap_breaks_the_run() {
 }
 
 #[test]
+fn removing_a_runs_head_promotes_the_next_row() {
+    // Same invariant as trimming, reached through remove: the row that
+    // moves up into the head's place must show its nick again.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    let head = b.append(said(7, "misha", "hai", 1000), &m);
+    b.append(said(7, "misha", "hai", 1005), &m);
+    b.reindex();
+    assert!(grouped(&b, 1));
+    assert!(b.remove(head, &m));
+    assert!(!grouped(&b, 0), "the new head must show its nick");
+}
+
+#[test]
 fn trimming_a_runs_head_promotes_the_next_row() {
     // The invariant that makes grouping safe: a row that suppresses its
     // nick must always have a row above it that showed one. Trim can
@@ -2536,6 +2594,46 @@ fn trimming_a_runs_head_promotes_the_next_row() {
         "the new front row must show its nick — nothing above it can"
     );
     assert!(grouped(&b, 1) && grouped(&b, 2));
+}
+
+/// Trims and inserts regroup only the rows whose predecessor changed.
+/// That is only sound because the flag depends on nothing further up, so
+/// check it: after a mixed run of appends at the cap, mid-buffer inserts
+/// and a history-style insert at the front, every flag must match what a
+/// full re-evaluation of the buffer produces.
+#[test]
+fn local_regrouping_matches_a_full_pass() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.set_max_rows(40, &m);
+    let speakers = [(7, "misha"), (7, "misha"), (9, "al"), (7, "misha")];
+    let mut t = 1000;
+    for i in 0..200usize {
+        let (uid, nick) = speakers[i % speakers.len()];
+        t += if i % 11 == 0 { 3600 } else { 5 };
+        b.append(said(uid, nick, "hai", t), &m);
+        if i % 13 == 0 {
+            let at = b.id_at(b.len() / 3);
+            let (uid, nick) = speakers[(i / 13) % speakers.len()];
+            b.insert_before(at, said(uid, nick, "older", t - 7), &m);
+        }
+        if i % 17 == 0 {
+            let front = b.id_at(0);
+            b.insert_before(front, said(7, "misha", "history", 900), &m);
+        }
+    }
+    let local: Vec<bool> = (0..b.len()).map(|r| grouped(&b, r)).collect();
+    let gap = b.group_gap_secs();
+    b.set_group_gap_secs(0, &m);
+    b.set_group_gap_secs(gap, &m);
+    let full: Vec<bool> = (0..b.len()).map(|r| grouped(&b, r)).collect();
+    assert!(
+        local.iter().any(|&g| g),
+        "the corpus should produce some runs"
+    );
+    assert_eq!(local, full);
 }
 
 #[test]

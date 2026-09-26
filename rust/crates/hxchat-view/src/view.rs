@@ -889,7 +889,11 @@ impl HxChatView {
     }
 
     pub fn remove(&self, id: MessageId) -> bool {
-        let ok = self.imp_().buffer.borrow_mut().remove(id);
+        let ok = {
+            let imp = self.imp_();
+            let m = imp.measure.borrow();
+            imp.buffer.borrow_mut().remove(id, &*m)
+        };
         if ok {
             self.after_content_change();
         }

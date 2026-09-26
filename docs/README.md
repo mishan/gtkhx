@@ -43,6 +43,7 @@ port).
 | Doc | Subject |
 |---|---|
 | [coverage.md](coverage.md) | Coverage reporting, what it does and doesn't measure, and the static-analysis setup. |
+| [performance.md](performance.md) | The performance-testing plan in four tiers, how to run the benchmarks, the current baseline, and what the measurements have found. |
 | [screenshots.md](screenshots.md) | `tools/screenshot.py`: headless screenshots sealed off from the desktop's theme, accent and settings, with a scripted chat room and input steps. |
 
 ## Forward-looking
