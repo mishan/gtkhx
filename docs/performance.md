@@ -282,8 +282,8 @@ rest are leads. Findings 6 onwards are from the UI scenarios.
 7. **The local listing is synchronous.** A 10,000-file directory froze the
    UI for 3.4 s: enumeration, a content-type description per file, and the
    per-row appends above. With the appends batched it is 238 ms, still on
-   the main thread; enumerating off it is the remaining half, and scales
-   with directory size in a way the batching doesn't.
+   the main thread; enumerating off it is the remaining half, and the one
+   that still grows with directory size.
 8. **Sorting by name costs 65 ms at 10,000 rows**, against 9 ms by size.
    `cmp_name` calls `g_utf8_collate` on every comparison, which re-derives a
    collation key each time. Precomputing a key per entry

@@ -357,10 +357,10 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
 /* ---- Reply: parse the FILE_LIST chunks into HxFileEntry rows ----
  *
  * The whole wire→model binding — walk each chunk, decode the name
- * (Mac Roman → UTF-8), dir flag, icon id, and kind label, build an
- * HxFileEntry, and append it — lives in the hxmodel::files_entry Rust crate
- * (gtkhx_files_populate_from_reply). It clears the store first, so
- * one call fully refreshes the listing. NULL/empty fh just clears. */
+ * (Mac Roman → UTF-8), dir flag, icon id, and kind label into HxFileEntry
+ * rows — lives in hxmodel::files_entry (gtkhx_files_populate_from_reply).
+ * It replaces the store's contents in one splice, so one call fully
+ * refreshes the listing. NULL/empty fh just clears. */
 static void
 populate_from_chunks (HxRemoteFilesProvider *self, struct cached_filelist *cfl)
 {
