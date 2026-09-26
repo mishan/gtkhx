@@ -134,9 +134,12 @@ stream on the pad of a *different* section — seen in practice as a
 camera arriving on the pad of that user's silent audio section. The
 spec requires the offer to declare each forwarded section's SSRC, and
 the pad's caps carry the SSRC, so the runtime keeps an SSRC → mid map
-from each offer (FID groups included) and resolves a pad through it,
+from the offers (FID groups included) and resolves a pad through it,
 falling back to the transceiver's mid only when the SSRC isn't
-declared. What the mid names picks the bin: audio for `send` / `user-N`,
+declared. An offer is indexed as it arrives, not when it is applied: one
+that arrives mid-answer is queued, and its RTP can come first. Entries
+are added, never pruned until the session ends — an SSRC names one
+stream for its life. What the mid names picks the bin: audio for `send` / `user-N`,
 VP8 for the video mids, and a discarding bin for anything else — the
 spec's "mirror it, never play it".
 

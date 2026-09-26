@@ -110,13 +110,15 @@ extern "C" {
         cid: u32,
         muted: glib::ffi::gboolean,
     ) -> glib::ffi::gboolean;
-    fn hx_send_video_start(htlc: *mut c_void, cid: u32, kind: u16) -> glib::ffi::gboolean;
+    fn hx_send_video_start(htlc: *mut c_void, cid: u32, kind: u16, gen: u32)
+        -> glib::ffi::gboolean;
     fn hx_send_video_stop(htlc: *mut c_void, cid: u32, kind: u16) -> glib::ffi::gboolean;
     fn hx_send_video_state(
         htlc: *mut c_void,
         cid: u32,
         kind: u16,
         paused: glib::ffi::gboolean,
+        gen: u32,
     ) -> glib::ffi::gboolean;
     fn hx_send_video_subscribe(
         htlc: *mut c_void,
@@ -260,6 +262,14 @@ fn gbool(b: bool) -> glib::ffi::gboolean {
     }
 }
 
+/// The big-endian generation a video body carries at `at`, or 0 if the
+/// body stops short of it.
+fn body_gen(payload: &[u8], at: usize) -> u32 {
+    payload
+        .get(at..at + 4)
+        .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+}
+
 // ---------------------------------------------------------------------
 // Runtime lifecycle + wire-frame / signal bridges.
 // ---------------------------------------------------------------------
@@ -399,11 +409,13 @@ unsafe extern "C" fn send_wire_frame_cb(
         // Video control: the state machine owns when these go out, so
         // unlike JOIN / MUTE they are always sent from here. Each body is
         // the cid, then the kind (607 / 608), the kind and the paused word
-        // (609), or the packed four-byte subscription entries (610).
+        // (609), or the packed four-byte subscription entries (610). A 607
+        // or 609 body ends with the machine's generation for the request,
+        // which the task keeps and a refusal brings back; it is not sent.
         HTLC_HDR_VIDEO_START | HTLC_HDR_VIDEO_STOP if payload.len() >= 2 => {
             let kind = u16::from_be_bytes([payload[0], payload[1]]);
             let sent = if opcode == HTLC_HDR_VIDEO_START {
-                hx_send_video_start(htlc, cid, kind)
+                hx_send_video_start(htlc, cid, kind, body_gen(payload, 2))
             } else {
                 hx_send_video_stop(htlc, cid, kind)
             };
@@ -414,7 +426,8 @@ unsafe extern "C" fn send_wire_frame_cb(
         HTLC_HDR_VIDEO_STATE if payload.len() >= 4 => {
             let kind = u16::from_be_bytes([payload[0], payload[1]]);
             let paused = u16::from_be_bytes([payload[2], payload[3]]) != 0;
-            if hx_send_video_state(htlc, cid, kind, gbool(paused)) == 0 {
+            let gen = body_gen(payload, 4);
+            if hx_send_video_state(htlc, cid, kind, gbool(paused), gen) == 0 {
                 glib::g_debug!("gtkhx", "video bridge: state FAILED cid={cid}");
             }
         }

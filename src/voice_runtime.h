@@ -455,11 +455,21 @@ extern void gtkhx_voice_runtime_video_status (gtkhx_voice_runtime *rt,
                                               uint32_t cid, const uint8_t *blob,
                                               size_t len);
 
-/* The server refused a Video Start of kind sent for room cid; text is
- * its error string. A refusal for a room the runtime has left is
- * ignored. */
+/* The server refused a Video Start of kind sent for room cid; gen is
+ * the generation the send kept in the task's ptr slot, and text is the
+ * server's error string. A refusal for a room the runtime has left, or
+ * of a start since superseded, is ignored. */
 extern void gtkhx_voice_runtime_video_start_failed (gtkhx_voice_runtime *rt,
                                                     uint32_t cid, uint16_t kind,
+                                                    uint32_t gen,
+                                                    const char *text);
+
+/* The server refused a Video State (a pause or resume) of kind; the
+ * arguments as for gtkhx_voice_runtime_video_start_failed. Only a refusal
+ * of the latest one is rolled back. */
+extern void gtkhx_voice_runtime_video_state_failed (gtkhx_voice_runtime *rt,
+                                                    uint32_t cid, uint16_t kind,
+                                                    uint32_t gen,
                                                     const char *text);
 
 /* The login reply's DATA_VIDEO_LIMITS for kind. */
@@ -488,6 +498,12 @@ extern void gtkhx_voice_runtime_video_subscribe (gtkhx_voice_runtime *rt,
 extern uint64_t
 gtkhx_voice_runtime_video_frames_received (gtkhx_voice_runtime *rt,
                                            uint16_t uid, uint16_t kind);
+
+/* uid's publication of kind, as the last 611 described it: -1 when it
+ * isn't listed, 0 when live, 1 when paused. */
+extern int gtkhx_voice_runtime_video_publication_state (gtkhx_voice_runtime *rt,
+                                                        uint16_t uid,
+                                                        uint16_t kind);
 
 /* The size of the newest decoded frame of uid's stream of kind: 1 and
  * *width / *height set once one has arrived, else 0. */

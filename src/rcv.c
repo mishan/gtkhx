@@ -445,9 +445,10 @@ static gboolean
 voice_reports_error (const char *label)
 {
     static const char *const labels[] = {
-        "voice-join", "voice-leave",        "voice-sdp-answer",
-        "voice-mute", "video-start-camera", "video-start-screen",
-        "video-stop", "video-state",        "video-subscribe",
+        "voice-join",      "voice-leave",        "voice-sdp-answer",
+        "voice-mute",      "video-start-camera", "video-start-screen",
+        "video-stop",      "video-state-camera", "video-state-screen",
+        "video-subscribe",
     };
     if (!label) {
         return FALSE;
@@ -543,26 +544,34 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
             opcode = HTLC_HDR_VOICE_MUTE;
         } else if (!strcmp (tsk->str, "video-stop")) {
             opcode = HTLC_HDR_VIDEO_STOP;
-        } else if (!strcmp (tsk->str, "video-state")) {
-            opcode = HTLC_HDR_VIDEO_STATE;
         } else if (!strcmp (tsk->str, "video-subscribe")) {
             opcode = HTLC_HDR_VIDEO_SUBSCRIBE;
         }
-        /* A refused Video Start names its kind in the task label: the
-         * state machine has to end that publication and no other. */
-        guint16 start_kind = 0;
+        /* A refused Video Start or Video State names its kind in the task
+         * label: the state machine has to undo that request and no other.
+         * send_video keeps the room in the task's data and the machine's
+         * generation for the request in its ptr. */
+        guint16 start_kind = 0, state_kind = 0;
         if (!strcmp (tsk->str, "video-start-camera")) {
             start_kind = HX_VIDEO_KIND_CAMERA;
         } else if (!strcmp (tsk->str, "video-start-screen")) {
             start_kind = HX_VIDEO_KIND_SCREEN;
+        } else if (!strcmp (tsk->str, "video-state-camera")) {
+            state_kind = HX_VIDEO_KIND_CAMERA;
+        } else if (!strcmp (tsk->str, "video-state-screen")) {
+            state_kind = HX_VIDEO_KIND_SCREEN;
         }
-        if ((start_kind || opcode) && sess && sess->voice_runtime) {
+        if ((start_kind || state_kind || opcode) && sess
+            && sess->voice_runtime) {
             g_autofree char *text = voice_error_text (frame, frame_len);
+            guint32 cid = GPOINTER_TO_UINT (tsk->data);
+            guint32 gen = GPOINTER_TO_UINT (tsk->ptr);
             if (start_kind) {
-                /* send_video stores the room id in the task's data. */
                 gtkhx_voice_runtime_video_start_failed (
-                    sess->voice_runtime, GPOINTER_TO_UINT (tsk->data),
-                    start_kind, text);
+                    sess->voice_runtime, cid, start_kind, gen, text);
+            } else if (state_kind) {
+                gtkhx_voice_runtime_video_state_failed (
+                    sess->voice_runtime, cid, state_kind, gen, text);
             } else {
                 gtkhx_voice_runtime_task_error (sess->voice_runtime, opcode,
                                                 text);
@@ -1193,17 +1202,18 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
 
 void
 rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame,
-                           gsize frame_len, void *opcode_ptr, void *cid_ptr)
+                           gsize frame_len, void *tag_ptr, void *cid_ptr)
 {
-    /* opcode is stashed in ptr via GUINT_TO_POINTER for the trace
-     * label; cid via the data slot. Both are diagnostic only — the
+    /* The ptr slot holds the opcode, or for a video start or state the
+     * state machine's generation, which only the error path above uses;
+     * cid is in the data slot. Both are diagnostic only here — the
      * empty-success-reply path doesn't carry any state worth
      * extracting. task_inerror is handled before this is called by
      * hx_rcv_task; we only see the success path. */
-    guint32 opcode = GPOINTER_TO_UINT (opcode_ptr);
+    guint32 tag = GPOINTER_TO_UINT (tag_ptr);
     guint32 cid = GPOINTER_TO_UINT (cid_ptr);
     (void)htlc;
-    debug_log ("voice", "← VOICE %u ack (cid=%u)", opcode, cid);
+    debug_log ("voice", "← VOICE ack (tag=%u cid=%u)", tag, cid);
 }
 #endif /* HAVE_VOICE */
 

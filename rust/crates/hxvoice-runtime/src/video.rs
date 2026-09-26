@@ -310,7 +310,7 @@ fn frame_from_sample(sample: &gst::Sample) -> Option<VideoFrame> {
 
 /// An appsink that keeps only the newest RGBA picture and hands each to
 /// `on_frame` on the streaming thread.
-fn make_frame_sink<F>(on_frame: F) -> Option<gst::Element>
+pub(crate) fn make_frame_sink<F>(on_frame: F) -> Option<gst::Element>
 where
     F: Fn(VideoFrame) + Send + Sync + 'static,
 {

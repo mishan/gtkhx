@@ -127,6 +127,19 @@ pub enum Event {
     VideoStartFailed {
         cid: u32,
         kind: crate::video::VideoKind,
+        /// The generation the 607 body carried; a refusal of an
+        /// earlier start is stale.
+        gen: u32,
+        text: String,
+    },
+
+    /// The server refused a Video State (609). `cid` and `gen` are the
+    /// room and the generation the 609 body carried; only a refusal of
+    /// the latest 609 rolls the paused state back.
+    VideoPauseFailed {
+        cid: u32,
+        kind: crate::video::VideoKind,
+        gen: u32,
         text: String,
     },
 
