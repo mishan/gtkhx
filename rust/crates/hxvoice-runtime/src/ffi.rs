@@ -830,8 +830,9 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_video_status(
     rt.video_status(cid, publications);
 }
 
-/// The server refused a Video Start (607) of `kind`. `text` is its
-/// error string, shown to the user verbatim.
+/// The server refused a Video Start (607) of `kind`. `gen` is the
+/// generation the send kept with the task; `text` is the server's error
+/// string, shown to the user verbatim.
 ///
 /// # Safety
 /// `rt` is NULL or a valid runtime; `text` is NULL or a C string.
@@ -840,13 +841,34 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_video_start_failed(
     rt: *mut VoiceRuntime,
     cid: u32,
     kind: u16,
+    gen: u32,
     text: *const c_char,
 ) {
     let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
         return;
     };
     let text = unsafe { cstr_to_string(text) };
-    rt.video_start_failed(cid, kind, text);
+    rt.video_start_failed(cid, kind, gen, text);
+}
+
+/// The server refused a Video State (609) of `kind`: a pause or resume.
+/// `gen` and `text` as for [`gtkhx_voice_runtime_video_start_failed`].
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime; `text` is NULL or a C string.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_state_failed(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+    kind: u16,
+    gen: u32,
+    text: *const c_char,
+) {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return;
+    };
+    let text = unsafe { cstr_to_string(text) };
+    rt.video_pause_failed(cid, kind, gen, text);
 }
 
 /// Record the server's `DATA_VIDEO_LIMITS` ceiling for `kind`.
@@ -957,6 +979,26 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_video_frames_received(
         return 0;
     };
     rt.video_frames_received(crate::video::StreamKey { user_id: uid, kind })
+}
+
+/// The room's publication of `uid`'s `kind` stream, as the last 611
+/// described it: -1 when it isn't listed, 0 when live, 1 when paused.
+///
+/// # Safety
+/// `rt` is NULL or a valid runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_video_publication_state(
+    rt: *mut VoiceRuntime,
+    uid: u16,
+    kind: u16,
+) -> i32 {
+    let (Some(rt), Some(kind)) = ((unsafe { rt_from_ptr(rt) }), kind_from_c(kind)) else {
+        return -1;
+    };
+    rt.video_publications()
+        .iter()
+        .find(|p| p.user_id == uid && p.kind == kind)
+        .map_or(-1, |p| i32::from(p.paused))
 }
 
 /// The size of the newest decoded frame of `uid`'s `kind` stream: 1 and

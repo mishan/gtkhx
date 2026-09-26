@@ -70,9 +70,13 @@ typedef struct {
     struct htlc_conn htlc;
     gtkhx_voice_runtime *rt;
     guint32 join_trans;
-    /* trans of the in-flight VIDEO_START, so a refusal reaches the
-     * runtime the way rcv.c's task-error path delivers it. */
-    guint32 start_trans;
+    /* In-flight VIDEO_START / VIDEO_STATE requests, so a refusal reaches
+     * the runtime the way rcv.c's task-error path delivers it: with its
+     * room, kind and the state machine's generation. */
+    struct {
+        guint32 trans, opcode, cid, gen;
+        guint16 kind;
+    } pending[8];
     gtkhx_voice_state state;
     /* Answer audit. Every answer must declare the microphone's SSRC in
      * `send`; every answer while the camera is live must carry cam-send
@@ -80,8 +84,10 @@ typedef struct {
     int answers_seen;
     int answers_with_send_ssrc;
     int answers_with_cam_send;
-    /* The last 611's view of the other client's camera. */
+    /* The last 611's view of the other client's camera: listed at all,
+     * and its paused flag. */
     gboolean peer_camera_listed;
+    gboolean peer_camera_paused;
 } video_client;
 
 /* Scan the answer's section for `mid`: is it present, sendonly, and
@@ -122,6 +128,32 @@ answer_section_sends (const char *sdp, size_t len, const char *mid)
 }
 
 /* Wire-out: the runtime's frames onto the control socket, 600-610. */
+
+/* Remember a 607 or 609 until its reply, as rcv.c's task does: the room,
+ * the kind, and the generation the body carries after byte `gen_at`. */
+static void
+track_request (video_client *c, guint32 trans, guint32 opcode, guint32 cid,
+               const guint8 *p, gsize gen_at, gsize plen)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS (c->pending); i++) {
+        if (c->pending[i].trans) {
+            continue;
+        }
+        c->pending[i].trans = trans;
+        c->pending[i].opcode = opcode;
+        c->pending[i].cid = cid;
+        c->pending[i].kind = (guint16)((p[0] << 8) | p[1]);
+        c->pending[i].gen
+            = plen >= gen_at + 4
+                  ? ((guint32)p[gen_at] << 24) | ((guint32)p[gen_at + 1] << 16)
+                        | ((guint32)p[gen_at + 2] << 8) | p[gen_at + 3]
+                  : 0;
+        return;
+    }
+    g_error ("video_media: more than %zu video requests in flight",
+             G_N_ELEMENTS (c->pending));
+}
+
 static void
 on_send_wire_frame (void *user_data, uint32_t opcode, const uint8_t *body,
                     size_t body_len)
@@ -172,20 +204,22 @@ on_send_wire_frame (void *user_data, uint32_t opcode, const uint8_t *body,
         break;
     case HTLC_HDR_VIDEO_START:
     case HTLC_HDR_VIDEO_STOP:
+        /* The generation after the kind is the machine's, never sent. */
         if (plen >= 2
             && integration_send_message (
                 c->fd, &c->htlc, opcode, 0, 2, (int)HTLC_DATA_CHAT_ID, 4,
                 &cid_be, (int)HTLC_DATA_VIDEO_KIND, 2, (guint8 *)p)
             && opcode == HTLC_HDR_VIDEO_START) {
-            c->start_trans = trans;
+            track_request (c, trans, opcode, cid, p, 2, plen);
         }
         break;
     case HTLC_HDR_VIDEO_STATE:
-        if (plen >= 4) {
-            integration_send_message (
+        if (plen >= 4
+            && integration_send_message (
                 c->fd, &c->htlc, opcode, 0, 3, (int)HTLC_DATA_CHAT_ID, 4,
                 &cid_be, (int)HTLC_DATA_VIDEO_KIND, 2, (guint8 *)p,
-                (int)HTLC_DATA_VIDEO_PAUSED, 2, (guint8 *)p + 2);
+                (int)HTLC_DATA_VIDEO_PAUSED, 2, (guint8 *)p + 2)) {
+            track_request (c, trans, opcode, cid, p, 4, plen);
         }
         break;
     case HTLC_HDR_VIDEO_SUBSCRIBE:
@@ -262,17 +296,27 @@ dispatch_frame (video_client *c, guint16 peer_uid)
         feed_voice_field (c, 0);
         return;
     }
-    if (type == HTLS_HDR_TASK && c->start_trans && trans == c->start_trans) {
-        c->start_trans = 0;
+    for (gsize i = 0; type == HTLS_HDR_TASK && i < G_N_ELEMENTS (c->pending);
+         i++) {
+        if (!c->pending[i].trans || c->pending[i].trans != trans) {
+            continue;
+        }
+        c->pending[i].trans = 0;
         if (hdr_flag (&c->htlc) & 1) {
             char err[256] = { 0 };
             gsize n = 0;
             task_error_extract (hx_test_in (&c->htlc)->buf,
                                 hx_test_in (&c->htlc)->pos, err, sizeof (err),
                                 &n);
-            /* Every start here is in the public chat. */
-            gtkhx_voice_runtime_video_start_failed (c->rt, 0,
-                                                    HX_VIDEO_KIND_CAMERA, err);
+            if (c->pending[i].opcode == HTLC_HDR_VIDEO_START) {
+                gtkhx_voice_runtime_video_start_failed (
+                    c->rt, c->pending[i].cid, c->pending[i].kind,
+                    c->pending[i].gen, err);
+            } else {
+                gtkhx_voice_runtime_video_state_failed (
+                    c->rt, c->pending[i].cid, c->pending[i].kind,
+                    c->pending[i].gen, err);
+            }
         }
         return;
     }
@@ -289,6 +333,7 @@ dispatch_frame (video_client *c, guint16 peer_uid)
         gtkhx_voice_runtime_video_status (c->rt, r.cid, r.publishers_ptr,
                                           r.publishers_len);
         c->peer_camera_listed = FALSE;
+        c->peer_camera_paused = FALSE;
         for (gsize at = 0; r.publishers_ptr && at + 8 <= r.publishers_len;
              at += 8) {
             const guint8 *e = r.publishers_ptr + at;
@@ -296,6 +341,7 @@ dispatch_frame (video_client *c, guint16 peer_uid)
             guint16 k = (guint16)((e[2] << 8) | e[3]);
             if (u == peer_uid && k == HX_VIDEO_KIND_CAMERA) {
                 c->peer_camera_listed = TRUE;
+                c->peer_camera_paused = (((e[4] << 8) | e[5]) & 0x0001) != 0;
             }
         }
     }
@@ -544,6 +590,19 @@ driver_tick (gpointer data)
                     d->mark, n);
                 break;
             }
+            /* The server must have told B, and B's runtime must have
+             * taken it: silence alone could be a stalled stream. */
+            if (!d->B->peer_camera_paused) {
+                driver_fail (d, "B never saw A's camera paused in a 611.");
+                break;
+            }
+            if (gtkhx_voice_runtime_video_publication_state (
+                    d->B->rt, d->A->htlc.uid, HX_VIDEO_KIND_CAMERA)
+                != 1) {
+                driver_fail (d, "B's runtime doesn't list A's camera as "
+                                "paused after the 611 said so.");
+                break;
+            }
             gtkhx_voice_runtime_video_pause (d->A->rt, HX_VIDEO_KIND_CAMERA, 0);
             d->mark = n;
             d->ph = PH_WAIT_RESUMED_FRAMES;
@@ -553,7 +612,11 @@ driver_tick (gpointer data)
 
     case PH_WAIT_RESUMED_FRAMES: {
         guint64 n = b_frames_of_a (d);
-        if (n >= d->mark + FRAME_MARGIN) {
+        gboolean live = !d->B->peer_camera_paused
+                        && gtkhx_voice_runtime_video_publication_state (
+                               d->B->rt, d->A->htlc.uid, HX_VIDEO_KIND_CAMERA)
+                               == 0;
+        if (n >= d->mark + FRAME_MARGIN && live) {
             d->frames_resumed = n;
             gtkhx_voice_runtime_video_stop (d->A->rt, HX_VIDEO_KIND_CAMERA);
             d->ph = PH_WAIT_STOPPED;
@@ -561,8 +624,8 @@ driver_tick (gpointer data)
         } else if (now >= d->deadline) {
             driver_fail (d,
                          "B's frames of A did not resume: %" G_GUINT64_FORMAT
-                         " -> %" G_GUINT64_FORMAT,
-                         d->mark, n);
+                         " -> %" G_GUINT64_FORMAT ", 611 paused flag %d",
+                         d->mark, n, d->B->peer_camera_paused);
         }
         break;
     }

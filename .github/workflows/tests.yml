@@ -146,8 +146,9 @@ jobs:
               # fingerprint (the build cache stays valid). mold is installed
               # in the gtkhx-ci-base image.
 
-              # All build/test deps (base + GStreamer + Xvfb) are pre-installed
-              # in the gtkhx-ci-base image (published from the hotline-docker
+              # All build/test deps (base + GStreamer + Xvfb + the PipeWire and
+              # D-Bus session tools/isolated-run.sh starts) are pre-installed
+              # in the gtkhx-ci-base image (published from the gtkhx-docker
               # repo) — no per-run dnf install. Keep that image in sync with
               # this build if a new dep is added.
 
@@ -166,20 +167,22 @@ jobs:
               meson setup build-novoice -Dvoice=disabled \
                 -Dcargo_target_dir=/src/rust-cargo-target
               meson compile -C build-novoice
-              # xvfb-run for the meson suites too: the C unit tests now include
-              # one that builds real widgets (dock_pages), and GTK 4 has no
-              # headless backend, so without a display it fails rather than
-              # skipping — which is the behaviour we want, but only once CI
-              # supplies the display.
-              GDK_BACKEND=x11 xvfb-run -a \
+              # Every test command runs under tools/isolated-run.sh: its own
+              # Xvfb display (GDK_BACKEND=x11), D-Bus session bus, and
+              # PipeWire with a null sink and source — the same session a
+              # developer'"'"'s run gets, so CI and a laptop see one environment.
+              # The C unit tests include one that builds real widgets
+              # (dock_pages), and GTK 4 has no headless backend, so without a
+              # display it fails rather than skipping.
+              tools/isolated-run.sh \
                 meson test -C build-novoice --suite unit --suite proto \
                   --print-errorlogs
-              # xvfb-run so the widget tests actually construct widgets rather
-              # than skipping. GDK_BACKEND=x11 pins the backend: the container
-              # has no Wayland socket, and letting GDK fall through its backend
-              # list turns a misconfigured display into a confusing failure
-              # somewhere else.
-              ( cd rust && GDK_BACKEND=x11 xvfb-run -a cargo test --workspace \
+              # A display so the widget tests actually construct widgets
+              # rather than skipping. The wrapper pins GDK_BACKEND=x11: the
+              # container has no Wayland socket, and letting GDK fall through
+              # its backend list turns a misconfigured display into a
+              # confusing failure somewhere else.
+              ( cd rust && ../tools/isolated-run.sh cargo test --workspace \
                   --exclude hxvoice --exclude hxvoice-runtime \
                   --ignore-rust-version )
 
@@ -190,11 +193,11 @@ jobs:
               meson setup build \
                 -Dcargo_target_dir=/src/rust-cargo-target
               meson compile -C build
-              GDK_BACKEND=x11 xvfb-run -a \
+              tools/isolated-run.sh \
                 meson test -C build --suite unit --suite proto \
                   --print-errorlogs
               ( cd rust \
-                && GDK_BACKEND=x11 xvfb-run -a cargo test --workspace \
+                && ../tools/isolated-run.sh cargo test --workspace \
                      --ignore-rust-version \
                 && cargo test -p hxnet --features socks --ignore-rust-version )
               # glycin-v2 (1+ loaders) backend — compile-only lib tests.
@@ -361,7 +364,10 @@ jobs:
             -e CARGO_HOME=/src/.cargo-home \
             gtkhx-buildenv bash -c '
               set +e
-              meson test -C build --suite integration --print-errorlogs
+              # The voice and video tests play into the wrapper'"'"'s private
+              # PipeWire rather than finding no audio server at all.
+              tools/isolated-run.sh \
+                meson test -C build --suite integration --print-errorlogs
               rc=$?
               chown -R "$(stat -c %u:%g /src)" \
                 /src/rust-cargo-target /src/.cargo-home /src/build 2>/dev/null || true

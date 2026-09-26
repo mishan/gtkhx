@@ -31,47 +31,27 @@ record.
 - **Settings don't show a missing camera.** When the saved camera is unplugged,
   the combo shows "First camera found" while the stored value still names the
   old device. A "(missing)" entry would be clearer.
-- **Tile names** only update when the room refreshes, not when someone changes
-  their nickname.
 - **Accessible labels** for the icon-only camera and screen toggles and the
   user-list video glyph. They have tooltips; an explicit label would be better.
 
 ### Robustness
 
-- **A refused 609 isn't rolled back.** The machine records the paused bit
-  before the server confirms it, so after a refusal the local state and the
-  server's disagree until the next toggle. The error carries only the opcode, so
-  telling a camera refusal from a screen one needs the kind in the task label,
-  the way 607 does it.
-- **A late 607 refusal can clear a newer publication in the same room.** The
-  refusal now carries its room, so one from a room the client has left is
-  ignored. A start → stop → start inside one round trip can still have the first
-  refusal end the second. A start generation (or the transaction id) in the
-  event would settle it.
-- **The caps wait has no recovery.** If an answer goes out on the 1500 ms
-  timeout without a sender's `a=ssrc`, the next offer sees that pad as already
-  bound and answers immediately, again without it. Either wait on every bound
-  sender that has no caps, or fail the publication when its SSRC is missing from
-  the answer.
-- **Frames outlive their streams.** `pad-removed` doesn't remove a video mid's
-  frames or send `StreamEnded`. `reset_legs` clears the frame store before the
-  old pipeline reaches Null, so the old appsinks can put frames back, including
-  the self preview.
-- **SSRC routing before the offer is indexed.** RTP for a new SSRC that arrives
-  before `set-remote-description` has indexed the offer falls back to the
-  transceiver's mid, which is the misrouting the map exists to prevent. The map
-  also isn't restored if that call fails.
+- **RTP ahead of every offer.** An offer's SSRCs are indexed the moment it
+  arrives, but RTP for an SSRC no offer has declared yet still falls back to
+  the transceiver's mid. Holding such a pad until the next offer is indexed,
+  rather than routing it by transceiver, would close that too.
 
 ## Voice
 
-- **`voice_rejoin_media` against Janus was intermittent.** B sometimes stayed
-  in ICE Connecting after a rejoin or a concurrent join, and `vad_speaker`
-  sometimes missed A's speaking flag. The rate didn't change when a
-  stale-answer race in the runtime was fixed, which pointed at the rig's old
-  pinned Janus build. With the rig moved to a current Janus (September 2026),
-  repeated runs of `voice_rejoin_media`, `voice_participants` and
-  `video_media` all passed. Keep an eye on CI; if the flake comes back, it's
-  ours. The test's wall time still varies widely between runs.
+- **`voice_rejoin_media` against Janus is intermittent.** B sometimes stays in
+  ICE Connecting after a rejoin or a concurrent join, and `vad_speaker`
+  sometimes misses A's speaking flag. The rate didn't change when a
+  stale-answer race in the runtime was fixed, and it survived moving the rig to
+  a current Janus (September 2026), so it's ours. It shows up under
+  `tools/isolated-run.sh` — roughly one run in four, on `main` as much as on
+  any branch — but rarely when the tests share a desktop session's PipeWire,
+  which points at timing rather than the server. The test's wall time also
+  varies widely between runs.
 - **Every first answer now waits for the microphone's caps**, up to 1500 ms.
   `voice_rejoin_media` asserts that every answer declares the send SSRC, so a
   slow audio source would fail that assertion rather than hang.
@@ -92,8 +72,6 @@ record.
 
 ## Tests and rig
 
-- The pause check in `video_media` stops at "frames stop arriving". It never
-  checks that B saw the 611 paused flag.
 - `tests/hxd-ng/Dockerfile` builds from the floating `rust:1-trixie`, so each
   new upstream tag invalidates the layer cache. Pin a version next to
   `HXD_NG_REV`, and fetch just the revision instead of cloning the whole

@@ -678,7 +678,7 @@ pub enum VideoNotice {
 /// widget that has gone away detaches without the runtime holding it.
 pub type VideoObserver = Box<dyn Fn(&VoiceRuntime, &VideoNotice) -> bool>;
 
-/// SSRC → mid, from the `a=ssrc` lines of the last remote offer.
+/// SSRC → mid, from the `a=ssrc` lines of the session's remote offers.
 ///
 /// A receive pad's transceiver is not a reliable name for what the pad
 /// carries: with every section bundled and no MID header extension
@@ -687,9 +687,18 @@ pub type VideoObserver = Box<dyn Fn(&VoiceRuntime, &VideoNotice) -> bool>;
 /// section, say. The SSRC, though, is on the pad's caps, and the spec
 /// requires the offer to declare which section each SSRC belongs to. So
 /// the mid a receive pad is handled as comes from here first.
+///
+/// An offer is indexed the moment it arrives, not when it is applied: an
+/// offer that comes in while the last answer is still being made waits
+/// its turn, and RTP for its new SSRCs can arrive — over UDP, ahead of
+/// the offer on the TCP link, or during that wait — before webrtcbin has
+/// it. Entries are only added or overwritten, never pruned: an SSRC names
+/// one stream for that stream's life, so an old entry misroutes nothing,
+/// and replacing the map when an offer is applied would drop the SSRCs of
+/// one still queued behind it. The map is cleared with the session.
 pub(crate) type SsrcMids = Arc<std::sync::Mutex<HashMap<u32, String>>>;
 
-/// Rebuild `map` from an offer: every `a=ssrc:<n>` and every member of an
+/// Add an offer to `map`: every `a=ssrc:<n>` and every member of an
 /// `a=ssrc-group:FID`, keyed to the section's mid.
 fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) {
     let mut fresh: HashMap<u32, String> = HashMap::new();
@@ -723,7 +732,7 @@ fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) {
     }
     flush(&mut mid, &mut pending);
     if let Ok(mut m) = map.lock() {
-        *m = fresh;
+        m.extend(fresh);
     }
 }
 
@@ -790,6 +799,11 @@ impl VideoRt {
 
     /// Forget every per-pipeline leg. The bins themselves go with the
     /// pipeline they belong to.
+    ///
+    /// The frame store is not cleared here: the old pipeline's appsinks
+    /// can still put a frame until it has reached Null, and a put after
+    /// a clear would bring the slot back for the next session. The
+    /// caller clears it once the pipeline is down.
     fn reset_legs(&mut self) {
         self.publishing = [false; 2];
         self.paused = [false; 2];
@@ -799,7 +813,6 @@ impl VideoRt {
         self.ts_base = [random_ssrc(), random_ssrc()];
         self.next_seq = [None, None];
         self.screen_source = None;
-        self.frames.clear();
         if let Ok(mut m) = self.ssrc_mids.lock() {
             m.clear();
         }
@@ -860,6 +873,10 @@ struct Inner {
     /// first, and servers that list other users' sections before
     /// `send` would find our microphone on someone else's.
     mic_bound: bool,
+    /// The webrtcbin sink pad the microphone is bound to, once it is.
+    /// An answer waits on it like a freshly bound one while it has no
+    /// caps.
+    mic_send_pad: Option<gstreamer::Pad>,
     /// `Some` once the GStreamer pipeline has been constructed.
     /// `None` for the pipeline-less test path. Holds the
     /// `webrtcbin` element as a child (added in `new()`).
@@ -1279,6 +1296,7 @@ impl VoiceRuntime {
                 machine: SessionMachine::new(),
                 video,
                 mic_bound: false,
+                mic_send_pad: None,
                 pipeline: Some(bits.pipeline),
                 webrtcbin: Some(bits.webrtcbin),
                 armed_timer_sources: HashMap::new(),
@@ -1330,6 +1348,7 @@ impl VoiceRuntime {
                 machine: SessionMachine::new(),
                 video: VideoRt::new(),
                 mic_bound: false,
+                mic_send_pad: None,
                 pipeline: None,
                 webrtcbin: None,
                 armed_timer_sources: HashMap::new(),
@@ -1755,6 +1774,7 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         inner.pending_pads.clear();
         inner.video.reset_legs();
         inner.mic_bound = false;
+        inner.mic_send_pad = None;
         // `answer_generation` keeps counting across rebuilds: a deferred
         // answer or a create-answer promise from the old pipeline
         // captured the old value, and a reset would let it match the new
@@ -1813,6 +1833,7 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         // Pipeline-less runtime (test path). Nothing to walk
         // down or rebuild — leave Inner's pipeline / webrtcbin
         // slots empty as they were.
+        frames.clear();
         return;
     };
 
@@ -1853,6 +1874,11 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
     // release, the rebuilt webrtcbin's nice elements would race
     // for the same UDP port the old one still holds.
     drop(pipeline);
+    // Only now is no appsink of the old pipeline left to put a frame: a
+    // downward change to Null deactivates every pad, which waits out the
+    // streaming thread holding it. Clearing any earlier let a frame from
+    // the old session land in the new one's store.
+    frames.clear();
 
     // Rebuild. Failure here means the next session can't drive
     // voice, but the state machine is already in Leaving and
@@ -2010,6 +2036,11 @@ impl VoiceRuntime {
     /// panic class when production wires `EmitSignal` to a GLib
     /// signal that the UI's voice button reacts to.
     pub fn handle_event(&self, event: Event) -> SessionState {
+        // Index an offer's SSRCs on arrival, before the machine can park
+        // it behind an answer in progress. See [`SsrcMids`].
+        if let Event::SdpOfferReceived { sdp, .. } = &event {
+            index_offer_ssrcs(sdp, &self.inner.borrow().video.ssrc_mids);
+        }
         // Enqueue the event. If we're already dispatching (this is
         // a nested call from inside a Backend invocation), just
         // queue and return — the outer loop will drain it.
@@ -2491,6 +2522,8 @@ impl VoiceRuntime {
                 // produces a fresh generation, and the in-flight
                 // promise's eventual resolution is correctly
                 // dropped as stale.
+                // Indexed already on arrival; again here for an offer
+                // dispatched without one. Adding is idempotent.
                 index_offer_ssrcs(&sdp, &self.inner.borrow().video.ssrc_mids);
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
@@ -2951,6 +2984,7 @@ fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64, generation: u6
                 if rt.inner.borrow().answer_generation != generation {
                     return;
                 }
+                rt.fail_sends_missing_ssrc(&sdp);
                 rt.handle_event(Event::WebrtcAnswerCreated { sdp });
             });
         });
@@ -3383,30 +3417,59 @@ fn connect_pad_removed(webrtcbin: &gstreamer::Element, runtime_id: u64) {
         let pad_key = pad.name().to_string();
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
-            with_main_thread_runtime(runtime_id, |rt| {
-                let (pipeline, bin) = {
-                    let mut inner = rt.inner.borrow_mut();
-                    (inner.pipeline.clone(), inner.receive_bins.remove(&pad_key))
-                };
-                if let (Some(pipeline), Some(bin)) = (pipeline, bin) {
-                    crate::debug::log!(
-                        "voice-pipe",
-                        "tearing down receive bin for removed pad {pad_key}"
-                    );
-                    // Evict the VAD uid cache entry for this bin so a
-                    // long session with many rejoins doesn't accumulate
-                    // dead entries (bin names are unique per pad
-                    // lifetime, so a stale entry can't mis-attribute —
-                    // this is purely to bound the map).
-                    rt.inner
-                        .borrow_mut()
-                        .recv_bin_uid_cache
-                        .remove(bin.name().as_str());
-                    stop_receive_bin(&pipeline, &bin);
-                }
-            });
+            with_main_thread_runtime(runtime_id, |rt| on_receive_pad_removed(rt, &pad_key));
         });
     });
+}
+
+/// Main-thread half of [`connect_pad_removed`]: tear down the removed
+/// pad's receive bin and, for a video stream, drop its frame and tell
+/// the panel the stream has ended, the same tail
+/// `Action::StopReceivePipeline` has. Without that, a stream that timed
+/// out left its tile frozen on the last frame.
+fn on_receive_pad_removed(rt: &VoiceRuntime, pad_key: &str) {
+    let (pipeline, bin) = {
+        let mut inner = rt.inner.borrow_mut();
+        (inner.pipeline.clone(), inner.receive_bins.remove(pad_key))
+    };
+    let Some(bin) = bin else {
+        return;
+    };
+    crate::debug::log!(
+        "voice-pipe",
+        "tearing down receive bin for removed pad {pad_key}"
+    );
+    // Evict the VAD uid cache entry for this bin so a long session with
+    // many rejoins doesn't accumulate dead entries (bin names are unique
+    // per pad lifetime, so a stale entry can't mis-attribute — this is
+    // purely to bound the map).
+    rt.inner
+        .borrow_mut()
+        .recv_bin_uid_cache
+        .remove(bin.name().as_str());
+    if let Some(pipeline) = pipeline {
+        stop_receive_bin(&pipeline, &bin);
+    }
+    let name = bin.name();
+    let Some(mid) = mid_from_recv_bin_name(name.as_str()) else {
+        return;
+    };
+    let Some(Track::Video(user_id, kind)) = hxvoice::video::parse_mid(mid) else {
+        return;
+    };
+    // A rejoin can already have bound a new pad to the same mid; its
+    // frames are live, so leave them.
+    let still_bound = rt.inner.borrow().receive_bins.values().any(|b| {
+        let n = b.name();
+        mid_from_recv_bin_name(n.as_str()) == Some(mid)
+    });
+    if still_bound {
+        return;
+    }
+    let key = StreamKey { user_id, kind };
+    let frames = Arc::clone(&rt.inner.borrow().video.frames);
+    frames.remove(key);
+    rt.notify_video(VideoNotice::StreamEnded(key));
 }
 
 /// Resolve the `mid` (SDP media identifier) for a webrtcbin pad.
@@ -4758,6 +4821,25 @@ fn answer_once_senders_have_caps(
     );
 }
 
+/// Does `answer` send on section `mid` without declaring `ssrc`? A
+/// section that is absent, or that doesn't send (inactive, recvonly), is
+/// not a send without an SSRC.
+fn answer_sends_without_ssrc(answer: &str, mid: &str, ssrc: u32) -> bool {
+    let want_mid = format!("a=mid:{mid}");
+    let want_ssrc = format!("a=ssrc:{ssrc} ");
+    let mut sections = answer.split("\nm=").skip(1);
+    let Some(section) = sections.find(|sec| {
+        sec.lines()
+            .any(|l| l.trim_end_matches('\r').trim_end() == want_mid)
+    }) else {
+        return false;
+    };
+    let lines = || section.lines().map(|l| l.trim_end_matches('\r'));
+    let sends = lines().any(|l| l == "a=sendonly" || l == "a=sendrecv");
+    let declared = lines().any(|l| format!("{l} ").starts_with(&want_ssrc));
+    sends && !declared
+}
+
 /// Post a frames notice to the main thread. Called from an appsink's
 /// streaming thread only when the store says none is on its way, so a
 /// burst of frames across every stream costs one main-loop wakeup.
@@ -4777,8 +4859,12 @@ impl VoiceRuntime {
     /// video publication to its `cam-send` / `scr-send`. Runs before
     /// `create-answer`, so the answer describes what we actually send.
     ///
-    /// Returns the webrtcbin sink pads it linked, so the caller can hold
-    /// the answer until their caps arrive.
+    /// Returns the webrtcbin sink pads the answer should wait on: the
+    /// ones it linked, and every live sender bound earlier. A sender
+    /// bound earlier can still have no caps — its last answer went out
+    /// on the timeout, or a restart or an unpause attached a capture that
+    /// hasn't produced yet — and answering straight away would leave its
+    /// SSRC out again. The caller skips the pads that have caps.
     fn bind_local_senders(&self, webrtcbin: &gstreamer::Element) -> Vec<gstreamer::Pad> {
         let mut fresh = Vec::new();
         if !self.inner.borrow().mic_bound {
@@ -4796,7 +4882,63 @@ impl VoiceRuntime {
                 fresh.extend(self.bind_video_sender(webrtcbin, kind));
             }
         }
+        let bound: Vec<gstreamer::Pad> = {
+            let inner = self.inner.borrow();
+            let v = &inner.video;
+            let video = VideoKind::ALL.into_iter().filter_map(|kind| {
+                let i = kind.index();
+                if v.publishing[i] && !v.paused[i] && v.send_bins[i].is_some() {
+                    v.send_pads[i].clone()
+                } else {
+                    None
+                }
+            });
+            inner.mic_send_pad.iter().cloned().chain(video).collect()
+        };
+        for pad in bound {
+            if !fresh.contains(&pad) {
+                fresh.push(pad);
+            }
+        }
         fresh
+    }
+
+    /// End every live video publication `answer` sends on without
+    /// declaring its SSRC. The answer waits for the senders' caps, but
+    /// only so long: a capture that produced nothing in that time would
+    /// otherwise be answered for, again and again, with a section the
+    /// server can't use. A server drops such a publication itself; ending
+    /// it here keeps this client's view the same, and its 608 goes out
+    /// ahead of the answer. Audio is never dropped this way.
+    fn fail_sends_missing_ssrc(&self, answer: &str) {
+        for kind in VideoKind::ALL {
+            let (live, ssrc) = {
+                let inner = self.inner.borrow();
+                let v = &inner.video;
+                let i = kind.index();
+                (
+                    v.publishing[i] && !v.paused[i] && v.send_bins[i].is_some(),
+                    v.ssrc[i],
+                )
+            };
+            if !live || !answer_sends_without_ssrc(answer, kind.send_mid(), ssrc) {
+                continue;
+            }
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: answer sends {} without its SSRC; ending the publication",
+                kind.send_mid()
+            );
+            self.detach_capture(kind);
+            let text = match kind {
+                VideoKind::Camera => "The camera produced no video in time.",
+                VideoKind::Screen => "Screen sharing produced no video in time.",
+            };
+            self.handle_event(Event::VideoCaptureFailed {
+                kind,
+                text: text.into(),
+            });
+        }
     }
 
     /// Link the microphone's send bin to the `send` section's
@@ -4861,7 +5003,11 @@ impl VoiceRuntime {
         }
         send_bin.set_locked_state(false);
         let _ = send_bin.sync_state_with_parent();
-        self.inner.borrow_mut().mic_bound = true;
+        {
+            let mut inner = self.inner.borrow_mut();
+            inner.mic_bound = true;
+            inner.mic_send_pad = Some(sink.clone());
+        }
         crate::debug::log!(
             "voice-pipe",
             "microphone bound to mid={:?} (mline {mline}, {dir:?})",
@@ -5294,8 +5440,24 @@ impl VoiceRuntime {
     }
 
     /// The server refused a Video Start of `kind` sent for room `cid`.
-    pub fn video_start_failed(&self, cid: u32, kind: VideoKind, text: String) {
-        self.handle_event(Event::VideoStartFailed { cid, kind, text });
+    pub fn video_start_failed(&self, cid: u32, kind: VideoKind, gen: u32, text: String) {
+        self.handle_event(Event::VideoStartFailed {
+            cid,
+            kind,
+            gen,
+            text,
+        });
+    }
+
+    /// The server refused the Video State (609) numbered `gen` for
+    /// `kind` in room `cid`; the latest one is rolled back.
+    pub fn video_pause_failed(&self, cid: u32, kind: VideoKind, gen: u32, text: String) {
+        self.handle_event(Event::VideoPauseFailed {
+            cid,
+            kind,
+            gen,
+            text,
+        });
     }
 }
 
@@ -7127,5 +7289,346 @@ mod tests {
             !MUTE_FIRED.load(Ordering::SeqCst),
             "mute_changed must not fire for RoomStatus / Error"
         );
+    }
+
+    // ---- Frame lifetime ----
+
+    fn test_frame() -> VideoFrame {
+        VideoFrame {
+            width: 2,
+            height: 2,
+            stride: 8,
+            bytes: gstreamer::glib::Bytes::from_owned(vec![0u8; 16]),
+        }
+    }
+
+    /// Record every `StreamEnded` a runtime announces.
+    fn record_stream_ended(runtime: &VoiceRuntime) -> Rc<RefCell<Vec<StreamKey>>> {
+        let ended = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&ended);
+        runtime.add_video_observer(Box::new(move |_rt, notice| {
+            if let VideoNotice::StreamEnded(key) = notice {
+                sink.borrow_mut().push(*key);
+            }
+            true
+        }));
+        ended
+    }
+
+    fn seed_receive_bin(runtime: &VoiceRuntime, mid: &str, pad: &str) {
+        let bin = gstreamer::Bin::builder()
+            .name(recv_bin_name(mid, pad))
+            .build();
+        runtime
+            .inner
+            .borrow_mut()
+            .receive_bins
+            .insert(pad.to_string(), bin);
+    }
+
+    /// A video pad that goes away (an SSRC timeout, a recycled slot)
+    /// takes its frame with it and ends the stream, so its tile doesn't
+    /// stay frozen on the last picture.
+    #[test]
+    fn a_removed_video_pad_ends_its_stream() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let (runtime, _backend) = rec();
+        let ended = record_stream_ended(&runtime);
+        let key = StreamKey {
+            user_id: 7,
+            kind: VideoKind::Camera,
+        };
+        seed_receive_bin(&runtime, "cam-user-7", "src_9");
+        let frames = Arc::clone(&runtime.inner.borrow().video.frames);
+        frames.put(key, test_frame());
+        assert_eq!(runtime.video_frames_received(key), 1);
+
+        on_receive_pad_removed(&runtime, "src_9");
+
+        assert_eq!(runtime.video_frames_received(key), 0);
+        assert!(runtime.take_video_frame(key).is_none());
+        assert_eq!(*ended.borrow(), vec![key]);
+        assert!(runtime.inner.borrow().receive_bins.is_empty());
+    }
+
+    /// An audio pad carries no frames, so its removal ends no stream.
+    #[test]
+    fn a_removed_audio_pad_ends_no_stream() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let (runtime, _backend) = rec();
+        let ended = record_stream_ended(&runtime);
+        seed_receive_bin(&runtime, "user-7", "src_3");
+
+        on_receive_pad_removed(&runtime, "src_3");
+
+        assert!(ended.borrow().is_empty());
+        assert!(runtime.inner.borrow().receive_bins.is_empty());
+    }
+
+    /// When a rejoin has already bound a new pad to the same mid, the
+    /// old pad's removal leaves the live stream's frames alone.
+    #[test]
+    fn a_removed_pad_keeps_a_rebound_streams_frames() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let (runtime, _backend) = rec();
+        let ended = record_stream_ended(&runtime);
+        let key = StreamKey {
+            user_id: 7,
+            kind: VideoKind::Screen,
+        };
+        seed_receive_bin(&runtime, "scr-user-7", "src_1");
+        seed_receive_bin(&runtime, "scr-user-7", "src_2");
+        let frames = Arc::clone(&runtime.inner.borrow().video.frames);
+        frames.put(key, test_frame());
+
+        on_receive_pad_removed(&runtime, "src_1");
+
+        assert_eq!(runtime.video_frames_received(key), 1);
+        assert!(ended.borrow().is_empty());
+        assert_eq!(runtime.inner.borrow().receive_bins.len(), 1);
+    }
+
+    /// A frame an appsink of the old pipeline delivers while the
+    /// pipeline is being torn down must not survive into the next
+    /// session. The callback holds the appsink's streaming thread
+    /// inside a frame while the teardown starts, so that frame is put
+    /// after whatever the teardown did first; clearing the store before
+    /// the pipeline reached Null left it there.
+    #[test]
+    fn a_frame_delivered_during_teardown_does_not_survive_it() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend)).expect("runtime with a pipeline");
+        let key = crate::video::self_key(VideoKind::Camera);
+        let frames = Arc::clone(&runtime.inner.borrow().video.frames);
+        let pipeline = runtime
+            .inner
+            .borrow()
+            .pipeline
+            .clone()
+            .expect("pipeline built");
+
+        let hold = Arc::new(AtomicBool::new(false));
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+        let store = Arc::clone(&frames);
+        let hold_cb = Arc::clone(&hold);
+        let sink = crate::video::make_frame_sink(move |frame| {
+            if hold_cb.swap(false, Ordering::SeqCst) {
+                if let Some(tx) = entered_tx.lock().ok().and_then(|mut t| t.take()) {
+                    let _ = tx.send(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            store.put(key, frame);
+        })
+        .expect("frame sink builds");
+        let src = gstreamer::ElementFactory::make("videotestsrc")
+            .property("is-live", true)
+            .build()
+            .expect("videotestsrc");
+        let convert = gstreamer::ElementFactory::make("videoconvert")
+            .build()
+            .expect("videoconvert");
+        pipeline
+            .add_many([&src, &convert, &sink])
+            .expect("add the preview chain");
+        gstreamer::Element::link_many([&src, &convert, &sink]).expect("link the preview chain");
+
+        pipeline
+            .set_state(gstreamer::State::Playing)
+            .expect("pipeline to Playing");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while frames.count(key) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the preview chain never produced a frame"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        hold.store(true, Ordering::SeqCst);
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("a buffer reached the held probe");
+        reset_and_rebuild_pipeline(&runtime);
+
+        assert_eq!(
+            frames.count(key),
+            0,
+            "a frame from the torn-down pipeline survived into the next session"
+        );
+    }
+
+    // ---- Answers and sender SSRCs ----
+
+    const ANSWER: &str = "v=0\r\n\
+o=- 1 0 IN IP4 0.0.0.0\r\n\
+s=-\r\n\
+t=0 0\r\n\
+m=audio 9 UDP/TLS/RTP/SAVPF 0\r\n\
+a=mid:send\r\n\
+a=sendonly\r\n\
+a=ssrc:111 cname:x\r\n\
+m=video 9 UDP/TLS/RTP/SAVPF 96\r\n\
+a=mid:cam-send\r\n\
+a=sendonly\r\n\
+m=video 9 UDP/TLS/RTP/SAVPF 96\r\n\
+a=mid:scr-send\r\n\
+a=sendonly\r\n\
+a=ssrc:2222 cname:x\r\n\
+m=video 9 UDP/TLS/RTP/SAVPF 96\r\n\
+a=mid:cam-user-5\r\n\
+a=inactive\r\n";
+
+    #[test]
+    fn an_answer_sending_without_its_ssrc_is_spotted() {
+        assert!(answer_sends_without_ssrc(ANSWER, "cam-send", 2222));
+        assert!(!answer_sends_without_ssrc(ANSWER, "scr-send", 2222));
+        // Another SSRC, or a prefix of the declared one, isn't ours.
+        assert!(answer_sends_without_ssrc(ANSWER, "scr-send", 222));
+        assert!(answer_sends_without_ssrc(ANSWER, "scr-send", 3333));
+        // Not sending, or not there at all: nothing is missing.
+        assert!(!answer_sends_without_ssrc(ANSWER, "cam-user-5", 1));
+        assert!(!answer_sends_without_ssrc(ANSWER, "nope", 1));
+        let lf = ANSWER.replace("\r\n", "\n");
+        assert!(answer_sends_without_ssrc(&lf, "cam-send", 2222));
+        assert!(!answer_sends_without_ssrc(&lf, "scr-send", 2222));
+    }
+
+    /// A pad standing in for a webrtcbin sink pad that has seen no caps.
+    fn capless_pad(name: &str) -> gstreamer::Pad {
+        gstreamer::Pad::builder(gstreamer::PadDirection::Sink)
+            .name(name)
+            .build()
+    }
+
+    fn live_sender(runtime: &VoiceRuntime, kind: VideoKind, pad: &gstreamer::Pad) {
+        let mut inner = runtime.inner.borrow_mut();
+        let v = &mut inner.video;
+        v.publishing[kind.index()] = true;
+        v.send_bins[kind.index()] = Some(gstreamer::Bin::new());
+        v.send_pads[kind.index()] = Some(pad.clone());
+    }
+
+    /// Senders bound under an earlier offer are waited on too, so an
+    /// answer that once went out on the timeout doesn't lose their SSRC
+    /// again. A paused publication has no capture to wait for.
+    #[test]
+    fn an_answer_waits_on_senders_bound_earlier() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let (runtime, _backend) = rec();
+        let mic = capless_pad("sink_0");
+        let cam = capless_pad("sink_1");
+        let scr = capless_pad("sink_2");
+        {
+            let mut inner = runtime.inner.borrow_mut();
+            inner.mic_bound = true;
+            inner.mic_send_pad = Some(mic.clone());
+        }
+        live_sender(&runtime, VideoKind::Camera, &cam);
+        live_sender(&runtime, VideoKind::Screen, &scr);
+        runtime.inner.borrow_mut().video.paused[VideoKind::Screen.index()] = true;
+
+        let webrtcbin = gstreamer::ElementFactory::make("identity")
+            .build()
+            .expect("identity");
+        let waited = runtime.bind_local_senders(&webrtcbin);
+        assert!(waited.contains(&mic));
+        assert!(waited.contains(&cam));
+        assert!(!waited.contains(&scr), "a paused sender has no capture");
+        assert_eq!(waited.len(), 2);
+    }
+
+    /// An answer about to send on a live section without its SSRC ends
+    /// that publication; one that declares it, or doesn't send, doesn't.
+    #[test]
+    fn an_answer_without_a_live_senders_ssrc_ends_it() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let (runtime, _backend) = rec();
+        live_sender(&runtime, VideoKind::Camera, &capless_pad("sink_1"));
+        live_sender(&runtime, VideoKind::Screen, &capless_pad("sink_2"));
+        runtime.inner.borrow_mut().video.ssrc = [2222, 2222];
+
+        runtime.fail_sends_missing_ssrc(ANSWER);
+
+        let inner = runtime.inner.borrow();
+        assert!(
+            inner.video.send_bins[VideoKind::Camera.index()].is_none(),
+            "cam-send went out without its SSRC: the capture is gone"
+        );
+        assert!(
+            inner.video.send_bins[VideoKind::Screen.index()].is_some(),
+            "scr-send declared its SSRC: the capture stays"
+        );
+    }
+
+    // ---- SSRC routing ----
+
+    fn ssrc_mid(runtime: &VoiceRuntime, ssrc: u32) -> Option<String> {
+        let map = Arc::clone(&runtime.inner.borrow().video.ssrc_mids);
+        let m = map.lock().expect("ssrc map");
+        m.get(&ssrc).cloned()
+    }
+
+    #[test]
+    fn offer_ssrcs_map_to_their_sections_mid() {
+        let map: SsrcMids = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        index_offer_ssrcs(
+            "v=0\r\n\
+a=ssrc:1 cname:session-level\r\n\
+m=audio 9 RTP/SAVPF 0\r\n\
+a=ssrc:10 cname:x\r\n\
+a=mid:user-4\r\n\
+m=video 9 RTP/SAVPF 96\r\n\
+a=mid:cam-user-4\r\n\
+a=ssrc-group:FID 20 21\r\n\
+a=ssrc:20 cname:x\r\n\
+a=ssrc:21 cname:x\r\n",
+            &map,
+        );
+        let m = map.lock().unwrap();
+        assert_eq!(
+            m.get(&10).map(String::as_str),
+            Some("user-4"),
+            "before a=mid"
+        );
+        assert_eq!(m.get(&20).map(String::as_str), Some("cam-user-4"));
+        assert_eq!(
+            m.get(&21).map(String::as_str),
+            Some("cam-user-4"),
+            "FID member"
+        );
+        assert_eq!(m.get(&1), None, "session-level lines belong to no section");
+    }
+
+    /// An offer that arrives while the last answer is still being made
+    /// is queued by the machine, but its SSRCs are routable at once:
+    /// RTP for them can beat it to webrtcbin. The applied offer's
+    /// entries stay.
+    #[test]
+    fn a_queued_offers_ssrcs_are_routable_at_once() {
+        let (runtime, _backend) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\nm=audio 9 RTP/SAVPF 0\na=mid:user-4\na=ssrc:10 cname:x\n".into(),
+        });
+        assert_eq!(runtime.state(), SessionState::OfferPending);
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\nm=audio 9 RTP/SAVPF 0\na=mid:user-4\na=ssrc:10 cname:x\n\
+                  m=video 9 RTP/SAVPF 96\na=mid:cam-user-5\na=ssrc:1234 cname:y\n"
+                .into(),
+        });
+        assert_eq!(
+            runtime.state(),
+            SessionState::OfferPending,
+            "the second offer waits its turn"
+        );
+        assert_eq!(ssrc_mid(&runtime, 1234).as_deref(), Some("cam-user-5"));
+        assert_eq!(ssrc_mid(&runtime, 10).as_deref(), Some("user-4"));
     }
 }

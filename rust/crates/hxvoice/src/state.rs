@@ -164,6 +164,13 @@ pub struct SessionMachine {
     /// publication the server has acknowledged this way can be read as
     /// ended when a later 611 leaves it out.
     local_listed: [bool; 2],
+    /// Per kind, a number for the latest 607 and the latest 609 sent,
+    /// carried out in the frame body and back in a refusal, so a refusal
+    /// only undoes the request it answers. A start numbers both: a pause
+    /// refused under an earlier publication can't touch a new one. They
+    /// keep counting across rooms and sessions.
+    start_gen: [u32; 2],
+    pause_gen: [u32; 2],
     /// Last seen participant list, indexed by user_id. Updated
     /// on `ParticipantsUpdated`; consumed by the runtime layer
     /// via [`SessionMachine::participants`] when it builds the
@@ -841,6 +848,9 @@ impl SessionMachine {
                 }
                 self.local_video[kind.index()] = Some(false);
                 self.local_listed[kind.index()] = false;
+                let gen = self.start_gen[kind.index()].wrapping_add(1);
+                self.start_gen[kind.index()] = gen;
+                self.pause_gen[kind.index()] = self.pause_gen[kind.index()].wrapping_add(1);
                 let cid = self.active_cid.unwrap_or(0);
                 vec![
                     Action::SetVideoPublishing {
@@ -849,7 +859,7 @@ impl SessionMachine {
                     },
                     Action::SendWireFrame {
                         opcode: HTLC_HDR_VIDEO_START,
-                        body: WireFrameBody(encode_cid_plus_kind(cid, kind)),
+                        body: WireFrameBody(encode_cid_kind_gen(cid, kind, gen)),
                     },
                     local_changed(kind, Some(false)),
                 ]
@@ -883,12 +893,14 @@ impl SessionMachine {
                     _ => return Vec::new(),
                 }
                 self.local_video[kind.index()] = Some(paused);
+                let gen = self.pause_gen[kind.index()].wrapping_add(1);
+                self.pause_gen[kind.index()] = gen;
                 let cid = self.active_cid.unwrap_or(0);
                 vec![
                     Action::SetVideoPaused { kind, paused },
                     Action::SendWireFrame {
                         opcode: HTLC_HDR_VIDEO_STATE,
-                        body: WireFrameBody(encode_cid_kind_paused(cid, kind, paused)),
+                        body: WireFrameBody(encode_cid_kind_paused_gen(cid, kind, paused, gen)),
                     },
                     local_changed(kind, Some(paused)),
                 ]
@@ -896,15 +908,62 @@ impl SessionMachine {
 
             // The server refused the start: the publication never
             // existed, so there is nothing to stop on the wire. The
-            // voice session is untouched either way.
-            (_, Event::VideoStartFailed { cid, kind, text }) => {
+            // voice session is untouched either way. A refusal of an
+            // earlier start (start, stop, start inside one round trip)
+            // must not end the newer publication.
+            (
+                _,
+                Event::VideoStartFailed {
+                    cid,
+                    kind,
+                    gen,
+                    text,
+                },
+            ) => {
                 let mut actions = Vec::new();
-                if self.active_cid == Some(cid) && self.local_video[kind.index()].take().is_some() {
+                if self.active_cid == Some(cid)
+                    && gen == self.start_gen[kind.index()]
+                    && self.local_video[kind.index()].take().is_some()
+                {
                     actions.push(Action::SetVideoPublishing {
                         kind,
                         publishing: false,
                     });
                     actions.push(local_changed(kind, None));
+                }
+                actions.push(Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    payload: SignalPayload::Error { text },
+                });
+                actions
+            }
+
+            // The server refused a pause or resume: put the capture back
+            // the way the server still has it. Only the latest 609 of the
+            // current publication is undone — pause, resume, pause inside
+            // one round trip with the first refused leaves the last one.
+            (
+                _,
+                Event::VideoPauseFailed {
+                    cid,
+                    kind,
+                    gen,
+                    text,
+                },
+            ) => {
+                let mut actions = Vec::new();
+                if let (true, true, Some(paused)) = (
+                    self.active_cid == Some(cid),
+                    gen == self.pause_gen[kind.index()],
+                    self.local_video[kind.index()],
+                ) {
+                    let restored = !paused;
+                    self.local_video[kind.index()] = Some(restored);
+                    actions.push(Action::SetVideoPaused {
+                        kind,
+                        paused: restored,
+                    });
+                    actions.push(local_changed(kind, Some(restored)));
                 }
                 actions.push(Action::EmitSignal {
                     kind: SignalKind::Error,
@@ -1398,9 +1457,20 @@ fn encode_cid_plus_kind(cid: u32, kind: VideoKind) -> Vec<u8> {
     v
 }
 
-fn encode_cid_kind_paused(cid: u32, kind: VideoKind, paused: bool) -> Vec<u8> {
+/// A 607 body: `cid | kind`, then the start's generation. The
+/// generation never reaches the wire; the sender keeps it with the task
+/// so a refusal can name the start it answers.
+fn encode_cid_kind_gen(cid: u32, kind: VideoKind, gen: u32) -> Vec<u8> {
+    let mut v = encode_cid_plus_kind(cid, kind);
+    v.extend_from_slice(&gen.to_be_bytes());
+    v
+}
+
+/// A 609 body: `cid | kind | paused`, then the generation, as for 607.
+fn encode_cid_kind_paused_gen(cid: u32, kind: VideoKind, paused: bool, gen: u32) -> Vec<u8> {
     let mut v = encode_cid_plus_kind(cid, kind);
     v.extend_from_slice(&(paused as u16).to_be_bytes());
+    v.extend_from_slice(&gen.to_be_bytes());
     v
 }
 
@@ -3640,7 +3710,8 @@ mod tests {
                 },
                 Action::SendWireFrame {
                     opcode: 607,
-                    body: WireFrameBody(vec![0, 0, 0, 7, 0, 1]),
+                    // cid, kind, then the start's generation.
+                    body: WireFrameBody(vec![0, 0, 0, 7, 0, 1, 0, 0, 0, 1]),
                 },
                 Action::EmitSignal {
                     kind: SignalKind::VideoLocalChanged,
@@ -3666,7 +3737,9 @@ mod tests {
         });
         assert_eq!(
             wire_frames(&acts),
-            vec![(609, vec![0, 0, 0, 7, 0, 1, 0, 1])]
+            // cid, kind, paused, then the pause generation: the start
+            // took the first.
+            vec![(609, vec![0, 0, 0, 7, 0, 1, 0, 1, 0, 0, 0, 2])]
         );
         assert!(acts.contains(&Action::SetVideoPaused {
             kind: VideoKind::Camera,
@@ -3730,6 +3803,7 @@ mod tests {
         let acts = m.step(Event::VideoStartFailed {
             cid: 1,
             kind: VideoKind::Screen,
+            gen: 1,
             text: "Someone else is already sharing.".into(),
         });
         assert_eq!(m.state(), SessionState::Connected);
@@ -3757,12 +3831,212 @@ mod tests {
         let acts = m.step(Event::VideoStartFailed {
             cid: 9,
             kind: VideoKind::Camera,
+            gen: 1,
             text: "no".into(),
         });
         assert_eq!(m.local_video(VideoKind::Camera), Some(false));
         assert!(!acts
             .iter()
             .any(|a| matches!(a, Action::SetVideoPublishing { .. })));
+    }
+
+    /// The generation a 607 or 609 body carries after `cid | kind` (and
+    /// the paused word, for 609).
+    fn body_gen(acts: &[Action], opcode: u32) -> u32 {
+        let (_, body) = wire_frames(acts)
+            .into_iter()
+            .find(|(op, _)| *op == opcode)
+            .expect("the frame was sent");
+        let at = body.len() - 4;
+        u32::from_be_bytes([body[at], body[at + 1], body[at + 2], body[at + 3]])
+    }
+
+    fn has_error_toast(acts: &[Action]) -> bool {
+        acts.iter().any(|a| {
+            matches!(
+                a,
+                Action::EmitSignal {
+                    payload: SignalPayload::Error { .. },
+                    ..
+                }
+            )
+        })
+    }
+
+    #[test]
+    fn a_refusal_of_an_earlier_start_leaves_the_newer_one() {
+        let mut m = connected(1);
+        let first = body_gen(
+            &m.step(Event::VideoStartRequested {
+                kind: VideoKind::Camera,
+            }),
+            607,
+        );
+        m.step(Event::VideoStopRequested {
+            kind: VideoKind::Camera,
+        });
+        let second = body_gen(
+            &m.step(Event::VideoStartRequested {
+                kind: VideoKind::Camera,
+            }),
+            607,
+        );
+        assert_ne!(first, second);
+
+        let acts = m.step(Event::VideoStartFailed {
+            cid: 1,
+            kind: VideoKind::Camera,
+            gen: first,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+        assert!(!acts
+            .iter()
+            .any(|a| matches!(a, Action::SetVideoPublishing { .. })));
+        assert!(has_error_toast(&acts), "the user still hears about it");
+
+        let acts = m.step(Event::VideoStartFailed {
+            cid: 1,
+            kind: VideoKind::Camera,
+            gen: second,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), None);
+        assert!(acts.contains(&Action::SetVideoPublishing {
+            kind: VideoKind::Camera,
+            publishing: false
+        }));
+    }
+
+    #[test]
+    fn a_refused_pause_is_rolled_back() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        let gen = body_gen(
+            &m.step(Event::VideoPauseRequested {
+                kind: VideoKind::Camera,
+                paused: true,
+            }),
+            609,
+        );
+        assert_eq!(m.local_video(VideoKind::Camera), Some(true));
+
+        let acts = m.step(Event::VideoPauseFailed {
+            cid: 1,
+            kind: VideoKind::Camera,
+            gen,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+        assert!(acts.contains(&Action::SetVideoPaused {
+            kind: VideoKind::Camera,
+            paused: false
+        }));
+        assert!(acts.contains(&Action::EmitSignal {
+            kind: SignalKind::VideoLocalChanged,
+            payload: SignalPayload::VideoLocalChanged {
+                kind: VideoKind::Camera,
+                publishing: true,
+                paused: false
+            },
+        }));
+        assert!(wire_frames(&acts).is_empty(), "the server never changed");
+        assert!(has_error_toast(&acts));
+    }
+
+    #[test]
+    fn a_refusal_of_an_earlier_pause_is_stale() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        let pause = |m: &mut SessionMachine, paused| {
+            body_gen(
+                &m.step(Event::VideoPauseRequested {
+                    kind: VideoKind::Camera,
+                    paused,
+                }),
+                609,
+            )
+        };
+        let first = pause(&mut m, true);
+        pause(&mut m, false);
+        pause(&mut m, true);
+
+        let acts = m.step(Event::VideoPauseFailed {
+            cid: 1,
+            kind: VideoKind::Camera,
+            gen: first,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(true));
+        assert!(!acts
+            .iter()
+            .any(|a| matches!(a, Action::SetVideoPaused { .. })));
+        assert!(has_error_toast(&acts));
+    }
+
+    #[test]
+    fn a_pause_refusal_from_an_earlier_publication_is_stale() {
+        let mut m = connected(1);
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+        let gen = body_gen(
+            &m.step(Event::VideoPauseRequested {
+                kind: VideoKind::Camera,
+                paused: true,
+            }),
+            609,
+        );
+        m.step(Event::VideoStopRequested {
+            kind: VideoKind::Camera,
+        });
+        m.step(Event::VideoStartRequested {
+            kind: VideoKind::Camera,
+        });
+
+        m.step(Event::VideoPauseFailed {
+            cid: 1,
+            kind: VideoKind::Camera,
+            gen,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(false));
+    }
+
+    #[test]
+    fn a_pause_refusal_is_scoped_to_its_room_and_kind() {
+        let mut m = connected(1);
+        for kind in VideoKind::ALL {
+            m.step(Event::VideoStartRequested { kind });
+        }
+        let gen = body_gen(
+            &m.step(Event::VideoPauseRequested {
+                kind: VideoKind::Camera,
+                paused: true,
+            }),
+            609,
+        );
+
+        m.step(Event::VideoPauseFailed {
+            cid: 9,
+            kind: VideoKind::Camera,
+            gen,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(true));
+
+        m.step(Event::VideoPauseFailed {
+            cid: 1,
+            kind: VideoKind::Screen,
+            gen,
+            text: "no".into(),
+        });
+        assert_eq!(m.local_video(VideoKind::Camera), Some(true));
+        assert_eq!(m.local_video(VideoKind::Screen), Some(false));
     }
 
     fn own(uid: u16, kind: VideoKind) -> Publication {

@@ -28,6 +28,7 @@ thread_local! {
     static CAP: Cell<bool> = const { Cell::new(false) };
     static VIDEO_CAP: Cell<bool> = const { Cell::new(false) };
     static LAST_LABEL: RefCell<Option<String>> = const { RefCell::new(None) };
+    static LAST_TAG: Cell<usize> = const { Cell::new(0) };
     static LAST_SEND: RefCell<Option<Sent>> = const { RefCell::new(None) };
 }
 
@@ -72,10 +73,11 @@ pub(crate) unsafe extern "C" fn hlwrite_chunks(
 pub(crate) unsafe extern "C" fn task_new(
     _htlc: *mut c_void,
     _rcv: RcvTaskFn,
-    _ptr: *mut c_void,
+    ptr: *mut c_void,
     _data: *mut c_void,
     str_: *const c_char,
 ) -> *mut c_void {
+    LAST_TAG.with(|t| t.set(ptr as usize));
     let label = if str_.is_null() {
         None
     } else {
@@ -253,13 +255,18 @@ fn label() -> Option<String> {
     LAST_LABEL.with(|l| l.borrow().clone())
 }
 
+/// The last task's ptr slot: the generation, for 607 and 609.
+fn tag() -> usize {
+    LAST_TAG.with(|t| t.get())
+}
+
 #[test]
 fn video_sends_need_both_caps() {
     unsafe {
         video_setup(true, false);
-        assert_eq!(hx_send_video_start(htlc(), 1, 1), glib::ffi::GFALSE);
+        assert_eq!(hx_send_video_start(htlc(), 1, 1, 1), glib::ffi::GFALSE);
         video_setup(false, true);
-        assert_eq!(hx_send_video_start(htlc(), 1, 1), glib::ffi::GFALSE);
+        assert_eq!(hx_send_video_start(htlc(), 1, 1, 1), glib::ffi::GFALSE);
         assert!(last_video().is_none());
     }
 }
@@ -268,16 +275,18 @@ fn video_sends_need_both_caps() {
 fn video_start_carries_the_kind_in_frame_and_label() {
     unsafe {
         video_setup(true, true);
-        assert_eq!(hx_send_video_start(htlc(), 9, 2), glib::ffi::GTRUE);
+        assert_eq!(hx_send_video_start(htlc(), 9, 2, 41), glib::ffi::GTRUE);
         let (ty, chunks) = last_video().unwrap();
         assert_eq!(ty, 607);
+        assert_eq!(chunks.len(), 2, "the generation stays off the wire");
         assert_eq!(chunks[0], (TAG_CHAT_ID, 9u32.to_be_bytes().to_vec()));
         assert_eq!(chunks[1], (TAG_VIDEO_KIND, vec![0, 2]));
         assert_eq!(label().as_deref(), Some("video-start-screen"));
+        assert_eq!(tag(), 41, "the task keeps the generation");
         // Kind 0 and the reserved kinds never reach the wire.
         video_setup(true, true);
-        assert_eq!(hx_send_video_start(htlc(), 9, 0), glib::ffi::GFALSE);
-        assert_eq!(hx_send_video_start(htlc(), 9, 3), glib::ffi::GFALSE);
+        assert_eq!(hx_send_video_start(htlc(), 9, 0, 1), glib::ffi::GFALSE);
+        assert_eq!(hx_send_video_start(htlc(), 9, 3, 1), glib::ffi::GFALSE);
         assert!(last_video().is_none());
     }
 }
@@ -300,13 +309,17 @@ fn video_stop_with_and_without_kind() {
 fn video_state_normalizes_paused() {
     unsafe {
         video_setup(true, true);
-        hx_send_video_state(htlc(), 4, 1, 7);
+        hx_send_video_state(htlc(), 4, 1, 7, 12);
         let (ty, chunks) = last_video().unwrap();
         assert_eq!(ty, 609);
+        assert_eq!(chunks.len(), 3, "the generation stays off the wire");
         assert_eq!(chunks[2], (TAG_VIDEO_PAUSED, vec![0, 1]));
-        hx_send_video_state(htlc(), 4, 1, 0);
+        assert_eq!(label().as_deref(), Some("video-state-camera"));
+        assert_eq!(tag(), 12);
+        hx_send_video_state(htlc(), 4, 2, 0, 13);
         let (_, chunks) = last_video().unwrap();
         assert_eq!(chunks[2], (TAG_VIDEO_PAUSED, vec![0, 0]));
+        assert_eq!(label().as_deref(), Some("video-state-screen"));
     }
 }
 

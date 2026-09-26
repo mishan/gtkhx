@@ -134,8 +134,10 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 - `src/themes/` — built-in theme files, shipped as GResource. `src/icons/` — the
   vendored app-specific symbolic icons (see its README), beside the classic
   `src/pixmaps/`.
-- `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting, and
-  `screenshot.py` (headless screenshots isolated from the desktop — see `docs/screenshots.md`).
+- `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting,
+  `isolated-run.sh` (runs a test command sealed off from the desktop — see "Before
+  calling anything done"), and `screenshot.py` (headless screenshots isolated from
+  the desktop — see `docs/screenshots.md`).
 
 ## The model / view boundary
 
@@ -282,16 +284,28 @@ mistakes are invisible in whichever one you happen to be in:
 
 ```sh
 ninja -C build-voice && ninja -C build-novoice
-(cd build-voice && GDK_BACKEND=x11 xvfb-run -a meson test --no-suite integration)
-(cd build-novoice && GDK_BACKEND=x11 xvfb-run -a meson test --no-suite integration)
+tools/isolated-run.sh meson test -C build-voice --no-suite integration
+tools/isolated-run.sh meson test -C build-novoice --no-suite integration
 cd rust
 cargo clippy --workspace --all-targets \
   --features voice,hx-image-decode/glycin-v3 -- -D warnings
 cargo clippy --workspace --all-targets \
   --features hx-image-decode/glycin-v3 -- -D warnings
-GDK_BACKEND=x11 xvfb-run -a cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
-GDK_BACKEND=x11 xvfb-run -a cargo test -p gtkhx-ui --features hx-image-decode/glycin-v3
+../tools/isolated-run.sh cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
+../tools/isolated-run.sh cargo test -p gtkhx-ui --features hx-image-decode/glycin-v3
 ```
+
+**Run tests under `tools/isolated-run.sh`, not bare `xvfb-run`** — the
+integration suite included. It gives the command its own Xvfb display
+(with `GDK_BACKEND=x11`), its own D-Bus session bus with nothing
+auto-started on it, and its own PipeWire + WirePlumber with a null sink
+and source, and it keeps GStreamer's hardware plugins (V4L2, libcamera)
+off the plugin path. Under bare `xvfb-run` the voice and video tests
+play into your desktop's audio server, scan your real cameras, and can
+start real portals. CI runs the same wrapper. It needs PipeWire,
+WirePlumber and `dbus-run-session` installed; `ISOLATED_RUN_KEEP=1` keeps
+its scratch directory (the PipeWire and WirePlumber logs) for a look
+afterwards.
 
 `-D warnings` is not decoration: CI denies, so a lint that is only a warning
 locally — a deprecation, an unused import — is a red build there and invisible

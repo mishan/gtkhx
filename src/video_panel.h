@@ -28,6 +28,10 @@ extern void create_video_window (GtkWidget *parent, session *sess);
  * login reply or a disconnect changed what the server offers. */
 extern void video_panel_refresh_all (session *sess);
 
+/* uid changed nick or icon in room cid on sess's connection: rename their
+ * tiles. */
+extern void video_panel_user_changed (session *sess, guint32 cid, guint16 uid);
+
 /* The "You are sharing your screen" banner for the main window's top
  * bars, revealed while any connection shares. Transfer none. */
 extern GtkWidget *gtkhx_screen_share_banner_new (void);

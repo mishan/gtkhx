@@ -371,6 +371,21 @@ impl PanelInner {
         self.schedule_subscribe();
     }
 
+    /// `uid` in room `cid` changed nick: rename their tiles in place. A
+    /// full refresh would do it too, but it also clears paused pictures
+    /// and resends the receive set, which a rename doesn't call for.
+    fn user_changed(&self, cid: u32, uid: u16) {
+        let sess = self.sess();
+        let Some(rt) = (unsafe { runtime(sess) }) else {
+            return;
+        };
+        if rt.active_cid() != Some(cid) {
+            return;
+        }
+        let label = unsafe { nick(sess, cid, uid) };
+        relabel(&self.tiles.borrow(), uid, &label);
+    }
+
     /// Queue the receive set to be recomputed and sent.
     fn schedule_subscribe(self: &Rc<Self>) {
         if self.subscribe_timer.borrow().is_some() {
@@ -557,6 +572,33 @@ pub unsafe extern "C" fn video_panel_refresh_all(sess: *mut c_void) {
     for_each_panel(Some(key), |p| p.refresh());
 }
 
+/// Rename `uid`'s tiles to `label`. uid 0 is this client's own preview,
+/// which is labeled "You" whatever the nick.
+fn relabel(tiles: &HashMap<StreamKey, Tile>, uid: u16, label: &str) {
+    if uid == 0 {
+        return;
+    }
+    for (key, tile) in tiles {
+        if key.user_id == uid {
+            tile.name.set_text(label);
+        }
+    }
+}
+
+/// `uid` changed nick or icon in room `cid` on `sess`'s connection:
+/// rename their tiles.
+///
+/// # Safety
+/// `sess` is a valid `session *` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn video_panel_user_changed(sess: *mut c_void, cid: u32, uid: u16) {
+    if sess.is_null() {
+        return;
+    }
+    let key = dock::key_for_session(sess);
+    for_each_panel(Some(key), |p| p.user_changed(cid, uid));
+}
+
 /// Bring the Video panel for `sess` to the front, building it if needed.
 /// Starting a camera does this, so the user sees what they're sending.
 pub(crate) fn present(sess: *mut c_void) {
@@ -587,5 +629,36 @@ pub(crate) mod tests {
             .expect("the frame became a paintable");
         assert_eq!(p.intrinsic_width(), 4);
         assert_eq!(p.intrinsic_height(), 2);
+    }
+
+    /// A rename reaches both of a user's tiles and nobody else's, and
+    /// never the local preview. Driven by `crate::gtk_tests`.
+    pub(crate) fn check_relabel_follows_a_nick_change() {
+        let mut tiles = HashMap::new();
+        for (uid, kind, label) in [
+            (5, VideoKind::Camera, "Old"),
+            (5, VideoKind::Screen, "Old"),
+            (6, VideoKind::Camera, "Other"),
+            (0, VideoKind::Camera, "You"),
+        ] {
+            let t = Tile::new(kind);
+            t.name.set_text(label);
+            tiles.insert(StreamKey { user_id: uid, kind }, t);
+        }
+        let name = |uid, kind| {
+            tiles[&StreamKey { user_id: uid, kind }]
+                .name
+                .text()
+                .to_string()
+        };
+
+        relabel(&tiles, 5, "NewNick");
+        assert_eq!(name(5, VideoKind::Camera), "NewNick");
+        assert_eq!(name(5, VideoKind::Screen), "NewNick");
+        assert_eq!(name(6, VideoKind::Camera), "Other");
+        assert_eq!(name(0, VideoKind::Camera), "You");
+
+        relabel(&tiles, 0, "Me");
+        assert_eq!(name(0, VideoKind::Camera), "You");
     }
 }

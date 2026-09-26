@@ -61,7 +61,17 @@ compiles none of it and advertises neither bit.
   Start, pause and stop emit the wire frame plus `SetVideoPublishing` /
   `SetVideoPaused` for the runtime. A refused start (`VideoStartFailed`,
   from the task label `video-start-camera` / `-screen`) ends the
-  publication without a wire frame; a capture failure ends it with a 608.
+  publication without a wire frame; a refused pause or resume
+  (`VideoPauseFailed`, from `video-state-camera` / `-screen`) puts the
+  capture back as the server still has it; a capture failure ends the
+  publication with a 608.
+- **request generations**, per kind: every 607 and every 609 is numbered,
+  and a start numbers the pauses too. The number rides in the action's
+  body, the send keeps it in the task's ptr slot — it never goes on the
+  wire — and rcv.c hands it back with a refusal. A refusal undoes its own
+  request only if it is still the latest: start, stop, start inside one
+  round trip with the first refused leaves the second publication alone,
+  and likewise pause, resume, pause.
 
 Receive mids of every kind feed `mid_to_user`, and every receive mid
 that goes `a=inactive` tears its leg down — the voice rule, widened.
@@ -110,7 +120,21 @@ jitterbuffer sees the same SSRC jump backwards and drops it.
 
 **The answer waits for the senders' caps.** See voice.md: an answer
 written before a freshly linked sender's caps reach `webrtcbin` declares
-no SSRC for it.
+no SSRC for it. Every live sender without caps is waited on, not only one
+bound for this offer: a restart or a resume attaches a capture outside
+the offer path, and an answer that once went out on the timeout would
+otherwise leave the SSRC out of every answer after it. If the answer
+still sends a live video section without its SSRC, the runtime ends that
+publication (a capture failure, so a 608) before the answer goes out —
+the server would drop it anyway, and a camera that never produces must
+not stall every renegotiation.
+
+**Frames end with their streams.** A receive pad that goes away takes
+its stream's frame with it and raises `StreamEnded`, unless a rejoin has
+already bound another pad to the same mid. A pipeline rebuild clears the
+frame store only once the old pipeline has reached Null — an appsink
+mid-frame can still put one until then, and a clear before it let the
+old session's picture into the new one.
 
 **Frame appsinks don't preroll** (`async=false`). A sink added to a
 running pipeline holds its bin in PAUSED until it prerolls, and a live
@@ -209,7 +233,9 @@ an explicit `LIBCAMERA_LOG_LEVELS` in the environment is left alone.
   bits refused.
 - **Integration, media** (`test_video_media.c`): two real runtimes. A
   publishes a `videotestsrc` camera, B subscribes late and decodes it
-  (so a keyframe request has to reach A), A pauses and resumes, A stops
+  (so a keyframe request has to reach A), A pauses — B must see the 611
+  paused flag and its runtime must list the publication as paused — and
+  resumes, A stops
   and B's leg goes; every answer declares the microphone's SSRC and
   `cam-send`'s. A second case publishes camera and screen from one user
   and B must decode both as two streams.

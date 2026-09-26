@@ -48,6 +48,7 @@
 #ifdef HAVE_VOICE
 #include "voice_model.h"   /* hx_voice_model_get_indicator — in-voice check */
 #include "voice_runtime.h" /* gtkhx_voice_runtime_set_user_volume — slider */
+#include "video_panel.h"   /* video_panel_user_changed — tile names */
 #endif
 #include "gif_avatar.h" /* gtkhx_avatar_is_animated / _is_paused / _set_paused */
 #include "panel_registry.h"
@@ -1177,6 +1178,11 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
         hx_member_model_upsert (hx_chat_member_model (chat), uid, nam, icon,
                                 color, nick_color);
     }
+#ifdef HAVE_VOICE
+    /* The Video panel names tiles from this model; a rename has to reach
+     * it, since it otherwise only re-reads names when the room changes. */
+    video_panel_user_changed (sess, hx_chat_cid (chat), uid);
+#endif
 
     if (hx_chat_cid (chat)) {
         gchat = gchat_with_cid (sess, hx_chat_cid (chat));

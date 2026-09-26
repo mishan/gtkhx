@@ -325,18 +325,22 @@ unsafe fn video_cap_ok(htlc: *mut c_void) -> bool {
     true
 }
 
-/// Register the empty-success reply task and write the frame.
+/// Register the empty-success reply task and write the frame. The task
+/// keeps the room in its data slot and `tag` in its ptr slot: the opcode,
+/// or for 607 and 609 the state machine's generation, which rcv.c hands
+/// back with a refusal so it undoes only the request it answers.
 unsafe fn send_video(
     htlc: *mut c_void,
     opcode: u32,
     cid: u32,
+    tag: u32,
     label: &std::ffi::CStr,
     chunks: &[HxChunk],
 ) -> glib::ffi::gboolean {
     task_new(
         htlc,
         rcv_task_voice_simple_ack,
-        to_ptr(opcode),
+        to_ptr(tag),
         to_ptr(cid),
         label.as_ptr(),
     );
@@ -345,7 +349,9 @@ unsafe fn send_video(
 }
 
 /// `gboolean hx_send_video_start(struct htlc_conn *htlc, guint32 cid,
-/// guint16 kind)` — 607. `kind` is 1 (camera) or 2 (screen).
+/// guint16 kind, guint32 gen)` — 607. `kind` is 1 (camera) or 2
+/// (screen); `gen` is the state machine's number for this start, kept
+/// with the task and never sent.
 ///
 /// # Safety
 /// `htlc` is NULL or a valid `htlc_conn *`; main thread only.
@@ -354,6 +360,7 @@ pub unsafe extern "C" fn hx_send_video_start(
     htlc: *mut c_void,
     cid: u32,
     kind: u16,
+    gen: u32,
 ) -> glib::ffi::gboolean {
     let Some(kind) = VideoKind::from_wire(kind) else {
         return glib::ffi::GFALSE;
@@ -368,7 +375,7 @@ pub unsafe extern "C" fn hx_send_video_start(
         VideoKind::Camera => c"video-start-camera",
         VideoKind::Screen => c"video-start-screen",
     };
-    send_video(htlc, HTLC_HDR_VIDEO_START, cid, label, &chunks[..hc])
+    send_video(htlc, HTLC_HDR_VIDEO_START, cid, gen, label, &chunks[..hc])
 }
 
 /// `gboolean hx_send_video_stop(struct htlc_conn *htlc, guint32 cid,
@@ -395,11 +402,20 @@ pub unsafe extern "C" fn hx_send_video_stop(
     let mut chunks = [HxChunk::EMPTY; 2];
     let mut scratch = [0u8; 6];
     let hc = video::build_video_stop_chunks(cid, kind, &mut chunks, &mut scratch);
-    send_video(htlc, HTLC_HDR_VIDEO_STOP, cid, c"video-stop", &chunks[..hc])
+    send_video(
+        htlc,
+        HTLC_HDR_VIDEO_STOP,
+        cid,
+        HTLC_HDR_VIDEO_STOP,
+        c"video-stop",
+        &chunks[..hc],
+    )
 }
 
 /// `gboolean hx_send_video_state(struct htlc_conn *htlc, guint32 cid,
-/// guint16 kind, gboolean paused)` — 609.
+/// guint16 kind, gboolean paused, guint32 gen)` — 609. `gen` as for
+/// [`hx_send_video_start`]; the label names the kind, since the refusal
+/// carries only the opcode.
 ///
 /// # Safety
 /// As [`hx_send_video_start`].
@@ -409,6 +425,7 @@ pub unsafe extern "C" fn hx_send_video_state(
     cid: u32,
     kind: u16,
     paused: glib::ffi::gboolean,
+    gen: u32,
 ) -> glib::ffi::gboolean {
     let Some(kind) = VideoKind::from_wire(kind) else {
         return glib::ffi::GFALSE;
@@ -425,13 +442,11 @@ pub unsafe extern "C" fn hx_send_video_state(
         &mut chunks,
         &mut scratch,
     );
-    send_video(
-        htlc,
-        HTLC_HDR_VIDEO_STATE,
-        cid,
-        c"video-state",
-        &chunks[..hc],
-    )
+    let label = match kind {
+        VideoKind::Camera => c"video-state-camera",
+        VideoKind::Screen => c"video-state-screen",
+    };
+    send_video(htlc, HTLC_HDR_VIDEO_STATE, cid, gen, label, &chunks[..hc])
 }
 
 /// `gboolean hx_send_video_subscribe(struct htlc_conn *htlc, guint32 cid,
@@ -470,6 +485,7 @@ pub unsafe extern "C" fn hx_send_video_subscribe(
         htlc,
         HTLC_HDR_VIDEO_SUBSCRIBE,
         cid,
+        HTLC_HDR_VIDEO_SUBSCRIBE,
         c"video-subscribe",
         &chunks[..hc],
     )

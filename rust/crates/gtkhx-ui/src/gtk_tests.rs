@@ -34,4 +34,6 @@ fn display_backed() {
     crate::conn_tabs::tests::check_wheel_is_wired_to_the_bar();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_tile_shows_a_frame();
+    #[cfg(feature = "voice")]
+    crate::video_panel::tests::check_relabel_follows_a_nick_change();
 }
