@@ -31,7 +31,7 @@ any new harness.
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
 | 3 | UI scenarios through the real frame clock | a harness generalized from `src/chat_bench.c` | Chat only (`tools/chatbench.sh`) |
-| 4 | End to end against the Docker rig | Tier 3 integration rig | Not started |
+| 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
 
@@ -40,6 +40,7 @@ cd rust
 cargo bench -p hxchat-layout          # layout engine
 cargo bench -p hxcrypto               # ciphers and hashes
 cargo bench -p hxcrypto -- aead       # one group
+cargo bench -p hxcrypto -- --warm-up-time 1 --measurement-time 3   # quicker
 ```
 
 criterion is a dev-dependency only, with its default features off; nothing
@@ -186,15 +187,18 @@ are leads.
    2,000-row figure. **Fixed.**
 3. **First paint pays for gutter settling across the whole scrollback.**
    Laying out the first visible rows widens the shared nick gutter, and
-   each widening drops every row's cached layout and height — an O(n) walk,
-   repeated until the gutter settles. With the gutter pinned
-   (`set_indent_width`), first paint at 20,000 rows falls from about 63 µs
-   to 13 µs. It happens once per buffer, so this is a note rather than a
+   each widening drops every row's cached layout and marks every height
+   unmeasured — an O(n) walk, repeated until the gutter settles. In one
+   side-by-side run, pinning the gutter (`set_indent_width`) took first
+   paint at 20,000 rows from 63 µs to 13 µs. This is also the noisiest
+   number in the table: a cold 20,000-row buffer is sensitive to cache
+   state, and a reviewer's run under load measured 445 µs. It happens once per buffer, so this is a note rather than a
    problem; it would matter if the gutter kept widening during a session.
-4. **Search takes a frame and more at large scrollbacks.** It runs on every
-   find-bar keystroke and scans the model with a character-by-character
-   case-insensitive match: 17 ms at 20,000 rows, under a millisecond at the
-   default cap.
+4. **Search takes a frame and more at large scrollbacks.** The find bar runs
+   it once typing pauses for 120 ms (`chat_find.rs`), and it scans the
+   model with a character-by-character case-insensitive match: 17 ms at
+   20,000 rows, under a millisecond at the default cap. One dropped frame
+   per pause, not per key.
 5. **AEAD allocates per record.** `AeadState::seal` and `open` use the
    allocating `encrypt` / `decrypt` and copy the result out, rather than
    the in-place detached form. At 1.8 GiB/s it does not matter for

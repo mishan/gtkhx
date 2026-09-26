@@ -13,6 +13,9 @@ publish = false
 # staticlib target before there is a linker asking for one would just
 # lengthen the build.
 crate-type = ["rlib"]
+# The benches are criterion targets; without this, `cargo bench` also runs
+# the lib under libtest, which rejects criterion's flags.
+bench = false
 
 # Deliberately no dependencies.
 #

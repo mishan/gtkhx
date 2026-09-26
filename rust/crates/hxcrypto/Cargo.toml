@@ -14,6 +14,9 @@ publish = false
 # directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
 # without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
+# The benches are criterion targets; without this, `cargo bench` also runs
+# the lib under libtest, which rejects criterion's flags.
+bench = false
 
 [features]
 default = ["lz4", "zstd"]

@@ -861,8 +861,8 @@ fn buffer_stale_mark_is_inert_not_fatal() {
     let m = FixedMeasure::new(8);
     let mut b = ChatBuffer::new(params(400));
     let id = b.append(Message::system(ParsedText::plain("x")), &m);
-    assert!(b.remove(id));
-    assert!(!b.remove(id), "second remove is a no-op, not a crash");
+    assert!(b.remove(id, &m));
+    assert!(!b.remove(id, &m), "second remove is a no-op, not a crash");
     assert_eq!(b.row_of(id), None);
     assert!(b.message(id).is_none());
 }
@@ -906,7 +906,7 @@ fn buffer_positions_survive_trims() {
             // Remove from the middle; `remove` reindexes first.
             11 => {
                 let mid = b.id_at(b.len() / 2).unwrap();
-                assert!(b.remove(mid));
+                assert!(b.remove(mid, &m));
             }
             // A read in the clean state, between trims.
             23 => b.reindex(),
@@ -2549,6 +2549,22 @@ fn a_different_speaker_or_a_long_gap_breaks_the_run() {
         "misha's return is a new run, not a continuation"
     );
     assert!(!grouped(&b, 4), "a long gap breaks the run");
+}
+
+#[test]
+fn removing_a_runs_head_promotes_the_next_row() {
+    // Same invariant as trimming, reached through remove: the row that
+    // moves up into the head's place must show its nick again.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    let head = b.append(said(7, "misha", "hai", 1000), &m);
+    b.append(said(7, "misha", "hai", 1005), &m);
+    b.reindex();
+    assert!(grouped(&b, 1));
+    assert!(b.remove(head, &m));
+    assert!(!grouped(&b, 0), "the new head must show its nick");
 }
 
 #[test]

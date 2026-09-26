@@ -259,7 +259,7 @@ impl ChatBuffer {
     /// Remove the row `id` names. `false` if the mark was already stale,
     /// which is not an error — it is how a caller learns the row was
     /// trimmed.
-    pub fn remove(&mut self, id: MessageId) -> bool {
+    pub fn remove(&mut self, id: MessageId, measure: &dyn TextMeasure) -> bool {
         self.reindex();
         let Some(row) = self.row_of(id) else {
             return false;
@@ -267,6 +267,10 @@ impl ChatBuffer {
         self.rows.remove(row);
         self.index.remove(row);
         self.pos_dirty = true;
+        // The row that moved up has a new predecessor. Removing a run's
+        // head would otherwise leave the next row suppressing a nick that
+        // nothing above it shows.
+        self.regroup_rows(row..row + 1, measure);
         if self.anchor.message == Some(id) {
             // Re-anchor to the row that took its place, so removing the
             // "Load older" sentinel from under the viewport doesn't
