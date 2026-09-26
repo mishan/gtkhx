@@ -159,7 +159,6 @@ sides are Rust — each category is a real constraint, not leftover work.
 | `gtkhx-ui` → the voice crates (`hxvoice-model` / `-runtime` / `-send`) | Already *optional* Cargo dependencies, but the calls still go through `extern` blocks. Converting them means code that only typechecks under `--features voice`, and their callback parameters need `Option<fn>` wrapping — a careful pass, not a mechanical one. **Genuine remaining work**, not a constraint. |
 | `hxhandlers` → `gtkhx-ui` | The dependency cycle of §2a. `gtkhx-ui` depends on `hxhandlers` through Cargo, so the reverse edge cannot be one. |
 | `task_new` (`hxtask`) | Deliberate type erasure. The `rcv_task_*` reply handlers have heterogeneous argument lists cast to a canonical shape; each caller declares its own local `RcvTaskFn` alias. Importing the real signature would force a `transmute` at every call site. |
-| `hx_tracker_v3_meta_{copy,free}` | Two intentional views of the same memory. `gtkhx-core` models the tracker-v3 metadata as an opaque, correctly-sized buffer (its copy/free only need the owned-string byte offsets); `gtkhx-ui` carries a full typed `#[repr(C)]` mirror because the tracker window reads the fields. Both are pinned by const asserts against the C `_Static_assert`s. |
 
 ### What converting the extern edges to Cargo dependencies surfaced
 

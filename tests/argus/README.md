@@ -104,9 +104,9 @@ literal IP like `"203.0.113.10:5500"`. The spec allows it — a
 hostname is just a UTF-8 string, and an IP literal is a valid
 hostname.
 
-The client-side parser (`src/tracker_v3.c::hx_tracker_v3_parse_record`)
+The record parser (`hxproto`'s `parse_tracker_v3_record`, in hx-libs)
 handles all three address-type bytes (`0x04`/`0x06`/`0x48`)
-cleanly, pinned by `tests/proto/test_tracker_v3.c::test_record_hostname`.
+cleanly, pinned by its `tracker_v3_record_hostname_basic` test.
 
 The view side (`src/tracker.c::tracker_server_create`) routes all
 three through the same string-keyed dedup tree — added in the
@@ -132,9 +132,9 @@ capability + content-index TLV blocks (`0x0200` / `0x0300` /
 UDP-registered against this tracker and supplied them — Argus
 doesn't fabricate them itself.
 
-For Phase B, the typed-meta decoder (`hx_tracker_v3_meta_new` in
-`src/tracker_v3_meta.c`) gets per-TLV coverage from synthetic
-fixtures in `tests/proto/test_tracker_v3_meta.c`, and the Tier 3
+The typed-meta decoder (`hxproto::tracker::TrackerMeta`, reached from C
+through `hx_tracker_v3_meta_new` in gtkhx-core) gets per-TLV coverage
+from synthetic fixtures in hxproto's own tests, and the Tier 3
 test here cross-checks the 0x0600 block by asserting
 `meta->is_promoted` for the Promoted Alpha record. A future
 follow-up could wire a small UDP-registration helper (parallel to

@@ -8,49 +8,20 @@
  */
 
 /*
- * src/tracker_v3_meta.h — typed accessor for the per-record TLV
- * trailer that v3 tracker responses carry.
+ * src/tracker_v3_meta.h — the typed metadata a v3 tracker record carries
+ * in its TLV trailer, as C sees it.
  *
- * Phase A (the protocol port) stashed the raw TLV bytes on each
- * HxTrackerServer event as a GBytes blob and walked past them to
- * advance the parse cursor, but didn't surface any of the typed
- * fields. Phase B decodes those bytes here.
+ * The decoder is hxproto's TrackerMeta (hx-libs), the same one hxd-ng
+ * encodes its registrations with; gtkhx-core::boxed::tracker builds this
+ * struct from it and owns the functions declared below. The struct stays
+ * defined here for tracker_event.c, which hangs one off every
+ * HxTrackerServer, and its layout is pinned on both sides: const asserts
+ * in gtkhx-core, _Static_asserts in tracker_event.c.
  *
- * The decoder is a pure function over a length-prefixed byte blob
- * — no GIO, no GObject — drivable from Tier 2 tests with canned
- * fixtures.
- *
- * Design choices:
- *
- *   - One sweep over the blob; each TLV id stores into the matching
- *     struct field via a small dispatch table. O(n) in the number
- *     of TLVs.
- *
- *   - Unknown TLV ids are silently ignored. That's the spec's
- *     forward-compat escape hatch — a tracker that grows new TLV
- *     ids doesn't break older clients.
- *
- *   - Strings live as g_strndup-ed buffers (UTF-8, NUL-terminated)
- *     and the struct owns them. tracker_v3_meta_free walks the
- *     known string fields. UTF-8 sanitisation runs at construction
- *     time (g_utf8_make_valid) so subscribers can hand the strings
- *     straight to Pango.
- *
- *   - Booleans land as gboolean (1 if any TLV value byte is
- *     non-zero, 0 otherwise) so callers don't have to special-case
- *     "TLV present with value 0" vs "TLV absent" — both render as
- *     FALSE, which is what the spec implies anyway.
- *
- *   - Missing-TLV defaults: zero for ints, NULL for strings, FALSE
- *     for booleans. A `has_*` companion flag distinguishes "set to
- *     zero" from "not set" for the numeric fields that need it
- *     (max_users 0 is meaningfully different from max_users absent;
- *     uptime 0 isn't).
- *
- * Phase B intent: tracker.c reads selected fields off the parsed
- * struct and renders them as new columns + a detail popover. The
- * struct grows over time as we surface more fields; the decoder
- * doesn't.
+ * Absent strings are NULL, absent numbers 0; has_max_users and
+ * has_timezone_offset tell 0 from absent where that matters. Unknown
+ * maturity and category values read as GENERAL and UNSPECIFIED, as the
+ * specification requires.
  */
 
 #ifndef HX_TRACKER_V3_META_H
@@ -146,37 +117,18 @@ struct _HxTrackerV3Meta {
     gboolean verified_online; /* 0x0603 */
 };
 
-/* Parse a TLV blob from the wire (typically the contents of
- * HxTrackerServer.tlv_bytes) into a freshly-allocated meta struct.
- *
- * `buf` / `buf_len` is the raw TLV concatenation; `tlv_count` is
- * how many TLVs to walk (matches the count field that prefixes the
- * trailer on the wire).
- *
- * Returns a non-NULL meta on success. A malformed input (a TLV's
- * length field overruns the buffer, or the declared count walks
- * past buf_len) returns NULL — partial state is freed before
- * return. NULL bufs with buf_len == 0 / tlv_count == 0 are valid
- * inputs and return an all-zero meta (the "no TLVs" case for v1
- * records routed through this constructor).
- *
- * Unknown TLV ids are silently skipped — forward-compat with future
- * spec revisions. */
+/* Decode a record's TLV trailer — `buf_len` bytes holding `tlv_count`
+ * fields — into a new meta. NULL when the trailer is malformed (a length
+ * overruns, or the count and the bytes disagree), which makes the record
+ * untrustworthy. A zero count gives an all-absent meta, which is what v1
+ * records carry. */
 extern HxTrackerV3Meta *
 hx_tracker_v3_meta_new (const guint8 *buf, gsize buf_len, guint16 tlv_count);
 
-/* Convenience over hx_tracker_v3_meta_new for the common case where
- * the bytes live in a GBytes (which is how HxTrackerServer carries
- * them). NULL `bytes` returns an all-zero meta. */
-extern HxTrackerV3Meta *hx_tracker_v3_meta_new_from_bytes (GBytes *bytes,
-                                                           guint16 tlv_count);
-
-/* Deep copy. Used by the boxed-type copy hook on HxTrackerServer
- * so signal subscribers that keep the event past the emit get
- * their own owned strings. */
+/* Deep copy, for the HxTrackerServer boxed copy. */
 extern HxTrackerV3Meta *hx_tracker_v3_meta_copy (HxTrackerV3Meta *src);
 
-/* Frees the struct and all owned strings. Safe on NULL. */
+/* Frees the struct and its strings. Safe on NULL. */
 extern void hx_tracker_v3_meta_free (HxTrackerV3Meta *meta);
 
 G_END_DECLS

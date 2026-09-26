@@ -267,20 +267,18 @@ registering server:
   interleaved per-record progress as bytes arrived, the engine reads a
   whole listing before returning it, so records for one tracker arrive
   as a burst and the progress indicator ticks per tracker.
-- **`src/tracker_v3.{c,h}`** — the surviving C ABI over the pure v3
-  encoders/parsers: handshake builder, handshake-response decoder,
-  listing-request builder, response-header parser, single-record parser
-  (borrowing slices into the caller's buffer, reporting bytes
-  consumed), and the TLV walker. The parsing delegates to
-  `hxproto`.
-- **`src/tracker_v3_meta.{c,h}`** — the typed TLV decoder. One sweep
-  over the blob, each ID stored into the matching struct field,
-  unknown IDs skipped. Strings are `g_utf8_make_valid`-ed at
-  construction so subscribers can hand them straight to Pango.
-  Companion `has_*` flags distinguish "set to zero" from "absent" for
-  the numeric fields where that matters.
-- **`src/tracker_parser.{c,h}`** — the v1 header and fixed-record
-  parsers. They stay: any tracker still running v1 has to keep working.
+- **`hxproto::tracker`** (in [hx-libs](https://github.com/mishan/hx-libs)) —
+  the wire codec, shared with hxd-ng: the v3 handshake, listing request,
+  response header and records; the v1 reply header and fixed record; and
+  `TrackerMeta`, the typed decoder for a record's TLV trailer. hxd-ng
+  encodes its registrations with the same type, so the field ids and
+  widths are defined once. Decoding skips unknown ids, lets the last
+  repeat win, reads a wrong-width number as 0, and replaces invalid UTF-8
+  with U+FFFD so the strings can go straight to Pango.
+- **`rust/crates/gtkhx-core/src/boxed/tracker.rs`** — `HxTrackerV3Meta`,
+  the C form of that metadata, built from `TrackerMeta` by
+  `hx_tracker_v3_meta_new`. Companion `has_*` flags distinguish "set to
+  zero" from "absent" for the numeric fields where that matters.
 - **`src/tracker_event.{c,h}`** — the boxed `HxTrackerServer` payload
   of the `tracker-server-create` session signal, including the address
   formatter that renders all three `addr_type` forms to a display
