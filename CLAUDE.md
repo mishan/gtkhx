@@ -239,12 +239,13 @@ request was rejected, and why.
 
 ## Reference servers
 
-- **mhxd** (<https://github.com/kangsterizer/mhxd>, vendored under `mhxd/` for reading) —
+- **mhxd** (<https://github.com/kangsterizer/mhxd>; keep a clone *outside* this checkout,
+  e.g. `../mhxd`, for reading — it is not part of the repo) —
   a 2023 merge of three HotlineX forks, the same codebase family GtkHx's protocol stack
   came from. The controlled, repeatable test target and the canonical reference for opcodes
   and the access bitmap. Its known bugs are in `docs/mhxd-bugs.md`, and it wedges: when it
-  starts refusing everything, restart its container before suspecting the client. Pinned to a specific revision in `tests/mhxd/`; an unpinned master
-  has broken the build before.
+  starts refusing everything, restart its container before suspecting the client. Pinned to
+  a specific revision in `tests/mhxd/`; an unpinned master has broken the build before.
 - **Janus** — VesperNet's closed-source server. Implements the fogWraith extensions (voice,
   inline media, GIF icons, chat history), so it is the integration target for all of them.
   Runs in the test rig. Its known bugs, kept to send upstream, are in `docs/janus-bugs.md`.

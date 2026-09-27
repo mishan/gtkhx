@@ -35,7 +35,7 @@
 const hx_test_server hx_test_server_matrix[] = {
     {
         /* mhxd: the controlled-codebase reference server. Built
-         * from the vendored mhxd/ source in tests/mhxd/. Hotline
+         * by tests/mhxd/ on the hotline-docker mhxd image. Hotline
          * 1.8.5-style flow, HOPE, threaded news. No chat-history.
          *
          * BANNER_HTXF intentionally NOT asserted here even though
