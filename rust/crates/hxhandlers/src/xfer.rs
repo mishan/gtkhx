@@ -413,7 +413,7 @@ unsafe fn resource_len(path: *const c_char) -> usize {
 }
 
 /// (ptr, len) → borrowed bytes (empty for NULL). Names carry any byte incl.
-/// `dir_char`, so they arrive as an explicit length, never NUL-terminated.
+/// `/`, so they arrive as an explicit length, never NUL-terminated.
 unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
     if p.is_null() || len == 0 {
         &[]

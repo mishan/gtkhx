@@ -20,9 +20,6 @@ extern "C" {
  * "dir/name" target is what's wanted, with `name` shipped as a
  * separate FILE_NAME chunk. */
 extern guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file);
-
-/* Strip the leading common prefix between src and mask, then copy
- * the unmatched tail of src into dst. */
 #ifdef __cplusplus
 }
 #endif

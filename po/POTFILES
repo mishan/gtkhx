@@ -1,5 +1,4 @@
 src/chat.c
-src/files.c
 src/files_browser.c
 src/files_entry.c
 src/files_local_provider.c

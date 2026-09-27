@@ -116,7 +116,7 @@ struct htxf_conn {
     /* Structured remote location. The wire protocol identifies a
      * file by a separate per-component DIR list plus a flat NAME
      * chunk — names can contain any byte including `/`, which is
-     * otherwise dir_char. Storing the dir and name apart from the
+     * otherwise the path separator. Storing the dir and name apart from the
      * joined remotepath is what lets xfer_go correctly request
      * files like "Cheeseman goes 56k/sec.pct" without the `/` in
      * the name getting reinterpreted as a directory boundary. */
@@ -246,10 +246,6 @@ extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
 
 #define XFER_GET 0
 #define XFER_PUT 1
-#define COMPLETE_NONE 0
-#define COMPLETE_EXPAND 1
-#define COMPLETE_LS_R 2
-#define COMPLETE_GET_R 3
 
 /* ---- Crypto helpers (implementations in Rust crates) ---- */
 

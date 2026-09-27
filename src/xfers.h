@@ -16,7 +16,7 @@
 extern void xfer_go (struct htxf_conn *htxf);
 /* Construct a transfer on `htlc`. The remote location is given as a (dir,
  * name, name_len) triple rather than a single joined path so that
- * names containing `/` (the default dir_char) survive untouched on
+ * names containing `/` (the path separator) survive untouched on
  * the wire — see protocol.h's comment on struct htxf_conn for the
  * full reasoning.
  *
