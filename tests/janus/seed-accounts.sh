@@ -3,12 +3,9 @@
 # seed-accounts.sh — edit the bundled guest / admin account YAMLs at
 # image-build time so the test suites can use them.
 #
-# admin gets the empty password. Janus's plain (non-HOPE) login
-# checks the password field as it arrives on the wire, without
-# undoing the XOR-0xFF obfuscation every Hotline client applies to
-# it, so a non-empty password never matches when a real client
-# sends it. The empty password obfuscates to itself and sidesteps
-# that; it is also the password HOPE login verifies without a
+# admin gets the empty password, so the suites log in the same way
+# on every rig server (see README.md for why it once had to be
+# empty). It is also the password HOPE login verifies without a
 # stored HOPEPassword blob (Janus computes HMAC(key="", session_key)
 # server-side), which is how guest has always logged in over HOPE.
 #

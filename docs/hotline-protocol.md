@@ -1119,9 +1119,9 @@ byte and a 64-bit counter. It also encrypts file transfers, with a per-transfer 
 derived from the reference number; the HTXF header itself stays in plaintext. There is
 no rekey.
 
-Server bugs worth knowing: Janus fails HOPE for any account with a non-empty password,
-and its plain login compares the obfuscated password without undoing the obfuscation
-([janus-bugs.md](janus-bugs.md)).
+Server bugs worth knowing: Janus before 2.0.13 fails HOPE for any account with a
+non-empty password, and its plain login compares the obfuscated password without
+undoing the obfuscation, so only the empty password logs in. 2.0.13 fixes both.
 
 ### TLS on dedicated ports
 

@@ -147,6 +147,4 @@ move. hlservd's `admin` has no password until one is set, and until then
 logs in only from the machine running the server, which host networking
 makes every test connection; its flood ban is off for loopback
 (`tests/hlservd/README.md`).
-Janus's `admin` has the empty password because Janus doesn't undo the
-password obfuscation on a plain login, so no other password logs in from a
-real client — see `tests/janus/README.md`.
+Janus's `admin` has the empty password too; see `tests/janus/README.md`.

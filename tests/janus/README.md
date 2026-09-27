@@ -95,11 +95,12 @@ Login:   admin
 Pass:    (empty)        (set by seed-accounts.sh)
 ```
 
-admin's password is empty because no other password works from a
-real client: Janus's plain login compares the password field as it
-arrives, without undoing the XOR-0xFF obfuscation every Hotline
-client applies to it, so only a password that obfuscates to itself
-matches.
+admin's password is empty so the suites log in the same way on every
+rig server. Before 2.0.13 it had to be: Janus's plain login compared
+the password field without undoing the XOR-0xFF obfuscation every
+Hotline client applies, and a HOPE password set through the admin API
+never validated, so only the empty password logged in from a real
+client. 2.0.13 fixes both.
 
 Janus's default `guest` account has `ReadChatHistory: true` already
 set (access bit 56), so chat-history queries from a guest connection
@@ -138,12 +139,10 @@ Out of the box:
        server-side and compares. Works out of the box —
        `test_hope_chacha20` uses this path, matching
        hotline.vespernet.net's guest configuration.
-    2. *Non-empty password* via the admin REST API (`:8973`).
-       Janus writes a `HOPEPassword:` blob into the account's
-       YAML, but empirically the blob doesn't validate at HOPE
-       login, and the plain login can't take a non-empty
-       password either (see above). Neither bundled account
-       uses this path.
+    2. *Non-empty password*, set through the admin REST API
+       (`:8973`), which writes a `HOPEPassword:` blob into the
+       account's YAML. Works from 2.0.13, including after a
+       restart. Neither bundled account uses this path.
 - Large-file (>4 GiB) transfers.
 - Text encoding negotiation (UTF-8 / Mac Roman).
 - File-mode banner (Janus ships a `banner.gif`).
