@@ -1,11 +1,12 @@
 # mhxd bugs
 
-mhxd is the rig's reference server (`tests/mhxd/`, source vendored under
-`mhxd/`), and the one server whose code we can read. This is the list of
-places where it misbehaves, so that a failing test or an odd report from a real
-server can be checked against what is already known before anyone goes looking
-for a client bug. Each entry says how it shows up, why (with the function in
-`mhxd/src/hxd/`), and what GtkHx does about it.
+mhxd is the rig's reference server (`tests/mhxd/`; source at
+[kangsterizer/mhxd](https://github.com/kangsterizer/mhxd)), and the one server
+whose code we can read. This is the list of places where it misbehaves, so that
+a failing test or an odd report from a real server can be checked against what
+is already known before anyone goes looking for a client bug. Each entry says
+how it shows up, why (with the function in mhxd's `src/hxd/`), and what GtkHx
+does about it.
 
 The Janus list is [janus-bugs.md](janus-bugs.md). These were found while
 building the Files end-to-end suite (`rust/crates/hx-e2e`). An
@@ -125,6 +126,40 @@ A folder's FILE_LIST entry carries its child count in the size field, as the
 Hotline convention has it, but FILE_GETINFO on the same folder reports the
 directory's `st_size` (`rcv_file_getinfo`): 4096 on ext4, whatever the
 contents. GtkHx's Get Info shows it as a size; it means nothing to the user.
+
+## Kill Download is rejected
+
+**Verified.** Kill Download (214, `HTLC_HDR_KILLDOWNLOAD`) is an official
+1.8.2 transaction for dropping a queued download, and mhxd defines it, but
+its dispatch case in `rcv.c` has the handler assignment commented out. The
+request gets "Transaction rejected. (Unknown or non-authorised)". GtkHx never
+sends it, so nothing depends on it; a client that cancels a queued download on
+mhxd has to hang up the transfer instead.
+
+## A folder-upload resume reply carries garbage resume data
+
+**From the source.** When a folder upload asks to resume (a non-zero transfer
+option on FILE_PUTFOLDER), `rcv_folder_put` answers with a 74-byte RFLT taken
+from a stack buffer it never fills, so the client is told arbitrary offsets.
+GtkHx never asks to resume a folder upload, so it never sees this.
+
+## hxtrackd lists a restarted server twice
+
+**Verified.** hxtrackd identifies a registration by its UDP source address and
+**port**, and ignores the server's pass ID (`htrk_udp_rcv` in
+mhxd's `src/hxtrackd/tracker.c`). mhxd sends from an ephemeral port, so after a
+server restarts its new registrations make a second entry beside the old one
+until that expires. The rig's listing routinely shows Janus twice. GtkHx lists
+what it is sent.
+
+## hxtrackd expires entries whether or not they keep registering
+
+**From the source.** An entry's age counter (`clock`) is incremented by
+`tracker_timer` every interval and the entry is dropped at 2, but nothing
+resets the counter when a heartbeat arrives; the only reset is in dead code.
+So every server falls out of the listing two or three intervals after it
+**first** registered, and comes back with its next heartbeat. The rig sets the
+interval to a day, which hides it.
 
 ## Adding an entry
 
