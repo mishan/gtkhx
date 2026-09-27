@@ -20,9 +20,9 @@ pub struct Server {
     pub host: &'static str,
     pub port: u16,
     pub xfer_port: u16,
-    /// Login and password of the account with every file privilege, where the
-    /// server has one (`Cap::FileAdmin`).
-    pub admin: (&'static str, &'static str),
+    /// Login of the account with every file privilege, where the server has
+    /// one (`Cap::FileAdmin`). The rig gives it no password.
+    pub admin: &'static str,
     pub caps: &'static [Cap],
 }
 
@@ -39,7 +39,7 @@ pub const SERVERS: &[Server] = &[
         port: 5500,
         xfer_port: 5501,
         // mhxd ships `admin` with no password and every access bit.
-        admin: ("admin", ""),
+        admin: "admin",
         caps: &[Cap::FileAdmin],
     },
     Server {
@@ -49,7 +49,7 @@ pub const SERVERS: &[Server] = &[
         xfer_port: 5511,
         // No file-admin account yet: the password tests/janus seeds for
         // `admin` doesn't log in, and the guest can't make folders.
-        admin: ("", ""),
+        admin: "",
         caps: &[Cap::TextEncoding, Cap::LargeFiles],
     },
 ];
