@@ -466,12 +466,9 @@ extern gboolean integration_drain_until_chat_user_event (
  *   bytes[name_len] name
  *
  * The full production encoder (src/path_hldir.c::path_to_hldir)
- * handles multi-component paths via a runtime-configured directory
- * separator (`dir_char`), set from the server's DIRECTORYCHAR
- * handshake. Tier 3 tests don't need the splitting — they target
- * top-level files / folders — so this single-component shortcut
- * stays here in the harness rather than depending on the global
- * `dir_char` extern.
+ * splits multi-component paths. Tier 3 tests don't need the
+ * splitting — they target top-level files / folders — so this
+ * single-component shortcut stays here in the harness.
  *
  * `out` must point to at least 5 + strlen(name) bytes.
  */

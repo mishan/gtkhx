@@ -458,7 +458,7 @@ test('uniquify_path', test_uniquify_path,
 
 # human_readable — fileutils-vintage byte-count formatter
 # (human_size / human_readable). Extracted to src/human_readable.c
-# so this test can link without dragging in files.c's GTK pile.
+# so this test can link without dragging in GTK.
 # Pins the user-visible suffix boundaries (1023 → "1023", 1024 →
 # "1.0k", 8500 → "8.3k", 4294967295u → "4.0G"). Catches any future
 # tidy-up of the .5-rounding state machine that would change what
@@ -490,11 +490,8 @@ test_htxf_hdr = executable('test_htxf_hdr',
 test('htxf_hdr', test_htxf_hdr,
      suite : 'unit')
 
-# path_hldir — path_to_hldir + dirmask. Pure path encoders extracted
-# from files.c so this test can link them without dragging in GTK /
-# Adwaita / files.c's UI globals. path_to_hldir references an extern
-# `dir_char` (set by the server's DIRECTORYCHAR handshake at run
-# time); the test provides its own definition.
+# path_hldir — the path_to_hldir DIR-chunk encoder, in its own
+# translation unit so this test can link it alone.
 test_path_hldir = executable('test_path_hldir',
   'unit/test_path_hldir.c',
   '../src/path_hldir.c',

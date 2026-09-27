@@ -13,24 +13,13 @@
  */
 
 /*
- * path_to_hldir + dirmask — pure path-encoding helpers, extracted
- * from files.c so Tier 1 unit tests can exercise them without
- * dragging in GTK / Adwaita / the entire file browser pile.
+ * path_to_hldir — the Hotline DIR-chunk path encoder, in its own
+ * translation unit so the Tier 1 unit test can link it alone.
  *
- * path_to_hldir packs a slash-separated (or whatever dir_char is set
- * to) path into the Hotline DIR-chunk wire format: a u16 component
- * count followed by N records of {u16 zero, u8 namelen, name bytes}.
- * Every file-name-bearing opcode uses this encoding for the directory
- * portion of the target.
- *
- * The dir_char separator is set by the server during the handshake
- * (HTLC_HDR_DIRECTORYCHAR / dirchar_change in rcv.c); we read it as
- * an extern. The unit test provides its own definition.
- *
- * dirmask strips a leading prefix from src using mask as the
- * candidate match, then copies the unmatched tail to dst. Used by
- * rcv.c::rcv_task_folder_get to peel the request-time path prefix
- * off the server-sent per-entry path.
+ * It packs a slash-separated path into the DIR-chunk wire format: a
+ * u16 component count followed by N records of {u16 zero, u8 namelen,
+ * name bytes}. Every file-name-bearing opcode uses this encoding for
+ * the directory portion of the target.
  */
 
 #include "config.h"
@@ -39,8 +28,6 @@
 #include <glib.h>
 #include "compat.h" /* PACKED */
 #include "path_hldir.h"
-
-extern guint8 dir_char;
 
 /* Wire layout for a single component header. The "enc" field is the
  * Hotline "encoding" tag — always zero in practice and the receiver
@@ -62,7 +49,7 @@ path_to_hldir (const char *path, guint16 *hldirlen, int is_file)
 
     hldir = g_malloc (2);
     p = path;
-    while ((p2 = strchr (p, dir_char))) {
+    while ((p2 = strchr (p, '/'))) {
         if (!(p2 - p)) {
             p++;
             continue;
@@ -91,13 +78,4 @@ path_to_hldir (const char *path, guint16 *hldirlen, int is_file)
 
     *hldirlen = pos;
     return hldir;
-}
-
-void
-dirmask (char *dst, char *src, char *mask)
-{
-    while (*mask && *src && *mask++ == *src++)
-        ;
-
-    strcpy (dst, src);
 }

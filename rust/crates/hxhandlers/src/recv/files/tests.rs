@@ -79,8 +79,6 @@ fn basic_listing_accumulates_and_emits() {
     let rec2 = round4(4 + 20 + 3);
     assert_eq!(unsafe { hx_cfl_fhlen(cfl) } as usize, rec1 + rec2);
     assert!(test_env::EMITTED.with(|c| c.get()));
-    assert_eq!(unsafe { hx_cfl_completing(cfl) }, 0);
-    assert!(test_env::COMPLETE_ENTRIES.with(|c| c.borrow().is_empty()));
     unsafe { hx_cfl_free(cfl) };
 }
 
@@ -117,26 +115,6 @@ fn task_error_notifies_provider_and_frees() {
     // handler — do not touch it again.)
     assert!(test_env::PROVIDER_ERROR.with(|c| c.get()));
     assert!(!test_env::EMITTED.with(|c| c.get()));
-}
-
-#[test]
-fn recursive_mode_hands_entries_to_the_engine() {
-    test_env::reset();
-    let cfl = hx_cfl_new();
-    unsafe { hx_cfl_set_completing(cfl, 3) }; // COMPLETE_GET_R
-    let f = frame(&[
-        (HTLS_DATA_FILE_LIST, entry_body(FTYPE_FLDR, 0, b"dir")),
-        (HTLS_DATA_FILE_LIST, entry_body(FTYPE_TEXT, 42, b"file.bin")),
-    ]);
-    unsafe { run(cfl, &f, std::ptr::null_mut()) };
-
-    let entries = test_env::COMPLETE_ENTRIES.with(|c| c.borrow().clone());
-    assert_eq!(entries.len(), 2);
-    assert_eq!(entries[0], (true, b"dir".to_vec(), 0)); // 'fldr' → is_folder
-    assert_eq!(entries[1], (false, b"file.bin".to_vec(), 42));
-    // Records still accumulated even in recursive mode.
-    assert!(unsafe { hx_cfl_fhlen(cfl) } > 0);
-    unsafe { hx_cfl_free(cfl) };
 }
 
 #[test]

@@ -1,8 +1,7 @@
 /*
  * tests/unit/test_path_hldir.c — verify the Hotline DIR-chunk
- * encoder (path_to_hldir) plus the dirmask prefix-stripper. Both
- * live in src/path_hldir.c specifically so this test can link them
- * without dragging in files.c's GTK / Adwaita pile.
+ * encoder (path_to_hldir). It lives in src/path_hldir.c specifically
+ * so this test can link it alone.
  *
  * Wire format pinned here:
  *
@@ -29,12 +28,6 @@
 #include <string.h>
 #include <glib.h>
 #include "path_hldir.h"
-
-/* dir_char lives in files.c at runtime. The test owns its own copy
- * — path_hldir.c references it as `extern`, and the linker resolves
- * here. Default to '/' (matches the production default and what
- * mhxd / hlserver advertise). */
-guint8 dir_char = '/';
 
 /* Read a u16 from a big-endian wire offset. */
 static guint16
@@ -196,54 +189,6 @@ test_repeated_separators (void)
     g_free (hldir);
 }
 
-/* When the server advertises a non-'/' dir separator (Mac-native
- * servers use ':'), path_to_hldir reads that from dir_char and
- * splits on it instead. Toggle dir_char around the call and verify
- * the components come out the way the server expects. */
-static void
-test_dir_char_colon (void)
-{
-    guint8 saved = dir_char;
-    dir_char = ':';
-
-    guint16 len = 0;
-    guint8 *hldir = path_to_hldir ("files:Oni Tracks", &len, 0);
-
-    g_assert_cmpint (beget16 (hldir), ==, 2);
-    g_assert_cmpint (hldir[4], ==, 5);
-    g_assert_cmpint (memcmp (&hldir[5], "files", 5), ==, 0);
-    g_assert_cmpint (hldir[12], ==, 10);
-    g_assert_cmpint (memcmp (&hldir[13], "Oni Tracks", 10), ==, 0);
-
-    g_free (hldir);
-    dir_char = saved;
-}
-
-/* When dir_char is ':', a literal '/' in a component is part of the
- * name. This is the whole reason the wire keeps the dir_char
- * negotiation: filenames with slashes (extremely common on Mac
- * servers) survive the round-trip because the separator can be
- * something else. */
-static void
-test_slash_in_name_when_dir_char_is_colon (void)
-{
-    guint8 saved = dir_char;
-    dir_char = ':';
-
-    guint16 len = 0;
-    guint8 *hldir = path_to_hldir ("a/b:c", &len, 0);
-
-    /* Two components: "a/b" and "c". */
-    g_assert_cmpint (beget16 (hldir), ==, 2);
-    g_assert_cmpint (hldir[4], ==, 3);
-    g_assert_cmpint (memcmp (&hldir[5], "a/b", 3), ==, 0);
-    g_assert_cmpint (hldir[10], ==, 1);
-    g_assert_cmphex (hldir[11], ==, 'c');
-
-    g_free (hldir);
-    dir_char = saved;
-}
-
 /* High-byte non-ASCII component names (UTF-8 multi-byte sequences)
  * pass through verbatim — path_to_hldir treats names as opaque
  * byte runs. The receiver does the UTF-8 sanitisation. */
@@ -265,77 +210,6 @@ test_high_byte_names (void)
     g_free (hldir);
 }
 
-/* ---------- dirmask ---------- */
-
-/* Common-prefix strip: src begins with mask, dst receives the tail. */
-static void
-test_dirmask_strips_prefix (void)
-{
-    char dst[64] = { 0 };
-    char src[] = "/home/misha/Downloads/file.txt";
-    char mask[] = "/home/misha/";
-
-    dirmask (dst, src, mask);
-
-    g_assert_cmpstr (dst, ==, "Downloads/file.txt");
-}
-
-/* If mask is exhausted first, the unmatched src tail copies. */
-static void
-test_dirmask_mask_shorter (void)
-{
-    char dst[32] = { 0 };
-    char src[] = "abc/def";
-    char mask[] = "abc/";
-
-    dirmask (dst, src, mask);
-
-    g_assert_cmpstr (dst, ==, "def");
-}
-
-/* If src ends before mask does, src has nothing to copy. */
-static void
-test_dirmask_src_shorter (void)
-{
-    char dst[32] = { 0 };
-    char src[] = "abc";
-    char mask[] = "abc/def";
-
-    dirmask (dst, src, mask);
-
-    g_assert_cmpstr (dst, ==, "");
-}
-
-/* Mismatch at the first byte: src copies verbatim (the inner loop
- * advances both pointers when mask[i] != src[i], so it actually
- * skips that one differing byte — pin that real behavior down). */
-static void
-test_dirmask_first_byte_mismatch (void)
-{
-    char dst[32] = { 0 };
-    char src[] = "xfoo";
-    char mask[] = "y";
-
-    dirmask (dst, src, mask);
-
-    /* Both pointers advance once on the mismatch, so the first byte
-     * gets eaten and dst receives the remainder. */
-    g_assert_cmpstr (dst, ==, "foo");
-}
-
-/* Empty mask is a no-op — entire src copies through. */
-static void
-test_dirmask_empty_mask (void)
-{
-    char dst[32] = { 0 };
-    char src[] = "anything";
-    char mask[] = "";
-
-    dirmask (dst, src, mask);
-
-    g_assert_cmpstr (dst, ==, "anything");
-}
-
 int
 main (int argc, char **argv)
 {
@@ -354,20 +228,7 @@ main (int argc, char **argv)
     g_test_add_func ("/path_hldir/trailing_separator", test_trailing_separator);
     g_test_add_func ("/path_hldir/repeated_separators",
                      test_repeated_separators);
-    g_test_add_func ("/path_hldir/dir_char_colon", test_dir_char_colon);
-    g_test_add_func ("/path_hldir/slash_in_name_when_dir_char_is_colon",
-                     test_slash_in_name_when_dir_char_is_colon);
     g_test_add_func ("/path_hldir/high_byte_names", test_high_byte_names);
-
-    g_test_add_func ("/path_hldir/dirmask/strips_prefix",
-                     test_dirmask_strips_prefix);
-    g_test_add_func ("/path_hldir/dirmask/mask_shorter",
-                     test_dirmask_mask_shorter);
-    g_test_add_func ("/path_hldir/dirmask/src_shorter",
-                     test_dirmask_src_shorter);
-    g_test_add_func ("/path_hldir/dirmask/first_byte_mismatch",
-                     test_dirmask_first_byte_mismatch);
-    g_test_add_func ("/path_hldir/dirmask/empty_mask", test_dirmask_empty_mask);
 
     return g_test_run ();
 }

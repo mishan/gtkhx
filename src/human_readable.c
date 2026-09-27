@@ -22,7 +22,7 @@
  * what Hotline's wire format ships.
  *
  * Extracted to its own translation unit so the Tier 1 unit test can
- * link it without dragging in files.c's GTK + Adwaita pile.
+ * link it without dragging in GTK + Adwaita.
  *
  * The "1024 vs 1000" choice is encoded in the output_block_size sign
  * trick: negative = base- |output_block_size| (e.g. -1024 = binary

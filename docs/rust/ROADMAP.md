@@ -402,7 +402,8 @@ The small self-contained pool is drained; three larger items remain.
   [preview-porting.md](preview-porting.md). It is a plain
   `GtkWindow` with no dock involvement, so it is free of the libpanel question.
 - **System tray** (`tray.c`).
-- **Files path-completion popover** (`files_complete.c`).
+- **Files path-completion popover** (`files_complete.c`) — step 2 of the
+  Files port below.
 
 ### B. Content still C inside a Rust window shell
 
@@ -410,13 +411,44 @@ Each of these is a *content* port of the same shape as the user-list, private
 message and private chat ports: build the widget tree in gtk4-rs and keep
 genuinely-C leaves behind FFI. This is the big remaining category.
 
-- **Files browser** — the largest content port left: the two `files_panel`
-  `GtkColumnView`s, drag-and-drop (`GtkDropTarget`), the three providers
-  (`files_provider.c`, `files_local_provider.c`, `files_remote_provider.c`),
-  `files_ops.c` / `files_entry.c`, transfer integration, the Norton-style
-  shortcut set, and the rename / mkdir / move sub-dialogs. The model and
-  wire halves are already Rust (`hxmodel::files`, the FILE_LIST populate and
-  decode, the Get Info dialog).
+- **Files browser** — the largest content port left. The model and wire
+  halves are already Rust (`hxmodel::files`, the FILE_LIST populate and
+  decode, the senders in `hxhandlers::send::files`, `xfer_new`, the Get Info
+  dialog), so what remains is view and controller. It ports in the order below.
+  Each step deletes C and none grows it:
+
+  1. **Wire senders** — done. `files.c` is gone: its senders are
+     `hxhandlers::send::files`, and the recursive-listing engine, the `dir_char`
+     global and the icon / kind / basename C wrappers had no callers left.
+  2. **Path-completion popover** (`files_complete.c`) — a self-contained leaf
+     with an `attach` / `free` C ABI, and a small branch that sets up the
+     `gtkhx-ui::files` module layout before the large one.
+  3. **The view** — `files_browser.c`, `files_panel.c`, `files_entry.c`: both
+     panels, the shared chrome, the row menu, the rename / mkdir / move
+     dialogs, drag and drop, and the shortcut set, together with the
+     `gtkhx_files_build_content` seam and the UI benchmark's panel FFI. For
+     the length of this step the Rust view drives the C providers through
+     their existing `hx_files_provider_*` ABI. It stays one branch: splitting
+     panel from browser would put a panel C ABI between them only to delete
+     it again. The details that have to survive are in
+     [../files-browser.md](../files-browser.md) — the bubble-phase click
+     gesture, the paned settle tick, teardown on the content's `destroy`, the
+     row menu's retargeting, folder-first sorting.
+  4. **Providers and operations** — `files_provider*.c`, `files_ops.c`. With no
+     C consumer left the provider stops being a GObject interface and becomes
+     a Rust enum over the two sides. The FILE_LIST reply routes straight to
+     the Rust remote provider, which deletes `on_file_list_signal`, the `cfl`
+     provider carrier and `hx_remote_files_provider_handle_file_list`; the
+     `safe_local_basename` unit test moves to `cargo test`.
+  5. **The seam** — drop the `HxFileEntry`, `hx_cfl_*` and sender exports that
+     have no C caller left, connect Get Info to the session signal from Rust
+     (deleting `on_file_info_signal`), and measure the seam before and after.
+
+  The view goes before the providers because feature work keeps landing in
+  `files_browser.c` and `files_panel.c`, and because the providers already
+  have a small, stable C ABI to lend the view in between; the other order
+  would need a Rust-implemented GInterface just to keep the C panel working.
+
 - **Chat content** — the render and output path in `chat.c` (`xprintline*`,
   `output_chat_from_event`, the history batch renderer, word-click handling),
   window construction, the private-chat leaf, and the wire senders. The tab
@@ -627,13 +659,9 @@ the plan: fix each one as the code around it ports.
 
 In order:
 
-1. **Port Files end to end.** The largest content port by a distance, and the
-   one feature work most recently added C to. The model and wire halves are
-   already Rust (`hxmodel::files`, the FILE_LIST populate and decode, the Get
-   Info dialog), so it is a view and controller port rather than a rewrite:
-   the two `files_panel` column views, the three providers, `files_ops.c`,
-   `files_entry.c`, `files_complete.c`, the sub-dialogs, drag and drop, and
-   the `rcv.c` handlers and `gtkhx.c` adapters that serve them.
+1. **Port Files end to end**, in the order laid out under *Content still C
+   inside a Rust window shell*. The largest content port by a distance, and
+   the one feature work most recently added C to.
 2. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
    the whole-app theming work is fresh.
 3. **The rest of inventory §B**, one feature at a time: Chat's render and

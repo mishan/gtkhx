@@ -1,9 +1,6 @@
 /*
- * path_hldir — Hotline DIR-chunk path encoder + the dirmask helper.
- * Lives in its own translation unit so the Tier 1 tests can link
- * it without dragging in files.c's GTK / Adwaita / file-browser
- * dependencies. files.c still owns the dir_char global; the encoder
- * references it as `extern`.
+ * path_hldir — the Hotline DIR-chunk path encoder, in its own
+ * translation unit so the Tier 1 test can link it alone.
  *
  * See path_hldir.c for the wire layout.
  */
@@ -26,8 +23,6 @@ extern guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file);
 
 /* Strip the leading common prefix between src and mask, then copy
  * the unmatched tail of src into dst. */
-extern void dirmask (char *dst, char *src, char *mask);
-
 #ifdef __cplusplus
 }
 #endif

@@ -590,7 +590,7 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
          * no progress and no way to dismiss it. The two labels
          * are 'xfer_go' (single-file FILE_GET / FILE_PUT, fired
          * from xfers.c) and 'xfer_go_folder' (folder transfers,
-         * fired from files.c). Their rcv functions
+         * fired from hxhandlers::send::files). Their rcv functions
          * (rcv_task_file_get / rcv_task_file_put) already check
          * task_inerror internally and free the htxf on that
          * path, so we run them on error too.

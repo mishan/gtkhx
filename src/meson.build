@@ -31,7 +31,6 @@ gtkhx_sources = files(
   'debug.c',
   # filelist_walker.c retired — the FILE_LIST walk + per-entry decode moved
   # into the hxmodel::files_entry Rust crate (gtkhx_files_populate_from_reply).
-  'files.c',
   'files_browser.c',
   'files_complete.c',
   'files_entry.c',

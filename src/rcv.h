@@ -155,9 +155,8 @@ extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame,
  * rcv_task_banner_get in banner.h) moved to the hxhandlers::recv::xfer Rust crate: each
  * parses its reply natively (hxproto::parse::*) and reaches the C-owned
  * htxf state through the hx_htxf_* accessor seam (htxf_accessors.c). The
- * prototypes stay because the C senders (xfers.c, files.c, banner.c) register the
- * handlers via RCV_TASK_FN(); the symbols now resolve against the Rust crate at
- * link. */
+ * prototypes stay for the C code that still names them; the symbols resolve
+ * against the Rust crate at link. */
 extern void rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len, char *path);
 extern void rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame,

@@ -24,7 +24,7 @@
  *     1 byte:  name length
  *     N bytes: name
  *
- * For path "Uploads" we emit one component with len=7. files.c's
+ * For path "Uploads" we emit one component with len=7. src/path_hldir.c's
  * path_to_hldir() builds the same shape but isn't linkable into
  * the test binary (it pulls in GTK), so we hand-build the 12-byte
  * blob inline.
