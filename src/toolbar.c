@@ -1135,8 +1135,13 @@ toolbar_present_panel (const char *id, session *sess,
 
     /* Selects the panel's tab in its frame, so even if the frame was
      * already visible with a different tab active, the click brings
-     * THIS panel forward. */
+     * THIS panel forward — and its window, when it's undocked. */
     panel_widget_raise (PANEL_WIDGET (panel));
+    if (!respect_saved_state
+        && GTK_IS_WINDOW (gtk_widget_get_root (GTK_WIDGET (panel)))) {
+        gtk_window_present (
+            GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (panel))));
+    }
 }
 
 /* toolbar buttons "show panel X". The button's `data' is the panel's
