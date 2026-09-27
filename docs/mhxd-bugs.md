@@ -12,6 +12,24 @@ building the Files end-to-end suite (`rust/crates/hx-e2e`). An
 entry marked *verified* was reproduced against the rig's container; *from the
 source* means read from the code and not yet reproduced.
 
+## It wedges under concurrent logins
+
+**Verified; cause not found.**
+
+With several clients logging in at once (the C integration tests that open
+two connections each, run in parallel), mhxd occasionally stops serving:
+connections are accepted and get no LOGIN reply. The rig's image watches for
+it (the entrypoint's health probe logs "mhxd wedged — terminating so the
+container can restart") and restarts the server after three failed probes,
+about 45 seconds, and every test that runs in that window fails. It isn't the
+per-address connection limits: `nospam` is off in the rig's `hxd.conf`, so
+`conn_max` and `reconn_time` are never checked. Sampling the process with gdb
+every two seconds made it stop happening, which points at a timing race.
+
+**GtkHx:** nothing to do on the client side; a test that fails with "timed out
+waiting for SELFINFO" or "no LOGIN reply" against mhxd is most likely this.
+Restart the container if the watchdog hasn't.
+
 ## Rename and move silently replace what is already there
 
 **Verified for an empty folder; from the source for files.**
