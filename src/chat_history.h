@@ -69,11 +69,11 @@ typedef struct {
     guint16 icon_id;
     /* nick / message are NUL-terminated, owned by the struct.
      * The wire bytes are NOT NUL-terminated; the parser appends
-     * a trailing zero for convenience. The server has already
-     * transcoded to whatever the negotiated text encoding is
-     * (UTF-8 if CAP_TEXT_ENCODING is set, Mac Roman otherwise);
-     * callers that need UTF-8 should pass these through
-     * gtkhx_text_to_utf8. */
+     * a trailing zero for convenience. The server sends them in
+     * the negotiated text encoding (UTF-8 if CAP_TEXT_ENCODING
+     * is set, Mac Roman otherwise); the parser decodes both to
+     * UTF-8 and turns the message's CR line breaks into LF, the
+     * way a live chat line is decoded. */
     gchar *nick;
     gsize nick_len;
     gchar *message;
