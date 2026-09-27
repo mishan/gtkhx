@@ -8,7 +8,7 @@
 //! a struct), the icon-change parse is already a bytes-in Rust parser, so the
 //! whole handler moves here and the C side is a one-line forwarder.
 
-use std::os::raw::{c_int, c_uint, c_void};
+use std::os::raw::{c_char, c_int, c_uint, c_void};
 
 #[cfg(not(test))]
 use gtkhx_core::session::{
@@ -40,6 +40,8 @@ extern "C" {
     fn g_source_remove(tag: c_uint) -> c_int;
     /// Push our saved avatar once the server proves capable (`gif_icons.c`).
     fn hx_icon_send_saved(htlc: *mut c_void);
+    /// Log a pre-formatted line under a debug category (`debug.c`).
+    fn debug_log_str(cat: *const c_char, msg: *const c_char);
 }
 
 /// Borrow the reply frame as a byte slice (empty on a NULL frame).
@@ -139,6 +141,46 @@ pub unsafe extern "C" fn rcv_task_icon_getlist(
     }
 }
 
+/// `void rcv_task_icon_set_auto (htlc, frame, frame_len, ptr, data)` — HTLS
+/// reply to the `ICON_SET` (1862) that re-sends our saved avatar after login.
+///
+/// That send is automatic, so its refusal is not something the user asked to
+/// hear about at every login: a server may refuse a guest an icon, or
+/// rate-limit it, and there is nothing to do but carry on without one. The
+/// generic task-error toast is suppressed for this task (`hx_rcv_task`), and
+/// the refusal goes to the `icon` debug category instead. Nothing re-sends:
+/// the automatic send happens once, from the login probe's reply, and an
+/// avatar the user picks by hand goes out untasked, so its refusal still
+/// reaches them through the generic toast.
+///
+/// # Safety
+/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
+/// valid for `frame_len` bytes; `ptr` / `data` are unused (NULL at register time).
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_icon_set_auto(
+    _htlc: *mut c_void,
+    frame: *const c_void,
+    frame_len: usize,
+    _ptr: *mut c_void,
+    _data: *mut c_void,
+) {
+    let line = if task_in_error(frame, frame_len) {
+        let s = frame_slice(frame, frame_len);
+        match hxproto::parse::parse_task_error(s, s.len(), 1024) {
+            Some(text) if !text.is_empty() => format!(
+                "server refused the saved avatar: {}; not re-sending on this connection",
+                hxproto::text::to_utf8(&text)
+            ),
+            _ => "server refused the saved avatar; not re-sending on this connection".to_owned(),
+        }
+    } else {
+        "server accepted the saved avatar".to_owned()
+    };
+    if let Ok(c) = std::ffi::CString::new(line.replace('\0', "")) {
+        debug_log_str(c"icon".as_ptr(), c.as_ptr());
+    }
+}
+
 /// `void hx_icon_data_recv (htlc, uid, gif, len)` — publish a user's GIF avatar
 /// bytes (from an `ICON_GET` reply or an `ICON_GETLIST` entry), upholding the
 /// `gif-icon-data` signal's "raw GIF bytes or empty" contract:
@@ -208,6 +250,9 @@ pub(crate) mod test_env {
         pub static SOURCE_REMOVED: Cell<Option<u32>> = const { Cell::new(None) };
         /// True once hx_icon_send_saved fired.
         pub static SEND_SAVED: Cell<bool> = const { Cell::new(false) };
+        /// Every line logged through debug_log_str, as (category, message).
+        pub static DEBUG_LINES: std::cell::RefCell<Vec<(String, String)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
     }
 
     pub fn reset() {
@@ -220,6 +265,7 @@ pub(crate) mod test_env {
         PROBE_TIMER.with(|c| c.set(0));
         SOURCE_REMOVED.with(|c| c.set(None));
         SEND_SAVED.with(|c| c.set(false));
+        DEBUG_LINES.with(|c| c.borrow_mut().clear());
     }
 }
 
@@ -285,6 +331,12 @@ unsafe fn g_source_remove(tag: c_uint) -> c_int {
 #[cfg(test)]
 unsafe fn hx_icon_send_saved(_htlc: *mut c_void) {
     test_env::SEND_SAVED.with(|c| c.set(true));
+}
+
+#[cfg(test)]
+unsafe fn debug_log_str(cat: *const c_char, msg: *const c_char) {
+    let s = |p| std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned();
+    test_env::DEBUG_LINES.with(|c| c.borrow_mut().push((s(cat), s(msg))));
 }
 
 #[cfg(test)]

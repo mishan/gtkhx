@@ -110,21 +110,19 @@ extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame,
 extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len, void *channel_ptr,
                                    void *data);
-/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The bodies moved
- * to the hxhandlers Rust crate (recv/icon.rs): each walks the reply natively
- * (crate::gif_icons), flips the probe negotiation state via the
- * hx_conn_gif_icons_* accessors, and publishes avatars through hx_icon_data_recv.
- * The prototypes stay because the send wrappers in gif_icons.c register them via
- * RCV_TASK_FN(task_new); the symbols resolve against the Rust crate at link.
- *   _get      — ICON_GET (1863) reply: UID + ICON_GIF. uid_ptr is
- *               GUINT_TO_POINTER(uid) from the send wrapper (uid is echoed in
- *               the reply, so the Rust body ignores it).
- *   _getlist  — ICON_GETLIST (1861) reply: 0..N packed ICON_LIST
- *               entries; also resolves the probe to SUPPORTED. */
+/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers, in the
+ * hxhandlers Rust crate (recv/icon.rs); gif_icons.c registers them via
+ * RCV_TASK_FN(task_new).
+ *   _get      — ICON_GET (1863): UID + ICON_GIF (uid_ptr unused; it's echoed).
+ *   _getlist  — ICON_GETLIST (1861): ICON_LIST entries; resolves the probe.
+ *   _set_auto — ICON_SET (1862) of the saved avatar at login: a refusal is
+ *               logged at debug, not toasted. */
 extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame,
                                gsize frame_len, void *uid_ptr);
 extern void rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len);
+extern void rcv_task_icon_set_auto (struct htlc_conn *htlc, const guint8 *frame,
+                                    gsize frame_len);
 /* ICON_CHANGE (1864) broadcast: UID only. Emits gif-icon-changed so a
  * view can re-fetch the avatar via hx_icon_get. */
 extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame,

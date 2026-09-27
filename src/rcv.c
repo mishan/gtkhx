@@ -495,14 +495,15 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     gtkhx_proto_header_trans (frame, frame_len, &trans);
     tsk = task_with_trans (sess_from_htlc (htlc), trans);
 
-    /* Speculative bootstrap probes whose rejection is expected and
-     * non-actionable: the GIF-icons capability probe (no cap/access bit
-     * and no version tie, so a task error is just "unsupported"). Their
-     * own rcv handler records the verdict on the error path (dispatched
-     * below), so suppress the generic error toast + ERROR sound for them
-     * — otherwise every login to a server without the extension nags the
-     * user about a request they never made. */
-    gboolean silent_probe = tsk && tsk->str && !strcmp (tsk->str, "icon-list");
+    /* Login-time requests whose rejection is expected and non-actionable:
+     * the GIF-icons probe (a task error is just "unsupported") and the
+     * saved avatar's automatic re-send (a guest, a rate limit). Their own
+     * rcv handler takes the error (dispatched below), so suppress the
+     * generic toast + ERROR sound — otherwise every login nags the user
+     * about a request they never made. */
+    gboolean silent_probe = tsk && tsk->str
+                            && (!strcmp (tsk->str, "icon-list")
+                                || !strcmp (tsk->str, "icon-set-auto"));
 #ifdef HAVE_VOICE
     {
         session *vsess = sess_from_htlc (htlc);
