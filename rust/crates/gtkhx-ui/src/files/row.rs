@@ -139,7 +139,15 @@ mod tests {
         assert_eq!(size_text(false, 0), "0 bytes");
         // GLib puts a no-break space before the unit.
         assert_eq!(size_text(false, 2048).replace('\u{a0}', " "), "2.0 KiB");
-        assert!(exact_size(2048).contains("2048"));
+        // The exact count groups its digits under a locale that does —
+        // "2,048" in en_US — and the display-backed test's gtk::init()
+        // switches to the environment's locale, from its own thread, while
+        // this test runs. Compare the digits alone.
+        let digits: String = exact_size(2048)
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect();
+        assert!(digits.ends_with("2048"), "{}", exact_size(2048));
     }
 
     #[test]
