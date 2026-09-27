@@ -128,19 +128,26 @@ tags used to anchor the `toolbar_*_frame` globals.
 
 Users can:
 
-1. **Split any leaf** horizontally or vertically. The original
-   frame becomes the start child; a fresh empty leaf becomes the
-   end child.
-2. **Move panels between leaves** via DnD (libpanel's existing
-   gesture, unchanged) or via *Move left / right / up / down* in
-   the panel chevron menu. With one unified tree, Move walks the
-   whole dock.
+1. **Split any leaf** horizontally or vertically, from the frame
+   menu (a fresh empty leaf on the right or below) or by dropping a
+   panel near one of the leaf's edges (the panel in a fresh leaf on
+   that side). Either way the leaf is divided down the middle.
+2. **Move panels between leaves** via DnD (libpanel's drag handle)
+   or the Alt+Shift+arrow keys. With one unified tree, a move walks
+   the whole dock.
 3. **Close a frame** (a leaf). Any panels in the closing leaf
    first migrate to the sibling, then the leaf collapses; the
    sibling takes the parent split's place in the tree.
-4. **Empty leaves stay visible** until explicitly closed. The
-   discoverability win — "I just split this, now what?" — is what
-   drove the design.
+4. **An emptied leaf collapses.** When a drag, an Alt+Shift+arrow
+   move, or a close (the header's X, *Close all pages*, a chat
+   window closing itself) takes a leaf's last panel, the leaf
+   closes and its neighbor takes the space (`collapse_when_emptied`
+   in `hx_panel.c`, from an idle — the gesture started in that
+   leaf's header, and GTK isn't done delivering it there). A fresh
+   split is the one empty leaf that stays, so a split made to drop
+   into is still there to drop into; the frame menu closes it. The
+   rule used to be that every empty leaf stayed; that predates
+   splitting by drag, which made empty leaves pile up.
 5. **Undock + Redock.** The panel chevron menu has *Undock*;
    close-request on the undocked window walks the panel back to its
    home frame.
@@ -467,7 +474,22 @@ six-dot icon in the frame header):
    close-request handler so the redock path doesn't race the
    already-moved panel).
 
-### Drop feedback is per-pane
+### Drop zones: tabs or a split
+
+Where in the frame the panel is dropped decides what happens.
+`drop_zone_at` in `hx_panel.c` measures the pointer's distance to each
+edge as a fraction of the frame's size; within `HX_DROP_EDGE` (a
+quarter) of an edge, the nearest edge wins and the drop splits the
+frame toward it (`hx_split_split_frame`), moving the panel into the new
+half. Anywhere else, the panel joins the frame's tabs, as it always
+did. Fractions rather than pixels, so a narrow sidebar still has a
+usable left and right zone.
+
+One exception: a frame's *only* panel dropped on its own edge counts as
+a drop into the tabs. The split would leave the original half empty,
+which is a longer way of doing nothing.
+
+### Drop feedback is per-pane and per-zone
 
 GTK's default stylesheet outlines *any* widget with an active drop
 target under the pointer (`:not(window):drop(active)`). Our target is a
@@ -479,17 +501,20 @@ Two halves to the fix, both in `hx_panel.c`:
 
 - The dock carries an `hx-dock-drop-host` class and a rule that turns
   its own `:drop(active)` box-shadow off.
-- `enter` and `motion` run `frame_at_dock_coords` — the *same*
-  hit-test the drop uses, so the highlight can't disagree with where
-  the panel actually goes — and put an `hx-drop-target` class on that
-  frame. `leave` and `drop` clear it.
+- `enter` and `motion` run `frame_at_dock_coords` and `drop_zone_at` —
+  the *same* hit-test and zones the drop uses, so the preview can't
+  disagree with where the panel actually goes — and hand the zone to
+  that frame (`hx_panel_frame_set_drop_zone`). `leave` and `drop`
+  clear it.
 
-The frame's highlight is `outline`, not `box-shadow: inset`, and the
-distinction is load-bearing: `gtk_widget_snapshot` paints background
-and border *before* the children and the outline *after*, so an inset
-shadow would be covered by whatever content fills the pane. A negative
-`outline-offset` keeps it inside the frame's own allocation instead of
-bleeding onto the neighbour.
+`HxPanelFrame` paints the preview in its own `snapshot`, after chaining
+up so it lands on top of the content: an accent tint with an accent
+edge, over the whole frame for a drop into the tabs and over the half
+on that side for a split. CSS can't draw it — an `outline` can only
+ring the whole widget, and anything painted as background or border is
+drawn *before* the children and covered by them. Every frame in the
+main dock is an `HxPanelFrame`, and the dock's drop target is the only
+one, so nothing else needs the preview.
 
 The tracking pointer is a `GWeakRef`-style weak pointer
 (`g_set_weak_pointer`): the highlighted frame can be destroyed
@@ -497,10 +522,10 @@ mid-drag — a cross-dock drag that empties an undocked window does
 exactly that — and a raw pointer would dangle until the next motion
 event cleared it.
 
-Colours come from `@accent_bg_color` rather than
-`var(--accent-bg-color)`: the named colour works across the whole
-supported libadwaita range, and CSS custom properties don't reach back
-to our floor.
+The color is the GtkHx theme's accent where the theme sets one
+(`gtkhx_theme_get_chrome_color`), else the desktop's
+(`adw_style_manager_get_accent_color_rgba`) — the same accent the
+theme's CSS hands libadwaita as `@accent_bg_color`.
 
 `hx_panel_undock` builds a fresh `AdwApplicationWindow` containing a
 `PanelDock` + `PanelGrid` from an inline builder string, and moves the
@@ -878,18 +903,18 @@ dying bin) even when it's no longer hooked into the dock. Walking up
 to a `PanelFrame` ancestor is the truthful test — present iff the
 panel is in the dock's tree. `hx_panel_ensure_attached` uses it.
 
-### "Close all pages" detaches but does not destroy frames
+### A closed leaf reseats everything that pointed at it
 
-The chevron menu's *Close all pages* action loops over the frame's
-pages and calls `panel_widget_close` on each. The leaf and its
-`PanelFrame` stay in the split tree — only an explicit *Close frame*
-destroys a leaf. So the `toolbar_*_frame` pointers remain valid across a
-close, and `panel_frame_add` on them during re-attach is safe.
-
-When a leaf *is* closed, `on_frame_close` migrates every page to the
-sibling leaf, reseats each moved panel's `home_frame` onto the sibling
-frame, and reseats whichever `toolbar_*_frame` globals pointed at the
-dying frame — all before calling `hx_split_close_leaf`.
+A leaf closes when *Close frame* is chosen, and when a move or a close
+takes its last panel (the dock's root leaf never closes). Either way
+`hx_split_close_frame` migrates any pages to the sibling leaf, reseats
+each moved panel's `home_frame` onto the sibling frame, and reseats
+whichever `toolbar_*_frame` globals pointed at the dying frame — all
+before calling `hx_split_close_leaf`. So those globals stay valid, and
+`panel_frame_add` on them when a closed panel is reopened is safe. A
+closed panel whose `home_frame` was the collapsed leaf finds its weak
+ref empty and falls back to `home_area`, which lands it in a role
+frame.
 
 ### `panel_frame_remove` is synchronous
 
@@ -898,7 +923,7 @@ Calling `panel_frame_remove` followed immediately by
 default `close-page` handler calls `adw_tab_view_close_page_finish`
 synchronously, so the page is gone by the time `remove`
 returns. The `n_pages > 0` guard in `hx_split_close_leaf` is
-defensive, not async-driven; the move loop in `on_frame_close`
+defensive, not async-driven; the move loop in `hx_split_close_frame`
 runs before the close attempt and the guard passes.
 
 ### `g_weak_ref_get` returns a strong ref — pass it through
@@ -955,7 +980,7 @@ becomes a non-root and its `close-frame` action should flip
 from greyed to enabled. `frame_do_split` walks every leaf in
 the tree (via `hx_split_foreach_leaf`) and runs
 `update_frame_action_enabled` so the state matches the
-topology; `on_frame_close` does the same after a collapse.
+topology; `hx_split_close_frame` does the same after a collapse.
 
 ### `PanelDock` accepts any `GtkWidget` as its center child
 

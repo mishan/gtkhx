@@ -59,6 +59,21 @@ G_DECLARE_FINAL_TYPE (HxPanelFrame, hx_panel_frame, HX, PANEL_FRAME, PanelFrame)
  * and at hx_split_new()'s sibling-leaf factory (hx_split.c). */
 PanelFrame *hx_panel_frame_new (void);
 
+/* Where a panel dragged over the frame would land: into its tabs, or
+ * into a new pane split off one of its edges. */
+typedef enum {
+    HX_DROP_LEFT = GTK_POS_LEFT, /* the edges double as GtkPositionType */
+    HX_DROP_RIGHT = GTK_POS_RIGHT,
+    HX_DROP_TOP = GTK_POS_TOP,
+    HX_DROP_BOTTOM = GTK_POS_BOTTOM,
+    HX_DROP_CENTER,
+    HX_DROP_NONE,
+} HxDropZone;
+
+/* Paint the preview for `zone' over the frame's content, or clear it
+ * with HX_DROP_NONE. */
+void hx_panel_frame_set_drop_zone (HxPanelFrame *self, HxDropZone zone);
+
 G_END_DECLS
 
 #endif /* GTKHX_HX_PANEL_FRAME_H */

@@ -18,11 +18,13 @@
 #include "dock_layout.h"
 #include "hx_panel.h"
 #include "debug.h"
+#include "gtkhx_theme.h"
 
 #include <adwaita.h>
 
 struct _HxPanelFrame {
     PanelFrame parent_instance;
+    HxDropZone drop_zone;
 };
 
 G_DEFINE_FINAL_TYPE (HxPanelFrame, hx_panel_frame, PANEL_TYPE_FRAME)
@@ -246,6 +248,68 @@ hx_panel_frame_unroot (GtkWidget *widget)
 }
 
 /* ----------------------------------------------------------------- */
+/* Drop preview                                                      */
+/* ----------------------------------------------------------------- */
+
+/* Drawn after chaining up, so it lands on top of the frame's content:
+ * a tint over the part of the frame the dropped panel will occupy,
+ * edged in the accent color. The whole frame for a drop into its
+ * tabs, the half on that side for a split. */
+static void
+hx_panel_frame_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+    HxPanelFrame *self = HX_PANEL_FRAME (widget);
+    float w = (float)gtk_widget_get_width (widget);
+    float h = (float)gtk_widget_get_height (widget);
+    graphene_rect_t r = GRAPHENE_RECT_INIT (0, 0, w, h);
+    GskRoundedRect outline;
+    AdwStyleManager *style = adw_style_manager_get_default ();
+    GdkRGBA accent, tint;
+    const float edge[4] = { 3, 3, 3, 3 };
+
+    GTK_WIDGET_CLASS (hx_panel_frame_parent_class)->snapshot (widget, snapshot);
+    if (self->drop_zone == HX_DROP_NONE) {
+        return;
+    }
+    if (self->drop_zone == HX_DROP_RIGHT) {
+        r.origin.x = w / 2;
+    }
+    if (self->drop_zone == HX_DROP_BOTTOM) {
+        r.origin.y = h / 2;
+    }
+    if (self->drop_zone == HX_DROP_LEFT || self->drop_zone == HX_DROP_RIGHT) {
+        r.size.width = w / 2;
+    }
+    if (self->drop_zone == HX_DROP_TOP || self->drop_zone == HX_DROP_BOTTOM) {
+        r.size.height = h / 2;
+    }
+
+    /* The GtkHx theme's accent where it sets one, else the desktop's. */
+    if (!gtkhx_theme_get_chrome_color (
+            GTKHX_CHROME_ACCENT, adw_style_manager_get_dark (style), &accent)) {
+        GdkRGBA *system = adw_style_manager_get_accent_color_rgba (style);
+        accent = *system;
+        gdk_rgba_free (system);
+    }
+    tint = accent;
+    tint.alpha = 0.25f;
+    gtk_snapshot_append_color (snapshot, &tint, &r);
+    gsk_rounded_rect_init_from_rect (&outline, &r, 0);
+    gtk_snapshot_append_border (snapshot, &outline, edge,
+                                (GdkRGBA[4]){ accent, accent, accent, accent });
+}
+
+void
+hx_panel_frame_set_drop_zone (HxPanelFrame *self, HxDropZone zone)
+{
+    g_return_if_fail (HX_IS_PANEL_FRAME (self));
+    if (self->drop_zone != zone) {
+        self->drop_zone = zone;
+        gtk_widget_queue_draw (GTK_WIDGET (self));
+    }
+}
+
+/* ----------------------------------------------------------------- */
 /* Class init                                                        */
 /* ----------------------------------------------------------------- */
 
@@ -258,6 +322,7 @@ hx_panel_frame_class_init (HxPanelFrameClass *klass)
     object_class->constructed = hx_panel_frame_constructed;
     widget_class->root = hx_panel_frame_root;
     widget_class->unroot = hx_panel_frame_unroot;
+    widget_class->snapshot = hx_panel_frame_snapshot;
 
     /* gtk_widget_class_install_action prepends onto the
      * priv->actions list inherited from PanelFrameClass; lookup is
@@ -315,6 +380,7 @@ hx_panel_frame_init (HxPanelFrame *self)
      * bounded to the slot regardless. Cheap defence, applies to
      * every leaf for consistency. */
     gtk_widget_set_overflow (GTK_WIDGET (self), GTK_OVERFLOW_HIDDEN);
+    self->drop_zone = HX_DROP_NONE;
 
     /* notify::visible-child fires when libpanel switches the
      * AdwTabView's selected page. connect_after places our handler

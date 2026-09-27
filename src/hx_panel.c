@@ -945,6 +945,43 @@ hx_panel_set_close_handler (HxPanel *self, HxPanelCloseFunc func,
     self->close_data = user_data;
 }
 
+static gboolean
+collapse_if_empty (gpointer data)
+{
+    GWeakRef *ref = data;
+    GtkWidget *frame = g_weak_ref_get (ref);
+
+    if (frame != NULL) {
+        if (panel_frame_get_n_pages (PANEL_FRAME (frame)) == 0) {
+            hx_split_close_frame (frame);
+        }
+        g_object_unref (frame);
+    }
+    g_weak_ref_clear (ref);
+    g_free (ref);
+    return G_SOURCE_REMOVE;
+}
+
+/* A pane in the main dock left with no panels — by a move, or by
+ * closing its last one — collapses, its neighbor taking the space.
+ * From an idle, not now: the gesture that emptied it started in this
+ * pane's header (the drag handle, the X), and GTK isn't done
+ * delivering it there. The idle checks again, in case something
+ * landed in the pane meanwhile. */
+static void
+collapse_when_emptied (GtkWidget *frame)
+{
+    GWeakRef *ref;
+
+    if (frame == NULL || panel_frame_get_n_pages (PANEL_FRAME (frame)) > 0
+        || gtk_widget_get_ancestor (frame, PANEL_TYPE_DOCK) != toolbar_dock) {
+        return;
+    }
+    ref = g_new0 (GWeakRef, 1);
+    g_weak_ref_init (ref, frame);
+    g_idle_add (collapse_if_empty, ref);
+}
+
 /* PanelFrame::page-closed handler. Fires after the page has been
  * detached from the tab view (so the widget no longer has a frame
  * ancestor at this point — the page-closed contract from
@@ -958,9 +995,9 @@ on_frame_page_closed (PanelFrame *frame, PanelWidget *page, gpointer user_data)
     HxPanelCloseFunc cb;
     gpointer cb_data;
 
-    (void)frame;
     (void)user_data;
 
+    collapse_when_emptied (GTK_WIDGET (frame));
     if (!HX_IS_PANEL (page)) {
         return;
     }
@@ -1288,6 +1325,7 @@ on_frame_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     if (target_dock == toolbar_dock) {
         dock_layout_request_save ();
     }
+    collapse_when_emptied (src_frame);
 
     /* On a cross-dock drop, if the source undocked window is now
      * empty, destroy it. Earlier this assumed an undocked window
@@ -1431,10 +1469,50 @@ frame_at_dock_coords (GtkWidget *dock, double x, double y)
     return result;
 }
 
-/* --- Drop highlight ---------------------------------------------- */
+/* --- Drop zones -------------------------------------------------- */
 
-/* Class on the PanelFrame the pointer is currently over. */
-#define HX_DROP_TARGET_CLASS "hx-drop-target"
+/* How near an edge, as a fraction of the frame's size, the pointer
+ * has to be for the drop to split the frame rather than join its
+ * tabs. */
+#define HX_DROP_EDGE 0.25
+
+/* Where a drop at dock coordinates (x, y) lands in `frame': the edge
+ * the pointer is nearest, when it's within HX_DROP_EDGE of one, or
+ * the frame's tabs. A frame's only panel dropped on its own edge would
+ * split off a pane and leave the old one empty, so that's a drop into
+ * the tabs — the no-op it already was. */
+static HxDropZone
+drop_zone_at (GtkWidget *dock, PanelFrame *frame, double x, double y,
+              const GValue *value)
+{
+    graphene_point_t pt = GRAPHENE_POINT_INIT ((float)x, (float)y), fp;
+    double w = gtk_widget_get_width (GTK_WIDGET (frame));
+    double h = gtk_widget_get_height (GTK_WIDGET (frame));
+    double d[4]; /* distance to each edge, indexed by HxDropZone */
+    GObject *obj = value != NULL && G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET)
+                       ? g_value_get_object (value)
+                       : NULL;
+    int nearest = HX_DROP_LEFT;
+
+    if (obj == NULL || !HX_IS_PANEL (obj) || w <= 0 || h <= 0
+        || !gtk_widget_compute_point (dock, GTK_WIDGET (frame), &pt, &fp)) {
+        return HX_DROP_CENTER;
+    }
+    if (gtk_widget_get_ancestor (GTK_WIDGET (obj), PANEL_TYPE_FRAME)
+            == GTK_WIDGET (frame)
+        && panel_frame_get_n_pages (frame) == 1) {
+        return HX_DROP_CENTER;
+    }
+    d[HX_DROP_LEFT] = fp.x / w;
+    d[HX_DROP_RIGHT] = 1 - fp.x / w;
+    d[HX_DROP_TOP] = fp.y / h;
+    d[HX_DROP_BOTTOM] = 1 - fp.y / h;
+    for (int i = HX_DROP_RIGHT; i <= HX_DROP_BOTTOM; i++) {
+        nearest = d[i] < d[nearest] ? i : nearest;
+    }
+    return d[nearest] < HX_DROP_EDGE ? (HxDropZone)nearest : HX_DROP_CENTER;
+}
+
 /* Class on the dock hosting our drop target, so the CSS below can
  * turn off the outline GTK would otherwise draw around it. */
 #define HX_DOCK_DROP_HOST_CLASS "hx-dock-drop-host"
@@ -1444,38 +1522,24 @@ frame_at_dock_coords (GtkWidget *dock, double x, double y)
  * pointer would dangle until the next motion event cleared it. */
 static GtkWidget *drop_highlight_frame;
 
+/* Preview the drop on `frame' (NULL to clear). Every frame in the main
+ * dock is an HxPanelFrame, which paints the preview itself. */
 static void
-set_drop_highlight (GtkWidget *frame)
+set_drop_highlight (GtkWidget *frame, HxDropZone zone)
 {
-    if (drop_highlight_frame == frame) {
-        return;
-    }
-    if (drop_highlight_frame != NULL) {
-        gtk_widget_remove_css_class (drop_highlight_frame,
-                                     HX_DROP_TARGET_CLASS);
+    if (drop_highlight_frame != NULL && drop_highlight_frame != frame) {
+        hx_panel_frame_set_drop_zone (HX_PANEL_FRAME (drop_highlight_frame),
+                                      HX_DROP_NONE);
         g_clear_weak_pointer (&drop_highlight_frame);
     }
-    if (frame != NULL) {
-        gtk_widget_add_css_class (frame, HX_DROP_TARGET_CLASS);
+    if (frame != NULL && HX_IS_PANEL_FRAME (frame)) {
+        hx_panel_frame_set_drop_zone (HX_PANEL_FRAME (frame), zone);
         g_set_weak_pointer (&drop_highlight_frame, frame);
     }
 }
 
 /* Install the drop-feedback stylesheet once, at
- * GTK_STYLE_PROVIDER_PRIORITY_APPLICATION so both rules beat the
- * theme's.
- *
- * `outline` rather than `box-shadow: inset` for the frame, and the
- * distinction matters: GtkWidget snapshots background and border
- * BEFORE its children and the outline AFTER, so an inset box-shadow
- * is painted over by whatever content fills the pane, while the
- * outline lands on top. A negative outline-offset keeps it inside
- * the frame's own allocation instead of bleeding onto the
- * neighbouring pane.
- *
- * @accent_bg_color rather than var(--accent-bg-color): the named
- * color works across the whole supported libadwaita range, and CSS
- * custom properties do not reach back to our floor. */
+ * GTK_STYLE_PROVIDER_PRIORITY_APPLICATION so it beats the theme's. */
 static void
 ensure_drop_css (void)
 {
@@ -1499,7 +1563,7 @@ ensure_drop_css (void)
          * the dock, which fills the window — so the whole window lit
          * up during a drag and gave the user no clue which pane the
          * panel would land in. Suppress it there; the hit-tested
-         * frame gets the highlight instead.
+         * frame paints a preview instead.
          *
          * All three properties that rule sets, not just box-shadow.
          * The other two are inert on a PanelDock today (no border
@@ -1510,10 +1574,6 @@ ensure_drop_css (void)
         "  box-shadow: none;"
         "  border-color: inherit;"
         "  caret-color: inherit;"
-        "}"
-        "panelframe." HX_DROP_TARGET_CLASS " {"
-        "  outline: 3px solid @accent_bg_color;"
-        "  outline-offset: -3px;"
         "}");
     gtk_style_context_add_provider_for_display (
         display, GTK_STYLE_PROVIDER (provider),
@@ -1528,22 +1588,32 @@ on_dock_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     PanelFrame *target_frame;
     GValue val_copy = G_VALUE_INIT;
     gboolean ret;
+    HxDropZone zone;
 
     debug_log ("dnd", "dock_drop: x=%g y=%g, value type=%s", x, y,
                G_VALUE_TYPE_NAME (value));
 
     /* The drag is over either way — clear the highlight before any
      * of the early returns below can skip it. */
-    set_drop_highlight (NULL);
+    set_drop_highlight (NULL, HX_DROP_NONE);
 
     if (!G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET)) {
         return FALSE;
     }
 
     target_frame = frame_at_dock_coords (dock, x, y);
-    debug_log ("dnd", "dock_drop: target_frame=%p", target_frame);
     if (target_frame == NULL) {
         return FALSE;
+    }
+    /* Dropped on an edge: split that side off and drop into the new
+     * pane. */
+    zone = drop_zone_at (dock, target_frame, x, y, value);
+    debug_log ("dnd", "dock_drop: target_frame=%p zone=%d", target_frame,
+               (int)zone);
+    if (zone != HX_DROP_CENTER) {
+        GtkWidget *split = hx_split_split_frame (GTK_WIDGET (target_frame),
+                                                 (GtkPositionType)zone);
+        target_frame = split != NULL ? PANEL_FRAME (split) : target_frame;
     }
 
     /* Reuse on_frame_drop's logic by calling it directly with the
@@ -1556,29 +1626,21 @@ on_dock_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     return ret;
 }
 
-/* enter and motion share a body: light up whichever frame the
- * pointer is over, using the same hit-test the drop itself uses so
- * the highlight can never point at a pane other than the one that
- * will receive the panel. */
-static GdkDragAction
-on_dock_enter (GtkDropTarget *target, double x, double y, gpointer user_data)
-{
-    GtkWidget *dock = GTK_WIDGET (user_data);
-    PanelFrame *frame = frame_at_dock_coords (dock, x, y);
-
-    (void)target;
-    set_drop_highlight (frame != NULL ? GTK_WIDGET (frame) : NULL);
-    return GDK_ACTION_MOVE;
-}
-
+/* enter and motion: preview the drop under the pointer, using the
+ * same hit-test and zones the drop itself uses so the preview can
+ * never promise a pane other than the one that will receive the
+ * panel. */
 static GdkDragAction
 on_dock_motion (GtkDropTarget *target, double x, double y, gpointer user_data)
 {
     GtkWidget *dock = GTK_WIDGET (user_data);
     PanelFrame *frame = frame_at_dock_coords (dock, x, y);
 
-    (void)target;
-    set_drop_highlight (frame != NULL ? GTK_WIDGET (frame) : NULL);
+    set_drop_highlight (GTK_WIDGET (frame),
+                        frame != NULL
+                            ? drop_zone_at (dock, frame, x, y,
+                                            gtk_drop_target_get_value (target))
+                            : HX_DROP_NONE);
     return GDK_ACTION_MOVE;
 }
 
@@ -1590,7 +1652,7 @@ on_dock_leave (GtkDropTarget *target, gpointer user_data)
 {
     (void)target;
     (void)user_data;
-    set_drop_highlight (NULL);
+    set_drop_highlight (NULL, HX_DROP_NONE);
 }
 
 void
@@ -1618,7 +1680,7 @@ hx_panel_install_drop_target_on_dock (GtkWidget *dock)
     gtk_drop_target_set_gtypes (target, types, G_N_ELEMENTS (types));
     gtk_drop_target_set_preload (target, TRUE);
     g_signal_connect (target, "drop", G_CALLBACK (on_dock_drop), dock);
-    g_signal_connect (target, "enter", G_CALLBACK (on_dock_enter), dock);
+    g_signal_connect (target, "enter", G_CALLBACK (on_dock_motion), dock);
     g_signal_connect (target, "motion", G_CALLBACK (on_dock_motion), dock);
     g_signal_connect (target, "leave", G_CALLBACK (on_dock_leave), dock);
     gtk_widget_add_controller (dock, GTK_EVENT_CONTROLLER (target));
@@ -2165,6 +2227,7 @@ hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir)
     }
     panel_widget_raise (PANEL_WIDGET (self));
     dock_layout_request_save ();
+    collapse_when_emptied (current_frame);
     g_object_unref (self);
 }
 

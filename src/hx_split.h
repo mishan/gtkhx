@@ -21,9 +21,9 @@
  * The two states are mutually exclusive and the widget tree mirrors
  * them. The two transitions are:
  *
- *   hx_split_split (leaf, orientation) — turn the leaf into a
- *     paned with the leaf's original PanelFrame in the start
- *     child and a fresh empty leaf in the end child.
+ *   hx_split_split (leaf, orientation, new_first) — turn the leaf
+ *     into a paned holding the leaf's original PanelFrame and a
+ *     fresh empty leaf, the new one first when new_first is set.
  *
  *   hx_split_close_leaf (leaf) — destroy the leaf; its sibling
  *     under the same parent paned collapses up to replace the
@@ -94,12 +94,25 @@ GtkOrientation hx_split_get_orientation (HxSplit *self);
  * don't unparent or sink. */
 GtkPaned *hx_split_get_paned (HxSplit *self);
 
-/* Convert a leaf into an internal split. The current PanelFrame
- * becomes the start child (child_a)'s frame; a brand-new empty
- * PanelFrame leaf is created for child_b. Returns the new sibling
- * leaf so the caller can populate it. Returns NULL and warns when
- * called on an internal split. */
-HxSplit *hx_split_split (HxSplit *self, GtkOrientation orientation);
+/* Convert a leaf into an internal split, divided down the middle. A
+ * brand-new empty PanelFrame leaf goes in the start child when
+ * new_first is set and the end child otherwise; the current
+ * PanelFrame takes the other. Returns the new sibling leaf so the
+ * caller can populate it. Returns NULL and warns when called on an
+ * internal split. */
+HxSplit *hx_split_split (HxSplit *self, GtkOrientation orientation,
+                         gboolean new_first);
+
+/* Split the leaf holding `frame' toward `side' — GTK_POS_LEFT puts
+ * the new empty pane on the left, and so on — with the new frame
+ * carrying the same hooks as every other leaf. Returns the new
+ * frame, or NULL when `frame' isn't a leaf of the dock. */
+GtkWidget *hx_split_split_frame (GtkWidget *frame, GtkPositionType side);
+
+/* Close the leaf holding `frame' (the frame menu's Close frame): its
+ * panels move to the neighboring leaf across the split, and the
+ * sibling takes the parent's place. No-op for the dock's root leaf. */
+void hx_split_close_frame (GtkWidget *frame);
 
 /* Collapse a leaf. The leaf's PanelFrame is destroyed and its
  * sibling under the same parent paned takes the parent's place in
