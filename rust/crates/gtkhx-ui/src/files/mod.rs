@@ -6,15 +6,21 @@
 //! while the transfers carry on in the Tasks panel. Closing the window closes
 //! the browser.
 //!
-//! The content — the two `files_panel` column views, the action buttons, DnD
-//! between panels, the provider/transfer integration, and the shortcut set —
-//! stays C in `files_browser.c`, built by `gtkhx_files_build_content`, which
-//! also tears the browser down when that content is destroyed. This module
-//! owns the window around it: one per connection, raised if already open,
+//! This module owns the window: one per connection, raised if already open,
 //! sized from the last one the user left, and closed when its connection goes
-//! away.
+//! away. Inside it, `browser` holds the two panels and every operation between
+//! them, `panel` is one panel, `dialogs` and `dnd` are the browser's dialogs
+//! and drag and drop, `row` is what a row shows, and `complete` is the path
+//! entries' completion. The providers underneath are still C, reached through
+//! `provider`.
 
+mod browser;
 pub mod complete;
+mod dialogs;
+mod dnd;
+pub(crate) mod panel;
+pub(crate) mod provider;
+mod row;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,11 +37,6 @@ use crate::dock::{self, ConnKey};
 use crate::tr::tr;
 
 extern "C" {
-    /// Build the whole browser + two-panel content for `sess` (registering it
-    /// in the C browser table, keyed on the session) and return the content
-    /// box, or NULL when there is nothing to build — this session already has
-    /// a browser, or `sess` was NULL, which C logs.
-    fn gtkhx_files_build_content(sess: *mut c_void) -> *mut gtk::ffi::GtkWidget;
     /// `gtkutil.c` — what to call a session: the server's name once it has
     /// sent one, else the address. Newly allocated.
     fn hx_session_label(sess: *mut c_void) -> *mut c_char;
@@ -103,21 +104,14 @@ pub unsafe extern "C" fn open_files_browser(sess: *mut c_void) {
         return;
     }
 
-    let content = gtkhx_files_build_content(sess);
-    if content.is_null() {
-        // No window, yet C still has a browser for this session: its content
-        // outlived the window somehow, and the button would silently do
-        // nothing. Say so rather than leave it a mystery.
-        if !sess.is_null() {
-            glib::g_warning!(
-                "gtkhx",
-                "open_files_browser: a browser exists for this connection \
-                 but has no window"
-            );
-        }
+    // Every operation routes through the session's connection, and a NULL one
+    // has no meaning to fall back on: disconnected is a session whose socket
+    // is closed.
+    if sess.is_null() {
+        glib::g_critical!("gtkhx", "open_files_browser: no session");
         return;
     }
-    let content: gtk::Widget = from_glib_none(content);
+    let built = browser::build(sess);
 
     let win = adw::Window::new();
     win.set_title(Some(&window_title(sess)));
@@ -130,31 +124,11 @@ pub unsafe extern "C" fn open_files_browser(sess: *mut c_void) {
     }
 
     let header = adw::HeaderBar::new();
-    // The browser's own action buttons, which it hands over on the content
-    // box (plain GObject data, not gtk-rs's typed data) instead of packing a
-    // row of its own.
-    for (key, start) in [
-        ("hx-files-header-start", true),
-        ("hx-files-header-end", false),
-    ] {
-        let ckey = crate::cs(key);
-        let ptr = glib::gobject_ffi::g_object_get_data(
-            content.as_ptr() as *mut glib::gobject_ffi::GObject,
-            ckey.as_ptr(),
-        );
-        if ptr.is_null() {
-            continue;
-        }
-        let group: gtk::Widget = from_glib_none(ptr as *mut gtk::ffi::GtkWidget);
-        if start {
-            header.pack_start(&group);
-        } else {
-            header.pack_end(&group);
-        }
-    }
+    header.pack_start(&built.header_start);
+    header.pack_end(&built.header_end);
     let view = adw::ToolbarView::new();
     view.add_top_bar(&header);
-    view.set_content(Some(&content));
+    view.set_content(Some(&built.content));
     win.set_content(Some(&view));
 
     // Registered with the application so it counts as one of its windows

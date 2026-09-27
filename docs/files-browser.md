@@ -5,13 +5,14 @@ active at a time, operations routing between them. It replaced a single-pane
 window-per-directory browser and is the only files UI — the legacy path
 (`open_files`, the per-path list cache, the `file_samewin` preference) is gone.
 
-The implementation: `rust/crates/gtkhx-ui/src/files.rs` (the window),
-`src/files_browser.c` (the content: shared actions, transfer buttons, the row
-menu, drag-and-drop, keyboard, active-panel state), `src/files_panel.c` (one
-panel — path row, `GtkColumnView`, status footer), `src/files_ops.c`
-(cross-panel copy / move orchestration), and the two providers,
-`src/files_local_provider.c` (GIO) and `src/files_remote_provider.c`
-(Hotline). The wire senders the browser calls are Rust,
+The implementation is `gtkhx-ui`'s `files` module: `files/mod.rs` (the
+window), `browser.rs` (the shared actions, transfer buttons, row menu,
+keyboard and active-panel state), `panel.rs` (one panel — path row,
+`GtkColumnView`, status footer), `dialogs.rs`, `dnd.rs`, `row.rs` (what a row
+shows and how columns sort) and `complete.rs` (path completion). The providers
+underneath are still C, reached through `provider.rs`: `src/files_ops.c`
+(cross-panel copy), `src/files_local_provider.c` (GIO) and
+`src/files_remote_provider.c` (Hotline). The wire senders are Rust,
 `hxhandlers::send::files`.
 
 ### A window, not a dock panel
@@ -65,7 +66,7 @@ transfer button, which says in words what it does to that panel's selection
 
 ### Function keys to Hotline operations
 
-The bindings live in one shortcut controller in `files_browser.c`, and every
+The bindings live in one shortcut controller in `browser.rs`, and every
 wrapper routes to the same handler the matching headerbar button uses, so the
 behaviour is identical whether you pressed the key or clicked the icon.
 
@@ -114,8 +115,8 @@ focus controller covers the clicks the column view fully consumes.
 One window, one header bar — the panels share the chrome rather than each
 carrying their own. The single-panel actions (refresh, new folder, preview, get
 info at the start; rename, delete at the end) sit in the window's header bar:
-the content builds them and hands them over on its content box
-(`hx-files-header-start` / `-end`), and `files.rs` packs them. Per-panel chrome
+the browser builds them and hands them to `files/mod.rs`, which packs
+them. Per-panel chrome
 is the path row, the side selector, and the footer.
 
 ### Transfer buttons
@@ -141,13 +142,15 @@ space, only the last two. Shift+F10 or the Menu key opens it at the focused
 row. Open acts on the entry the menu opened on, found again at open time,
 so a reload underneath doesn't retarget it. The row under the pointer is found
 through the `GtkListItem` every cell's bind stashes on its widget
-(`files_panel_entry_at`).
+(`Panel::entry_at`). The menu's popover hangs off the panel, not the column
+view: parented to the column view it was cut to a fixed height, and the last
+items fell off the bottom.
 
 ### Layout
 
 The two panels start level — half the paned's width, applied once the
 window's width has held across two frames, since a window's first allocations
-arrive in steps (`on_paned_settle_tick`) — and resize together from then on.
+arrive in steps (`settle_paned`) — and resize together from then on.
 Name takes whatever width Size and Modified leave; Kind starts hidden, because
 the icon already says folder or file, and comes back from any column header's
 right-click menu. Row icons show at their native 16px.

@@ -110,7 +110,7 @@ def parse_args(argv):
         action="append",
         default=[],
         metavar="ACTION",
-        help="move:X,Y | click:X,Y | key:ctrl+comma | sleep:S | shot:PATH[@CROP] "
+        help="move:X,Y | click:X,Y | dclick:X,Y | rclick:X,Y | drag:X1,Y1,X2,Y2 | key:ctrl+comma | sleep:S | shot:PATH[@CROP] "
         "(repeatable, run in order; a shot's @CROP overrides --crop)",
     )
     p.add_argument(
@@ -351,12 +351,27 @@ class Pointer:
         self.xtest.fake_input(self.d, self.X.MotionNotify, x=x, y=y)
         self.d.sync()
 
-    def click(self, x, y):
+    def click(self, x, y, button=1, count=1):
         self.move(x, y)
+        time.sleep(0.2)
+        for _ in range(count):
+            self.xtest.fake_input(self.d, self.X.ButtonPress, button)
+            self.d.sync()
+            time.sleep(0.05)
+            self.xtest.fake_input(self.d, self.X.ButtonRelease, button)
+            self.d.sync()
+            time.sleep(0.05)
+
+    def drag(self, x1, y1, x2, y2):
+        self.move(x1, y1)
         time.sleep(0.2)
         self.xtest.fake_input(self.d, self.X.ButtonPress, 1)
         self.d.sync()
-        time.sleep(0.05)
+        steps = 20
+        for i in range(1, steps + 1):
+            time.sleep(0.03)
+            self.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+        time.sleep(0.3)
         self.xtest.fake_input(self.d, self.X.ButtonRelease, 1)
         self.d.sync()
 
@@ -409,13 +424,18 @@ def run_steps(args, app):
         elif verb == "shot":
             path, _, crop = arg.partition("@")
             shoot(path, args, crop or None)
-        elif verb in ("move", "click", "key"):
+        elif verb in ("move", "click", "dclick", "rclick", "drag", "key"):
             pointer = pointer or Pointer()
             if verb == "key":
                 pointer.key(arg)
+            elif verb == "drag":
+                pointer.drag(*(int(v) for v in arg.split(",")))
             else:
                 x, y = (int(v) for v in arg.split(","))
-                (pointer.move if verb == "move" else pointer.click)(x, y)
+                if verb == "move":
+                    pointer.move(x, y)
+                else:
+                    pointer.click(x, y, button=3 if verb == "rclick" else 1, count=2 if verb == "dclick" else 1)
         else:
             die(f"unknown step {step!r}")
     return True

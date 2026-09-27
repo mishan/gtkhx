@@ -96,7 +96,7 @@ strip is `src/chat_tabs.h`; the implementation is Rust
 or fundamentally not server-content):
 
 - Agreement, About, user editor, post-news composer, file preview.
-- **Files** — one window per connection (`gtkhx-ui/src/files.rs`). A
+- **Files** — one window per connection (`gtkhx-ui/src/files/`). A
   two-panel file manager needs more width than a dock frame gives it,
   and it is used in bursts; see `docs/files-browser.md`.
 - **Tracker** — server-discovery, not server-content. Exists *before*

@@ -1938,6 +1938,7 @@ dependencies = [
  "hxconfig",
  "hxhandlers",
  "hxmodel",
+ "hxnet",
  "hxproto",
  "hxrequest",
  "hxtext",

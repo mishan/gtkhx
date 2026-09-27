@@ -18,6 +18,8 @@ hxchat-layout = { path = "../hxchat-layout" }
 hxchat-view = { path = "../hxchat-view" }
 gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
+# The Files browser reads a finished transfer's size off its handle.
+hxnet = { path = "../hxnet" }
 hxmodel = { path = "../hxmodel" }
 hxrequest = { path = "../hxrequest" }
 hxtext = { path = "../hxtext" }

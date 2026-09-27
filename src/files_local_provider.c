@@ -206,7 +206,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
         type = g_file_info_get_file_type (info);
         is_dir = (type == G_FILE_TYPE_DIRECTORY);
         is_hidden = g_file_info_get_is_hidden (info);
-        size = g_file_info_get_size (info);
+        size = is_dir ? 0 : g_file_info_get_size (info);
         mtime = g_file_info_get_attribute_uint64 (
             info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
         content_type = g_file_info_get_content_type (info);

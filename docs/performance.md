@@ -106,7 +106,7 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 | Scenario | Measures | Checks |
 |---|---|---|
 | `chat[=N]` | The phases of the original chat-view benchmark: ingest + first paint, relayout after a font change, scrolling. | The idle frame. |
-| `files[=N]` | The real `files_panel` in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider. | Row count equals N; rows actually in size order after the sort. |
+| `files[=N]` | The real files panel (`gtkhx-ui` `files::panel`) in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider. | Row count equals N; rows actually in size order after the sort. |
 
 The panel has no filter, so none is measured.
 

@@ -193,7 +193,7 @@ pub(crate) fn symbolic_icon_for_kind(kind: i32) -> Option<String> {
     (!name.is_null()).then(|| unsafe { crate::cstr(name) })
 }
 
-fn load_icon(resource: &str) -> Option<gdk::Paintable> {
+pub(crate) fn load_icon(resource: &str) -> Option<gdk::Paintable> {
     let res = crate::cs(resource);
     let pb_ptr = unsafe { gtkhx_icon_load(res.as_ptr()) };
     if pb_ptr.is_null() {

@@ -16,15 +16,11 @@
 //! highlight; Tab inserts the highlighted name; Enter inserts it only once the
 //! user has moved off the first row, so typing a whole path and pressing Enter
 //! still goes there; Escape closes the popover.
-//!
-//! The C side attaches and frees through `hx_path_complete_attach` /
-//! `hx_path_complete_free`.
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::{Rc, Weak};
 
-use glib::translate::from_glib_none;
 use gtk::gdk;
 use gtk::glib;
 use gtk4 as gtk;
@@ -387,34 +383,6 @@ impl Drop for PathComplete {
         if let Some(p) = self.inner.popover.take() {
             p.unparent();
         }
-    }
-}
-
-/// Attach path completion to `entry`. NULL for a NULL entry.
-///
-/// # Safety
-/// Main thread; `entry` is NULL or a live GtkEntry.
-#[no_mangle]
-pub unsafe extern "C" fn hx_path_complete_attach(
-    entry: *mut gtk::ffi::GtkEntry,
-) -> *mut PathComplete {
-    if entry.is_null() {
-        return std::ptr::null_mut();
-    }
-    crate::ensure_gtk_init();
-    let entry: gtk::Entry = from_glib_none(entry);
-    Box::into_raw(Box::new(PathComplete::attach(&entry)))
-}
-
-/// Detach and free what `hx_path_complete_attach` returned. Safe to call
-/// after the entry has been destroyed. NULL is a no-op.
-///
-/// # Safety
-/// Main thread; `c` is NULL or an unfreed `hx_path_complete_attach` result.
-#[no_mangle]
-pub unsafe extern "C" fn hx_path_complete_free(c: *mut PathComplete) {
-    if !c.is_null() {
-        drop(Box::from_raw(c));
     }
 }
 
