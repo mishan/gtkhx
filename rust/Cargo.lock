@@ -2184,6 +2184,7 @@ source = "git+https://github.com/mishan/hx-libs.git?rev=fce3ad8234ce9708b645d5e4
 name = "hxmacres"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "glib 0.21.5",
 ]
 
@@ -2191,6 +2192,7 @@ dependencies = [
 name = "hxmodel"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "gio 0.21.5",
  "glib 0.21.5",
  "gtkhx-core",
@@ -2258,6 +2260,7 @@ dependencies = [
 name = "hxtext"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "glib 0.21.5",
  "hxproto",
 ]

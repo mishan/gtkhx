@@ -57,6 +57,20 @@ fn names_sorted_is_case_insensitive() {
 // ---- completion: address form (whole buffer is a bare nick) --------------
 
 #[test]
+fn case_insensitive_duplicate_names_are_listed_once() {
+    // Two users named "bob" in different case sort next to each other; the
+    // candidate list keeps the first.
+    let mut conv = Conversation::new(0);
+    for (i, n) in ["bobby", "Bob", "alice", "bob"].iter().enumerate() {
+        conv.members.upsert(Member::new(i as u16, *n));
+    }
+    let c = conv.complete("b", 1, false, ':').unwrap();
+    // Extended to the common prefix, in the first candidate's casing.
+    assert_eq!(c.text, "Bob");
+    assert_eq!(c.info, vec!["Bob".to_string(), "bobby".to_string()]);
+}
+
+#[test]
 fn address_form_single_match_adds_suffix() {
     let c = complete(&["alice"], "ali", 3, false, ':').unwrap();
     assert_eq!(c.text, "alice: ");

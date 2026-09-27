@@ -338,10 +338,13 @@ pub fn complete_styled(
         return None;
     }
 
-    // Prefix matches (case-insensitive), de-duplicated by name.
+    // Prefix matches (case-insensitive), de-duplicated by name. The names are
+    // sorted case-insensitively, so duplicates are adjacent and the last match
+    // kept is the only one to check — checking them all made an ambiguous
+    // prefix quadratic in the number of matches.
     let mut matches: Vec<&str> = Vec::new();
     for &n in names_sorted {
-        if has_prefix_ci(n, &word) && !matches.iter().any(|m| m.eq_ignore_ascii_case(n)) {
+        if has_prefix_ci(n, &word) && !matches.last().is_some_and(|m| m.eq_ignore_ascii_case(n)) {
             matches.push(n);
         }
     }
