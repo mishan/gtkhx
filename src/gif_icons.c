@@ -131,10 +131,8 @@ hx_icon_set (struct htlc_conn *htlc, const guint8 *gif, gsize len)
                    (size_t)len);
         return;
     }
-    /* The reply is a bare task completion with no payload; we don't
-     * register a task handler — an unmatched TASK reply is handled
-     * benignly by hx_rcv_task, and a task error surfaces through its
-     * standard error path. */
+    /* Untasked: the reply is a bare completion, and a refusal of a set
+     * the user made surfaces through hx_rcv_task's error toast. */
     hlwrite_chunks (htlc, HTLC_HDR_ICON_SET, 0, chunks, hc);
 }
 
@@ -278,6 +276,9 @@ hx_icon_send_saved (struct htlc_conn *htlc)
     if (!avatar_bytes_valid (gif, len)) {
         return;
     }
+    /* Tasked so a refusal is logged, not toasted: the user didn't ask. */
+    task_new (htlc, RCV_TASK_FN (rcv_task_icon_set_auto), NULL, 0,
+              "icon-set-auto");
     hx_icon_set (htlc, gif, len);
     debug_log ("icon", "sent saved avatar (%zu bytes) to capable server",
                (size_t)len);

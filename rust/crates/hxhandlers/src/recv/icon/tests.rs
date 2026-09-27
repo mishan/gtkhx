@@ -178,3 +178,54 @@ fn icon_getlist_success_publishes_entries() {
     assert!(test_env::SEND_SAVED.with(|c| c.get()));
     assert_eq!(test_env::DATA_COUNT.with(|c| c.get()), 3);
 }
+
+/// A refused automatic ICON_SET is logged under `icon` with the server's text
+/// — decoded from Mac Roman — and touches nothing else: no state change, no
+/// re-send.
+#[test]
+fn icon_set_auto_refusal_is_logged_quietly() {
+    test_env::reset();
+    test_env::STATE.with(|c| c.set(1 /* SUPPORTED */));
+    let text = b"You are not allowed to set an icon \xd1 guests can't.".to_vec();
+    let frame = reply(true, &[(tag::TASK_ERROR, text)]);
+    unsafe { call_frame(rcv_task_icon_set_auto, &frame) };
+    let lines = test_env::DEBUG_LINES.with(|c| c.take());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].0, "icon");
+    assert!(
+        lines[0]
+            .1
+            .contains("You are not allowed to set an icon \u{2014} guests can't."),
+        "{lines:?}"
+    );
+    assert!(lines[0].1.contains("not re-sending"), "{lines:?}");
+    assert_eq!(
+        test_env::STATE.with(|c| c.get()),
+        1,
+        "negotiation untouched"
+    );
+    assert!(!test_env::SEND_SAVED.with(|c| c.get()));
+    assert_eq!(test_env::DATA_COUNT.with(|c| c.get()), 0);
+}
+
+/// A refusal with no text still logs a line rather than nothing.
+#[test]
+fn icon_set_auto_refusal_without_text_still_logs() {
+    test_env::reset();
+    let frame = reply(true, &[]);
+    unsafe { call_frame(rcv_task_icon_set_auto, &frame) };
+    let lines = test_env::DEBUG_LINES.with(|c| c.take());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].1.contains("refused the saved avatar"), "{lines:?}");
+}
+
+/// An accepted automatic ICON_SET is a bare completion: one debug line.
+#[test]
+fn icon_set_auto_success_logs_acceptance() {
+    test_env::reset();
+    let frame = reply(false, &[]);
+    unsafe { call_frame(rcv_task_icon_set_auto, &frame) };
+    let lines = test_env::DEBUG_LINES.with(|c| c.take());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].1.contains("accepted"), "{lines:?}");
+}

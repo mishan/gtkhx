@@ -205,7 +205,15 @@ on the live server, the avatar is persisted to `$CONFIG/avatar.gif` the
 moment it's chosen — even offline, even on a non-supporting server. It
 is sent immediately if the current server is capable, and otherwise
 **sent automatically on the next connect to a capable server**, from the
-post-login probe once support is confirmed. Clear forgets the saved file
+post-login probe once support is confirmed. A server may refuse that
+automatic send — hxd-ng refuses a guest an icon, and a server may
+rate-limit it — and since the user didn't ask for it at this login, the
+refusal is logged under `GTKHX_DEBUG=icon` rather than toasted, and it
+is not retried on that connection. The automatic send carries its own
+task (`icon-set-auto`, handled by `rcv_task_icon_set_auto`) so
+`hx_rcv_task` can tell it apart; a set the user makes in Settings goes
+out untasked and a refusal of it still reaches them as a toast. Clear
+forgets the saved file
 and, if connected and capable, sends a clear. The preview seeds from the
 saved file so it shows before connecting.
 
