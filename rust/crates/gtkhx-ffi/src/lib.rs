@@ -62,6 +62,7 @@ use hxhandlers as _;
 
 // --- models ---
 use hxmodel as _;
+use hxrequest as _;
 
 // --- per-session state owner (extern-ful: cannot live in gtkhx-core) ---
 use hxtask as _;

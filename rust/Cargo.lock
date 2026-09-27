@@ -1893,6 +1893,7 @@ dependencies = [
  "hxmacres",
  "hxmodel",
  "hxnet",
+ "hxrequest",
  "hxsound",
  "hxtask",
  "hxtext",
@@ -1938,6 +1939,7 @@ dependencies = [
  "hxhandlers",
  "hxmodel",
  "hxproto",
+ "hxrequest",
  "hxtext",
  "hxtls-trust",
  "hxvoice-model",
@@ -2056,6 +2058,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
+name = "hx-e2e"
+version = "0.1.0"
+dependencies = [
+ "hxnet",
+ "hxproto",
+ "hxrequest",
+ "tokio",
+]
+
+[[package]]
 name = "hx-image-decode"
 version = "0.1.0"
 dependencies = [
@@ -2157,6 +2169,7 @@ dependencies = [
  "hxmodel",
  "hxnet",
  "hxproto",
+ "hxrequest",
  "hxtask",
  "hxtext",
 ]
@@ -2212,6 +2225,15 @@ dependencies = [
 name = "hxproto"
 version = "0.1.0"
 source = "git+https://github.com/mishan/hx-libs.git?rev=e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5#e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5"
+
+[[package]]
+name = "hxrequest"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+ "hxproto",
+ "hxtext",
+]
 
 [[package]]
 name = "hxsound"

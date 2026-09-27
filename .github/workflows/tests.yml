@@ -362,6 +362,7 @@ jobs:
             -e GTKHX_TEST_PORT=5500 \
             -e GTKHX_TEST_SOCKS=socks5://127.0.0.1:1080 \
             -e CARGO_HOME=/src/.cargo-home \
+            -e CARGO_TARGET_DIR=/src/rust-cargo-target \
             gtkhx-buildenv bash -c '
               set +e
               # The voice and video tests play into the wrapper'"'"'s private
@@ -369,6 +370,10 @@ jobs:
               tools/isolated-run.sh \
                 meson test -C build --suite integration --print-errorlogs
               rc=$?
+              # The Rust end-to-end suites (rust/crates/hx-e2e): GtkHx'"'"'s own
+              # requests and reply parsers against the same servers.
+              ( cd rust && cargo test -p hx-e2e --features rig \
+                  --ignore-rust-version ) || rc=1
               chown -R "$(stat -c %u:%g /src)" \
                 /src/rust-cargo-target /src/.cargo-home /src/build 2>/dev/null || true
               exit $rc

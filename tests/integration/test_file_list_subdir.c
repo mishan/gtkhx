@@ -24,10 +24,9 @@
  *     1 byte:  name length
  *     N bytes: name
  *
- * For path "Uploads" we emit one component with len=7. src/path_hldir.c's
- * path_to_hldir() builds the same shape but isn't linkable into
- * the test binary (it pulls in GTK), so we hand-build the 12-byte
- * blob inline.
+ * For path "Uploads" we emit one component with len=7. hxrequest's
+ * encoder builds the same shape; this test hand-builds the 12-byte
+ * blob inline so it pins the bytes independently.
  */
 
 #include "config.h"

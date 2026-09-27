@@ -490,18 +490,6 @@ test_htxf_hdr = executable('test_htxf_hdr',
 test('htxf_hdr', test_htxf_hdr,
      suite : 'unit')
 
-# path_hldir — the path_to_hldir DIR-chunk encoder, in its own
-# translation unit so this test can link it alone.
-test_path_hldir = executable('test_path_hldir',
-  'unit/test_path_hldir.c',
-  '../src/path_hldir.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('path_hldir', test_path_hldir,
-     suite : 'unit')
-
 # hl_date — the Hotline 8-byte timestamp decoder now lives in the
 # hxproto Rust crate (crate::hl_date::parse_hl_date), exercised by that
 # crate's native cargo tests. The C test that used to pin src/hl_date.c is gone

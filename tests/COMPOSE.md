@@ -118,3 +118,28 @@ through the proxy to mhxd. The test asks the proxy to CONNECT to
 exactly what host networking gives it (the same reason everything else in
 the rig is host-net). It binds the host's `1080` directly, matching the
 standalone `docker run --network host gtkhx-socks`.
+
+## The Rust end-to-end suites
+
+`rust/crates/hx-e2e` runs against the same containers. Where the C
+integration tests build their frames by hand, these send the requests GtkHx
+itself builds (`hxrequest`) over the production connect path (`hxnet`) and
+decode the replies with the receive handlers' parsers (`hxproto::parse`), so
+they cover what the client really sends and what it makes of the answer.
+
+```sh
+cd rust
+cargo test -p hx-e2e --features rig
+GTKHX_TEST_SERVERS=mhxd cargo test -p hx-e2e --features rig   # one server
+```
+
+Without `--features rig` the suites compile to nothing, so a plain
+`cargo test --workspace` neither needs the rig nor reports skips; with it, a
+server that isn't up is a failure. Each suite runs against every server that
+supports what it needs (`hx_e2e::servers_with`), and does its work inside a
+uniquely named scratch folder it deletes afterwards, so runs don't collide
+and the shared servers don't drift.
+
+Operations that need a file-admin account run on mhxd only for now: Janus's
+seeded `admin` password doesn't log in, and the pinned hxd-ng has no mkdir,
+delete or move.

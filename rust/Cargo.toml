@@ -19,6 +19,11 @@ members = [
     "crates/hxtls-trust",
     "crates/hxnet",
     "crates/hxtext",
+    # The requests the client sends, as pure Rust values — shared by the
+    # production senders and the end-to-end suite (hx-e2e).
+    "crates/hxrequest",
+    # End-to-end suites against the Docker rig, behind its `rig` feature.
+    "crates/hx-e2e",
     # Chat-view phase C1: the chat layout engine (message model, span
     # parsers, wrapping, height index, scroll anchoring). Deliberately
     # dependency-free — no gtk4/glib/pango — so the whole of it runs under

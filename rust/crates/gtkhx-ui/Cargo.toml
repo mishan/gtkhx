@@ -19,6 +19,7 @@ hxchat-view = { path = "../hxchat-view" }
 gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
+hxrequest = { path = "../hxrequest" }
 hxtext = { path = "../hxtext" }
 # default-features = false: don't re-add hx-image-decode's default `glycin-v3`
 # through this edge — the backend is selected on the crate itself, and forcing

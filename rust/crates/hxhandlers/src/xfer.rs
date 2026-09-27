@@ -41,6 +41,9 @@ use hxtask::send::hlwrite_chunks;
 use hxtask::task_new;
 #[cfg(not(test))]
 use hxtext::gtkhx_text_for_wire;
+// Encode a "/a/b" path to the wire DIR bytes (g_malloc'd buffer + out length;
+// caller g_free's). is_file = 0 for a directory chunk.
+use hxrequest::path::path_to_hldir;
 
 /// `FILE_DONE` (src/sound.h) — the transfer-complete chime.
 const FILE_DONE: c_int = 3;
@@ -138,9 +141,6 @@ extern "C" {
     fn hx_htxf_opt_large(htxf: *const c_void) -> c_int;
 
     // ---- xfer_go wire build + path collaborators ----
-    /// path_hldir.c — encode a "/a/b" path to the wire DIR bytes (g_malloc'd
-    /// buffer + out length; caller g_free's). is_file = 0 for a directory chunk.
-    fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: c_int) -> *mut u8;
     /// uniquify_path.c — mutate `path` in place to a non-colliding name using the
     /// supplied exists predicate (the core algorithm keeps its Tier-1 test in C).
     fn uniquify_path(
@@ -1124,13 +1124,6 @@ unsafe extern "C" fn rcv_task_file_put(
     _ptr: *mut c_void,
     _data: *mut c_void,
 ) {
-}
-#[cfg(test)]
-unsafe fn path_to_hldir(_path: *const c_char, hldirlen: *mut u16, _is_file: c_int) -> *mut u8 {
-    if !hldirlen.is_null() {
-        *hldirlen = 0;
-    }
-    std::ptr::null_mut()
 }
 #[cfg(test)]
 unsafe fn uniquify_path(

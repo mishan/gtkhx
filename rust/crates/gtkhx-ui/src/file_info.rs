@@ -1,5 +1,4 @@
-//! File "Get Info" dialog (ported from `src/files.c::output_file_info` + its
-//! Save / date-format helpers).
+//! File "Get Info" dialog.
 //!
 //! The reply to HTLC_HDR_FILE_GETINFO: a small window showing a file's name
 //! (editable), creator / type / size / created / modified (read-only), and its
@@ -9,11 +8,10 @@
 //!
 //! Everything the dialog needs is native Rust now: the two Hotline date stamps
 //! format through [`crate::hl_date::format_wire`] (no raw-bytes → C round-trip),
-//! and the Save button builds the FILE_SETINFO request with
-//! `hxproto::build::build_file_setinfo_chunks` + the Rust send primitive.
-//! What stays on the C ABI is leaf glue: the active-connection accessor, the
-//! path encoder (`path_to_hldir`), the task table +
-//! `hlwrite_chunks`, and `human_size`.
+//! and the Save button sends `hxrequest::files::set_info`'s FILE_SETINFO
+//! through the Rust send primitive. What stays on the C ABI is leaf glue: the
+//! active-connection accessor, the task table + `hlwrite_chunks`, and
+//! `human_size`.
 
 use std::ffi::{c_char, c_void, CStr};
 
@@ -22,13 +20,12 @@ use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use hxproto::build::{build_file_setinfo_chunks, FileSetInfoRequest, HxChunk};
+use hxproto::build::HxChunk;
 
 use crate::ffi as cffi;
 use crate::tr::tr;
 
-// HTLC_HDR_FILE_SETINFO (hotline.h) + the text-encoding capability bit.
-const HTLC_HDR_FILE_SETINFO: u32 = 0x0000_00cf;
+// The text-encoding capability bit (hotline.h).
 const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
 
 /// `rcv_task_fn` — FILE_SETINFO registers a no-reply task (rcv fn NULL).
@@ -36,14 +33,11 @@ type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 
 // Native imports (real Rust crates, type-checked).
 use gtkhx_core::conn::hx_conn_has_cap;
-use hxtext::gtkhx_text_for_wire;
 
 extern "C" {
     // gtkhx_ui_bridge.c — the active connection + whether it's live.
     fn gtkhx_active_htlc() -> *mut c_void;
     fn gtkhx_active_connected() -> glib::ffi::gboolean;
-    // path_hldir.c — the wire "hldir" encoding of the parent directory.
-    fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: i32) -> *mut u8;
     // hxtask — register the (no-reply) task + send.
     fn task_new(
         htlc: *mut c_void,
@@ -97,34 +91,6 @@ fn info_row(title: &str, value: &str) -> adw::ActionRow {
     row
 }
 
-/// Encode `text` for the wire (Mac Roman / UTF-8 per the negotiated cap) and run
-/// `f` with the borrowed encoded bytes; frees the g_malloc'd buffer after. Empty
-/// on a NULL encode.
-unsafe fn with_wire<R>(text: &str, utf8: bool, is_body: bool, f: impl FnOnce(&[u8]) -> R) -> R {
-    let mut len: usize = 0;
-    let buf = gtkhx_text_for_wire(
-        text.as_ptr() as *const c_char,
-        text.len(),
-        if utf8 {
-            glib::ffi::GTRUE
-        } else {
-            glib::ffi::GFALSE
-        },
-        if is_body {
-            glib::ffi::GTRUE
-        } else {
-            glib::ffi::GFALSE
-        },
-        &mut len,
-    );
-    if buf.is_null() {
-        return f(&[]);
-    }
-    let out = f(std::slice::from_raw_parts(buf as *const u8, len));
-    glib::ffi::g_free(buf as *mut c_void);
-    out
-}
-
 /// Send FILE_SETINFO for a rename + comment edit (was `set_name_comment`).
 /// `path` is the file's full path (used for the current basename + parent dir);
 /// `new_name` and `comments` are the dialog's editable fields.
@@ -141,63 +107,25 @@ unsafe fn save_file_info(path: &str, new_name: &str, comments: &str) {
         return;
     }
     let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING) != glib::ffi::GFALSE;
-
-    // Current basename, and whether the file lives under a directory (→ include
-    // the HTLC_DATA_DIR chunk).
-    let path_buf: Vec<c_char> = path
-        .bytes()
-        .map(|b| b as c_char)
-        .chain(std::iter::once(0))
-        .collect();
-    let base_off = hxmodel::files::basename_offset(path.as_bytes(), b'/');
-    let has_dir = base_off > 0;
-    let base = String::from_utf8_lossy(&path.as_bytes()[base_off..]).into_owned();
-
-    // Optional wire "hldir" for the parent directory (g_malloc'd → g_free below).
-    let mut hldirlen: u16 = 0;
-    let hldir = if has_dir {
-        path_to_hldir(path_buf.as_ptr(), &mut hldirlen, 1)
-    } else {
-        std::ptr::null_mut()
+    let Some(req) = hxrequest::files::set_info(
+        path.as_bytes(),
+        new_name.as_bytes(),
+        Some(comments.as_bytes()),
+        utf8,
+    ) else {
+        return;
     };
-    let hldir_slice: Option<&[u8]> = if hldir.is_null() {
-        None
-    } else {
-        Some(std::slice::from_raw_parts(hldir, hldirlen as usize))
-    };
-
-    // Encode name (current basename), rename (typed name), comment; build the
-    // chunk array referencing the borrowed encoded bytes, then send. The nested
-    // with_wire closures keep every wire buffer alive across the send.
-    with_wire(&base, utf8, false, |name_w| {
-        with_wire(new_name, utf8, false, |rename_w| {
-            with_wire(comments, utf8, true, |comment_w| {
-                let req = FileSetInfoRequest {
-                    name: name_w,
-                    rename: rename_w,
-                    comment: Some(comment_w),
-                    dir: hldir_slice,
-                };
-                let mut chunks = [HxChunk::EMPTY; 4];
-                let hc = build_file_setinfo_chunks(&req, &mut chunks);
-                if hc > 0 {
-                    let label = crate::cs("set file info");
-                    task_new(
-                        htlc,
-                        None,
-                        std::ptr::null_mut(),
-                        std::ptr::null_mut(),
-                        label.as_ptr(),
-                    );
-                    hlwrite_chunks(htlc, HTLC_HDR_FILE_SETINFO, 0, chunks.as_ptr(), hc as i32);
-                }
-            })
-        })
+    let label = crate::cs("set file info");
+    task_new(
+        htlc,
+        None,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        label.as_ptr(),
+    );
+    req.with_hx_chunks(|chunks| {
+        hlwrite_chunks(htlc, req.opcode, 0, chunks.as_ptr(), chunks.len() as i32)
     });
-
-    if !hldir.is_null() {
-        glib::ffi::g_free(hldir as *mut c_void);
-    }
 }
 
 /// `void output_file_info(char *path, char *name, char *creator, char *type,

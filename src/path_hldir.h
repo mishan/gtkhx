@@ -1,8 +1,6 @@
 /*
- * path_hldir — the Hotline DIR-chunk path encoder, in its own
- * translation unit so the Tier 1 test can link it alone.
- *
- * See path_hldir.c for the wire layout.
+ * path_to_hldir — the Hotline DIR-chunk path encoder. Implemented in Rust
+ * (hxrequest::path, whose tests pin the wire layout); this is its C ABI.
  */
 
 #ifndef HX_PATH_HLDIR_H

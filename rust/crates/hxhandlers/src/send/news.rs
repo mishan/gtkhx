@@ -6,8 +6,8 @@
 //! NEWS_GETFILE / NEWS_POST, and the 1.5 DIRLIST / CATLIST folder+category
 //! enumeration, GETTHREAD post-body fetch, POSTTHREAD, DELETETHREAD,
 //! DELNEWSDIRCAT, MAKECATEGORY, MAKENEWSDIR. Each
-//! one: encodes the request's path to the wire `NEWSPATH` bytes (via C's
-//! `path_to_hldir`), encodes any text for the wire (`gtkhx_text_for_wire`,
+//! one: encodes the request's path to the wire `NEWSPATH` bytes
+//! (`hxrequest`'s `path_to_hldir`), encodes any text for the wire (`gtkhx_text_for_wire`,
 //! hxtext), builds the chunks with the **native** `hxproto::build`
 //! builders (the same ones the R2 `gtkhx_proto_build_news_*` C-ABI shims wrap),
 //! registers a reply task where the C original did, and hands the chunks to
@@ -61,13 +61,13 @@ use crate::recv::news::{
 };
 #[cfg(not(test))]
 use hxtext::gtkhx_text_for_wire;
+// Encode a "/a/b" path to the wire NEWSPATH bytes. Returns a g_malloc'd buffer +
+// out length; caller g_free's. is_file = 0 for news.
+#[cfg(not(test))]
+use hxrequest::path::path_to_hldir;
 
 #[cfg(not(test))]
 extern "C" {
-    // path_hldir.c — encode a "/a/b" path to the wire NEWSPATH bytes. Returns a
-    // g_malloc'd buffer + out length; caller g_free's. is_file = 0 for news.
-    fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: c_int) -> *mut u8;
-
     // chat_send_bridge.c — per-htlc CAP_TEXT_ENCODING probe (shared with the
     // chat senders).
     fn hx_htlc_text_encoding_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn hx_news15_get_post(
     mime_type: *const c_char,
     target: *mut c_void,
 ) {
-    // path_to_hldir dereferences `path` immediately (no NULL check).
+    // Nothing to fetch without a path.
     if htlc.is_null() || path.is_null() {
         release(target);
         return;
@@ -214,8 +214,7 @@ pub unsafe extern "C" fn hx_news15_cat_list(htlc: *mut c_void, g: *mut c_void) {
     if htlc.is_null() || g.is_null() {
         return;
     }
-    // Guard the path before path_to_hldir, which dereferences it immediately
-    // (no NULL check) — a node cleared mid-refresh yields NULL here.
+    // A node cleared mid-refresh yields a NULL path: nothing to ask for.
     let path = gnews_catalog_path(g);
     if path.is_null() {
         return;
@@ -249,8 +248,7 @@ pub unsafe extern "C" fn hx_news15_fldr_list(htlc: *mut c_void, g: *mut c_void) 
     if htlc.is_null() || g.is_null() {
         return;
     }
-    // Guard the path before path_to_hldir, which dereferences it immediately
-    // (no NULL check) — a node cleared mid-refresh yields NULL here.
+    // A node cleared mid-refresh yields a NULL path: nothing to ask for.
     let path = gnews_folder_path(g);
     if path.is_null() {
         return;
@@ -288,9 +286,7 @@ pub unsafe extern "C" fn hx_news15_post_thread(
     threadid: u32,
     text: *const c_char,
 ) {
-    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
-    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
-    // refresh) rather than crash.
+    // A node cleared during a refresh yields a NULL path: nothing to send.
     if htlc.is_null() || path.is_null() {
         return;
     }
@@ -343,9 +339,7 @@ pub unsafe extern "C" fn hx_news15_delete_thread(
     path: *const c_char,
     threadid: u32,
 ) {
-    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
-    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
-    // refresh) rather than crash.
+    // A node cleared during a refresh yields a NULL path: nothing to send.
     if htlc.is_null() || path.is_null() {
         return;
     }
@@ -379,9 +373,7 @@ pub unsafe extern "C" fn hx_news15_delete_thread(
 /// `htlc` is NULL or valid; `path` is a NUL-terminated C string or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn hx_news15_delete(htlc: *mut c_void, path: *const c_char) {
-    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
-    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
-    // refresh) rather than crash.
+    // A node cleared during a refresh yields a NULL path: nothing to send.
     if htlc.is_null() || path.is_null() {
         return;
     }
@@ -420,9 +412,7 @@ pub unsafe extern "C" fn hx_news15_mkcat(
     path: *const c_char,
     name: *const c_char,
 ) {
-    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
-    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
-    // refresh) rather than crash.
+    // A node cleared during a refresh yields a NULL path: nothing to send.
     if htlc.is_null() || path.is_null() {
         return;
     }
@@ -470,9 +460,7 @@ pub unsafe extern "C" fn hx_news15_mkdir(
     path: *const c_char,
     name: *const c_char,
 ) {
-    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
-    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
-    // refresh) rather than crash.
+    // A node cleared during a refresh yields a NULL path: nothing to send.
     if htlc.is_null() || path.is_null() {
         return;
     }

@@ -61,8 +61,8 @@ extern void hx_cfl_set_path (struct cached_filelist *cfl, const char *path);
 extern const void *hx_cfl_fh (const struct cached_filelist *cfl);
 extern guint32 hx_cfl_fhlen (const struct cached_filelist *cfl);
 
-/* path_to_hldir lives in src/path_hldir.c; re-exported here so files
- * callers don't have to chase a second header. */
+/* path_to_hldir, re-exported so files callers don't have to chase a
+ * second header. */
 #include "path_hldir.h"
 
 extern void hx_file_delete (struct htlc_conn *htlc, char *path);
