@@ -32,11 +32,12 @@
 //!   6-byte response (no watchdog — we already know this endpoint), then
 //!   the same version dispatch.
 //!
-//! v1 listing: read the rest of the 14-byte reply header (`nservers` at
-//! offset 10), then per server: 8 bytes (IPv4 + port + nusers; a leading
-//! zero byte marks a padding slot that's skipped without decrementing
-//! the count), 3 bytes (2 reserved + `name_len`), the name, 1 byte
-//! `desc_len`, the description.
+//! v1 listing: read the rest of the 14-byte reply header (the 6-byte
+//! magic echo, then the first batch's 8-byte header with the total
+//! `nservers` at offset 10), then per server: 8 bytes (IPv4 + port +
+//! nusers; a leading zero byte marks the next batch's 8-byte header,
+//! which is skipped without decrementing the count), 3 bytes (2
+//! reserved + `name_len`), the name, 1 byte `desc_len`, the description.
 //!
 //! v3 listing: write the 4-byte listing request, read the 10-byte
 //! response header (`total_size` + `record_count`), read the capped
@@ -65,12 +66,14 @@ const HTRK_VERSION_V3: u16 = 0x0003;
 /// + read that much. ~200k servers at ~80 bytes each.
 pub const V3_MAX_PAYLOAD: u32 = 16 * 1024 * 1024;
 
-/// Cap on padding slots in a v1 listing. Padding slots (records whose
-/// first octet is 0 — an impossible IPv4 first octet) mark deleted-server
-/// gaps and don't count against `nservers`, so a tracker that emits an
-/// endless stream of them would otherwise hang the reader on unbounded
-/// data. Real listings have at most a handful; 65_535 (the `nservers`
-/// ceiling) is a generous bound that still terminates a hostile feed.
+/// Cap on padding slots in a v1 listing. A tracker sends its list in
+/// batches of about 8 KB, each after an 8-byte header (`u16 type = 1`,
+/// `u16 size`, `u16 total`, `u16 in this batch`). A header starts with a
+/// zero byte, which no IPv4 record does, so the reader skips these
+/// "padding slots" without counting them against `nservers`. A tracker
+/// that emits an endless stream of them would otherwise hang the reader
+/// on unbounded data; 65_535 (the `nservers` ceiling) is a generous
+/// bound that still terminates a hostile feed.
 pub const MAX_V1_PADDING_SLOTS: u32 = 65_535;
 
 /// IPv4 address-type byte (`tracker_v3::ADDR_IPV4`); v1 records are
@@ -344,10 +347,9 @@ async fn read_v1_listing<S: AsyncRead + AsyncWrite + Unpin>(
     let mut remaining = nservers;
     let mut padding_slots: u32 = 0;
     while remaining > 0 {
-        // IPv4(4) + port(2) + nusers(2). A leading zero byte is a
-        // padding slot (IPs can't start with 0) — skip it without
-        // decrementing the counter, exactly the bytes the C reader
-        // consumes for a padding entry.
+        // IPv4(4) + port(2) + nusers(2). A leading zero byte is the
+        // next batch's 8-byte header (IPs can't start with 0) — skip
+        // it without decrementing the counter.
         let mut head8 = [0u8; 8];
         read_exact_or_short(stream, &mut head8).await?;
         if tracker_record_is_padding(&head8) {
@@ -609,6 +611,33 @@ mod tests {
         r.push(desc.len() as u8);
         r.extend_from_slice(desc);
         r
+    }
+
+    /// What trackers actually send once a list outgrows one batch: a
+    /// second 8-byte batch header between records, repeating the total.
+    #[tokio::test]
+    async fn v1_listing_spanning_two_batches() {
+        let first = v1_record([1, 2, 3, 4], 5500, 3, b"srv1", b"abc");
+        let second = v1_record([5, 6, 7, 8], 6000, 0, b"srv2", b"");
+        let mut script = v1_header(2);
+        script.extend_from_slice(&first);
+        let size = (4 + second.len()) as u16;
+        for word in [1u16, size, 2, 1] {
+            script.extend_from_slice(&word.to_be_bytes());
+        }
+        script.extend_from_slice(&second);
+
+        let listing = with_server(&v1_client_magic(), script, |mut c| async move {
+            run_v1(&mut c).await
+        })
+        .await
+        .expect("v1 listing");
+
+        assert_eq!(listing.expected, 2);
+        assert_eq!(listing.records.len(), 2);
+        assert_eq!(listing.records[0].port, 5500);
+        assert_eq!(listing.records[1].address, vec![5, 6, 7, 8]);
+        assert_eq!(listing.records[1].port, 6000);
     }
 
     #[tokio::test]

@@ -527,20 +527,20 @@ impl<S: AsyncRead + Unpin, R: HopeRng + Unpin> AsyncRead for HopeBlowfishStream<
                                 return Poll::Ready(Err(e));
                             }
                         }
-                        // Parse the wire `len` field at offset
-                        // 12 (network byte order). The Hotline
-                        // wire encodes `len = body_len +
-                        // sizeof(hc) = body_len + 2`, so we
-                        // subtract 2 to get the actual body
-                        // byte count that comes off the wire
-                        // after the 22-byte header. Treating
-                        // `len` as body_len directly over-reads
-                        // by 2 bytes per frame and quietly
-                        // desyncs the frame boundary (and the
-                        // rekey rotation boundary with it) —
-                        // not what we want.
+                        // Parse this frame's data size at
+                        // offset 16 (network byte order), not
+                        // the total size at 12: a server that
+                        // splits a transaction sends a total
+                        // larger than any one frame, and framing
+                        // by it over-reads and desyncs the frame
+                        // boundary (and the rekey rotation
+                        // boundary with it). The data size
+                        // counts the 2-byte `hc`, so subtract it
+                        // to get the body bytes that follow the
+                        // 22-byte header. Same framing as
+                        // frame::decode_header_full.
                         let wire_len =
-                            u32::from_be_bytes([hdr[12], hdr[13], hdr[14], hdr[15]]) as usize;
+                            u32::from_be_bytes([hdr[16], hdr[17], hdr[18], hdr[19]]) as usize;
                         if wire_len < HC_SIZE {
                             return Poll::Ready(Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -700,20 +700,19 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         let new_pos = pos + take;
 
         // Did we just complete the header (and so can parse the
-        // body length)? The wire `len` field at offset 12 is
+        // body length)? The frame's data size at offset 16 is
         // `body_len + sizeof(hc)`, so subtract HC_SIZE to get
         // the actual on-wire body byte count that follows the
-        // 22-byte header. Same wire-format quirk hl_hdr_decode
-        // / hxnet's frame::decode_header_full handle on the
-        // receive side.
+        // 22-byte header. Offset 16, not the total size at 12,
+        // for the same reason as on the read side.
         let new_frame_len = match frame_len {
             Some(len) => Some(len),
             None if new_pos >= HL_HDR_SIZE => {
                 let wire_len = u32::from_be_bytes([
-                    this.write_plaintext[12],
-                    this.write_plaintext[13],
-                    this.write_plaintext[14],
-                    this.write_plaintext[15],
+                    this.write_plaintext[16],
+                    this.write_plaintext[17],
+                    this.write_plaintext[18],
+                    this.write_plaintext[19],
                 ]) as usize;
                 if wire_len < HC_SIZE {
                     return Poll::Ready(Err(io::Error::new(
@@ -1125,6 +1124,38 @@ mod tests {
         assert_eq!(received2, frame2);
     }
 
+    /// A transaction split across frames carries a total size
+    /// (offset 12) larger than the frame's own data size (offset
+    /// 16). The adapter must frame by the data size, or it
+    /// over-reads into the next frame and applies the next rekey
+    /// in the middle of it.
+    #[tokio::test]
+    async fn round_trip_fragment_frames_by_data_size() {
+        let (mut client, mut server) = make_streams(AlwaysMarkerRng { count: 3 }, NoMarkerRng);
+
+        let mut fragment = make_frame(0x010000, 7, b"first-part-of-a-split-transaction");
+        let total = 4096u32 + HC_SIZE as u32;
+        fragment[12..16].copy_from_slice(&total.to_be_bytes());
+        let follow_up = make_frame(0x6b, 8, b"next-frame");
+
+        client.write_all(&fragment).await.expect("write fragment");
+        client.write_all(&follow_up).await.expect("write follow-up");
+        client.flush().await.expect("flush");
+
+        let mut received = vec![0u8; fragment.len()];
+        server
+            .read_exact(&mut received)
+            .await
+            .expect("read fragment");
+        assert_eq!(received, fragment);
+        let mut received = vec![0u8; follow_up.len()];
+        server
+            .read_exact(&mut received)
+            .await
+            .expect("read follow-up");
+        assert_eq!(received, follow_up);
+    }
+
     #[tokio::test]
     async fn round_trip_multiple_markers_in_sequence() {
         // Five frames in a row, every one fires the marker.
@@ -1172,7 +1203,7 @@ mod tests {
         // back to the oversized value the cap check should
         // reject. Use a side state with the same key.
         let mut side_state = BlowfishOfb64State::new(&read_key).unwrap();
-        // Patch the wire `len` field with the value that
+        // Patch the size fields with the value that
         // decodes to body_len = MAX_BODY_LEN + 1 after the
         // adapter subtracts HC_SIZE — i.e. `len =
         // (MAX_BODY_LEN + 1) + HC_SIZE`. With the framing fix
@@ -1182,8 +1213,10 @@ mod tests {
         // check we're trying to exercise.
         let bad_wire_len = (MAX_BODY_LEN + 1 + HC_SIZE) as u32;
         let mut hdr = make_frame(0x6b, 1, &[]);
-        // Patch len field to the bad value.
+        // Patch both size fields to the bad value; the adapter
+        // frames by the data size at offset 16.
         hdr[12..16].copy_from_slice(&bad_wire_len.to_be_bytes());
+        hdr[16..20].copy_from_slice(&bad_wire_len.to_be_bytes());
         side_state.crypt_in_place(&mut hdr);
         let mut writer = a;
         writer

@@ -856,7 +856,7 @@ mod tests {
             let trans = u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
             let err_text = b"Login is incorrect.";
             let chunks = [PackChunk {
-                tag: 0x0100, // TAG_ERROR_TEXT
+                tag: 0x0064, // field 100, the error text
                 data: err_text,
             }];
             let needed = pack_message_size(&chunks);

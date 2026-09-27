@@ -22,8 +22,8 @@
 //! - Stream IO error during read — surfaces as `io::Error`.
 //! - Header signals task failure (`flag != 0`) — this is NOT an
 //!   error here: `recv_login_reply` returns `Ok(LoginReply)` with
-//!   `flag` set and `error_text` populated from the `DATA_ERROR_TEXT`
-//!   chunk if present. The caller (e.g. the lifecycle) decides how to
+//!   `flag` set and `error_text` populated from the error-text
+//!   chunk (field 100) if present. The caller (e.g. the lifecycle) decides how to
 //!   surface a rejection — `LoginReply::is_success()` is the gate.
 //! - Header doesn't decode (oversized wire_len, etc.) —
 //!   surfaces as `io::ErrorKind::InvalidData`.
@@ -44,10 +44,10 @@ use crate::{ConnectionState, Event, MAX_BODY_LEN};
 /// `src/hotline.h`.
 pub const HTLS_HDR_TASK: u32 = 0x0001_0000;
 
-/// `HTLS_DATA_ERROR_TEXT` chunk tag — error message body when
-/// a TASK reply signals failure. Mirrors
-/// `HTLS_DATA_ERROR_TEXT` (0x0100) in `src/hotline.h`.
-pub const TAG_ERROR_TEXT: u16 = 0x0100;
+/// Error-text chunk tag — the message body when a TASK reply signals
+/// failure (Hotline field 100, `myField_ErrorText`). Mirrors
+/// `HTLS_DATA_TASKERROR` (0x0064) in `src/hotline.h`.
+pub const TAG_ERROR_TEXT: u16 = hxproto::messages::tag::TASK_ERROR;
 
 /// `HTLC_DATA_LOGIN` / `HTLS_DATA_LOGIN` echo tag (0x0069). The
 /// HOPE step-1 reply echoes the login when the server is running
@@ -367,7 +367,8 @@ mod tests {
         let reply_bytes = build_task_reply(
             1,
             &[PackChunk {
-                tag: TAG_ERROR_TEXT,
+                // The wire value, not our constant, so a wrong constant fails here.
+                tag: 0x0064,
                 data: b"login incorrect",
             }],
         );

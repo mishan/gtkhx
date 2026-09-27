@@ -21,7 +21,7 @@ section it appears in — we never register.)
 
 ## Version detection: a timed probe with fallback
 
-**Real pre-spec v1 trackers do not respond to a v3 handshake at all.**
+**Real pre-spec v1 trackers do not answer a v3 handshake.**
 
 The spec's recommended detection is symmetric: read 6 bytes, look at
 the version field, read 2 more if it says `0x0003`. That works for a
@@ -29,10 +29,10 @@ spec-compliant implementation. It does not describe what is actually
 deployed. Every v1 tracker we have tested — `hxtrackd`, and the
 hxd-derived trackers generally — `memcmp`s the **full 6-byte magic**
 against `"HTRK\0\1"`. A client sending `"HTRK"` + `0x0003` fails that
-comparison, and the tracker silently falls through: the connection
-stays open and **nothing is sent back**. The extra bytes do not sit
-harmlessly in a buffer waiting to be ignored; there is no reply to
-ignore them alongside.
+comparison. `hxtrackd` then closes the connection at once; other
+pre-spec trackers may leave it open and **send nothing back**. Either
+way the extra bytes do not sit harmlessly in a buffer waiting to be
+ignored; there is no reply to ignore them alongside.
 
 So the shipped design is a **probe with a watchdog and a reconnect**:
 
@@ -70,28 +70,31 @@ cache.
 | Handshake direction | Client → server only; server immediately sends the list | Bidirectional; both sides send 8 bytes, then the client must send a listing request |
 | Read strategy | Read the 14-byte response header | Read 6 bytes; if the version is `0x0003`, read 2 more for feature flags |
 | Listing request | None — the server sends as soon as the handshake is done | `request_type u16 = 0x0001` + `field_count u16` + N TLV query fields |
-| Response header | 14 bytes (`server_count` at offset 10) | 10 bytes: `response_type u16 = 0x0001`, `total_size u32`, `total_servers u16`, `record_count u16` |
-| Server record fixed header | 8 bytes: ipv4(4) + port(2) + nusers(2) + name_len(1) | Variable: `addr_type u8` + address + `port u16` + `nusers u16` + `name_len u16` + `desc_len u16` |
+| Response header | 14 bytes: the 6-byte magic echo, then the first batch's 8-byte header (`server_count` at offset 10) | 10 bytes: `response_type u16 = 0x0001`, `total_size u32`, `total_servers u16`, `record_count u16` |
+| Server record fixed header | 11 bytes: ipv4(4) + port(2) + nusers(2) + reserved(2) + name_len(1) | Variable: `addr_type u8` + address + `port u16` + `nusers u16` + `name_len u16` + `desc_len u16` |
 | Address types | IPv4 only | `0x04` IPv4 (4B), `0x06` IPv6 (16B), `0x48` hostname (2B length + UTF-8 bytes) |
 | String length prefix | 1 byte (Pascal string) | 2 bytes (`u16` big-endian) |
 | Per-record TLV trailer | None | `tlv_count u16` + N `{ID:u16, Len:u16, Value:Len bytes}` |
-| Padding slot convention | First-byte-zero entries are padding — skip without decrementing the count | Doesn't exist; `addr_type` is the discriminator |
+| Padding slot convention | First-byte-zero entries are the next batch's 8-byte header — skip without decrementing the count | Doesn't exist; `addr_type` is the discriminator |
 | String encoding | MacRoman in practice | UTF-8 mandatory |
 | Total response size cap | `u16` server count | `u32` total size + `u16` total servers (still 65535 servers max) |
-| Multi-message response | No | No — single response, but pagination lets the client re-request the next page |
+| Multi-message response | Yes — batches of about 8 KB, each after its own 8-byte header | No — single response, but pagination lets the client re-request the next page |
 | Transport | Plain TCP/5498 | TLS on TCP/5498 SHOULD; plain TCP MAY be accepted for v1/v2 backcompat |
 
 ### v1 record layout
 
 ```text
   14-byte response header
-    [0..9]   opaque (msg type + protocol ver + msg-id)
-    [10..11] u16 BE — number of server records to follow
-    [12..13] opaque
+    [0..5]   magic echo, "HTRK\0\1"
+    [6..7]   u16 BE — message type, 1           ┐
+    [8..9]   u16 BE — bytes in this batch after │ the first batch's
+                      these four                │ 8-byte header
+    [10..11] u16 BE — total server records      │
+    [12..13] u16 BE — records in this batch     ┘
 
   Per server record (variable length):
     [0..3]   u32 BE — IPv4 address (network byte order; a zero first
-                      octet marks a padding/empty slot, NOT a record)
+                      octet marks the next batch's header, NOT a record)
     [4..5]   u16 BE — TCP port
     [6..7]   u16 BE — users currently on this server
     [8..9]   reserved
@@ -101,9 +104,15 @@ cache.
     [12+N..]         — description (CR / ANSI possible; normalise)
 ```
 
-Padding slots do not count against `nservers`, which means a buggy or
-hostile tracker dribbling zero-prefixed slots forever would hang the
-reader; the client caps the number of padding slots it will skip.
+A tracker sends the list in batches, about 8 KB each for the mhxd
+family and 30 000 bytes for hltracker.com, and a record never straddles
+two. Every batch after the first starts with another 8-byte header that
+repeats the total. The header's first byte is zero, which no IPv4
+record's is, so the reader skips these "padding slots" without counting
+them against `nservers`. The tracker doesn't close the connection after
+the list; the count is the only way to find the end. A buggy or hostile
+tracker dribbling zero-prefixed slots forever would hang the reader, so
+the client caps the number it will skip.
 
 ### v3 record layout
 
