@@ -28,7 +28,7 @@ any new harness.
 
 | Tier | What | Where | Status |
 |---|---|---|---|
-| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto` |
+| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
 | 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
@@ -40,6 +40,9 @@ cd rust
 cargo bench -p hxchat-layout          # layout engine
 cargo bench -p hxcrypto               # ciphers and hashes
 cargo bench -p hxcrypto -- aead       # one group
+cargo bench -p hxtext                 # Mac Roman, the wire encode, shortcodes
+cargo bench -p hxmodel                # member list, nick completion, file list
+cargo bench -p hxmacres               # icons.rsrc: open, look up, decode
 cargo bench -p hxcrypto -- --warm-up-time 1 --measurement-time 3   # quicker
 ```
 
@@ -55,10 +58,8 @@ Still to add:
   of common transactions, a large user-list reply, a 10k-entry file list, a
   news listing.
 - `hxcrypto` compression, once it is negotiated.
-- `hxtext` Mac Roman ↔ UTF-8 on long lines; `:shortcode:` lookup.
-- `hxfiles-xfer`, `hxhfs`, `hxmacres`, `hx-image-decode`: the fork-header
-  codec, sidecar reads, cicn and PICT decode, per-frame GIF decode.
-- `hxmodel`: member-list upsert on a large login, nick completion.
+- `hxfiles-xfer`, `hxhfs` (in hx-libs), `hx-image-decode`: the
+  fork-header codec, sidecar reads, PICT decode, per-frame GIF decode.
 - The tracker codec, once it moves to hx-libs.
 
 ### Tier 2 — loopback
@@ -185,6 +186,73 @@ The instrument check passes: Blowfish OFB-64 runs at the raw block cipher's
 rate, so the per-byte XOR loop costs nothing measurable and Blowfish itself
 is the ceiling — far above any Hotline link.
 
+### `hxtext`
+
+**2026-09-27**, as are the `hxmodel` and `hxmacres` tables below; same
+machine and settings. Measured through the entry points GtkHx calls, so the numbers include
+hxproto's primitives underneath and the `g_malloc` copy the C ABI hands
+back.
+
+| Benchmark | 80 B | 4 KiB | 64 KiB |
+|---|---|---|---|
+| `to_utf8`, already UTF-8 | 39 ns | 1.69 µs | 27.6 µs |
+| `to_utf8/validate_copy` (the check) | 39 ns | 1.68 µs | 30.7 µs |
+| `to_utf8`, Mac Roman | 276 ns | 11.4 µs | 182 µs |
+| `for_wire`, UTF-8 negotiated | 12 ns | 53 ns | 928 ns |
+| `for_wire`, Mac Roman, accented text | 7.45 µs | 406 µs | 6.45 ms |
+| `for_wire`, Mac Roman, emoji text | 3.16 µs | 173 µs | 2.84 ms |
+
+| Benchmark | Time |
+|---|---|
+| `shortcodes/to_emoji`, a line with four shortcodes | 646 ns |
+| `shortcode_matches`, prefix `s` / `smi` / `thumbsup` | 30 µs / 14 µs / 12 µs |
+
+The instrument check passes: the UTF-8 fast path runs at the rate of
+`str::from_utf8` and a copy. Decoding Mac Roman runs at about 340 MiB/s.
+Encoding to it is finding 10.
+
+### `hxmodel`
+
+Members are `user00001` upwards; the file list is one folder in ten and
+Mac Roman names, so every name takes the decode path.
+
+| Benchmark | 100 | 1,000 | 5,000 |
+|---|---|---|---|
+| `member_login` (all) | 36 µs | 353 µs | 1.73 ms |
+| `member_change` (all, in place) | 13 µs | 131 µs | 688 µs |
+| `member_leave` (the first) | 1.5 µs | 11.7 µs | 63 µs |
+| `nick_complete`, one match, C ABI | 11.5 µs | 107 µs | 527 µs |
+| `nick_complete`, one match, `MemberList` | 3.1 µs | 28 µs | 141 µs |
+| `nick_complete`, every member matches, C ABI | 48 µs | 2.96 ms | **62.8 ms** |
+| `nick_complete`, every member matches, `MemberList` | 39 µs | 2.90 ms | **62.4 ms** |
+
+| Benchmark | 1,000 | 10,000 |
+|---|---|---|
+| `files_populate` | 574 µs | 5.49 ms |
+
+Login, change and leave are what they should be: flat per member for the
+first two, O(n) for a leave, which re-indexes the members behind it, and
+none of them large. The one-match completion is O(n) as expected, the
+C ABI's extra three-to-four times being its walk of the GObject model and
+a copy of every name per Tab. The every-member case is finding 9.
+`files_populate` is finding 11.
+
+### `hxmacres`
+
+Against the `icons.rsrc` GtkHx ships (613 `cicn`s).
+
+| Benchmark | Time |
+|---|---|
+| `parse`, the whole file | 7.7 µs |
+| `lookup`, `nth_res_of_type(0)` / first id / last id | 3.4 ns / 3.6 ns / 346 ns |
+| `decode`, icon 135 (`DEFAULT_ICON`) | 1.25 µs |
+| `decode`, every icon | 1.15 ms — 1.9 µs each |
+
+The instrument check passes: looking up the first id costs what the
+direct index does. `load_icon` does a lookup and a decode on every call
+with no cache, but at under 2.5 µs for both, a 1,000-user login spends a
+few milliseconds on icons. Not worth a cache yet.
+
 ### UI scenarios
 
 **2026-09-26**, same machine, under `tools/isolated-run.sh` (Xvfb, software
@@ -236,10 +304,20 @@ against `main` measured alongside:
 The keys are built on first sort, so the populate — which sorts — would
 show any cost; it is within the noise.
 
+After building the rename editor only for a rename (finding 11),
+**2026-09-27**, same setup, median of five. Measured before finding 8's fix,
+so both columns include the slower name sort:
+
+| Files panel, 10,000 entries | Before | After |
+|---|---|---|
+| remote populate (UI frozen) | 176 ms | 44 ms |
+| remote populate + paint | 221 ms | 70 ms |
+| local listing (UI frozen) | 244 ms | 80 ms |
+
 ## Findings
 
-What the measurements have turned up. Findings 1, 2, 6 and 8 are fixed; the
-rest are leads. Findings 6 onwards are from the UI scenarios.
+What the measurements have turned up. Findings 1, 2, 6, 8, 9, 10 and 11
+are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -302,3 +380,31 @@ rest are leads. Findings 6 onwards are from the UI scenarios.
    `g_utf8_collate_key` on first use and keeps it, and the sort compares
    keys bytewise — the same order. Sorting by name is down to 12 ms, level
    with size; the Kind column got the same treatment.
+9. **Nick completion is quadratic in the number of matches.** When the
+   prefix is ambiguous, `complete_styled` (`hxmodel::chat`) drops
+   case-insensitive duplicates by checking each match against every match
+   kept so far. With every member matching, one Tab takes 48 µs at 100
+   members, 2.9 ms at 1,000 and 63 ms at 5,000. A one-letter prefix on a
+   large server is the case that hits it. **Fixed:** the names arrive
+   sorted case-insensitively, so duplicates are adjacent and comparing with
+   the last match kept is enough. The every-member case is now 14 µs,
+   132 µs and 651 µs, linear in the matches like the rest.
+10. **Encoding to Mac Roman ran at 10 MiB/s**, about a microsecond for each
+    non-ASCII character: 7.5 µs for an 80-byte line of accented text, 6.3 ms
+    for 64 KiB. Emoji text was faster only because it has fewer non-ASCII
+    characters per byte. For each one, `emoji_to_shortcodes` (hxproto, in
+    hx-libs) tried all ten cluster lengths against the emoji table, each an
+    exact binary search. The Mac Roman table's linear search was the other
+    suspect, but replacing it moved nothing. **Fixed** in hx-libs: the
+    search grows the candidate a character at a time and stops once no
+    emoji starts with it, which finds the same longest match. The 80-byte
+    line takes 1.3 µs and 64 KiB 0.95 ms, about 65 MiB/s.
+11. **Every Files row built a text editor.** `files_populate` builds
+    10,000 entries in 5.5 ms, yet the UI scenario's remote populate froze
+    the UI for about 170 ms. Detaching the models one at a time put the rest
+    on the column view: taking the new rows, it builds a couple of hundred
+    at once — 205 here — and each Name cell was a `GtkEditableLabel`, which
+    carries a whole text editor with its input method, shortcuts, context
+    menu and styling. Those rows took 99 of the 141 ms. **Fixed:** the cell
+    is a plain label, and the editor is built when a rename opens and
+    removed when it closes.

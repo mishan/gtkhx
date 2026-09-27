@@ -11,6 +11,9 @@ publish = false
 # rlib only. The C ABI symbols this crate exports reach the C link
 # through the workspace's single staticlib, gtkhx-ffi.
 crate-type = ["rlib"]
+# The benches are criterion targets; without this, `cargo bench` also runs
+# the lib under libtest, which rejects criterion's flags.
+bench = false
 
 # The union of what the five merged crates needed. glib/gio are for the
 # GObject + ListModel modules (member, news::node, files_entry); the chat and
@@ -20,3 +23,10 @@ gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }
 gio = { workspace = true }
 hxproto = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "model"
+harness = false

@@ -60,19 +60,30 @@ fn item_of(w: &impl IsA<glib::Object>) -> Option<gtk::ListItem> {
     }
 }
 
-/// The name a label showed before editing, which a commit renames from.
-fn set_old_name(label: &gtk::EditableLabel, name: Option<String>) {
+/// The name a row shows, which a rename renames from; `None` while the row
+/// is bound to nothing.
+fn set_old_name(label: &gtk::Label, name: Option<String>) {
     // SAFETY: this key only ever holds an Option<String>.
     unsafe { label.set_data(OLD_NAME_KEY, name) };
 }
 
-fn old_name(label: &gtk::EditableLabel) -> Option<String> {
+fn old_name(label: &gtk::Label) -> Option<String> {
     // SAFETY: as set_old_name.
     unsafe {
         label
             .data::<Option<String>>(OLD_NAME_KEY)
             .and_then(|p| p.as_ref().clone())
     }
+}
+
+/// A Name cell's label: the second child of the row, after the icon.
+fn name_label(row: &gtk::Widget) -> Option<gtk::Label> {
+    row.first_child()?.next_sibling().and_downcast()
+}
+
+/// A Name cell's rename editor, present only while a rename is open.
+fn name_editor(row: &gtk::Widget) -> Option<gtk::EditableLabel> {
+    row.last_child().and_downcast()
 }
 
 /// Join a name onto a folder path. Both sides use `/`.
@@ -85,11 +96,12 @@ pub fn join(dir: &str, name: &str) -> String {
     }
 }
 
-/// An inline rename waiting out its pause: the label to edit and the name it
-/// showed when armed, in case the row was reused for another entry meanwhile.
+/// An inline rename waiting out its pause: the Name cell to edit and the
+/// name it showed when armed, in case the row was reused for another entry
+/// meanwhile.
 struct PendingRename {
     source: glib::SourceId,
-    label: gtk::EditableLabel,
+    row: gtk::Widget,
     name: String,
 }
 
@@ -118,7 +130,7 @@ pub struct Panel {
     complete: RefCell<Option<PathComplete>>,
 
     pending_rename: RefCell<Option<PendingRename>>,
-    /// The label in edit mode, so a click elsewhere can stop it.
+    /// The open rename editor, so a click elsewhere can stop it.
     editing: RefCell<Option<glib::WeakRef<gtk::EditableLabel>>>,
     /// The row and time of the last primary click, for the rename gesture.
     last_click: Cell<(Option<u32>, i64)>,
@@ -315,14 +327,19 @@ impl Panel {
         col
     }
 
-    /// The Name column: icon plus an editable label that renames in place.
+    /// The Name column: icon plus a label, which a rename swaps for an editor
+    /// in place.
     ///
-    /// The label is neither editable nor a pointer target until a rename
-    /// starts. GtkEditableLabel would otherwise start editing on its own click,
-    /// and its inner label takes presses for text selection, which keeps them
-    /// from the row's selection, double-click and drag. The rename gesture sits
-    /// on the row box instead, in the capture phase so it sees the click before
-    /// the column view claims it, and never claims it.
+    /// The editor exists only while a rename is open. A GtkEditableLabel in
+    /// every row carries a whole text editor — input method, shortcuts,
+    /// context menu, styling — and the column view builds a couple of hundred
+    /// rows at once whenever a folder is listed: that was most of the time a
+    /// 10,000-entry listing froze the UI for (docs/performance.md).
+    ///
+    /// The plain label takes no presses, so the row's selection, double-click
+    /// and drag work as in any other cell. The rename gesture sits on the row
+    /// box, in the capture phase so it sees the click before the column view
+    /// claims it, and never claims it.
     fn name_factory(self: &Rc<Self>) -> gtk::SignalListItemFactory {
         let factory = gtk::SignalListItemFactory::new();
         let weak = Rc::downgrade(self);
@@ -333,25 +350,15 @@ impl Panel {
             // rows stay dense.
             let icon = gtk::Image::new();
             icon.set_pixel_size(16);
-            let label = gtk::EditableLabel::new("");
-            label.set_editable(false);
+            let label = gtk::Label::new(None);
+            label.set_xalign(0.0);
             label.set_can_target(false);
-            // Nor a focus stop: keyboard focus belongs to the row, and a
-            // label that could take it drew a focus box after every rename.
-            label.set_focusable(false);
             label.set_hexpand(true);
             label.set_halign(gtk::Align::Start);
             label.set_valign(gtk::Align::Center);
             row.append(&icon);
             row.append(&label);
             item.set_child(Some(&row));
-
-            let w = weak.clone();
-            label.connect_editing_notify(move |label| {
-                if let Some(p) = w.upgrade() {
-                    p.on_editing_changed(label);
-                }
-            });
 
             let click = gtk::GestureClick::new();
             click.set_button(gdk::BUTTON_PRIMARY);
@@ -371,9 +378,14 @@ impl Panel {
                 return;
             };
             set_item(&row, item);
+            // A rebind mid-rename would commit whatever was typed against the
+            // new entry; drop the edit first.
+            if let Some(editor) = name_editor(&row) {
+                editor.stop_editing(false);
+            }
             let (Some(icon), Some(label)) = (
                 row.first_child().and_downcast::<gtk::Image>(),
-                row.last_child().and_downcast::<gtk::EditableLabel>(),
+                name_label(&row),
             ) else {
                 return;
             };
@@ -385,11 +397,6 @@ impl Panel {
             };
             if let Some(p) = weak.upgrade() {
                 p.set_row_icon(&icon, e.icon_id());
-            }
-            // A rebind mid-edit would commit whatever was typed against the
-            // new entry; drop the edit first.
-            if label.is_editing() {
-                label.stop_editing(false);
             }
             let name = e.name();
             label.set_text(&name);
@@ -672,9 +679,9 @@ impl Panel {
             self.selection.select_item(pos, true);
         }
 
-        let label = row.last_child().and_downcast::<gtk::EditableLabel>();
+        let editor = name_editor(&row);
         let editing = self.editing.borrow().as_ref().and_then(|w| w.upgrade());
-        if editing.is_some() && editing != label {
+        if editing.is_some() && editing != editor {
             self.stop_inline_edit();
         }
 
@@ -682,11 +689,8 @@ impl Panel {
             self.cancel_rename();
             return;
         };
-        let Some(label) = label else {
-            return;
-        };
         // A click inside the open editor places the cursor.
-        if label.is_editing() {
+        if editor.is_some() {
             self.cancel_rename();
             return;
         }
@@ -708,78 +712,114 @@ impl Panel {
         });
         *self.pending_rename.borrow_mut() = Some(PendingRename {
             source,
-            label,
+            row,
             name: e.name(),
         });
     }
 
-    fn fire_rename(&self) {
+    fn fire_rename(self: &Rc<Self>) {
         // The source has fired, so it isn't removed.
-        let Some(PendingRename { label, name, .. }) = self.pending_rename.take() else {
+        let Some(PendingRename { row, name, .. }) = self.pending_rename.take() else {
+            return;
+        };
+        self.begin_rename(&row, &name);
+    }
+
+    /// Open the rename editor on a Name cell, if it still shows `name`.
+    fn begin_rename(self: &Rc<Self>, row: &gtk::Widget, name: &str) {
+        let (Some(row_box), Some(label)) = (row.downcast_ref::<gtk::Box>(), name_label(row)) else {
             return;
         };
         // The row may have been reused for another entry since.
-        if old_name(&label).as_deref() != Some(name.as_str()) || label.is_editing() {
+        if old_name(&label).as_deref() != Some(name) || name_editor(row).is_some() {
             return;
         }
-        // Editable and a pointer target while editing, so the entry takes
-        // clicks for the cursor; the end of the edit turns both back off.
-        label.set_editable(true);
-        label.set_can_target(true);
-        label.start_editing();
+        let editor = gtk::EditableLabel::new(name);
+        // Nor a focus stop of its own: keyboard focus goes back to the row
+        // when the edit ends, and a label that could take it drew a focus
+        // box after every rename.
+        editor.set_focusable(false);
+        editor.set_hexpand(true);
+        editor.set_halign(gtk::Align::Start);
+        editor.set_valign(gtk::Align::Center);
+        let weak = Rc::downgrade(self);
+        editor.connect_editing_notify(move |editor| {
+            if let Some(p) = weak.upgrade() {
+                p.on_editing_changed(editor);
+            }
+        });
+        label.set_visible(false);
+        row_box.append(&editor);
+        editor.start_editing();
         // Select the whole name so typing replaces it. Not right away: the
         // editor's text takes focus after this, and taking focus puts the
         // cursor at the end.
-        glib::idle_add_local_once(move || label.select_region(0, -1));
+        glib::idle_add_local_once(move || editor.select_region(0, -1));
     }
 
     /// Leave an edit without renaming. The stop comes before moving focus:
     /// losing focus first sends GtkEditableLabel down its own commit path,
     /// which can leave the editor showing.
     fn stop_inline_edit(&self) {
-        let Some(label) = self.editing.take().and_then(|w| w.upgrade()) else {
+        let Some(editor) = self.editing.take().and_then(|w| w.upgrade()) else {
             return;
         };
-        label.stop_editing(false);
+        editor.stop_editing(false);
         self.column_view.grab_focus();
-        label.set_editable(false);
-        label.set_can_target(false);
     }
 
-    fn on_editing_changed(&self, label: &gtk::EditableLabel) {
-        if label.is_editing() {
-            *self.editing.borrow_mut() = Some(label.downgrade());
-            label.select_region(0, -1);
+    /// The editor opening or closing. Closing puts the label back and removes
+    /// the editor, then renames if the name changed.
+    fn on_editing_changed(&self, editor: &gtk::EditableLabel) {
+        if editor.is_editing() {
+            *self.editing.borrow_mut() = Some(editor.downgrade());
+            editor.select_region(0, -1);
             return;
         }
-        label.set_editable(false);
-        label.set_can_target(false);
         let was_this = self
             .editing
             .borrow()
             .as_ref()
             .and_then(|w| w.upgrade())
-            .is_some_and(|l| &l == label);
+            .is_some_and(|e| &e == editor);
         if was_this {
             self.editing.replace(None);
         }
 
-        let Some(old) = old_name(label) else {
+        let Some(row) = editor.parent() else {
             return;
         };
-        let new = label.text();
+        let Some(label) = name_label(&row) else {
+            return;
+        };
+        let new = editor.text();
+        // Removing the editor while it holds focus would leave focus nowhere;
+        // hand it to the listing, as a click there would. After a commit by
+        // clicking away, focus has already gone where the click went.
+        if editor.state_flags().contains(gtk::StateFlags::FOCUS_WITHIN) {
+            self.column_view.grab_focus();
+        }
+        if let Some(row_box) = row.downcast_ref::<gtk::Box>() {
+            row_box.remove(editor);
+        }
+        label.set_visible(true);
+
+        let Some(old) = old_name(&label) else {
+            return;
+        };
         if new.is_empty() || new == old {
-            label.set_text(&old);
             return;
         }
         let Some(prov) = self.provider() else {
             return;
         };
         match prov.rename(&old, &new) {
-            Ok(()) => set_old_name(label, Some(new.into())),
+            Ok(()) => {
+                label.set_text(&new);
+                set_old_name(&label, Some(new.into()));
+            }
             Err(e) => {
                 glib::g_warning!("gtkhx", "files: inline rename {old} -> {new} failed: {e}");
-                label.set_text(&old);
             }
         }
     }

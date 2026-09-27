@@ -2155,7 +2155,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=fce3ad8234ce9708b645d5e42dd68edfc140114e#fce3ad8234ce9708b645d5e42dd68edfc140114e"
+source = "git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143#ba28f6481bf44b197b3b9312e36a243dd3893143"
 dependencies = [
  "sha2",
 ]
@@ -2178,12 +2178,13 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=fce3ad8234ce9708b645d5e42dd68edfc140114e#fce3ad8234ce9708b645d5e42dd68edfc140114e"
+source = "git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143#ba28f6481bf44b197b3b9312e36a243dd3893143"
 
 [[package]]
 name = "hxmacres"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "glib 0.21.5",
 ]
 
@@ -2191,6 +2192,7 @@ dependencies = [
 name = "hxmodel"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "gio 0.21.5",
  "glib 0.21.5",
  "gtkhx-core",
@@ -2225,7 +2227,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=fce3ad8234ce9708b645d5e42dd68edfc140114e#fce3ad8234ce9708b645d5e42dd68edfc140114e"
+source = "git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143#ba28f6481bf44b197b3b9312e36a243dd3893143"
 
 [[package]]
 name = "hxrequest"
@@ -2258,6 +2260,7 @@ dependencies = [
 name = "hxtext"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "glib 0.21.5",
  "hxproto",
 ]
