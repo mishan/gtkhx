@@ -43,7 +43,7 @@ pub const ID_VIDEO: &str = "video";
 /// switch has to swap.
 ///
 /// Files is absent because it is not a panel: each connection's browser is a
-/// window of its own (see `files.rs`), closed with the rest of the
+/// window of its own (see `files/mod.rs`), closed with the rest of the
 /// connection's content in [`gtkhx_dock_remove_session_pages`].
 ///
 /// Tasks is deliberately absent: the transfer queue is one list for the whole

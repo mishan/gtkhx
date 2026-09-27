@@ -1,10 +1,8 @@
 //! The Files scenario: populate, sort and scroll a large listing in the
-//! real `files_panel`, in a window of its own.
+//! real files panel (`files::panel`), in a window of its own.
 //!
 //! It drives the same panel the browser builds — column view, sorters,
-//! status footer, per-row bindings — without needing a connection. The
-//! panel is the next thing on the port list, so this is also the baseline
-//! a Rust version will be held to.
+//! status footer, per-row bindings — without needing a connection.
 //!
 //! Two populate paths, because they are different code:
 //!
@@ -25,41 +23,24 @@
 //! with either check failed says so, because its timings would then be
 //! timing something other than what they are labeled.
 
-use std::ffi::{c_char, c_void};
 use std::path::{Path, PathBuf};
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use glib::translate::{from_glib_full, from_glib_none};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
-use hxmodel::files_entry::{
-    gtkhx_files_populate_from_reply, hx_file_entry_get_size, hx_file_entry_is_dir,
-};
+use hxmodel::files_entry::{gtkhx_files_populate_from_reply, HxFileEntry};
+
+use crate::files::panel::Panel;
+use crate::files::provider::Provider;
 
 use super::{after_paint, next_frame, warm_up, Report, Stats};
 
-extern "C" {
-    fn hx_local_files_provider_new(initial_path: *const c_char) -> *mut c_void;
-    fn hx_files_provider_get_listing(provider: *mut c_void) -> *mut gtk::gio::ffi::GListModel;
-    fn hx_files_provider_navigate(provider: *mut c_void, path: *const c_char);
-    fn files_panel_new(
-        provider: *mut c_void,
-        swap_cb: Option<
-            unsafe extern "C" fn(panel: *mut c_void, want_local: glib::ffi::gboolean, *mut c_void),
-        >,
-        user_data: *mut c_void,
-    ) -> *mut c_void;
-    fn files_panel_get_widget(panel: *mut c_void) -> *mut gtk::ffi::GtkWidget;
-    fn files_panel_get_column_view(panel: *mut c_void) -> *mut gtk::ffi::GtkWidget;
-    fn files_panel_free(panel: *mut c_void);
-}
-
 /// Frames sampled while scrolling.
 const SCROLL_FRAMES: usize = 120;
-/// Column positions, in the order `files_panel.c` adds them.
+/// Column positions, in the order the panel adds them.
 const COL_NAME: u32 = 0;
 const COL_SIZE: u32 = 1;
 
@@ -116,10 +97,6 @@ fn fill_dir(dir: &Path, n: u32) -> std::io::Result<()> {
     Ok(())
 }
 
-fn cstr(p: &Path) -> std::ffi::CString {
-    std::ffi::CString::new(p.to_string_lossy().as_bytes()).unwrap_or_default()
-}
-
 /// Whether the rows, in display order, are sorted by size in `order`
 /// within each kind (the panel keeps folders and files apart).
 fn sorted_by_size(cv: &gtk::ColumnView, order: gtk::SortType) -> bool {
@@ -128,11 +105,10 @@ fn sorted_by_size(cv: &gtk::ColumnView, order: gtk::SortType) -> bool {
     };
     let mut prev: Option<(bool, u64)> = None;
     for i in 0..model.n_items() {
-        let Some(item) = model.item(i) else {
+        let Some(e) = model.item(i).and_downcast::<HxFileEntry>() else {
             return false;
         };
-        let p = item.as_ptr() as *mut c_void;
-        let row = unsafe { (hx_file_entry_is_dir(p) != 0, hx_file_entry_get_size(p)) };
+        let row = (e.is_dir(), e.size());
         if let Some((dir, size)) = prev {
             let in_order = match order {
                 gtk::SortType::Descending => size >= row.1,
@@ -181,31 +157,14 @@ pub(super) async fn run(n: u32) {
 async fn measure(n: u32, empty: &Path, full: &Path) {
     // The panel starts on an empty local directory, so its own initial
     // reload leaves an empty store for the remote-shaped populate to fill.
-    let (provider, win, cv) = unsafe {
-        let raw = hx_local_files_provider_new(cstr(empty).as_ptr());
-        // Keep our own reference for the whole run. The panel holds one
-        // too, but drops it in files_panel_free, which runs when the
-        // panel's widgets are disposed — not something to rely on while
-        // this code still calls into the provider.
-        let provider: glib::Object = from_glib_full(raw as *mut glib::gobject_ffi::GObject);
-        let panel = files_panel_new(raw, None, std::ptr::null_mut());
-        let widget: gtk::Widget = from_glib_none(files_panel_get_widget(panel));
-        let cv: gtk::Widget = from_glib_none(files_panel_get_column_view(panel));
-        let cv = cv
-            .downcast::<gtk::ColumnView>()
-            .expect("files_panel_get_column_view returns a GtkColumnView");
-        let win = gtk::Window::new();
-        win.set_title(Some("GtkHx benchmark: Files"));
-        win.set_default_size(1000, 640);
-        win.set_child(Some(&widget));
-        // Free the panel as its tree comes down, the way the browser does,
-        // so no binding outlives the struct it reads.
-        let p = panel as usize;
-        widget.connect_destroy(move |_| files_panel_free(p as *mut c_void));
-        win.present();
-        (provider, win, cv)
-    };
-    let prov = provider.as_ptr() as *mut c_void;
+    let provider = Provider::local_at(&empty.to_string_lossy());
+    let panel = Panel::new(&provider, false);
+    let cv = panel.column_view().clone();
+    let win = gtk::Window::new();
+    win.set_title(Some("GtkHx benchmark: Files"));
+    win.set_default_size(1000, 640);
+    win.set_child(Some(panel.widget()));
+    win.present();
     let closed = Rc::new(Cell::new(false));
     // close-request, not destroy: this function holds the window, so it
     // is never disposed while we run and "destroy" would not fire.
@@ -234,8 +193,7 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
 
     // ---- remote-shaped populate -----------------------------------------
     let reply = file_list_reply(n);
-    let listing: gtk::gio::ListModel =
-        unsafe { from_glib_none(hx_files_provider_get_listing(prov)) };
+    let listing = provider.listing();
     let t = glib::monotonic_time();
     unsafe {
         let store = listing.as_ptr() as *mut gtk::gio::ffi::GListStore;
@@ -301,7 +259,7 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
 
     // ---- local listing --------------------------------------------------
     let t = glib::monotonic_time();
-    unsafe { hx_files_provider_navigate(prov, cstr(full).as_ptr()) };
+    provider.navigate(&full.to_string_lossy());
     let list = glib::monotonic_time() - t;
     let t = glib::monotonic_time();
     let first_paint = after_paint(&cv).await - t;
@@ -318,12 +276,9 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
     }
 
     r.print();
-    // Let go of every widget and model reference before the window comes
-    // down, so nothing we hold outlives files_panel_free; the provider,
-    // which the panel no longer needs, goes last.
     drop((adj, listing, cv));
+    panel.teardown();
     win.destroy();
-    drop(provider);
 }
 
 #[cfg(test)]

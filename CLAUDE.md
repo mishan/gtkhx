@@ -76,7 +76,7 @@ looking for code in the wrong place.
 | **Dock / layout** | `hx_panel.c`, `hx_panel_frame.c`, `hx_split.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `dock_bridge.c`, `toolbar.c` |
 | **Settings** | `options.c` (change hooks, identity resolution, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `prefs_parser.c`, `icon_enum.c` (icon IDs for the Rust picker) |
 | **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c` |
-| **Files** | `files_browser.c`, `files_panel.c`, `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_complete.c`, `files_ops.c`, `files_entry.c` |
+| **Files** | `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_ops.c` (the providers; the browser itself is `gtkhx-ui`'s `files` module) |
 | **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the frame-dispatch switch, the transaction correlator), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
 | **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (user editor wire senders), `tasks.c` |

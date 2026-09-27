@@ -135,10 +135,9 @@ pub mod chat_invite;
 // the C create_msg model/leaf widgets. The msgwin struct + chat_tabs + wire
 // senders stay C.
 pub mod msg;
-// the Files browser window shell (two-panel browser, CENTER). Dock
-// registration via dock_bridge; the browser content + DnD + providers +
-// transfer integration stay C in files_browser.c. open_files_browser is this
-// module's #[no_mangle] export.
+// the Files browser: its window, both panels and every operation between
+// them. The providers underneath stay C (files_*_provider.c, files_ops.c).
+// open_files_browser is this module's #[no_mangle] export.
 pub mod files;
 // In-app frame-clock benchmarks, armed by GTKHX_BENCH. See bench/mod.rs.
 mod bench;

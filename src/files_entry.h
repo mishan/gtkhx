@@ -48,16 +48,6 @@ extern gint64 hx_file_entry_get_modified (HxFileEntry *e);
 extern const char *hx_file_entry_get_kind (HxFileEntry *e);
 extern guint16 hx_file_entry_get_icon_id (HxFileEntry *e);
 
-/* Formatters used by the panel's column bind callbacks. Each
- * returns a fresh g_malloc'd string (caller frees).
- *
- *   size_text:   "—" for folders, "12.4 MB" for files
- *   modified_text: localized "Tue 14:32" / "Mar 5" / "2024-08-12"
- *                  depending on age, or "" when modified == 0
- */
-extern char *hx_file_entry_format_size (HxFileEntry *e);
-extern char *hx_file_entry_format_modified (HxFileEntry *e);
-
 G_END_DECLS
 
 #endif /* HX_FILES_ENTRY_H */

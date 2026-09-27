@@ -1,22 +1,17 @@
 //! `HxFileEntry` — one row in the files browser model, as a Rust
 //! glib::subclass GObject.
 //!
-//! This is the model half of the C `src/files_entry.c`: an immutable
-//! value object carrying a file/folder's display name, kind label, size,
-//! modified time, dir flag, and icon id, held in a `GListStore` that
-//! `GtkColumnView` consumes. Both providers (local GIO + remote Hotline)
+//! An immutable value object carrying a file or folder's display name, kind
+//! label, size, modified time, dir flag, and icon id, held in a `GListStore`
+//! that `GtkColumnView` consumes. Both providers (local GIO + remote Hotline)
 //! build these rows; the panel widget reads them through the accessors
 //! and doesn't care which side produced them.
 //!
-//! The crate exports the exact `hx_file_entry_*` C ABI the old
-//! `G_DEFINE_FINAL_TYPE` in `files_entry.c` provided —
-//! `hx_file_entry_get_type` (the `G_DECLARE_FINAL_TYPE` accessor in
-//! `files_entry.h`), `hx_file_entry_new`, and the six field getters — so
-//! every C consumer compiles and links unchanged. Only the two
-//! presentation *formatters* (`hx_file_entry_format_size` /
-//! `_format_modified`) stay in C: they're thin `g_format_size_full` /
-//! `g_dngettext` / `GDateTime` i18n wrappers whose whole value is GLib's
-//! locale handling, and they read only through the public accessors.
+//! The crate exports the `hx_file_entry_*` C ABI `files_entry.h` declares —
+//! `hx_file_entry_get_type`, `hx_file_entry_new`, and the six field getters —
+//! for the C providers. The Rust view reads it
+//! through the methods on [`HxFileEntry`]; what a row shows is formatted in
+//! `gtkhx-ui`'s `files::row`.
 //!
 //! The entry is immutable once constructed, so the fields need only
 //! construction-time writes; there is no signal surface.
@@ -122,6 +117,46 @@ impl HxFileEntry {
             ICON_FILE
         });
         obj
+    }
+
+    /// The display name (UTF-8).
+    pub fn name(&self) -> String {
+        self.imp().name.borrow().to_string_lossy().into_owned()
+    }
+
+    /// The display name as the C string it's stored as, for comparing
+    /// without a copy.
+    pub fn name_c(&self) -> std::cell::Ref<'_, CString> {
+        self.imp().name.borrow()
+    }
+
+    /// The kind, as [`HxFileEntry::name_c`].
+    pub fn kind_c(&self) -> std::cell::Ref<'_, CString> {
+        self.imp().kind.borrow()
+    }
+
+    /// The short kind description ("Folder", "MP3 Audio"), empty if unknown.
+    pub fn kind(&self) -> String {
+        self.imp().kind.borrow().to_string_lossy().into_owned()
+    }
+
+    pub fn is_dir(&self) -> bool {
+        self.imp().is_dir.get()
+    }
+
+    /// Bytes for a file; for a folder, the child count when the server sent one.
+    pub fn size(&self) -> u64 {
+        self.imp().size.get()
+    }
+
+    /// Unix seconds, or 0 when unknown.
+    pub fn modified(&self) -> i64 {
+        self.imp().modified.get()
+    }
+
+    /// The Mac cicn icon ID, already defaulted to the generic file or folder.
+    pub fn icon_id(&self) -> u16 {
+        self.imp().icon_id.get()
     }
 }
 

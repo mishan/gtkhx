@@ -87,6 +87,7 @@ def parse_args(argv):
     p.add_argument("--size", default="1100x700", help="window size WxH (default: 1100x700)")
     p.add_argument("--nick", default="misha", help="the app's own nick (default: misha)")
     p.add_argument("--server", help="HOST[:PORT] to connect to on launch")
+    p.add_argument("--login", help="account to log in with (default: guest); no password")
     p.add_argument("--chat", action="store_true", help="fill the chat with scripted users (needs --server)")
     p.add_argument(
         "--chat-file",
@@ -110,7 +111,7 @@ def parse_args(argv):
         action="append",
         default=[],
         metavar="ACTION",
-        help="move:X,Y | click:X,Y | key:ctrl+comma | sleep:S | shot:PATH[@CROP] "
+        help="move:X,Y | click:X,Y | dclick:X,Y | rclick:X,Y | drag:X1,Y1,X2,Y2 | key:ctrl+comma | sleep:S | shot:PATH[@CROP] "
         "(repeatable, run in order; a shot's @CROP overrides --crop)",
     )
     p.add_argument(
@@ -351,12 +352,27 @@ class Pointer:
         self.xtest.fake_input(self.d, self.X.MotionNotify, x=x, y=y)
         self.d.sync()
 
-    def click(self, x, y):
+    def click(self, x, y, button=1, count=1):
         self.move(x, y)
+        time.sleep(0.2)
+        for _ in range(count):
+            self.xtest.fake_input(self.d, self.X.ButtonPress, button)
+            self.d.sync()
+            time.sleep(0.05)
+            self.xtest.fake_input(self.d, self.X.ButtonRelease, button)
+            self.d.sync()
+            time.sleep(0.05)
+
+    def drag(self, x1, y1, x2, y2):
+        self.move(x1, y1)
         time.sleep(0.2)
         self.xtest.fake_input(self.d, self.X.ButtonPress, 1)
         self.d.sync()
-        time.sleep(0.05)
+        steps = 20
+        for i in range(1, steps + 1):
+            time.sleep(0.03)
+            self.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+        time.sleep(0.3)
         self.xtest.fake_input(self.d, self.X.ButtonRelease, 1)
         self.d.sync()
 
@@ -409,13 +425,18 @@ def run_steps(args, app):
         elif verb == "shot":
             path, _, crop = arg.partition("@")
             shoot(path, args, crop or None)
-        elif verb in ("move", "click", "key"):
+        elif verb in ("move", "click", "dclick", "rclick", "drag", "key"):
             pointer = pointer or Pointer()
             if verb == "key":
                 pointer.key(arg)
+            elif verb == "drag":
+                pointer.drag(*(int(v) for v in arg.split(",")))
             else:
                 x, y = (int(v) for v in arg.split(","))
-                (pointer.move if verb == "move" else pointer.click)(x, y)
+                if verb == "move":
+                    pointer.move(x, y)
+                else:
+                    pointer.click(x, y, button=3 if verb == "rclick" else 1, count=2 if verb == "dclick" else 1)
         else:
             die(f"unknown step {step!r}")
     return True
@@ -443,6 +464,8 @@ def run_isolated(args):
     if args.server:
         host, _, port = args.server.partition(":")
         cmd += ["-s", host, "-t", port or "5500"]
+        if args.login:
+            cmd += ["-l", args.login]
 
     script = load_script(args) if args.chat else []
     chatters = start_chatters(args, script) if args.chat else {}
