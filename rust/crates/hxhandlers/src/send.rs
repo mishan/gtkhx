@@ -6,4 +6,5 @@
 
 pub mod chat;
 pub mod chat_history;
+pub mod files;
 pub mod news;

@@ -3,8 +3,7 @@
 GtkHx's file browser is an orthodox file manager: two panels side by side, one
 active at a time, operations routing between them. It replaced a single-pane
 window-per-directory browser and is the only files UI — the legacy path
-(`open_files`, the per-path list cache, the `file_samewin` preference) is gone,
-leaving `src/files.c` as wire senders plus the Get Info dialog plumbing.
+(`open_files`, the per-path list cache, the `file_samewin` preference) is gone.
 
 The implementation: `rust/crates/gtkhx-ui/src/files.rs` (the window),
 `src/files_browser.c` (the content: shared actions, transfer buttons, the row
@@ -12,7 +11,8 @@ menu, drag-and-drop, keyboard, active-panel state), `src/files_panel.c` (one
 panel — path row, `GtkColumnView`, status footer), `src/files_ops.c`
 (cross-panel copy / move orchestration), and the two providers,
 `src/files_local_provider.c` (GIO) and `src/files_remote_provider.c`
-(Hotline).
+(Hotline). The wire senders the browser calls are Rust,
+`hxhandlers::send::files`.
 
 ### A window, not a dock panel
 
@@ -71,7 +71,7 @@ behaviour is identical whether you pressed the key or clicked the icon.
 
 | Key | Alternate | Operation | On the remote side |
 |---|---|---|---|
-| F2 | — | Rename | `HTLC_HDR_FILE_MOVE` in place |
+| F2 | — | Rename | `HTLC_HDR_FILE_SETINFO` rename |
 | F3 | Ctrl+P | Preview | fetch + `preview.c` |
 | F4 | — | Open / activate | descend, or `xdg-open` locally |
 | F5 | — | Copy active → inactive | download, upload, or GIO copy |
@@ -179,7 +179,7 @@ tooltip.
 
 The opcodes the browser drives: `HTLC_HDR_FILE_LIST`, `HTLC_HDR_FILE_MKDIR`,
 `HTLC_HDR_FILE_DELETE`, `HTLC_HDR_FILE_GETINFO`, `HTLC_HDR_FILE_SETINFO`,
-`HTLC_HDR_FILE_MOVE`, `HTLC_HDR_FILE_SYMLINK`, plus the transfer requests for
+`HTLC_HDR_FILE_MOVE`, plus the transfer requests for
 files and, for recursive copies, `HTLC_HDR_FILE_GETFOLDER` and
 `HTLC_HDR_FILE_PUTFOLDER` — whose payloads stream over an HTXF subchannel with
 `HTXF_TYPE_FOLDER` framing rather than the plain file framing.

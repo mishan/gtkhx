@@ -2,7 +2,7 @@
  * human_readable / human_size — fileutils-vintage byte-count
  * formatter ("8.3k", "127M", "53G"). Extracted to its own
  * translation unit so the Tier 1 test can link it without dragging
- * in files.c's GTK + Adwaita pile.
+ * in GTK + Adwaita.
  *
  * Output buffers must be at least LONGEST_HUMAN_READABLE + 1 bytes;
  * the writer fills from the right and returns a pointer into the

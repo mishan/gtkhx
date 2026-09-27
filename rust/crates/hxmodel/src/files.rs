@@ -5,13 +5,14 @@
 //! Two pieces live here, both pure (no glib/gtk) so they carry real
 //! headless unit tests the display-less CI can run:
 //!
-//!  * the file-type → icon-id map and the FourCC → human-label table,
-//!    ported from `src/files.c` (`icon_id_for`, `kind_label_for`);
+//!  * the file-type → icon-id map and the FourCC → human-label table
+//!    (`icon_id_for`, `kind_label_for`);
 //!  * [`RemoteListing`], the remote provider's path-navigation model
 //!    (current path + listing-error flag + parent/child path math),
 //!    ported from `src/files_remote_provider.c`.
 //!
-//! The C side calls in through the `#[no_mangle]` surface in `ffi.rs`.
+//! The C remote provider reaches `RemoteListing` through the `#[no_mangle]`
+//! surface in `ffi.rs`.
 
 mod ffi;
 mod remote_listing;
@@ -41,7 +42,7 @@ pub mod icon {
 /// Pick a file-list icon id from a 4-byte Hotline file type (FourCC) and
 /// the entry name.
 ///
-/// Mirrors `icon_of_ftype_and_name` in `src/files.c` byte-for-byte:
+/// The rules:
 /// - `None`/short `ftype` → generic FILE.
 /// - `fldr` whose name contains "DROP BOX" or "UPLOAD" (ASCII
 ///   case-insensitive) → the upload-folder icon; otherwise a plain folder.
@@ -111,14 +112,12 @@ fn contains_ascii_ci(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
-/// Human label for a 4-byte Hotline file type (FourCC), ported from the
-/// table in `src/files.c::kind_of_ftype`.
+/// Human label for a 4-byte Hotline file type (FourCC).
 ///
 /// Returns a static, NUL-terminated English label for a known type, or
-/// `None` for an unknown/short/missing type. The C side wraps the result
-/// in `_()` for runtime translation and handles the unknown-FourCC
-/// fallback ("<XXXX> file") + the "Unknown" (null type) case itself, so
-/// this stays pure logic. The English strings match the old C table
+/// `None` for an unknown/short/missing type. The caller translates the
+/// result and formats the unknown-FourCC fallback ("<XXXX> file"), so this
+/// stays pure logic. The English strings match the old C table
 /// byte-for-byte so any existing translation catalog keys still resolve.
 pub fn kind_label_for(ftype: Option<&[u8]>) -> Option<&'static core::ffi::CStr> {
     let f = match ftype {
@@ -162,7 +161,7 @@ pub fn kind_label_for(ftype: Option<&[u8]>) -> Option<&'static core::ffi::CStr> 
 /// Byte offset within `bytes` at which the last path component starts, where
 /// components are separated by `sep`. With no `sep` the whole string is the
 /// basename → `0`; a trailing `sep` yields an offset at the end (empty
-/// basename). The C `path_basename(path, sep)` returns `path + this`.
+/// basename).
 pub fn basename_offset(bytes: &[u8], sep: u8) -> usize {
     bytes.iter().rposition(|&b| b == sep).map_or(0, |i| i + 1)
 }
@@ -283,7 +282,6 @@ mod tests {
         assert_eq!(kind_label_for(Some(b"MP")), None); // < 4 bytes
     }
 
-    // path_basename(path, sep) == path + basename_offset(bytes, sep).
     #[test]
     fn basename_offset_cases() {
         // Mac ':' and Unix '/' separators pick the last component.

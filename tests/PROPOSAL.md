@@ -58,7 +58,6 @@ required to test them.
 |-------------------------------------|------------------------------------------|---------------------------------------------|
 | `hl_access_has(access, bit)`        | `src/hl_access.h` (inline)               | Bit-decoding correctness; we just got this wrong once already |
 | `gtkhx_text_to_utf8(bytes, len, *)` | `src/gtkutil.c`                          | Mac Roman → UTF-8 cascade with U+FFFD fallback; covers chat / news / preview content |
-| `dirchar_basename(path)`            | `src/files.c:1290`                       | Pure path helper used in xfer paths        |
 | `CR2LF(buf, len)` / `LF2CR`         | macros in `src/hx.h`                     | Wire-format line ending conversions        |
 | `strip_ansi(buf, len)`              | wherever it's defined                    | Pure-byte transform; used everywhere chat lands |
 | BOOLEAN parser in `prefs_allocate`  | `src/options.c` near the type switch     | The bug we already shipped a fix for       |

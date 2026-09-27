@@ -83,8 +83,6 @@ extern "C" {
         f: Option<unsafe extern "C" fn(*mut c_void)>,
         user_data: *mut c_void,
     );
-    /// Basename within `path` (a pointer *into* `path`; not freed).
-    fn dirchar_basename(path: *mut c_char) -> *mut c_char;
     fn hx_conn_serverport(htlc: *const c_void) -> u16;
     /// The DOWNLOAD_BANNER reply spins up an HTXF subchannel worker (`banner.c`).
     fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, size: u32);
@@ -240,11 +238,12 @@ pub unsafe extern "C" fn rcv_task_file_get(
     // before the announce tail because that starts the download when unqueued.
     if hx_htxf_opt_preview(htxf) != 0 && hx_htxf_preview(htxf).is_null() {
         let path = hx_htxf_path(htxf);
-        let name = dirchar_basename(path as *mut c_char);
-        let title = if name.is_null() {
+        // Titled with the file's name: the local path's last component.
+        let title = if path.is_null() {
             path
         } else {
-            name as *const c_char
+            let bytes = std::ffi::CStr::from_ptr(path).to_bytes();
+            path.add(hxmodel::files::basename_offset(bytes, b'/'))
         };
         let pv = hx_preview_new(title);
         hx_htxf_set_preview(htxf, pv);

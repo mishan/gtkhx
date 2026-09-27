@@ -12,7 +12,7 @@
 //! and the Save button builds the FILE_SETINFO request with
 //! `hxproto::build::build_file_setinfo_chunks` + the Rust send primitive.
 //! What stays on the C ABI is leaf glue: the active-connection accessor, the
-//! path helpers (`dirchar_basename` / `path_to_hldir`), the task table +
+//! path encoder (`path_to_hldir`), the task table +
 //! `hlwrite_chunks`, and `human_size`.
 
 use std::ffi::{c_char, c_void, CStr};
@@ -42,9 +42,7 @@ extern "C" {
     // gtkhx_ui_bridge.c — the active connection + whether it's live.
     fn gtkhx_active_htlc() -> *mut c_void;
     fn gtkhx_active_connected() -> glib::ffi::gboolean;
-    // path helpers (path_util.c / path_hldir.c): current basename (a pointer
-    // into `path`) + the wire "hldir" encoding of the parent directory.
-    fn dirchar_basename(path: *mut c_char) -> *mut c_char;
+    // path_hldir.c — the wire "hldir" encoding of the parent directory.
     fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: i32) -> *mut u8;
     // hxtask — register the (no-reply) task + send.
     fn task_new(
@@ -144,16 +142,16 @@ unsafe fn save_file_info(path: &str, new_name: &str, comments: &str) {
     }
     let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING) != glib::ffi::GFALSE;
 
-    // Current basename (a pointer into a mutable copy of `path`), and whether the
-    // file lives under a directory (→ include the HTLC_DATA_DIR chunk).
-    let mut path_buf: Vec<c_char> = path
+    // Current basename, and whether the file lives under a directory (→ include
+    // the HTLC_DATA_DIR chunk).
+    let path_buf: Vec<c_char> = path
         .bytes()
         .map(|b| b as c_char)
         .chain(std::iter::once(0))
         .collect();
-    let base_ptr = dirchar_basename(path_buf.as_mut_ptr());
-    let has_dir = base_ptr != path_buf.as_mut_ptr();
-    let base = CStr::from_ptr(base_ptr).to_string_lossy().into_owned();
+    let base_off = hxmodel::files::basename_offset(path.as_bytes(), b'/');
+    let has_dir = base_off > 0;
+    let base = String::from_utf8_lossy(&path.as_bytes()[base_off..]).into_owned();
 
     // Optional wire "hldir" for the parent directory (g_malloc'd → g_free below).
     let mut hldirlen: u16 = 0;

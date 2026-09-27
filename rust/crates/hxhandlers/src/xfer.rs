@@ -141,9 +141,6 @@ extern "C" {
     /// path_hldir.c — encode a "/a/b" path to the wire DIR bytes (g_malloc'd
     /// buffer + out length; caller g_free's). is_file = 0 for a directory chunk.
     fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: c_int) -> *mut u8;
-    /// files.c — does a preview/companion already exist at this remote path?
-    /// (Drives the FILE_PREVIEW marker on an upload.)
-    fn exists_remote(path: *mut c_char) -> c_int;
     /// uniquify_path.c — mutate `path` in place to a non-colliding name using the
     /// supplied exists predicate (the core algorithm keeps its Tier-1 test in C).
     fn uniquify_path(
@@ -416,7 +413,7 @@ unsafe fn resource_len(path: *const c_char) -> usize {
 }
 
 /// (ptr, len) → borrowed bytes (empty for NULL). Names carry any byte incl.
-/// `dir_char`, so they arrive as an explicit length, never NUL-terminated.
+/// `/`, so they arrive as an explicit length, never NUL-terminated.
 unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
     if p.is_null() || len == 0 {
         &[]
@@ -976,7 +973,6 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
     let htlc = (*htxf).htlc;
     let large = hx_conn_has_cap(htlc.cast(), HTLC_CAP_LARGE_FILES) != glib::ffi::GFALSE;
     let has_dir = remotedir_present(htxf);
-    let has_preview = exists_remote((*htxf).remotepath.as_ptr() as *mut c_char) != 0;
     let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING);
 
     with_name_wire(htxf, utf8, |nm_wire| {
@@ -988,7 +984,11 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
         let req = FilePutRequest {
             name: nm_wire,
             dir: hldir_dir_bytes(&hldir, hldirlen, has_dir),
-            has_preview,
+            // FILE_PREVIEW marks an upload that resumes a file already on the
+            // server. Nothing keeps a record of what the server holds to answer
+            // that, so an upload never claims it; the server renames on a
+            // collision instead.
+            has_preview: false,
             size: size_host,
             size64: large.then_some((*htxf).total_size),
         };
@@ -1131,10 +1131,6 @@ unsafe fn path_to_hldir(_path: *const c_char, hldirlen: *mut u16, _is_file: c_in
         *hldirlen = 0;
     }
     std::ptr::null_mut()
-}
-#[cfg(test)]
-unsafe fn exists_remote(_path: *mut c_char) -> c_int {
-    0
 }
 #[cfg(test)]
 unsafe fn uniquify_path(

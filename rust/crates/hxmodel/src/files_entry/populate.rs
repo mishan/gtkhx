@@ -49,8 +49,7 @@ fn tr(s: &str) -> String {
     }
 }
 
-/// Human kind label for a big-endian FourCC, mirroring
-/// `files.c::kind_of_ftype`: a known type's English label run through the
+/// Human kind label for a big-endian FourCC: a known type's English label run through the
 /// catalog; otherwise `"XXXX file"` with non-printable bytes shown as `?`.
 fn kind_for(ftype_be: [u8; 4]) -> String {
     match crate::files::kind_label_for(Some(&ftype_be)) {

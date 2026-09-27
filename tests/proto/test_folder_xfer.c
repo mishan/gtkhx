@@ -8,7 +8,7 @@
  *
  *   1. SEND side: pack a representative GETFOLDER and PUTFOLDER
  *      request via hlpack (mirrors hx_get_folder / hx_put_folder in
- *      files.c) and verify each named chunk lands in the buffer
+ *      hxhandlers::send::files) and verify each named chunk lands in the buffer
  *      with the expected type code, length, and payload bytes. This
  *      regression-locks the opcode and chunk IDs we shipped — every
  *      one of them is a magic number drawn from the Hotline 1.5
@@ -84,7 +84,7 @@ assert_packed_opcode (struct htlc_conn *htlc, guint32 expected)
 /* ---------- GETFOLDER request ---------- */
 
 /* GETFOLDER without DIR — single FILE_NAME chunk. Matches the
- * files.c hx_get_folder branch when rdir is empty / root. */
+ * hx_get_folder branch when rdir is empty / root. */
 static void
 test_getfolder_request_name_only (void)
 {
@@ -112,7 +112,7 @@ test_getfolder_request_name_only (void)
 }
 
 /* GETFOLDER with a DIR chunk for a non-root parent. Matches the
- * files.c hx_get_folder branch when rdir is non-empty. The DIR
+ * hx_get_folder branch when rdir is non-empty. The DIR
  * chunk's body is opaque here (path_to_hldir's encoding is tested
  * separately in test_path_hldir); we only assert it survived the
  * round trip with the right type code and length. */

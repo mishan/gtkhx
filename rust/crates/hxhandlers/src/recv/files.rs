@@ -4,29 +4,20 @@
 //! `cfl` used to be a `protocol.h` struct that `rcv.c` filled and the files
 //! browser's remote provider consumed. It is now owned here (the gtkhx-core::conn
 //! playbook): an opaque handle behind the `hx_cfl_*` accessor facade, holding the
-//! path, the accumulated `fh` buffer (a `Vec<u8>`), the `completing` mode, and the
-//! borrowed `filter_argv`. Because the buffer lives in Rust, the FILE_LIST reply's
+//! path and the accumulated `fh` buffer (a `Vec<u8>`). Because the buffer lives in
+//! Rust, the FILE_LIST reply's
 //! chunk accumulation is native — [`CachedFileList::append_entry`] grows `fh` with
 //! the exact 4-byte-aligned, patched-length record layout the view's
 //! `hxmodel::files_entry` populate walks — and the handler emits the `file-list` signal
 //! directly (the old C `cfl_print` is gone).
-//!
-//! The one thing the handler still calls out to C for is the recursive engine:
-//! when `completing > 1`, each folder entry is handed to `hx_cfl_complete_entry`
-//! (files.c), which re-issues FILE_LIST for a subfolder or spins up a recursive
-//! download (`mkdir` trees, `xfer_new`, `path_to_hldir`) — genuine files-subsystem
-//! C that reads the Rust `cfl` through the same accessors.
 
-use hxproto::parse::FTYPE_FLDR;
 use hxproto::wire::ChunkIter;
-use std::os::raw::{c_char, c_int, c_uint, c_void};
+use std::os::raw::{c_char, c_void};
 
 /// `HTLS_DATA_FILE_LIST` (src/hotline.h).
 const HTLS_DATA_FILE_LIST: u16 = 0x00c8;
 /// The `hl_data_hdr` size (tag + len).
 const HL_DATA_HDR_LEN: usize = 4;
-/// `COMPLETE_NONE` (src/protocol.h).
-const COMPLETE_NONE: u8 = 0;
 
 /// Rust-owned `struct cached_filelist`. Opaque to C, reached through `hx_cfl_*`.
 pub struct CachedFileList {
@@ -36,10 +27,6 @@ pub struct CachedFileList {
     /// buffer, byte-for-byte, so `hxmodel::files_entry`'s `parse_file_list_entry` walk is
     /// unchanged. Grown by [`Self::append_entry`].
     fh: Vec<u8>,
-    /// Recursive-listing mode (`COMPLETE_*`, 2 bits on the wire struct).
-    completing: u8,
-    /// Borrowed `char **` filter (owned by the browser, not by `cfl`).
-    filter_argv: *mut c_void,
 }
 
 impl CachedFileList {
@@ -69,13 +56,11 @@ pub extern "C" fn hx_cfl_new() -> *mut CachedFileList {
     Box::into_raw(Box::new(CachedFileList {
         path: None,
         fh: Vec::new(),
-        completing: 0,
-        filter_argv: std::ptr::null_mut(),
     }))
 }
 
 /// `void hx_cfl_free (struct cached_filelist *cfl)` — free the cfl (path + fh
-/// drop with the box; `filter_argv` is borrowed and not freed here).
+/// drop with the box).
 ///
 /// # Safety
 /// `cfl` is a live handle from [`hx_cfl_new`] or NULL.
@@ -129,34 +114,6 @@ pub unsafe extern "C" fn hx_cfl_fhlen(cfl: *const CachedFileList) -> u32 {
     (*cfl).fh.len() as u32
 }
 
-/// # Safety
-/// `cfl` is a live handle.
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_completing(cfl: *const CachedFileList) -> c_uint {
-    (*cfl).completing as c_uint
-}
-
-/// # Safety
-/// `cfl` is a live handle.
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_set_completing(cfl: *mut CachedFileList, completing: c_uint) {
-    (*cfl).completing = (completing & 0x3) as u8; // 2-bit field on the old struct
-}
-
-/// # Safety
-/// `cfl` is a live handle.
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_filter_argv(cfl: *const CachedFileList) -> *mut c_void {
-    (*cfl).filter_argv
-}
-
-/// # Safety
-/// `cfl` is a live handle; `argv` is a borrowed `char **` (not owned by cfl).
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_set_filter_argv(cfl: *mut CachedFileList, argv: *mut c_void) {
-    (*cfl).filter_argv = argv;
-}
-
 // ---- the receive handler ----------------------------------------------------
 
 #[cfg(not(test))]
@@ -171,20 +128,7 @@ extern "C" {
     fn hx_remote_files_provider_handle_file_list_error(
         cfl: *mut c_void,
         data: *mut c_void,
-    ) -> c_int;
-    /// The recursive folder-relist / GET_R engine (files.c): re-issue FILE_LIST
-    /// for a subfolder (`is_folder`), or `mkdir` + `xfer_new` a leaf for a
-    /// recursive download. The folder-vs-file decision is made here in Rust (via
-    /// [`FTYPE_FLDR`]) and passed as a flag, so the C side carries no FourCC.
-    /// Reads the Rust `cfl` through the accessors above.
-    fn hx_cfl_complete_entry(
-        htlc: *mut c_void,
-        cfl: *mut c_void,
-        is_folder: c_int,
-        fname: *const u8,
-        fnlen: usize,
-        fsize: u32,
-    );
+    ) -> std::os::raw::c_int;
 }
 
 /// True when the reply frame's task-error bit is set (native `hxproto`
@@ -197,17 +141,12 @@ unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
     hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
 }
 
-fn be32(b: &[u8]) -> u32 {
-    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
-}
-
 /// `void rcv_task_file_list (htlc, frame, frame_len, cfl, data)` — the HTLC_HDR_
 /// FILE_LIST reply (was `rcv.c`). Walks the FILE_LIST chunks natively
-/// (`ChunkIter`), accumulates each raw record into the Rust-owned `cfl.fh`, and
-/// — for a recursive listing (`completing > 1`) — hands each folder entry to the
-/// C recursive engine. On a task error it lets the provider render an empty-state
-/// hint, then frees the cfl. Finally it resets `completing` and emits `file-list`
-/// so the browser repaints (only when `data` names a provider carrier).
+/// (`ChunkIter`) and accumulates each raw record into the Rust-owned `cfl.fh`. On
+/// a task error it lets the provider render an empty-state hint, then frees the
+/// cfl. Finally it emits `file-list` so the browser repaints (only when `data`
+/// names a provider carrier).
 ///
 /// # Safety
 /// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
@@ -229,30 +168,18 @@ pub unsafe extern "C" fn rcv_task_file_list(
         return;
     }
 
-    let completing = (*cfl).completing;
     let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
     for chunk in ChunkIter::over_message(s, s.len()) {
         if chunk.tag != HTLS_DATA_FILE_LIST {
             continue;
         }
         let d = chunk.data;
-        if completing > 1 && d.len() >= 20 {
-            let ftype = be32(&d[0..4]);
-            let fsize = be32(&d[8..12]);
-            let fnlen = be32(&d[16..20]) as usize;
-            let name_end = 20usize.saturating_add(fnlen).min(d.len());
-            let fname = &d[20..name_end];
-            let is_folder = c_int::from(ftype == FTYPE_FLDR);
-            hx_cfl_complete_entry(htlc, ptr, is_folder, fname.as_ptr(), fname.len(), fsize);
-        }
         // The raw record is the 4-byte header immediately before `d` plus `d`
         // itself (ChunkIter positions data right after the header).
         let record =
             std::slice::from_raw_parts(d.as_ptr().sub(HL_DATA_HDR_LEN), HL_DATA_HDR_LEN + d.len());
         (*cfl).append_entry(record);
     }
-
-    (*cfl).completing = COMPLETE_NONE;
 
     // Emit only when a provider carrier is present (the old cfl_print gate). The
     // provider reads hx_cfl_fh(cfl) itself, so the fh signal arg stays NULL.

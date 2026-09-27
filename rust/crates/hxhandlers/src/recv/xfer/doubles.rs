@@ -217,9 +217,6 @@ pub(crate) unsafe fn hx_preview_set_cancel_cb(
     _user_data: *mut c_void,
 ) {
 }
-pub(crate) unsafe fn dirchar_basename(path: *mut c_char) -> *mut c_char {
-    path
-}
 pub(crate) unsafe fn resource_len(_path: *const c_char) -> usize {
     test_env::RSRC_LEN.with(|c| c.get())
 }
