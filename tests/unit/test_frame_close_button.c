@@ -443,6 +443,70 @@ test_closing_last_panel_collapses (Fixture *fx, gconstpointer user_data)
     g_assert_true (hx_split_get_frame (root) == fx->frame);
 }
 
+/* A split-off pane holding one panel, which is then undocked. */
+static HxPanel *
+undock_from_own_pane (Fixture *fx, GtkRoot **undocked)
+{
+    GtkWidget *right;
+    HxPanel *a;
+
+    right = hx_split_split_frame (GTK_WIDGET (fx->frame), GTK_POS_RIGHT);
+    hx_panel_install_close_dispatcher (right);
+    a = add_panel (PANEL_FRAME (right), "a");
+    hx_panel_set_home_frame (a, right);
+
+    hx_panel_undock (a);
+    pump ();
+    *undocked = gtk_widget_get_root (GTK_WIDGET (a));
+    g_assert_true (GTK_WIDGET (*undocked) != fx->window);
+    return a;
+}
+
+/* Undocking a pane's only panel empties the pane, and it collapses
+ * like any other emptied pane. Closing the undocked window then has no
+ * pane to go back to, so the panel lands in its home area's frame —
+ * not left behind in the closing window. */
+static void
+test_undock_collapses_and_redocks (Fixture *fx, gconstpointer user_data)
+{
+    HxSplit *root = HX_SPLIT (gtk_widget_get_parent (GTK_WIDGET (fx->frame)));
+    GtkRoot *undocked;
+    HxPanel *a;
+
+    (void)user_data;
+    a = undock_from_own_pane (fx, &undocked);
+    g_assert_true (hx_split_is_leaf (root));
+
+    gtk_window_close (GTK_WINDOW (undocked));
+    pump ();
+    g_assert_true (gtk_widget_get_ancestor (GTK_WIDGET (a), PANEL_TYPE_FRAME)
+                   == GTK_WIDGET (fx->frame));
+}
+
+/* A panel stranded in a window that went away without asking — so
+ * nothing redocked it — still has that window's frame around it. The
+ * toolbar's show-panel path (hx_panel_ensure_attached) has to see
+ * through that and bring it back, or the panel can never be reopened. */
+static void
+test_stranded_panel_reopens (Fixture *fx, gconstpointer user_data)
+{
+    GtkRoot *undocked;
+    HxPanel *a;
+
+    (void)user_data;
+    a = undock_from_own_pane (fx, &undocked);
+    gtk_window_destroy (GTK_WINDOW (undocked)); /* no close-request */
+    pump ();
+    g_assert_null (gtk_widget_get_root (GTK_WIDGET (a)));
+
+    hx_panel_ensure_attached (a);
+    pump ();
+    g_assert_true (gtk_widget_get_ancestor (GTK_WIDGET (a), PANEL_TYPE_FRAME)
+                   == GTK_WIDGET (fx->frame));
+    g_assert_true (gtk_widget_get_root (GTK_WIDGET (a))
+                   == GTK_ROOT (fx->window));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -490,6 +554,9 @@ main (int argc, char **argv)
     ADD ("/dock_split/emptied_pane_collapses", test_emptied_pane_collapses);
     ADD ("/dock_split/closing_last_panel_collapses",
          test_closing_last_panel_collapses);
+    ADD ("/dock_split/undock_collapses_and_redocks",
+         test_undock_collapses_and_redocks);
+    ADD ("/dock_split/stranded_panel_reopens", test_stranded_panel_reopens);
 
 #undef ADD
 

@@ -1702,6 +1702,24 @@ hx_panel_set_home_frame (HxPanel *self, GtkWidget *frame)
     g_weak_ref_set (&self->home_frame, frame);
 }
 
+/* The role frame for the panel's home area: where it goes when the
+ * frame it last lived in is gone. */
+static GtkWidget *
+home_area_frame (HxPanel *self)
+{
+    switch (self->home_area) {
+    case PANEL_AREA_START:
+        return toolbar_sidebar_frame;
+    case PANEL_AREA_END:
+        return toolbar_end_frame;
+    case PANEL_AREA_BOTTOM:
+        return toolbar_bottom_frame;
+    case PANEL_AREA_CENTER:
+    default:
+        return toolbar_center_frame;
+    }
+}
+
 void
 hx_panel_ensure_attached (HxPanel *self)
 {
@@ -1718,9 +1736,16 @@ hx_panel_ensure_attached (HxPanel *self)
      * AdwTabPage that wraps it is closed; that AdwBin still appears
      * as the panel's parent until its dispose runs. The
      * PanelFrame-ancestor test catches both the "really detached"
-     * case (no ancestor) and the "stale AdwBin hanging on" case. */
+     * case (no ancestor) and the "stale AdwBin hanging on" case.
+     *
+     * A frame outside the main dock only counts while its window is
+     * alive: a panel left behind in a closed undocked window still has
+     * that window's frame around it, and treating it as attached would
+     * mean nothing could ever bring it back. */
     frame_anc = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
-    if (frame_anc != NULL) {
+    if (frame_anc != NULL
+        && (gtk_widget_get_ancestor (frame_anc, PANEL_TYPE_DOCK) == toolbar_dock
+            || gtk_widget_get_root (frame_anc) != NULL)) {
         return;
     }
 
@@ -1775,21 +1800,7 @@ hx_panel_ensure_attached (HxPanel *self)
              * stored home_frame in this branch — when home_frame
              * was already usable, leave it untouched so the user's
              * choice persists. */
-            switch (self->home_area) {
-            case PANEL_AREA_START:
-                target = toolbar_sidebar_frame;
-                break;
-            case PANEL_AREA_END:
-                target = toolbar_end_frame;
-                break;
-            case PANEL_AREA_BOTTOM:
-                target = toolbar_bottom_frame;
-                break;
-            case PANEL_AREA_CENTER:
-            default:
-                target = toolbar_center_frame;
-                break;
-            }
+            target = home_area_frame (self);
             if (target == NULL) {
                 return;
             }
@@ -1840,6 +1851,18 @@ on_undocked_close_request (GtkWindow *window, gpointer user_data)
     g_object_ref (self);
 
     home = hx_panel_get_home_frame (self);
+    /* The frame it came from can be gone — closed while the panel was
+     * out, and no longer in the dock even if something still holds it.
+     * Without somewhere to go, the panel would be left inside this
+     * closing window, and every later "is it in the dock?" check would
+     * see a frame around it and not reopen it. */
+    if (home == NULL || gtk_widget_get_parent (home) == NULL) {
+        g_clear_object (&home);
+        if (home_area_frame (self) != NULL) {
+            home = g_object_ref (home_area_frame (self));
+            hx_panel_set_home_frame (self, home);
+        }
+    }
     parent_frame
         = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
     if (parent_frame != NULL) {
