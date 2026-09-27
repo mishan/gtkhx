@@ -87,6 +87,7 @@ def parse_args(argv):
     p.add_argument("--size", default="1100x700", help="window size WxH (default: 1100x700)")
     p.add_argument("--nick", default="misha", help="the app's own nick (default: misha)")
     p.add_argument("--server", help="HOST[:PORT] to connect to on launch")
+    p.add_argument("--login", help="account to log in with (default: guest); no password")
     p.add_argument("--chat", action="store_true", help="fill the chat with scripted users (needs --server)")
     p.add_argument(
         "--chat-file",
@@ -463,6 +464,8 @@ def run_isolated(args):
     if args.server:
         host, _, port = args.server.partition(":")
         cmd += ["-s", host, "-t", port or "5500"]
+        if args.login:
+            cmd += ["-l", args.login]
 
     script = load_script(args) if args.chat else []
     chatters = start_chatters(args, script) if args.chat else {}

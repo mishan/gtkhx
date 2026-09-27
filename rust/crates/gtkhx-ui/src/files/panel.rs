@@ -336,6 +336,9 @@ impl Panel {
             let label = gtk::EditableLabel::new("");
             label.set_editable(false);
             label.set_can_target(false);
+            // Nor a focus stop: keyboard focus belongs to the row, and a
+            // label that could take it drew a focus box after every rename.
+            label.set_focusable(false);
             label.set_hexpand(true);
             label.set_halign(gtk::Align::Start);
             label.set_valign(gtk::Align::Center);
@@ -724,7 +727,10 @@ impl Panel {
         label.set_editable(true);
         label.set_can_target(true);
         label.start_editing();
-        label.select_region(0, -1);
+        // Select the whole name so typing replaces it. Not right away: the
+        // editor's text takes focus after this, and taking focus puts the
+        // cursor at the end.
+        glib::idle_add_local_once(move || label.select_region(0, -1));
     }
 
     /// Leave an edit without renaming. The stop comes before moving focus:
