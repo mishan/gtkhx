@@ -6,7 +6,7 @@
 #   proto        — wire-format parsers driven from canned fixtures.
 #   integration  — end-to-end against the mhxd + Janus + hxd-ng + Argus +
 #                  hxtrackd Docker containers in tests/mhxd/,
-#                  tests/janus/, tests/hxd-ng/, tests/argus/, and
+#                  tests/janus/, tests/hxd-ng/, tests/hlservd/, tests/argus/, and
 #                  tests/hxtrackd/.
 #
 # ONE job, ordered to fail fast:
@@ -257,6 +257,19 @@ jobs:
           cache-from: type=gha,scope=hxd-ng
           cache-to: type=gha,mode=max,scope=hxd-ng
 
+      - name: build hlservd test container
+        # hlservd — the Hotline Server 1.9.5 as a headless daemon, the rig's
+        # stand-in for the original 1.9 server. tests/hlservd/Dockerfile
+        # layers the rig's settings on hotline-docker's image, which pins
+        # the upstream binary by sha256.
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/hlservd
+          tags: gtkhx-hlservd
+          load: true
+          cache-from: type=gha,scope=hlservd
+          cache-to: type=gha,mode=max,scope=hlservd
+
       - name: build hxtrackd test container
         # hxtrackd is mhxd's bundled pre-spec v1 tracker — coverage for the
         # probe-then-fallback path in network.c. See tests/hxtrackd/README.md.
@@ -300,6 +313,7 @@ jobs:
         #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice)
         #   hxd-ng   5520 + 5524/udp (voice + video; advertises the runner's
         #            primary IPv4, see tests/hxd-ng/entrypoint.sh)
+        #   hlservd  5530/5531 (+ HTTP tunnel 5532/5533)
         #   hxtrackd 5498 + 5499/udp        (its hardcoded HTRK ports)
         #   argus    5698 + 6498 (TLS via stunnel) + 5699/udp
         #   socks    1080 (forwards CONNECTs to 127.0.0.1:5500)
@@ -327,6 +341,7 @@ jobs:
           wait_tcp 5500   # mhxd HTLS
           wait_tcp 5510   # janus HTLS
           wait_tcp 5520   # hxd-ng HTLS (video)
+          wait_tcp 5530   # hlservd HTLS
           wait_tcp 5498   # hxtrackd listing
           wait_tcp 5698   # argus listing
           wait_tcp 6498   # argus TLS (stunnel)

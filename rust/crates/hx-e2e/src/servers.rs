@@ -57,6 +57,17 @@ pub const SERVERS: &[Server] = &[
         admin: "admin",
         caps: &[Cap::FileAdmin, Cap::TextEncoding, Cap::LargeFiles],
     },
+    Server {
+        name: "hlservd",
+        host: "127.0.0.1",
+        port: 5530,
+        xfer_port: 5531,
+        // hlservd makes `admin` on its first start with no password, which
+        // logs in from the machine running the server: over host
+        // networking, every test connection.
+        admin: "admin",
+        caps: &[Cap::FileAdmin, Cap::LongNames],
+    },
 ];
 
 /// The servers that have every one of `caps`, narrowed by

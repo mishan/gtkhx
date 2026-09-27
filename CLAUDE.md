@@ -127,7 +127,8 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 ### Other directories
 
 - `tests/` — three tiers: unit (pure functions), proto (wire fixtures), integration
-  (end-to-end against a Docker rig of mhxd / Janus / hxtrackd / Argus / a SOCKS proxy).
+  (end-to-end against a Docker rig of mhxd / Janus / hxd-ng / hlservd / hxtrackd /
+  Argus / a SOCKS proxy).
   `tests/COMPOSE.md` describes the rig; `tests/run.sh` brings it up. The C integration
   tests build their frames by hand; `rust/crates/hx-e2e` drives GtkHx's own requests
   and reply parsers against the same rig (`cargo test -p hx-e2e --features rig`), and
@@ -249,6 +250,10 @@ request was rejected, and why.
 - **Janus** — VesperNet's closed-source server. Implements the fogWraith extensions (voice,
   inline media, GIF icons, chat history), so it is the integration target for all of them.
   Runs in the test rig. Its known bugs, kept to send upstream, are in `docs/janus-bugs.md`.
+- **hlservd** — the Hotline Server 1.9.5 as a headless POSIX daemon, ported from the
+  Hotsprings 2003 GPL release by Underline's author. The rig's stand-in for the original
+  1.9 server, which otherwise needs Wine. Its image lives in hotline-docker; see
+  `tests/hlservd/README.md`.
 - **Argus** — a real tracker-v3 tracker, in the test rig. **hxtrackd** covers the v1
   tracker fallback path.
 - **hlserver.com** — behaves like a 1.0/1.2 server from the client's perspective: no
