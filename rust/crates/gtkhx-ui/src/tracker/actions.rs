@@ -565,7 +565,7 @@ fn show_server_details(row: &HxTrackerRow) {
         n += add_uint(&grp, &tr("News posts"), m.news_count);
         n += add_uint(&grp, &tr("Message-board posts"), m.msgboard_count);
         n += add_uint(&grp, &tr("Files"), m.files_count);
-        n += add_bytes(&grp, &tr("Total file size"), m.total_file_size as u64);
+        n += add_bytes(&grp, &tr("Total file size"), m.total_file_size);
         n += add_timestamp(&grp, &tr("Last news activity"), m.last_news_timestamp);
         n += add_timestamp(&grp, &tr("Last public chat"), m.last_chat_timestamp);
         finish_group(&content, grp, n);

@@ -7,32 +7,47 @@
  * your option) any later version.
  */
 
-/*
- * src/tracker_v3.c — pure encoders / parsers for the Hotline
- * tracker v3 wire format. No network I/O, no GTK; the only
- * dependencies are GLib for `gboolean` / `g_return_val_if_fail` and
- * the wire constants in hotline.h. Drivable from tests/proto/
- * test_tracker_v3.c without the GIO async state machine.
- *
- * Byte-ordering policy: all multi-byte numeric fields go through
- * memcpy-into-aligned-local then ntohs/ntohl. That's the portable
- * idiom — type-punning the byte pointer is undefined behaviour
- * under strict aliasing and SIGBUSes on ARMv6 / SPARC. Both gcc
- * and clang fold the memcpy into a single mov + bswap on x86, so
- * it's free.
- */
+/* tests/integration/tracker_wire.c — see tracker_wire.h. */
 
 #include "config.h"
 
 #include <glib.h>
-#include "hotline_proto.h" /* gtkhx_proto_tracker_v3_* */
-#include "tracker_v3.h"
+#include "hotline_proto.h" /* gtkhx_proto_tracker_* */
+#include "tracker_wire.h"
 
-/* pack / parse moved to the Rust hxproto crate's
- * tracker_v3 module. The public C surface in tracker_v3.h is
- * preserved unchanged — production callers (the async fetch state
- * machine in network.c, and the meta-TLV walker in
- * tracker_v3_meta.c) don't know the bodies delegate now. */
+gboolean
+hx_tracker_reply_parse_header (const guint8 *buf, gsize len,
+                               guint16 *nservers_out)
+{
+    return gtkhx_proto_parse_tracker_header (buf, len, nservers_out);
+}
+
+gboolean
+hx_tracker_record_is_padding (const guint8 *buf, gsize len)
+{
+    return gtkhx_proto_tracker_record_is_padding (buf, len);
+}
+
+gboolean
+hx_tracker_record_parse_fixed (const guint8 *buf, gsize len,
+                               hx_tracker_record_fixed *out)
+{
+    if (!out) {
+        return FALSE;
+    }
+    struct gtkhx_proto_tracker_record_fixed parsed;
+    if (!gtkhx_proto_parse_tracker_record_fixed (buf, len, &parsed)) {
+        return FALSE;
+    }
+    /* addr_be stores the wire bytes verbatim — same network-byte-
+     * order convention the parser stores addresses in, so this is a
+     * direct field assignment, not a byte-swap. */
+    out->addr = parsed.addr_be;
+    out->port = parsed.port;
+    out->nusers = parsed.nusers;
+    out->name_len = parsed.name_len;
+    return TRUE;
+}
 
 gboolean
 hx_tracker_v3_pack_handshake (guint8 *out, gsize out_len, guint16 features)
@@ -111,36 +126,4 @@ hx_tracker_v3_parse_record (const guint8 *buf, gsize buf_len,
     out->tlv_bytes_len = parsed.tlv_len;
     *consumed_out = parsed.consumed;
     return TRUE;
-}
-
-gboolean
-hx_tracker_v3_walk_tlvs (const guint8 *buf, gsize buf_len, guint16 count,
-                         hx_tracker_v3_tlv_cb cb, gpointer user_data)
-{
-    /* The Rust parser surfaces one TLV at a time via an offset
-     * iterator; the callback contract (return FALSE to stop early
-     * without failure, plus the "no leftover bytes" final check)
-     * stays here in C. */
-    if (!buf && buf_len > 0) {
-        return FALSE;
-    }
-    size_t off = 0;
-    for (guint16 i = 0; i < count; i++) {
-        struct gtkhx_proto_tracker_v3_tlv tlv;
-        if (!gtkhx_proto_tracker_v3_parse_tlv_at (buf, buf_len, off, &tlv)) {
-            return FALSE;
-        }
-        if (cb
-            && !cb (tlv.id, (guint16)tlv.value_len, buf + tlv.value_off,
-                    user_data)) {
-            /* Caller asked us to stop early; unconsumed bytes past
-             * the stop point are by definition expected. */
-            return TRUE;
-        }
-        off = tlv.next_off;
-    }
-    /* All `count` entries walked. The public contract promises
-     * FALSE when the supplied buf had leftover bytes past the
-     * declared TLVs. */
-    return off == buf_len;
 }

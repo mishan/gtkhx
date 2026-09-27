@@ -81,7 +81,7 @@ looking for code in the wrong place.
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
 | **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (user editor wire senders), `tasks.c` |
 | **Sessions** | `session_registry.c` (the connection collection, the factory, and which connection has focus) |
-| **Tracker** | `tracker_parser.c`, `tracker_v3.c`, `tracker_v3_meta.c`, `tracker_event.c` |
+| **Tracker** | `tracker_event.c` (the `HxTrackerServer` signal payload). The wire codec is `hxproto::tracker` in hx-libs; the fetch is `hxnet`. |
 | **Media** | `inline_media*.c`, `gif_icons.c`, `gif_avatar.c`, `cicn.c`, `pict_embed.c`, `pict_magick.c`, `preview.c` |
 | **Theming / chrome** | `gtkhx_theme.c`, `gtkhx_icon.c`, `gtkutil.c`, `gtkurl.c` |
 | **Messaging** | `msg.c` (private-message windows, broadcast render) |

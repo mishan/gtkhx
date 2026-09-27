@@ -1057,13 +1057,6 @@ extern bool gtkhx_proto_parse_tracker_record_fixed (
     const uint8_t *buf, size_t len,
     struct gtkhx_proto_tracker_record_fixed *out);
 
-/* Normalize a server name or description in place: CR (0x0D) → LF
- * (0x0A); strip_ansi folds C0 control bytes (ESC etc. in the
- * 14..30 band, minus the {15, 22} exception set) to printable
- * ASCII via (c & 127) | 64 — buffer length unchanged. No-op on
- * NULL buf or zero len. */
-extern void gtkhx_proto_tracker_normalize_text (uint8_t *buf, size_t len);
-
 /* ---- HTRK v3 (newer tracker protocol) ---- */
 
 /* 8-byte client-side handshake builder. Writes "HTRK" + version
@@ -1124,51 +1117,6 @@ struct gtkhx_proto_tracker_v3_record {
 extern bool
 gtkhx_proto_tracker_v3_parse_record (const uint8_t *buf, size_t len, size_t off,
                                      struct gtkhx_proto_tracker_v3_record *out);
-
-struct gtkhx_proto_tracker_v3_tlv {
-    size_t value_off;
-    size_t value_len;
-    size_t next_off;
-    uint16_t id;
-};
-
-/* Parse the next TLV at buf[off..]. Returns false on a short
- * buffer (< 4 bytes for the id+len header) or when the declared
- * value_len runs past the buffer. The hx_tracker_v3_walk_tlvs C
- * wrapper iterates this and fires its callback per entry. */
-extern bool
-gtkhx_proto_tracker_v3_parse_tlv_at (const uint8_t *buf, size_t len, size_t off,
-                                     struct gtkhx_proto_tracker_v3_tlv *out);
-
-/* ---- HTRK v3 meta TLV typed readers ----
- *
- * Wire-format-strict fail-closed scalar extractors for the
- * per-record TLV trailer. "Wrong size" — anything other than the
- * exact spec-mandated width — returns the supplied default rather
- * than silently decoding partial bytes. Strings stay in C
- * (g_utf8_make_valid + g_strndup); these cover only the numeric /
- * bool / enum-clamp half. */
-
-extern uint8_t gtkhx_proto_tracker_v3_meta_read_u8 (const uint8_t *value,
-                                                    size_t value_len,
-                                                    uint8_t default_);
-extern uint16_t gtkhx_proto_tracker_v3_meta_read_u16 (const uint8_t *value,
-                                                      size_t value_len,
-                                                      uint16_t default_);
-extern int16_t gtkhx_proto_tracker_v3_meta_read_i16 (const uint8_t *value,
-                                                     size_t value_len,
-                                                     int16_t default_);
-extern uint32_t gtkhx_proto_tracker_v3_meta_read_u32 (const uint8_t *value,
-                                                      size_t value_len,
-                                                      uint32_t default_);
-extern bool gtkhx_proto_tracker_v3_meta_read_bool (const uint8_t *value,
-                                                   size_t value_len);
-
-/* Closed-vocab enum clamps. raw values inside the spec-defined
- * range pass through; out-of-range values reset to 0 (GENERAL /
- * UNSPECIFIED). Spec rule for forward-compat. */
-extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_maturity (uint8_t raw);
-extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_listing_category (uint8_t raw);
 
 /* ---- HTLS_DATA_CAPABILITIES decode ---- */
 
