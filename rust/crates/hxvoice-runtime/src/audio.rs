@@ -74,22 +74,28 @@ struct DevicePrefs {
 
 /// Set the preferred capture device by `gst::Device::name()`.
 /// Passing `None` or an empty `&str` clears the preference and
-/// falls back to the system default at the next runtime
-/// construction.
-pub fn set_input_device(name: Option<&str>) {
+/// falls back to the system default. Returns whether the stored
+/// preference changed, so the caller only swaps live devices when
+/// there is something to swap to.
+pub fn set_input_device(name: Option<&str>) -> bool {
     let normalised = name.filter(|s| !s.is_empty()).map(str::to_string);
-    if let Ok(mut prefs) = DEVICE_PREFS.lock() {
+    DEVICE_PREFS.lock().is_ok_and(|mut prefs| {
+        let changed = prefs.input != normalised;
         prefs.input = normalised;
-    }
+        changed
+    })
 }
 
 /// Set the preferred playback device by `gst::Device::name()`.
-/// Same `None` / empty semantics as [`set_input_device`].
-pub fn set_output_device(name: Option<&str>) {
+/// Same `None` / empty semantics and return value as
+/// [`set_input_device`].
+pub fn set_output_device(name: Option<&str>) -> bool {
     let normalised = name.filter(|s| !s.is_empty()).map(str::to_string);
-    if let Ok(mut prefs) = DEVICE_PREFS.lock() {
+    DEVICE_PREFS.lock().is_ok_and(|mut prefs| {
+        let changed = prefs.output != normalised;
         prefs.output = normalised;
-    }
+        changed
+    })
 }
 
 /// Return the currently-preferred capture device name, or `None`
@@ -407,6 +413,7 @@ pub fn make_receive_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bi
     // None falls back to autoaudiosink; an explicit name resolves
     // via DeviceMonitor against the `Audio/Sink` class.
     let sink = make_sink(device_name)?;
+    sink.set_property("name", RECV_SINK_ELEMENT_NAME);
     // Voice-activity meter, tapped on the decoded PCM after
     // audioconvert (normalised raw format) and before audioresample.
     // OPTIONAL: if the `level` plugin isn't installed we drop it from
@@ -532,6 +539,13 @@ pub const SEND_VOLUME_ELEMENT_NAME: &str = "hxvoice-send-volume";
 /// never `pipeline.by_name` (which would return an arbitrary match).
 pub const RECV_VOLUME_ELEMENT_NAME: &str = "hxvoice-recv-volume";
 
+/// Element name of the capture source inside the send bin, and of the
+/// playback sink inside every receive bin. [`replace_source`] and
+/// [`replace_sink`] find the element to swap by these names; like
+/// [`RECV_VOLUME_ELEMENT_NAME`], they are only unique within one bin.
+pub const SEND_SOURCE_ELEMENT_NAME: &str = "hxvoice-send-source";
+pub const RECV_SINK_ELEMENT_NAME: &str = "hxvoice-recv-sink";
+
 /// Name of the send `gst::Bin`. The runtime passes this to
 /// [`make_send_bin`] and matches on it in `handle_level_message` to
 /// route the send leg's `level` RMS windows to the LOCAL user's speaker
@@ -594,6 +608,7 @@ pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> 
     // "configured input device unavailable" toast in Phase
     // 8.E follow-ups.
     let src = make_source(device_name)?;
+    src.set_property("name", SEND_SOURCE_ELEMENT_NAME);
     let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
     // Local mute control. A `volume` element whose `mute` property,
     // when set TRUE, replaces the captured microphone audio with
@@ -664,6 +679,123 @@ pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> 
     let ghost = gst::GhostPad::with_target(&pay_src).ok()?;
     bin.add_pad(&ghost).ok()?;
     Some(bin)
+}
+
+/// Swap the capture source of a send bin for `new_src`, leaving the
+/// rest of the chain in place.
+///
+/// Only the source changes, so everything downstream of it keeps its
+/// state: the mute `volume`, the `level` meter, and the payloader's
+/// SSRC and sequence numbers, which is what lets a device change ride
+/// through a live call without renegotiating or looking like a new
+/// stream to the far end. The replacement is timestamped against the
+/// same pipeline clock, so the RTP timestamps stay continuous too.
+///
+/// Main thread. A source has no upstream, so there is no data flow to
+/// block: taking the old one to `Null` first stops its streaming
+/// thread before the link is cut, which keeps it from pushing into an
+/// unlinked pad and posting a not-linked error. Returns `false`, and
+/// leaves the bin as it was, when the bin has no linked source or the
+/// replacement will not link; a bin whose leg is locked (the microphone
+/// not yet bound) takes the new source in the same locked state.
+pub fn replace_source(bin: &gst::Bin, new_src: gst::Element) -> bool {
+    replace_named_source(bin, SEND_SOURCE_ELEMENT_NAME, new_src)
+}
+
+/// [`replace_source`] for any bin whose source is the element `name`;
+/// the camera's capture bin shares it.
+pub(crate) fn replace_named_source(bin: &gst::Bin, name: &str, new_src: gst::Element) -> bool {
+    let Some(old) = bin.by_name(name) else {
+        return false;
+    };
+    let Some(old_pad) = old.static_pad("src") else {
+        return false;
+    };
+    let Some(downstream) = old_pad.peer() else {
+        return false;
+    };
+    let Some(new_pad) = new_src.static_pad("src") else {
+        return false;
+    };
+    new_src.set_property("name", name);
+
+    let _ = old.set_state(gst::State::Null);
+    let _ = old_pad.unlink(&downstream);
+    let _ = bin.remove(&old);
+    if bin.add(&new_src).is_ok() {
+        if new_pad.link(&downstream).is_ok() {
+            if new_src.sync_state_with_parent().is_ok() {
+                return true;
+            }
+            let _ = new_pad.unlink(&downstream);
+        }
+        let _ = new_src.set_state(gst::State::Null);
+        let _ = bin.remove(&new_src);
+    }
+    // Put the old device back rather than leave the leg without a
+    // source; it was working a moment ago.
+    let restored = bin.add(&old).is_ok()
+        && old_pad.link(&downstream).is_ok()
+        && old.sync_state_with_parent().is_ok();
+    if !restored {
+        gst::warning!(
+            gst::CAT_RUST,
+            "hxvoice: could not restore the previous capture device in {} \
+             after a failed swap",
+            bin.name()
+        );
+    }
+    false
+}
+
+/// Swap the playback sink of a receive bin for `new_sink`, leaving the
+/// depayloader, decoder, `level` meter and per-listener `volume` in
+/// place, so the listener's gain and the speaker indicator carry over.
+///
+/// Unlike a source, a sink is fed by a streaming thread that is not
+/// ours, so the swap waits for the pad feeding it to go idle and runs
+/// from an idle probe — immediately, on the calling thread, when no
+/// buffer is in flight, otherwise on the streaming thread just after
+/// the current one lands. Either way no buffer reaches an unlinked pad.
+/// Returns `false` without touching the bin when it has no linked sink
+/// (a video or discard bin), `true` once the swap is scheduled.
+pub fn replace_sink(bin: &gst::Bin, new_sink: gst::Element) -> bool {
+    let Some(old) = bin.by_name(RECV_SINK_ELEMENT_NAME) else {
+        return false;
+    };
+    let Some(upstream) = old.static_pad("sink").and_then(|p| p.peer()) else {
+        return false;
+    };
+    let Some(new_pad) = new_sink.static_pad("sink") else {
+        return false;
+    };
+    new_sink.set_property("name", RECV_SINK_ELEMENT_NAME);
+    let weak_bin = bin.downgrade();
+    let pending = std::sync::Mutex::new(Some((old, new_sink, new_pad)));
+    upstream.add_probe(gst::PadProbeType::IDLE, move |upstream, _info| {
+        let taken = pending.lock().ok().and_then(|mut p| p.take());
+        let (Some(bin), Some((old, new_sink, new_pad))) = (weak_bin.upgrade(), taken) else {
+            return gst::PadProbeReturn::Remove;
+        };
+        let _ = old.set_state(gst::State::Null);
+        if let Some(old_pad) = old.static_pad("sink") {
+            let _ = upstream.unlink(&old_pad);
+        }
+        let _ = bin.remove(&old);
+        let swapped = bin.add(&new_sink).is_ok()
+            && upstream.link(&new_pad).is_ok()
+            && new_sink.sync_state_with_parent().is_ok();
+        if !swapped {
+            gst::warning!(
+                gst::CAT_RUST,
+                "hxvoice: could not attach the new playback device to {} — \
+                 that participant is silent until the next join",
+                bin.name()
+            );
+        }
+        gst::PadProbeReturn::Remove
+    });
+    true
 }
 
 /// Attach a buffer-counting probe to the send chain's payloader

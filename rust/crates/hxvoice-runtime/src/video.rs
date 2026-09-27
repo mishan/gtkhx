@@ -418,10 +418,14 @@ static CAMERA_PREF: Mutex<Option<String>> = Mutex::new(None);
 
 /// Set the preferred camera by [`Camera::name`]; `None` or empty means
 /// the first camera found.
-pub fn set_camera_device(name: Option<&str>) {
-    if let Ok(mut p) = CAMERA_PREF.lock() {
-        *p = name.filter(|s| !s.is_empty()).map(str::to_string);
-    }
+/// Returns whether the preference changed.
+pub fn set_camera_device(name: Option<&str>) -> bool {
+    let name = name.filter(|s| !s.is_empty()).map(str::to_string);
+    CAMERA_PREF.lock().is_ok_and(|mut p| {
+        let changed = *p != name;
+        *p = name;
+        changed
+    })
 }
 
 /// The preferred camera, or `None` for the first one found.
@@ -806,6 +810,7 @@ where
         VideoKind::Camera => make_camera_source()?,
         VideoKind::Screen => make_screen_source(screen)?,
     };
+    source.set_property("name", SOURCE_NAME);
     let convert = make("videoconvert")?;
     let scale = gst::ElementFactory::make("videoscale")
         .property("add-borders", true)
@@ -935,6 +940,20 @@ pub(crate) struct RtpContinuity {
     pub timestamp_base: u32,
     /// The sequence number to start at; `None` for the first capture.
     pub next_seqnum: Option<u16>,
+}
+
+/// The capture source's element name inside a capture bin, for swapping
+/// the camera under a live publication.
+pub(crate) const SOURCE_NAME: &str = "source";
+
+/// Move a live camera capture bin onto the current camera preference,
+/// replacing only its source. The scaler and the fixed-size caps absorb a
+/// camera with a different native size, so the encoder, the payloader and
+/// the self-preview carry on, and the far end sees the same stream with
+/// new pictures in it.
+pub(crate) fn replace_camera_source(bin: &gst::Bin) -> bool {
+    make_camera_source()
+        .is_some_and(|src| crate::audio::replace_named_source(bin, SOURCE_NAME, src))
 }
 
 /// The payloader's element name inside a capture bin, for reading its
@@ -1134,6 +1153,80 @@ mod pipeline_tests {
     fn both_kinds_produce_rtp() {
         assert!(rtp_out_of(VideoKind::Camera) > 10);
         assert!(rtp_out_of(VideoKind::Screen) > 10);
+    }
+
+    /// A camera change mid-publication swaps only the capture's source:
+    /// the payloader carries on, so the far end sees one stream, same
+    /// SSRC and unbroken sequence numbers, with the new camera's pictures.
+    #[test]
+    fn camera_swap_keeps_the_rtp_stream() {
+        std::env::set_var(TEST_SRC_ENV, "ball");
+        gst::init().unwrap();
+        let t = Limits::spec_default(VideoKind::Camera).target(VideoKind::Camera);
+        let rtp = RtpContinuity {
+            ssrc: 4321,
+            timestamp_base: 1,
+            next_seqnum: None,
+        };
+        let bin = make_send_bin("t", VideoKind::Camera, None, t, rtp, |_| {}).unwrap();
+        let sink = gst::ElementFactory::make("fakesink")
+            .property("sync", false)
+            .build()
+            .unwrap();
+        let pipeline = gst::Pipeline::new();
+        pipeline
+            .add_many([bin.upcast_ref::<gst::Element>(), &sink])
+            .unwrap();
+        bin.link(&sink).unwrap();
+        let packets: std::sync::Arc<Mutex<Vec<(u32, u16)>>> = Default::default();
+        let p = packets.clone();
+        sink.static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, info| {
+                if let Some(buf) = info.buffer() {
+                    let map = buf.map_readable().unwrap();
+                    let seq = u16::from_be_bytes([map[2], map[3]]);
+                    let ssrc = u32::from_be_bytes([map[8], map[9], map[10], map[11]]);
+                    p.lock().unwrap().push((ssrc, seq));
+                }
+                gst::PadProbeReturn::Ok
+            });
+        let wait_for = |n: usize| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while packets.lock().unwrap().len() < n {
+                assert!(std::time::Instant::now() < deadline, "RTP stalled");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        pipeline.set_state(gst::State::Playing).unwrap();
+        wait_for(10);
+
+        let old = bin
+            .by_name(SOURCE_NAME)
+            .expect("the capture names its source");
+        assert!(replace_camera_source(&bin));
+        let new = bin.by_name(SOURCE_NAME).unwrap();
+        assert_ne!(new, old);
+        assert!(old.parent().is_none());
+        let before = packets.lock().unwrap().len();
+        wait_for(before + 10);
+
+        let bus = pipeline.bus().unwrap();
+        while let Some(msg) = bus.pop() {
+            if let gst::MessageView::Error(e) = msg.view() {
+                panic!(
+                    "capture error across the swap: {} {:?}",
+                    e.error(),
+                    e.debug()
+                );
+            }
+        }
+        pipeline.set_state(gst::State::Null).unwrap();
+        let packets = packets.lock().unwrap().clone();
+        assert!(packets.iter().all(|&(ssrc, _)| ssrc == 4321));
+        for pair in packets.windows(2) {
+            assert_eq!(pair[1].1, pair[0].1.wrapping_add(1), "no gap in the stream");
+        }
     }
 
     /// The state machine's mid scanner is a no_std copy of hxproto's

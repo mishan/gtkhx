@@ -418,14 +418,20 @@ client_runtime_unmute (voice_client *c)
 /* ------------------------------------------------------------------ */
 
 static const hx_test_server *
-pick_voice_server (void)
+pick_voice_server (const char *name)
 {
     GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_VOICE);
     if (!servers) {
         return NULL;
     }
-    const hx_test_server *srv
-        = servers->len > 0 ? g_ptr_array_index (servers, 0) : NULL;
+    /* The first voice server (Janus), unless the test names one. */
+    const hx_test_server *srv = NULL;
+    for (guint i = 0; i < servers->len && !srv; i++) {
+        const hx_test_server *row = g_ptr_array_index (servers, i);
+        if (name == NULL || g_strcmp0 (row->name, name) == 0) {
+            srv = row;
+        }
+    }
     g_ptr_array_unref (servers);
     if (!srv) {
         return NULL;
@@ -703,7 +709,7 @@ test_voice_rejoin_media (void)
 
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server ();
+    const hx_test_server *srv = pick_voice_server (NULL);
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -891,7 +897,7 @@ test_voice_vad_speaker (void)
 
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server ();
+    const hx_test_server *srv = pick_voice_server (NULL);
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -1102,7 +1108,7 @@ test_voice_concurrent_join (void)
 
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server ();
+    const hx_test_server *srv = pick_voice_server (NULL);
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -1175,6 +1181,191 @@ out:
     client_close (&A);
 }
 
+/* ------------------------------------------------------------------ */
+/* Device hot-swap. A and B are in a call, hearing each other; then    */
+/* both the input and the output device preference change. That swaps */
+/* the capture source and every playback sink under both runtimes at  */
+/* once — the setters reach every live runtime in the process — and    */
+/* the call has to carry on: each side keeps receiving the other's RTP */
+/* with no leave, rejoin or renegotiation. The names don't resolve to  */
+/* a real device, so the swaps land on the test source and the default */
+/* sink; what matters is that the replacement happened mid-stream and  */
+/* Janus kept forwarding the same stream.                              */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+    HS_START,
+    HS_WAIT_A_CONNECTED,
+    HS_WAIT_B_CONNECTED,
+    HS_WAIT_RX_BEFORE,
+    HS_WAIT_RX_AFTER,
+} hs_phase;
+
+typedef struct {
+    voice_client *both[2];
+    gboolean simultaneous; /* B joins in the same tick as A */
+    gboolean swap;         /* change devices once both hear each other */
+    GMainLoop *loop;
+    hs_phase ph;
+    gint64 deadline;
+    guint64 at_swap[2];
+    guint64 rx[2];
+    gboolean failed;
+    gchar failmsg[256];
+} hs_driver;
+
+static gboolean
+hs_tick (gpointer data)
+{
+    hs_driver *d = data;
+    gint64 now = g_get_monotonic_time ();
+    gboolean heard = TRUE;
+
+    for (int i = 0; i < 2; i++) {
+        voice_client *c = d->both[i];
+        while (integration_recv_message (c->fd, &c->htlc, 0)) {
+            dispatch_frame (c);
+        }
+        d->rx[i] = gtkhx_voice_runtime_rtp_buffers_received (c->rt);
+        heard = heard && d->rx[i] >= d->at_swap[i] + CJ_RX_MIN;
+    }
+    switch (d->ph) {
+    case HS_START:
+        client_join_muted (d->both[0], 0);
+        if (d->simultaneous) {
+            client_join_muted (d->both[1], 0);
+        }
+        d->ph = HS_WAIT_A_CONNECTED;
+        d->deadline = now + SECS (15);
+        return G_SOURCE_CONTINUE;
+    case HS_WAIT_A_CONNECTED:
+    case HS_WAIT_B_CONNECTED: {
+        voice_client *c = d->both[d->ph == HS_WAIT_B_CONNECTED];
+        if (c->state == GTKHX_VOICE_STATE_CONNECTED) {
+            client_runtime_unmute (c);
+            if (d->ph == HS_WAIT_A_CONNECTED && !d->simultaneous) {
+                client_join_muted (d->both[1], 0);
+            }
+            d->ph++;
+            d->deadline = now + SECS (15);
+            return G_SOURCE_CONTINUE;
+        }
+        break;
+    }
+    case HS_WAIT_RX_BEFORE:
+        if (heard && !d->swap) {
+            g_main_loop_quit (d->loop); /* PASS */
+            return G_SOURCE_CONTINUE;
+        }
+        if (heard) {
+            d->at_swap[0] = d->rx[0];
+            d->at_swap[1] = d->rx[1];
+            gtkhx_voice_set_input_device ("gtkhx-hotswap-test-input");
+            gtkhx_voice_set_output_device ("gtkhx-hotswap-test-output");
+            d->ph = HS_WAIT_RX_AFTER;
+            d->deadline = now + SECS (CJ_RX_DEADLINE_S);
+            return G_SOURCE_CONTINUE;
+        }
+        break;
+    case HS_WAIT_RX_AFTER:
+        if (heard) {
+            g_main_loop_quit (d->loop); /* PASS */
+            return G_SOURCE_CONTINUE;
+        }
+        break;
+    }
+    if (now >= d->deadline) {
+        g_snprintf (d->failmsg, sizeof (d->failmsg),
+                    "stalled in phase %d (A rx=%" G_GUINT64_FORMAT
+                    ", B rx=%" G_GUINT64_FORMAT ", at swap %" G_GUINT64_FORMAT
+                    "/%" G_GUINT64_FORMAT ")",
+                    (int)d->ph, d->rx[0], d->rx[1], d->at_swap[0],
+                    d->at_swap[1]);
+        d->failed = TRUE;
+        g_main_loop_quit (d->loop);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+run_two_way_call (const char *server, gboolean simultaneous, gboolean swap)
+{
+    harness_select_audio_source ("1");
+    g_assert_cmpint (gtkhx_voice_init (), ==, 1);
+
+    const hx_test_server *srv = pick_voice_server (server);
+    if (!srv) {
+        g_test_fail_printf ("no voice-capable server in the matrix.");
+        return;
+    }
+
+    voice_client A, B;
+    client_reset (&A);
+    client_reset (&B);
+    if (!client_open (&A, "A", srv, 414) || !client_open (&B, "B", srv, 415)) {
+        goto out;
+    }
+
+    hs_driver d;
+    memset (&d, 0, sizeof (d));
+    d.both[0] = &A;
+    d.both[1] = &B;
+    d.simultaneous = simultaneous;
+    d.swap = swap;
+    d.loop = g_main_loop_new (NULL, FALSE);
+    d.ph = HS_START;
+
+    guint tick = g_timeout_add (5, hs_tick, &d);
+    g_main_loop_run (d.loop);
+    g_source_remove (tick);
+    if (d.failed) {
+        g_test_fail_printf ("%s", d.failmsg);
+    } else {
+        g_test_message ("A rx %" G_GUINT64_FORMAT " -> %" G_GUINT64_FORMAT
+                        ", B rx %" G_GUINT64_FORMAT " -> %" G_GUINT64_FORMAT,
+                        d.at_swap[0], d.rx[0], d.at_swap[1], d.rx[1]);
+    }
+
+    gtkhx_voice_set_input_device (NULL);
+    gtkhx_voice_set_output_device (NULL);
+    gtkhx_voice_runtime_leave (B.rt, 0);
+    gtkhx_voice_runtime_leave (A.rt, 0);
+    for (int spin = 0; spin < 50; spin++) {
+        g_main_context_iteration (NULL, FALSE);
+        for (int i = 0; i < 2; i++) {
+            while (
+                integration_recv_message (d.both[i]->fd, &d.both[i]->htlc, 0)) {
+                dispatch_frame (d.both[i]);
+            }
+        }
+        g_usleep (2000);
+    }
+    g_main_loop_unref (d.loop);
+
+out:
+    client_close (&B);
+    client_close (&A);
+}
+
+static void
+test_voice_device_hotswap (void)
+{
+    run_two_way_call (NULL, FALSE, TRUE);
+}
+
+/* Both participants join in the same instant — two users clicking Join
+ * together, or a room both auto-join. Each must still hear the other.
+ *
+ * Runs against hxd-ng: Janus fails it on the server side, never offering
+ * the second joiner a section for a first joiner whose track arrived after
+ * the second joined (docs/janus-bugs.md). GTKHX_VOICE_TEST_PORT=5510
+ * points it at Janus to check whether a release has fixed that. */
+static void
+test_voice_simultaneous_join (void)
+{
+    run_two_way_call ("hxd-ng", TRUE, FALSE);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -1184,5 +1375,9 @@ main (int argc, char **argv)
     g_test_add_func ("/integration/voice/vad_speaker", test_voice_vad_speaker);
     g_test_add_func ("/integration/voice/concurrent_join",
                      test_voice_concurrent_join);
+    g_test_add_func ("/integration/voice/device_hotswap",
+                     test_voice_device_hotswap);
+    g_test_add_func ("/integration/voice/simultaneous_join",
+                     test_voice_simultaneous_join);
     return g_test_run ();
 }

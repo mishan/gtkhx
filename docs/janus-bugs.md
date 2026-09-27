@@ -55,6 +55,33 @@ error is the expected answer, as other servers give.
 
 **GtkHx:** probes on a timeout ([gif-icons.md](gif-icons.md)).
 
+## A voice participant whose audio arrives after others joined is never offered to them
+
+**Verified; still present in 2.0.13.**
+
+- **Sends:** two clients VOICE_JOIN (600) the same room within a few
+  milliseconds, answer their offers, and unmute.
+- **Gets:** the first joiner (A) is sent a renegotiation offer with a
+  `mid:user-<B>` section the moment B joins, before B has any media. B's
+  initial offer has only `mid:send`, because A's track hadn't arrived yet
+  either — and when A's track does arrive (`OnTrack`, a few tens of
+  milliseconds later), B is never sent a renegotiation adding A. A hears B;
+  B never hears A, for as long as both stay in the room.
+- **Should get:** an offer to B adding `mid:user-<A>` once A's track arrives —
+  or, since Janus already adds a section to others at join time for a
+  participant with no track yet, the same for a newcomer's initial offer.
+  hxd-ng offers both directions.
+
+The window is from a participant's join until their ICE and DTLS complete,
+which is well under a second on the rig but can be longer on a real network,
+so two people joining together — or anyone joining just after someone else
+clicks Join — can hit it. Leaving and rejoining recovers, since the new
+initial offer includes everyone with a track by then.
+
+**GtkHx:** nothing to do on the client, which the spec gives no way to ask for
+a fresh offer. `/integration/voice/simultaneous_join` covers it against
+hxd-ng; `GTKHX_VOICE_TEST_PORT=5510` points it at Janus.
+
 ## A `0s` duration in the config means the default, not zero
 
 **Verified before 2.0.13; not re-checked since.** The YAML decoder treats a

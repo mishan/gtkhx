@@ -592,18 +592,10 @@ changed_tint_window (void)
 
 #ifdef HAVE_VOICE
 /* Settings → Voice → "Input device" combobox. Pushes the user's
- * pick through to the Rust runtime via FFI; the next VoiceRuntime
- * construction (typically the next Join Voice click) builds the
- * send leg against the resolved device. Empty / NULL means
- * "system default" — autoaudiosrc resolves whichever PulseAudio /
- * PipeWire / ALSA default the host has configured.
- *
- * No effect on a currently-active voice session — the runtime is
- * constructed once per session and the bins are built at Join
- * time; changing the device picker takes effect on the next call.
- * Phase 8.E follow-up could hot-swap by rebuilding the send bin
- * on prefs change, but for now Leave + Join is the prescribed
- * dance. */
+ * pick through to the Rust runtime, which also moves any call in
+ * progress onto it. Empty / NULL means "system default" —
+ * autoaudiosrc resolves whichever PulseAudio / PipeWire / ALSA
+ * default the host has configured. */
 static void
 changed_voice_input_device (void)
 {
@@ -619,8 +611,7 @@ changed_voice_output_device (void)
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 }
 
-/* Settings → Voice → "Camera". Takes effect the next time a camera
- * publication starts or resumes, since the capture bin is built then. */
+/* Settings → Voice → "Camera". The runtime moves a live camera onto it. */
 static void
 changed_voice_camera_device (void)
 {

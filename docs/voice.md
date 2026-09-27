@@ -398,8 +398,27 @@ sweep on the UI thread. The model also emits a presence-chime signal
 Settings → Voice has audio device pickers (input and output, with a
 "System default" entry following the desktop's configuration) and the
 push-to-talk group. Device choices persist in `gtkhxrc` and are read
-when the runtime builds its send and receive bins, so they take effect
-on the next join.
+when the runtime builds its send and receive bins.
+
+A change mid-call takes effect at once, without leaving the room. The
+runtime swaps only the device element — the capture source at the head
+of the send bin, the sink at the tail of each audio receive bin — and
+keeps everything else in the leg. That is what makes it invisible to
+the far end: the payloader survives, so the SSRC, sequence numbers and
+RTP timestamps carry straight on and nothing is renegotiated, and the
+mute `volume`, the per-listener gains and the `level` meters keep their
+state. The source is swapped from the main thread after taking the old
+one to `Null`, which stops its streaming thread before the link is cut;
+a sink is fed by webrtcbin's thread, so it is swapped from an idle probe
+on the pad feeding it. The setter swaps every live runtime, found
+through the main thread's runtime registry. If a swap cannot complete,
+the old capture source is put back; a sink that fails leaves that
+participant silent until the next join, with a warning. Should the
+outgoing device have been providing the pipeline clock, the bus watch
+answers the clock-lost message by cycling the pipeline through `Paused`
+to pick a new one.
+
+The camera picker works the same way; see `docs/video.md`.
 
 The PTT key controller is **window-scoped**, not chat-input-scoped, so
 the captured key works with focus on any widget in the window. Its
@@ -558,6 +577,14 @@ and `tools/voice-gui-repro-loop.sh` loops to catch the flake. The
 `GTKHX_VOICE_AUTOJOIN` and `GTKHX_VOICE_AUTOUNMUTE_MS` environment
 hooks in the voice panel drive the real join/unmute path for those
 scripts; both are no-ops unless set.
+
+### Janus never offers a participant whose audio arrived after others joined
+
+When two people join within the ICE/DTLS window of each other, Janus
+offers the later joiner to the earlier one but never the reverse, so the
+later joiner never hears the earlier. Server-side; the details are in
+[janus-bugs.md](janus-bugs.md). hxd-ng offers both ways, and the
+`simultaneous_join` integration test runs against it.
 
 ### Server omits the per-user mid on renegotiation to existing participants
 
