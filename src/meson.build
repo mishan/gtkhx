@@ -83,7 +83,6 @@ gtkhx_sources = files(
   'options.c',
   'icon_enum.c',
   'prefs_mirror.c',
-  'path_hldir.c',
   'pict_embed.c',
   'pict_magick.c',
   'preview.c',

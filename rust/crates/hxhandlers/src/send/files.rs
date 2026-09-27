@@ -1,36 +1,21 @@
 //! `hxhandlers::send::files` — the files-browser RPC senders.
 //!
 //! MKDIR, DELETE, GETINFO, MOVE (with its rename-in-place SETINFO companion),
-//! and the upload / folder-transfer kickoffs. Each one encodes its path to the
-//! wire DIR bytes (via C's `path_to_hldir`), encodes the basename for the wire
-//! (`gtkhx_text_for_wire`, hxtext), builds the chunks with the native
-//! `hxproto::build` builders, registers a reply task, and hands the chunks to
-//! `hlwrite_chunks`. The single-file upload goes through `xfer_new`, which sends
-//! its own FILE_PUT once the queue lets it.
-//!
-//! Remote paths are `/`-separated, with `/` as the root. A name travels as its
-//! own byte run wherever the wire allows it, since a Classic-Mac name may hold a
-//! `/`; the flat-path senders (delete, move) split on the last `/`, as they always
-//! have.
-//!
-//! Exports the exact `hx_*` C ABI the files browser calls.
+//! and the upload / folder-transfer kickoffs. The requests themselves are built
+//! by `hxrequest::files`, which the end-to-end suite drives against real
+//! servers; what lives here is the C ABI the files browser calls, the reply
+//! task each request registers, and the send. The single-file upload goes
+//! through `xfer_new`, which sends its own FILE_PUT once the queue lets it.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::os::raw::c_int;
 
-use hxproto::build::{self, FileMoveRequest, FilePutFolderRequest, FileSetInfoRequest, HxChunk};
-use hxproto::messages::ClientHdr;
+use hxnet::xfer_handle::HtxfHandle;
+use hxrequest::path::split;
+use hxrequest::{files, Request};
+use hxtask::Task;
 
 use crate::recv::xfer::{rcv_task_file_getinfo, rcv_task_folder_get, rcv_task_folder_put};
-use hxnet::xfer_handle::HtxfHandle;
-
-const HTLC_HDR_FILE_DELETE: u32 = ClientHdr::FileDelete as u32;
-const HTLC_HDR_FILE_MKDIR: u32 = ClientHdr::FileMkdir as u32;
-const HTLC_HDR_FILE_GETINFO: u32 = ClientHdr::FileGetInfo as u32;
-const HTLC_HDR_FILE_SETINFO: u32 = ClientHdr::FileSetInfo as u32;
-const HTLC_HDR_FILE_MOVE: u32 = ClientHdr::FileMove as u32;
-const HTLC_HDR_FILE_GETFOLDER: u32 = ClientHdr::FileGetFolder as u32;
-const HTLC_HDR_FILE_PUTFOLDER: u32 = ClientHdr::FilePutFolder as u32;
 
 /// `HTLC_CAP_TEXT_ENCODING` (hotline.h) — names go out as UTF-8 when set.
 const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
@@ -39,8 +24,6 @@ const XFER_GET: u16 = 0;
 const XFER_PUT: u16 = 1;
 /// `MAXPATHLEN` (compat.h) — the fixed path fields on the transfer handle.
 const MAXPATHLEN: usize = 4095;
-/// The remote path separator.
-const SEP: u8 = b'/';
 
 // Real build: these resolve at the final link. Test build: `use tests::{…}`
 // below shadows them with recording stubs.
@@ -52,22 +35,11 @@ use gtkhx_core::conn::hx_conn_has_cap;
 use hxtask::send::hlwrite_chunks;
 #[cfg(not(test))]
 use hxtask::task_new;
-#[cfg(not(test))]
-use hxtext::gtkhx_text_for_wire;
-
-#[cfg(not(test))]
-extern "C" {
-    // path_hldir.c — encode a "/a/b" path to the wire DIR bytes. Returns a
-    // g_malloc'd buffer + out length; caller g_free's. `is_file` drops the last
-    // component (it names the file, not a directory).
-    fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: c_int) -> *mut u8;
-}
 
 #[cfg(test)]
-use tests::{
-    gtkhx_text_for_wire, hlwrite_chunks, hx_conn_has_cap, path_to_hldir, task_new, xfer_new,
-    xfer_new_folder,
-};
+use tests::{hlwrite_chunks, hx_conn_has_cap, task_new, xfer_new, xfer_new_folder};
+
+type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void);
 
 /// A NUL-terminated C string's bytes (without the NUL), or empty for NULL.
 unsafe fn cstr_bytes<'a>(s: *const c_char) -> &'a [u8] {
@@ -99,79 +71,31 @@ fn clamp_path(bytes: &[u8]) -> &[u8] {
     &bytes[..bytes.len().min(MAXPATHLEN - 1)]
 }
 
-/// Whether a remote directory names something below the root.
-fn below_root(dir: &[u8]) -> bool {
-    !dir.is_empty() && dir != [SEP]
+/// Whether `htlc` negotiated UTF-8 names.
+unsafe fn utf8(htlc: *mut c_void) -> bool {
+    hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING) != glib::ffi::GFALSE
 }
 
-/// Offset of the last component of a remote path (0 with no separator).
-fn basename_offset(path: &[u8]) -> usize {
-    hxmodel::files::basename_offset(path, SEP)
-}
-
-/// A g_malloc'd DIR-chunk encoding of a path; g_free'd on drop.
-struct HlDir {
-    ptr: *mut u8,
-    len: u16,
-}
-
-impl HlDir {
-    /// # Safety
-    /// `path` is a NUL-terminated C string.
-    unsafe fn new(path: *const c_char, is_file: bool) -> Self {
-        let mut len: u16 = 0;
-        let ptr = path_to_hldir(path, &mut len, c_int::from(is_file));
-        HlDir { ptr, len }
-    }
-
-    fn bytes(&self) -> &[u8] {
-        if self.ptr.is_null() || self.len == 0 {
-            &[]
-        } else {
-            // SAFETY: path_to_hldir returned `len` bytes at `ptr`.
-            unsafe { std::slice::from_raw_parts(self.ptr, self.len as usize) }
-        }
-    }
-}
-
-impl Drop for HlDir {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { glib::ffi::g_free(self.ptr as *mut c_void) };
-        }
-    }
-}
-
-/// A name encoded for the wire on `htlc` (UTF-8 or Mac Roman, per the
-/// negotiated text-encoding capability). Names are single-line, so no LF→CR.
-unsafe fn name_for_wire(htlc: *mut c_void, name: &[u8]) -> Vec<u8> {
-    let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING);
-    let mut len: usize = 0;
-    let wire = gtkhx_text_for_wire(
-        name.as_ptr() as *const c_char,
-        name.len(),
-        utf8,
-        glib::ffi::GFALSE,
-        &mut len,
-    );
-    if wire.is_null() {
-        return Vec::new();
-    }
-    let out = std::slice::from_raw_parts(wire as *const u8, len).to_vec();
-    glib::ffi::g_free(wire as *mut c_void);
-    out
-}
-
-/// Register a reply-less task labeled `label` and write the request.
-unsafe fn send(htlc: *mut c_void, ty: u32, label: &CStr, chunks: &[HxChunk], hc: usize) {
-    task_new(
-        htlc.cast(),
-        None,
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        label.as_ptr(),
-    );
-    hlwrite_chunks(htlc.cast(), ty, 0, chunks.as_ptr(), hc as c_int);
+/// Register a task labeled `label` (with `rcv` and its `ptr` when the reply
+/// needs handling) and write `req`. Returns the task, NULL if none was made.
+unsafe fn send(
+    htlc: *mut c_void,
+    req: &Request,
+    label: &CStr,
+    rcv: Option<RcvTaskFn>,
+    ptr: *mut c_void,
+) -> *mut Task {
+    let task = task_new(htlc.cast(), rcv, ptr, std::ptr::null_mut(), label.as_ptr());
+    req.with_hx_chunks(|chunks| {
+        hlwrite_chunks(
+            htlc.cast(),
+            req.opcode,
+            0,
+            chunks.as_ptr(),
+            chunks.len() as c_int,
+        )
+    });
+    task.cast()
 }
 
 /// `void hx_make_dir (struct htlc_conn *htlc, char *path)` — FILE_MKDIR for the
@@ -184,11 +108,8 @@ pub unsafe extern "C" fn hx_make_dir(htlc: *mut c_void, path: *mut c_char) {
     if htlc.is_null() || path.is_null() {
         return;
     }
-    let dir = HlDir::new(path, false);
-    let mut chunks = [HxChunk::EMPTY; 1];
-    let hc = build::build_file_mkdir_chunks(dir.bytes(), &mut chunks);
-    if hc > 0 {
-        send(htlc, HTLC_HDR_FILE_MKDIR, c"mkdir", &chunks, hc);
+    if let Some(req) = files::mkdir(cstr_bytes(path)) {
+        send(htlc, &req, c"mkdir", None, std::ptr::null_mut());
     }
 }
 
@@ -202,14 +123,8 @@ pub unsafe extern "C" fn hx_file_delete(htlc: *mut c_void, path: *mut c_char) {
     if htlc.is_null() || path.is_null() {
         return;
     }
-    let p = cstr_bytes(path);
-    let base = basename_offset(p);
-    let name = name_for_wire(htlc, &p[base..]);
-    let dir = (base > 0).then(|| HlDir::new(path, true));
-    let mut chunks = [HxChunk::EMPTY; 2];
-    let hc = build::build_file_delete_chunks(&name, dir.as_ref().map(HlDir::bytes), &mut chunks);
-    if hc > 0 {
-        send(htlc, HTLC_HDR_FILE_DELETE, c"rm", &chunks, hc);
+    if let Some(req) = files::delete(cstr_bytes(path), utf8(htlc)) {
+        send(htlc, &req, c"rm", None, std::ptr::null_mut());
     }
 }
 
@@ -231,40 +146,27 @@ pub unsafe extern "C" fn hx_file_info(
     if htlc.is_null() {
         return;
     }
-    let dir_bytes = cstr_bytes(dir_path);
-    let raw_name = slice_bytes(file_name, file_name_len);
-    let has_dir = below_root(dir_bytes);
+    let dir = cstr_bytes(dir_path);
+    let name = slice_bytes(file_name, file_name_len);
+    let Some(req) = files::get_info(dir, name, utf8(htlc)) else {
+        return;
+    };
 
     let mut label = Vec::new();
-    if has_dir {
-        label.extend_from_slice(dir_bytes);
-        label.push(SEP);
+    if hxrequest::path::below_root(dir) {
+        label.extend_from_slice(dir);
+        label.push(hxrequest::path::SEP);
     }
-    label.extend_from_slice(raw_name);
-    let label = c_string(&label);
-
-    let name = name_for_wire(htlc, raw_name);
-    let dir = has_dir.then(|| HlDir::new(dir_path, false));
-    let mut chunks = [HxChunk::EMPTY; 2];
-    let hc = build::build_file_getinfo_chunks(&name, dir.as_ref().map(HlDir::bytes), &mut chunks);
-    if hc > 0 {
-        // The label is the reply handler's to free.
-        let ptr = glib::ffi::g_strdup(label.as_ptr());
-        task_new(
-            htlc.cast(),
-            Some(rcv_task_file_getinfo),
-            ptr as *mut c_void,
-            std::ptr::null_mut(),
-            c"finfo".as_ptr(),
-        );
-        hlwrite_chunks(
-            htlc.cast(),
-            HTLC_HDR_FILE_GETINFO,
-            0,
-            chunks.as_ptr(),
-            hc as c_int,
-        );
-    }
+    label.extend_from_slice(name);
+    // The label is the reply handler's to free.
+    let label = glib::ffi::g_strdup(c_string(&label).as_ptr());
+    send(
+        htlc,
+        &req,
+        c"finfo",
+        Some(rcv_task_file_getinfo),
+        label as *mut c_void,
+    );
 }
 
 /// `void hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)` —
@@ -279,16 +181,8 @@ pub unsafe extern "C" fn hx_put_file(htlc: *mut c_void, lpath: *mut c_char, rpat
     if htlc.is_null() || lpath.is_null() || rpath.is_null() {
         return;
     }
-    let r = cstr_bytes(rpath);
-    let base = basename_offset(r);
-    let mut rdir = clamp_path(&r[..base]);
-    // "/a/" → "/a", so xfer_go's is-it-the-root test sees what it expects; the
-    // root itself stays "/".
-    if rdir.len() > 1 && rdir.last() == Some(&SEP) {
-        rdir = &rdir[..rdir.len() - 1];
-    }
-    let rdir = c_string(rdir);
-    let name = &r[base..];
+    let (rdir, name) = split(cstr_bytes(rpath));
+    let rdir = c_string(clamp_path(rdir));
     xfer_new(
         htlc,
         lpath,
@@ -333,9 +227,6 @@ pub unsafe extern "C" fn hx_get_folder(
         return;
     }
     let lpath = c_string(&lpath);
-
-    // As with FILE_GET, the request names the parent directory and carries the
-    // folder's basename as FILE_NAME.
     let rdir_bytes = clamp_path(cstr_bytes(rdir));
     let rdir = c_string(rdir_bytes);
 
@@ -347,26 +238,13 @@ pub unsafe extern "C" fn hx_get_folder(
         name_len,
         XFER_GET,
     );
-
-    let wire_name = name_for_wire(htlc, raw_name);
-    let dir = below_root(rdir_bytes).then(|| HlDir::new(rdir.as_ptr(), false));
-    let mut chunks = [HxChunk::EMPTY; 2];
-    let hc =
-        build::build_file_getfolder_chunks(&wire_name, dir.as_ref().map(HlDir::bytes), &mut chunks);
-    if hc > 0 {
-        task_new(
-            htlc.cast(),
+    if let Some(req) = files::get_folder(rdir_bytes, raw_name, utf8(htlc)) {
+        send(
+            htlc,
+            &req,
+            c"xfer_go_folder",
             Some(rcv_task_folder_get),
             htxf as *mut c_void,
-            std::ptr::null_mut(),
-            c"xfer_go_folder".as_ptr(),
-        );
-        hlwrite_chunks(
-            htlc.cast(),
-            HTLC_HDR_FILE_GETFOLDER,
-            0,
-            chunks.as_ptr(),
-            hc as c_int,
         );
     }
 }
@@ -412,9 +290,6 @@ fn local_path(bytes: &[u8]) -> std::path::PathBuf {
 /// *rdir, const char *name, gsize name_len)` — upload the local folder `lpath`
 /// into `rdir` as `name` (FILE_PUTFOLDER).
 ///
-/// The request carries the tree's byte total and file count, which the server
-/// shows in its queue; the per-file sizes stream with the files.
-///
 /// # Safety
 /// `htlc` is NULL or live; `lpath` / `rdir` are NULL or NUL-terminated; `name`
 /// is valid for `name_len` bytes. Main thread only.
@@ -432,9 +307,6 @@ pub unsafe extern "C" fn hx_put_folder(
     }
 
     let (total_bytes, nfiles) = folder_aggregate(&local_path(cstr_bytes(lpath)));
-    // HTXF_SIZE is 32-bit on the wire.
-    let size = total_bytes.min(u64::from(u32::MAX)) as u32;
-
     let rdir_bytes = clamp_path(cstr_bytes(rdir));
     let rdir = c_string(rdir_bytes);
 
@@ -442,45 +314,25 @@ pub unsafe extern "C" fn hx_put_folder(
         xfer_new_folder(htlc, lpath, rdir.as_ptr(), name, name_len, XFER_PUT);
     // The progress denominator until the stream fills total_pos; never 0, which
     // the tasks window would divide by.
-    (*htxf).total_size = u64::from(size.max(1));
+    (*htxf).total_size = total_bytes.clamp(1, u64::from(u32::MAX));
 
-    let wire_name = name_for_wire(htlc, raw_name);
-    let dir = below_root(rdir_bytes).then(|| HlDir::new(rdir.as_ptr(), false));
-    let req = FilePutFolderRequest {
-        name: &wire_name,
-        dir: dir.as_ref().map(HlDir::bytes),
-        size,
-        nfiles,
-    };
-    let mut chunks = [HxChunk::EMPTY; 4];
-    let mut scratch = [0u8; 8];
     // On a builder failure no task is made and nothing is written; the transfer
     // just created sits idle, since only the server's reply starts it.
-    let hc = build::build_file_putfolder_chunks(&req, &mut chunks, &mut scratch);
-    if hc > 0 {
-        task_new(
-            htlc.cast(),
+    if let Some(req) = files::put_folder(rdir_bytes, raw_name, total_bytes, nfiles, utf8(htlc)) {
+        send(
+            htlc,
+            &req,
+            c"xfer_go_folder",
             Some(rcv_task_folder_put),
             htxf as *mut c_void,
-            std::ptr::null_mut(),
-            c"xfer_go_folder".as_ptr(),
-        );
-        hlwrite_chunks(
-            htlc.cast(),
-            HTLC_HDR_FILE_PUTFOLDER,
-            0,
-            chunks.as_ptr(),
-            hc as c_int,
         );
     }
 }
 
 /// `void hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)`
-/// — move and/or rename the remote file at `src_path` to `dst_path`.
-///
-/// Hotline splits the two: FILE_MOVE changes the directory (keeping the name),
-/// and FILE_SETINFO's rename changes the name within a directory. A move that
-/// also renames sends both, the rename addressed to the source directory.
+/// — move and/or rename the remote file at `src_path` to `dst_path`: a
+/// FILE_MOVE for a new directory and a FILE_SETINFO for a new name (see
+/// `hxrequest::files::moves`).
 ///
 /// # Safety
 /// `htlc` is NULL or live; `src_path` / `dst_path` are NULL or NUL-terminated.
@@ -494,43 +346,60 @@ pub unsafe extern "C" fn hx_file_move(
     if htlc.is_null() || src_path.is_null() || dst_path.is_null() {
         return;
     }
-    let src = cstr_bytes(src_path);
-    let dst = cstr_bytes(dst_path);
-    let src_base = basename_offset(src);
-    let dst_base = basename_offset(dst);
-    let src_name = &src[src_base..];
-    let dst_name = &dst[dst_base..];
-
-    let src_dir = HlDir::new(src_path, true);
-    let src_wire = name_for_wire(htlc, src_name);
-    let dst_wire = name_for_wire(htlc, dst_name);
-
-    // The directory prefixes (each through its trailing separator) differ.
-    if dst_base > 0 && dst[..dst_base] != src[..src_base] {
-        let dst_dir = HlDir::new(dst_path, true);
-        let req = FileMoveRequest {
-            name: &src_wire,
-            dir: src_dir.bytes(),
-            dir_rename: dst_dir.bytes(),
-        };
-        let mut chunks = [HxChunk::EMPTY; 3];
-        let hc = build::build_file_move_chunks(&req, &mut chunks);
-        if hc > 0 {
-            send(htlc, HTLC_HDR_FILE_MOVE, c"mv", &chunks, hc);
-        }
+    let mut reqs = files::moves(cstr_bytes(src_path), cstr_bytes(dst_path), utf8(htlc)).into_iter();
+    let Some(first) = reqs.next() else {
+        return;
+    };
+    let Some(then) = reqs.next() else {
+        send(htlc, &first, c"mv", None, std::ptr::null_mut());
+        return;
+    };
+    // A move that also renames: the rename waits for the move's reply (see
+    // hxrequest::files::moves), riding on the move's task until then.
+    let then = Box::into_raw(Box::new(then));
+    let task = send(
+        htlc,
+        &first,
+        c"mv",
+        Some(rcv_task_move_then_rename),
+        then.cast(),
+    );
+    if task.is_null() {
+        drop(Box::from_raw(then));
+    } else {
+        (*task).ptr_free = Some(free_request);
     }
-    if !dst_name.is_empty() && src_name != dst_name {
-        let req = FileSetInfoRequest {
-            name: &src_wire,
-            rename: &dst_wire,
-            comment: None,
-            dir: Some(src_dir.bytes()),
-        };
-        let mut chunks = [HxChunk::EMPTY; 4];
-        let hc = build::build_file_setinfo_chunks(&req, &mut chunks);
-        if hc > 0 {
-            send(htlc, HTLC_HDR_FILE_SETINFO, c"mv", &chunks, hc);
-        }
+}
+
+/// The reply to the move half of a move-and-rename: send the rename (`ptr`) if
+/// the move went through. The task owns `ptr` and frees it afterwards.
+unsafe extern "C" fn rcv_task_move_then_rename(
+    htlc: *mut c_void,
+    frame: *const c_void,
+    frame_len: usize,
+    ptr: *mut c_void,
+    _data: *mut c_void,
+) {
+    if ptr.is_null() || frame.is_null() {
+        return;
+    }
+    let frame = std::slice::from_raw_parts(frame as *const u8, frame_len);
+    let moved = hxproto::parse::Header::parse(frame).is_some_and(|h| !h.in_error());
+    if moved {
+        send(
+            htlc,
+            &*(ptr as *const Request),
+            c"mv",
+            None,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
+/// `GDestroyNotify` for the rename a move task carries.
+unsafe extern "C" fn free_request(p: glib::ffi::gpointer) {
+    if !p.is_null() {
+        drop(Box::from_raw(p as *mut Request));
     }
 }
 

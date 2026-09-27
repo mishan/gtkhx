@@ -92,8 +92,14 @@ Or as admin (full access):
 
 ```
 Login:   admin
-Pass:    adminpass      (set by the Dockerfile HOPE-seed step)
+Pass:    (empty)        (set by seed-accounts.sh)
 ```
+
+admin's password is empty because no other password works from a
+real client: Janus's plain login compares the password field as it
+arrives, without undoing the XOR-0xFF obfuscation every Hotline
+client applies to it, so only a password that obfuscates to itself
+matches.
 
 Janus's default `guest` account has `ReadChatHistory: true` already
 set (access bit 56), so chat-history queries from a guest connection
@@ -132,15 +138,12 @@ Out of the box:
        server-side and compares. Works out of the box —
        `test_hope_chacha20` uses this path, matching
        hotline.vespernet.net's guest configuration.
-    2. *Non-empty password* via the admin REST API. The
-       Dockerfile exposes the API on `:8973` and PATCHes
-       `admin` to `"adminpass"`. Janus writes a `HOPEPassword:`
-       blob into `Server/Users/admin.yaml`, but empirically
-       the blob doesn't validate at HOPE login (likely a Janus
-       issue). We seed it anyway in case future tests need
-       a non-empty HOPE password and the path gets fixed.
-  The master key Janus generated for the encryption sits in
-  `Server/Data/` and ships in the image.
+    2. *Non-empty password* via the admin REST API (`:8973`).
+       Janus writes a `HOPEPassword:` blob into the account's
+       YAML, but empirically the blob doesn't validate at HOPE
+       login, and the plain login can't take a non-empty
+       password either (see above). Neither bundled account
+       uses this path.
 - Large-file (>4 GiB) transfers.
 - Text encoding negotiation (UTF-8 / Mac Roman).
 - File-mode banner (Janus ships a `banner.gif`).
@@ -151,7 +154,7 @@ Out of the box:
   `NewUserDefaults.VoiceChat: true` gives any runtime-created
   account access bit 55 by default; the bundled `guest` and
   `admin` accounts get the bit through an in-place YAML edit in
-  `seed-hope-passwords.sh` (the upstream YAML schema is one
+  `seed-accounts.sh` (the upstream YAML schema is one
   boolean per access bit, two-space-indented under `Access:`).
 
   GtkHx Phase 8 (A-E) ships end-to-end DTLS-SRTP voice against
@@ -168,8 +171,7 @@ Also enabled:
   `conf/config.yaml`. The
   Dockerfile generates a self-signed cert (CN=localhost,
   SAN=DNS:localhost,IP:127.0.0.1, 10-year validity, 2048-bit RSA)
-  into `Server/tls/` before the seed step (the seed-time Janus
-  process refuses to start without it). Janus is the canonical TLS
+  into `Server/tls/` (Janus refuses to start without it). Janus is the canonical TLS
   test target — `real_connect` (tls_login / tls_mismatch_rejected),
   the `real_tls_login` / `_banner` / `_file_get` suite, and the Tier 3
   TLS matrix rows depend on this. The client pins the self-signed
@@ -241,23 +243,19 @@ tests/janus/
 ├── Dockerfile               build recipe (curl + sha256 + copy + seed)
 ├── conf/
 │   └── config.yaml          full server config (replaces upstream)
-├── seed-hope-passwords.sh   build-time HOPE password seeder
+├── seed-accounts.sh        build-time edits to the bundled accounts
 └── README.md                this file
 ```
 
 `conf/config.yaml` is the upstream Janus 2.0.8-dev `config.yaml`
 with the test-targeted edits baked in (HOPE on, chat-history on,
-per-IP throttles disabled, admin API exposed for the build-time
-HOPE seeding). It's checked in whole rather than `sed`-applied
-in the Dockerfile so the diff against upstream is auditable and
+per-IP throttles disabled, admin API exposed). It's checked in
+whole rather than `sed`-applied in the Dockerfile so the diff against upstream is auditable and
 robust to upstream re-wording. Mirrors how `tests/mhxd/conf/`
 ships its full `hxd.conf`.
 
-`seed-hope-passwords.sh` is a standalone script the Dockerfile
-invokes during the build stage. It starts Janus once, PATCHes
-the bundled guest/admin passwords via the admin REST API to
-generate HOPE-compatible hashes, then shuts Janus down. Lives
-in its own file because Dockerfile `RUN` steps mixing `&`
-(background) with `&&` (conditional) silently misparse; a
-standalone `set -euo pipefail` script keeps the control flow
-auditable.
+`seed-accounts.sh` is a standalone script the Dockerfile invokes
+during the build stage. It edits the bundled `guest` / `admin`
+account YAMLs in place — admin's empty password, and the voice and
+inline-media access bits — and fails the build if an edit didn't
+take.

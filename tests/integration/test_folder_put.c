@@ -41,6 +41,7 @@
 #include "config.h"
 #include <string.h>
 #include <unistd.h>
+#include <sys/socket.h>
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
@@ -116,6 +117,21 @@ test_folder_put_request_reply (void)
         dh_end ();
         g_assert_cmphex (xfer_ref, !=, 0);
         g_test_message ("PUTFOLDER accepted; ref=0x%08x", (unsigned)xfer_ref);
+
+        /* Claim the reference and hang up, as a cancelled upload does,
+         * then wait for mhxd to close its end before disconnecting.
+         * mhxd never releases the global transfer slot of a reference
+         * it hasn't seen claimed when the client disconnects, so
+         * skipping this would use up one of the rig's slots every run
+         * (see docs/mhxd-bugs.md). */
+        int xfd = integration_connect_xfer ();
+        g_assert_cmpint (xfd, >=, 0);
+        g_assert_true (integration_send_xfer_hdr (xfd, xfer_ref, 0));
+        shutdown (xfd, SHUT_WR);
+        guint8 sink;
+        while (integration_recv (xfd, &sink, 1)) {
+        }
+        integration_close (xfd);
 
         /* TODO future batch: connect to the HTXF subchannel,
          * drive the FILE_NEXT loop (server drives, we send

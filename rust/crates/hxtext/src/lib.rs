@@ -148,41 +148,44 @@ pub unsafe extern "C" fn gtkhx_text_for_wire(
         return g_dup(b"");
     }
     let input = std::slice::from_raw_parts(utf8 as *const u8, utf8_len);
+    let wire = for_wire(
+        input,
+        utf8_mode != glib::ffi::GFALSE,
+        is_body != glib::ffi::GFALSE,
+    );
+    if !out_len.is_null() {
+        *out_len = wire.len();
+    }
+    g_dup(&wire)
+}
 
-    // UTF-8 negotiated — pass through verbatim (no conversion, no LF→CR).
-    if utf8_mode != glib::ffi::GFALSE {
-        if !out_len.is_null() {
-            *out_len = utf8_len;
-        }
-        return g_dup(input);
+/// Encode UTF-8 `text` for the wire — the native core of
+/// [`gtkhx_text_for_wire`]. With UTF-8 negotiated (`utf8_mode`) the bytes pass
+/// through untouched. Otherwise emoji become `:shortcode:` text (when that's
+/// on), the result is encoded to Mac Roman (`?` for anything outside it), and
+/// for a body field (`is_body`) LF becomes CR, the line ending legacy servers
+/// expect.
+pub fn for_wire(text: &[u8], utf8_mode: bool, is_body: bool) -> Vec<u8> {
+    if utf8_mode {
+        return text.to_vec();
     }
 
-    let text = String::from_utf8_lossy(input);
-    // Rewrite emoji → `:shortcode:` so they survive Mac Roman as readable
-    // text instead of the `?` fallback (unless the toggle is off / empty).
-    let sc: String = if emoji_shortcodes_on() && utf8_len > 0 {
+    let text = String::from_utf8_lossy(text);
+    let sc: String = if emoji_shortcodes_on() && !text.is_empty() {
         hxproto::emoji::emoji_to_shortcodes(&text)
     } else {
         text.into_owned()
     };
 
-    // Encode the shortcoded UTF-8 to Mac Roman (`?` for out-of-repertoire).
     let mut wire = hxproto::text::from_utf8(&sc);
-
-    // Body fields: LF → CR for legacy clients (spec: legacy servers expect
-    // CR-terminated lines on the wire).
-    if is_body != glib::ffi::GFALSE {
+    if is_body {
         for b in wire.iter_mut() {
             if *b == 0x0a {
                 *b = 0x0d;
             }
         }
     }
-
-    if !out_len.is_null() {
-        *out_len = wire.len();
-    }
-    g_dup(&wire)
+    wire
 }
 
 #[cfg(test)]

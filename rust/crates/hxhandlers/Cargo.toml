@@ -22,6 +22,7 @@ hxproto = { workspace = true }
 gtkhx-proto-ffi = { path = "../gtkhx-proto-ffi" }
 hxmodel = { path = "../hxmodel" }
 hxtext = { path = "../hxtext" }
+hxrequest = { path = "../hxrequest" }
 # The xfers shell (src/xfer.rs) owns the transfer registry over hxnet's
 # HtxfHandle + hx_htxf_* lifecycle; native access instead of the hx_htxf_*
 # C-ABI accessor bounce. hxnet does not depend on hxhandlers (acyclic).

@@ -1,0 +1,25 @@
+[package]
+rust-version.workspace = true
+name = "hx-e2e"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "End-to-end tests: GtkHx's own requests and reply parsers, driven against the real servers in the test rig."
+publish = false
+
+# Nothing links this crate; it exists for its tests.
+[lib]
+crate-type = ["rlib"]
+
+[features]
+# The suites under tests/ talk to the Docker rig (tests/COMPOSE.md). Without
+# this feature they compile to nothing, so `cargo test --workspace` on a machine
+# with no rig neither fails nor reports skips; with it, a server the rig should
+# have and doesn't is a failure. CI's integration job turns it on.
+rig = []
+
+[dependencies]
+hxnet = { path = "../hxnet" }
+hxproto = { workspace = true }
+hxrequest = { path = "../hxrequest" }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
