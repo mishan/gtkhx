@@ -101,9 +101,10 @@ services:
       TRACKERS: "127.0.0.1:5499,127.0.0.1:5699"
 
   # hxd-ng: the only server with the video extension, so the video tests'
-  # target. Built from source at a pinned revision (tests/hxd-ng). Its
-  # entrypoint advertises the host's own addresses as ICE candidates — see
-  # tests/hxd-ng/README.md for why loopback won't do. No tracker
+  # target. hxd-ng's published GHCR image at a pinned digest, plus the
+  # rig's config (tests/hxd-ng). Its entrypoint advertises the host's own
+  # addresses as ICE candidates — see tests/hxd-ng/README.md for why
+  # loopback won't do. No tracker
   # registration: nothing tests it here.
   hxd-ng:
     build:

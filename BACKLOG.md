@@ -72,10 +72,6 @@ record.
 
 ## Tests and rig
 
-- `tests/hxd-ng/Dockerfile` builds from the floating `rust:1-trixie`, so each
-  new upstream tag invalidates the layer cache. Pin a version next to
-  `HXD_NG_REV`, and fetch just the revision instead of cloning the whole
-  history.
 - The hxd-ng entrypoint falls back to advertising `127.0.0.1` on an IPv6-only or
   loopback-only host, and the media tests then fail with "never reached
   CONNECTED". The README and the compose comment say "addresses" where only one

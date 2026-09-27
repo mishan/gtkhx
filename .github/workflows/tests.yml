@@ -245,10 +245,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=janus
 
       - name: build hxd-ng test container
-        # hxd-ng from source at the revision pinned in tests/hxd-ng/Dockerfile
-        # — the only server with the video extension, so the video tests'
-        # target. A full cargo release build the first time; the gha layer
-        # cache makes it a no-op until the pin or the rig config changes.
+        # hxd-ng — the only server with the video extension, so the video
+        # tests' target. Nothing compiles: tests/hxd-ng/Dockerfile layers the
+        # rig's config on the image hxd-ng's CI publishes to GHCR, pinned by
+        # digest.
         uses: docker/build-push-action@v6
         with:
           context: tests/hxd-ng
