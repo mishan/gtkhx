@@ -76,15 +76,24 @@ pick_nick_color_server (void)
     return srv;
 }
 
-/* Process-unique 24-bit RGB color. Avoid 0 and 0x00ffffff (the
- * lower 24 bits of HX_NICK_COLOR_NONE) so an assertion on the
- * "color was set" side can't false-positive on the sentinel. */
+/* Process-unique 24-bit RGB color that a server will let a guest use.
+ *
+ * Janus silently strips a non-admin's color within 32 per channel of
+ * its default "admin red" family (#FF0000, #CC0000, #B22222, #8B0000,
+ * #FF4444, #E53935), so a fully random color failed this test a few
+ * percent of the time. Every one of those has a green channel at or
+ * below 0x44, so a green channel of 0x80 or more is never stripped.
+ *
+ * Also avoid 0x00ffffff (the lower 24 bits of HX_NICK_COLOR_NONE) so
+ * an assertion on the "color was set" side can't false-positive on the
+ * sentinel. */
 static guint32
 make_unique_color (void)
 {
     guint32 r = g_random_int () & 0x00ffffffu;
-    if (r == 0 || r == 0x00ffffffu) {
-        r ^= 0x00abc123u;
+    r |= 0x00008000u;
+    if (r == 0x00ffffffu) {
+        r = 0x00fffeffu;
     }
     return r;
 }
@@ -145,6 +154,7 @@ test_nick_color_user_list_trailer (void)
     /* Set our color. The spec's auto-opt-in fires on the server's
      * first DATA_COLOR receipt from this session. */
     guint32 wanted = make_unique_color ();
+    g_test_message ("setting color %06x", (unsigned)wanted);
     g_assert_true (send_user_change_with_color (fd, &htlc, nick, 412, wanted));
 
     /* Brief settle so Janus persists AGREEMENTAGREE + USER_CHANGE
