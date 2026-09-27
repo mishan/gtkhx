@@ -8,6 +8,9 @@ pub enum Cap {
     /// An account allowed to manage files: make, rename, move and delete
     /// folders and files anywhere under the root.
     FileAdmin,
+    /// Takes a file or folder name of the full 255 bytes a path item can
+    /// carry. Janus refuses names over 128 bytes, and has no setting for it.
+    LongNames,
     /// Negotiates UTF-8 names (`HTLC_CAP_TEXT_ENCODING`).
     TextEncoding,
     /// Negotiates 64-bit file sizes (`HTLC_CAP_LARGE_FILES`).
@@ -40,17 +43,18 @@ pub const SERVERS: &[Server] = &[
         xfer_port: 5501,
         // mhxd ships `admin` with no password and every access bit.
         admin: ("admin", ""),
-        caps: &[Cap::FileAdmin],
+        caps: &[Cap::FileAdmin, Cap::LongNames],
     },
     Server {
         name: "janus",
         host: "127.0.0.1",
         port: 5510,
         xfer_port: 5511,
-        // No file-admin account yet: the password tests/janus seeds for
-        // `admin` doesn't log in, and the guest can't make folders.
-        admin: ("", ""),
-        caps: &[Cap::TextEncoding, Cap::LargeFiles],
+        // tests/janus gives `admin` the empty password: Janus compares a
+        // plain login's password without undoing the wire obfuscation, so
+        // no other password logs in.
+        admin: ("admin", ""),
+        caps: &[Cap::FileAdmin, Cap::TextEncoding, Cap::LargeFiles],
     },
 ];
 

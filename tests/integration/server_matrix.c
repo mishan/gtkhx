@@ -78,11 +78,8 @@ const hx_test_server hx_test_server_matrix[] = {
          * with the empty password Janus ships upstream — that's
          * the path that works for HOPE login (server computes
          * HMAC(key="", session_key) without needing a stored
-         * HOPEPassword). The Dockerfile additionally seeds
-         * admin's password to "adminpass" via the REST admin
-         * API at build time; see tests/janus/seed-hope-
-         * passwords.sh for the full background on why we don't
-         * seed guest.
+         * HOPEPassword). admin has the empty password too; see
+         * tests/janus/seed-accounts.sh for why.
          *
          * TLS shipped 2026-05 (claude/tls-phase1-control-channel):
          * the Dockerfile generates a self-signed CN=localhost cert

@@ -140,6 +140,8 @@ supports what it needs (`hx_e2e::servers_with`), and does its work inside a
 uniquely named scratch folder it deletes afterwards, so runs don't collide
 and the shared servers don't drift.
 
-Operations that need a file-admin account run on mhxd only for now: Janus's
-seeded `admin` password doesn't log in, and the pinned hxd-ng has no mkdir,
-delete or move.
+Operations that need a file-admin account run on mhxd and Janus (both
+`admin`, empty password); the pinned hxd-ng has no mkdir, delete or move.
+Janus's `admin` has the empty password because Janus doesn't undo the
+password obfuscation on a plain login, so no other password logs in from a
+real client — see `tests/janus/README.md`.

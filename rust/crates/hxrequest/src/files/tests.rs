@@ -111,6 +111,22 @@ fn set_info_carries_a_body_encoded_comment() {
 }
 
 #[test]
+fn set_info_keeping_the_name_sends_no_rename() {
+    let r = set_info(b"/pub/same", b"same", Some(b"note"), false).unwrap();
+    assert_eq!(
+        r,
+        req(
+            ClientHdr::FileSetInfo,
+            &[
+                (TAG_FILE_NAME, b"same"),
+                (TAG_FILE_COMMENT, b"note"),
+                (TAG_DIR, &dir("/pub")),
+            ]
+        )
+    );
+}
+
+#[test]
 fn a_move_across_directories_is_one_move() {
     assert_eq!(
         moves(b"/a/f", b"/b/f", true),

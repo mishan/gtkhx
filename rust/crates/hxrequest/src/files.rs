@@ -57,15 +57,18 @@ pub fn get_info(dir: &[u8], name: &[u8], utf8: bool) -> Option<Request> {
 
 /// FILE_SETINFO renaming the file or folder at `path` to `rename`, and setting
 /// its comment when `comment` is given (the Get Info dialog's Save).
+///
+/// A `rename` that is the current name goes out as no rename at all: Janus
+/// refuses a rename to the item's own name, and fails the comment with it.
 pub fn set_info(path: &[u8], rename: &[u8], comment: Option<&[u8]>, utf8: bool) -> Option<Request> {
     let (dir, name) = split(path);
+    let rename = (rename != name).then(|| name_for_wire(rename, utf8));
     let name = name_for_wire(name, utf8);
-    let rename = name_for_wire(rename, utf8);
     let comment = comment.map(|c| hxtext::for_wire(c, utf8, true));
     let enc = (!dir.is_empty()).then(|| encode_dir(path, true));
     let req = FileSetInfoRequest {
         name: &name,
-        rename: &rename,
+        rename: rename.as_deref(),
         comment: comment.as_deref(),
         dir: enc.as_deref(),
     };
@@ -110,7 +113,7 @@ pub fn moves(src: &[u8], dst: &[u8], utf8: bool) -> Vec<Request> {
         let dst_wire = name_for_wire(dst_name, utf8);
         let req = FileSetInfoRequest {
             name: &src_wire,
-            rename: &dst_wire,
+            rename: Some(&dst_wire),
             comment: None,
             dir: Some(&rename_dir),
         };

@@ -105,7 +105,8 @@ fn mkdir_refuses_an_existing_name_and_a_missing_parent() {
 
 #[test]
 fn a_255_byte_name_round_trips() {
-    for mut c in admins() {
+    for s in servers_with(&[Cap::FileAdmin, Cap::LongNames]) {
+        let mut c = Client::admin(s, 0);
         let mut s = Scratch::new(&mut c, "long");
         let (dir, long) = (s.path().to_string(), "L".repeat(255));
         let path = s.join(&long);
@@ -254,7 +255,14 @@ fn get_info_describes_a_folder_and_reads_back_its_comment() {
         ok(c, &r, "get info");
         let info = r.file_info();
         assert_eq!(info.name, b"f");
-        assert_eq!(info.type_, b"fldr");
+        // The type string: mhxd sends the type code, Janus a display name
+        // (with the code in a separate field the parser doesn't read).
+        assert!(
+            [&b"fldr"[..], b"Folder"].contains(&info.type_.as_slice()),
+            "{}: folder type {:?}",
+            c.server().name,
+            String::from_utf8_lossy(&info.type_)
+        );
         // Sent with CR line ends, read back with LF.
         assert_eq!(info.comment, b"two\nlines");
     }

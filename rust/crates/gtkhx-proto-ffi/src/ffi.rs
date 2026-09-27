@@ -3058,7 +3058,7 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_setinfo_chunks(
     let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
     let req = build::FileSetInfoRequest {
         name: as_slice(name_ptr, name_len),
-        rename: as_slice(rename_ptr, rename_len),
+        rename: Some(as_slice(rename_ptr, rename_len)),
         comment: comment_opt,
         dir: dir_opt,
     };
