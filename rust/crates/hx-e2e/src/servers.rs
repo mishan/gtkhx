@@ -51,9 +51,7 @@ pub const SERVERS: &[Server] = &[
         host: "127.0.0.1",
         port: 5510,
         xfer_port: 5511,
-        // tests/janus gives `admin` the empty password: Janus compares a
-        // plain login's password without undoing the wire obfuscation, so
-        // no other password logs in.
+        // tests/janus gives `admin` the empty password.
         admin: "admin",
         caps: &[Cap::FileAdmin, Cap::TextEncoding, Cap::LargeFiles],
     },
