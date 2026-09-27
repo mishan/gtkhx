@@ -1537,6 +1537,10 @@ mod recv_timeout_tests {
     // sends it must not hang the download worker until the socket closes — the
     // ~2s end-of-transfer stall. The worker should finish promptly (bounded by
     // MACR_DRAIN_TIMEOUT_MS) and return success.
+    /// How long the phantom-MACR server holds the socket open without
+    /// sending, when the receive under test doesn't return first.
+    const SERVER_HOLD: Duration = Duration::from_secs(6);
+
     #[test]
     fn phantom_macr_does_not_hang_completion() {
         let body = b"downloaded file body, no resource fork\n";
@@ -1546,13 +1550,15 @@ mod recv_timeout_tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        // Server: send header+data, then hold the socket open well past the drain
-        // timeout without sending the (nonexistent) MACR, then close.
+        // Server: send header+data, then hold the socket open far past the drain
+        // timeout without sending the (nonexistent) MACR. It closes early once
+        // the receive has returned, so a passing run doesn't wait out the hold.
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
         let server = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
             s.write_all(&wire).unwrap();
             s.flush().unwrap();
-            std::thread::sleep(Duration::from_millis(1500));
+            let _ = done_rx.recv_timeout(SERVER_HOLD);
             // socket closes on drop
         });
 
@@ -1585,6 +1591,7 @@ mod recv_timeout_tests {
         let start = Instant::now();
         let rv = unsafe { hxnet_xfer_file_recv_one(&params) };
         let elapsed = start.elapsed();
+        let _ = done_tx.send(());
         drop(conn);
 
         let got = std::fs::read(&out_path).unwrap_or_default();
@@ -1596,8 +1603,12 @@ mod recv_timeout_tests {
             "recv should complete cleanly despite the phantom MACR"
         );
         assert_eq!(got, body, "data fork must be written correctly");
+        // The elapsed time also covers the fsyncs of the file and its
+        // sidecar, which can take most of a second on a CI runner, so the
+        // bound sits between that and the server's hold rather than near
+        // the drain timeout itself.
         assert!(
-            elapsed < Duration::from_millis(1000),
+            elapsed < SERVER_HOLD / 2,
             "recv should finish within the drain timeout, not block until close; took {:?}",
             elapsed
         );
