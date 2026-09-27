@@ -254,17 +254,22 @@ hx_split_get_paned (HxSplit *self)
 /* ----------------------------------------------------------------- */
 
 HxSplit *
-hx_split_split (HxSplit *self, GtkOrientation orientation)
+hx_split_split (HxSplit *self, GtkOrientation orientation, gboolean new_first)
 {
     PanelFrame *original_frame;
     HxSplit *sibling;
     GtkWidget *paned;
+    int size;
 
     g_return_val_if_fail (HX_IS_SPLIT (self), NULL);
     if (!hx_split_is_leaf (self)) {
         g_warning ("hx_split_split: called on internal split");
         return NULL;
     }
+
+    size = orientation == GTK_ORIENTATION_HORIZONTAL
+               ? gtk_widget_get_width (GTK_WIDGET (self))
+               : gtk_widget_get_height (GTK_WIDGET (self));
 
     /* Steal a strong ref on the existing frame so the widget tree
      * shuffle below doesn't dispose it. */
@@ -275,27 +280,33 @@ hx_split_split (HxSplit *self, GtkOrientation orientation)
     gtk_widget_unparent (GTK_WIDGET (original_frame));
     self->frame = NULL;
 
-    /* Build the paned + two child splits. child_a wraps the
-     * original frame so its contents (panels) move with it. */
+    /* Build the paned + two child splits. The original frame moves
+     * over whole, so its panels come with it. */
     paned = gtk_paned_new (orientation);
     gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
     gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
 
-    self->child_a = hx_split_new_with_frame (original_frame);
+    sibling = hx_split_new ();
+    self->child_a
+        = new_first ? sibling : hx_split_new_with_frame (original_frame);
+    self->child_b
+        = new_first ? hx_split_new_with_frame (original_frame) : sibling;
     g_object_unref (original_frame); /* the new leaf parented it */
-
-    self->child_b = hx_split_new ();
 
     gtk_paned_set_start_child (GTK_PANED (paned), GTK_WIDGET (self->child_a));
     gtk_paned_set_end_child (GTK_PANED (paned), GTK_WIDGET (self->child_b));
+    /* Halve it — what a drop's preview promised, and fairer than
+     * letting the populated frame's natural size squeeze the new one. */
+    if (size > 0) {
+        gtk_paned_set_position (GTK_PANED (paned), size / 2);
+    }
 
     self->paned = GTK_PANED (paned);
     gtk_widget_set_parent (paned, GTK_WIDGET (self));
     install_paned_save_triggers (GTK_PANED (paned));
 
-    sibling = self->child_b;
     dock_layout_request_save ();
     return sibling;
 }
@@ -629,28 +640,28 @@ extern GtkWidget *toolbar_end_frame;
 extern GtkWidget *toolbar_bottom_frame;
 extern GtkWidget *toolbar_center_frame;
 
-/* Forward decl — used by frame_do_split, defined further down. */
+/* Forward decl — used by hx_split_split_frame, defined further down. */
 static void refresh_close_enabled_leaf (HxSplit *leaf, gpointer user_data);
 
-static void
-frame_do_split (GtkWidget *frame, GtkOrientation orientation)
+GtkWidget *
+hx_split_split_frame (GtkWidget *frame, GtkPositionType side)
 {
     HxSplit *leaf = frame_to_leaf (frame);
     HxSplit *new_leaf;
     PanelFrame *new_frame;
+    GtkOrientation orientation = side == GTK_POS_LEFT || side == GTK_POS_RIGHT
+                                     ? GTK_ORIENTATION_HORIZONTAL
+                                     : GTK_ORIENTATION_VERTICAL;
 
     if (leaf == NULL) {
-        return;
+        return NULL;
     }
 
-    new_leaf = hx_split_split (leaf, orientation);
-    if (new_leaf == NULL) {
-        return;
-    }
-
-    new_frame = hx_split_get_frame (new_leaf);
+    new_leaf = hx_split_split (leaf, orientation,
+                               side == GTK_POS_LEFT || side == GTK_POS_TOP);
+    new_frame = new_leaf != NULL ? hx_split_get_frame (new_leaf) : NULL;
     if (new_frame == NULL) {
-        return;
+        return NULL;
     }
 
     /* The new sibling leaf's PanelFrame needs the same plumbing
@@ -680,6 +691,7 @@ frame_do_split (GtkWidget *frame, GtkOrientation orientation)
         }
         hx_split_foreach_leaf (area_root, refresh_close_enabled_leaf, NULL);
     }
+    return GTK_WIDGET (new_frame);
 }
 
 static void
@@ -688,7 +700,7 @@ on_frame_split_h (GSimpleAction *action, GVariant *parameter,
 {
     (void)action;
     (void)parameter;
-    frame_do_split (GTK_WIDGET (user_data), GTK_ORIENTATION_HORIZONTAL);
+    hx_split_split_frame (GTK_WIDGET (user_data), GTK_POS_RIGHT);
 }
 
 static void
@@ -697,7 +709,7 @@ on_frame_split_v (GSimpleAction *action, GVariant *parameter,
 {
     (void)action;
     (void)parameter;
-    frame_do_split (GTK_WIDGET (user_data), GTK_ORIENTATION_VERTICAL);
+    hx_split_split_frame (GTK_WIDGET (user_data), GTK_POS_BOTTOM);
 }
 
 static void
@@ -824,7 +836,7 @@ on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
      * root (e.g. closing one leaf of a two-leaf area's only
      * internal split). The surviving leaves' close-frame
      * enabled state then needs to refresh, exactly the same way
-     * frame_do_split refreshes after a split changes the
+     * hx_split_split_frame refreshes after a split changes the
      * topology — otherwise the area-root leaf's close-frame can
      * stay enabled even though closing it is now a no-op. */
     {

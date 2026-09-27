@@ -68,6 +68,17 @@ GtkWidget *gtkhx_pixmap_button (const char *resource_name, const char *tooltip,
                                 GtkhxScaleArea area, GCallback cb,
                                 gpointer user_data);
 
+/* The drop preview's accent (hx_panel_frame.c): no theme here, so the
+ * desktop's. */
+gboolean
+gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
+{
+    (void)role;
+    (void)dark;
+    (void)out;
+    return FALSE;
+}
+
 /* The pane switcher's buttons (hx_panel.c) — a plain button is all the
  * fixture needs; the pixmap and theme scaling live in gtkutil.c. */
 GtkWidget *
@@ -327,6 +338,55 @@ test_state_survives_repeated_add_remove (Fixture *fx, gconstpointer user_data)
     }
 }
 
+/* A drop on a pane's edge splits the new, empty pane off that side.
+ * The original frame keeps its panels either way; which paned child it
+ * ends up in, and the paned's orientation, are what the side decides. */
+static void
+test_split_toward_each_side (Fixture *fx, gconstpointer user_data)
+{
+    static const struct {
+        GtkPositionType side;
+        GtkOrientation orientation;
+        gboolean new_first;
+    } cases[] = {
+        { GTK_POS_LEFT, GTK_ORIENTATION_HORIZONTAL, TRUE },
+        { GTK_POS_RIGHT, GTK_ORIENTATION_HORIZONTAL, FALSE },
+        { GTK_POS_TOP, GTK_ORIENTATION_VERTICAL, TRUE },
+        { GTK_POS_BOTTOM, GTK_ORIENTATION_VERTICAL, FALSE },
+    };
+
+    (void)user_data;
+    add_panel (fx->frame, "a");
+
+    for (guint i = 0; i < G_N_ELEMENTS (cases); i++) {
+        HxSplit *parent;
+        GtkWidget *new_frame;
+        HxSplit *first, *second;
+
+        new_frame
+            = hx_split_split_frame (GTK_WIDGET (fx->frame), cases[i].side);
+        pump ();
+        g_assert_nonnull (new_frame);
+        g_assert_true (HX_IS_PANEL_FRAME (new_frame));
+        g_assert_cmpuint (panel_frame_get_n_pages (PANEL_FRAME (new_frame)), ==,
+                          0);
+        g_assert_cmpuint (panel_frame_get_n_pages (fx->frame), ==, 1);
+
+        /* frame -> leaf -> paned -> the split that was the leaf */
+        parent = HX_SPLIT (gtk_widget_get_parent (gtk_widget_get_parent (
+            gtk_widget_get_parent (GTK_WIDGET (fx->frame)))));
+        g_assert_cmpint (hx_split_get_orientation (parent), ==,
+                         cases[i].orientation);
+        first = hx_split_get_child_a (parent);
+        second = hx_split_get_child_b (parent);
+        g_assert_true (GTK_WIDGET (hx_split_get_frame (
+                           cases[i].new_first ? first : second))
+                       == new_frame);
+        g_assert_true (hx_split_get_frame (cases[i].new_first ? second : first)
+                       == fx->frame);
+    }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -370,6 +430,7 @@ main (int argc, char **argv)
          test_closing_the_last_page_empties_the_frame);
     ADD ("/frame_close_button/survives_add_remove_churn",
          test_state_survives_repeated_add_remove);
+    ADD ("/dock_split/toward_each_side", test_split_toward_each_side);
 
 #undef ADD
 

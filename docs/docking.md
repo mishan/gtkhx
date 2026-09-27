@@ -128,13 +128,13 @@ tags used to anchor the `toolbar_*_frame` globals.
 
 Users can:
 
-1. **Split any leaf** horizontally or vertically. The original
-   frame becomes the start child; a fresh empty leaf becomes the
-   end child.
-2. **Move panels between leaves** via DnD (libpanel's existing
-   gesture, unchanged) or via *Move left / right / up / down* in
-   the panel chevron menu. With one unified tree, Move walks the
-   whole dock.
+1. **Split any leaf** horizontally or vertically, from the frame
+   menu (a fresh empty leaf on the right or below) or by dropping a
+   panel near one of the leaf's edges (the panel in a fresh leaf on
+   that side). Either way the leaf is divided down the middle.
+2. **Move panels between leaves** via DnD (libpanel's drag handle)
+   or the Alt+Shift+arrow keys. With one unified tree, a move walks
+   the whole dock.
 3. **Close a frame** (a leaf). Any panels in the closing leaf
    first migrate to the sibling, then the leaf collapses; the
    sibling takes the parent split's place in the tree.
@@ -467,7 +467,22 @@ six-dot icon in the frame header):
    close-request handler so the redock path doesn't race the
    already-moved panel).
 
-### Drop feedback is per-pane
+### Drop zones: tabs or a split
+
+Where in the frame the panel is dropped decides what happens.
+`drop_zone_at` in `hx_panel.c` measures the pointer's distance to each
+edge as a fraction of the frame's size; within `HX_DROP_EDGE` (a
+quarter) of an edge, the nearest edge wins and the drop splits the
+frame toward it (`hx_split_split_frame`), moving the panel into the new
+half. Anywhere else, the panel joins the frame's tabs, as it always
+did. Fractions rather than pixels, so a narrow sidebar still has a
+usable left and right zone.
+
+One exception: a frame's *only* panel dropped on its own edge counts as
+a drop into the tabs. The split would leave the original half empty,
+which is a longer way of doing nothing.
+
+### Drop feedback is per-pane and per-zone
 
 GTK's default stylesheet outlines *any* widget with an active drop
 target under the pointer (`:not(window):drop(active)`). Our target is a
@@ -479,17 +494,20 @@ Two halves to the fix, both in `hx_panel.c`:
 
 - The dock carries an `hx-dock-drop-host` class and a rule that turns
   its own `:drop(active)` box-shadow off.
-- `enter` and `motion` run `frame_at_dock_coords` — the *same*
-  hit-test the drop uses, so the highlight can't disagree with where
-  the panel actually goes — and put an `hx-drop-target` class on that
-  frame. `leave` and `drop` clear it.
+- `enter` and `motion` run `frame_at_dock_coords` and `drop_zone_at` —
+  the *same* hit-test and zones the drop uses, so the preview can't
+  disagree with where the panel actually goes — and hand the zone to
+  that frame (`hx_panel_frame_set_drop_zone`). `leave` and `drop`
+  clear it.
 
-The frame's highlight is `outline`, not `box-shadow: inset`, and the
-distinction is load-bearing: `gtk_widget_snapshot` paints background
-and border *before* the children and the outline *after*, so an inset
-shadow would be covered by whatever content fills the pane. A negative
-`outline-offset` keeps it inside the frame's own allocation instead of
-bleeding onto the neighbour.
+`HxPanelFrame` paints the preview in its own `snapshot`, after chaining
+up so it lands on top of the content: an accent tint with an accent
+edge, over the whole frame for a drop into the tabs and over the half
+on that side for a split. CSS can't draw it — an `outline` can only
+ring the whole widget, and anything painted as background or border is
+drawn *before* the children and covered by them. Every frame in the
+main dock is an `HxPanelFrame`, and the dock's drop target is the only
+one, so nothing else needs the preview.
 
 The tracking pointer is a `GWeakRef`-style weak pointer
 (`g_set_weak_pointer`): the highlighted frame can be destroyed
@@ -497,10 +515,10 @@ mid-drag — a cross-dock drag that empties an undocked window does
 exactly that — and a raw pointer would dangle until the next motion
 event cleared it.
 
-Colours come from `@accent_bg_color` rather than
-`var(--accent-bg-color)`: the named colour works across the whole
-supported libadwaita range, and CSS custom properties don't reach back
-to our floor.
+The color is the GtkHx theme's accent where the theme sets one
+(`gtkhx_theme_get_chrome_color`), else the desktop's
+(`adw_style_manager_get_accent_color_rgba`) — the same accent the
+theme's CSS hands libadwaita as `@accent_bg_color`.
 
 `hx_panel_undock` builds a fresh `AdwApplicationWindow` containing a
 `PanelDock` + `PanelGrid` from an inline builder string, and moves the
