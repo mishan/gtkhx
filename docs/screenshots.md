@@ -44,11 +44,15 @@ light. The news and video scenes start from a dock layout of their own, written 
 configuration as `dock-layout.ini`, so the picture has only what it's about: threaded news
 without the message board beside it, chat and video without an empty column.
 
-A scene drives GtkHx the way a person would, with shotbox's `click`, `drag`, `key` and `type`,
-and waits for the things it can see (a window, a user arriving, a voice session in the server's
-log). Where it can only wait on the clock, the wait is for something that has certainly finished.
-`scenes.py` explains the waits that aren't obvious: the login toast, which pauses while the
-pointer rests on it; the message board, whose resting scroll position depends on timing until
+A scene drives GtkHx the way a person would, through shotbox's Python API (`shotbox.here()`,
+the session's display, over one X connection): it clicks, drags, types and presses keys, and
+waits for the things it can see (a window, a user arriving, a voice session or a camera in the
+server's log). After a click it waits for the window to hold still rather than for a fixed
+time, and before a picture it parks the pointer in the corner, off anything it would hover.
+Where it can only wait on the clock, for a timer in the app or live video that never holds
+still, the wait is for something that has certainly finished. `scenes.py` explains the waits
+that aren't obvious: the login toast, which pauses while the pointer rests on it and gives no
+sign before it goes; the message board, whose resting scroll position depends on timing until
 it is sent to the top.
 
 To find where something is on screen, the `explore` scene logs in and then runs `$EXPLORE`, a
@@ -60,12 +64,13 @@ EXPLORE='click:1138,28@GtkHx.*;wait:1' tools/screenshots.sh explore
 ```
 
 The captures land in `build-screenshots/`, as does a picture of the screen when a scene gives
-up waiting for something (`NAME-failed.png`).
+up waiting for something (`NAME-failed.png`, shotbox's `$SHOTBOX_FAILED`).
 
 ### How identical is identical
 
 The scenes come out byte for byte the same run after run, with two known exceptions, which is
-why `--check` compares pixels with a small tolerance rather than bytes:
+why `--check` compares pixels with a small tolerance rather than bytes (`shotbox compare`, a
+line per picture, with the differences of any that fail beside them as `NAME-diff.png`):
 
 - Now and then the scaled server banner in the header lands one level off in a handful of
   pixels, a rounding difference that depends on the order the window was laid out in. The check

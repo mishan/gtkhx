@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 import hotline
+import shotbox
 
 HERE = Path(__file__).resolve().parent
 CONTENT = HERE / "content"
@@ -54,15 +55,10 @@ def log(msg):
     print(f"scenes: {msg}", flush=True)
 
 
-def wait_until(what, test, timeout=30, interval=0.1):
-    end = time.monotonic() + timeout
-    while not test():
-        if time.monotonic() > end:
-            # Inside a session, a picture of the screen says more than this.
-            if os.environ.get("SHOTBOX_SCRATCH") and os.environ.get("SCENES_DEBUG_SHOT"):
-                shotbox("capture", os.environ["SCENES_DEBUG_SHOT"], check=False)
-            raise SystemExit(f"scenes: gave up waiting for {what}")
-        time.sleep(interval)
+# The session's display, once inside one (see inner()): what a scene
+# waits on, clicks and takes pictures of. A wait that gives up leaves a
+# picture of the screen at $SHOTBOX_FAILED first.
+display = None
 
 
 # ------------------------------------------------------------------ assets --
@@ -259,12 +255,12 @@ class Janus:
         self.log = open(WORK / "janus.log", "ab")
         # Once to create its databases, then again with the news seeded.
         self._start()
-        wait_until("Janus's news database", lambda: (server / "news.db").exists())
-        wait_until("Janus to listen", lambda: port_open(JANUS_PORT))
+        display.wait_file(server / "news.db")
+        display.until("Janus to listen", lambda: port_open(JANUS_PORT))
         self.stop()
         seed_news(server / "news.db")
         self._start()
-        wait_until("Janus to listen", lambda: port_open(JANUS_PORT))
+        display.until("Janus to listen", lambda: port_open(JANUS_PORT))
 
     def _start(self):
         self.proc = subprocess.Popen(["./janus"], cwd=self.dir, stdout=self.log,
@@ -274,7 +270,7 @@ class Janus:
         if self.proc.poll() is None:
             os.killpg(self.proc.pid, signal.SIGTERM)
             self.proc.wait(10)
-        wait_until("Janus to stop listening", lambda: not port_open(JANUS_PORT))
+        display.until("Janus to stop listening", lambda: not port_open(JANUS_PORT))
 
 
 HXD_PORT = 5520
@@ -315,7 +311,7 @@ class HxdNg:
                                      stdout=open(WORK / "hxd-ng.log", "wb"),
                                      stderr=subprocess.STDOUT, start_new_session=True,
                                      env={**os.environ, "NO_COLOR": "1"})
-        wait_until("hxd-ng to listen", lambda: port_open(HXD_PORT))
+        display.until("hxd-ng to listen", lambda: port_open(HXD_PORT))
 
     def stop(self):
         if self.proc.poll() is None:
@@ -380,10 +376,6 @@ def gtkhx_config(path, theme="default", scheme="light", extra=None, avatars=True
     shutil.copy(SRC / "icons.rsrc", path / "icons" / "icons.rsrc")
 
 
-def shotbox(*args, check=True):
-    return subprocess.run([SHOTBOX, *map(str, args)], check=check)
-
-
 # ------------------------------------------------------------------ scenes --
 #
 # A scene is a function run inside the shotbox session, with GtkHx not yet
@@ -401,7 +393,7 @@ def start_gtkhx(connect=True, port=JANUS_PORT, env=None):
     proc = subprocess.Popen(cmd, cwd=local, stdout=open(WORK / "gtkhx.log", "ab"),
                             stderr=subprocess.STDOUT, start_new_session=True,
                             env={**os.environ, **(env or {})})
-    shotbox("wait", "window", "GtkHx.*")
+    display.wait_window("GtkHx.*")
     return proc
 
 
@@ -411,41 +403,58 @@ def log_in(bots, port=JANUS_PORT, agreement=True, env=None):
     app = start_gtkhx(port=port, env=env)
     you = load("server.json")["you"]["nick"]
     if agreement:
-        shotbox("wait", "window", "Agreement")
-        shotbox("click", 390, 500, "--window", "Agreement")
+        display.wait_window("Agreement")
+        # Mapped isn't yet drawn: a click that comes before the paint is
+        # lost.
+        display.wait_stable(window="Agreement")
+        display.click(390, 500, window="Agreement")
     # GtkHx is in once the others see it arrive.
-    wait_until("GtkHx to log in", lambda: any(b.saw_user(you) for b in bots.values()))
-    shotbox("click", 560, 660, "--window", "GtkHx.*")
-    shotbox("type", "/clear\n")
+    display.until("GtkHx to log in", lambda: any(b.saw_user(you) for b in bots.values()))
+    display.click(560, 660, window="GtkHx.*")
+    display.type("/clear\n")
     # Off the window: a pointer resting on the login toast stops it timing
     # out, and would show as a hover anywhere else.
-    shotbox("move", SCREEN[0] - 1, SCREEN[1] - 1)
-    time.sleep(0.5)
+    display.park()
     return app
 
 
-# How long after login to take a picture, at the least: the "Logged in"
-# toast stays up for Adwaita's default of five seconds.
-TOAST_GONE = 6.0
+# The "Logged in" toast stays up for Adwaita's default of five seconds.
+# Nothing on the screen says it's about to go, and until it does the
+# screen holds still, so a stable wait alone would take it in the picture:
+# the clock first, counted from the end of log_in() (by when the toast
+# has been up a while), then the repaint.
+TOAST_GONE = 5.0
+
+
+def toast_gone(since):
+    """Wait for the login toast to time out, and the screen to repaint
+    without it."""
+    left = since + TOAST_GONE - time.monotonic()
+    if left > 0:
+        time.sleep(left)
+    display.wait_stable()
+
+
+# How long GTK's overlay scrollbar stays up after a scroll: another
+# timer, the same way.
+SCROLLBAR_GONE = 2.0
 
 
 def board_to_top():
     """Scroll the message board to its first post. Where it comes to rest
     after loading depends on when the text arrived relative to its
     layout, a pixel either way from run to run."""
-    shotbox("click", 150, 400, "--window", "GtkHx.*")
-    shotbox("key", "ctrl+Home")
-    shotbox("move", SCREEN[0] - 1, SCREEN[1] - 1)
-    # The overlay scrollbar the scroll brought up hides after a second.
-    time.sleep(2)
+    display.click(150, 400, window="GtkHx.*")
+    display.key("ctrl+Home")
+    display.park()
+    time.sleep(SCROLLBAR_GONE)
+    display.wait_stable(window="GtkHx.*")
 
 
 def capture_window(out, since):
     """Capture the main window once the login toast has gone."""
-    left = since + TOAST_GONE - time.monotonic()
-    if left > 0:
-        time.sleep(left)
-    shotbox("capture", out, "--window", "GtkHx.*")
+    toast_gone(since)
+    display.capture(out, window="GtkHx.*", park=True)
 
 
 def say_lines(bots, script, assets):
@@ -462,8 +471,8 @@ def scene_chat(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
     say_lines(bots, load("chat.json"), assets)
-    # The image is fetched after its line arrives; a second is plenty.
-    time.sleep(2)
+    # The image is fetched after its line arrives.
+    display.wait_stable(window="GtkHx.*")
     board_to_top()
     capture_window(out, since)
     app.terminate()
@@ -471,44 +480,43 @@ def scene_chat(out, bots, assets):
 
 def menu(item_y):
     """Pick an item from the main menu, by its height in the popover."""
-    shotbox("click", 1138, 28, "--window", "GtkHx.*")
-    time.sleep(0.5)
-    shotbox("click", 1114, item_y, "--window", "GtkHx.*")
+    display.click(1138, 28, window="GtkHx.*")
+    # The popover is a window of its own: the whole display, then.
+    display.wait_stable()
+    display.click(1114, item_y, window="GtkHx.*")
 
 
 def scene_files(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
     menu(175)                                   # Files
-    shotbox("wait", "window", "Files.*")
-    time.sleep(1)
-    win = ["--window", "Files.*"]
-    shotbox("click", 558, 183, "--double", *win)  # Photos
-    time.sleep(1)
-    shotbox("click", 558, 158, "--double", *win)  # Harbor
-    time.sleep(1)
-    shotbox("click", 600, 183, *win)            # fog-over-the-pier.jpg
-    shotbox("move", SCREEN[0] - 1, SCREEN[1] - 1)
-    time.sleep(max(1.0, since + TOAST_GONE - time.monotonic()))
-    shotbox("capture", out, *win)
+    win = "Files.*"
+    display.wait_window(win)
+    display.wait_stable(window=win)
+    display.click(558, 183, window=win, double=True)  # Photos
+    display.wait_stable(window=win)
+    display.click(558, 158, window=win, double=True)  # Harbor
+    display.wait_stable(window=win)
+    display.click(600, 183, window=win)         # fog-over-the-pier.jpg
+    toast_gone(since)
+    display.capture(out, window=win, park=True)
     app.terminate()
 
 
 def scene_news(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
-    win = ["--window", "GtkHx.*"]
-    shotbox("click", 16, 169, *win)             # Photography
-    time.sleep(1.5)
-    shotbox("click", 36, 192, *win)             # Settings for low light?
-    time.sleep(1.5)
-    shotbox("click", 56, 215, *win)             # Tripod and a slow shutter
-    time.sleep(1.5)
-    shotbox("click", 160, 215, *win)
-    time.sleep(1.5)
+    win = "GtkHx.*"
+    display.click(16, 169, window=win)          # Photography
+    display.wait_stable(window=win)
+    display.click(36, 192, window=win)          # Settings for low light?
+    display.wait_stable(window=win)
+    display.click(56, 215, window=win)          # Tripod and a slow shutter
+    display.wait_stable(window=win)
+    display.click(160, 215, window=win)
+    display.wait_stable(window=win)
     # Room for the nested reply's title.
-    shotbox("drag", 286, 450, 370, 450, *win)
-    time.sleep(0.5)
+    display.drag(286, 450, 370, 450, window=win)
     capture_window(out, since)
     app.terminate()
 
@@ -517,13 +525,17 @@ def scene_tracker(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
     menu(143)                                   # Tracker
-    shotbox("wait", "window", "Tracker")
+    display.wait_window("Tracker")
     # The listing arrives in one burst; the count in the header says so.
-    time.sleep(3)
-    time.sleep(max(0, since + TOAST_GONE - time.monotonic()))
-    shotbox("capture", out, "--window", "Tracker")
+    display.wait_stable(window="Tracker")
+    toast_gone(since)
+    display.capture(out, window="Tracker", park=True)
     app.terminate()
 
+
+# How long the video tiles take to show, once GtkHx is in the voice
+# session: the offer and answer, then the first keyframes.
+VIDEO_SETTLE = 12
 
 # Voice and video for a GtkHx with no microphone or camera: a test tone,
 # and join as soon as the server allows it.
@@ -555,28 +567,38 @@ def publisher(nick, icon, picture, screen=None):
 def scene_video(out, bots, assets):
     log = WORK / "hxd-ng.log"
 
+    def logged(message, uid, kind=""):
+        return any(f"{message} uid={uid} " in line and kind in line
+                   for line in log.read_text(errors="replace").splitlines())
+
     def in_voice(uid):
-        return f"voice session connected uid={uid} " in log.read_text(errors="replace")
+        return logged("voice session connected", uid)
+
+    def publishing(uid, kind):
+        return logged("video publication started", uid, f"kind={kind}")
 
     # One at a time, so ada is uid 1 and marco uid 2 on every run.
     pubs = [publisher("ada", 128, assets / "cam-ada.png", screen=assets / "screen-ada.png")]
     try:
-        wait_until("ada to join voice", lambda: in_voice(1), timeout=60)
+        display.until("ada to join voice", lambda: in_voice(1), timeout=60)
         pubs.append(publisher("marco", 129, assets / "cam-marco.png"))
-        wait_until("marco to join voice", lambda: in_voice(2), timeout=60)
+        display.until("marco to join voice", lambda: in_voice(2), timeout=60)
         # Cameras and ada's screen go on a few seconds after joining.
-        time.sleep(8)
+        display.until("ada's camera", lambda: publishing(1, "Camera"))
+        display.until("ada's screen", lambda: publishing(1, "Screen"))
+        display.until("marco's camera", lambda: publishing(2, "Camera"))
         users = {u["nick"]: u for u in load("server.json")["users"]}
         for nick in ("priya", "jonas", "lena"):
             bots[nick] = hotline.Bot("127.0.0.1", HXD_PORT, nick, users[nick]["icon"])
         app = log_in(bots, port=HXD_PORT, agreement=False,
                      env={**VOICE_ENV, "GTKHX_VIDEO_AUTOPRESENT": "1"})
-        since = time.monotonic()
         say_lines(bots, load("video-chat.json"), assets)
-        # Joining, the offer and answer, the first keyframes.
-        time.sleep(25)
-        shotbox("move", SCREEN[0] - 1, SCREEN[1] - 1)
-        capture_window(out, since)
+        # GtkHx is uid 6, after ada, marco and the three in the chat.
+        display.until("GtkHx to join voice", lambda: in_voice(6), timeout=60)
+        # The offer and answer, the first keyframes. The tiles never hold
+        # still, so this one is on the clock.
+        time.sleep(VIDEO_SETTLE)
+        display.capture(out, window="GtkHx.*", park=True)
         app.terminate()
     finally:
         for p in pubs:
@@ -589,28 +611,27 @@ def scene_explore(out, bots, assets):
     `drag:X1,Y1,X2,Y2`, `key:CHORD`, `type:TEXT`, `wait:SECS`, each optionally `@WINDOW-RE`)
     takes a picture of the whole screen, numbered after the output."""
     app = log_in(bots)
-    since = time.monotonic()
-    time.sleep(max(0, since + TOAST_GONE - time.monotonic()))
+    toast_gone(time.monotonic())
     stem = Path(out).with_suffix("")
-    shotbox("capture", f"{stem}-0.png")
+    display.capture(f"{stem}-0.png")
     for n, step in enumerate(filter(None, os.environ.get("EXPLORE", "").split(";")), 1):
         step, _, window = step.partition("@")
         kind, _, arg = step.partition(":")
-        where = ["--window", window] if window else []
+        window = window or None
         if kind in ("click", "dclick"):
-            x, y = arg.split(",")
-            shotbox("click", x, y, *where, *(["--double"] if kind == "dclick" else []))
+            x, y = map(int, arg.split(","))
+            display.click(x, y, window=window, double=kind == "dclick")
         elif kind == "drag":
-            shotbox("drag", *arg.split(","), *where)
+            display.drag(*map(int, arg.split(",")), window=window)
         elif kind == "key":
-            shotbox("key", arg)
+            display.key(arg)
         elif kind == "type":
-            shotbox("type", arg)
+            display.type(arg)
         elif kind == "wait":
             time.sleep(float(arg))
-        time.sleep(1.5)
-        shotbox("move", SCREEN[0] - 1, SCREEN[1] - 1)
-        shotbox("capture", f"{stem}-{n}.png")
+        display.park()
+        display.wait_stable()
+        display.capture(f"{stem}-{n}.png")
     app.terminate()
 
 
@@ -637,6 +658,8 @@ ON_HXD_NG = {"video"}
 
 def inner(scene, out):
     """Inside the session: the scene, with its server and users."""
+    global display
+    display = shotbox.here()
     assets = WORK / "assets"
     fn, opts = SCENES[scene]
     if scene in ON_HXD_NG:
@@ -659,31 +682,21 @@ def inner(scene, out):
 # was laid out in. 0.5% forgives exactly that one level. The video tiles
 # are VP8 at a constant bitrate, and how the encoder spends its bits
 # depends on live timing: never more than 4% in any channel.
-FUZZ = {"video": "5%"}
-DEFAULT_FUZZ = "0.5%"
+FUZZ = ["--fuzz", "0.5%", "--fuzz", "video=5%"]
 
 
 def compare(ref, new, names):
     """Compare fresh pictures against committed ones; the failing ones'
     differences go beside them as NAME-diff.png."""
-    bad = []
-    for name in names:
-        a, b = Path(ref) / f"{name}.png", Path(new) / f"{name}.png"
-        diff = Path(new) / f"{name}-diff.png"
-        r = subprocess.run([SHOTBOX, "compare", a, b, "--diff", diff,
-                            "--fuzz", FUZZ.get(name, DEFAULT_FUZZ)], capture_output=True, text=True)
-        log(f"{name}: {r.stdout.strip() or r.stderr.strip()}")
-        if r.returncode:
-            bad.append(name)
-    if bad:
-        log(f"differ: {', '.join(bad)}; see {new}")
-        return 1
-    return 0
+    return subprocess.run([SHOTBOX, "compare", ref, new, *names, "--diff", new, *FUZZ]).returncode
 
 
 def main(argv):
     if len(argv) >= 1 and argv[0] == "--inner":
-        return inner(argv[1], argv[2])
+        try:
+            return inner(argv[1], argv[2])
+        except shotbox.SessionError as e:
+            raise SystemExit(f"scenes: {e}")
     if len(argv) >= 3 and argv[0] == "--compare":
         names = argv[3:] or [n for n in SCENES if n != "explore"]
         return compare(argv[1], argv[2], names)
@@ -700,13 +713,16 @@ def main(argv):
         shutil.rmtree(conf, ignore_errors=True)
         gtkhx_config(conf, **opts)
         log(f"{name}...")
-        shotbox("run", "--screen", f"{SCREEN[0]}x{SCREEN[1]}",
-                "--env", f"GTKHX_PATH={conf}",
-                "--env", f"GTKHX_DEBUG={os.environ.get('GTKHX_DEBUG', '')}",
-                "--env", f"EXPLORE={os.environ.get('EXPLORE', '')}",
-
-                "--env", f"SCENES_DEBUG_SHOT={outdir / (name + '-failed.png')}", "--pass", "GTKHX_SRC", "--pass", "PYTHONPATH",
-                "--", sys.executable, __file__, "--inner", name, outdir / f"{name}.png")
+        # A wait that gives up leaves a picture of the screen as
+        # NAME-failed.png, which tools/screenshots.sh keeps.
+        subprocess.run([SHOTBOX, "run", "--screen", f"{SCREEN[0]}x{SCREEN[1]}",
+                        "--env", f"GTKHX_PATH={conf}",
+                        "--env", f"GTKHX_DEBUG={os.environ.get('GTKHX_DEBUG', '')}",
+                        "--env", f"EXPLORE={os.environ.get('EXPLORE', '')}",
+                        "--env", f"SHOTBOX_FAILED={outdir / (name + '-failed.png')}",
+                        "--pass", "GTKHX_SRC", "--pass", "PYTHONPATH",
+                        "--", sys.executable, __file__, "--inner", name, outdir / f"{name}.png"],
+                       check=True)
         log(f"{name}: {outdir / (name + '.png')}")
 
 

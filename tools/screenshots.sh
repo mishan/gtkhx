@@ -55,6 +55,8 @@ docker run --rm \
             -Dcargo_target_dir=/work/cargo-target >/work/setup.log
         meson compile -C /work/build >/work/compile.log ||
             { tail -40 /work/compile.log; exit 1; }
+        # The scenes drive the display with shotbox, from Python.
+        export PYTHONPATH=/shotbox
         python3 /src/tools/screenshots/scenes.py /out "$@"
         if [ -n "'"$check"'" ]; then
             python3 /src/tools/screenshots/scenes.py --compare /ref /out "$@"
