@@ -138,9 +138,16 @@ Users can:
 3. **Close a frame** (a leaf). Any panels in the closing leaf
    first migrate to the sibling, then the leaf collapses; the
    sibling takes the parent split's place in the tree.
-4. **Empty leaves stay visible** until explicitly closed. The
-   discoverability win — "I just split this, now what?" — is what
-   drove the design.
+4. **A leaf a move empties collapses.** When a drag or an
+   Alt+Shift+arrow move takes a leaf's last panel, the leaf closes
+   and its neighbor takes the space (`collapse_when_emptied` in
+   `hx_panel.c`, from an idle — on a drag, the drag source is the
+   handle in that leaf's header, and GTK still owes it the
+   drag-end). A leaf emptied any other way — a fresh split, the
+   header's X on its last panel — stays until closed from the
+   frame menu, so a split made to drop into is still there to drop
+   into. The rule used to be that every empty leaf stayed; that
+   predates splitting by drag, which made empty leaves pile up.
 5. **Undock + Redock.** The panel chevron menu has *Undock*;
    close-request on the undocked window walks the panel back to its
    home frame.

@@ -109,6 +109,11 @@ HxSplit *hx_split_split (HxSplit *self, GtkOrientation orientation,
  * frame, or NULL when `frame' isn't a leaf of the dock. */
 GtkWidget *hx_split_split_frame (GtkWidget *frame, GtkPositionType side);
 
+/* Close the leaf holding `frame' (the frame menu's Close frame): its
+ * panels move to the neighboring leaf across the split, and the
+ * sibling takes the parent's place. No-op for the dock's root leaf. */
+void hx_split_close_frame (GtkWidget *frame);
+
 /* Collapse a leaf. The leaf's PanelFrame is destroyed and its
  * sibling under the same parent paned takes the parent's place in
  * the tree. Returns TRUE if the close actually happened. Returns

@@ -712,18 +712,14 @@ on_frame_split_v (GSimpleAction *action, GVariant *parameter,
     hx_split_split_frame (GTK_WIDGET (user_data), GTK_POS_BOTTOM);
 }
 
-static void
-on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+void
+hx_split_close_frame (GtkWidget *frame)
 {
-    GtkWidget *frame = GTK_WIDGET (user_data);
     HxSplit *leaf = frame_to_leaf (frame);
     HxSplit *parent;
     HxSplit *sibling_leaf;
     PanelFrame *sibling_frame;
     PanelFrame *current_frame;
-
-    (void)action;
-    (void)parameter;
 
     if (leaf == NULL) {
         return;
@@ -854,6 +850,14 @@ on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
         }
         hx_split_foreach_leaf (area_root, refresh_close_enabled_leaf, NULL);
     }
+}
+
+static void
+on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+    hx_split_close_frame (GTK_WIDGET (user_data));
 }
 
 /* ----------------------------------------------------------------- */

@@ -387,6 +387,37 @@ test_split_toward_each_side (Fixture *fx, gconstpointer user_data)
     }
 }
 
+/* Moving a pane's last panel out collapses the pane: the neighbor
+ * takes the whole split. One with panels left behind stays. */
+static void
+test_emptied_pane_collapses (Fixture *fx, gconstpointer user_data)
+{
+    HxSplit *root;
+    GtkWidget *right;
+    HxPanel *a, *b;
+
+    (void)user_data;
+    root = HX_SPLIT (gtk_widget_get_parent (GTK_WIDGET (fx->frame)));
+    a = add_panel (fx->frame, "a");
+    b = add_panel (fx->frame, "b");
+    right = hx_split_split_frame (GTK_WIDGET (fx->frame), GTK_POS_RIGHT);
+    pump ();
+    g_assert_false (hx_split_is_leaf (root));
+
+    hx_panel_do_move_in_direction (a, GTK_DIR_RIGHT);
+    pump ();
+    g_assert_false (hx_split_is_leaf (root));
+    g_assert_cmpuint (panel_frame_get_n_pages (fx->frame), ==, 1);
+
+    hx_panel_do_move_in_direction (b, GTK_DIR_RIGHT);
+    pump ();
+    g_assert_true (hx_split_is_leaf (root));
+    g_assert_true (GTK_WIDGET (hx_split_get_frame (root)) == right);
+    g_assert_cmpuint (panel_frame_get_n_pages (PANEL_FRAME (right)), ==, 2);
+    /* The role globals followed the panels rather than dangling. */
+    g_assert_true (toolbar_center_frame == right);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -431,6 +462,7 @@ main (int argc, char **argv)
     ADD ("/frame_close_button/survives_add_remove_churn",
          test_state_survives_repeated_add_remove);
     ADD ("/dock_split/toward_each_side", test_split_toward_each_side);
+    ADD ("/dock_split/emptied_pane_collapses", test_emptied_pane_collapses);
 
 #undef ADD
 
