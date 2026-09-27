@@ -163,16 +163,17 @@ Out of the box:
 
 Also enabled:
 
-- **TLS** on 5600 (control) and 5601 (HTXF subchannel). The
+- **TLS** on 5610 (control) and 5611 (HTXF subchannel): the usual
+  5600/5601 pair shifted with the plain ports, see `TLSPort` in
+  `conf/config.yaml`. The
   Dockerfile generates a self-signed cert (CN=localhost,
   SAN=DNS:localhost,IP:127.0.0.1, 10-year validity, 2048-bit RSA)
   into `Server/tls/` before the seed step (the seed-time Janus
   process refuses to start without it). Janus is the canonical TLS
   test target — `real_connect` (tls_login / tls_mismatch_rejected),
   the `real_tls_login` / `_banner` / `_file_get` suite, and the Tier 3
-  TLS matrix rows depend on this. The Phase 1 client trust path
-  accepts any cert via an accept-certificate stub; the Phase 3
-  trust UI lands the actual pinning flow.
+  TLS matrix rows depend on this. The client pins the self-signed
+  cert on first use; the trust model is in `docs/tls.md`.
 
 Not enabled (out of scope for GtkHx):
 

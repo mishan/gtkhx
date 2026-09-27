@@ -9,12 +9,14 @@ hxtrackd instead of hxd.
 
 GtkHx's tracker v3 work added a probe-then-fallback to the
 network state machine: send the 8-byte v3 magic with a 2-second
-read watchdog, fall back to a fresh 6-byte v1 magic on timeout.
+read watchdog, fall back to a fresh 6-byte v1 magic on a timeout
+or a closed connection.
 The fallback path exists because real-world v1 trackers
 (hltracker.com, hxd-family community trackers, mhxd's own
 bundled hxtrackd) `memcmp` the full 6-byte `HTRK_MAGIC` against
-`"HTRK\0\1"` and silently ignore connections whose version
-byte is `0x03` instead of `0x01`. The spec's "v1 trackers read
+`"HTRK\0\1"` and reject connections whose version byte is
+`0x03` instead of `0x01`: hxtrackd closes the connection, others
+go silent. The spec's "v1 trackers read
 6 bytes and respond" backcompat clause is wishful thinking
 about pre-spec implementations.
 
@@ -85,8 +87,9 @@ Connecting to this container exercises the entire v3-probe-fails
 
 1. GtkHx sends 8-byte v3 magic (`HTRK\0\3` + 2 feature bytes).
 2. hxtrackd reads 6 bytes, `memcmp`s against `HTRK\0\1`, fails,
-   falls through. The connection stays open with no response.
-3. GtkHx's 2-second read watchdog fires.
+   and closes the connection.
+3. GtkHx's probe sees the close (a silent tracker would trip the
+   2-second read watchdog instead; both count as inconclusive).
 4. `tracker_fetch_retry_v1` closes the conn, opens a new one,
    sends the 6-byte v1 magic (`HTRK\0\1`).
 5. hxtrackd accepts, echoes back the magic, streams the listing.

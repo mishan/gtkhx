@@ -47,19 +47,19 @@ def fetch_listing(host, port, recv_timeout=3.0):
         nservers = struct.unpack(">H", hdr[10:12])[0]
 
         records = []
-        for _ in range(nservers):
-            # Read the 8-byte head first and test the padding sentinel
-            # BEFORE consuming the rest of the fixed prefix. The v1
-            # stream can carry all-zero 8-byte padding slots that must be
-            # skipped without eating the next record's bytes — exactly
-            # how tests/integration/test_tracker_v1.c and
-            # src/network.c's reader handle it. (padding == first byte 0,
-            # per tracker_record_is_padding.) Reading 11 unconditionally
-            # would desync the stream by 3 bytes on the first padding
-            # slot and make the poll fail spuriously.
+        while len(records) < nservers:
+            # Read the 8-byte head first and test for a padding slot
+            # BEFORE consuming the rest of the fixed prefix. A listing
+            # longer than one batch carries each later batch's 8-byte
+            # header between records; it starts with a zero byte (no
+            # IPv4 record does) and must be skipped without eating the
+            # next record's bytes or counting against nservers — exactly
+            # how hxnet's reader handles it (tracker_record_is_padding).
+            # Reading 11 unconditionally would desync the stream by 3
+            # bytes on the first padding slot.
             head = recv_exact(s, 8)
             if head[0] == 0:
-                continue                     # padding slot: 8 bytes only
+                continue                     # batch header: 8 bytes only
             rest = recv_exact(s, 3)          # reserved(2) + name_len(1)
             fixed = head + rest
             # 11-byte fixed record: [0..3] addr, [4..5] port (BE),

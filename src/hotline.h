@@ -78,12 +78,12 @@ struct hl_user_data {
  *
  * Pre-spec v1 trackers in the wild (hxtrackd, hltracker.com, every
  * hxd-derived tracker we've tested) do NOT do this. They memcmp the
- * full 6-byte HTRK_MAGIC against "HTRK\0\1" and silently fall
- * through when byte 5 is 0x03 instead of 0x01 — the connection
- * stays open with no response. The probe-then-fallback in
- * network.c handles this: send the 8-byte v3 magic with a 2-second
- * read watchdog, fall back to a fresh connection sending the
- * 6-byte v1 magic if no response arrives. */
+ * full 6-byte HTRK_MAGIC against "HTRK\0\1" and reject byte 5 =
+ * 0x03: hxtrackd closes the connection at once, others may go
+ * silent. The probe-then-fallback in network.c handles both: send
+ * the 8-byte v3 magic with a 2-second read watchdog, and on a
+ * timeout or close retry on a fresh connection with the 6-byte v1
+ * magic. */
 #define HTRK_V3_MAGIC_PREFIX "HTRK" /* 4 bytes; version u16 BE follows */
 #define HTRK_V3_HANDSHAKE_LEN 8     /* full client-side handshake */
 #define HTRK_VERSION_V1 ((guint16)0x0001)
@@ -248,10 +248,10 @@ struct hl_user_data {
 #define HTLC_HDR_POSTTHREAD ((guint32)0x0000019a)
 #define HTLC_HDR_DELETETHREAD ((guint32)0x0000019b)
 
-/* opcodes adopted from mhxd's protocol additions
- * (mhxd/src/common/hotline.h). Same wire values both ends agree on;
- * old (1.0/1.2) servers will reject the unknown header and the
- * client recovers gracefully. */
+/* Opcodes from the later official releases, not mhxd additions:
+ * Agreed (1.5), Kill Download (1.8.2) and the keepalive (1.8.5).
+ * Servers older than each reject the unknown header and the client
+ * recovers gracefully. */
 #define HTLC_HDR_PING ((guint32)0x000001f4)
 #define HTLS_HDR_PING ((guint32)0x000001f4)
 #define HTLC_HDR_AGREEMENTAGREE ((guint32)0x00000079)
@@ -291,13 +291,12 @@ struct hl_user_data {
 #define HTLC_OPT_REFUSE_CHAT ((guint16)0x0002)
 #define HTLC_OPT_AUTO_RESPONSE ((guint16)0x0004)
 #define HTLC_DATA_CHAT_ID ((guint16)0x0072)
-/* mhxd extension. Sent in HTLC_HDR_LOGIN to advertise the client's
- * Hotline-protocol version. mhxd uses values >= 150 as a "modern
- * client" gate that unlocks features like HTLC_HDR_PING acceptance
- * (see mhxd/src/hxd/rcv.c around the can_ping flag set in
- * rcv_login). GtkHx itself doesn't send this in its production
- * login path today; the integration test harness sends it so the
- * Tier 3 PING test exercises the modern-client codepath. */
+/* The client's protocol version, sent in HTLC_HDR_LOGIN (field 160,
+ * official since 1.5; the server's reply carries its own version in
+ * the same field). GtkHx sends 185 on every login path. Servers fork
+ * on it: mhxd accepts HTLC_HDR_PING only from clients >= 150 (the
+ * can_ping flag in mhxd/src/hxd/rcv.c rcv_login), and the official
+ * servers send the banner only to clients >= 151. */
 #define HTLC_DATA_CLIENTVERSION ((guint16)0x00a0)
 
 /* DATA_CAPABILITIES (0x01f0) — session capability bitmask sent in
