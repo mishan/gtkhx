@@ -398,8 +398,7 @@ are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
     suspect, but replacing it moved nothing. **Fixed** in hx-libs: the
     search grows the candidate a character at a time and stops once no
     emoji starts with it, which finds the same longest match. The 80-byte
-    line takes 1.3 µs and 64 KiB 0.95 ms, about 65 MiB/s. It reaches GtkHx
-    with the next hx-libs pin.
+    line takes 1.3 µs and 64 KiB 0.95 ms, about 65 MiB/s.
 11. **Every Files row built a text editor.** `files_populate` builds
     10,000 entries in 5.5 ms, yet the UI scenario's remote populate froze
     the UI for about 170 ms. Detaching the models one at a time put the rest
