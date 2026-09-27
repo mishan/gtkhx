@@ -91,9 +91,9 @@ pub extern "C" fn gtkhx_voice_init() -> i32 {
 // from `gtkhx_voice_list_input_devices` / `_list_output_devices`,
 // stores the user's pick as `gst::Device::name()` in `gtkhxrc`, and
 // hands it back via `gtkhx_voice_set_input_device` /
-// `_set_output_device`. `VoiceRuntime::new` reads those preferences
-// at construction time and threads them through to
-// `audio::make_send_bin` / `make_receive_bin`. NULL or "" means
+// `_set_output_device`. New pipelines read those preferences when they
+// build their bins; a change also swaps the device under every live
+// call on the spot. NULL or "" means
 // "use system default" (autoaudiosrc / autoaudiosink).
 //
 // Device lists are returned as opaque handles with `_len` / `_name`
@@ -239,10 +239,14 @@ pub unsafe extern "C" fn gtkhx_voice_device_list_free(list: *mut GtkhxVoiceDevic
 ///
 /// `name` may be NULL or "" to clear the preference (system
 /// default, via `autoaudiosrc`). Any non-empty value is stored
-/// verbatim and looked up via DeviceMonitor at the next
-/// `VoiceRuntime::new` call. If the named device isn't present at
-/// runtime construction time, the send chain falls back to
-/// autoaudiosrc — the runtime never panics over a missing device.
+/// verbatim and looked up via DeviceMonitor whenever a capture source
+/// is built. If the named device isn't present then, the send chain
+/// falls back to autoaudiosrc — the runtime never panics over a
+/// missing device.
+///
+/// A change also moves every call in progress onto the new device
+/// (see [`VoiceRuntime::reload_input_device`]). Main thread only; the
+/// live runtimes are found through the main thread's registry.
 ///
 /// # Safety
 /// `name` must either be NULL or a valid NUL-terminated UTF-8 string.
@@ -253,7 +257,9 @@ pub unsafe extern "C" fn gtkhx_voice_set_input_device(name: *const c_char) {
     } else {
         CStr::from_ptr(name).to_str().ok()
     };
-    crate::audio::set_input_device(s);
+    if crate::audio::set_input_device(s) {
+        crate::runtime::for_each_main_thread_runtime(VoiceRuntime::reload_input_device);
+    }
 }
 
 /// Set the preferred playback device. Same shape and semantics as
@@ -268,7 +274,9 @@ pub unsafe extern "C" fn gtkhx_voice_set_output_device(name: *const c_char) {
     } else {
         CStr::from_ptr(name).to_str().ok()
     };
-    crate::audio::set_output_device(s);
+    if crate::audio::set_output_device(s) {
+        crate::runtime::for_each_main_thread_runtime(VoiceRuntime::reload_output_device);
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -783,14 +791,18 @@ pub extern "C" fn gtkhx_voice_video_publish_available(kind: u16) -> i32 {
 }
 
 /// Set the preferred camera by device name; NULL or empty picks the
-/// first camera found.
+/// first camera found. A change also moves every live camera
+/// publication onto the new camera (see
+/// [`VoiceRuntime::reload_camera_device`]). Main thread only.
 ///
 /// # Safety
 /// `name` is NULL or a NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_voice_set_camera_device(name: *const c_char) {
     let name = unsafe { cstr_to_string(name) };
-    crate::video::set_camera_device(Some(name.as_str()));
+    if crate::video::set_camera_device(Some(name.as_str())) {
+        crate::runtime::for_each_main_thread_runtime(VoiceRuntime::reload_camera_device);
+    }
 }
 
 /// Feed a Video Status (611): the room's complete publication list, as

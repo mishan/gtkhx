@@ -266,6 +266,23 @@ where
     }
 }
 
+/// Run `f` against every live runtime on this (main) thread. The
+/// runtimes are collected before any of them runs, so `f` is free to
+/// reach back into the registry.
+pub(crate) fn for_each_main_thread_runtime(f: impl Fn(&VoiceRuntime)) {
+    let live: Vec<VoiceRuntime> = MAIN_THREAD_RUNTIMES
+        .try_with(|cell| {
+            cell.borrow()
+                .values()
+                .filter_map(WeakRuntime::upgrade)
+                .collect()
+        })
+        .unwrap_or_default();
+    for rt in &live {
+        f(rt);
+    }
+}
+
 /// Register a freshly-constructed runtime in the thread-local
 /// registry under its `runtime_id`. Called by both constructors;
 /// dropped by `Drop for Inner`.
@@ -1984,6 +2001,88 @@ impl VoiceRuntime {
             .get(&uid)
             .copied()
             .unwrap_or(1.0)
+    }
+
+    /// Move the microphone to the current input-device preference
+    /// without leaving the call: swap the send bin's capture source and
+    /// keep the rest of the leg, so nothing is renegotiated and the mute
+    /// state carries over. A runtime with no pipeline has nothing to
+    /// swap; its next pipeline is built against the preference anyway.
+    pub fn reload_input_device(&self) {
+        let pipeline = self.inner.borrow().pipeline.clone();
+        let Some(send_bin) = pipeline
+            .and_then(|p| p.by_name(crate::audio::SEND_BIN_NAME))
+            .and_then(|e| e.downcast::<gstreamer::Bin>().ok())
+        else {
+            return;
+        };
+        let device = crate::audio::input_device();
+        let swapped = crate::audio::make_source(device.as_deref())
+            .is_some_and(|src| crate::audio::replace_source(&send_bin, src));
+        if swapped {
+            crate::debug::log!("voice-pipe", "capture device now {device:?}");
+        } else {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: could not switch the capture device to {device:?}; \
+                 keeping the current one"
+            );
+        }
+    }
+
+    /// Move a live camera publication to the current camera preference.
+    /// Only the capture's source is replaced, as for the microphone; a
+    /// camera that is paused or not published has no capture to move, and
+    /// picks the preference up when it next starts. A camera that opens
+    /// and then fails reports through the bus like any capture failure,
+    /// ending the publication and leaving the call.
+    pub fn reload_camera_device(&self) {
+        let bin = self.inner.borrow().video.send_bins[VideoKind::Camera.index()].clone();
+        let Some(bin) = bin else {
+            return;
+        };
+        if crate::video::replace_camera_source(&bin) {
+            crate::debug::log!(
+                "voice-pipe",
+                "camera now {:?}",
+                crate::video::camera_device()
+            );
+        } else {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: could not switch the camera; keeping the current one"
+            );
+        }
+    }
+
+    /// Move every participant's playback to the current output-device
+    /// preference without leaving the call. Each audio receive bin gets a
+    /// new sink and keeps everything upstream of it, per-listener volume
+    /// included; video and discard bins have no sink and are passed over.
+    pub fn reload_output_device(&self) {
+        let bins: Vec<gstreamer::Bin> = {
+            let inner = self.inner.borrow();
+            if inner.pipeline.is_none() {
+                return;
+            }
+            inner.receive_bins.values().cloned().collect()
+        };
+        let device = crate::audio::output_device();
+        for bin in bins {
+            if bin.by_name(crate::audio::RECV_SINK_ELEMENT_NAME).is_none() {
+                continue;
+            }
+            let swapped = crate::audio::make_sink(device.as_deref())
+                .is_some_and(|sink| crate::audio::replace_sink(&bin, sink));
+            if !swapped {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: could not switch {} to playback device {device:?}",
+                    bin.name()
+                );
+            }
+        }
+        crate::debug::log!("voice-pipe", "playback device now {device:?}");
     }
 
     /// Replay the stored per-user gain onto a freshly (re)built receive
@@ -3998,6 +4097,7 @@ fn attach_pipeline_bus_watch(
             Err(_) => return None,
         }
     };
+    let weak_pipeline = pipeline.downgrade();
     let watch = bus
         .add_watch_local(move |_bus, msg| {
             use gstreamer::MessageView;
@@ -4045,6 +4145,16 @@ fn attach_pipeline_bus_watch(
                         if s.name() == "level" {
                             handle_level_message(runtime_id, e.src(), s);
                         }
+                    }
+                }
+                MessageView::ClockLost(_) => {
+                    // The element providing the pipeline clock went away —
+                    // an audio device swapped out mid-call, say. Cycling
+                    // through Paused makes the pipeline pick a new one.
+                    if let Some(pipeline) = weak_pipeline.upgrade() {
+                        crate::debug::log!("voice-pipe", "pipeline clock lost; reselecting");
+                        let _ = pipeline.set_state(gstreamer::State::Paused);
+                        let _ = pipeline.set_state(gstreamer::State::Playing);
                     }
                 }
                 _ => {}
@@ -6498,6 +6608,54 @@ mod tests {
             has_level,
             "send bin must contain a `level` meter for outgoing VAD"
         );
+    }
+
+    /// A capture-device change swaps the send bin's source in place,
+    /// before the microphone is bound as well as after: the bin, and its
+    /// locked state, stay put.
+    #[test]
+    fn reload_input_device_swaps_the_capture_source_in_place() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        let pipeline = runtime.inner.borrow().pipeline.clone().unwrap();
+        let send_bin = pipeline
+            .by_name(crate::audio::SEND_BIN_NAME)
+            .expect("send bin present in the pipeline")
+            .downcast::<gstreamer::Bin>()
+            .unwrap();
+        let old = send_bin
+            .by_name(crate::audio::SEND_SOURCE_ELEMENT_NAME)
+            .expect("send bin names its source");
+
+        runtime.reload_input_device();
+
+        let new = send_bin
+            .by_name(crate::audio::SEND_SOURCE_ELEMENT_NAME)
+            .expect("send bin still has a source");
+        assert_ne!(new, old, "the source was replaced");
+        assert!(old.parent().is_none());
+        assert_eq!(
+            pipeline.by_name(crate::audio::SEND_BIN_NAME).as_ref(),
+            Some(send_bin.upcast_ref::<gstreamer::Element>()),
+            "the send bin itself is not rebuilt"
+        );
+        assert!(send_bin.is_locked_state(), "an unbound mic stays locked");
+    }
+
+    /// Device reloads with nothing to reload are no-ops, not panics: no
+    /// pipeline at all, or a pipeline nobody else is talking in yet.
+    #[test]
+    fn device_reloads_without_live_legs_are_no_ops() {
+        let bare = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        bare.reload_input_device();
+        bare.reload_output_device();
+
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.reload_output_device();
+        assert!(runtime.inner.borrow().receive_bins.is_empty());
     }
 
     /// SetRemoteDescription dispatch reaches the underlying

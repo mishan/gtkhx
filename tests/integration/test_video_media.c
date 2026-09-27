@@ -439,6 +439,7 @@ typedef enum {
     PH_PAUSED_SETTLE,
     PH_PAUSED_QUIET,
     PH_WAIT_RESUMED_FRAMES,
+    PH_WAIT_SWAPPED_FRAMES,
     PH_WAIT_STOPPED,
 } phase;
 
@@ -618,14 +619,34 @@ driver_tick (gpointer data)
                                == 0;
         if (n >= d->mark + FRAME_MARGIN && live) {
             d->frames_resumed = n;
-            gtkhx_voice_runtime_video_stop (d->A->rt, HX_VIDEO_KIND_CAMERA);
-            d->ph = PH_WAIT_STOPPED;
-            d->deadline = now + SECS (10);
+            /* Change cameras mid-publication. No such camera exists, so
+             * the swap lands on the test pattern again; what counts is
+             * that the capture's source was replaced under a live stream
+             * and B goes on decoding it. */
+            gtkhx_voice_set_camera_device ("gtkhx-swap-test-camera");
+            d->mark = n;
+            d->ph = PH_WAIT_SWAPPED_FRAMES;
+            d->deadline = now + SECS (15);
         } else if (now >= d->deadline) {
             driver_fail (d,
                          "B's frames of A did not resume: %" G_GUINT64_FORMAT
                          " -> %" G_GUINT64_FORMAT ", 611 paused flag %d",
                          d->mark, n, d->B->peer_camera_paused);
+        }
+        break;
+    }
+
+    case PH_WAIT_SWAPPED_FRAMES: {
+        guint64 n = b_frames_of_a (d);
+        if (n >= d->mark + FRAME_MARGIN) {
+            gtkhx_voice_runtime_video_stop (d->A->rt, HX_VIDEO_KIND_CAMERA);
+            d->ph = PH_WAIT_STOPPED;
+            d->deadline = now + SECS (10);
+        } else if (now >= d->deadline) {
+            driver_fail (d,
+                         "B's frames of A stalled after a camera change: "
+                         "%" G_GUINT64_FORMAT " -> %" G_GUINT64_FORMAT,
+                         d->mark, n);
         }
         break;
     }
@@ -714,6 +735,7 @@ leave:
     g_main_loop_unref (d.loop);
 
 out:
+    gtkhx_voice_set_camera_device (NULL);
     client_close (&B);
     client_close (&A);
 }

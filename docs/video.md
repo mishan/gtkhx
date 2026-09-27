@@ -211,6 +211,17 @@ selected, not when Settings opens, so the camera scan — which wakes every
 GStreamer device provider — happens only when someone actually looks at
 the picker.
 
+Picking another camera while the camera is live moves the publication
+onto it at once, the way the audio pickers do (`docs/voice.md`): only
+the capture bin's source is replaced. The scaler and the fixed-size caps
+behind it absorb a camera with a different native size, so the encoder,
+the payloader — its SSRC and sequence numbers — and the self-preview
+carry on, and receivers see the same stream with new pictures in it. A
+camera that is paused or not published has no capture to move; it reads
+the preference when it next starts. A replacement that opens and then
+fails reports through the bus like any capture failure, ending the
+publication and not the call.
+
 libcamera, one of those providers, logs its enumeration (each camera it
 adds, each pixel format it can't use) at INFO and WARN on stderr. `main`
 sets `LIBCAMERA_LOG_LEVELS=*:ERROR` before GStreamer loads unless
