@@ -313,7 +313,8 @@ impl PathComplete {
         scrolled.set_child(Some(&listview));
 
         // Autohide off, so clicking a row leaves focus in the entry and the
-        // user can keep typing; Escape and losing the text focus close it.
+        // user can keep typing. Escape closes it, and so does the next text
+        // change made while the entry doesn't have focus.
         let popover = gtk::Popover::new();
         popover.set_has_arrow(false);
         popover.set_autohide(false);

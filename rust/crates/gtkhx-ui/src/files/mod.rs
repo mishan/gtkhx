@@ -14,6 +14,8 @@
 //! sized from the last one the user left, and closed when its connection goes
 //! away.
 
+pub mod complete;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void};
@@ -26,8 +28,6 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::dock::{self, ConnKey};
-
-pub mod complete;
 use crate::tr::tr;
 
 extern "C" {
