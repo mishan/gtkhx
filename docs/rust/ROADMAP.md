@@ -402,8 +402,6 @@ The small self-contained pool is drained; three larger items remain.
   [preview-porting.md](preview-porting.md). It is a plain
   `GtkWindow` with no dock involvement, so it is free of the libpanel question.
 - **System tray** (`tray.c`).
-- **Files path-completion popover** (`files_complete.c`) — step 2 of the
-  Files port below.
 
 ### B. Content still C inside a Rust window shell
 
@@ -420,9 +418,10 @@ genuinely-C leaves behind FFI. This is the big remaining category.
   1. **Wire senders** — done. `files.c` is gone: its senders are
      `hxhandlers::send::files`, and the recursive-listing engine, the `dir_char`
      global and the icon / kind / basename C wrappers had no callers left.
-  2. **Path-completion popover** (`files_complete.c`) — a self-contained leaf
-     with an `attach` / `free` C ABI, and a small branch that sets up the
-     `gtkhx-ui::files` module layout before the large one.
+  2. **Path-completion popover** — done. It is `gtkhx-ui::files::complete`,
+     still attached and freed through `hx_path_complete_attach` / `_free`
+     until the view that calls them is Rust, and `gtkhx-ui::files` is the
+     module the view ports into.
   3. **The view** — `files_browser.c`, `files_panel.c`, `files_entry.c`: both
      panels, the shared chrome, the row menu, the rename / mkdir / move
      dialogs, drag and drop, and the shortcut set, together with the

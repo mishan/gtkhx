@@ -26,6 +26,8 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::dock::{self, ConnKey};
+
+pub mod complete;
 use crate::tr::tr;
 
 extern "C" {

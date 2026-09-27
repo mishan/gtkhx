@@ -138,7 +138,8 @@ pub mod msg;
 // the Files browser window shell (two-panel browser, CENTER). Dock
 // registration via dock_bridge; the browser content + DnD + providers +
 // transfer integration stay C in files_browser.c. open_files_browser is this
-// module's #[no_mangle] export.
+// module's #[no_mangle] export; files::complete is the path entries'
+// completion popover.
 pub mod files;
 // In-app frame-clock benchmarks, armed by GTKHX_BENCH. See bench/mod.rs.
 mod bench;
