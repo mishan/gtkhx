@@ -123,12 +123,12 @@ impl Reply {
 }
 
 impl Client {
-    /// Log in to `server` as `login` / `password`, offering `caps`
-    /// (`CAP_*`). Returns the server's refusal as the error.
+    /// Log in to `server` as `login`, with `password` if the account has one,
+    /// offering `caps` (`CAP_*`). Returns the server's refusal as the error.
     pub fn login(
         server: &'static Server,
         login: &str,
-        password: &str,
+        password: Option<&str>,
         caps: u16,
     ) -> Result<Client, String> {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -141,7 +141,7 @@ impl Client {
             host: server.host.to_string(),
             port: server.port,
             login: login.as_bytes().to_vec(),
-            password: password.as_bytes().to_vec(),
+            password: password.map(|p| p.as_bytes().to_vec()).unwrap_or_default(),
             name: b"hx-e2e".to_vec(),
             icon: 414,
             version: 185,
@@ -151,13 +151,20 @@ impl Client {
         };
         rt.spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
 
-        // The LOGIN reply is the first frame the connection delivers.
+        // The LOGIN reply. Not necessarily the first frame: a server can
+        // broadcast another user's arrival ahead of it.
         let reply = rt
             .block_on(async {
                 tokio::time::timeout(REPLY_TIMEOUT, async {
                     loop {
                         match events.recv().await {
-                            Some(Event::Frame(f)) => return Ok(f),
+                            Some(Event::Frame(f))
+                                if f.header.type_ == HTLS_HDR_TASK
+                                    && f.header.trans == LOGIN_TRANS =>
+                            {
+                                return Ok(f);
+                            }
+                            Some(Event::Frame(_)) => continue,
                             Some(Event::State(_)) => continue,
                             Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
                             None => return Err("connection closed".to_string()),
@@ -191,14 +198,13 @@ impl Client {
 
     /// Log in as the server's guest (the empty login), offering `caps`.
     pub fn guest(server: &'static Server, caps: u16) -> Client {
-        Client::login(server, "", "", caps).unwrap_or_else(|e| panic!("{e}"))
+        Client::login(server, "", None, caps).unwrap_or_else(|e| panic!("{e}"))
     }
 
     /// Log in with the server's file-admin account, offering `caps`. Panics
     /// when the server can't be reached or refuses: the rig is expected up.
     pub fn admin(server: &'static Server, caps: u16) -> Client {
-        let (login, password) = server.admin;
-        Client::login(server, login, password, caps).unwrap_or_else(|e| panic!("{e}"))
+        Client::login(server, server.admin, None, caps).unwrap_or_else(|e| panic!("{e}"))
     }
 
     pub fn server(&self) -> &'static Server {
