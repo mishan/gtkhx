@@ -139,8 +139,8 @@ Users can:
    first migrate to the sibling, then the leaf collapses; the
    sibling takes the parent split's place in the tree.
 4. **An emptied leaf collapses.** When a drag, an Alt+Shift+arrow
-   move, or a close (the header's X, *Close all pages*, a chat
-   window closing itself) takes a leaf's last panel, the leaf
+   move, an undock, or a close (the header's X, *Close all pages*, a
+   chat window closing itself) takes a leaf's last panel, the leaf
    closes and its neighbor takes the space (`collapse_when_emptied`
    in `hx_panel.c`, from an idle — the gesture started in that
    leaf's header, and GTK isn't done delivering it there). A fresh
@@ -150,7 +150,14 @@ Users can:
    splitting by drag, which made empty leaves pile up.
 5. **Undock + Redock.** The panel chevron menu has *Undock*;
    close-request on the undocked window walks the panel back to its
-   home frame.
+   home frame — or, when that leaf has since collapsed (as it does
+   when the undock emptied it), to its home area's role frame. The
+   toolbar button and the menu item for a panel always bring it
+   back: into the dock when it's closed, and to the front of its
+   window when it's undocked. `hx_panel_ensure_attached` counts a
+   frame outside the main dock as "attached" only while its window
+   is alive, so a panel stranded in a window that went away without
+   redocking it can still be reopened.
 
 ### Default layout
 
