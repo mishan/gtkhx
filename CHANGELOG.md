@@ -1,3 +1,39 @@
+## 1.4.1-dev
+
+- Files
+  - Large folders open several times faster, and sorting by name is faster too
+  - Renaming in place now replaces the name instead of adding to it
+  - Moving a file and renaming it in one step no longer leaves it under its old name
+  - Get Info can save just a comment on Janus servers
+  - The right-click menu's last items are no longer cut off
+  - Local folders no longer show "(4096 items)" as their size
+  - Very long folder names no longer break the path sent to the server
+- Docking
+  - Drop a panel on the edge of a pane to split it
+  - A pane closes when its last panel is moved out or closed
+  - A panel's toolbar button and menu item always bring it back after it was undocked
+- Voice and Video
+  - Changing the microphone, speaker or camera in Settings now switches a call in progress
+- Chat
+  - Chat history shows line breaks and accented characters correctly
+  - Very long scrollbacks stay fast as new messages arrive and while scrolling
+  - Nickname completion is faster on busy servers
+- Hotline Protocol
+  - A rejected login now shows the server's own message
+  - Fixed HOPE-encrypted connections misreading a message split across frames
+  - No more error at every login on servers that refuse your saved GIF icon
+  - Sending text is faster on servers without Unicode
+- Code Modernization
+  - The file browser is now Rust
+  - GtkHx now reads tracker listings with code shared with the hxd-ng server
+- Development
+  - Performance benchmarks, from single functions up to the running app
+  - End-to-end tests of GtkHx's own file requests against real servers
+  - The test servers now include hlservd, the Hotline 1.9 server
+  - A reference guide to the Hotline protocol and its extensions
+- Translations
+  - The Local / Remote selector in the file browser is now translated
+
 ## 1.4.0
 
 - Video
