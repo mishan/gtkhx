@@ -19,6 +19,7 @@ gtkhx-files-ffi = { path = "../gtkhx-files-ffi" }
 hxcrypto = { path = "../hxcrypto" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
+hxrequest = { path = "../hxrequest" }
 # --- GObject / UI layer ---
 gtkhx-ui = { path = "../gtkhx-ui" }
 

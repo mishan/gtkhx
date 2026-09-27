@@ -2,7 +2,7 @@
 #
 # The base image (published from hotline-docker) pulls + verifies the
 # Janus binary and ships a general config. This thin layer re-applies
-# GtkHx's test config + fixtures + HOPE-seeded accounts on top, so CI
+# GtkHx's test config + fixtures + seeded accounts on top, so CI
 # doesn't re-pull the tarball every run.
 #
 # Requires the base image to be published + pullable (public, or CI logged
@@ -13,18 +13,18 @@ FROM ${BASE_REGISTRY}/janus:${BASE_TAG}
 
 USER root
 
-# openssl (self-signed cert) + curl (seed-hope API calls, banner fetch);
+# openssl (self-signed cert) + curl (banner fetch);
 # the base image ships neither.
 RUN apt-get update \
  && apt-get install --no-install-recommends -y openssl curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # Test config: HOPE / chat-history / voice ON, rate limits off, admin API
-# on (for the build-time seed), matrix ports (5510/5610/5514), banner.
+# on, matrix ports (5510/5610/5514), banner.
 COPY conf/config.yaml /opt/janus/Server/config.yaml
 
-# Self-signed cert the test config's TLSCert/TLSKey point at (must exist
-# before the seed step boots Janus).
+# Self-signed cert the test config's TLSCert/TLSKey point at (Janus
+# refuses to start without it).
 RUN mkdir -p /opt/janus/Server/tls \
  && openssl req -x509 -newkey rsa:2048 -nodes \
         -keyout /opt/janus/Server/tls/key.pem \
@@ -33,11 +33,11 @@ RUN mkdir -p /opt/janus/Server/tls \
         -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
  && chmod 600 /opt/janus/Server/tls/key.pem
 
-# Seed HOPE password blobs onto the bundled accounts (boots Janus + PATCHes
-# via the admin API; the base image already pre-created Server/*).
-COPY seed-hope-passwords.sh /usr/local/bin/seed-hope-passwords
-RUN chmod +x /usr/local/bin/seed-hope-passwords \
- && /usr/local/bin/seed-hope-passwords
+# Give admin the empty password and turn on the bundled accounts' voice
+# and inline-media bits (an edit of the account YAMLs; see the script).
+COPY seed-accounts.sh /usr/local/bin/seed-accounts
+RUN chmod +x /usr/local/bin/seed-accounts \
+ && /usr/local/bin/seed-accounts
 
 # Deterministic Files/ fixtures + a banner so HTLS_HDR_BANNER fires.
 RUN printf 'hello world\n' > /opt/janus/Server/Files/test.txt \

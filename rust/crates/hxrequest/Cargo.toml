@@ -1,0 +1,22 @@
+[package]
+rust-version.workspace = true
+name = "hxrequest"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GtkHx's client request builders: the exact frames each client operation sends, as pure Rust."
+publish = false
+
+[lib]
+# rlib only. The C ABI symbols this crate exports reach the C link through
+# the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
+
+# No C imports, on purpose: the end-to-end suite (hx-e2e) links this crate
+# into a plain cargo test binary, so it can't lean on anything only the
+# application link provides. glib is only for the g_malloc'd buffer the
+# path_to_hldir C ABI owes its callers.
+[dependencies]
+glib = { workspace = true }
+hxproto = { workspace = true }
+hxtext = { path = "../hxtext" }

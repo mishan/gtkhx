@@ -114,7 +114,7 @@ test_getfolder_request_name_only (void)
 /* GETFOLDER with a DIR chunk for a non-root parent. Matches the
  * hx_get_folder branch when rdir is non-empty. The DIR
  * chunk's body is opaque here (path_to_hldir's encoding is tested
- * separately in test_path_hldir); we only assert it survived the
+ * separately in hxrequest::path); we only assert it survived the
  * round trip with the right type code and length. */
 static void
 test_getfolder_request_with_dir (void)

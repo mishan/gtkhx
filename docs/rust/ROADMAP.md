@@ -433,7 +433,11 @@ genuinely-C leaves behind FFI. This is the big remaining category.
      it again. The details that have to survive are in
      [../files-browser.md](../files-browser.md) — the bubble-phase click
      gesture, the paned settle tick, teardown on the content's `destroy`, the
-     row menu's retargeting, folder-first sorting.
+     row menu's retargeting, folder-first sorting. Rows must also keep each
+     name's raw wire bytes and send those back: today a row holds only the
+     decoded name, so a name whose Mac Roman bytes happen to be valid UTF-8
+     (`√©` is `C3 A9`) shows as `é`, goes back as `0x8E`, and the server
+     reports it missing.
   4. **Providers and operations** — `files_provider*.c`, `files_ops.c`. With no
      C consumer left the provider stops being a GObject interface and becomes
      a Rust enum over the two sides. The FILE_LIST reply routes straight to
@@ -443,6 +447,10 @@ genuinely-C leaves behind FFI. This is the big remaining category.
   5. **The seam** — drop the `HxFileEntry`, `hx_cfl_*` and sender exports that
      have no C caller left, connect Get Info to the session signal from Rust
      (deleting `on_file_info_signal`), and measure the seam before and after.
+
+  End-to-end coverage for each step goes in `rust/crates/hx-e2e`, which sends
+  the `hxrequest` builders' requests to the rig's servers (see
+  [tests/COMPOSE.md](../../tests/COMPOSE.md)).
 
   The view goes before the providers because feature work keeps landing in
   `files_browser.c` and `files_panel.c`, and because the providers already

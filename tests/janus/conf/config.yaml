@@ -19,10 +19,9 @@ Port: 5510
 # The Dockerfile generates a self-signed cert at build time and drops
 # it at /opt/janus/Server/tls/{cert,key}.pem. We use ABSOLUTE paths
 # here because Janus resolves relative paths against its cwd, not
-# the config file's directory — and the two relevant cwds differ:
-# the seed-hope-passwords script inherits cwd=/build from the
-# earlier Dockerfile WORKDIR, and the runtime stage's ENTRYPOINT
-# inherits cwd=/opt/janus. Absolute paths sidestep both.
+# the config file's directory, and a Janus started from anywhere
+# but the runtime stage's cwd=/opt/janus would miss them. Absolute
+# paths sidestep that.
 TLSCert: "/opt/janus/Server/tls/cert.pem"
 TLSKey: "/opt/janus/Server/tls/key.pem"
 
@@ -671,7 +670,7 @@ NewUserDefaults:
   # 55 (HL_ACCESS_VOICE_CHAT) without an extra PATCH step. The bundled
   # guest / admin accounts (whose YAMLs were written by an upstream
   # Janus build before this template was edited) are seeded
-  # separately in seed-hope-passwords.sh — see the bit-flip block at
+  # separately in seed-accounts.sh — see the bit-flip block at
   # the end of that script.
   VoiceChat:            true    # Join voice chat rooms
   ReadChatHistory:      false   # Request chat history (replay on demand)
@@ -683,7 +682,7 @@ NewUserDefaults:
   # keeps the test-account template consistent for follow-ups.
   # Bundled accounts (guest / admin) inherit from this template
   # at account-create time; pre-existing bundled YAMLs are
-  # patched separately in seed-hope-passwords.sh.
+  # patched separately in seed-accounts.sh.
   SendMedia:            true    # Attach inline images in chat
 
 # ─── IRC Bridge ─────────────────────────────────────────────────────────────

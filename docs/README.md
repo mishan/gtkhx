@@ -38,6 +38,8 @@ port).
 | [gif-icons.md](gif-icons.md) | Per-user GIF avatars, discovered by probe because the spec defines no capability bit. |
 | [emoji-shortcodes.md](emoji-shortcodes.md) | Emoji that survive servers which don't speak UTF-8, and how the shortcode table is generated. |
 | [image-decoding.md](image-decoding.md) | The glycin-backed decoder, the loader-generation compatibility problem, and the three backends. |
+| [mhxd-bugs.md](mhxd-bugs.md) | Where mhxd misbehaves — rename and move replacing what's there, names with `/` acting on the parent folder, leaked transfer slots — so a failing test gets checked against the known list first. |
+| [janus-bugs.md](janus-bugs.md) | The same for Janus, written as reports to send upstream: what the client sends, what comes back, what should. |
 
 ## Process
 

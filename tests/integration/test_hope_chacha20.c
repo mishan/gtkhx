@@ -89,9 +89,8 @@ test_hope_chacha20_login_and_ping (void)
      * .net's guest account with cipher=CHACHA20-POLY1305, verified
      * by tracing a live connection. The PATCH-the-password path
      * via Janus's admin API writes a HOPEPassword: field but
-     * doesn't validate at login (likely a Janus issue) — see the
-     * preamble of tests/janus/seed-hope-passwords.sh for the full
-     * write-up. */
+     * doesn't validate at login (likely a Janus issue) — see
+     * tests/janus/README.md. */
     int fd = integration_open_login_hope_or_skip (
         srv, &htlc, &hope,
         /*username=*/"guest",

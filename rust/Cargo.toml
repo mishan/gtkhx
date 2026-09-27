@@ -19,6 +19,11 @@ members = [
     "crates/hxtls-trust",
     "crates/hxnet",
     "crates/hxtext",
+    # The requests the client sends, as pure Rust values — shared by the
+    # production senders and the end-to-end suite (hx-e2e).
+    "crates/hxrequest",
+    # End-to-end suites against the Docker rig, behind its `rig` feature.
+    "crates/hx-e2e",
     # Chat-view phase C1: the chat layout engine (message model, span
     # parsers, wrapping, height index, scroll anchoring). Deliberately
     # dependency-free — no gtk4/glib/pango — so the whole of it runs under
@@ -83,9 +88,9 @@ members = [
 rust-version = "1.85"
 
 [workspace.dependencies]
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5" }
-hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "e7705c1dc7b9b755ea0a22b4b61b2e0675eb61f5" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "fce3ad8234ce9708b645d5e42dd68edfc140114e" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "fce3ad8234ce9708b645d5e42dd68edfc140114e" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "fce3ad8234ce9708b645d5e42dd68edfc140114e" }
 glib = "0.21"
 gio = "0.21"
 gtk4 = "0.10"

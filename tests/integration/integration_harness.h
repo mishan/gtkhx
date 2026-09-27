@@ -465,7 +465,7 @@ extern gboolean integration_drain_until_chat_user_event (
  *   u16 name_len (BE)
  *   bytes[name_len] name
  *
- * The full production encoder (src/path_hldir.c::path_to_hldir)
+ * The full production encoder (hxrequest::path::encode_dir)
  * splits multi-component paths. Tier 3 tests don't need the
  * splitting — they target top-level files / folders — so this
  * single-component shortcut stays here in the harness.

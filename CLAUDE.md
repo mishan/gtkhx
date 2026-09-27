@@ -88,7 +88,7 @@ looking for code in the wrong place.
 | **Voice** (optional) | `voice_bridge.c`, `voice_ptt_keyspec.c` |
 | **Desktop integration** | `tray.c`, `notify.c`, `sound.c`, `sound_events.c` |
 | **Bridges to Rust** | `hxnet_bridge.c`, `dock_bridge.c`, `gtkhx_ui_bridge.c`, `users_bridge.c`, `tasks_bridge.c`, `tracker_bridge.c`, `chat_send_bridge.c`, `voice_bridge.c`, `htxf_accessors.c`, `inline_media_decode.c` |
-| **Infrastructure** | `debug.c`, `gtkhx_log.c`, `human_readable.c`, `uniquify_path.c`, `path_hldir.c`, `hl_code.c`, `cmd_exec.c` |
+| **Infrastructure** | `debug.c`, `gtkhx_log.c`, `human_readable.c`, `uniquify_path.c`, `hl_code.c`, `cmd_exec.c` |
 
 Deliberately absent, and worth knowing so you don't go looking: `xtext.c` (replaced by the
 Rust chat view), `gtk_hlist.c` (replaced by `GtkColumnView`), `xfers.c` (transfers are
@@ -116,7 +116,7 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 |---|---|
 | **Shared with hxd-ng** (from hx-libs) | `hxproto` — typed builders and parsers for every opcode, pure Rust; `hxfiles-xfer` (fork-header and HTXF codec); `hxhfs` (resource-fork sidecars). All three are git dependencies pinned in `rust/Cargo.toml`. GtkHx's C ABI over them lives here: `gtkhx-proto-ffi` (the `gtkhx_proto_*` / `hx_recv_route` / `hx_user_change_plan_resolve` shims) and `gtkhx-files-ffi`, each also a standalone staticlib for the focused tests |
 | **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
-| **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain |
+| **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain; `hxrequest` — the requests the client sends, built as plain values with no C imports, so the end-to-end suites can send exactly what production sends |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window), `hxchat-view` (the GTK4 chat widget), `hxchat-layout` (its layout engine — **dependency-free**: no gtk, glib, or pango) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
@@ -128,7 +128,11 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 
 - `tests/` — three tiers: unit (pure functions), proto (wire fixtures), integration
   (end-to-end against a Docker rig of mhxd / Janus / hxtrackd / Argus / a SOCKS proxy).
-  `tests/COMPOSE.md` describes the rig; `tests/run.sh` brings it up.
+  `tests/COMPOSE.md` describes the rig; `tests/run.sh` brings it up. The C integration
+  tests build their frames by hand; `rust/crates/hx-e2e` drives GtkHx's own requests
+  and reply parsers against the same rig (`cargo test -p hx-e2e --features rig`), and
+  is where new end-to-end coverage goes.
+- `mhxd/` — the reference server's source, vendored for cross-reading only. Not built.
 - `po/` — translations (German, Spanish, French, Portuguese). `sounds/` — chat alert `.wav`s.
 - `src/themes/` — built-in theme files, shipped as GResource. `src/icons/` — the
   vendored app-specific symbolic icons (see its README), beside the classic
@@ -239,11 +243,12 @@ request was rejected, and why.
   e.g. `../mhxd`, for reading — it is not part of the repo) —
   a 2023 merge of three HotlineX forks, the same codebase family GtkHx's protocol stack
   came from. The controlled, repeatable test target and the canonical reference for opcodes
-  and the access bitmap. The rig's container (`tests/mhxd/`) layers on the `mhxd` base
-  image built in the hotline-docker repo; an unpinned master has broken the build before.
+  and the access bitmap. Its known bugs are in `docs/mhxd-bugs.md`, and it wedges: when it
+  starts refusing everything, restart its container before suspecting the client. Pinned to
+  a specific revision in `tests/mhxd/`; an unpinned master has broken the build before.
 - **Janus** — VesperNet's closed-source server. Implements the fogWraith extensions (voice,
   inline media, GIF icons, chat history), so it is the integration target for all of them.
-  Runs in the test rig.
+  Runs in the test rig. Its known bugs, kept to send upstream, are in `docs/janus-bugs.md`.
 - **Argus** — a real tracker-v3 tracker, in the test rig. **hxtrackd** covers the v1
   tracker fallback path.
 - **hlserver.com** — behaves like a 1.0/1.2 server from the client's perspective: no
