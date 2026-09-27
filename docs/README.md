@@ -29,6 +29,7 @@ port).
 
 | Doc | Subject |
 |---|---|
+| [hotline-protocol.md](hotline-protocol.md) | The Hotline protocol itself: the 1.9 transaction and field set as the original source and servers implement it, the version forks from 1.2 on, file transfers, tunneling, trackers, every extension since with its spec and numbers, and the original servers as test targets. |
 | [tls.md](tls.md) | Transport security: the dedicated-port model, the TOFU trust store, why TOFU is the expected path rather than a degraded one, and the bookmark format's compatibility trick. |
 | [tracker-protocol.md](tracker-protocol.md) | HTRK v1 and v3, the full TLV catalogue, and the timed-probe-with-fallback version detection that a v1 tracker's silence forces. |
 | [voice.md](voice.md) | Voice chat: the wire contract, the WebRTC pipeline and state machine, and the longest gotchas chapter in the tree. |

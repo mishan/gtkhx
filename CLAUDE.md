@@ -129,7 +129,6 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 - `tests/` — three tiers: unit (pure functions), proto (wire fixtures), integration
   (end-to-end against a Docker rig of mhxd / Janus / hxtrackd / Argus / a SOCKS proxy).
   `tests/COMPOSE.md` describes the rig; `tests/run.sh` brings it up.
-- `mhxd/` — the reference server's source, vendored for cross-reading only. Not built.
 - `po/` — translations (German, Spanish, French, Portuguese). `sounds/` — chat alert `.wav`s.
 - `src/themes/` — built-in theme files, shipped as GResource. `src/icons/` — the
   vendored app-specific symbolic icons (see its README), beside the classic
@@ -236,11 +235,12 @@ request was rejected, and why.
 
 ## Reference servers
 
-- **mhxd** (<https://github.com/kangsterizer/mhxd>, vendored under `mhxd/` for reading) —
+- **mhxd** (<https://github.com/kangsterizer/mhxd>; keep a clone *outside* this checkout,
+  e.g. `../mhxd`, for reading — it is not part of the repo) —
   a 2023 merge of three HotlineX forks, the same codebase family GtkHx's protocol stack
   came from. The controlled, repeatable test target and the canonical reference for opcodes
-  and the access bitmap. Pinned to a specific revision in `tests/mhxd/`; an unpinned master
-  has broken the build before.
+  and the access bitmap. The rig's container (`tests/mhxd/`) layers on the `mhxd` base
+  image built in the hotline-docker repo; an unpinned master has broken the build before.
 - **Janus** — VesperNet's closed-source server. Implements the fogWraith extensions (voice,
   inline media, GIF icons, chat history), so it is the integration target for all of them.
   Runs in the test rig.
