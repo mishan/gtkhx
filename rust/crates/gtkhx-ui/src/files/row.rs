@@ -99,16 +99,12 @@ fn folders_first(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
     b.is_dir().cmp(&a.is_dir())
 }
 
-fn collate(a: &std::ffi::CStr, b: &std::ffi::CStr) -> Ordering {
-    unsafe { glib::ffi::g_utf8_collate(a.as_ptr(), b.as_ptr()) }.cmp(&0)
-}
-
 // Every column puts folders first, as orthodox file managers do, and because a
 // folder's size is a count: a 7-item folder ranked against a 7-byte file means
 // nothing.
 
 pub fn cmp_name(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
-    folders_first(a, b).then_with(|| collate(&a.name_c(), &b.name_c()))
+    folders_first(a, b).then_with(|| a.name_collate_key().cmp(b.name_collate_key()))
 }
 
 pub fn cmp_size(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
@@ -120,7 +116,7 @@ pub fn cmp_modified(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
 }
 
 pub fn cmp_kind(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
-    folders_first(a, b).then_with(|| collate(&a.kind_c(), &b.kind_c()))
+    folders_first(a, b).then_with(|| a.kind_collate_key().cmp(b.kind_collate_key()))
 }
 
 #[cfg(test)]

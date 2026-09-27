@@ -224,9 +224,21 @@ After batching the populate (finding 6), same setup, median of three:
 | remote populate (UI frozen) | 1.32 s | 165 ms |
 | local listing (UI frozen) | 3.4 s | 238 ms |
 
+After caching collation keys (finding 8), same setup, median of five,
+against `main` measured alongside:
+
+| Files panel, 10,000 entries | Before | After |
+|---|---|---|
+| sort by name: call | 69.6 ms | 12.3 ms |
+| sort by name: until painted | 78.2 ms | 22.8 ms |
+| remote populate (UI frozen) | 182 ms | 172 ms |
+
+The keys are built on first sort, so the populate — which sorts — would
+show any cost; it is within the noise.
+
 ## Findings
 
-What the measurements have turned up. Findings 1, 2 and 6 are fixed; the
+What the measurements have turned up. Findings 1, 2, 6 and 8 are fixed; the
 rest are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
@@ -285,6 +297,8 @@ rest are leads. Findings 6 onwards are from the UI scenarios.
    the main thread; enumerating off it is the remaining half, and the one
    that still grows with directory size.
 8. **Sorting by name costs 65 ms at 10,000 rows**, against 9 ms by size.
-   `cmp_name` calls `g_utf8_collate` on every comparison, which re-derives a
-   collation key each time. Precomputing a key per entry
-   (`g_utf8_collate_key`) is the usual fix.
+   `cmp_name` called `g_utf8_collate` on every comparison, which re-derives
+   a collation key each time. **Fixed:** each entry derives its
+   `g_utf8_collate_key` on first use and keeps it, and the sort compares
+   keys bytewise — the same order. Sorting by name is down to 12 ms, level
+   with size; the Kind column got the same treatment.

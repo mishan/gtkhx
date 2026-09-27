@@ -20,7 +20,7 @@ mod populate;
 
 pub use populate::gtkhx_files_populate_from_reply;
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::ffi::{c_char, CStr, CString};
 use std::os::raw::c_void;
 
@@ -46,6 +46,17 @@ fn cstring_of(s: &str) -> CString {
     CString::new(s).unwrap_or_else(|_| CString::new("").unwrap())
 }
 
+/// `g_utf8_collate_key` of `s`: byte-comparing two keys orders the strings
+/// as `g_utf8_collate` would, without re-deriving the collation each time.
+fn collate_key_of(s: &CStr) -> CString {
+    unsafe {
+        let key = glib::ffi::g_utf8_collate_key(s.as_ptr(), -1);
+        let owned = CStr::from_ptr(key).to_owned();
+        glib::ffi::g_free(key.cast());
+        owned
+    }
+}
+
 mod imp {
     use super::*;
 
@@ -56,6 +67,8 @@ mod imp {
         pub size: Cell<u64>,
         pub modified: Cell<i64>,
         pub icon_id: Cell<u16>,
+        pub name_key: OnceCell<CString>,
+        pub kind_key: OnceCell<CString>,
     }
 
     impl Default for HxFileEntry {
@@ -67,6 +80,8 @@ mod imp {
                 size: Cell::new(0),
                 modified: Cell::new(0),
                 icon_id: Cell::new(0),
+                name_key: OnceCell::new(),
+                kind_key: OnceCell::new(),
             }
         }
     }
@@ -124,15 +139,20 @@ impl HxFileEntry {
         self.imp().name.borrow().to_string_lossy().into_owned()
     }
 
-    /// The display name as the C string it's stored as, for comparing
-    /// without a copy.
-    pub fn name_c(&self) -> std::cell::Ref<'_, CString> {
-        self.imp().name.borrow()
+    /// The name's collation key, for sorting: comparing two keys bytewise
+    /// matches `g_utf8_collate` on the names. Derived on first use, since
+    /// only a sort needs it, and kept — the entry never changes.
+    pub fn name_collate_key(&self) -> &CStr {
+        let imp = self.imp();
+        imp.name_key
+            .get_or_init(|| collate_key_of(&imp.name.borrow()))
     }
 
-    /// The kind, as [`HxFileEntry::name_c`].
-    pub fn kind_c(&self) -> std::cell::Ref<'_, CString> {
-        self.imp().kind.borrow()
+    /// The kind's collation key, as [`HxFileEntry::name_collate_key`].
+    pub fn kind_collate_key(&self) -> &CStr {
+        let imp = self.imp();
+        imp.kind_key
+            .get_or_init(|| collate_key_of(&imp.kind.borrow()))
     }
 
     /// The short kind description ("Folder", "MP3 Audio"), empty if unknown.
@@ -366,6 +386,23 @@ mod tests {
             assert_eq!(hx_file_entry_get_size(n), 0);
             assert_eq!(hx_file_entry_get_modified(n), 0);
             assert_eq!(hx_file_entry_get_icon_id(n), 0);
+        }
+    }
+
+    #[test]
+    fn collate_keys_order_as_collate() {
+        let names = ["b", "A", "a", "Ä", "z", "10", "9", "", "émile", "Zed"];
+        let entries: Vec<HxFileEntry> = names
+            .iter()
+            .map(|n| HxFileEntry::build(n, false, 0, 0, n, 0))
+            .collect();
+        for a in &entries {
+            for b in &entries {
+                let (an, bn) = (a.imp().name.borrow(), b.imp().name.borrow());
+                let want = unsafe { glib::ffi::g_utf8_collate(an.as_ptr(), bn.as_ptr()) }.cmp(&0);
+                assert_eq!(a.name_collate_key().cmp(b.name_collate_key()), want);
+                assert_eq!(a.kind_collate_key().cmp(b.kind_collate_key()), want);
+            }
         }
     }
 
