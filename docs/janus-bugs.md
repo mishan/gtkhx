@@ -1,0 +1,98 @@
+# Janus bugs
+
+Janus is VesperNet's server and the rig's target for the fogWraith
+extensions (`tests/janus/`, Janus 2.0.8-dev). Its source is closed, so this is
+the list to send upstream: each entry says what a client sends, what it gets
+back, and what it should get. It also lets a failing test or an odd report be
+checked against what is already known before anyone goes looking for a client
+bug. The companion list for the other reference server is
+[mhxd-bugs.md](mhxd-bugs.md).
+
+An entry marked *verified* was reproduced against the rig's container.
+
+## A plain login with a password never matches
+
+**Verified.**
+
+Every Hotline client obfuscates the LOGIN's login and password fields by
+XORing each byte with `0xFF`. Janus compares the password field as it arrives,
+without undoing that, against the account's stored password. So no account with
+a non-empty password can log in from a real client with the right password.
+Only an empty password works, since it obfuscates to itself.
+
+- **Sends:** LOGIN (107), login `admin`, password `adminpass`, both
+  XOR-`0xFF`, for an account whose password is `adminpass`.
+- **Gets:** a task error, "Incorrect login".
+- **Should get:** the login reply.
+
+**GtkHx:** the rig gives `admin` the empty password
+(`tests/janus/seed-accounts.sh`). Real users with a password on a Janus server
+can't log in without HOPE.
+
+## A HOPE password set through the admin API doesn't validate
+
+**Verified.** Setting an account's password with `PATCH /accounts/{login}`
+writes a `HOPEPassword:` blob into its YAML, and the API reports
+`has_hope_password: true`, but after a restart a HOPE login with that password
+fails with "Incorrect login", and Janus logs "HOPE authentication failed".
+HOPE login works only for an account with an empty password.
+
+## A rename to the item's own name reports an error
+
+**Verified.**
+
+- **Sends:** FILE_SETINFO (207) with FILE_NAME `f`, FILE_RENAME `f` (the same
+  name), FILE_COMMENT `note`, and the folder's DIR.
+- **Gets:** a task error, "Error renaming folder." The comment *is* saved.
+- **Should get:** success; the unchanged name is a no-op, as on mhxd.
+
+Hotline clients have long sent the current name back in FILE_RENAME when only
+the comment changed, so saving a comment from a client's Get Info reports a
+failure that didn't happen.
+
+**GtkHx:** leaves FILE_RENAME out when the name hasn't changed
+(`hxrequest::files::set_info`).
+
+## A name of 253 bytes or more panics the handler, and nothing replies
+
+**Verified.**
+
+- **Sends:** FILE_MKDIR (205) for `/` + a 253-byte name (one DIR component of
+  253 bytes). FILE_DELETE naming such an item does the same.
+- **Gets:** no reply at all. Janus logs `PANIC`, "runtime error: slice bounds
+  out of range [3:0]", in `hotline.(*FilePathItem).Write` (`file_path.go:41`)
+  under `HandleNewFolder`, and recovers.
+- **Should get:** the folder, or a task error if the name is too long.
+
+It is the length of one path component that matters: names up to 252 bytes
+work, at any depth. A DIR component carries a name of up to 255 bytes, and
+mhxd takes the full length. The client waits out its timeout, and a GtkHx user
+sees a request that never finishes.
+
+**GtkHx:** the end-to-end suite runs the 255-byte name test only where
+`Cap::LongNames` says it's safe.
+
+## An unknown opcode gets no reply at all
+
+**Verified.** A transaction type Janus doesn't know is dropped silently, with
+no task error back. A client that tries an optional request to find out whether
+the server supports it (GtkHx's GIF icon list, for one) can't tell "unsupported"
+from "slow" and has to wait out a timeout. A task error is the expected answer,
+as other servers give.
+
+**GtkHx:** probes on a timeout ([gif-icons.md](gif-icons.md)).
+
+## A `0s` duration in the config means the default, not zero
+
+**Verified.** The YAML decoder treats a duration of `0s` as unset and applies
+the default, so writing `0s` to turn off a rate limit leaves the default limit
+in force (10 s per account for inline media uploads). A setting meant to
+disable something has to be a tiny non-zero value (`1ms`) instead
+([inline-media.md](inline-media.md)).
+
+## Adding an entry
+
+Reproduce it against the rig first, ideally as an `hx-e2e` probe, and write it
+as what the client sends, what comes back, and what should. When a Janus
+release fixes one, delete the entry and point the test that covers it at the
+fixed behavior.

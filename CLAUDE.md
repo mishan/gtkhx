@@ -242,11 +242,12 @@ request was rejected, and why.
 - **mhxd** (<https://github.com/kangsterizer/mhxd>, vendored under `mhxd/` for reading) —
   a 2023 merge of three HotlineX forks, the same codebase family GtkHx's protocol stack
   came from. The controlled, repeatable test target and the canonical reference for opcodes
-  and the access bitmap. Pinned to a specific revision in `tests/mhxd/`; an unpinned master
+  and the access bitmap. Its known bugs are in `docs/mhxd-bugs.md`, and it wedges: when it
+  starts refusing everything, restart its container before suspecting the client. Pinned to a specific revision in `tests/mhxd/`; an unpinned master
   has broken the build before.
 - **Janus** — VesperNet's closed-source server. Implements the fogWraith extensions (voice,
   inline media, GIF icons, chat history), so it is the integration target for all of them.
-  Runs in the test rig.
+  Runs in the test rig. Its known bugs, kept to send upstream, are in `docs/janus-bugs.md`.
 - **Argus** — a real tracker-v3 tracker, in the test rig. **hxtrackd** covers the v1
   tracker fallback path.
 - **hlserver.com** — behaves like a 1.0/1.2 server from the client's perspective: no

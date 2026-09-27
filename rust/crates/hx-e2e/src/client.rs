@@ -151,13 +151,20 @@ impl Client {
         };
         rt.spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
 
-        // The LOGIN reply is the first frame the connection delivers.
+        // The LOGIN reply. Not necessarily the first frame: a server can
+        // broadcast another user's arrival ahead of it.
         let reply = rt
             .block_on(async {
                 tokio::time::timeout(REPLY_TIMEOUT, async {
                     loop {
                         match events.recv().await {
-                            Some(Event::Frame(f)) => return Ok(f),
+                            Some(Event::Frame(f))
+                                if f.header.type_ == HTLS_HDR_TASK
+                                    && f.header.trans == LOGIN_TRANS =>
+                            {
+                                return Ok(f);
+                            }
+                            Some(Event::Frame(_)) => continue,
                             Some(Event::State(_)) => continue,
                             Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
                             None => return Err("connection closed".to_string()),
@@ -279,6 +286,38 @@ impl Client {
             }
         }
         last.expect("moving a path onto itself sends nothing")
+    }
+
+    /// Claim the transfer reference `ref_` a server granted and hang up, as a
+    /// cancelled transfer does, waiting until the server has let go of it.
+    /// mhxd keeps a global transfer slot for good for a reference that was
+    /// never claimed, or whose claim it hadn't seen when the client
+    /// disconnected (docs/mhxd-bugs.md), so this must finish before the
+    /// client goes.
+    pub fn cancel_transfer(&self, ref_: u32) {
+        use std::io::{Read, Write};
+        let mut preamble = [0u8; 24];
+        let n = hxproto::build::build_htxf_preamble(&mut preamble, ref_, 0, 0, 0, false);
+        assert!(n > 0, "no HTXF preamble for ref {ref_:#x}");
+        let addr = (self.server.host, self.server.xfer_port);
+        let mut sock = std::net::TcpStream::connect(addr)
+            .unwrap_or_else(|e| panic!("{}: transfer port: {e}", self.server.name));
+        sock.write_all(&preamble[..n])
+            .unwrap_or_else(|e| panic!("{}: transfer preamble: {e}", self.server.name));
+        // Stop sending, and read until the server closes its end: by then it
+        // has matched the reference and wound the transfer down.
+        let _ = sock.shutdown(std::net::Shutdown::Write);
+        sock.set_read_timeout(Some(REPLY_TIMEOUT))
+            .expect("a read timeout");
+        let mut sink = [0u8; 4096];
+        loop {
+            match sock.read(&mut sink) {
+                Ok(0) => break,
+                Ok(_) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(e) => panic!("{}: transfer {ref_:#x} never closed: {e}", self.server.name),
+            }
+        }
     }
 
     /// The entries of the folder at `dir`; panics if the listing fails.

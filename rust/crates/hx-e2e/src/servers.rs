@@ -9,7 +9,8 @@ pub enum Cap {
     /// folders and files anywhere under the root.
     FileAdmin,
     /// Takes a file or folder name of the full 255 bytes a path item can
-    /// carry. Janus refuses names over 128 bytes, and has no setting for it.
+    /// carry. Janus panics on a name of 253 bytes or more and never replies
+    /// (docs/janus-bugs.md).
     LongNames,
     /// Negotiates UTF-8 names (`HTLC_CAP_TEXT_ENCODING`).
     TextEncoding,
@@ -59,8 +60,11 @@ pub const SERVERS: &[Server] = &[
 ];
 
 /// The servers that have every one of `caps`, narrowed by
-/// `GTKHX_TEST_SERVERS` when it's set. Panics if nothing is left: a suite that
-/// runs against no server has tested nothing, and must not pass.
+/// `GTKHX_TEST_SERVERS` when it's set.
+///
+/// With no narrowing, an empty result panics: a suite that runs against no
+/// server has tested nothing, and must not pass. A narrowing that leaves a
+/// suite nothing is the caller's own choice, and runs it against nothing.
 pub fn servers_with(caps: &[Cap]) -> Vec<&'static Server> {
     let only = std::env::var("GTKHX_TEST_SERVERS").ok();
     let wanted = |name: &str| {
@@ -72,8 +76,8 @@ pub fn servers_with(caps: &[Cap]) -> Vec<&'static Server> {
         .filter(|s| wanted(s.name) && caps.iter().all(|c| s.has(*c)))
         .collect();
     assert!(
-        !out.is_empty(),
-        "no server in the rig has {caps:?} (GTKHX_TEST_SERVERS={only:?})"
+        !out.is_empty() || only.is_some(),
+        "no server in the rig has {caps:?}"
     );
     out
 }

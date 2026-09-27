@@ -8,9 +8,6 @@ use hx_e2e::client::{CAP_LARGE_FILES, CAP_TEXT_ENCODING};
 use hx_e2e::{servers_with, Cap, Client, Scratch};
 use hxrequest::files;
 
-/// `HTLS_DATA_HTXF_REF`.
-const TAG_HTXF_REF: u16 = 0x006b;
-
 fn admins() -> Vec<Client> {
     servers_with(&[Cap::FileAdmin])
         .into_iter()
@@ -284,10 +281,13 @@ fn folder_transfers_are_granted_a_reference() {
         ok(c, &r, "folder download");
         let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
         assert_ne!(get.ref_, 0);
+        c.cancel_transfer(get.ref_);
 
         let r = c.request(&files::put_folder(dir.as_bytes(), b"up", 15, 2, utf8).unwrap());
         ok(c, &r, "folder upload");
-        assert_eq!(r.chunk(TAG_HTXF_REF).map(<[u8]>::len), Some(4));
+        let put = hxproto::parse::parse_folder_put_reply(&r.raw, r.raw.len());
+        assert_ne!(put.ref_, 0);
+        c.cancel_transfer(put.ref_);
     }
 }
 
