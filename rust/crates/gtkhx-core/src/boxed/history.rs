@@ -21,9 +21,10 @@ use std::os::raw::c_void;
 use std::ptr;
 
 /// `#[repr(C)]` mirror of `HxHistoryEntry` (`src/chat_history.h`). `nick` /
-/// `message` are NUL-terminated glib-owned copies; the `*_len` fields carry the
-/// on-wire byte lengths (which may differ from `strlen` if the payload holds an
-/// interior NUL — see the copy-by-length note in [`hx_history_entry_parse`]).
+/// `message` are NUL-terminated glib-owned UTF-8 copies, decoded the way the
+/// live chat path decodes (see [`hx_history_entry_parse`]); the `*_len` fields
+/// carry their byte lengths (which may differ from `strlen` if the payload holds
+/// an interior NUL — see the copy-by-length note on `dup_by_len`).
 #[repr(C)]
 pub struct HxHistoryEntry {
     pub message_id: u64,
@@ -72,6 +73,13 @@ unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
 /// it with the glib allocation the entry's owner expects. Caller frees via
 /// [`hx_history_entry_free`].
 ///
+/// The text gets the same treatment `parse_chat` and the chat output path give a
+/// live line: the message has its `\r` line breaks turned into `\n` and stray
+/// control bytes folded, and both strings are decoded to UTF-8 (Mac Roman when
+/// they aren't UTF-8 already). A raw `\r` reaches Pango as a paragraph break the
+/// chat layout doesn't count, so a multi-line entry would draw over the rows
+/// below it.
+///
 /// # Safety
 /// `data` is valid for `len` bytes, or NULL (returns NULL).
 #[no_mangle]
@@ -91,10 +99,15 @@ pub unsafe extern "C" fn hx_history_entry_parse(
     (*entry).timestamp = e.timestamp;
     (*entry).flags = e.flags;
     (*entry).icon_id = e.icon_id;
-    (*entry).nick_len = e.nick.len();
-    (*entry).nick = dup_by_len(e.nick);
-    (*entry).message_len = e.message.len();
-    (*entry).message = dup_by_len(e.message);
+    let nick = hxproto::text::to_utf8(e.nick);
+    let mut message = e.message.to_vec();
+    hxproto::sanitize::cr2lf(&mut message);
+    hxproto::sanitize::strip_ansi(&mut message);
+    let message = hxproto::text::to_utf8(&message);
+    (*entry).nick_len = nick.len();
+    (*entry).nick = dup_by_len(nick.as_bytes());
+    (*entry).message_len = message.len();
+    (*entry).message = dup_by_len(message.as_bytes());
     entry
 }
 
@@ -176,6 +189,34 @@ mod tests {
             assert_eq!(cbytes((*e).message, 5), msg);
             assert_eq!((*e).nick_len, 0);
             assert_eq!(*(*e).nick, 0); // empty nick is just a NUL
+            hx_history_entry_free(e);
+        }
+    }
+
+    #[test]
+    fn normalizes_line_breaks_and_decodes_mac_roman() {
+        // 0x8C is Mac Roman å; a lone high byte isn't valid UTF-8.
+        let body = entry_body(1, 0, 0, 0, b"n\x8C", b"Sverige \x8Ct\rSDP:\ra=x");
+        unsafe {
+            let e = hx_history_entry_parse(body.as_ptr(), body.len());
+            assert!(!e.is_null());
+            assert_eq!(cbytes((*e).nick, (*e).nick_len), "nå".as_bytes());
+            assert_eq!(
+                cbytes((*e).message, (*e).message_len),
+                "Sverige åt\nSDP:\na=x".as_bytes()
+            );
+            hx_history_entry_free(e);
+        }
+    }
+
+    #[test]
+    fn keeps_utf8_verbatim() {
+        let body = entry_body(1, 0, 0, 0, "å".as_bytes(), "över".as_bytes());
+        unsafe {
+            let e = hx_history_entry_parse(body.as_ptr(), body.len());
+            assert!(!e.is_null());
+            assert_eq!(cbytes((*e).nick, (*e).nick_len), "å".as_bytes());
+            assert_eq!(cbytes((*e).message, (*e).message_len), "över".as_bytes());
             hx_history_entry_free(e);
         }
     }

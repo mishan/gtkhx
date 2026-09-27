@@ -449,6 +449,21 @@ pub unsafe extern "C" fn rcv_task_chat_history(
                         );
                         continue;
                     }
+                    // The raw wire text, escaped, so a server's encoding and
+                    // line-break choices are visible under GTKHX_DEBUG.
+                    if let Some(raw) = hxproto::parse::parse_history_entry(chunk.data) {
+                        debug_trace(
+                            c"chat-history",
+                            format!(
+                                "entry msgid={} ts={} flags=0x{:04x} nick=\"{}\" msg=\"{}\"",
+                                raw.message_id,
+                                raw.timestamp,
+                                raw.flags,
+                                raw.nick.escape_ascii(),
+                                raw.message.escape_ascii()
+                            ),
+                        );
+                    }
                     if (*e).message_id > max_msgid {
                         max_msgid = (*e).message_id;
                     }
