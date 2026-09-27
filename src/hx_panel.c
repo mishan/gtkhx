@@ -945,6 +945,43 @@ hx_panel_set_close_handler (HxPanel *self, HxPanelCloseFunc func,
     self->close_data = user_data;
 }
 
+static gboolean
+collapse_if_empty (gpointer data)
+{
+    GWeakRef *ref = data;
+    GtkWidget *frame = g_weak_ref_get (ref);
+
+    if (frame != NULL) {
+        if (panel_frame_get_n_pages (PANEL_FRAME (frame)) == 0) {
+            hx_split_close_frame (frame);
+        }
+        g_object_unref (frame);
+    }
+    g_weak_ref_clear (ref);
+    g_free (ref);
+    return G_SOURCE_REMOVE;
+}
+
+/* A pane in the main dock left with no panels — by a move, or by
+ * closing its last one — collapses, its neighbor taking the space.
+ * From an idle, not now: the gesture that emptied it started in this
+ * pane's header (the drag handle, the X), and GTK isn't done
+ * delivering it there. The idle checks again, in case something
+ * landed in the pane meanwhile. */
+static void
+collapse_when_emptied (GtkWidget *frame)
+{
+    GWeakRef *ref;
+
+    if (frame == NULL || panel_frame_get_n_pages (PANEL_FRAME (frame)) > 0
+        || gtk_widget_get_ancestor (frame, PANEL_TYPE_DOCK) != toolbar_dock) {
+        return;
+    }
+    ref = g_new0 (GWeakRef, 1);
+    g_weak_ref_init (ref, frame);
+    g_idle_add (collapse_if_empty, ref);
+}
+
 /* PanelFrame::page-closed handler. Fires after the page has been
  * detached from the tab view (so the widget no longer has a frame
  * ancestor at this point — the page-closed contract from
@@ -958,9 +995,9 @@ on_frame_page_closed (PanelFrame *frame, PanelWidget *page, gpointer user_data)
     HxPanelCloseFunc cb;
     gpointer cb_data;
 
-    (void)frame;
     (void)user_data;
 
+    collapse_when_emptied (GTK_WIDGET (frame));
     if (!HX_IS_PANEL (page)) {
         return;
     }
@@ -1182,42 +1219,6 @@ hx_panel_install_drag_out_on_frame (GtkWidget *frame)
  * pop the panel out of its source frame and add it to the target
  * frame, raising. Same handler works for in-dock moves and
  * cross-dock (from an undocked window) moves. */
-
-static gboolean
-collapse_if_empty (gpointer data)
-{
-    GWeakRef *ref = data;
-    GtkWidget *frame = g_weak_ref_get (ref);
-
-    if (frame != NULL) {
-        if (panel_frame_get_n_pages (PANEL_FRAME (frame)) == 0) {
-            hx_split_close_frame (frame);
-        }
-        g_object_unref (frame);
-    }
-    g_weak_ref_clear (ref);
-    g_free (ref);
-    return G_SOURCE_REMOVE;
-}
-
-/* A pane in the main dock that a move just emptied collapses, its
- * neighbor taking the space. From an idle, not now: on a drag, the
- * drag source is the handle in this pane's header, and GTK still has
- * the drag-end to deliver to it. The idle checks again, in case
- * something landed in the pane meanwhile. */
-static void
-collapse_when_emptied (GtkWidget *frame)
-{
-    GWeakRef *ref;
-
-    if (frame == NULL || panel_frame_get_n_pages (PANEL_FRAME (frame)) > 0
-        || gtk_widget_get_ancestor (frame, PANEL_TYPE_DOCK) != toolbar_dock) {
-        return;
-    }
-    ref = g_new0 (GWeakRef, 1);
-    g_weak_ref_init (ref, frame);
-    g_idle_add (collapse_if_empty, ref);
-}
 
 /* Forward decl — used by on_frame_drop to check whether the source
  * undocked dock is empty after the drop, so we only destroy windows

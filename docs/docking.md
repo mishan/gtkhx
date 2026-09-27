@@ -138,16 +138,16 @@ Users can:
 3. **Close a frame** (a leaf). Any panels in the closing leaf
    first migrate to the sibling, then the leaf collapses; the
    sibling takes the parent split's place in the tree.
-4. **A leaf a move empties collapses.** When a drag or an
-   Alt+Shift+arrow move takes a leaf's last panel, the leaf closes
-   and its neighbor takes the space (`collapse_when_emptied` in
-   `hx_panel.c`, from an idle — on a drag, the drag source is the
-   handle in that leaf's header, and GTK still owes it the
-   drag-end). A leaf emptied any other way — a fresh split, the
-   header's X on its last panel — stays until closed from the
-   frame menu, so a split made to drop into is still there to drop
-   into. The rule used to be that every empty leaf stayed; that
-   predates splitting by drag, which made empty leaves pile up.
+4. **An emptied leaf collapses.** When a drag, an Alt+Shift+arrow
+   move, or a close (the header's X, *Close all pages*, a chat
+   window closing itself) takes a leaf's last panel, the leaf
+   closes and its neighbor takes the space (`collapse_when_emptied`
+   in `hx_panel.c`, from an idle — the gesture started in that
+   leaf's header, and GTK isn't done delivering it there). A fresh
+   split is the one empty leaf that stays, so a split made to drop
+   into is still there to drop into; the frame menu closes it. The
+   rule used to be that every empty leaf stayed; that predates
+   splitting by drag, which made empty leaves pile up.
 5. **Undock + Redock.** The panel chevron menu has *Undock*;
    close-request on the undocked window walks the panel back to its
    home frame.
@@ -903,18 +903,18 @@ dying bin) even when it's no longer hooked into the dock. Walking up
 to a `PanelFrame` ancestor is the truthful test — present iff the
 panel is in the dock's tree. `hx_panel_ensure_attached` uses it.
 
-### "Close all pages" detaches but does not destroy frames
+### A closed leaf reseats everything that pointed at it
 
-The chevron menu's *Close all pages* action loops over the frame's
-pages and calls `panel_widget_close` on each. The leaf and its
-`PanelFrame` stay in the split tree — only an explicit *Close frame*
-destroys a leaf. So the `toolbar_*_frame` pointers remain valid across a
-close, and `panel_frame_add` on them during re-attach is safe.
-
-When a leaf *is* closed, `on_frame_close` migrates every page to the
-sibling leaf, reseats each moved panel's `home_frame` onto the sibling
-frame, and reseats whichever `toolbar_*_frame` globals pointed at the
-dying frame — all before calling `hx_split_close_leaf`.
+A leaf closes when *Close frame* is chosen, and when a move or a close
+takes its last panel (the dock's root leaf never closes). Either way
+`hx_split_close_frame` migrates any pages to the sibling leaf, reseats
+each moved panel's `home_frame` onto the sibling frame, and reseats
+whichever `toolbar_*_frame` globals pointed at the dying frame — all
+before calling `hx_split_close_leaf`. So those globals stay valid, and
+`panel_frame_add` on them when a closed panel is reopened is safe. A
+closed panel whose `home_frame` was the collapsed leaf finds its weak
+ref empty and falls back to `home_area`, which lands it in a role
+frame.
 
 ### `panel_frame_remove` is synchronous
 
@@ -923,7 +923,7 @@ Calling `panel_frame_remove` followed immediately by
 default `close-page` handler calls `adw_tab_view_close_page_finish`
 synchronously, so the page is gone by the time `remove`
 returns. The `n_pages > 0` guard in `hx_split_close_leaf` is
-defensive, not async-driven; the move loop in `on_frame_close`
+defensive, not async-driven; the move loop in `hx_split_close_frame`
 runs before the close attempt and the guard passes.
 
 ### `g_weak_ref_get` returns a strong ref — pass it through
@@ -980,7 +980,7 @@ becomes a non-root and its `close-frame` action should flip
 from greyed to enabled. `frame_do_split` walks every leaf in
 the tree (via `hx_split_foreach_leaf`) and runs
 `update_frame_action_enabled` so the state matches the
-topology; `on_frame_close` does the same after a collapse.
+topology; `hx_split_close_frame` does the same after a collapse.
 
 ### `PanelDock` accepts any `GtkWidget` as its center child
 

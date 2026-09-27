@@ -299,9 +299,10 @@ test_closes_the_visible_page (Fixture *fx, gconstpointer user_data)
                    == PANEL_WIDGET (a));
 }
 
-/* Closing every page has to leave the frame itself standing — the
- * "or frame" half of libpanel's action is deliberately not
- * reimplemented, so an emptied frame stays put and greys its X. */
+/* Closing every page leaves the dock's root leaf standing — there is
+ * nothing to collapse it into — so it stays put and greys its X. A
+ * leaf with a sibling collapses instead; see
+ * /dock_split/closing_last_panel_collapses. */
 static void
 test_closing_the_last_page_empties_the_frame (Fixture *fx,
                                               gconstpointer user_data)
@@ -418,6 +419,30 @@ test_emptied_pane_collapses (Fixture *fx, gconstpointer user_data)
     g_assert_true (toolbar_center_frame == right);
 }
 
+/* Closing a pane's last panel collapses the pane, the same as moving
+ * it out does. */
+static void
+test_closing_last_panel_collapses (Fixture *fx, gconstpointer user_data)
+{
+    HxSplit *root;
+    GtkWidget *right;
+    HxPanel *a;
+
+    (void)user_data;
+    root = HX_SPLIT (gtk_widget_get_parent (GTK_WIDGET (fx->frame)));
+    right = hx_split_split_frame (GTK_WIDGET (fx->frame), GTK_POS_RIGHT);
+    /* What toolbar_install_panel_hooks_on_frame (stubbed here) gives
+     * every new leaf: the page-closed hook. */
+    hx_panel_install_close_dispatcher (right);
+    a = add_panel (PANEL_FRAME (right), "a");
+    g_assert_false (hx_split_is_leaf (root));
+
+    panel_widget_close (PANEL_WIDGET (a));
+    pump ();
+    g_assert_true (hx_split_is_leaf (root));
+    g_assert_true (hx_split_get_frame (root) == fx->frame);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -463,6 +488,8 @@ main (int argc, char **argv)
          test_state_survives_repeated_add_remove);
     ADD ("/dock_split/toward_each_side", test_split_toward_each_side);
     ADD ("/dock_split/emptied_pane_collapses", test_emptied_pane_collapses);
+    ADD ("/dock_split/closing_last_panel_collapses",
+         test_closing_last_panel_collapses);
 
 #undef ADD
 
