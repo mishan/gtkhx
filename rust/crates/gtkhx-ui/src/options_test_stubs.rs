@@ -297,7 +297,7 @@ pub unsafe extern "C" fn gtkhx_dock_show_page(
     glib::ffi::GFALSE
 }
 
-// ---- voice (voice_ptt_keyspec.c) -----------------------------------------
+// ---- voice (voice_ptt_keyspec.c, and the session's voice accessors) --------
 //
 // Only referenced in a voice build, and gated to match so the stub set
 // doesn't drift out of step with the feature it shadows.
@@ -327,6 +327,21 @@ mod voice {
         _state: u32,
     ) -> *mut c_char {
         std::ptr::null_mut()
+    }
+
+    // The Video panel's view of its session, for a panel tied to none: no
+    // runtime, so it never reaches the connection.
+    #[no_mangle]
+    pub unsafe extern "C" fn hx_session_voice_runtime(_sess: *mut c_void) -> *mut c_void {
+        std::ptr::null_mut()
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn hx_session_htlc(_sess: *mut c_void) -> *mut c_void {
+        std::ptr::null_mut()
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn hx_htlc_uid(_htlc: *mut c_void) -> u16 {
+        0
     }
 }
 

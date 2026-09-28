@@ -253,7 +253,7 @@ impl PanelInner {
 
     fn on_notice(self: &Rc<Self>, rt: &VoiceRuntime, notice: &VideoNotice) {
         match notice {
-            VideoNotice::Frames => self.pull_frames(rt),
+            VideoNotice::Frames => self.pull_frames(|key| rt.take_video_frame(key)),
             VideoNotice::StreamEnded(key) => {
                 if let Some(t) = self.tiles.borrow().get(key) {
                     t.picture.set_paintable(None::<&gdk::Paintable>);
@@ -265,9 +265,10 @@ impl PanelInner {
         }
     }
 
-    fn pull_frames(&self, rt: &VoiceRuntime) {
+    /// Show the newest frame of every tile that has one waiting.
+    fn pull_frames(&self, take: impl Fn(StreamKey) -> Option<VideoFrame>) {
         for (key, tile) in self.tiles.borrow().iter() {
-            if let Some(frame) = rt.take_video_frame(*key) {
+            if let Some(frame) = take(*key) {
                 tile.show(&frame);
             }
         }
@@ -317,6 +318,23 @@ impl PanelInner {
             }
         }
 
+        let has_tiles = self.set_tiles(&want);
+        if !has_tiles {
+            self.status.set_description(Some(&if !video {
+                tr("This server doesn't support video.")
+            } else if !in_room {
+                tr("Join voice to see who has a camera or screen on.")
+            } else {
+                tr("Nobody in this voice chat has a camera or screen on.")
+            }));
+        }
+        self.schedule_subscribe();
+    }
+
+    /// Make the tiles exactly `want` — (stream, paused, label) — and show
+    /// them, or the status page when there are none. Returns whether there
+    /// are any.
+    fn set_tiles(&self, want: &[(StreamKey, bool, String)]) -> bool {
         {
             let mut tiles = self.tiles.borrow_mut();
             tiles.retain(|key, tile| {
@@ -332,7 +350,7 @@ impl PanelInner {
                 }
                 keep
             });
-            for (key, paused, label) in &want {
+            for (key, paused, label) in want {
                 let tile = tiles.entry(*key).or_insert_with(|| {
                     let t = Tile::new(key.kind);
                     // The grid sorts on this; see tile_uid.
@@ -358,19 +376,9 @@ impl PanelInner {
                 .keys()
                 .any(|k| k.kind == VideoKind::Screen),
         );
-        if has_tiles {
-            self.stack.set_visible_child_name("tiles");
-        } else {
-            self.status.set_description(Some(&if !video {
-                tr("This server doesn't support video.")
-            } else if !in_room {
-                tr("Join voice to see who has a camera or screen on.")
-            } else {
-                tr("Nobody in this voice chat has a camera or screen on.")
-            }));
-            self.stack.set_visible_child_name("empty");
-        }
-        self.schedule_subscribe();
+        self.stack
+            .set_visible_child_name(if has_tiles { "tiles" } else { "empty" });
+        has_tiles
     }
 
     /// `uid` in room `cid` changed nick: rename their tiles in place. A
@@ -442,7 +450,7 @@ fn sort_tiles(a: &gtk::FlowBoxChild, b: &gtk::FlowBoxChild) -> gtk::Ordering {
     tile_uid(a).cmp(&tile_uid(b)).into()
 }
 
-/// The user a grid child's tile shows, from the name `refresh` gave it.
+/// The user a grid child's tile shows, from the name `set_tiles` gave it.
 fn tile_uid(child: &gtk::FlowBoxChild) -> u16 {
     child
         .child()
@@ -451,6 +459,14 @@ fn tile_uid(child: &gtk::FlowBoxChild) -> u16 {
 }
 
 fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
+    let (root, inner) = build_panel(dock::key_for_session(sess));
+    inner.refresh();
+    (root, inner)
+}
+
+/// The panel's widgets and state for connection `conn`, before it has
+/// read the room.
+fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.set_hexpand(true);
     root.set_vexpand(true);
@@ -498,7 +514,7 @@ fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     root.append(&stack);
 
     let inner = Rc::new(PanelInner {
-        conn: dock::key_for_session(sess),
+        conn,
         root: root.downgrade(),
         stack,
         status,
@@ -545,8 +561,45 @@ fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     // The panel owns itself through the widget: dropping the last strong
     // ref with the widget is what unregisters its observer.
     unsafe { root.set_data("video-panel-state", inner.clone()) };
-    inner.refresh();
     (root, inner)
+}
+
+/// A Video panel tied to no connection, for the UI benchmark: it shows
+/// the tiles it is given and the frames it is fed, through the code a
+/// room's streams go through.
+pub(crate) struct Standalone {
+    pub(crate) root: gtk::Box,
+    inner: Rc<PanelInner>,
+}
+
+impl Standalone {
+    pub(crate) fn new() -> Standalone {
+        // Serial 0 is no connection: no runtime is ever found for it, and
+        // no session's refresh reaches it.
+        let (root, inner) = build_panel(0);
+        Standalone { root, inner }
+    }
+
+    /// Show a tile, unpaused, for each (stream, label).
+    pub(crate) fn set_tiles(&self, tiles: &[(StreamKey, String)]) {
+        let want: Vec<_> = tiles.iter().map(|(k, l)| (*k, false, l.clone())).collect();
+        self.inner.set_tiles(&want);
+    }
+
+    /// What a frames notice does: show each tile's newest frame.
+    pub(crate) fn pull_frames(&self, take: impl Fn(StreamKey) -> Option<VideoFrame>) {
+        self.inner.pull_frames(take);
+    }
+
+    /// Whether there is a tile for `key`.
+    pub(crate) fn has_tile(&self, key: StreamKey) -> bool {
+        self.inner.tiles.borrow().contains_key(&key)
+    }
+
+    /// The picture `key`'s tile shows, if any.
+    pub(crate) fn paintable(&self, key: StreamKey) -> Option<gdk::Paintable> {
+        self.inner.tiles.borrow().get(&key)?.picture.paintable()
+    }
 }
 
 /// Open (or raise) the Video panel for `sess`.
@@ -678,6 +731,52 @@ pub(crate) mod tests {
 
         relabel(&tiles, 0, "Me");
         assert_eq!(name(0, VideoKind::Camera), "You");
+    }
+
+    /// A panel shows the tiles it is given, each takes the frame waiting
+    /// for it and no other, and an empty set brings the status page back.
+    /// Driven by `crate::gtk_tests`.
+    pub(crate) fn check_panel_shows_tiles_and_frames() {
+        let panel = Standalone::new();
+        let key = |uid| StreamKey {
+            user_id: uid,
+            kind: VideoKind::Camera,
+        };
+        let screen = StreamKey {
+            user_id: 2,
+            kind: VideoKind::Screen,
+        };
+        panel.set_tiles(&[
+            (key(1), "one".into()),
+            (key(2), "two".into()),
+            (screen, "two".into()),
+        ]);
+        assert_eq!(
+            panel.inner.stack.visible_child_name().as_deref(),
+            Some("tiles")
+        );
+        assert!(panel.inner.stage.is_visible());
+
+        let frame = VideoFrame {
+            width: 8,
+            height: 6,
+            stride: 32,
+            bytes: glib::Bytes::from_owned(vec![255u8; 8 * 6 * 4]),
+        };
+        panel.pull_frames(|k| (k == key(2)).then(|| frame.clone()));
+        let shown = panel.paintable(key(2)).expect("tile 2 took its frame");
+        assert_eq!((shown.intrinsic_width(), shown.intrinsic_height()), (8, 6));
+        assert!(panel.paintable(key(1)).is_none());
+        assert!(panel.paintable(screen).is_none());
+
+        panel.set_tiles(&[(key(1), "one".into())]);
+        assert!(panel.paintable(key(2)).is_none(), "tile 2 went");
+        assert!(!panel.inner.stage.is_visible());
+        panel.set_tiles(&[]);
+        assert_eq!(
+            panel.inner.stack.visible_child_name().as_deref(),
+            Some("empty")
+        );
     }
 
     /// Camera tiles sit in user order whatever order they arrive in, this

@@ -9,6 +9,7 @@
 //!
 //! ```sh
 //! GTKHX_BENCH=startup,chat=20000,files=10000,users=1000,tracker=2000,media=50,history=1000 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
+//! GTKHX_BENCH=video=9 GTKHX_BENCH_QUIT=1 ./build-voice/src/gtkhx   # needs voice
 //! ```
 //!
 //! `GTKHX_BENCH` lists scenarios to run in order, each with an optional
@@ -34,6 +35,8 @@ mod media;
 mod startup;
 mod tracker;
 mod users;
+#[cfg(feature = "voice")]
+mod video;
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -73,12 +76,15 @@ fn parse_requests(spec: &str) -> Result<Vec<Request>, String> {
             }
             None => (item, None),
         };
+        if name == "video" && !cfg!(feature = "voice") {
+            return Err("'video' needs a build with voice".to_string());
+        }
         if !matches!(
             name,
-            "chat" | "files" | "users" | "tracker" | "media" | "startup" | "history"
+            "chat" | "files" | "users" | "tracker" | "media" | "startup" | "history" | "video"
         ) {
             return Err(format!(
-                "unknown scenario '{name}' (known: chat, files, users, tracker, media, startup, history)"
+                "unknown scenario '{name}' (known: chat, files, users, tracker, media, startup, history, video)"
             ));
         }
         out.push(Request {
@@ -153,6 +159,8 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
                     Some(v) => history::run(v, r.size.unwrap_or(1_000)).await,
                     None => glib::g_warning!("gtkhx", "GTKHX_BENCH: no chat view to measure"),
                 },
+                #[cfg(feature = "voice")]
+                "video" => video::run(r.size.unwrap_or(9)).await,
                 _ => unreachable!("parse_requests only admits known names"),
             }
         }
@@ -461,6 +469,8 @@ mod tests {
         assert!(parse_requests("chat,nope").is_err());
         assert!(parse_requests("files=0").is_err());
         assert!(parse_requests("files=lots").is_err());
+        // Video tiles are voice's; a build without it names the reason.
+        assert_eq!(parse_requests("video=4").is_ok(), cfg!(feature = "voice"));
     }
 
     #[test]
