@@ -144,6 +144,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/bench/media.rs',
   'crates/gtkhx-ui/src/bench/tracker.rs',
   'crates/gtkhx-ui/src/bench/users.rs',
+  'crates/gtkhx-ui/src/bench/video.rs',
   'crates/gtkhx-ui/src/pchat.rs',
   'crates/gtkhx-ui/src/inline_media_dialog.rs',
   'crates/gtkhx-ui/src/user_info.rs',

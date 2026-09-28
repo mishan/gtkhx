@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, video tiles |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -77,6 +77,7 @@ Still to add:
 ```sh
 tools/uibench.sh                              # chat=20000,files=10000,users=1000,tracker=2000,media=50, 3 repeats
 tools/uibench.sh files=10000 5                # one scenario, 5 repeats
+GTKHX_BIN=build-voice/src/gtkhx tools/uibench.sh video=9   # needs a voice build
 GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 ```
 
@@ -112,12 +113,27 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 
 | `tracker[=N]` | The real tracker window, opened without fetching: a listing of N servers delivered the way a fetch's drain delivers them — `tracker-batch-begin`, then per server an event from `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the Tasks progress tick, all in one main-loop turn; then two searches typed into the window's own entry a key at a time, each cleared after: one that narrows the list from its first keys, one that keeps every server until its last few. Keys are inserted as typing inserts them, and the entry's typing delay is held off, so each keystroke measures the filter. Refuses to run in a tracker window the user already has open. | N servers listed; each search shows exactly the servers its regex matches, counted independently; clearing shows all N. |
 | `media[=N]` | The main window's real chat view, cleared, then filled with N animated inline images followed by a few hundred lines of text, so pinned to the bottom it shows none of them. Three states, a few seconds each: text only, the images out of view, the images on screen — frames the clock ran, paints and main-thread CPU, per second. The acceptance test for offscreen animation. The text cursor's blink is off for the run; it repaints every frame while it fades. | On screen, the animation repaints; out of view, it doesn't. |
+| `video[=N]` | The Video panel's tiles (`gtkhx-ui` `video_panel`), in a panel of its own in its own window, tied to no connection: N cameras at 640×480 and 30 fps, then the same with a 1920×1080 screen share at 15 fps on the stage. A feeder thread stands in for the receive bins' appsinks — it stores RGBA frames in the runtime's own `FrameStore` and posts a notice when none is on its way — and the notice does what the panel's does. Per phase: tiles up to first paint; frame intervals; the main thread's CPU; notices a second and their cost; frames each tile showed a second against the rate sent. Decoding is left out: the frames are RGBA from the start. Needs a voice build. | Every tile shows at least nine in ten of the frames sent to it and no more, and ends on a picture of its stream's size. |
 
 The Files panel has no filter, so none is measured. The Users scenario
 refuses to run on a connected session: it writes fake users into the public
 chat and clears it afterwards.
 
-Still to add: chat-history replay on join; video tiles; startup.
+Still to add: chat-history replay on join; startup.
+
+Frames only come while the compositor is presenting the window. On a locked
+desktop GNOME holds them back, and every scenario that samples frames then
+reports that a frame never came. A headless mutter measures on the GPU all
+the same:
+
+```sh
+dbus-run-session -- sh -c '
+  mutter --headless --no-x11 --wayland-display=hxbench-0 \
+    --virtual-monitor 1920x1080@60 & sleep 3
+  WAYLAND_DISPLAY=hxbench-0 GDK_BACKEND=wayland \
+    GTKHX_BIN=build-voice/src/gtkhx tools/uibench.sh video=9
+  kill $!'
+```
 
 ### Tier 4 — end to end
 
@@ -373,6 +389,25 @@ frames a second, median of three. "Before" is this branch with finding
 | on screen: frames / paints a second | 60 / 10 | 60 / 10 |
 | on screen: main-thread CPU | 13.3 ms/s | 13.1 ms/s |
 
+The video scenario, **2026-09-28**, under a headless mutter (above) so the
+GPU renders, and under `tools/isolated-run.sh` for comparison. Median of
+three to five runs for nine cameras; the other rows are one or two runs
+each, a guide to the shape rather than a baseline. Every run showed every
+tile at the rate it was sent — 30 fps cameras, 15 fps screen — with frames
+at the refresh interval.
+
+| Video panel, main-thread CPU | headless mutter | Xvfb |
+|---|---|---|
+| 1 camera | 2.3 % | 3.1 % |
+| 1 camera + screen share | 5.3 % | 9.9 % |
+| 9 cameras | 7.5 % | 21 % |
+| 9 cameras + screen share | 9.5 % | 21 % |
+| 25 cameras + screen share | 11 % | 21 % |
+
+Frame notices ran at about 270 a second for nine cameras, one per frame —
+the streams run out of step, so little lands together to coalesce — at
+6 µs each.
+
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
@@ -563,3 +598,16 @@ Findings 6 onwards are from the UI scenarios.
     frames, 10 paints and 9.7 ms of CPU a second before. The
     user list's animated avatars have the same shape on their own timer in
     `gif_avatar.c`, and are still ungated.
+23. **The Video panel keeps up, and tiles out of view cost the UI almost
+    nothing — but they are still received.** Every tile showed every frame
+    sent, with frames at the refresh interval, from one camera to 25 with
+    a screen share. Main-thread cost grows with the tiles on screen, not
+    the tiles in the panel: GTK uploads only the textures it draws, so 25
+    cameras cost little more than 9. The frame notices themselves are
+    negligible. Declaring the frames premultiplied, which is exact for
+    opaque video, measured no different on GTK 4.24. What the scenario
+    cannot see is the receive side: the panel subscribes to every
+    publication while it is on screen, so a camera scrolled out of view is
+    still sent, depacketized, decoded and converted to RGBA. Subscribing
+    only to tiles in view would save that, at the price of a tile going
+    blank until its next keyframe when scrolled back. A lead.

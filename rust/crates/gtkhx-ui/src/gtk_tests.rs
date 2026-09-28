@@ -40,4 +40,6 @@ fn display_backed() {
     crate::video_panel::tests::check_relabel_follows_a_nick_change();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_tiles_sort_by_user();
+    #[cfg(feature = "voice")]
+    crate::video_panel::tests::check_panel_shows_tiles_and_frames();
 }
