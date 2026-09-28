@@ -185,7 +185,8 @@ where
         // and we'd read a truncated frame, leaving the remainder on the
         // stream and desyncing the next header read — especially bad now
         // that we loop and replay pre-TASK frames. Same ceiling check as
-        // connection.rs::read_one_frame (wire_len includes the 2-byte hc).
+        // the actor's frame reader in connection.rs (wire_len includes the
+        // 2-byte hc).
         let decoded = decode_header_full(&hdr_buf, u32::MAX).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
