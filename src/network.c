@@ -895,14 +895,14 @@ htxf_connect (struct htxf_conn *htxf)
  * left here is the thin C glue:
  *
  *   - hx_tracker_list_async builds the URL list from gtkhx_prefs and
- *     opens a fetch (hxnet_tracker_fetch_open), then starts a main-loop
- *     timeout that drains fetch events.
+ *     opens a fetch (hxnet_tracker_fetch_open) and drains its events on
+ *     the main thread as they arrive (hxnet_tracker_fetch_watch).
  *   - the drain re-emits the EXISTING tracker-batch-begin /
  *     tracker-server-create signals and ticks track_prog_update,
  *     exactly as the old hand-rolled state machine did, so tracker.c
  *     (the view) is unchanged.
- *   - tracker_kill_threads closes the handle (which cancels the walk)
- *     and removes the drain source.
+ *   - tracker_kill_threads closes the handle, which cancels the walk and
+ *     any drain still queued.
  *
  * The verdict cache, the v3 watchdog, and the ~1100 lines of
  * GSocketClient async callbacks the C used to carry are gone — that
@@ -926,7 +926,6 @@ htxf_connect (struct htxf_conn *htxf)
 /* ---- bridge state (main thread only) ---------------------------- */
 
 static HxnetTrackerFetch *current_tracker_fetch;
-static guint tracker_drain_source_id;
 /* Wire version of the batch in progress, set on BEGIN; picks the v1 vs
  * v3 HxTrackerServer constructor for the records that follow. */
 static guint8 tracker_batch_version;
@@ -1067,10 +1066,10 @@ tracker_fetch_cleanup (void)
     g_clear_pointer (&tracker_batch_url, g_free);
 }
 
-/* Main-loop drain: pull every ready event this tick, then either keep
- * the timer (more may come) or tear down on a closed channel. */
-static gboolean
-tracker_fetch_drain (gpointer user_data)
+/* The fetch's wakeup: pull every event waiting, and tear down once the
+ * walk has finished. */
+static void
+tracker_fetch_drain (void *user_data)
 {
     /* The connection that asked, by serial rather than by pointer: the walk
      * takes seconds and the user can close its tab mid-way, which frees the
@@ -1081,39 +1080,22 @@ tracker_fetch_drain (gpointer user_data)
     HxnetTrackerEvent ev;
 
     if (sess == NULL) {
-        /* Drop the id before closing the handle: this source is removing
-         * itself by returning below, so tracker_kill_threads would be asking
-         * GLib to remove an id it is already retiring. */
-        tracker_drain_source_id = 0;
         tracker_fetch_cleanup ();
-        return G_SOURCE_REMOVE;
+        return;
     }
 
-    for (;;) {
-        /* tracker_fetch_dispatch_event emits view signals, and a
-         * subscriber can re-enter (e.g. trigger a Refresh / disconnect)
-         * and run tracker_kill_threads, which removes this source and
-         * closes the handle mid-drain. Re-check at the top of every
-         * iteration so we never poll a NULL handle (the `continue` after
-         * a dispatched event comes back through here). */
-        if (!current_tracker_fetch) {
-            tracker_drain_source_id = 0;
-            return G_SOURCE_REMOVE;
-        }
+    /* tracker_fetch_dispatch_event emits view signals, and a subscriber can
+     * re-enter (a Refresh, a disconnect) and run tracker_kill_threads, which
+     * closes the handle mid-drain — so check it before every poll. */
+    while (current_tracker_fetch) {
         int rc = hxnet_tracker_fetch_poll (current_tracker_fetch, &ev);
         if (rc == HXNET_TRK_POLL_EVENT) {
             tracker_fetch_dispatch_event (sess, &ev);
-            continue;
+        } else if (rc == HXNET_TRK_POLL_EMPTY) {
+            return; /* the next event wakes us again */
+        } else {
+            tracker_fetch_cleanup (); /* finished and drained */
         }
-        if (rc == HXNET_TRK_POLL_EMPTY) {
-            return G_SOURCE_CONTINUE;
-        }
-        /* HXNET_TRK_POLL_CLOSED — the walk finished and its events are
-         * drained. The G_SOURCE_REMOVE below drops this source, so just
-         * clear our id and free the handle. */
-        tracker_drain_source_id = 0;
-        tracker_fetch_cleanup ();
-        return G_SOURCE_REMOVE;
     }
 }
 
@@ -1160,20 +1142,14 @@ hx_tracker_list_async (session *sess)
 
     tracker_batch_version = 0;
     tracker_batch_server_i = 1;
-    /* Drain on the main loop. 50 ms keeps the list lively without
-     * busy-spinning; each tick re-emits whatever the walk produced. */
-    tracker_drain_source_id
-        = g_timeout_add (50, tracker_fetch_drain,
-                         GUINT_TO_POINTER ((guint)hx_conn_serial (sess->htlc)));
+    hxnet_tracker_fetch_watch (
+        current_tracker_fetch, tracker_fetch_drain,
+        GUINT_TO_POINTER ((guint)hx_conn_serial (sess->htlc)));
 }
 
 void
 tracker_kill_threads (void)
 {
-    if (tracker_drain_source_id) {
-        g_source_remove (tracker_drain_source_id);
-        tracker_drain_source_id = 0;
-    }
     tracker_fetch_cleanup ();
     /* The progress rows go with the fetch. They are connection-less, so the
      * per-connection sweep never touches them, and reaching the last server

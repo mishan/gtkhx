@@ -145,6 +145,16 @@ hxnet_tracker_fetch_open (const char *const *urls, gsize n, guint16 features,
 extern int hxnet_tracker_fetch_poll (HxnetTrackerFetch *handle,
                                      HxnetTrackerEvent *out);
 
+/* Call cb(user_data) on the main thread whenever the fetch has events
+ * waiting, and once more when it has finished — drain with
+ * hxnet_tracker_fetch_poll until EMPTY or CLOSED. Wakeups coalesce;
+ * events that arrived before the call wake it at once; nothing is called
+ * after hxnet_tracker_fetch_close. */
+typedef void (*hxnet_tracker_wake_cb_t) (void *user_data);
+extern void hxnet_tracker_fetch_watch (HxnetTrackerFetch *handle,
+                                       hxnet_tracker_wake_cb_t cb,
+                                       void *user_data);
+
 /* Cancel (if running) and free a handle. NULL-safe. */
 extern void hxnet_tracker_fetch_close (HxnetTrackerFetch *handle);
 

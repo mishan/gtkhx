@@ -303,12 +303,39 @@ pub async fn run_fetch<C: TrackerConnector>(
     verdicts: &mut VerdictCache,
     out: &mpsc::Sender<TrackerEvent>,
 ) {
+    run_fetch_notifying(
+        connector,
+        urls,
+        features,
+        probe_timeout,
+        verdicts,
+        out,
+        &|| {},
+    )
+    .await
+}
+
+/// [`run_fetch`], calling `sent` each time a tracker's events — its
+/// listing or its error, then the final `Done` — are all on `out`, so the
+/// consumer can take each tracker's in one go.
+pub async fn run_fetch_notifying<C: TrackerConnector>(
+    connector: &mut C,
+    urls: &[String],
+    features: u16,
+    probe_timeout: Duration,
+    verdicts: &mut VerdictCache,
+    out: &mpsc::Sender<TrackerEvent>,
+    sent: &(dyn Fn() + Sync),
+) {
     for url in urls {
-        if !fetch_one(connector, url, features, probe_timeout, verdicts, out).await {
+        let more = fetch_one(connector, url, features, probe_timeout, verdicts, out).await;
+        sent();
+        if !more {
             return; // receiver dropped — caller cancelled
         }
     }
     let _ = out.send(TrackerEvent::Done).await;
+    sent();
 }
 
 // ---- Production connector (TCP + rustls) ---------------------------------
@@ -656,6 +683,41 @@ mod tests {
         ));
         assert!(matches!(events[1], TrackerEvent::Record { total: 1, .. }));
         assert!(matches!(events.last(), Some(TrackerEvent::Done)));
+    }
+
+    #[tokio::test]
+    async fn the_walk_says_when_each_trackers_events_are_all_sent() {
+        // t1 lists three servers, t2 fails to connect. Each `sent` must
+        // come once that tracker's events are all in the channel — the
+        // listing whole, the error — and once more after Done.
+        let mut script = v1_header(3);
+        for port in [5500, 5501, 5502] {
+            script.extend_from_slice(&v1_record([1, 2, 3, 4], port, 0, b"s", b""));
+        }
+        let mut conn = ScriptedConnector::new(vec![Plan::Reply(script), Plan::FailTransport]);
+        let (tx, rx) = mpsc::channel(64);
+        let queued = std::sync::Mutex::new(Vec::new());
+        let mut verdicts = VerdictCache::new();
+        run_fetch_notifying(
+            &mut conn,
+            &urls(&["t1", "t2"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+            &|| {
+                let n = tx.max_capacity() - tx.capacity();
+                queued.lock().unwrap().push(n);
+            },
+        )
+        .await;
+        drop(tx);
+
+        // BatchBegin + 3 records; + the error; + Done.
+        assert_eq!(*queued.lock().unwrap(), vec![4, 5, 6]);
+        let events = collect(rx).await;
+        assert!(matches!(events[4], TrackerEvent::BatchError { .. }));
+        assert!(matches!(events[5], TrackerEvent::Done));
     }
 
     #[tokio::test]
