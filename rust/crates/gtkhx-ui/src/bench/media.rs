@@ -18,8 +18,8 @@
 //!
 //! Checks: on screen, the animation must actually repaint (else the
 //! scenario measures nothing); offscreen, it must not. The view is cleared
-//! before and after, and the text cursor's blink is off for the run — it
-//! repaints every frame while it fades.
+//! before and after, and nothing has the keyboard focus during the run: a
+//! focused text cursor blinks, repainting every frame while it fades.
 
 use gtk::gdk;
 use gtk::glib;
@@ -33,6 +33,12 @@ use super::{next_frame, warm_up, Report};
 
 /// How long each state is sampled.
 const SAMPLE_US: i64 = 3_000_000;
+/// How long the frame clock must go without a frame before the text-only
+/// floor is sampled, and the longest to wait for that. Longer than a
+/// scrollbar's wait before it fades, which an earlier scenario can leave
+/// pending.
+const QUIET_US: i64 = 3_000_000;
+const QUIET_MAX_US: i64 = 8_000_000;
 /// Lines of text after the images, enough to push them out of view.
 const TEXT_AFTER: u32 = 400;
 /// Tokens for the scenario's images, clear of the ones chat.c hands out.
@@ -133,6 +139,26 @@ async fn sample(view: &gtk::Widget) -> Option<Rates> {
     })
 }
 
+/// Wait until `view`'s frame clock has gone [`QUIET_US`] without a frame,
+/// or [`QUIET_MAX_US`] has passed. What an earlier scenario left moving,
+/// or about to move — a scrollbar due to fade out, say — then settles
+/// before the floor is taken.
+async fn until_quiet(view: &gtk::Widget) {
+    let Some(clock) = view.frame_clock() else {
+        return;
+    };
+    let last = std::rc::Rc::new(std::cell::Cell::new(glib::monotonic_time()));
+    let id = clock.connect_update({
+        let last = last.clone();
+        move |_| last.set(glib::monotonic_time())
+    });
+    let give_up = glib::monotonic_time() + QUIET_MAX_US;
+    while glib::monotonic_time() - last.get() < QUIET_US && glib::monotonic_time() < give_up {
+        glib::timeout_future(std::time::Duration::from_millis(100)).await;
+    }
+    clock.disconnect(id);
+}
+
 fn report(r: &mut Report, label: &str, rates: &Rates) {
     r.line(label, "", "");
     r.line(
@@ -170,16 +196,18 @@ pub(super) async fn run(view: &gtk::Widget, n: u32) {
     }
     // The chat input's cursor fades in and out on the frame clock, a
     // repaint every frame while it blinks, which would swamp what this
-    // measures. Off for the run.
-    let settings = gtk::Settings::default();
-    if let Some(s) = &settings {
-        s.set_gtk_cursor_blink(false);
+    // measures. It blinks for a while after anything moves the focus or
+    // types, which an earlier scenario may just have done, and turning the
+    // blink setting off doesn't stop a blink already running. So nothing
+    // has the focus for the run; it goes back after.
+    let root = view.root();
+    let focus = root.as_ref().and_then(|r| r.focus());
+    if let Some(r) = &root {
+        r.set_focus(None::<&gtk::Widget>);
     }
     measure(chat, view, n).await;
-    // Back to what the desktop says, and following it again — setting the
-    // old value would pin it for the rest of the session.
-    if let Some(s) = &settings {
-        s.reset_property("gtk-cursor-blink");
+    if let Some(w) = &focus {
+        w.grab_focus();
     }
     chat.clear();
 }
@@ -196,6 +224,7 @@ async fn measure(chat: &HxChatView, view: &gtk::Widget, n: u32) {
     }
     chat.scroll_to_bottom();
     next_frame(view).await;
+    until_quiet(view).await;
     let Some(floor) = sample(view).await else {
         r.line("CHECK FAILED", "", "the view has no frame clock");
         r.print();
@@ -273,7 +302,29 @@ async fn measure(chat: &HxChatView, view: &gtk::Widget, n: u32) {
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "linux")]
+    /// This thread's CPU time from the C library, in µs: the known value
+    /// the schedstat reading is held to. `struct timespec` is two 64-bit
+    /// fields on the 64-bit targets this is gated to.
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    fn clock_thread_cpu_us() -> i64 {
+        #[repr(C)]
+        struct Timespec {
+            sec: i64,
+            nsec: i64,
+        }
+        extern "C" {
+            fn clock_gettime(clock: i32, ts: *mut Timespec) -> i32;
+        }
+        const CLOCK_THREAD_CPUTIME_ID: i32 = 3;
+        let mut ts = Timespec { sec: 0, nsec: 0 };
+        assert_eq!(
+            unsafe { clock_gettime(CLOCK_THREAD_CPUTIME_ID, &mut ts) },
+            0
+        );
+        ts.sec * 1_000_000 + ts.nsec / 1000
+    }
+
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
     #[test]
     fn schedstat_counts_this_threads_cpu_time() {
         // The kernel adds a thread's running time up when it is switched
@@ -281,14 +332,17 @@ mod tests {
         let settle = || std::thread::sleep(std::time::Duration::from_millis(2));
         settle();
         let a = thread_cpu_us();
-        let start = std::time::Instant::now();
+        // 20 ms of this thread's own CPU time, however long that takes on
+        // a loaded machine: spinning for 20 ms of wall time could be
+        // preempted for most of it.
+        let until = clock_thread_cpu_us() + 20_000;
         let mut x = 0u64;
-        while start.elapsed() < std::time::Duration::from_millis(20) {
+        while clock_thread_cpu_us() < until {
             x = x.wrapping_add(std::hint::black_box(x) ^ 7);
         }
         std::hint::black_box(x);
         settle();
         let b = thread_cpu_us();
-        assert!(b - a >= 10_000, "20 ms of work read as {} µs", b - a);
+        assert!(b - a >= 18_000, "20 ms of CPU read as {} µs", b - a);
     }
 }
