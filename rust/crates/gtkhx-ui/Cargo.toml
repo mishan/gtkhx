@@ -21,8 +21,8 @@ hxhandlers = { path = "../hxhandlers" }
 # The Files browser reads a finished transfer's size off its handle.
 hxnet = { path = "../hxnet" }
 hxmodel = { path = "../hxmodel" }
-hxrequest = { path = "../hxrequest" }
-hxtext = { path = "../hxtext" }
+hxrequest = { path = "../hxrequest", features = ["c-abi"] }
+hxtext = { path = "../hxtext", features = ["c-abi"] }
 # default-features = false: don't re-add hx-image-decode's default `glycin-v3`
 # through this edge — the backend is selected on the crate itself, and forcing
 # the default here would clash with a `-Dglycin_compat=1` (glycin-v2) build.

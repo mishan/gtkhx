@@ -26,7 +26,7 @@ use std::slice;
 ///
 /// # Safety
 /// `key` must be valid for `keylen` bytes if `keylen > 0`.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_blowfish_ofb64_new(
     key: *const u8,
     keylen: u32,
@@ -47,7 +47,7 @@ pub unsafe extern "C" fn gtkhx_blowfish_ofb64_new(
 /// # Safety
 /// `state` must be a pointer returned by one of the
 /// `gtkhx_blowfish_ofb64_*` constructors, or NULL.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_blowfish_ofb64_free(state: *mut BlowfishOfb64State) {
     if !state.is_null() {
         drop(Box::from_raw(state));
@@ -64,7 +64,7 @@ pub unsafe extern "C" fn gtkhx_blowfish_ofb64_free(state: *mut BlowfishOfb64Stat
 /// # Safety
 /// `state` must be a non-NULL state pointer; `key` must be valid
 /// for `keylen` bytes if `keylen > 0`.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_blowfish_ofb64_set_key(
     state: *mut BlowfishOfb64State,
     key: *const u8,
@@ -83,7 +83,7 @@ pub unsafe extern "C" fn gtkhx_blowfish_ofb64_set_key(
 /// # Safety
 /// `state` must be a non-NULL state pointer; `src` and `dst` must
 /// each be valid for `len` bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_blowfish_ofb64_crypt(
     state: *mut BlowfishOfb64State,
     src: *const u8,
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn gtkhx_blowfish_ofb64_crypt(
 /// # Safety
 /// `state` must be a non-NULL state pointer; `out_ivec` must be
 /// valid for 8 bytes; `out_num` must be a valid u32 pointer.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_blowfish_ofb64_save_state(
     state: *const BlowfishOfb64State,
     out_ivec: *mut u8,
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn gtkhx_blowfish_ofb64_save_state(
 /// # Safety
 /// `state` must be a non-NULL state pointer; `ivec` must be valid
 /// for 8 bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_blowfish_ofb64_restore_state(
     state: *mut BlowfishOfb64State,
     ivec: *const u8,

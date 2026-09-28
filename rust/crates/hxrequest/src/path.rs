@@ -5,6 +5,7 @@
 //! per component two zero bytes, a length byte, and the name's bytes. Every
 //! file-bearing opcode carries one for the directory part of its target.
 
+#[cfg(feature = "c-abi")]
 use std::ffi::{c_char, c_int, CStr};
 
 /// The remote path separator.
@@ -66,6 +67,7 @@ pub fn below_root(dir: &[u8]) -> bool {
     !dir.is_empty() && dir != [SEP]
 }
 
+#[cfg(feature = "c-abi")]
 /// `guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file)`
 /// — [`encode_dir`] for C and for the Rust callers still on the C shape.
 /// Returns a `g_malloc`'d buffer the caller `g_free`s, its length in

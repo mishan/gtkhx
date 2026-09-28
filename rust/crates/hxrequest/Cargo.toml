@@ -15,8 +15,15 @@ crate-type = ["rlib"]
 # No C imports, on purpose: the end-to-end suite (hx-e2e) links this crate
 # into a plain cargo test binary, so it can't lean on anything only the
 # application link provides. glib is only for the g_malloc'd buffer the
-# path_to_hldir C ABI owes its callers.
+# path_to_hldir C ABI owes its callers, and comes with `c-abi`.
 [dependencies]
-glib = { workspace = true }
+glib = { workspace = true, optional = true }
 hxproto = { workspace = true }
-hxtext = { path = "../hxtext" }
+hxtext = { path = "../hxtext", default-features = false }
+
+[features]
+default = ["c-abi"]
+# `path_to_hldir` for C (and the Rust callers still on its C shape), plus
+# hxtext's C entry points. Off, the crate is plain Rust and builds for
+# targets with no glib, such as wasm32.
+c-abi = ["dep:glib", "hxtext/c-abi"]

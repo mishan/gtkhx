@@ -21,6 +21,7 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+#[cfg(feature = "lz4")]
 use std::io::{Cursor, Write};
 use std::slice;
 
@@ -111,7 +112,7 @@ impl std::io::Read for Lz4InputBuf {
 /// the underlying codec failed to initialise. The C dispatcher in
 /// compress.c maps a null return to "no compression" rather than
 /// driving an uninitialised state forward.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub extern "C" fn gtkhx_compress_encoder_new(algo: u16) -> *mut CompressEncoder {
     let encoder = match algo {
         // zlib_header=true selects RFC 1950 (zlib wrapper), which is
@@ -136,7 +137,7 @@ pub extern "C" fn gtkhx_compress_encoder_new(algo: u16) -> *mut CompressEncoder 
 /// # Safety
 /// `enc` must be either null or a pointer returned by the matching encoder
 /// constructor in this module and not yet freed.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_compress_encoder_free(enc: *mut CompressEncoder) {
     if !enc.is_null() {
         drop(Box::from_raw(enc));
@@ -148,7 +149,7 @@ pub unsafe extern "C" fn gtkhx_compress_encoder_free(enc: *mut CompressEncoder) 
 ///
 /// # Safety
 /// `input` must be valid for `input_len` bytes. `out` must be valid for `out_cap` bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_compress_encode(
     enc: *mut CompressEncoder,
     input: *const u8,
@@ -243,7 +244,7 @@ pub unsafe extern "C" fn gtkhx_compress_encode(
 /// Create a new decoder for the given algorithm. Returns null on
 /// unsupported algorithm, COMPRESS_NONE, or codec init failure;
 /// same fail-closed contract as `gtkhx_compress_encoder_new`.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub extern "C" fn gtkhx_compress_decoder_new(algo: u16) -> *mut CompressDecoder {
     let decoder = match algo {
         // zlib_header=true matches the encoder side; see the comment
@@ -272,7 +273,7 @@ pub extern "C" fn gtkhx_compress_decoder_new(algo: u16) -> *mut CompressDecoder 
 /// # Safety
 /// `dec` must be either null or a pointer returned by the matching decoder
 /// constructor in this module and not yet freed.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_compress_decoder_free(dec: *mut CompressDecoder) {
     if !dec.is_null() {
         drop(Box::from_raw(dec));
@@ -284,7 +285,7 @@ pub unsafe extern "C" fn gtkhx_compress_decoder_free(dec: *mut CompressDecoder) 
 ///
 /// # Safety
 /// All pointers must be valid for their respective lengths.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_compress_decode(
     dec: *mut CompressDecoder,
     input: *const u8,
@@ -422,7 +423,7 @@ pub unsafe extern "C" fn gtkhx_compress_decode(
 ///
 /// # Safety
 /// `name` must be a valid null-terminated C string.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_compress_id_from_name(name: *const std::ffi::c_char) -> u16 {
     if name.is_null() {
         return COMPRESS_NONE;

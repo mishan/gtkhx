@@ -16,10 +16,13 @@ crate-type = ["staticlib"]
 [dependencies]
 gtkhx-core = { path = "../gtkhx-core" }
 gtkhx-files-ffi = { path = "../gtkhx-files-ffi" }
-hxcrypto = { path = "../hxcrypto" }
+# The C side calls the `c-abi` exports of hxcrypto, hxrequest and hxtext.
+# They are default features; naming them keeps the façade whole even in a
+# build that passes --no-default-features.
+hxcrypto = { path = "../hxcrypto", features = ["c-abi"] }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
-hxrequest = { path = "../hxrequest" }
+hxrequest = { path = "../hxrequest", features = ["c-abi"] }
 # --- GObject / UI layer ---
 gtkhx-ui = { path = "../gtkhx-ui" }
 
@@ -51,7 +54,7 @@ hxconfig = { path = "../hxconfig" }
 hx-image-decode = { path = "../hx-image-decode", default-features = false }
 hxmacres = { path = "../hxmacres" }
 hxsound = { path = "../hxsound" }
-hxtext = { path = "../hxtext" }
+hxtext = { path = "../hxtext", features = ["c-abi"] }
 # The GTK4 chat widget. Exports the rotulus_view_* symbols declared in the
 # crate's include/rotulus.h, which rust/meson.build finds through cargo;
 # C links against them directly.

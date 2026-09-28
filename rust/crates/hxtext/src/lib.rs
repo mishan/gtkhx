@@ -18,13 +18,16 @@
 //! tests module.
 
 use std::cell::Cell;
+#[cfg(feature = "c-abi")]
 use std::os::raw::c_char;
 
+#[cfg(feature = "c-abi")]
 /// Hard cap on `gtkhx_text_to_utf8`'s `len` (mirrors
 /// `GTKHX_TEXT_TO_UTF8_MAX_LEN` in text_util.h): `(G_MAXSSIZE - 1) / 3`,
 /// the tightest of the validate / overflow / isize-slice constraints.
 const TO_UTF8_MAX_LEN: usize = (isize::MAX as usize - 1) / 3;
 
+#[cfg(feature = "c-abi")]
 /// Length cap for `gtkhx_text_for_wire`: `(G_MAXSSIZE - 64) / 2`, bounding the
 /// legacy shortcode-rewrite buffer + the encode length under isize::MAX. Gates
 /// BOTH modes (checked before any `from_raw_parts`, whose own precondition is
@@ -46,6 +49,7 @@ fn emoji_shortcodes_on() -> bool {
     EMOJI_SHORTCODES.with(|c| c.get())
 }
 
+#[cfg(feature = "c-abi")]
 /// Copy `bytes` into a fresh `g_malloc`'d, NUL-terminated buffer (the C ABI's
 /// ownership contract — caller `g_free`s). Interior NULs are preserved; the
 /// length is reported separately via `out_len`.
@@ -59,12 +63,14 @@ unsafe fn g_dup(bytes: &[u8]) -> *mut c_char {
     buf as *mut c_char
 }
 
+#[cfg(feature = "c-abi")]
 /// `void gtkhx_text_set_emoji_shortcodes_enabled(gboolean enabled)`.
 #[no_mangle]
 pub extern "C" fn gtkhx_text_set_emoji_shortcodes_enabled(enabled: glib::ffi::gboolean) {
     EMOJI_SHORTCODES.with(|c| c.set(enabled != glib::ffi::GFALSE));
 }
 
+#[cfg(feature = "c-abi")]
 /// `gboolean gtkhx_text_emoji_shortcodes_enabled(void)`.
 #[no_mangle]
 pub extern "C" fn gtkhx_text_emoji_shortcodes_enabled() -> glib::ffi::gboolean {
@@ -75,6 +81,7 @@ pub extern "C" fn gtkhx_text_emoji_shortcodes_enabled() -> glib::ffi::gboolean {
     }
 }
 
+#[cfg(feature = "c-abi")]
 /// `char *gtkhx_text_to_utf8(const char *bytes, gsize len, gsize *out_len)` —
 /// decode wire bytes to UTF-8. Already-valid UTF-8 passes through verbatim
 /// (embedded NULs preserved); otherwise every byte decodes through the Mac
@@ -124,6 +131,7 @@ pub unsafe extern "C" fn gtkhx_text_to_utf8(
     buf
 }
 
+#[cfg(feature = "c-abi")]
 /// `char *gtkhx_text_for_wire(const char *utf8, gsize utf8_len, gboolean
 /// utf8_mode, gboolean is_body, gsize *out_len)` — encode UTF-8 for the wire.
 ///
@@ -188,5 +196,6 @@ pub fn for_wire(text: &[u8], utf8_mode: bool, is_body: bool) -> Vec<u8> {
     wire
 }
 
-#[cfg(test)]
+// Every test drives the C entry points.
+#[cfg(all(test, feature = "c-abi"))]
 mod tests;

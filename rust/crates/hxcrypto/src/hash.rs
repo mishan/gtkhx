@@ -38,7 +38,7 @@ use sha2::Sha256;
 /// - `key` must point to at least `keylen` bytes of readable memory.
 /// - `text` must point to at least `textlen` bytes of readable memory.
 /// - `macalg` must be a valid null-terminated C string.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_hmac_xxx(
     md: *mut u8,
     key: *const u8,

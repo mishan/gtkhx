@@ -19,7 +19,13 @@ crate-type = ["staticlib", "rlib"]
 bench = false
 
 [features]
-default = ["lz4", "zstd"]
+default = ["c-abi", "lz4", "zstd"]
+# Export the `gtkhx_hmac_*` / `gtkhx_blowfish_*` / `gtkhx_aead_*` /
+# `gtkhx_compress_*` functions under their unmangled names for the C side.
+# Without it they are still there as ordinary Rust functions (hxnet calls
+# several), but nothing pins them into the binary, so a wasm build only
+# keeps what it uses.
+c-abi = []
 lz4 = ["dep:lz4_flex"]
 zstd = ["dep:zstd"]
 
@@ -34,7 +40,9 @@ digest = "0.10"
 blowfish = "0.10"
 cipher = "0.5"
 # aead
-chacha20poly1305 = "0.10"
+# Without the default `getrandom` feature: nothing here draws a random key
+# or nonce, and getrandom 0.2 refuses to build for wasm32-unknown-unknown.
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
 hkdf = "0.12"
 # compress
 flate2 = "1"
