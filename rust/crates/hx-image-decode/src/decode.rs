@@ -650,15 +650,17 @@ async fn run_decode(
 /// fresh one.
 ///
 /// glycin's image-rs loader keeps a thread alive for every animated image
-/// it has decoded, and releasing the image doesn't end it. The loader runs
-/// under an address-space limit glycin sets from free memory, and each
-/// thread takes a slice of it, so one long-lived loader eventually cannot
-/// start a thread and fails every decode it holds — after a hundred or so
-/// GIF icons on a machine with little free memory. A retired loader is
-/// shut down once it has been idle for a while (glycin's pool does that),
-/// and its threads go with it.
+/// it has decoded, and releasing the image doesn't end it. Under glycin's
+/// bwrap sandbox the loader runs under an address-space limit set from free
+/// memory, and each thread takes a slice of it, so one long-lived loader
+/// eventually cannot start a thread and fails every decode it holds — after
+/// a hundred or so GIF icons on a machine with little free memory. Without
+/// that sandbox the threads just pile up. A retired loader is shut down
+/// once it has been idle for a while (glycin's pool does that), and its
+/// threads go with it.
 ///
-/// glycin 2 needs none of this: it starts a loader per image.
+/// glycin 2 needs none of this: it starts a loader per image and ends it
+/// with the image.
 #[cfg(all(target_os = "linux", feature = "glycin-v3"))]
 const IMAGES_PER_LOADER: u32 = 32;
 
