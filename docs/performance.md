@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup, chat history |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -75,7 +75,7 @@ Still to add:
 ### Tier 3 — UI scenarios
 
 ```sh
-tools/uibench.sh                              # startup,chat=20000,…,media=50, 3 repeats
+tools/uibench.sh                              # startup,chat=20000,…,media=50,history=1000, 3 repeats
 tools/uibench.sh files=10000 5                # one scenario, 5 repeats
 GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 ```
@@ -113,12 +113,13 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 | `tracker[=N]` | The real tracker window, opened without fetching: a listing of N servers delivered the way a fetch's drain delivers them — `tracker-batch-begin`, then per server an event from `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the Tasks progress tick, all in one main-loop turn; then two searches typed into the window's own entry a key at a time, each cleared after: one that narrows the list from its first keys, one that keeps every server until its last few. Keys are inserted as typing inserts them, and the entry's typing delay is held off, so each keystroke measures the filter. Refuses to run in a tracker window the user already has open. | N servers listed; each search shows exactly the servers its regex matches, counted independently; clearing shows all N. |
 | `media[=N]` | The main window's real chat view, cleared, then filled with N animated inline images followed by a few hundred lines of text, so pinned to the bottom it shows none of them. Three states, a few seconds each: text only, the images out of view, the images on screen — frames the clock ran, paints and main-thread CPU, per second. The acceptance test for offscreen animation. Nothing has the keyboard focus for the run: a focused text cursor blinks, repainting every frame while it fades. | On screen, the animation repaints; out of view, it doesn't. |
 | `startup` | Launch to a usable main window, timed from `GTKHX_BENCH_T0` (the launch time `tools/uibench.sh` stamps) or else from `/proc` to 10 ms: the chat panel built (the bench hook, before the main loop starts), the chat view's first paint, and settled — the main loop's first low-priority idle after it — plus the main thread's CPU to first paint. Always runs first. The first run on a fresh configuration is a first run: Settings opens, and caches start empty. | The moments come in order; a launch time was found. |
+| `history[=N]` | The main window's real chat view, against the unconnected session: a chat-history replay of N entries through `rcv_task_chat_history` — the parse, the `chat-history-batch` signal and `chat.c`'s renderer — then a "Load older" page of N rows inserted one at a time above an anchor through the view's insert-above call, as the renderer inserts an older page (that path's own trigger is C state with no accessor), then a scrollback's worth of live messages, timed. Refuses a connected session, and runs only when the app exits afterwards (`GTKHX_BENCH_QUIT`), since it leaves `chat.c`'s own "Load older" cursor on the fake replay; clears the view and restores the connection's history cursor. | The replay adds N rows and its three framing rows; the page adds N rows; live traffic past the cap keeps every history row. |
 
 The Files panel has no filter, so none is measured. The Users scenario
 refuses to run on a connected session: it writes fake users into the public
 chat and clears it afterwards.
 
-Still to add: chat-history replay on join; video tiles.
+Still to add: video tiles.
 
 ### Tier 4 — end to end
 
@@ -385,11 +386,26 @@ launches (a first run excluded). "Before" is this branch without finding
 | settled (main loop idle) | 975 ms | 392 ms |
 | main-thread CPU to first paint | 312 ms | 310 ms |
 
+The history scenario, **2026-09-27**, same setup, median of three, with the
+default 500-row scrollback. "Before" is this branch without finding 19's
+fix. The replay now keeps every entry, since history doesn't count against
+the cap (finding 20), so a 5,000-row page lands in a buffer of about 10,000
+rows rather than 5,500; what remains is linear per insert.
+
+| Chat history | Before | After |
+|---|---|---|
+| replay, 50 entries: call / + paint | 0.3 / 23 ms | unchanged |
+| replay, 1,000 entries: call / + paint | 3.9 / 23 ms | unchanged |
+| live message at the cap, `history=1000` (~2,000 history rows) | — | 2.8 µs |
+| "Load older", 50 rows (UI frozen) | 0.15 ms | 0.14 ms |
+| "Load older", 1,000 rows (UI frozen) | 13.8 ms | 4.1 ms |
+| "Load older", 5,000 rows (UI frozen) | 170 ms | 54 ms |
+
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13, 15, 16, 18 and 21 are fixed and 14 is worked around; the rest are
-leads. Findings 6 onwards are from the UI scenarios.
+12, 13, 15, 16, 18, 19, 20 and 21 are fixed and 14 is worked around; the
+rest are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -575,6 +591,33 @@ leads. Findings 6 onwards are from the UI scenarios.
     frames, 10 paints and 9.7 ms of CPU a second before. The
     user list's animated avatars have the same shape on their own timer in
     `gif_avatar.c`, and are still ungated.
+19. **A "Load older" page cost time growing with the scrollback, for every
+    row.** The renderer inserts an older page a row at a time above one
+    anchor. Each insert dirtied the buffer's id-to-row map, and the next
+    lookup — the insert anchor, then the reading position the scrollbar is
+    set from after every change — rebuilt the whole map: a page of N rows
+    cost N rebuilds. 1,000 rows took 14 ms and 5,000 took 170 ms. **Fixed:**
+    the buffer remembers the rows it was last asked for, moves them with
+    every insert, removal and trim, and checks each against its row before
+    trusting it: 4.1 ms for 1,000 rows. The default page is 50 rows, which
+    never showed it. What remains grows with the buffer per insert — the
+    height index's insert — which only a very large page would notice.
+20. **A "Load older" page on a full scrollback was gone at the next
+    message.** Inserting above never trimmed, so a page took the buffer past
+    its row cap, and the next appended message trimmed everything over the
+    cap from the top — the whole page the user had just asked for, and the
+    oldest live row with it. With the default 500-row cap, that was any
+    "Load older" once the chat had seen 500 rows. **Fixed:** history rows —
+    the replay, older pages, and the rows that frame them — don't count
+    against the cap, and a message over it drops the oldest *live* row,
+    wherever it sits. History — the replay on join, a reconnect's catch-up,
+    older pages — is bounded by the server and the replay preference rather
+    than the cap, and cleared on reconnect. The view learns which rows are
+    history from `chat.c`, which draws every history row entirely in the
+    history palette slot and nothing else in it. With history at the top,
+    the live row dropped is below it rather than at the front; removing it
+    by position keeps each message at the cap to about 0.5 µs under ~100
+    history rows and 9.4 µs under ~10,000.
 21. **Every chat input built GTK's emoji chooser at startup.** The emoji
     button made its `GtkEmojiChooser` up front, and GTK fills a new chooser
     with every emoji, measuring each glyph, in idle batches — most of the

@@ -856,6 +856,118 @@ fn buffer_marks_are_stable_across_inserts() {
 }
 
 #[test]
+fn a_long_page_before_one_anchor_lands_in_order() {
+    // A Load-older page: row after row inserted before the same anchor,
+    // with other changes landing in between. Every insert must go directly
+    // above the anchor, and every mark must still name its row.
+    let m = FixedMeasure::new(8);
+    let mut b = ChatBuffer::new(params(400));
+    let anchor = b.append(Message::system(ParsedText::plain("anchor")), &m);
+    for i in 0..40 {
+        b.append(Message::system(ParsedText::plain(format!("live {i}"))), &m);
+    }
+    // Read from partway down, so the reading position is a real row the
+    // inserts keep pushing further down.
+    b.scroll_to(160, 100, 0);
+    let mut page = Vec::new();
+    for i in 0..300 {
+        page.push(b.insert_before(
+            Some(anchor),
+            Message::system(ParsedText::plain(format!("old {i}"))),
+            &m,
+        ));
+        // The reading position from the remembered row must match a full
+        // rebuild's. Rebuilt only now and then, so the hints also have to
+        // survive long stretches of shifts on their own.
+        let fast = b.scroll_offset(100);
+        if i % 37 == 0 {
+            b.reindex();
+            assert_eq!(fast, b.scroll_offset(100), "after insert {i}");
+        }
+        match i % 50 {
+            // An append after the anchor leaves it where it is.
+            10 => {
+                b.append(Message::system(ParsedText::plain("new")), &m);
+            }
+            // A removal above the anchor moves it up by one.
+            20 => assert!(b.remove(page[i - 5], &m)),
+            _ => {}
+        }
+    }
+    b.reindex();
+    let order: Vec<String> = (0..b.len())
+        .map(|r| b.message(b.id_at(r).unwrap()).unwrap().to_plain_text())
+        .collect();
+    let kept: Vec<String> = (0..300)
+        .filter(|i| i % 50 != 15)
+        .map(|i| format!("old {i}"))
+        .collect();
+    assert_eq!(&order[..kept.len()], &kept[..]);
+    assert_eq!(order[kept.len()], "anchor");
+    for r in 0..b.len() {
+        assert_eq!(b.row_of(b.id_at(r).unwrap()), Some(r));
+    }
+}
+
+#[test]
+fn a_full_scrollback_trims_live_rows_and_keeps_loaded_history() {
+    // A "Load older" page on a full scrollback used to be trimmed away,
+    // whole, by the next live message. History doesn't count against the
+    // cap; the oldest live row goes instead.
+    let m = FixedMeasure::new(8);
+    let mut b = ChatBuffer::new(params(400));
+    b.set_max_rows(5, &m);
+    let history = |t: &str| Message {
+        kind: crate::MessageKind::History {
+            server_message_id: 0,
+        },
+        ..Message::system(ParsedText::plain(t))
+    };
+    let live = |t: &str| Message {
+        kind: crate::MessageKind::Live,
+        ..Message::system(ParsedText::plain(t))
+    };
+    for i in 0..5 {
+        b.append(live(&format!("live {i}")), &m);
+    }
+    let top = b.id_at(0);
+    for i in 0..3 {
+        b.insert_before(top, history(&format!("older {i}")), &m);
+    }
+    b.append(live("new"), &m);
+    b.append(live("newer"), &m);
+    b.reindex();
+    let rows: Vec<String> = (0..b.len())
+        .map(|r| b.message(b.id_at(r).unwrap()).unwrap().to_plain_text())
+        .collect();
+    assert_eq!(
+        rows,
+        ["older 0", "older 1", "older 2", "live 2", "live 3", "live 4", "new", "newer"]
+    );
+    for r in 0..b.len() {
+        assert_eq!(b.row_of(b.id_at(r).unwrap()), Some(r));
+    }
+
+    // Live rows ahead of the history block still go first, the cheap way.
+    let mut b = ChatBuffer::new(params(400));
+    b.set_max_rows(3, &m);
+    b.append(live("notice"), &m);
+    b.append(history("history"), &m);
+    for i in 0..3 {
+        b.append(live(&format!("live {i}")), &m);
+    }
+    let rows: Vec<String> = (0..b.len())
+        .map(|r| b.message(b.id_at(r).unwrap()).unwrap().to_plain_text())
+        .collect();
+    assert_eq!(rows, ["history", "live 0", "live 1", "live 2"]);
+
+    // A history row replaced by a live one counts again.
+    let id = b.id_at(0).unwrap();
+    assert!(b.replace(id, live("was history"), &m));
+    assert_eq!(b.len(), 3);
+}
+
+#[test]
 fn buffer_stale_mark_is_inert_not_fatal() {
     // The whole reason marks replaced raw textentry pointers.
     let m = FixedMeasure::new(8);

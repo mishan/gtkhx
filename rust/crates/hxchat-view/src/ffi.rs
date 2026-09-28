@@ -594,7 +594,7 @@ pub unsafe extern "C" fn hx_chat_view_append_runs(
             body,
             n_body,
             stamp,
-            MessageKind::Live,
+            runs_kind(gutter, n_gutter, body, n_body),
         ))),
         None => std::ptr::null_mut(),
     }
@@ -654,11 +654,46 @@ pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
                 body,
                 n_body,
                 stamp,
-                MessageKind::Live,
+                runs_kind(gutter, n_gutter, body, n_body),
             );
             mark_to_ptr(v.insert_before(ptr_to_mark(anchor), msg))
         }
         None => std::ptr::null_mut(),
+    }
+}
+
+/// What a row of runs is: history when every run is drawn in the history
+/// palette slot, live otherwise.
+///
+/// `chat.c` draws every row of a chat-history block — entries, dividers,
+/// the "Load older" row — entirely in `HX_CHAT_PAL_HISTORY_MUTED`, and
+/// nothing else uses that slot, so this is how the view learns which rows
+/// are history without a second set of entry points. It matters to the
+/// scrollback cap, which history rows don't count against.
+///
+/// # Safety
+/// As `hx_chat_view_append_runs`.
+pub(crate) unsafe fn runs_kind(
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+) -> MessageKind {
+    let runs = |p: *const HxChatRun, n: c_int| -> &[HxChatRun] {
+        if p.is_null() || n <= 0 {
+            &[]
+        } else {
+            std::slice::from_raw_parts(p, n as usize)
+        }
+    };
+    let (g, b) = (runs(gutter, n_gutter), runs(body, n_body));
+    let muted = |r: &HxChatRun| r.color as usize == crate::view::PAL_HISTORY_MUTED;
+    if !b.is_empty() && g.iter().chain(b).all(muted) {
+        MessageKind::History {
+            server_message_id: 0,
+        }
+    } else {
+        MessageKind::Live
     }
 }
 

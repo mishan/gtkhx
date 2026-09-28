@@ -931,6 +931,20 @@ impl HxChatView {
         ok
     }
 
+    /// The scrollback cap in rows; 0 is no limit.
+    pub fn max_rows(&self) -> usize {
+        self.imp_().buffer.borrow().max_rows()
+    }
+
+    /// Rows in the buffer.
+    pub fn len(&self) -> usize {
+        self.imp_().buffer.borrow().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn clear(&self) {
         self.imp_().buffer.borrow_mut().clear();
         // Textures are keyed by token, and tokens are per-conversation
@@ -1034,6 +1048,10 @@ impl HxChatView {
             return;
         }
         let height = content_height(alloc_h) as i32;
+        // One map rebuild per paint, if anything dirtied it: the draw loop
+        // looks rows up by id for every line while a selection is up, and
+        // a dirty map answers each of those with a scan.
+        imp.buffer.borrow_mut().reindex();
 
         // Background covers the whole allocation, padding included —
         // the inset is meant to be empty margin, not a differently

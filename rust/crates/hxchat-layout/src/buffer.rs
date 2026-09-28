@@ -65,13 +65,28 @@ pub struct ChatBuffer {
     pos: HashMap<MessageId, usize>,
     pos_base: usize,
     pos_dirty: bool,
+    /// The rows most recently looked up by id while `pos` was dirty, kept
+    /// in step through inserts, removals and trims.
+    ///
+    /// A Load-older page inserts row after row above one anchor, and each
+    /// insert dirties `pos`; finding the insert anchor, and then the
+    /// reading position for the scrollbar, rebuilt the whole map for every
+    /// row of the page, which made the page quadratic in the scrollback.
+    /// Those are the only two rows asked for, so they are remembered. Each
+    /// is checked against its row before use, so a change these don't
+    /// follow just falls back to the rebuild.
+    hints: [Option<(MessageId, usize)>; 2],
 
     params: LayoutParams,
     generation: LayoutGeneration,
     anchor: ScrollAnchor,
 
-    /// Scrollback cap. 0 disables trimming.
+    /// Scrollback cap on live rows. 0 disables trimming. History rows
+    /// (see [`MessageKind::is_history`]) don't count against it.
     max_rows: usize,
+    /// How many rows are history, so the live count is `rows.len()` minus
+    /// this without a scan.
+    history_rows: usize,
     /// Widest gutter any row has asked for, so columns align.
     indent_width: u32,
     /// How long a gap breaks a run of messages from one speaker, in
@@ -104,10 +119,12 @@ impl ChatBuffer {
             pos: HashMap::new(),
             pos_base: 0,
             pos_dirty: false,
+            hints: [None; 2],
             params,
             generation,
             anchor: ScrollAnchor::bottom(),
             max_rows: 0,
+            history_rows: 0,
             group_gap_secs: DEFAULT_GROUP_GAP_SECS,
             indent_width: 0,
             indent_pinned: false,
@@ -138,7 +155,12 @@ impl ChatBuffer {
         self.generation
     }
 
-    /// Scrollback cap, in rows. Matches `hx_chat_view_set_max_lines`.
+    /// The scrollback cap on live rows; 0 is no limit.
+    pub fn max_rows(&self) -> usize {
+        self.max_rows
+    }
+
+    /// Scrollback cap on live rows. Matches `hx_chat_view_set_max_lines`.
     pub fn set_max_rows(&mut self, n: usize, measure: &dyn TextMeasure) {
         self.max_rows = n;
         self.trim(measure);
@@ -201,6 +223,9 @@ impl ChatBuffer {
             msg.flags = msg.flags.union(MessageFlags::GROUPED);
         }
         let h = estimate_height(&msg, &self.layout_params(), measure);
+        if msg.kind.is_history() {
+            self.history_rows += 1;
+        }
         self.rows.push_back(Row {
             id,
             msg,
@@ -230,14 +255,14 @@ impl ChatBuffer {
         measure: &dyn TextMeasure,
     ) -> MessageId {
         let at = match anchor {
-            Some(a) => {
-                self.reindex();
-                self.row_of(a).unwrap_or(0)
-            }
+            Some(a) => self.locate(a).unwrap_or(0),
             None => 0,
         };
         let id = self.alloc_id();
         let h = estimate_height(&msg, &self.layout_params(), measure);
+        if msg.kind.is_history() {
+            self.history_rows += 1;
+        }
         self.rows.insert(
             at,
             Row {
@@ -248,6 +273,7 @@ impl ChatBuffer {
         );
         self.index.insert(at, h, false);
         self.pos_dirty = true;
+        self.shift_hints(at, 1);
         // An insert splits whatever run spanned this point: the new row
         // may continue the one above, and the row below may no longer
         // continue what is now two rows up. Nothing further down moves
@@ -260,13 +286,24 @@ impl ChatBuffer {
     /// which is not an error — it is how a caller learns the row was
     /// trimmed.
     pub fn remove(&mut self, id: MessageId, measure: &dyn TextMeasure) -> bool {
-        self.reindex();
-        let Some(row) = self.row_of(id) else {
+        let Some(row) = self.locate(id) else {
             return false;
         };
+        self.remove_row(row, measure);
+        true
+    }
+
+    /// Remove the row at `row`, which the caller has already found.
+    fn remove_row(&mut self, row: usize, measure: &dyn TextMeasure) {
+        let id = self.rows[row].id;
+        if self.rows[row].msg.kind.is_history() {
+            self.history_rows -= 1;
+        }
         self.rows.remove(row);
         self.index.remove(row);
         self.pos_dirty = true;
+        self.forget_hint(row);
+        self.shift_hints(row + 1, -1);
         // The row that moved up has a new predecessor. Removing a run's
         // head would otherwise leave the next row suppressing a nick that
         // nothing above it shows.
@@ -280,7 +317,6 @@ impl ChatBuffer {
                 self.anchor = ScrollAnchor::bottom();
             }
         }
-        true
     }
 
     /// Replace a message in place, e.g. to attach a decoded image size.
@@ -290,9 +326,19 @@ impl ChatBuffer {
             return false;
         };
         let h = estimate_height(&msg, &self.layout_params(), measure);
+        let was = self.rows[row].msg.kind.is_history();
+        let now = msg.kind.is_history();
         self.rows[row].msg = msg;
         self.rows[row].layout = None;
+        match (was, now) {
+            (false, true) => self.history_rows += 1,
+            (true, false) => self.history_rows -= 1,
+            _ => {}
+        }
         self.index.set_height(row, h, false);
+        if was && !now {
+            self.trim(measure);
+        }
         true
     }
 
@@ -360,32 +406,70 @@ impl ChatBuffer {
         self.pos.clear();
         self.pos_base = 0;
         self.pos_dirty = false;
+        self.hints = [None; 2];
+        self.history_rows = 0;
         self.anchor = ScrollAnchor::bottom();
         self.reset_indent();
     }
 
+    /// Bring the live rows back under the cap by dropping the oldest of
+    /// them.
+    ///
+    /// History rows don't count and are never dropped here: the replay on
+    /// join, a reconnect's catch-up and "Load older" pages. A page the user
+    /// asked for, inserted above a full scrollback, used to be trimmed
+    /// away, whole, by the next live message. History is bounded instead by
+    /// the server and the replay preference, and cleared on reconnect.
     fn trim(&mut self, measure: &dyn TextMeasure) {
-        if self.max_rows == 0 || self.rows.len() <= self.max_rows {
+        let live = self.rows.len() - self.history_rows;
+        if self.max_rows == 0 || live <= self.max_rows {
             return;
         }
-        let excess = self.rows.len() - self.max_rows;
-        for _ in 0..excess {
-            if let Some(row) = self.rows.pop_front() {
-                // A dirty map is rebuilt from `rows` on the next lookup,
-                // so it has nothing to keep in step.
-                if !self.pos_dirty {
-                    self.pos.remove(&row.id);
+        let mut excess = live - self.max_rows;
+
+        // Live rows at the very front go the cheap way.
+        let front = self
+            .rows
+            .iter()
+            .take(excess)
+            .take_while(|r| !r.msg.kind.is_history())
+            .count();
+        if front > 0 {
+            for _ in 0..front {
+                if let Some(row) = self.rows.pop_front() {
+                    // A dirty map is rebuilt from `rows` on the next
+                    // lookup, so it has nothing to keep in step.
+                    if !self.pos_dirty {
+                        self.pos.remove(&row.id);
+                    }
                 }
             }
+            self.index.drain_front(front);
+            if !self.pos_dirty {
+                self.pos_base += front;
+            }
+            for r in 0..front {
+                self.forget_hint(r);
+            }
+            self.shift_hints(front, -(front as isize));
+            // The trimmed rows may have included a run's head. Whatever
+            // is at the front now cannot be a continuation of anything;
+            // every other row keeps the predecessor it had.
+            self.regroup_rows(0..1, measure);
+            excess -= front;
         }
-        self.index.drain_front(excess);
-        if !self.pos_dirty {
-            self.pos_base += excess;
+
+        // The rest are below a history block at the top: the oldest live
+        // rows after it.
+        while excess > 0 {
+            let Some(row) = self.rows.iter().position(|r| !r.msg.kind.is_history()) else {
+                break;
+            };
+            // By position: the row is in hand, and looking it up by id
+            // would rebuild the whole map for every message at the cap.
+            self.remove_row(row, measure);
+            excess -= 1;
         }
-        // The trimmed rows may have included a run's head. Whatever is
-        // at the front now cannot be a continuation of anything; every
-        // other row keeps the predecessor it had.
-        self.regroup_rows(0..1, measure);
     }
 
     /// Grouping controls. 0 disables it; rows already in the buffer are
@@ -1337,12 +1421,48 @@ impl ChatBuffer {
 
     /// The scroll adjustment value the current anchor implies.
     pub fn scroll_offset(&mut self, viewport_height: u32) -> u64 {
+        // Only the anchored row is ever asked for.
+        let row = self.anchor.message.and_then(|id| self.locate(id));
+        AnchorResolver::to_pixels(&self.anchor, &mut self.index, viewport_height, |_| row)
+    }
+
+    /// The row `id` names, from a remembered row when `pos` is dirty and
+    /// the id was asked for recently, else by rebuilding `pos`.
+    fn locate(&mut self, id: MessageId) -> Option<usize> {
+        if !self.pos_dirty {
+            return self.row_of(id);
+        }
+        let known = self
+            .hints
+            .iter()
+            .flatten()
+            .find(|&&(h, r)| h == id && self.rows.get(r).is_some_and(|row| row.id == id))
+            .map(|&(_, r)| r);
+        if known.is_some() {
+            return known;
+        }
         self.reindex();
-        let pos = &self.pos;
-        let base = self.pos_base;
-        AnchorResolver::to_pixels(&self.anchor, &mut self.index, viewport_height, |id| {
-            pos.get(&id).map(|p| p - base)
-        })
+        let row = self.row_of(id)?;
+        self.hints = [Some((id, row)), self.hints[0].filter(|&(h, _)| h != id)];
+        Some(row)
+    }
+
+    /// Rows at `from` and below moved by `delta`: move the hints with them.
+    fn shift_hints(&mut self, from: usize, delta: isize) {
+        for (_, r) in self.hints.iter_mut().flatten() {
+            if *r >= from {
+                *r = r.saturating_add_signed(delta);
+            }
+        }
+    }
+
+    /// Row `row` is gone: drop a hint that named it.
+    fn forget_hint(&mut self, row: usize) {
+        for h in &mut self.hints {
+            if h.is_some_and(|(_, r)| r == row) {
+                *h = None;
+            }
+        }
     }
 
     /// Re-anchor from a pixel position — a scrollbar drag.
