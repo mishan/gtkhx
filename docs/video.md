@@ -155,11 +155,20 @@ publications show as "You" tiles from the preview; a paused publication
 keeps its tile, marked paused.
 
 **Visibility is the subscription policy.** While the panel's page is
-mapped it subscribes to every publication in the room; unmapped —
-another tab, a collapsed dock, a withdrawn window — it sends the empty
-set. Changes are debounced so a burst of 611s and layout churn costs one
-610. A collapsed panel costs no bandwidth, which is the spec's reason
-610 takes a whole set.
+mapped it subscribes to every publication whose tile is in view or about
+to be; unmapped — another tab, a collapsed dock, a withdrawn window — it
+sends the empty set. "About to be" is within half a view height of the
+view, since a stream takes a renegotiation and a keyframe to appear (on
+the local rig, about a quarter of a second after the 610; up to a second
+more when another viewer has just asked the same publisher for a
+keyframe, since servers allow one a second). A tile already
+received is let go only once it is a view and a half away, so scrolling
+back and forth across the edge doesn't renegotiate each time. A tile let
+go goes blank, as a stopped publication's does. A burst of 611s costs one
+610; scrolling and resizes send one once the view has been still for
+150 ms, rather than one along the way. A collapsed
+panel or a tile scrolled away costs no bandwidth and no decoding, which
+is the spec's reason 610 takes a whole set.
 
 **The user list shows who is publishing** regardless of the panel, from
 the 611 (camera or screen glyph beside the voice indicator, dim when
@@ -246,7 +255,8 @@ an explicit `LIBCAMERA_LOG_LEVELS` in the environment is left alone.
   publishes a `videotestsrc` camera, B subscribes late and decodes it
   (so a keyframe request has to reach A), A pauses — B must see the 611
   paused flag and its runtime must list the publication as paused — and
-  resumes, A stops
+  resumes, B unsubscribes and its leg goes, B subscribes again and
+  decodes again (a tile scrolled away and back), A stops
   and B's leg goes; every answer declares the microphone's SSRC and
   `cam-send`'s. A second case publishes camera and screen from one user
   and B must decode both as two streams.

@@ -411,8 +411,8 @@ the streams run out of step, so little lands together to coalesce — at
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13, 15 and 16 are fixed and 14 is worked around; the rest are leads.
-Findings 6 onwards are from the UI scenarios.
+12, 13, 15, 16, 18 and 23 are fixed and 14 is worked around; the rest are
+leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -599,15 +599,22 @@ Findings 6 onwards are from the UI scenarios.
     user list's animated avatars have the same shape on their own timer in
     `gif_avatar.c`, and are still ungated.
 23. **The Video panel keeps up, and tiles out of view cost the UI almost
-    nothing — but they are still received.** Every tile showed every frame
+    nothing — but they were still received.** Every tile showed every frame
     sent, with frames at the refresh interval, from one camera to 25 with
     a screen share. Main-thread cost grows with the tiles on screen, not
     the tiles in the panel: GTK uploads only the textures it draws, so 25
     cameras cost little more than 9. The frame notices themselves are
     negligible. Declaring the frames premultiplied, which is exact for
     opaque video, measured no different on GTK 4.24. What the scenario
-    cannot see is the receive side: the panel subscribes to every
-    publication while it is on screen, so a camera scrolled out of view is
-    still sent, depacketized, decoded and converted to RGBA. Subscribing
-    only to tiles in view would save that, at the price of a tile going
-    blank until its next keyframe when scrolled back. A lead.
+    cannot see is the receive side: the panel subscribed to every
+    publication while it was on screen, so a camera scrolled out of view
+    was still sent, depacketized, decoded and converted to RGBA — about
+    600 kb/s each at the encoder's target, and 1–7% of a core to decode
+    and convert, from a simple scene to noise. Now the panel subscribes
+    to the tiles in view and within half a view height of it, and lets a
+    tile go once it is a view and a half away, recomputing once scrolling
+    comes to rest. A tile scrolled back from further shows its first
+    frame about a quarter of a second after the request on the local rig,
+    plus the panel's 150 ms debounce — up to a second more when the
+    server has just asked that publisher for a keyframe for someone else.
+    Fixed.
