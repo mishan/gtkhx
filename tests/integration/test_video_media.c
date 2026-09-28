@@ -440,6 +440,8 @@ typedef enum {
     PH_PAUSED_QUIET,
     PH_WAIT_RESUMED_FRAMES,
     PH_WAIT_SWAPPED_FRAMES,
+    PH_WAIT_UNSUBSCRIBED,
+    PH_WAIT_RESUBSCRIBED_FRAMES,
     PH_WAIT_STOPPED,
 } phase;
 
@@ -639,14 +641,50 @@ driver_tick (gpointer data)
     case PH_WAIT_SWAPPED_FRAMES: {
         guint64 n = b_frames_of_a (d);
         if (n >= d->mark + FRAME_MARGIN) {
-            gtkhx_voice_runtime_video_stop (d->A->rt, HX_VIDEO_KIND_CAMERA);
-            d->ph = PH_WAIT_STOPPED;
+            /* What the video panel does when a tile scrolls away: leave
+             * it out of the set. */
+            gtkhx_voice_runtime_video_subscribe (d->B->rt, NULL, NULL, 0);
+            d->ph = PH_WAIT_UNSUBSCRIBED;
             d->deadline = now + SECS (10);
         } else if (now >= d->deadline) {
             driver_fail (d,
                          "B's frames of A stalled after a camera change: "
                          "%" G_GUINT64_FORMAT " -> %" G_GUINT64_FORMAT,
                          d->mark, n);
+        }
+        break;
+    }
+
+    case PH_WAIT_UNSUBSCRIBED:
+        /* The section goes inactive, and the stream's leg and frame slot
+         * with it, while A goes on publishing. */
+        if (b_frames_of_a (d) == 0
+            && d->B->state == GTKHX_VOICE_STATE_CONNECTED) {
+            guint16 uid = d->A->htlc.uid, kind = HX_VIDEO_KIND_CAMERA;
+            gtkhx_voice_runtime_video_subscribe (d->B->rt, &uid, &kind, 1);
+            d->ph = PH_WAIT_RESUBSCRIBED_FRAMES;
+            d->deadline = now + SECS (15);
+        } else if (now >= d->deadline) {
+            driver_fail (d,
+                         "B still holds A's camera after unsubscribing "
+                         "(B state=%d).",
+                         (int)d->B->state);
+        }
+        break;
+
+    case PH_WAIT_RESUBSCRIBED_FRAMES: {
+        /* The tile scrolls back: the same mid comes back to life, and a
+         * keyframe has to reach B again before it decodes anything. */
+        guint64 n = b_frames_of_a (d);
+        if (n >= FRAME_MARGIN) {
+            gtkhx_voice_runtime_video_stop (d->A->rt, HX_VIDEO_KIND_CAMERA);
+            d->ph = PH_WAIT_STOPPED;
+            d->deadline = now + SECS (10);
+        } else if (now >= d->deadline) {
+            driver_fail (d,
+                         "B decoded %" G_GUINT64_FORMAT
+                         " frames of A in 15 s after resubscribing.",
+                         n);
         }
         break;
     }

@@ -15,9 +15,9 @@ record.
   follows `ssrc-group:FID`, but the answer pins VP8 without RTX. If a server did
   negotiate RTX, its stream would expose a pad that can't link to
   `rtpvp8depay`.
-- **Narrower subscriptions.** Tiles that are scrolled out of view, a
-  backgrounded window, and a metered-connection preference should all shrink
-  the receive set.
+- **Narrower subscriptions.** Tiles scrolled out of view are no longer
+  received; a window behind others, and a metered-connection preference,
+  should shrink the receive set too.
 - **A chat notice when someone starts sharing**, gated like the voice chimes.
 - **Renderer cost.** The panel builds a new `GdkMemoryTexture` for every frame,
   and GTK uploads each one to the GPU. `gtk4paintablesink` would keep frames on
