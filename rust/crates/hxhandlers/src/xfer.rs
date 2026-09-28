@@ -16,7 +16,9 @@
 use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
-use hxnet::htxf::{hxnet_htxf_abort, hxnet_htxf_close, HtxfAbort, HtxfConn};
+use hxnet::htxf::{
+    hxnet_htxf_abort, hxnet_htxf_close, hxnet_htxf_finish_send, HtxfAbort, HtxfConn,
+};
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
     hxnet_xfer_folder_send_all, HxnetFolderParams, HxnetXferParams,
@@ -128,6 +130,8 @@ extern "C" {
     fn htxf_connect(htxf: *mut HtxfHandle) -> glib::ffi::gboolean;
     /// sound.c — play a chime by id (FILE_DONE here). Worker thread.
     fn play_sound(sound: c_int);
+    /// debug.c — a line under a `GTKHX_DEBUG` category.
+    fn debug_log_str(cat: *const c_char, msg: *const c_char);
     /// preview.c — the GTK preview-window feed. Reached only through the receive
     /// param callbacks; cast to the void*-first shape hxnet::xfer expects (they
     /// really take `hx_preview *`, ABI-identical to a leading pointer arg).
@@ -749,13 +753,36 @@ unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
     xfer_close_channel(htxf);
 }
 
-/// Solo upload worker: connect, run the single-file send loop, chime on success.
+/// See a sent upload all the way to the server, then chime — unless the
+/// user cancelled meanwhile. Closing on the last write can lose the
+/// upload's end; see hxnet_htxf_finish_send, which waits, within a limit,
+/// for the server to close.
+unsafe fn finish_upload(htxf: *mut HtxfHandle) {
+    if hxnet_htxf_finish_send((*htxf).hx as *mut HtxfConn) != 0 && hx_htxf_is_canceled(htxf) == 0 {
+        // Not necessarily a loss — a server that stops reading at the
+        // declared size can reset rather than close — but worth a trace
+        // when one keeps the worker waiting.
+        let msg = std::ffi::CString::new(format!(
+            "upload ref={}: the server didn't close cleanly after it",
+            (*htxf).ref_
+        ))
+        .unwrap_or_default();
+        debug_log_str(c"xfer".as_ptr(), msg.as_ptr());
+    }
+    if hx_htxf_is_canceled(htxf) == 0 {
+        play_sound(FILE_DONE);
+    }
+}
+
+/// Solo upload worker: connect, run the single-file send loop, see it all
+/// reach the server, chime on success.
 unsafe fn put_thread(htxf: *mut HtxfHandle) {
     if htxf_connect(htxf) != glib::ffi::GFALSE {
         let params = xfer_send_params(htxf);
         if hxnet_xfer_file_send_one(&params) == 0 {
-            play_sound(FILE_DONE);
+            // All sent: the row shows it now, not after the wait below.
             post_file_update(htxf);
+            finish_upload(htxf);
         }
     }
     xfer_close_channel(htxf);
@@ -767,9 +794,9 @@ unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
     if htxf_connect(htxf) != glib::ffi::GFALSE {
         let params = xfer_folder_params(htxf);
         if hxnet_xfer_folder_send_all(&params) == 0 {
-            play_sound(FILE_DONE);
             hx_htxf_set_total_pos(htxf, (*htxf).total_size);
             post_file_update(htxf);
+            finish_upload(htxf);
         }
     }
     xfer_close_channel(htxf);
@@ -1162,6 +1189,8 @@ unsafe fn htxf_connect(_htxf: *mut HtxfHandle) -> glib::ffi::gboolean {
 }
 #[cfg(test)]
 unsafe fn play_sound(_sound: c_int) {}
+#[cfg(test)]
+unsafe fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
 #[cfg(test)]
 unsafe extern "C" fn hx_preview_chunk(_preview: *mut c_void, _buf: *const c_char, _len: usize) {}
 #[cfg(test)]

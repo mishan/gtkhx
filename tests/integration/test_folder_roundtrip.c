@@ -42,6 +42,11 @@
 #include "xfers_recv.h"
 #include "integration_harness.h"
 
+/* hxnet/src/htxf.rs — what the upload workers call between the last write
+ * and the close, so the server reads the whole upload before the socket
+ * goes away. */
+extern int hxnet_htxf_finish_send (HtxfConn *handle);
+
 /* HxnetFolderParams progress shape for the Rust folder transfer paths
  * (hxnet_xfer_folder_{recv,send}_all forward it per file). */
 static void
@@ -255,8 +260,13 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
     params.user_data = &htxf;
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_folder_send_all (&params);
+    /* The server closes once it has the whole tree. */
+    int finished = rv == 0 ? hxnet_htxf_finish_send ((HtxfConn *)htxf.hx) : -1;
     hxnet_htxf_close ((HtxfConn *)htxf.hx);
-    return rv == 0;
+    if (rv == 0 && finished != 0) {
+        g_test_message ("the server didn't close after the folder upload");
+    }
+    return rv == 0 && finished == 0;
 }
 
 /* Download folder `name` from Uploads/ into `dstroot` via the production
