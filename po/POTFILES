@@ -30,6 +30,7 @@ rust/crates/gtkhx-ui/src/emoji.rs
 rust/crates/gtkhx-ui/src/file_info.rs
 rust/crates/gtkhx-ui/src/files/browser.rs
 rust/crates/gtkhx-ui/src/files/dialogs.rs
+rust/crates/gtkhx-ui/src/files/local.rs
 rust/crates/gtkhx-ui/src/files/mod.rs
 rust/crates/gtkhx-ui/src/files/panel.rs
 rust/crates/gtkhx-ui/src/files/row.rs

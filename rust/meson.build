@@ -134,6 +134,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/files/complete.rs',
   'crates/gtkhx-ui/src/files/dialogs.rs',
   'crates/gtkhx-ui/src/files/dnd.rs',
+  'crates/gtkhx-ui/src/files/local.rs',
   'crates/gtkhx-ui/src/files/panel.rs',
   'crates/gtkhx-ui/src/files/provider.rs',
   'crates/gtkhx-ui/src/files/row.rs',

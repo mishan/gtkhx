@@ -107,7 +107,7 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 | Scenario | Measures | Checks |
 |---|---|---|
 | `chat[=N]` | The phases of the original chat-view benchmark: ingest + first paint, relayout after a font change, scrolling. | The idle frame. |
-| `files[=N]` | The real files panel (`gtkhx-ui` `files::panel`) in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider. | Row count equals N; rows actually in size order after the sort. |
+| `files[=N]` | The real files panel (`gtkhx-ui` `files::panel`) in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider — the call, the wait until the listing lands, and the longest frame meanwhile. | Row count equals N; rows actually in size order after the sort. |
 
 The panel has no filter, so none is measured.
 
@@ -314,9 +314,20 @@ so both columns include the slower name sort:
 | remote populate + paint | 221 ms | 70 ms |
 | local listing (UI frozen) | 244 ms | 80 ms |
 
+After moving the local listing onto a worker (finding 7), same setup,
+median of five, against `main` measured alongside:
+
+| Files panel, 10,000 entries | Before | After |
+|---|---|---|
+| local listing: navigate call (UI frozen) | 82.8 ms | 0.01 ms |
+| local listing: until on screen | 110 ms (call + first paint) | 110 ms (until listed + first paint) |
+| local listing: longest frame | 110 ms — the call and the paint | 55 ms |
+
+The wall time is unchanged; what moved is where the main thread waits.
+
 ## Findings
 
-What the measurements have turned up. Findings 1, 2, 6, 8, 9, 10 and 11
+What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10 and 11
 are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
@@ -373,7 +384,17 @@ are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
    UI for 3.4 s: enumeration, a content-type description per file, and the
    per-row appends above. With the appends batched it is 238 ms, still on
    the main thread; enumerating off it is the remaining half, and the one
-   that still grows with directory size.
+   that still grows with directory size. **Fixed:** the folder is read on
+   GLib's worker pool (`gtkhx-ui` `files::local`), with each content type
+   described once rather than once per file, and the main thread only
+   builds the rows and splices them in — about 2 ms for the rows. The
+   longest frame while listing fell from 110 ms to 55 ms, and what is left
+   is the splice: the column view taking the new rows and the sort, the
+   same cost a remote populate pays. Starting a listing cancels the read
+   before it, and one that lands after being overtaken is dropped. The
+   provider's current path moves when its listing lands, not when
+   `navigate` is called, so a delete or rename in between still acts on the
+   folder the user is looking at.
 8. **Sorting by name costs 65 ms at 10,000 rows**, against 9 ms by size.
    `cmp_name` called `g_utf8_collate` on every comparison, which re-derives
    a collation key each time. **Fixed:** each entry derives its
