@@ -85,6 +85,11 @@ struct Section {
     sort_model: gtk::SortListModel,
     selection: gtk::SingleSelection,
     dedup: RefCell<HashSet<String>>,
+    /// Records received but not yet in `store`. A fetch delivers every
+    /// ready record in one turn, one signal each, and every append cost
+    /// the column view a walk over all of its rows; queued, they land in
+    /// one splice before the next frame.
+    pending: RefCell<Vec<HxTrackerRow>>,
     expander: gtk::Expander,
     col_country: gtk::ColumnViewColumn,
     col_caps: gtk::ColumnViewColumn,
@@ -110,6 +115,8 @@ struct Win {
     /// a raw pointer (not `usize`) so it keeps its provenance across the
     /// FFI round-trip. Main-thread only, so no `Send`/`Sync` needed.
     sess: *mut c_void,
+    /// Whether a flush of the sections' pending records is scheduled.
+    flush_scheduled: bool,
 }
 
 thread_local! {
@@ -384,6 +391,7 @@ fn section_new(url: &str, version: u8, expected: u16, filter: &gtk::CustomFilter
         sort_model,
         selection: selection.clone(),
         dedup: RefCell::new(HashSet::new()),
+        pending: RefCell::new(Vec::new()),
         expander,
         col_country,
         col_caps,
@@ -624,6 +632,7 @@ pub unsafe extern "C" fn tracker_batch_begin(url: *const c_char, version: u8, ex
 
     if let Some(sec) = recycled {
         sec.selection.set_selected(INVALID);
+        sec.pending.borrow_mut().clear();
         sec.store.remove_all();
         sec.dedup.borrow_mut().clear();
         sec.col_country.set_visible(version != 1);
@@ -660,29 +669,58 @@ pub unsafe extern "C" fn tracker_server_create(event: *mut HxTrackerServer) {
     }
     let dedup_key = format!("{}:{}", address, e.port);
 
-    WIN.with_borrow_mut(|w| {
-        let Some(win) = w.as_mut() else { return };
-        let Some(sec) = win.current.clone() else {
-            return;
-        };
+    let schedule = WIN.with_borrow_mut(|w| {
+        let win = w.as_mut()?;
+        let sec = win.current.clone()?;
         if !sec.dedup.borrow_mut().insert(dedup_key) {
-            return; // already present
+            return None; // already present
         }
-        let old_found = section_num_found(&sec) as i32;
-        let row = HxTrackerRow::from_event(event);
-        sec.store.append(&row);
-        let new_found = section_num_found(&sec) as i32;
+        sec.pending
+            .borrow_mut()
+            .push(HxTrackerRow::from_event(event));
+        Some(!std::mem::replace(&mut win.flush_scheduled, true))
+    });
+    if schedule == Some(true) {
+        // HIGH_IDLE runs ahead of GTK's layout and paint, so the records
+        // still show in the frame they arrived for.
+        glib::idle_add_local_full(glib::Priority::HIGH_IDLE, || {
+            flush_pending();
+            glib::ControlFlow::Break
+        });
+    }
+}
 
-        win.num_total_total += 1;
-        if new_found != old_found {
-            win.num_found_total += new_found - old_found;
+/// Put every section's pending records into its store, then bring the
+/// titles and counts up to date once.
+fn flush_pending() {
+    let sections = WIN.with_borrow_mut(|w| {
+        let win = w.as_mut()?;
+        win.flush_scheduled = false;
+        Some(win.order.clone())
+    });
+    let Some(sections) = sections else { return };
+    let (mut added, mut found_delta) = (0i32, 0i32);
+    for sec in &sections {
+        let rows = sec.pending.take();
+        if rows.is_empty() {
+            continue;
         }
-        update_title(&sec);
-        win.lbl_total
-            .set_text(&format!(" / {}", win.num_total_total));
-        if new_found != old_found {
-            win.lbl_found
-                .set_text(&format!("  {}", win.num_found_total));
+        let old_found = section_num_found(sec) as i32;
+        // Outside any WIN borrow: the splice re-evaluates the filter and
+        // can reach the selection handler.
+        sec.store.splice(sec.store.n_items(), 0, &rows);
+        added += rows.len() as i32;
+        found_delta += section_num_found(sec) as i32 - old_found;
+        update_title(sec);
+    }
+    if added == 0 {
+        return;
+    }
+    WIN.with_borrow_mut(|w| {
+        if let Some(win) = w.as_mut() {
+            win.num_total_total += added;
+            win.num_found_total += found_delta;
+            set_count_labels(win);
         }
     });
 }
@@ -725,6 +763,18 @@ pub extern "C" fn create_tracker_window(_widget: *mut cffi::GtkWidget, data: *mu
         return;
     }
     build_window(data);
+    tracker_getlist();
+}
+
+/// For the in-app benchmark: open the window without fetching anything,
+/// so a run never touches the network. FALSE when it was already open —
+/// the user's own window, which a run must not take over.
+pub(crate) fn open_without_fetch(sess: *mut c_void) -> bool {
+    if WIN.with_borrow(|w| w.is_some()) {
+        return false;
+    }
+    build_window(sess);
+    true
 }
 
 // ---------------------------------------------------------------------
@@ -846,14 +896,39 @@ fn build_window(sess: *mut c_void) {
             num_found_total: 0,
             num_total_total: 0,
             sess,
+            flush_scheduled: false,
         });
     });
     SEARCH.with_borrow_mut(|s| *s = None);
 
     window.present();
     search_entry.grab_focus();
+}
 
-    tracker_getlist();
+/// For the in-app benchmark: land the queued records now, so a listing can
+/// be timed through to its stores.
+pub(crate) fn bench_flush() {
+    flush_pending();
+}
+
+/// For the in-app benchmark: the open window and its search entry.
+pub(crate) fn bench_view() -> Option<(gtk::Window, gtk::SearchEntry)> {
+    WIN.with_borrow(|w| {
+        w.as_ref()
+            .map(|win| (win.window.clone(), win.search_entry.clone()))
+    })
+}
+
+/// For the in-app benchmark: servers listed and servers shown, across every
+/// section.
+pub(crate) fn bench_counts() -> (u32, u32) {
+    WIN.with_borrow(|w| {
+        w.as_ref().map_or((0, 0), |win| {
+            win.order.iter().fold((0, 0), |(t, f), sec| {
+                (t + section_num_total(sec), f + section_num_found(sec))
+            })
+        })
+    })
 }
 
 fn on_close() {

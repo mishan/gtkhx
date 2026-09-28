@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -75,7 +75,7 @@ Still to add:
 ### Tier 3 — UI scenarios
 
 ```sh
-tools/uibench.sh                              # chat=20000,files=10000,users=1000, 3 repeats
+tools/uibench.sh                              # chat=20000,files=10000,users=1000,tracker=2000, 3 repeats
 tools/uibench.sh files=10000 5                # one scenario, 5 repeats
 GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 ```
@@ -110,13 +110,15 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 | `files[=N]` | The real files panel (`gtkhx-ui` `files::panel`) in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider — the call, the wait until the listing lands, and the longest frame meanwhile. | Row count equals N; rows actually in size order after the sort. |
 | `users[=N]` | The main window's real Users panel, fed through the real receive handlers against the unconnected session: a login's USER_LIST reply for N users; a USER_CHANGE for every one of them at once; a GIF icon for every one at once through `gtkhx_avatar_update`, as a GIF-icons server's ICON_GETLIST reply delivers them; then frames and scrolling with every icon animating. Clears the list before and after through `users-clear`. | Row count equals N; every row shows the new status after the burst; every icon decodes and animates. |
 
+| `tracker[=N]` | The real tracker window, opened without fetching: a listing of N servers delivered the way a fetch's drain delivers them — `tracker-batch-begin`, then per server an event from `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the Tasks progress tick, all in one main-loop turn; then two searches typed into the window's own entry a key at a time, each cleared after: one that narrows the list from its first keys, one that keeps every server until its last few. Keys are inserted as typing inserts them, and the entry's typing delay is held off, so each keystroke measures the filter. Refuses to run in a tracker window the user already has open. | N servers listed; each search shows exactly the servers its regex matches, counted independently; clearing shows all N. |
+
 The Files panel has no filter, so none is measured. The Users scenario
 refuses to run on a connected session: it writes fake users into the public
 chat and clears it afterwards.
 
-Still to add: the tracker window (a large listing, filter typing); chat-history
-replay on join; animated media scrolled out of view — the acceptance test
-for the known offscreen-animation defect; video tiles; startup.
+Still to add: chat-history replay on join; animated media scrolled out of
+view — the acceptance test for the known offscreen-animation defect; video
+tiles; startup.
 
 ### Tier 4 — end to end
 
@@ -344,10 +346,28 @@ decode that never finished is marked as such.
 The first run in a session is consistently slower on the login paint (about
 75 ms after), and is the spread to expect.
 
+The tracker scenario, **2026-09-27**, same setup, median of three. "Before"
+is this branch with finding 16's fix backed out. The listing is timed
+through to the stores, splice included.
+
+| Tracker window, listing | Before | After |
+|---|---|---|
+| 2,000 servers (UI frozen) | 187 ms | 43.3 ms |
+| 2,000 servers: listing + paint | 239 ms | 93.2 ms |
+| 10,000 servers (UI frozen) | 1.81 s | 76.5 ms |
+| 10,000 servers: listing + paint | 1.86 s | 128 ms |
+
+| Tracker window, searching | 2,000 servers | 10,000 servers |
+|---|---|---|
+| narrowing query: keystroke / until painted, mean | 8.7 / 26.6 ms | 12.5 / 26.9 ms |
+| broad query: keystroke / until painted, mean | 2.3 / 16.3 ms | 6.8 / 18.2 ms |
+| clear search: until painted | 66 ms | 72 ms |
+
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13 and 15 are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
+12, 13, 15 and 16 are fixed; the rest are leads. Findings 6 onwards are
+from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -485,3 +505,22 @@ What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
     1,000 users the UI is frozen for 16 ms instead of 43 — the handler and
     the one splice, timed together — and login plus paint went from 59 ms
     to 33 ms.
+16. **A tracker listing added servers one row at a time, in quadratic
+    time.** A fetch delivers every ready record in one main-loop turn, one
+    `tracker-server-create` each, and each appended to the section's store
+    and rewrote the section title's markup. Every append's `items-changed`
+    made the column view's list item manager walk its whole row tree, so
+    the listing grew with the square of its size: 187 ms at 2,000 servers,
+    1.81 s at 10,000. **Fixed:** records queue per section and land in one
+    splice from a high-priority idle, which runs before the next frame, with
+    the titles and counts brought up to date once: 43 ms and 77 ms, splice
+    included.
+17. **A search keystroke that hides rows costs a dropped frame.** What a
+    key costs depends on how much it changes which rows show. One that
+    narrows the list costs 9–13 ms, and about 27 ms until painted, at 2,000
+    servers and at 10,000 alike; one that leaves the rows as they were costs
+    2–7 ms. Clearing the search, which brings every row back, takes 66–72 ms
+    to paint. The filter's own matching is a small part of it — most is GTK
+    rebuilding row widgets for the rows that change. Moving the sort below
+    the filter, so a search never reaches the sort model, measured no
+    different. A lead.
