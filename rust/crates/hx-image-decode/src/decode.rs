@@ -505,6 +505,8 @@ async fn run_decode(
     // a Flatpak runtime.
     #[cfg(feature = "glycin-v3")]
     let (mut loader, _tmp_guard) = (glycin::Loader::new_bytes(gbytes), ());
+    #[cfg(feature = "glycin-v3")]
+    loader.pool(loader_pool());
     #[cfg(all(target_os = "linux", feature = "glycin-v2"))]
     let (mut loader, _tmp_guard) = {
         let guard = TempImageFile::create(&gbytes).map_err(|e| DecodeErr {
@@ -642,6 +644,45 @@ async fn run_decode(
     }
 
     Ok(DecodeOk::Animation(frames))
+}
+
+/// Images one glycin loader process decodes before new decodes move to a
+/// fresh one.
+///
+/// glycin's image-rs loader keeps a thread alive for every animated image
+/// it has decoded, and releasing the image doesn't end it. Under glycin's
+/// bwrap sandbox the loader runs under an address-space limit set from free
+/// memory, and each thread takes a slice of it, so one long-lived loader
+/// eventually cannot start a thread and fails every decode it holds — after
+/// a hundred or so GIF icons on a machine with little free memory. Without
+/// that sandbox the threads just pile up. A retired loader is shut down
+/// once it has been idle for a while (glycin's pool does that), and its
+/// threads go with it.
+///
+/// glycin 2 needs none of this: it starts a loader per image and ends it
+/// with the image.
+#[cfg(all(target_os = "linux", feature = "glycin-v3"))]
+const IMAGES_PER_LOADER: u32 = 32;
+
+#[cfg(all(target_os = "linux", feature = "glycin-v3"))]
+thread_local! {
+    /// The pool new decodes use, and how many images it has been given.
+    static LOADER_POOL: std::cell::RefCell<(std::sync::Arc<glycin::Pool>, u32)> =
+        std::cell::RefCell::new((glycin::Pool::new(glycin::PoolConfig::new()), 0));
+}
+
+/// The pool for the next decode, moving to a fresh one every
+/// [`IMAGES_PER_LOADER`] images.
+#[cfg(all(target_os = "linux", feature = "glycin-v3"))]
+fn loader_pool() -> std::sync::Arc<glycin::Pool> {
+    LOADER_POOL.with(|p| {
+        let mut p = p.borrow_mut();
+        if p.1 >= IMAGES_PER_LOADER {
+            *p = (glycin::Pool::new(glycin::PoolConfig::new()), 0);
+        }
+        p.1 += 1;
+        p.0.clone()
+    })
 }
 
 /// The loader's index for `frame`, when it reports one.

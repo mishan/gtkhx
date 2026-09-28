@@ -376,8 +376,8 @@ frames a second, median of three. "Before" is this branch with finding
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13, 15 and 16 are fixed; the rest are leads. Findings 6 onwards are
-from the UI scenarios.
+12, 13, 15 and 16 are fixed and 14 is worked around; the rest are leads.
+Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -501,12 +501,27 @@ from the UI scenarios.
     round to the first frame's again. (An animation long enough to reach
     the duration cap first stopped there instead.) With finding 12's slots, 500 icons
     decode in 0.3 s with no frame over 24 ms, and 1,000 in 0.55 s.
-14. **glycin's loader runs out of threads after about 2,000 images.** In
-    one run of the Users scenario the last few dozen of 2,000 icons fail: the
-    loader process panics spawning a thread (`EAGAIN`) and every decode it
-    holds fails with it. glycin tells the loader when each image is done, so
-    this looks like the loader keeping something per image. The Users
-    scenario defaults to 1,000 users to stay under it. A lead, upstream.
+14. **glycin's loader leaks a thread per animated image, and then fails
+    every decode.** glycin's image-rs loader keeps a thread alive for each
+    animated image it decodes, and releasing the image doesn't end it: 60
+    icons leave the loader at 67 threads, and they stay until the loader has
+    sat idle long enough for glycin to shut it down. Under glycin's bwrap
+    sandbox — the usual case on a desktop — the loader runs under an
+    address-space limit glycin sets from free memory, and each thread takes
+    a slice of it, so once enough have built up it cannot start another and
+    every decode it holds fails. Where that happens depends on free memory:
+    about 2,000 icons on one run, about 100 of 1,000 on another with 7 GB
+    free. Without that sandbox (flatpak-spawn, or unsandboxed) there is no
+    limit, and the threads simply pile up. **Worked around:** `hx-image-decode` gives new
+    decodes a fresh glycin pool, and so a fresh loader process, every 32
+    images. glycin shuts a pool's loader down about 30 s after its last use,
+    and the leaked threads go with it; no loader holds more than a few dozen.
+    1,000 icons decode in 1.3 s and 2,000 in 2.8 s, every one of them, at
+    the cost of starting a loader per 32 icons — 0.55 s for 1,000 when the
+    leak hadn't yet bitten, and a longest frame of about 70 ms instead of
+    30. glycin 2 has the same bug, but starts a loader per image and ends
+    it with the image, so nothing builds up. The leak itself is upstream's
+    to fix.
 15. **A login added users to the list one row at a time.** Each
     `hx_user_list_view_add` appended to the store, and each append cost the
     sort model and the column view a round of work — the same shape as
