@@ -162,3 +162,4 @@ __pycache__/
 
 # meson fetches these from subprojects/*.wrap
 /subprojects/*/
+/subprojects/.wraplock
