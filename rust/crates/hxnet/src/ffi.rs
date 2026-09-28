@@ -2248,6 +2248,10 @@ pub const HXNET_TRK_KIND_ERROR: u32 = 2;
 pub const HXNET_TRK_KIND_DONE: u32 = 3;
 
 /// [`hxnet_tracker_fetch_poll`] return codes.
+/// A tracker fetch's event channel: one listing's records — a v3 count is
+/// a `u16` — and its begin and end.
+const TRACKER_EVENT_ROOM: usize = u16::MAX as usize + 2;
+
 pub const HXNET_TRK_POLL_EMPTY: c_int = 0;
 pub const HXNET_TRK_POLL_EVENT: c_int = 1;
 pub const HXNET_TRK_POLL_CLOSED: c_int = -1;
@@ -2537,7 +2541,13 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
     };
 
     let probe_timeout = std::time::Duration::from_millis(probe_ms as u64);
-    let (tx, rx) = mpsc::channel::<TrackerEvent>(64);
+    // Room for a whole listing. The walk hands a tracker's records over
+    // in one burst once they are read, and the C side drains the channel
+    // on a 50 ms timeout until it finds it empty; with less room, each
+    // tick took what fit and the rest waited for the next — 64 records a
+    // tick, eight seconds for 10,000 servers. tokio allocates a bounded
+    // channel's slots as they fill, so the room costs nothing unused.
+    let (tx, rx) = mpsc::channel::<TrackerEvent>(TRACKER_EVENT_ROOM);
     let join = rt.handle().spawn(async move {
         let mut connector = TcpTlsConnector { verify, proxy };
         // Snapshot the process-global verdict cache so a Refresh doesn't

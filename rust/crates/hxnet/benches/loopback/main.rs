@@ -1,10 +1,14 @@
-//! Loopback benchmarks for the connection pipeline (docs/performance.md,
-//! Tier 2).
+//! Loopback benchmarks (docs/performance.md, Tier 2): the connection
+//! pipeline here, HTXF transfers in [`htxf`], the tracker fetch in
+//! [`tracker`].
 //!
 //! ```sh
 //! cd rust && cargo bench -p hxnet --bench loopback
-//! cargo bench -p hxnet --bench loopback -- aead     # one transport
+//! cargo bench -p hxnet --bench loopback -- pipeline   # one section
+//! cargo bench -p hxnet --bench loopback -- htxf aead  # one transport of it
 //! ```
+//!
+//! ## The connection pipeline
 //!
 //! Each transport — plain, TLS, HOPE with Blowfish, HOPE with
 //! ChaCha20-Poly1305 — connects through the production entry point
@@ -53,6 +57,9 @@ use hxnet::ConnectionState;
 use hxproto::build::{pack_message, pack_message_size, PackChunk};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_rustls::rustls;
+
+mod htxf;
+mod tracker;
 
 /// Frames in a throughput burst.
 const BURST: u32 = 100_000;
@@ -155,9 +162,16 @@ enum Script {
         acks: tokio::sync::mpsc::UnboundedReceiver<()>,
         sent: std::sync::mpsc::Sender<Instant>,
     },
+    /// Nothing; keep the session open until the client hangs up.
+    Hold,
 }
 
 fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
+    tokio_rustls::TlsAcceptor::from(tls_server_config())
+}
+
+/// The fake servers' TLS: the self-signed certificate beside this file.
+fn tls_server_config() -> Arc<rustls::ServerConfig> {
     let cert =
         rustls::pki_types::CertificateDer::from(include_bytes!("loopback-cert.der").to_vec());
     let key =
@@ -170,7 +184,39 @@ fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
     .with_no_client_auth()
     .with_single_cert(vec![cert], key)
     .expect("the benchmark's certificate");
-    tokio_rustls::TlsAcceptor::from(Arc::new(config))
+    Arc::new(config)
+}
+
+/// The HOPE session key the fake server hands out.
+fn session_key() -> Vec<u8> {
+    (0u8..64).collect()
+}
+
+/// What a HOPE-AEAD login with the fake server agrees, as the client's
+/// retained material holds it: the session key, and the control channel's
+/// client-to-server and server-to-client states. HTXF derives its
+/// transfer keys from these.
+fn hope_keys_for_bench() -> (
+    Vec<u8>,
+    hxcrypto::aead::AeadState,
+    hxcrypto::aead::AeadState,
+) {
+    let sk = session_key();
+    let (_, keys) = compute_blowfish_chain(PASSWORD, &sk, b"HMAC-SHA256").expect("key chain");
+    let aead = derive_aead_keys(&sk, &keys.decode_key, &keys.encode_key);
+    (
+        sk,
+        hxcrypto::aead::AeadState {
+            key: aead.encode_key,
+            counter: 0,
+            dir: hxcrypto::aead::AEAD_DIR_CLIENT_TO_SERVER,
+        },
+        hxcrypto::aead::AeadState {
+            key: aead.decode_key,
+            counter: 0,
+            dir: hxcrypto::aead::AEAD_DIR_SERVER_TO_CLIENT,
+        },
+    )
 }
 
 /// Magic, then the login the transport calls for. Returns the stream the
@@ -197,7 +243,7 @@ where
         Transport::HopeBlowfish | Transport::HopeAead => {
             // Step 1: offer the one cipher the transport is about.
             let (trans, _) = read_frame(&mut s).await.expect("HOPE step 1");
-            let sessionkey: Vec<u8> = (0u8..64).collect();
+            let sessionkey = session_key();
             let mac = encode_alg_list(&[b"HMAC-SHA256"]).expect("MAC list");
             let cipher = encode_alg_list(&[transport.cipher_label()]).expect("cipher list");
             let reply = task_reply(
@@ -286,6 +332,7 @@ async fn run_script(mut s: BoxedDuplex, script: Script) {
                 }
             }
         }
+        Script::Hold => {}
     }
     // Hold the connection until the client hangs up.
     let mut sink = [0u8; 256];
@@ -599,6 +646,21 @@ fn close(conn: *mut HxnetConnection, server: std::thread::JoinHandle<()>) {
     let _ = server.join();
 }
 
+/// A logged-in session kept open for something else to use.
+struct Held {
+    conn: *mut HxnetConnection,
+    server: std::thread::JoinHandle<()>,
+}
+
+fn hold(transport: Transport) -> Held {
+    let (conn, server, _) = connect_and(transport, Script::Hold, None);
+    Held { conn, server }
+}
+
+fn release(held: Held) {
+    close(held.conn, held.server);
+}
+
 fn run_once(transport: Transport) -> Run {
     let main_tid = this_tid();
     let mut failures = Vec::new();
@@ -738,10 +800,22 @@ fn median(mut v: Vec<f64>) -> f64 {
 }
 
 fn main() {
-    // `cargo bench` passes `--bench`; anything else filters transports.
-    let filter: Vec<String> = std::env::args()
+    // `cargo bench` passes `--bench`. Anything else picks sections
+    // (pipeline, htxf, tracker) and filters transports; with none named,
+    // everything runs.
+    let args: Vec<String> = std::env::args()
         .skip(1)
         .filter(|a| !a.starts_with("--"))
+        .collect();
+    let sections = ["pipeline", "htxf", "tracker"];
+    let named: Vec<&str> = sections
+        .into_iter()
+        .filter(|s| args.iter().any(|a| a == s))
+        .collect();
+    let run = |s: &str| named.is_empty() || named.contains(&s);
+    let filter: Vec<&String> = args
+        .iter()
+        .filter(|a| !sections.contains(&a.as_str()))
         .collect();
     let chosen: Vec<Transport> = Transport::ALL
         .into_iter()
@@ -753,6 +827,24 @@ fn main() {
     let ctx = glib::MainContext::default();
     let _guard = ctx.acquire().expect("the main context");
 
+    let mut failed = false;
+    if run("pipeline") {
+        failed |= pipeline(&chosen);
+    }
+    if run("htxf") {
+        failed |= transfers(&chosen);
+    }
+    if run("tracker") {
+        failed |= tracker_fetch();
+    }
+    if failed {
+        std::process::exit(1);
+    }
+}
+
+/// The connection pipeline's report. Returns whether a check failed.
+fn pipeline(chosen: &[Transport]) -> bool {
+    let mut failed = false;
     let floor = {
         let mut all: Vec<f64> = (0..RUNS).flat_map(|_| raw_floor()).collect();
         all.sort_by(f64::total_cmp);
@@ -777,8 +869,7 @@ fn main() {
         "", "ms", "", "ns/frame", "ns/frame", "ns/frame", "µs", "µs"
     );
 
-    let mut failed = false;
-    for t in chosen {
+    for &t in chosen {
         // One untimed run first: the first connection pays for loading
         // native roots and warming allocators.
         let _ = run_once(t);
@@ -815,7 +906,131 @@ fn main() {
             failed = true;
         }
     }
-    if failed {
-        std::process::exit(1);
+    failed
+}
+
+/// Runs of each transfer; the report gives the median.
+const TRANSFER_RUNS: usize = 3;
+
+/// HTXF's report. Returns whether a check failed.
+fn transfers(chosen: &[Transport]) -> bool {
+    let chosen: Vec<Transport> = chosen
+        .iter()
+        .copied()
+        .filter(|t| *t != Transport::HopeBlowfish)
+        .collect();
+    if chosen.is_empty() {
+        return false;
     }
+    let fx = htxf::Fixture::new();
+    let floor = median(
+        (0..TRANSFER_RUNS)
+            .map(|_| htxf::raw_floor(&fx.data))
+            .collect(),
+    );
+    println!();
+    println!(
+        "htxf: {} MiB each way; a folder of {} files of 4 KiB; files in {}; median of {TRANSFER_RUNS}",
+        htxf::FILE_MB,
+        htxf::FOLDER_FILES,
+        fx.dir.parent().map_or(String::new(), |p| p.display().to_string()),
+    );
+    println!("raw socket floor: {floor:.0} MB/s");
+    println!();
+    println!(
+        "{:<14} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+        "transport", "down", "posts", "main", "up", "posts", "folder", "posts"
+    );
+    println!(
+        "{:<14} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+        "", "MB/s", "/s", "ms/s", "MB/s", "/s", "µs/file", "/s"
+    );
+    let mut failed = false;
+    for &t in &chosen {
+        // HTXF over AEAD needs a HOPE-AEAD session's key material.
+        let session = (t == Transport::HopeAead).then(htxf::aead_session);
+        let hope = session
+            .as_ref()
+            .map_or(std::ptr::null(), |(m, _)| *m as *const _);
+        let label = match t {
+            Transport::HopeAead => "aead",
+            other => other.name(),
+        };
+        let down: Vec<htxf::Transfer> = (0..TRANSFER_RUNS)
+            .map(|_| htxf::download(t, hope, &fx.data, &fx.filp, &fx.dir))
+            .collect();
+        let up: Vec<htxf::Transfer> = (0..TRANSFER_RUNS)
+            .map(|_| htxf::upload(t, hope, &fx.data, &fx.filp, &fx.source))
+            .collect();
+        let folder: Vec<htxf::Folder> = (0..TRANSFER_RUNS)
+            .map(|_| htxf::folder(t, hope, &fx.files, &fx.dir))
+            .collect();
+        if let Some((m, held)) = session {
+            htxf::free_session(m, held);
+        }
+        let med = |f: &dyn Fn(&htxf::Transfer) -> f64, v: &[htxf::Transfer]| {
+            median(v.iter().map(f).collect())
+        };
+        let down_rate = med(&|x| x.rate, &down);
+        println!(
+            "{:<14} {:>9.0} {:>9.0} {:>9.2} {:>9.0} {:>9.0} {:>9.1} {:>9.0}",
+            label,
+            down_rate,
+            med(&|x| x.posts, &down),
+            med(&|x| x.main_load, &down),
+            med(&|x| x.rate, &up),
+            med(&|x| x.posts, &up),
+            median(folder.iter().map(|f| f.per_file).collect()),
+            median(folder.iter().map(|f| f.posts).collect()),
+        );
+        let failures = down
+            .iter()
+            .chain(&up)
+            .flat_map(|x| &x.failures)
+            .chain(folder.iter().flat_map(|f| &f.failures));
+        for f in failures {
+            println!("  CHECK FAILED: {label}: {f}");
+            failed = true;
+        }
+        if down_rate > floor {
+            println!(
+                "  CHECK FAILED: {label}: a download beat the raw socket — the timing is wrong"
+            );
+            failed = true;
+        }
+    }
+    failed
+}
+
+/// Runs of each tracker fetch; the report gives the median.
+const TRACKER_RUNS: usize = 5;
+
+/// The tracker fetch's report. Returns whether a check failed.
+fn tracker_fetch() -> bool {
+    println!();
+    println!(
+        "tracker: a v3 listing through hxnet_tracker_fetch_open, drained as network.c does; median of {TRACKER_RUNS}"
+    );
+    println!();
+    println!(
+        "{:<14} {:>9} {:>9} {:>9}",
+        "servers", "fetch", "tail", "ticks"
+    );
+    println!("{:<14} {:>9} {:>9} {:>9}", "", "ms", "ms", "");
+    let mut failed = false;
+    for n in [2_000u16, 10_000] {
+        let runs: Vec<tracker::Fetch> = (0..TRACKER_RUNS).map(|_| tracker::fetch(n)).collect();
+        println!(
+            "{:<14} {:>9.1} {:>9.1} {:>9.0}",
+            n,
+            median(runs.iter().map(|r| r.total.as_secs_f64() * 1e3).collect()),
+            median(runs.iter().map(|r| r.tail.as_secs_f64() * 1e3).collect()),
+            median(runs.iter().map(|r| f64::from(r.ticks)).collect()),
+        );
+        for f in runs.iter().flat_map(|r| &r.failures) {
+            println!("  CHECK FAILED: {n} servers: {f}");
+            failed = true;
+        }
+    }
+    failed
 }
