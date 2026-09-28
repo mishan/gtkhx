@@ -286,6 +286,15 @@ async fn actor_loop<S>(
 
 /// The actor's main loop, factored out so the [`actor_loop`]
 /// wrapper can run a uniform `Shutdown` send on every exit path.
+///
+/// Reading and writing run side by side, each on its half of the
+/// stream, and the first to finish ends the connection. Neither waits
+/// on the other: a command being written — a large one into a full
+/// socket — doesn't stop frames being read, and a frame waiting for
+/// room in the event channel — a consumer that's behind — doesn't stop
+/// commands, `Shutdown` among them, going out. Taking turns in one loop
+/// could deadlock against a server doing the same: each side writing,
+/// neither reading.
 async fn run<S>(
     stream: &mut S,
     cmd_rx: &mut mpsc::Receiver<Command>,
@@ -294,66 +303,65 @@ async fn run<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    loop {
-        tokio::select! {
-            // No `biased;` here. With a sustained inbound frame
-            // burst, biasing reads-first would starve the command
-            // branch indefinitely — every iteration the read
-            // future is immediately ready, the bias prefers it,
-            // and queued outbound commands (including
-            // `Command::Shutdown`) never get polled. tokio's
-            // default fair (random) policy is the right shape:
-            // every iteration the select picks one of the two
-            // ready branches uniformly at random, so commands
-            // get reliable head-of-line service even under read
-            // pressure. Test determinism is bought instead by
-            // the per-test setup driving one side at a time.
+    let (mut rd, mut wr) = tokio::io::split(stream);
+    tokio::select! {
+        reason = read_side(&mut rd, evt_tx) => reason,
+        reason = write_side(&mut wr, cmd_rx) => reason,
+    }
+}
 
-            // Read side: try to read one complete frame.
-            read = read_one_frame(stream) => {
-                match read {
-                    Ok(frame) => {
-                        if evt_tx.send(Event::Frame(frame)).await.is_err() {
-                            // Consumer's receiver dropped — no
-                            // point reading more. Treat as a
-                            // clean shutdown from our side.
-                            return ShutdownReason::HandleDropped;
-                        }
-                    }
-                    Err(ReadFrameError::Eof) => return ShutdownReason::Eof,
-                    Err(ReadFrameError::Io(e)) => {
-                        return ShutdownReason::StreamError(e.to_string());
-                    }
-                    Err(ReadFrameError::FrameTooLarge { wire_len }) => {
-                        return ShutdownReason::FrameTooLarge { wire_len };
-                    }
+/// Read frames and hand them on until the stream ends or fails, or the
+/// consumer goes away.
+async fn read_side<R>(rd: &mut R, evt_tx: &mpsc::Sender<Event>) -> ShutdownReason
+where
+    R: AsyncRead + Unpin,
+{
+    let mut reader = FrameReader::default();
+    loop {
+        match reader.next(rd).await {
+            Ok(frame) => {
+                if evt_tx.send(Event::Frame(frame)).await.is_err() {
+                    // Consumer's receiver dropped — no point reading
+                    // more. Treat as a clean shutdown from our side.
+                    return ShutdownReason::HandleDropped;
                 }
             }
-
-            // Write side: pull the next command.
-            cmd = cmd_rx.recv() => {
-                match cmd {
-                    Some(Command::WriteFrame(bytes)) => {
-                        if let Err(e) = stream.write_all(&bytes).await {
-                            return ShutdownReason::StreamError(e.to_string());
-                        }
-                        if let Err(e) = stream.flush().await {
-                            return ShutdownReason::StreamError(e.to_string());
-                        }
-                    }
-                    Some(Command::Shutdown) | None => {
-                        // Best-effort flush — if it errors, we
-                        // were going to shut down anyway.
-                        let _ = stream.flush().await;
-                        return ShutdownReason::HandleDropped;
-                    }
-                }
+            Err(ReadFrameError::Eof) => return ShutdownReason::Eof,
+            Err(ReadFrameError::Io(e)) => return ShutdownReason::StreamError(e.to_string()),
+            Err(ReadFrameError::FrameTooLarge { wire_len }) => {
+                return ShutdownReason::FrameTooLarge { wire_len };
             }
         }
     }
 }
 
-/// Internal error from [`read_one_frame`].
+/// Write each command's frame until `Shutdown`, every handle gone, or a
+/// failed write.
+async fn write_side<W>(wr: &mut W, cmd_rx: &mut mpsc::Receiver<Command>) -> ShutdownReason
+where
+    W: AsyncWrite + Unpin,
+{
+    loop {
+        match cmd_rx.recv().await {
+            Some(Command::WriteFrame(bytes)) => {
+                if let Err(e) = wr.write_all(&bytes).await {
+                    return ShutdownReason::StreamError(e.to_string());
+                }
+                if let Err(e) = wr.flush().await {
+                    return ShutdownReason::StreamError(e.to_string());
+                }
+            }
+            Some(Command::Shutdown) | None => {
+                // Best-effort flush — if it errors, we were going to
+                // shut down anyway.
+                let _ = wr.flush().await;
+                return ShutdownReason::HandleDropped;
+            }
+        }
+    }
+}
+
+/// Internal error from [`FrameReader::next`].
 enum ReadFrameError {
     /// Clean EOF before any header bytes were read. Distinct
     /// from a mid-frame EOF, which surfaces as
@@ -372,79 +380,83 @@ impl From<io::Error> for ReadFrameError {
     }
 }
 
-/// Read one complete Hotline frame from `stream`. Returns the
-/// header + body. EOF on the very first byte is a clean
-/// shutdown; EOF mid-frame is an error.
-async fn read_one_frame<S>(stream: &mut S) -> Result<Frame, ReadFrameError>
-where
-    S: AsyncRead + Unpin,
-{
-    let header = read_header(stream).await?;
-    // Compare against the raw wire `len`, NOT the body_len —
-    // decode_header_full clamps body_len to its max_packet
-    // argument so it can hide pathological wire values. We want
-    // to surface oversized frames as a fatal `FrameTooLarge`
-    // rather than read clamped-and-misaligned bytes off the
-    // socket. (`wire_len` includes the 2-byte `hc` field, hence
-    // the +2 in the threshold.)
-    let wire_limit = MAX_BODY_LEN.saturating_add(2);
-    if header.wire_len > wire_limit {
-        return Err(ReadFrameError::FrameTooLarge {
-            wire_len: header.wire_len,
-        });
-    }
-    let body = read_body(stream, header.body_len as usize).await?;
-    Ok(Frame::new(header, body))
+/// Reads frames off the stream, keeping the frame in progress in itself
+/// rather than in a future.
+///
+/// Nothing read lives only in a future: every read here is a single `read`
+/// call, which is cancel-safe — dropped before it completes, it has taken
+/// nothing — and what it returns goes straight into `self`. So a read that
+/// is interrupted carries on where it stopped the next time it's polled.
+/// The actor's read side runs alongside its write side rather than taking
+/// turns with it, so nothing interrupts a read today short of the
+/// connection ending; this keeps it correct however it comes to be polled.
+#[derive(Default)]
+struct FrameReader {
+    header: [u8; HL_HDR_LEN],
+    header_filled: usize,
+    /// Once the header is in: it, the body buffer, and how much of the
+    /// body has arrived.
+    body: Option<(HeaderDecoded, Vec<u8>, usize)>,
 }
 
-/// Read exactly [`HL_HDR_LEN`] bytes and decode the header. A
-/// zero-byte read on the first byte is the EOF marker.
-async fn read_header<S>(stream: &mut S) -> Result<HeaderDecoded, ReadFrameError>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut hdr_buf = [0u8; HL_HDR_LEN];
-    let mut read = 0;
-    while read < HL_HDR_LEN {
-        let n = stream.read(&mut hdr_buf[read..]).await?;
-        if n == 0 {
-            if read == 0 {
-                return Err(ReadFrameError::Eof);
+impl FrameReader {
+    /// The next complete frame. EOF on the very first byte of a frame is
+    /// a clean shutdown; EOF anywhere else is an error.
+    async fn next<S>(&mut self, stream: &mut S) -> Result<Frame, ReadFrameError>
+    where
+        S: AsyncRead + Unpin,
+    {
+        loop {
+            if let Some((_, body, filled)) = &mut self.body {
+                if *filled < body.len() {
+                    let n = stream.read(&mut body[*filled..]).await?;
+                    if n == 0 {
+                        return Err(ReadFrameError::Io(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "EOF mid-body",
+                        )));
+                    }
+                    *filled += n;
+                    continue;
+                }
+                let (header, body, _) = self.body.take().expect("checked above");
+                return Ok(Frame::new(header, body));
             }
-            return Err(ReadFrameError::Io(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "EOF mid-header",
-            )));
-        }
-        read += n;
-    }
-    // Pass u32::MAX so body_len mirrors wire_len exactly; the
-    // call-site `read_one_frame` does its own ceiling check
-    // against the raw wire_len before allocating.
-    decode_header_full(&hdr_buf, u32::MAX).ok_or_else(|| {
-        ReadFrameError::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "header decode returned None — should be unreachable on 22-byte input",
-        ))
-    })
-}
 
-/// Read exactly `len` body bytes. Mid-body EOF is an error.
-async fn read_body<S>(stream: &mut S, len: usize) -> Result<Vec<u8>, ReadFrameError>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut body = vec![0u8; len];
-    let mut read = 0;
-    while read < len {
-        let n = stream.read(&mut body[read..]).await?;
-        if n == 0 {
-            return Err(ReadFrameError::Io(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "EOF mid-body",
-            )));
+            if self.header_filled < HL_HDR_LEN {
+                let n = stream.read(&mut self.header[self.header_filled..]).await?;
+                if n == 0 {
+                    if self.header_filled == 0 {
+                        return Err(ReadFrameError::Eof);
+                    }
+                    return Err(ReadFrameError::Io(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "EOF mid-header",
+                    )));
+                }
+                self.header_filled += n;
+                continue;
+            }
+
+            // The header is in. Decode it without clamping, so body_len
+            // mirrors the wire, and refuse an oversized frame by the raw
+            // wire `len` before allocating for it — rather than reading
+            // clamped, misaligned bytes off the socket. (`wire_len`
+            // includes the 2-byte `hc` field, hence the +2.)
+            self.header_filled = 0;
+            let header = decode_header_full(&self.header, u32::MAX).ok_or_else(|| {
+                ReadFrameError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "header decode returned None — should be unreachable on 22-byte input",
+                ))
+            })?;
+            if header.wire_len > MAX_BODY_LEN.saturating_add(2) {
+                return Err(ReadFrameError::FrameTooLarge {
+                    wire_len: header.wire_len,
+                });
+            }
+            let len = header.body_len as usize;
+            self.body = Some((header, vec![0u8; len], 0));
         }
-        read += n;
     }
-    Ok(body)
 }

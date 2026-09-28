@@ -407,3 +407,131 @@ impl InErrorBitCheck for hxproto::parse::HeaderDecoded {
         self.flag & 1 != 0
     }
 }
+
+/// A frame that arrives in pieces must survive a command sent while it is
+/// half read. The actor races each frame read against the command queue;
+/// a read that lost the race used to be dropped with the bytes it had
+/// already taken, so the rest of the body was read as the next header.
+#[tokio::test]
+async fn a_command_mid_frame_does_not_lose_the_frame() {
+    let (mut server, client) = tokio::io::duplex(64 * 1024);
+    let (handle, mut events, _join) = Connection::spawn(client).expect("spawn under tokio runtime");
+
+    let body: Vec<u8> = (0..4000u32).map(|i| i as u8).collect();
+    let hdr = build_header(0x69, 1, 0, body.len() as u32, 0);
+
+    for split in [5usize, 22, 23, 1000] {
+        // Part of the frame: some of the header, or the header and part of
+        // the body. Let the actor start reading it.
+        let whole: Vec<u8> = hdr.iter().copied().chain(body.iter().copied()).collect();
+        server.write_all(&whole[..split]).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // A command lands mid-frame; it goes out while the read waits.
+        let out = build_header(0x6a, 2, 0, 0, 0).to_vec();
+        handle.send(Command::WriteFrame(out.clone())).await.unwrap();
+        let mut echoed = vec![0u8; out.len()];
+        server.read_exact(&mut echoed).await.unwrap();
+        assert_eq!(echoed, out, "the command went out");
+
+        // The rest of the frame, then one more whole frame after it.
+        server.write_all(&whole[split..]).await.unwrap();
+        let next = build_header(0x6b, 3, 0, 4, 0);
+        server.write_all(&next).await.unwrap();
+        server.write_all(b"next").await.unwrap();
+
+        for (want_type, want_body) in [(0x69u32, &body[..]), (0x6b, &b"next"[..])] {
+            let evt = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+                .await
+                .unwrap_or_else(|_| panic!("split {split}: no frame"))
+                .expect("event channel open");
+            match evt {
+                Event::Frame(f) => {
+                    assert_eq!(f.header.type_, want_type, "split {split}: frame type");
+                    assert_eq!(f.body, want_body, "split {split}: frame body");
+                }
+                other => panic!("split {split}: expected a frame, got {other:?}"),
+            }
+        }
+    }
+}
+
+/// The connection must read while it writes. Both sides here send a frame
+/// larger than the pipe between them, and neither reads until its own
+/// write is done — so if the actor stops reading while it writes a
+/// command, neither write ever finishes.
+#[tokio::test]
+async fn a_large_command_goes_out_while_a_large_frame_comes_in() {
+    let (mut server, client) = tokio::io::duplex(1024);
+    let (handle, mut events, _join) = Connection::spawn(client).expect("spawn under tokio runtime");
+
+    let big: Vec<u8> = (0..256 * 1024u32).map(|i| i as u8).collect();
+    let mut command = build_header(0x70, 9, 0, big.len() as u32, 0).to_vec();
+    command.extend_from_slice(&big);
+    handle
+        .send(Command::WriteFrame(command.clone()))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let incoming = big.clone();
+    let expect = command.len();
+    let server_side = tokio::spawn(async move {
+        server
+            .write_all(&build_header(0x71, 10, 0, incoming.len() as u32, 0))
+            .await
+            .unwrap();
+        server.write_all(&incoming).await.unwrap();
+        let mut got = vec![0u8; expect];
+        server.read_exact(&mut got).await.unwrap();
+        got
+    });
+
+    let evt = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .expect("the frame came in while the command went out")
+        .expect("event channel open");
+    match evt {
+        Event::Frame(f) => {
+            assert_eq!(f.header.type_, 0x71);
+            assert_eq!(f.body, big);
+        }
+        other => panic!("expected a frame, got {other:?}"),
+    }
+    let got = tokio::time::timeout(std::time::Duration::from_secs(5), server_side)
+        .await
+        .expect("the command went out")
+        .unwrap();
+    assert_eq!(got, command);
+}
+
+/// A command must go out while the consumer is slow to take frames: the
+/// actor waiting for room in the event channel mustn't stop it writing.
+#[tokio::test]
+async fn a_command_goes_out_while_the_consumer_lags() {
+    let (mut server, client) = tokio::io::duplex(64 * 1024);
+    let (handle, _events, _join) =
+        Connection::spawn_with_capacities(client, 8, 1).expect("spawn under tokio runtime");
+
+    // More frames than the event channel holds, none of them taken.
+    for i in 0..4u32 {
+        server
+            .write_all(&build_header(0x72, i, 0, 4, 0))
+            .await
+            .unwrap();
+        server.write_all(b"full").await.unwrap();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let out = build_header(0x73, 11, 0, 0, 0).to_vec();
+    handle.send(Command::WriteFrame(out.clone())).await.unwrap();
+    let mut got = vec![0u8; out.len()];
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        server.read_exact(&mut got),
+    )
+    .await
+    .expect("the command went out")
+    .unwrap();
+    assert_eq!(got, out);
+}

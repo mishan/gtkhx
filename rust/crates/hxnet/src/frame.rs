@@ -30,7 +30,7 @@ use hxproto::HL_HDR_LEN;
 /// without allocating or reading a body. There is no clamping,
 /// no partial read — the frame is refused outright so we never
 /// mis-align subsequent frames on the stream. See
-/// [`crate::connection`]'s `read_one_frame` for the policy.
+/// [`crate::connection`]'s frame reader for the policy.
 pub const MAX_BODY_LEN: u32 = 1024 * 1024;
 
 /// A complete Hotline frame as the actor reads it off the wire.
@@ -68,14 +68,14 @@ impl Frame {
     /// `Event::Frame` so the C-side `rcv.c` dispatch (`rcv_task_login`)
     /// runs unchanged and produces the post-login side effects. The
     /// slicing here is deliberately identical to the actor's
-    /// `read_one_frame` (`HL_HDR_LEN` header + `body_len` body), so a
+    /// frame reader (`HL_HDR_LEN` header + `body_len` body), so a
     /// replayed frame and an actor-read frame are byte-for-byte the
     /// same shape by the time they reach the FFI.
     pub fn from_raw(raw: &[u8]) -> Option<Frame> {
         // Decode WITHOUT clamping (u32::MAX) so body_len reflects the
         // real on-wire length, then reject oversized frames by the raw
         // wire_len — same non-clamping policy as
-        // connection::read_one_frame. Passing MAX_BODY_LEN+2 as the clamp
+        // the actor's frame reader. Passing MAX_BODY_LEN+2 as the clamp
         // would let decode_header_full silently truncate body_len for an
         // oversized header and yield a Frame that misrepresents the
         // on-wire bytes. (wire_len includes the 2-byte hc, hence +2.)
