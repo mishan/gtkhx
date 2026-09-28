@@ -82,7 +82,7 @@ looking for code in the wrong place.
 | **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (user editor wire senders), `tasks.c` |
 | **Sessions** | `session_registry.c` (the connection collection, the factory, and which connection has focus) |
 | **Tracker** | `tracker_event.c` (the `HxTrackerServer` signal payload). The wire codec is `hxproto::tracker` in hx-libs; the fetch is `hxnet`. |
-| **Media** | `inline_media*.c`, `gif_icons.c`, `gif_avatar.c`, `cicn.c`, `pict_embed.c`, `pict_magick.c`, `preview.c` |
+| **Media** | `inline_media*.c`, `gif_icons.c`, `cicn.c`, `pict_embed.c`, `pict_magick.c`, `preview.c` |
 | **Theming / chrome** | `gtkhx_theme.c`, `gtkhx_icon.c`, `gtkutil.c`, `gtkurl.c` |
 | **Messaging** | `msg.c` (private-message windows, broadcast render) |
 | **Voice** (optional) | `voice_bridge.c`, `voice_ptt_keyspec.c` |

@@ -21,7 +21,6 @@ gtkhx_sources = files(
   # (GIF avatar wins over the cicn id). See chat_avatar.h.
   'chat_avatar.c',
   'cicn.c',
-  'gif_avatar.c',
   'gif_icons.c',
   'commands.c',
   # connect.c ported to Rust (gtkhx-ui connect.rs); connect.h keeps the C ABI

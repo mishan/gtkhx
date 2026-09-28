@@ -35,9 +35,6 @@ use super::{after_paint, next_frame, warm_up, Report, Stats};
 extern "C" {
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
-    /// `gif_avatar.c` — where an ICON_GET reply's GIF lands.
-    fn gtkhx_avatar_update(htlc: *mut c_void, uid: u16, gif: *const u8, len: usize);
-    fn gtkhx_avatar_is_animated(htlc: *mut c_void, uid: u16) -> glib::ffi::gboolean;
     fn hx_conn_fd(htlc: *const c_void) -> i32;
 }
 
@@ -267,12 +264,12 @@ async fn measure(
     let gif = animated_icon();
     let t = glib::monotonic_time();
     for i in 0..n {
-        unsafe { gtkhx_avatar_update(htlc, uid_of(i), gif.as_ptr(), gif.len()) };
+        unsafe { crate::avatar::gtkhx_avatar_update(htlc, uid_of(i), gif.as_ptr(), gif.len()) };
     }
     let call = glib::monotonic_time() - t;
     let decoded = || {
         (0..n)
-            .filter(|&i| unsafe { gtkhx_avatar_is_animated(htlc, uid_of(i)) } != 0)
+            .filter(|&i| unsafe { crate::avatar::gtkhx_avatar_is_animated(htlc, uid_of(i)) } != 0)
             .count() as u32
     };
     let start = glib::monotonic_time();
@@ -314,6 +311,35 @@ async fn measure(
         last = now;
     }
     r.stats("animating", &Stats::of(&still));
+
+    // ---- what the animating icons cost at rest ---------------------------
+    // With nothing else going on: with the list on screen, where only the
+    // rows in view need to move, and with it hidden, where none do.
+    // The first row is in view, so its avatar moves; hidden, it holds.
+    let scroller = cv.parent();
+    let first = || crate::avatar::steps(htlc, uid_of(0));
+    if let Some(root) = cv.root().map(|w| w.upcast::<gtk::Widget>()) {
+        let before = first();
+        if let Some(rates) = super::media::sample(&root).await {
+            super::media::report(&mut r, "at rest, in view", &rates);
+        }
+        if first() == before {
+            r.line("  CHECK FAILED", "", "an avatar in view never moved");
+        }
+        if let Some(s) = &scroller {
+            s.set_visible(false);
+            // Let the tick that was due land before taking the frame.
+            glib::timeout_future(std::time::Duration::from_millis(300)).await;
+            let before = first();
+            if let Some(rates) = super::media::sample(&root).await {
+                super::media::report(&mut r, "at rest, hidden", &rates);
+            }
+            if first() != before {
+                r.line("  CHECK FAILED", "", "a hidden avatar kept moving");
+            }
+            s.set_visible(true);
+        }
+    }
 
     let adj = cv
         .parent()

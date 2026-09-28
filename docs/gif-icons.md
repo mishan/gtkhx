@@ -142,7 +142,7 @@ They reach the view through two `GtkhxSession` signals:
 `gif-icon-changed (htlc, uid)` for the broadcast (which triggers a
 re-fetch) and `gif-icon-data (htlc, uid, gif, len)` for fetched bytes.
 
-`src/gif_avatar.c` owns the avatar cache, keyed on `(connection, uid)` — a
+`gtkhx-ui`'s `avatar` module owns the avatar cache, keyed on `(connection, uid)` — a
 uid is only unique within a connection, so two servers can each have a user 5
 with a different face. **Decoding goes through the
 shared bounded, sandboxed image decoder** (see
@@ -165,12 +165,18 @@ about which icon a user "has".
 
 ### Animation
 
-Animated avatars are decoded to all their frames and played by **a
-single shared frame timer** — the whole cache advances on one 60 ms
-tick, and `gtkhx_avatar_get(htlc, uid)` simply returns whichever frame is
-current, so a cell needs no animation state of its own. The timer runs
-only while at least one animated, unpaused avatar exists and the global
-preference is on.
+Animated avatars are decoded to all their frames. Each user's avatar is
+one `GdkPaintable` (`gtkhx_avatar_get_paintable`) that the user-list cell
+draws, and a **single shared 60 ms timer** plays them: advancing a frame
+invalidates the paintable's contents, which redraws the cells showing it,
+so a cell needs no animation state of its own and never rebinds.
+
+Only avatars on screen move. A paintable records that it was drawn, the
+timer advances an avatar only once it has been drawn since its last frame,
+and the timer stops when a tick finds none that was — so a row scrolled
+out of view, a hidden panel or a minimized window costs nothing. The next
+draw of an animated avatar starts it again. The chat gutter takes a still
+texture of the current frame (`gtkhx_avatar_get`) when it draws a row.
 
 Three controls:
 

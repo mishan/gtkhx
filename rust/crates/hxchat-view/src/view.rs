@@ -2892,7 +2892,7 @@ impl HxChatView {
     /// otherwise.
     ///
     /// One shared tick for the whole view rather than a timer per image
-    /// — the same shape `gif_avatar.c` settled on for the user list, and
+    /// — the same shape the user list's avatars settled on, and
     /// for the same reason: dozens of independent timeouts is a lot of
     /// wakeups for something the frame clock already provides.
     ///

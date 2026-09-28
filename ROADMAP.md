@@ -170,10 +170,6 @@ These are real, reproduced, and unfixed. Each is described in full in its subjec
   never turned on against a server that would accept it. There is no server in the rig to
   test it against; HOPE support in hxd-ng would give it one.
   [docs/rust/networking.md](docs/rust/networking.md)
-- **Animated avatars have no offscreen gating.** The chat view animates only the images
-  on screen now, but the user list's avatar timer in `gif_avatar.c` still advances every
-  animated avatar whether or not its row is visible.
-  [docs/image-decoding.md](docs/image-decoding.md)
 - **Two voice defects against Janus's SFU**, both diagnosed as server-side. One is a
   publish-before-answer race, only reproducible with two real GUI processes — a client-side
   delay was tried and reverted. The other omits a spec-required attribute on renegotiation,

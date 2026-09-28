@@ -7,24 +7,18 @@
  * your option) any later version.
  */
 
-/* View-side per-uid GIF avatar cache (GIF-icons extension, Phase 10.B).
+/* The GIF avatar cache (the GIF-icons extension), implemented in Rust
+ * (gtkhx-ui's avatar module).
  *
- * Holds a decoded GdkTexture per user id — the source of truth the
- * user-list cells read at snapshot time (hx_user_cell_name). Decoding
- * runs through the bounded, sandboxed inline-media loader
- * (inline_media_decode_async, STRICT allowlist = JPEG/PNG/GIF), so a
- * hostile GIF can't stall the UI or escape the size/dimension caps.
+ * Holds each user's decoded avatar, the source the user-list cells and the
+ * chat view draw from. Decoding runs through the bounded inline-media
+ * loader, so a hostile GIF can't stall the UI or escape the size caps.
+ * Animated GIFs keep every frame; a shared timer animates the avatars that
+ * are on screen, subject to the "animate avatars" preference and a per-user
+ * pause (click an animated avatar, or the right-click menu).
  *
- * Phase 10.D: animated GIFs are decoded to all their frames and played
- * by a single shared frame timer (gtkhx_avatar_get returns the current
- * frame). Animation is gated on the global CFG_ANIMATE_AVATARS pref and
- * a per-user pause toggle (click an animated avatar, or the right-click
- * menu).
- *
- * This is a view-side module (it produces GdkTextures and pokes the
- * user-list views), so model code never calls it directly — the
- * GtkhxSession::gif-icon-data / gif-icon-changed handlers in gtkhx.c
- * are the entry points. */
+ * View-side: model code never calls it. The GtkhxSession gif-icon handlers
+ * in gtkhx.c are the entry points. */
 
 #ifndef GTKHX_GIF_AVATAR_H
 #define GTKHX_GIF_AVATAR_H
@@ -36,17 +30,21 @@
 struct htlc_conn;
 
 typedef struct _GdkTexture GdkTexture;
+typedef struct _GdkPaintable GdkPaintable;
 
-/* The frame of `uid`'s avatar to display *right now*, or NULL if none
- * is cached (or its decode is still in flight / failed). For an
- * animated avatar this is the current frame (advanced by the shared
- * timer); when animation is globally off it's always the first frame.
- * Borrowed — the cell refs it for the lifetime of the binding. */
+/* The frame of `uid`'s avatar to show right now, or NULL if there is none
+ * (or its decode is in flight, or failed). The first frame while animation
+ * is off. Borrowed. */
 GdkTexture *gtkhx_avatar_get (struct htlc_conn *htlc, guint16 uid);
+
+/* `uid`'s avatar as a paintable that animates itself while it is drawn,
+ * invalidating its contents at each frame; NULL if there is none. The same
+ * object for as long as the avatar is unchanged. Borrowed. */
+GdkPaintable *gtkhx_avatar_get_paintable (struct htlc_conn *htlc, guint16 uid);
 
 /* Ingest a raw GIF payload for `uid`. `len == 0` (or NULL `gif`) is a
  * clear — the cached avatar is dropped immediately. A non-empty
- * payload is decoded asynchronously; on success the texture replaces
+ * payload is decoded asynchronously; on success the avatar replaces
  * any cached one. Either way the affected user-list rows are refreshed
  * (synchronously for a clear, on decode completion otherwise). A
  * second call for the same uid cancels an in-flight decode. */
@@ -60,8 +58,6 @@ void gtkhx_avatar_update (struct htlc_conn *htlc, guint16 uid,
  * pair. This used to be a clear-all, which meant one server's user list going
  * away wiped every server's faces. */
 void gtkhx_avatar_clear_conn (struct htlc_conn *htlc);
-
-/* ---- Animation control (Phase 10.D) -------------------------------- */
 
 /* Global on/off for avatar animation (CFG_ANIMATE_AVATARS). When off,
  * every avatar shows its still first frame and the frame timer stops.
