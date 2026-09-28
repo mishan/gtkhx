@@ -145,119 +145,15 @@ hx_local_files_provider_get_label (HxLocalFilesProvider *self)
     return _ ("Local");
 }
 
-/* Read `path` via GIO and replace listing's contents. Errors are
- * surfaced via the "error" signal. `path` must be absolute.
- *
- * Blocking GIO rather than the async enumerate: normal directories list
- * in well under a millisecond, and async adds a cancellable/callback
- * dance. Huge ones still block (docs/performance.md) — the rows land in
- * one splice, since each items-changed costs the panel a sort insert and
- * a status update, but enumeration off the main thread is deferred. */
+/* gtkhx-ui files::local — reads `path` on a worker thread, then replaces
+ * the listing and emits "navigated" (or "error") on the main thread. */
+extern void hx_files_local_list (GObject *provider, GListStore *listing,
+                                 const char *path);
+
 static void
 do_list (HxLocalFilesProvider *self, const char *path)
 {
-    GFile *dir;
-    GFileEnumerator *enumer;
-    GFileInfo *info;
-    GError *err = NULL;
-    g_autoptr (GPtrArray) rows
-        = g_ptr_array_new_with_free_func (g_object_unref);
-
-    if (!path || !*path) {
-        g_signal_emit_by_name (self, "error", _ ("No path to list"));
-        return;
-    }
-
-    dir = g_file_new_for_path (path);
-    enumer = g_file_enumerate_children (
-        dir,
-        G_FILE_ATTRIBUTE_STANDARD_NAME
-        "," G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME
-        "," G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_STANDARD_SIZE
-        "," G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN
-        "," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE
-        "," G_FILE_ATTRIBUTE_TIME_MODIFIED,
-        G_FILE_QUERY_INFO_NONE, NULL, &err);
-
-    if (!enumer) {
-        char *msg = g_strdup_printf (_ ("Can't read %1$s: %2$s"), path,
-                                     err ? err->message : "unknown error");
-        g_signal_emit_by_name (self, "error", msg);
-        g_free (msg);
-        g_clear_error (&err);
-        g_object_unref (dir);
-        return;
-    }
-
-    while ((info = g_file_enumerator_next_file (enumer, NULL, &err))) {
-        const char *name;
-        const char *content_type;
-        GFileType type;
-        guint64 size;
-        gint64 mtime;
-        gboolean is_dir, is_hidden;
-        char *kind;
-        HxFileEntry *entry;
-
-        name = g_file_info_get_display_name (info);
-        if (!name) {
-            name = g_file_info_get_name (info);
-        }
-        type = g_file_info_get_file_type (info);
-        is_dir = (type == G_FILE_TYPE_DIRECTORY);
-        is_hidden = g_file_info_get_is_hidden (info);
-        size = is_dir ? 0 : g_file_info_get_size (info);
-        mtime = g_file_info_get_attribute_uint64 (
-            info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
-        content_type = g_file_info_get_content_type (info);
-
-        /* Skip dotfiles by default; matches most file managers'
-         * out-of-the-box behaviour. A "show hidden" toggle is a
-         * polish-item deferred. */
-        if (is_hidden) {
-            g_object_unref (info);
-            continue;
-        }
-
-        if (is_dir) {
-            kind = g_strdup (_ ("Folder"));
-        } else if (content_type) {
-            kind = g_content_type_get_description (content_type);
-            if (!kind) {
-                kind = g_strdup ("");
-            }
-        } else {
-            kind = g_strdup ("");
-        }
-
-        /* icon_id 0 → hx_file_entry_new picks the generic folder
-         * vs. file icon based on is_dir. Polish-item: map the GIO
-         * content_type to richer icons (image/audio/archive) the
-         * same way the remote provider does for Hotline FourCCs. */
-        entry = hx_file_entry_new (name, is_dir, size, (gint64)mtime, kind, 0);
-        g_ptr_array_add (rows, entry);
-        g_free (kind);
-        g_object_unref (info);
-    }
-
-    g_list_store_splice (
-        self->listing, 0,
-        g_list_model_get_n_items (G_LIST_MODEL (self->listing)), rows->pdata,
-        rows->len);
-
-    if (err) {
-        /* Partial-read error — keep what we got and tell the user. */
-        char *msg = g_strdup_printf (_ ("Error reading %1$s: %2$s"), path,
-                                     err->message);
-        g_signal_emit_by_name (self, "error", msg);
-        g_free (msg);
-        g_clear_error (&err);
-    }
-
-    g_object_unref (enumer);
-    g_object_unref (dir);
-
-    g_signal_emit_by_name (self, "navigated", self->current_path);
+    hx_files_local_list (G_OBJECT (self), self->listing, path);
 }
 
 void

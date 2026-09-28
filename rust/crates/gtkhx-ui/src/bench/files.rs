@@ -13,8 +13,9 @@
 //!   wiring is the local side's; the remote provider itself needs a live
 //!   connection to fill anything.
 //! - **Local**: a real temporary directory, listed by the local provider.
-//!   Its listing is synchronous, so the call time is time the UI is
-//!   frozen.
+//!   The folder is read on a worker thread, so the call returns at once;
+//!   what the UI still pays is building the rows and the splice when the
+//!   listing lands, which shows up as the longest frame while it runs.
 //!
 //! Filtering is not measured: the panel has no filter.
 //!
@@ -40,6 +41,8 @@ use super::{after_paint, next_frame, warm_up, Report, Stats};
 
 /// Frames sampled while scrolling.
 const SCROLL_FRAMES: usize = 120;
+/// Frames to wait for a local listing before calling it lost.
+const LIST_FRAMES: usize = 1200;
 /// Column positions, in the order the panel adds them.
 const COL_NAME: u32 = 0;
 const COL_SIZE: u32 = 1;
@@ -158,6 +161,12 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
     // The panel starts on an empty local directory, so its own initial
     // reload leaves an empty store for the remote-shaped populate to fill.
     let provider = Provider::local_at(&empty.to_string_lossy());
+    // Local listings land asynchronously; count them so a step can wait.
+    let listed = Rc::new(Cell::new(0u32));
+    let nav = provider.connect_navigated({
+        let listed = listed.clone();
+        move |_| listed.set(listed.get() + 1)
+    });
     let panel = Panel::new(&provider, false);
     let cv = panel.column_view().clone();
     let win = gtk::Window::new();
@@ -190,6 +199,14 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
         };
     }
     bail_if_closed!();
+    // The panel's own listing of the empty folder must land first, or it
+    // would replace the populate below.
+    if wait_listed(&cv, &listed, 1).await.is_none() {
+        bail_if_closed!();
+        r.line("CHECK FAILED", "", "the initial listing never arrived");
+        r.print();
+        return;
+    }
 
     // ---- remote-shaped populate -----------------------------------------
     let reply = file_list_reply(n);
@@ -258,14 +275,24 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
     r.stats("scroll", &Stats::of(&scroll));
 
     // ---- local listing --------------------------------------------------
+    let before = listed.get();
     let t = glib::monotonic_time();
     provider.navigate(&full.to_string_lossy());
-    let list = glib::monotonic_time() - t;
+    let call = glib::monotonic_time() - t;
+    let waited = wait_listed(&cv, &listed, before + 1).await;
+    bail_if_closed!();
+    let Some((until, longest)) = waited else {
+        r.line("CHECK FAILED", "", "the local listing never arrived");
+        r.print();
+        return;
+    };
     let t = glib::monotonic_time();
     let first_paint = after_paint(&cv).await - t;
     bail_if_closed!();
     let rows = listing.n_items();
-    r.ms("local listing", list, "synchronous, UI frozen");
+    r.ms("local listing", call, "navigate call, UI frozen");
+    r.ms("  until listed", call + until, "read on a worker");
+    r.ms("  longest frame", longest, "while listing");
     r.ms("  first paint", first_paint, "");
     if rows != n {
         r.line(
@@ -276,9 +303,28 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
     }
 
     r.print();
+    provider.disconnect(nav);
     drop((adj, listing, cv));
     panel.teardown();
     win.destroy();
+}
+
+/// Wait, frame by frame, until `listed` reaches `target`. Returns the time
+/// waited and the longest frame interval meanwhile, or `None` if it never
+/// got there.
+async fn wait_listed(cv: &gtk::ColumnView, listed: &Cell<u32>, target: u32) -> Option<(i64, i64)> {
+    let start = glib::monotonic_time();
+    let mut last = start;
+    let mut longest = 0;
+    for _ in 0..LIST_FRAMES {
+        if listed.get() >= target {
+            return Some((glib::monotonic_time() - start, longest));
+        }
+        let now = next_frame(cv).await;
+        longest = longest.max(now - last);
+        last = now;
+    }
+    None
 }
 
 #[cfg(test)]

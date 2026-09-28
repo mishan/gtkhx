@@ -12,12 +12,13 @@
 //! them, `panel` is one panel, `dialogs` and `dnd` are the browser's dialogs
 //! and drag and drop, `row` is what a row shows, and `complete` is the path
 //! entries' completion. The providers underneath are still C, reached through
-//! `provider`.
+//! `provider`; `local` is the local one's folder listing.
 
 mod browser;
 pub mod complete;
 mod dialogs;
 mod dnd;
+mod local;
 pub(crate) mod panel;
 pub(crate) mod provider;
 mod row;

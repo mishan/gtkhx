@@ -12,7 +12,9 @@ keyboard and active-panel state), `panel.rs` (one panel — path row,
 shows and how columns sort) and `complete.rs` (path completion). The providers
 underneath are still C, reached through `provider.rs`: `src/files_ops.c`
 (cross-panel copy), `src/files_local_provider.c` (GIO) and
-`src/files_remote_provider.c` (Hotline). The wire senders are Rust,
+`src/files_remote_provider.c` (Hotline). The local provider's folder listing
+is already Rust, `local.rs`: it reads the folder on a worker thread, so a
+large one no longer stalls the window. The wire senders are Rust,
 `hxhandlers::send::files`.
 
 ### A window, not a dock panel

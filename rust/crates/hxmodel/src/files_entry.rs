@@ -109,7 +109,7 @@ impl HxFileEntry {
     /// Construct a row. `icon_id == 0` means "caller didn't classify" and
     /// defaults to the generic file/folder icon per `is_dir` — the same
     /// fallback both providers relied on the C constructor for.
-    pub(crate) fn build(
+    pub fn build(
         name: &str,
         is_dir: bool,
         size: u64,

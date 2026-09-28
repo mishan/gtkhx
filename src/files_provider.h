@@ -10,10 +10,10 @@
  *   - Each provider owns a `current_path` (string) and a `listing`
  *     (GListModel of HxFileEntry). The panel widget reads both
  *     directly; do not duplicate them on the panel side.
- *   - `navigate` is async-by-name. Local provider implementations
- *     can satisfy synchronously; remote ones fire an RPC and
- *     complete on reply. Either way, the "navigated" signal fires
- *     after the listing has been refreshed with the new contents.
+ *   - `navigate` is async. The local provider reads the folder on
+ *     a worker thread; the remote one fires an RPC and completes on
+ *     reply. Either way, the "navigated" signal fires after the
+ *     listing has been refreshed with the new contents.
  *   - "error" fires when an operation fails; the payload is a
  *     human-readable, already-localised string suitable for an
  *     AdwToast.
