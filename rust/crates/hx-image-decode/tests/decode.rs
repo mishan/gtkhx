@@ -156,11 +156,6 @@ struct DecodeResult {
     error_code: u16,
     has_texture: bool,
     has_frames: bool,
-    /// Reserved for the animated-GIF round-trip test that
-    /// ships alongside the Tier 3 Janus work — keeps the field
-    /// in the struct so an animated fixture decode populates
-    /// it without churning the struct shape.
-    #[allow(dead_code)]
     frame_count: usize,
     width: i32,
     height: i32,
@@ -257,6 +252,12 @@ fn decode_fixture(path: &str) -> DecodeResult {
     std::env::set_var("GTKHX_GLYCIN_NO_SANDBOX", "1");
     let bytes = std::fs::read(fixture_path(path))
         .unwrap_or_else(|e| panic!("read fixture {}: {}", path, e));
+    decode_bytes(&bytes)
+}
+
+fn decode_bytes(bytes: &[u8]) -> DecodeResult {
+    #[cfg(target_os = "linux")]
+    std::env::set_var("GTKHX_GLYCIN_NO_SANDBOX", "1");
     // Spec defaults: caps NULL → glycin sees the spec floor.
     let token = unsafe {
         inline_media_decode_async(
@@ -382,6 +383,66 @@ fn gif_fixture_decodes() {
         assert!(r.has_texture);
         assert!(r.width > 0 && r.height > 0);
         assert_eq!(r.mime.as_deref(), Some("image/gif"));
+    });
+}
+
+/// A 16×8 GIF of two frames, 100 ms each, looping forever. The image
+/// data uses the uncompressed LZW form: with a 7-bit minimum code size
+/// every code is one byte, and a clear code every 100 pixels keeps the
+/// table from growing into 9-bit codes.
+fn looping_two_frame_gif() -> Vec<u8> {
+    const W: u16 = 16;
+    const H: u16 = 8;
+    let mut g = b"GIF89a".to_vec();
+    g.extend_from_slice(&W.to_le_bytes());
+    g.extend_from_slice(&H.to_le_bytes());
+    // Global color table, 128 entries.
+    g.extend_from_slice(&[0xf6, 0, 0]);
+    for c in 0..128u8 {
+        g.extend_from_slice(&[c.wrapping_mul(2), 255 - c.wrapping_mul(2), c]);
+    }
+    g.extend_from_slice(b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00");
+    for f in 0..2u8 {
+        g.extend_from_slice(&[0x21, 0xf9, 0x04, 0x00, 10, 0, 0, 0]);
+        g.push(0x2c);
+        g.extend_from_slice(&[0, 0, 0, 0]);
+        g.extend_from_slice(&W.to_le_bytes());
+        g.extend_from_slice(&H.to_le_bytes());
+        g.push(0);
+        let mut codes = Vec::new();
+        for p in 0..(W as usize * H as usize) {
+            if p % 100 == 0 {
+                codes.push(128); // clear
+            }
+            codes.push(1 + f + (p % 7) as u8);
+        }
+        codes.push(129); // end
+        g.push(7);
+        for block in codes.chunks(255) {
+            g.push(block.len() as u8);
+            g.extend_from_slice(block);
+        }
+        g.push(0);
+    }
+    g.push(0x3b);
+    g
+}
+
+/// A looping animation decodes to its own frames, once. glycin hands the
+/// first frame back again when an animation ends, and the decoder used to
+/// keep collecting until the frame cap — a two-frame icon came back as
+/// 256.
+#[test]
+fn looping_gif_decodes_each_frame_once() {
+    if !require_decoder() {
+        return;
+    }
+    run_in_main_thread(|| {
+        let r = decode_bytes(&looping_two_frame_gif());
+        assert_eq!(r.error_code, 0, "decode failed: {:?}", r.error_message);
+        assert!(r.has_frames, "a two-frame GIF decodes as an animation");
+        assert_eq!(r.frame_count, 2);
+        assert_eq!((r.width, r.height), (16, 8));
     });
 }
 

@@ -123,6 +123,11 @@ impl HxUserRow {
         self.imp().uid.get()
     }
 
+    /// The row's status bits (the wire `color`: idle, admin, …).
+    pub(crate) fn status_of(&self) -> u16 {
+        self.imp().color.get()
+    }
+
     /// Run `f` with a borrowed `const char *` to the row's cached display
     /// name (valid for the closure's duration). Lets the view hand the name
     /// to `create_msgwin` on activate without dereferencing `hx_user*`.

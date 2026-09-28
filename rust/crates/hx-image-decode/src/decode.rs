@@ -136,8 +136,6 @@ pub(crate) fn decode_async(
     cb: DecodeCallback,
     user_data: *mut c_void,
 ) -> Option<Rc<DecodeToken>> {
-    let started = Instant::now();
-
     // ---- Sync gate 1: empty input ------------------------------
     if bytes.is_empty() {
         let result = decoded_alloc();
@@ -208,16 +206,24 @@ pub(crate) fn decode_async(
         // across await points. The marker keeps it !Send-safe.
         let UserData(user_data) = user_data;
 
+        let _slot = crate::slots::acquire().await;
+        // Cancelled while it waited for a slot: skip the decode.
+        if token_for_future.cancelled.get() {
+            return;
+        }
+        // Timed from the slot, so the logs report the decode, not the queue.
+        let started = Instant::now();
+
         let result = decoded_alloc();
 
-        match run_decode(
+        match within_deadline(run_decode(
             gbytes,
             max_dim,
             max_pix,
             max_frames,
             max_duration_ms,
             sniffed,
-        )
+        ))
         .await
         {
             Ok(DecodeOk::Static(tex)) => {
@@ -279,6 +285,26 @@ pub(crate) fn decode_async(
     Some(token)
 }
 
+/// How long a decode may hold its slot. Every image decode in the app
+/// shares the few slots (see `crate::slots`), so a loader that never
+/// answers must not keep one for good — four such images would stall every
+/// decode after them. Generous: a real decode takes milliseconds.
+const DECODE_DEADLINE: Duration = Duration::from_secs(30);
+
+/// `fut`, or a failure once [`DECODE_DEADLINE`] passes. Dropping the glycin
+/// future abandons its call.
+async fn within_deadline(
+    fut: impl std::future::Future<Output = Result<DecodeOk, DecodeErr>>,
+) -> Result<DecodeOk, DecodeErr> {
+    crate::compat::glib::future_with_timeout(DECODE_DEADLINE, fut)
+        .await
+        .unwrap_or(Err(DecodeErr {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: "decode timed out",
+            detail: None,
+        }))
+}
+
 /// Outcome handed to [`decode_first_frame_async`]'s closure. Success carries the
 /// decoded first (or only) frame's texture; failure carries the spec
 /// MediaErrorCode (`1` too-large, `2` unsupported, `0` generic) plus a
@@ -290,8 +316,9 @@ pub enum ImageDecodeOutcome {
 
 /// Cancel handle for an in-flight [`decode_first_frame_async`]. Call
 /// [`cancel`](Self::cancel) to suppress the pending closure (e.g. the banner was
-/// cleared before the decode landed); the decode future still runs to
-/// completion, but drops its outcome + the closure instead of invoking it.
+/// cleared before the decode landed). A decode still waiting for a slot is
+/// skipped; one already running finishes, but drops its outcome + the
+/// closure instead of invoking it.
 /// Dropping the handle does *not* cancel — hold it for as long as cancellation
 /// matters.
 pub struct ImageDecodeHandle {
@@ -323,7 +350,6 @@ pub fn decode_first_frame_async(
     caps: HxInlineMediaCaps,
     on_done: impl FnOnce(ImageDecodeOutcome) + 'static,
 ) -> Option<ImageDecodeHandle> {
-    let started = Instant::now();
     // Any zero field falls back to the spec default, same as the C caps path.
     let caps = caps.with_defaults();
 
@@ -369,14 +395,21 @@ pub fn decode_first_frame_async(
     let max_duration_ms = caps.max_duration_ms;
 
     MainContext::default().spawn_local(async move {
-        let outcome = match run_decode(
+        let _slot = crate::slots::acquire().await;
+        // Cancelled while it waited for a slot: skip the decode.
+        if token_for_future.cancelled.get() {
+            return;
+        }
+        // Timed from the slot, so the logs report the decode, not the queue.
+        let started = Instant::now();
+        let outcome = match within_deadline(run_decode(
             gbytes,
             max_dim,
             max_pix,
             max_frames,
             max_duration_ms,
             sniffed,
-        )
+        ))
         .await
         {
             Ok(DecodeOk::Static(tex)) => {
@@ -543,14 +576,16 @@ async fn run_decode(
     // First frame is always present. `delay` distinguishes
     // static images (None) from animated ones (Some). Glycin
     // documents next_frame as looping back to frame 0 once the
-    // animation completes — we stop ourselves via max_frames /
-    // max_duration_ms rather than relying on a sentinel.
+    // animation completes, so the loop below stops when the frame
+    // index comes round again; max_frames / max_duration_ms bound
+    // a loader that reports no index.
     let first = image.next_frame().await.map_err(|ctx| DecodeErr {
         code: MEDIA_ERR_UNSUPPORTED,
         message: glycin_err_category(&ctx),
         detail: Some(format!("{ctx}")),
     })?;
     let first_delay = first.delay();
+    let first_index = frame_index(&first);
     // `adopt_texture` is the identity under glycin-v3 and bridges the 0.20
     // texture to the public 0.21 family under glycin-v2 (see below).
     let first_tex = adopt_texture(first.texture());
@@ -584,6 +619,12 @@ async fn run_decode(
             // truncation in telemetry.
             Err(_) => break,
         };
+        // Back at the start: the animation is complete. Without this a
+        // looping two-frame GIF was collected over and over up to the
+        // frame cap.
+        if first_index.is_some() && frame_index(&frame) == first_index {
+            break;
+        }
         let delay = match frame.delay() {
             Some(d) => d,
             // Glycin returned a frame with no delay after the
@@ -601,6 +642,17 @@ async fn run_decode(
     }
 
     Ok(DecodeOk::Animation(frames))
+}
+
+/// The loader's index for `frame`, when it reports one.
+#[cfg(all(target_os = "linux", feature = "glycin-v3"))]
+fn frame_index(frame: &glycin::Frame) -> Option<u64> {
+    frame.details().n_frame()
+}
+
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
+fn frame_index(frame: &glycin::Frame) -> Option<u64> {
+    frame.details().n_frame
 }
 
 /// Stand-in for the Linux backend when no glycin feature is selected.

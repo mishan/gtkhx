@@ -141,6 +141,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/bench/mod.rs',
   'crates/gtkhx-ui/src/bench/chat.rs',
   'crates/gtkhx-ui/src/bench/files.rs',
+  'crates/gtkhx-ui/src/bench/users.rs',
   'crates/gtkhx-ui/src/pchat.rs',
   'crates/gtkhx-ui/src/inline_media_dialog.rs',
   'crates/gtkhx-ui/src/user_info.rs',
@@ -275,6 +276,7 @@ rust_sources = files(
   'crates/hx-image-decode/src/ffi.rs',
   'crates/hx-image-decode/src/caps.rs',
   'crates/hx-image-decode/src/decode.rs',
+  'crates/hx-image-decode/src/slots.rs',
   'crates/hx-image-decode/src/ffi_result.rs',
   'crates/hx-image-decode/src/telemetry.rs',
   # CI feature-unification shim (crates/feature-unify) — pins Cargo

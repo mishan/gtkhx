@@ -47,6 +47,7 @@ pub mod compat;
 pub mod decode;
 pub mod ffi;
 pub(crate) mod ffi_result;
+pub(crate) mod slots;
 pub mod sniff;
 pub(crate) mod telemetry;
 
