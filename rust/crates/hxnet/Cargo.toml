@@ -157,3 +157,10 @@ tokio = { workspace = true, features = [
     "time",
     "test-util",
 ] }
+
+# Tier 2 loopback benchmarks (docs/performance.md): a plain binary rather
+# than criterion, since it reports throughput, per-thread CPU and latency
+# percentiles against a fake server of its own.
+[[bench]]
+name = "loopback"
+harness = false
