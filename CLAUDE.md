@@ -24,7 +24,7 @@ version"). Misha confirmed keep-as-is — don't strip the "or later" clause with
 meson setup build && meson compile -C build
 ```
 
-Floors: `gtk4 >= 4.10`, `libadwaita-1 >= 1.6`, `mullion-gtk-0 >= 0.1.0` (fetched and built
+Floors: `gtk4 >= 4.10`, `libadwaita-1 >= 1.6`, `mullion-gtk-0 >= 0.2.0` (fetched and built
 static by `subprojects/mullion-gtk.wrap` when not installed), `glib >= 2.56`, and
 rustc at the workspace MSRV (pinned to Debian stable's stock toolchain — see
 `rust/Cargo.toml`). The gtk-rs binding generation is pinned to match; **that pin is

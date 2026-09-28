@@ -100,7 +100,8 @@ Video, which the default layout leaves out) still lands somewhere sensible.
 ### Headers: the corner or the strip
 
 By default (`MLN_HEADER_CORNER`) a leaf has no tab strip: its tabs sit over
-its top corner, in sight while the pointer or the focus is in the pane —
+its top corner, in sight while the pointer or the focus is in the pane (or
+for good, below) —
 the panels' icons, a grip for a panel alone in its leaf, the front one's
 close button, and a button for its tab menu. **Pane Titles** in the main
 menu (`app.show-pane-titles`, saved as `[Chrome] pane-titles`) puts tab
@@ -111,7 +112,10 @@ visible widget tagged `.gtkhx-panel-actions` or `.gtkhx-pane-reserve` (an
 action row; the chat's subject line) on each of a panel's pages gets an end
 margin of the corner's width, from `mln_panes_get_corner_width`, redone on
 `::corner-changed` and whenever a page is added or an action row shown or
-hidden.
+hidden. Where the page on screen has such a widget, the corner covers
+nothing, so it stays in sight (`mln_panes_set_corner_pinned`) rather than
+only on hover and focus; a connection switch re-checks, since another page
+may have none.
 
 ### The tab menu
 

@@ -10,7 +10,7 @@
   - Very long folder names no longer break the path sent to the server
 - Docking
   - A new dock, built on mullion-gtk in place of libpanel; your layout carries over
-  - A pane's tabs sit in its top corner as icons, and show while you are in the pane; Pane Titles puts tab strips with titles back
+  - A pane's tabs sit in its top corner as icons, in sight where the pane has room for them and otherwise while you are in the pane; Pane Titles puts tab strips with titles back
   - Drag a tab onto another pane's tabs, onto a pane, or onto an edge to split it
   - Drag a tab out of the window to give it a window of its own, and back to dock it
   - Reset Layout puts the default layout back at once, rather than at the next launch

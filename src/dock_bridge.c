@@ -154,16 +154,24 @@ clear_corner_margins (GtkWidget *root)
 
 /* Room for the corner's controls on every one of a panel's pages -- each
  * connection has its own, with its own corner widget -- or, with the tabs
- * in a strip, none. */
+ * in a strip, none. And the corner kept in sight where the page on screen
+ * has made room for it, since it covers nothing there: an action row, or
+ * the chat's subject line, with the controls at its end. Elsewhere they
+ * would sit over content, and show only on hover and focus. */
 static void
 reserve_corner (const char *id)
 {
     GtkWidget *stack = pane_content (id);
     int margin = dock != NULL ? mln_panes_get_corner_width (dock, id) : 0;
+    GtkWidget *front;
 
     if (stack == NULL) {
         return;
     }
+    front = gtk_stack_get_visible_child (GTK_STACK (stack));
+    mln_panes_set_corner_pinned (dock, id,
+                                 front != NULL
+                                     && find_corner_widget (front) != NULL);
     clear_corner_margins (stack);
     if (margin <= 0) {
         return;
@@ -562,7 +570,11 @@ gtkhx_dock_has_page (const char *id, const char *page)
 gboolean
 gtkhx_dock_show_page (const char *id, const char *page)
 {
-    return hx_dock_pages_show (pane_content (id), page);
+    gboolean shown = hx_dock_pages_show (pane_content (id), page);
+
+    /* Another connection's page, with its own corner widget or none. */
+    reserve_corner (id);
+    return shown;
 }
 
 gboolean
