@@ -1023,3 +1023,27 @@ fn inline_code_carries_the_code_attr_for_the_renderer_to_tint() {
         p.spans
     );
 }
+
+#[test]
+fn rows_drawn_in_the_history_palette_are_history() {
+    let run = |t: &'static std::ffi::CStr, color: usize| crate::ffi::HxChatRun {
+        text: t.as_ptr(),
+        len: t.to_bytes().len() as i32,
+        color: color as i16,
+        attrs: 0,
+    };
+    let muted = crate::view::PAL_HISTORY_MUTED;
+    let (nick, body) = (run(c"<alice>", muted), run(c"hi", muted));
+    let kind = unsafe { crate::ffi::runs_kind(&nick, 1, &body, 1) };
+    assert!(kind.is_history(), "an all-muted row is history: {kind:?}");
+
+    let live_body = run(c"hi", 0);
+    let kind = unsafe { crate::ffi::runs_kind(&nick, 1, &live_body, 1) };
+    assert_eq!(kind, hxchat_layout::MessageKind::Live);
+    let kind = unsafe { crate::ffi::runs_kind(std::ptr::null(), 0, std::ptr::null(), 0) };
+    assert_eq!(
+        kind,
+        hxchat_layout::MessageKind::Live,
+        "an empty row isn't history"
+    );
+}

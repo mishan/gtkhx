@@ -8,7 +8,7 @@
 //! docs/performance.md for how the tiers divide.
 //!
 //! ```sh
-//! GTKHX_BENCH=startup,chat=20000,files=10000,users=1000,tracker=2000,media=50 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
+//! GTKHX_BENCH=startup,chat=20000,files=10000,users=1000,tracker=2000,media=50,history=1000 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 //! ```
 //!
 //! `GTKHX_BENCH` lists scenarios to run in order, each with an optional
@@ -29,6 +29,7 @@
 
 mod chat;
 mod files;
+mod history;
 mod media;
 mod startup;
 mod tracker;
@@ -74,10 +75,10 @@ fn parse_requests(spec: &str) -> Result<Vec<Request>, String> {
         };
         if !matches!(
             name,
-            "chat" | "files" | "users" | "tracker" | "media" | "startup"
+            "chat" | "files" | "users" | "tracker" | "media" | "startup" | "history"
         ) {
             return Err(format!(
-                "unknown scenario '{name}' (known: chat, files, users, tracker, media, startup)"
+                "unknown scenario '{name}' (known: chat, files, users, tracker, media, startup, history)"
             ));
         }
         out.push(Request {
@@ -146,6 +147,10 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
                 },
                 "startup" => match &chat_view {
                     Some(v) => startup::run(v, hooked).await,
+                    None => glib::g_warning!("gtkhx", "GTKHX_BENCH: no chat view to measure"),
+                },
+                "history" => match &chat_view {
+                    Some(v) => history::run(v, r.size.unwrap_or(1_000)).await,
                     None => glib::g_warning!("gtkhx", "GTKHX_BENCH: no chat view to measure"),
                 },
                 _ => unreachable!("parse_requests only admits known names"),

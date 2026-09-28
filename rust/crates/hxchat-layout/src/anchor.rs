@@ -99,9 +99,9 @@ impl AnchorResolver {
                 }
                 // The anchored row was trimmed or cleared out from under
                 // us. Falling back to the bottom is right: a trim only
-                // ever removes the *oldest* rows, so the content the user
-                // was looking at is gone and the least surprising place
-                // to be is where new messages arrive.
+                // ever removes the oldest live rows, so the content the
+                // user was looking at is gone and the least surprising
+                // place to be is where new messages arrive.
                 None => max,
             },
         }

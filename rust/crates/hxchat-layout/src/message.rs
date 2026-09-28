@@ -52,6 +52,18 @@ pub enum MessageKind {
     System,
 }
 
+impl MessageKind {
+    /// Part of a chat-history block: backfilled messages and the rows that
+    /// frame them. These don't count against the scrollback cap — the user
+    /// asked for them — and are never trimmed to make room for live rows.
+    pub fn is_history(&self) -> bool {
+        matches!(
+            self,
+            MessageKind::History { .. } | MessageKind::Divider | MessageKind::LoadMore(_)
+        )
+    }
+}
+
 /// Which icon to draw in a speaker's gutter.
 ///
 /// Resolved by the view against infrastructure that already exists and

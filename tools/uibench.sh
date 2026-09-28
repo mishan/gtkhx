@@ -3,7 +3,7 @@
 #
 #   tools/uibench.sh [scenarios] [repeats]
 #
-# `scenarios` is the GTKHX_BENCH list, default "startup,chat=20000,files=10000,users=1000,tracker=2000,media=50".
+# `scenarios` is the GTKHX_BENCH list, default "startup,chat=20000,files=10000,users=1000,tracker=2000,media=50,history=1000".
 # Repeats default to 3 and matter more than they look: frame timings on a
 # live compositor are noisy, and one run can't tell a real difference from
 # scheduler luck. Read the spread, not the single number.
@@ -18,7 +18,7 @@
 
 set -eu
 
-SCENARIOS="${1:-startup,chat=20000,files=10000,users=1000,tracker=2000,media=50}"
+SCENARIOS="${1:-startup,chat=20000,files=10000,users=1000,tracker=2000,media=50,history=1000}"
 REPEATS="${2:-3}"
 BIN="${GTKHX_BIN:-./build/src/gtkhx}"
 
