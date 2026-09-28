@@ -390,7 +390,47 @@ impl HtxfInner {
             HtxfInner::Tls(c) => c.inner.sock.try_clone().ok(),
         }
     }
+
+    /// End the sending side and wait, up to `timeout`, for the peer to
+    /// close. Under TLS, `close_notify` goes first. Whatever the peer
+    /// sends meanwhile is read and discarded, so nothing is left unread
+    /// when the socket closes: closing with unread data resets the
+    /// connection, and a reset makes the peer's kernel drop whatever it
+    /// hasn't read yet — the tail of an upload. `Ok` once the peer has
+    /// closed.
+    fn finish_send(&mut self, timeout: Duration) -> io::Result<()> {
+        let sock = match self {
+            HtxfInner::Plain(c) => &c.inner,
+            HtxfInner::Tls(c) => {
+                c.inner.conn.send_close_notify();
+                c.inner.flush()?;
+                &c.inner.sock
+            }
+        };
+        sock.shutdown(Shutdown::Write)?;
+        let deadline = std::time::Instant::now() + timeout;
+        let mut sink = [0u8; 4096];
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            sock.set_read_timeout(Some(left))?;
+            // The raw socket, under TLS too: nothing read here is used.
+            match (&*sock).read(&mut sink) {
+                Ok(0) => return Ok(()),
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
 }
+
+/// How long [`hxnet_htxf_finish_send`] waits for the server to close.
+/// Servers close an upload's subchannel once they have read it all, which
+/// a send's end makes certain; this only bounds a server that doesn't.
+const FINISH_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Thread-safe cancellation token for one HTXF subchannel — the
 /// foundation for cooperative transfer cancel (Phase R3 X1,
@@ -890,6 +930,40 @@ pub unsafe extern "C" fn hxnet_htxf_set_read_timeout(
     }
 }
 
+/// Finish an upload on `handle` before it is closed: end the sending
+/// side (TLS `close_notify`, then a TCP half-close) and wait for the
+/// server to close, reading and discarding anything it sends meanwhile.
+///
+/// Closing straight after the last write loses the end of an upload
+/// whenever the client has unread bytes from the server — a TLS 1.3
+/// server's session tickets are enough: the close resets the connection
+/// instead of ending it, and the server's kernel drops whatever the
+/// server hadn't read yet. Call it from the transfer worker after a
+/// successful send, not the main thread: it waits on the server, up to
+/// ten seconds for one that never closes. An abort cuts it short.
+///
+/// Returns `0` once the server has closed, `-1` otherwise. `-1` isn't
+/// necessarily a lost upload: the send worker writes a 16-byte trailer the
+/// declared size doesn't count, so a server that stops reading at that
+/// size and closes resets the connection over it.
+///
+/// # Safety
+/// `handle` must be a live handle from [`hxnet_htxf_connect`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_finish_send(handle: *mut HtxfConn) -> c_int {
+    if handle.is_null() {
+        return -1;
+    }
+    let h = &mut *handle;
+    if h.is_aborted() {
+        return -1;
+    }
+    match h.inner.finish_send(FINISH_SEND_TIMEOUT) {
+        Ok(()) if !h.is_aborted() => 0,
+        _ => -1,
+    }
+}
+
 /// Pack the HTXF subchannel handshake preamble into `buf[..cap]` (S1.1 — the
 /// Rust home of the retired C `hx_htxf_subchannel_pack_preamble`). Delegates to
 /// [`hxproto::build::build_htxf_preamble`], the single source of truth for
@@ -1247,6 +1321,68 @@ mod tests {
 
         unsafe { hxnet_htxf_close(h) };
         server.join().unwrap();
+    }
+
+    /// An upload's last bytes must reach the server even when the client
+    /// has something unread from it — a TLS 1.3 server's session tickets,
+    /// say. Closing a socket with unread data resets the connection, and
+    /// the reset makes the server's kernel drop what it hasn't read yet:
+    /// the end of the upload. Here the server sends a few bytes the client
+    /// never reads, and reads nothing itself until the upload is all
+    /// written, so none of it has been read when the client finishes.
+    #[test]
+    fn an_upload_survives_unread_bytes_from_the_server() {
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+        use std::thread;
+
+        // Small enough to sit in the socket buffers unread.
+        const TOTAL: usize = 256 * 1024;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            sock.write_all(b"something the client never reads").unwrap();
+            go_rx.recv().unwrap();
+            let mut got = 0usize;
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match sock.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => got += n,
+                }
+            }
+            got
+        });
+
+        // Written on a thread of its own, with the server told to start
+        // reading if it takes long: where the socket buffers can't hold the
+        // upload, the writes would otherwise wait on a server that isn't
+        // reading, and the test would hang rather than fail.
+        let stream = TcpStream::connect(addr).unwrap();
+        let writer = thread::spawn(move || {
+            let mut conn = HtxfConn::new_plain_for_test(stream);
+            let chunk = vec![0x5au8; 0xf000];
+            let mut sent = 0;
+            while sent < TOTAL {
+                let n = chunk.len().min(TOTAL - sent);
+                sent += conn.inner.write(&chunk[..n]).unwrap();
+            }
+            conn
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !writer.is_finished() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        go_tx.send(()).unwrap();
+        let conn = writer.join().unwrap();
+        let h = Box::into_raw(Box::new(conn));
+        let finished = unsafe { hxnet_htxf_finish_send(h) };
+        unsafe { hxnet_htxf_close(h) };
+
+        assert_eq!(server.join().unwrap(), TOTAL, "the whole upload arrived");
+        assert_eq!(finished, 0, "the server closed after reading it");
     }
 
     // A worker parked in a blocking read of a stalled transfer must be

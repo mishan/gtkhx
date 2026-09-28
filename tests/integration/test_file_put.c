@@ -44,6 +44,11 @@
 #include "xfers_recv.h"
 #include "integration_harness.h"
 
+/* hxnet/src/htxf.rs — what the upload workers call between the last write
+ * and the close, so the server reads the whole upload before the socket
+ * goes away. */
+extern int hxnet_htxf_finish_send (HtxfConn *handle);
+
 /* HxnetXferParams progress shape (user_data + byte delta) for the Rust
  * hxnet_xfer_file_{recv,send}_one paths. */
 static void
@@ -228,6 +233,8 @@ test_file_put_round_trip (void)
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_file_send_one (&params);
     g_assert_cmpint (rv, ==, 0);
+    /* The server closes once it has the whole upload. */
+    g_assert_cmpint (hxnet_htxf_finish_send ((HtxfConn *)htxf.hx), ==, 0);
     hxnet_htxf_close ((HtxfConn *)htxf.hx);
 
     /* Round-trip: download it back and assert byte-exact. mhxd commits
