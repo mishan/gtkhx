@@ -10,11 +10,13 @@
 //! **What this client receives is decided here.** The server delivers no
 //! video until asked (Video Subscribe, 610), and asks are the complete
 //! set, so the panel is the one place that computes it: while its page is
-//! mapped, every publication in the room; while hidden — another tab,
-//! a collapsed dock, the window withdrawn — nothing. A collapsed panel
-//! costs no bandwidth, which is the spec's reason 610 takes a whole set.
-//! Changes are debounced so a burst of 611s and layout churn costs one
-//! request, and the state machine drops a set that hasn't changed.
+//! mapped, the publications whose tiles are in view or about to be; while
+//! hidden — another tab, a collapsed dock, the window withdrawn — nothing.
+//! A collapsed panel or a tile scrolled away costs no bandwidth and no
+//! decoding, which is the spec's reason 610 takes a whole set. Changes are
+//! debounced so a burst of 611s costs one request, scrolling and resizes
+//! send one set once the view comes to rest, and the state machine drops a
+//! set that hasn't changed.
 //!
 //! The runtime is reached through its Rust API directly: `gtkhx-ui` links
 //! it, and the panel is main-thread code talking to a main-thread object.
@@ -42,6 +44,15 @@ use crate::tr::tr;
 
 /// How long the subscription set may settle before it goes out.
 const SUBSCRIBE_DEBOUNCE_MS: u64 = 150;
+
+/// How far outside the view a tile starts being received, in view
+/// heights. A stream takes a renegotiation and a keyframe to appear, so it
+/// is asked for before it scrolls in.
+const RECEIVE_AHEAD: f64 = 0.5;
+/// How far outside the view a tile being received is let go, in view
+/// heights. Wider than `RECEIVE_AHEAD`, so scrolling back and forth
+/// across one edge doesn't renegotiate each time.
+const RECEIVE_BEHIND: f64 = 1.5;
 
 extern "C" {
     fn toolbar_present_panel(
@@ -198,6 +209,9 @@ struct PanelInner {
     status: adw::StatusPage,
     stage: gtk::Box,
     grid: gtk::FlowBox,
+    /// The scrolled content, stage and grid, and its window.
+    tiles_box: gtk::Box,
+    scroll: gtk::ScrolledWindow,
     tiles: RefCell<HashMap<StreamKey, Tile>>,
     /// The runtime this panel has an observer on, by id (0 for none).
     observing: Cell<u64>,
@@ -253,7 +267,7 @@ impl PanelInner {
 
     fn on_notice(self: &Rc<Self>, rt: &VoiceRuntime, notice: &VideoNotice) {
         match notice {
-            VideoNotice::Frames => self.pull_frames(rt),
+            VideoNotice::Frames => self.pull_frames(|key| rt.take_video_frame(key)),
             VideoNotice::StreamEnded(key) => {
                 if let Some(t) = self.tiles.borrow().get(key) {
                     t.picture.set_paintable(None::<&gdk::Paintable>);
@@ -265,9 +279,10 @@ impl PanelInner {
         }
     }
 
-    fn pull_frames(&self, rt: &VoiceRuntime) {
+    /// Show the newest frame of every tile that has one waiting.
+    fn pull_frames(&self, take: impl Fn(StreamKey) -> Option<VideoFrame>) {
         for (key, tile) in self.tiles.borrow().iter() {
-            if let Some(frame) = rt.take_video_frame(*key) {
+            if let Some(frame) = take(*key) {
                 tile.show(&frame);
             }
         }
@@ -317,6 +332,23 @@ impl PanelInner {
             }
         }
 
+        let has_tiles = self.set_tiles(&want);
+        if !has_tiles {
+            self.status.set_description(Some(&if !video {
+                tr("This server doesn't support video.")
+            } else if !in_room {
+                tr("Join voice to see who has a camera or screen on.")
+            } else {
+                tr("Nobody in this voice chat has a camera or screen on.")
+            }));
+        }
+        self.schedule_subscribe();
+    }
+
+    /// Make the tiles exactly `want` — (stream, paused, label) — and show
+    /// them, or the status page when there are none. Returns whether there
+    /// are any.
+    fn set_tiles(&self, want: &[(StreamKey, bool, String)]) -> bool {
         {
             let mut tiles = self.tiles.borrow_mut();
             tiles.retain(|key, tile| {
@@ -332,7 +364,7 @@ impl PanelInner {
                 }
                 keep
             });
-            for (key, paused, label) in &want {
+            for (key, paused, label) in want {
                 let tile = tiles.entry(*key).or_insert_with(|| {
                     let t = Tile::new(key.kind);
                     // The grid sorts on this; see tile_uid.
@@ -358,19 +390,9 @@ impl PanelInner {
                 .keys()
                 .any(|k| k.kind == VideoKind::Screen),
         );
-        if has_tiles {
-            self.stack.set_visible_child_name("tiles");
-        } else {
-            self.status.set_description(Some(&if !video {
-                tr("This server doesn't support video.")
-            } else if !in_room {
-                tr("Join voice to see who has a camera or screen on.")
-            } else {
-                tr("Nobody in this voice chat has a camera or screen on.")
-            }));
-            self.stack.set_visible_child_name("empty");
-        }
-        self.schedule_subscribe();
+        self.stack
+            .set_visible_child_name(if has_tiles { "tiles" } else { "empty" });
+        has_tiles
     }
 
     /// `uid` in room `cid` changed nick: rename their tiles in place. A
@@ -393,6 +415,21 @@ impl PanelInner {
         if self.subscribe_timer.borrow().is_some() {
             return;
         }
+        self.arm_subscribe();
+    }
+
+    /// Queue the receive set once the view has stopped moving: every
+    /// call puts it off again, so a scroll or a fling sends one set where
+    /// it comes to rest rather than one per debounce along the way. Each
+    /// set that differs costs the server a renegotiation.
+    fn schedule_subscribe_settled(self: &Rc<Self>) {
+        if let Some(id) = self.subscribe_timer.borrow_mut().take() {
+            id.remove();
+        }
+        self.arm_subscribe();
+    }
+
+    fn arm_subscribe(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         let id = glib::timeout_add_local_once(
             std::time::Duration::from_millis(SUBSCRIBE_DEBOUNCE_MS),
@@ -406,10 +443,31 @@ impl PanelInner {
         *self.subscribe_timer.borrow_mut() = Some(id);
     }
 
-    /// Everything the room publishes while this page is on screen;
-    /// nothing while it isn't. Paused publications are included: the
-    /// subscription survives the pause, and resuming then costs no
-    /// renegotiation.
+    /// Where each tile sits in the scrolled content, top and bottom, and
+    /// the span in view. `None` for what isn't laid out yet.
+    fn layout(&self) -> (Vec<(StreamKey, Option<Span>)>, Option<Span>) {
+        let adj = self.scroll.vadjustment();
+        let view = (adj.page_size() > 0.0).then(|| (adj.value(), adj.value() + adj.page_size()));
+        let tiles = self
+            .tiles
+            .borrow()
+            .iter()
+            .map(|(key, tile)| {
+                let span = tile
+                    .root
+                    .compute_bounds(&self.tiles_box)
+                    .filter(|b| b.height() > 0.0)
+                    .map(|b| (f64::from(b.y()), f64::from(b.y() + b.height())));
+                (*key, span)
+            })
+            .collect();
+        (tiles, view)
+    }
+
+    /// The publications in the room while this page is on screen, less
+    /// those whose tiles are scrolled well away (see `in_reach`); nothing
+    /// while it isn't. Paused publications are included: the subscription
+    /// survives the pause, and resuming then costs no renegotiation.
     fn send_subscriptions(&self) {
         let sess = self.sess();
         let Some(rt) = (unsafe { runtime(sess) }) else {
@@ -423,9 +481,29 @@ impl PanelInner {
         };
         let visible = self.root.upgrade().is_some_and(|r| r.is_mapped());
         let streams: Vec<Stream> = if visible {
+            let receiving: Vec<StreamKey> = rt
+                .video_subscriptions()
+                .iter()
+                .map(|s| StreamKey {
+                    user_id: s.user_id,
+                    kind: s.kind,
+                })
+                .collect();
+            let (tiles, view) = self.layout();
+            let reach = in_reach(&tiles, view, &receiving);
+            let tiled = |key: &StreamKey| tiles.iter().any(|(k, _)| k == key);
             rt.video_publications()
                 .into_iter()
                 .filter(|p| p.user_id != me)
+                .filter(|p| {
+                    let key = StreamKey {
+                        user_id: p.user_id,
+                        kind: p.kind,
+                    };
+                    // A publication with no tile yet is one the next
+                    // refresh adds: receive it rather than wait.
+                    !tiled(&key) || reach.contains(&key)
+                })
                 .map(|p| Stream {
                     user_id: p.user_id,
                     kind: p.kind,
@@ -438,11 +516,41 @@ impl PanelInner {
     }
 }
 
+/// A vertical extent in the scrolled content: top, bottom.
+type Span = (f64, f64);
+
+/// Which of `tiles` to receive: those within `RECEIVE_AHEAD` view heights
+/// of `view`, and those already in `receiving` within `RECEIVE_BEHIND`.
+/// Each tile comes with its top and bottom in the scrolled content; one
+/// not laid out yet, or a view not laid out yet, means receive it — the
+/// first layout then narrows the set.
+fn in_reach(
+    tiles: &[(StreamKey, Option<Span>)],
+    view: Option<Span>,
+    receiving: &[StreamKey],
+) -> Vec<StreamKey> {
+    tiles
+        .iter()
+        .filter(|(key, span)| {
+            let (Some((top, bottom)), Some((v_top, v_bottom))) = (*span, view) else {
+                return true;
+            };
+            let margin = if receiving.contains(key) {
+                RECEIVE_BEHIND
+            } else {
+                RECEIVE_AHEAD
+            } * (v_bottom - v_top);
+            bottom > v_top - margin && top < v_bottom + margin
+        })
+        .map(|(key, _)| *key)
+        .collect()
+}
+
 fn sort_tiles(a: &gtk::FlowBoxChild, b: &gtk::FlowBoxChild) -> gtk::Ordering {
     tile_uid(a).cmp(&tile_uid(b)).into()
 }
 
-/// The user a grid child's tile shows, from the name `refresh` gave it.
+/// The user a grid child's tile shows, from the name `set_tiles` gave it.
 fn tile_uid(child: &gtk::FlowBoxChild) -> u16 {
     child
         .child()
@@ -451,6 +559,14 @@ fn tile_uid(child: &gtk::FlowBoxChild) -> u16 {
 }
 
 fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
+    let (root, inner) = build_panel(dock::key_for_session(sess));
+    inner.refresh();
+    (root, inner)
+}
+
+/// The panel's widgets and state for connection `conn`, before it has
+/// read the room.
+fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.set_hexpand(true);
     root.set_vexpand(true);
@@ -498,20 +614,42 @@ fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     root.append(&stack);
 
     let inner = Rc::new(PanelInner {
-        conn: dock::key_for_session(sess),
+        conn,
         root: root.downgrade(),
         stack,
         status,
         stage,
         grid,
+        tiles_box,
+        scroll,
         tiles: RefCell::new(HashMap::new()),
         observing: Cell::new(0),
         subscribe_timer: RefCell::new(None),
     });
 
     // Visibility is the subscription policy: mapping and unmapping the
-    // page (tab switches, dock collapse, a withdrawn window) recompute it.
+    // page (tab switches, dock collapse, a withdrawn window) recompute it,
+    // and so do scrolling and anything that changes the scrolled extent —
+    // a resize, tiles coming and going.
     {
+        let adj = inner.scroll.vadjustment();
+        let weak = Rc::downgrade(&inner);
+        adj.connect_value_changed(move |_| {
+            if let Some(p) = weak.upgrade() {
+                p.schedule_subscribe_settled();
+            }
+        });
+        // The vertical extent changes with the rows; the horizontal one
+        // catches a width change that reflows tiles between rows without
+        // changing how many there are.
+        for adj in [adj, inner.scroll.hadjustment()] {
+            let weak = Rc::downgrade(&inner);
+            adj.connect_changed(move |_| {
+                if let Some(p) = weak.upgrade() {
+                    p.schedule_subscribe_settled();
+                }
+            });
+        }
         let weak = Rc::downgrade(&inner);
         root.connect_map(move |_| {
             if let Some(p) = weak.upgrade() {
@@ -545,8 +683,45 @@ fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     // The panel owns itself through the widget: dropping the last strong
     // ref with the widget is what unregisters its observer.
     unsafe { root.set_data("video-panel-state", inner.clone()) };
-    inner.refresh();
     (root, inner)
+}
+
+/// A Video panel tied to no connection, for the UI benchmark: it shows
+/// the tiles it is given and the frames it is fed, through the code a
+/// room's streams go through.
+pub(crate) struct Standalone {
+    pub(crate) root: gtk::Box,
+    inner: Rc<PanelInner>,
+}
+
+impl Standalone {
+    pub(crate) fn new() -> Standalone {
+        // Serial 0 is no connection: no runtime is ever found for it, and
+        // no session's refresh reaches it.
+        let (root, inner) = build_panel(0);
+        Standalone { root, inner }
+    }
+
+    /// Show a tile, unpaused, for each (stream, label).
+    pub(crate) fn set_tiles(&self, tiles: &[(StreamKey, String)]) {
+        let want: Vec<_> = tiles.iter().map(|(k, l)| (*k, false, l.clone())).collect();
+        self.inner.set_tiles(&want);
+    }
+
+    /// What a frames notice does: show each tile's newest frame.
+    pub(crate) fn pull_frames(&self, take: impl Fn(StreamKey) -> Option<VideoFrame>) {
+        self.inner.pull_frames(take);
+    }
+
+    /// Whether there is a tile for `key`.
+    pub(crate) fn has_tile(&self, key: StreamKey) -> bool {
+        self.inner.tiles.borrow().contains_key(&key)
+    }
+
+    /// The picture `key`'s tile shows, if any.
+    pub(crate) fn paintable(&self, key: StreamKey) -> Option<gdk::Paintable> {
+        self.inner.tiles.borrow().get(&key)?.picture.paintable()
+    }
 }
 
 /// Open (or raise) the Video panel for `sess`.
@@ -678,6 +853,139 @@ pub(crate) mod tests {
 
         relabel(&tiles, 0, "Me");
         assert_eq!(name(0, VideoKind::Camera), "You");
+    }
+
+    /// A panel shows the tiles it is given, each takes the frame waiting
+    /// for it and no other, and an empty set brings the status page back.
+    /// Driven by `crate::gtk_tests`.
+    pub(crate) fn check_panel_shows_tiles_and_frames() {
+        let panel = Standalone::new();
+        let key = |uid| StreamKey {
+            user_id: uid,
+            kind: VideoKind::Camera,
+        };
+        let screen = StreamKey {
+            user_id: 2,
+            kind: VideoKind::Screen,
+        };
+        panel.set_tiles(&[
+            (key(1), "one".into()),
+            (key(2), "two".into()),
+            (screen, "two".into()),
+        ]);
+        assert_eq!(
+            panel.inner.stack.visible_child_name().as_deref(),
+            Some("tiles")
+        );
+        assert!(panel.inner.stage.is_visible());
+
+        let frame = VideoFrame {
+            width: 8,
+            height: 6,
+            stride: 32,
+            bytes: glib::Bytes::from_owned(vec![255u8; 8 * 6 * 4]),
+        };
+        panel.pull_frames(|k| (k == key(2)).then(|| frame.clone()));
+        let shown = panel.paintable(key(2)).expect("tile 2 took its frame");
+        assert_eq!((shown.intrinsic_width(), shown.intrinsic_height()), (8, 6));
+        assert!(panel.paintable(key(1)).is_none());
+        assert!(panel.paintable(screen).is_none());
+
+        panel.set_tiles(&[(key(1), "one".into())]);
+        assert!(panel.paintable(key(2)).is_none(), "tile 2 went");
+        assert!(!panel.inner.stage.is_visible());
+        panel.set_tiles(&[]);
+        assert_eq!(
+            panel.inner.stack.visible_child_name().as_deref(),
+            Some("empty")
+        );
+    }
+
+    fn cam(uid: u16) -> StreamKey {
+        StreamKey {
+            user_id: uid,
+            kind: VideoKind::Camera,
+        }
+    }
+
+    /// Tiles in view and just ahead of it are received, those well away
+    /// are not, and one already received is kept a little further out.
+    #[test]
+    fn in_reach_takes_the_view_and_a_margin() {
+        // A 100-high view at 1000; tiles 100 high.
+        let view = Some((1000.0, 1100.0));
+        let at = |uid, top: f64| (cam(uid), Some((top, top + 100.0)));
+        let tiles = [
+            at(1, 1000.0), // in view
+            at(2, 1120.0), // below, inside the look-ahead
+            at(3, 1200.0), // below, past it
+            at(4, 770.0),  // above, past the look-ahead, inside the hold
+            at(5, 500.0),  // above, past both
+            (cam(6), None),
+        ];
+        let got = in_reach(&tiles, view, &[]);
+        assert_eq!(got, [cam(1), cam(2), cam(6)]);
+        let got = in_reach(&tiles, view, &[cam(3), cam(4), cam(5)]);
+        assert_eq!(got, [cam(1), cam(2), cam(3), cam(4), cam(6)]);
+        // No view yet: everything.
+        assert_eq!(in_reach(&tiles, None, &[]).len(), tiles.len());
+    }
+
+    /// A laid-out panel reports its tiles where they are: with the view at
+    /// the top, the bottom tiles are out of reach, and scrolled to the
+    /// bottom, the top ones. Driven by `crate::gtk_tests`.
+    pub(crate) fn check_reach_follows_the_scroll() {
+        let panel = Standalone::new();
+        let tiles: Vec<_> = (1..=24).map(|uid| (cam(uid), uid.to_string())).collect();
+        panel.set_tiles(&tiles);
+        let win = gtk::Window::new();
+        // One tile a row, a little over one row in view.
+        win.set_default_size(260, 220);
+        win.set_child(Some(&panel.root));
+        win.present();
+        let adj = panel.inner.scroll.vadjustment();
+        let ctx = glib::MainContext::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while (adj.page_size() <= 0.0 || adj.upper() <= adj.page_size())
+            && std::time::Instant::now() < deadline
+        {
+            ctx.iteration(false);
+        }
+        assert!(
+            adj.upper() > 3.0 * adj.page_size(),
+            "the tiles overflow the view"
+        );
+
+        let reach = |receiving: &[StreamKey]| {
+            let (tiles, view) = panel.inner.layout();
+            in_reach(&tiles, view, receiving)
+        };
+        let top = reach(&[]);
+        assert!(top.contains(&cam(1)));
+        assert!(!top.contains(&cam(24)));
+
+        adj.set_value(adj.upper() - adj.page_size());
+        let bottom = reach(&[]);
+        assert!(bottom.contains(&cam(24)));
+        assert!(!bottom.contains(&cam(1)));
+
+        // A width change is a reason to look again even when the row
+        // count, and so the vertical extent, stays put: in a wider grid
+        // tiles can move between rows without adding one. Here the grid
+        // stays one tile wide.
+        let timer = || panel.inner.subscribe_timer.borrow().is_some();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while timer() && std::time::Instant::now() < deadline {
+            ctx.iteration(true);
+        }
+        assert!(!timer(), "the pending set went out");
+        win.set_default_size(300, 220);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !timer() && std::time::Instant::now() < deadline {
+            ctx.iteration(false);
+        }
+        assert!(timer(), "a resize schedules the set");
+        win.destroy();
     }
 
     /// Camera tiles sit in user order whatever order they arrive in, this

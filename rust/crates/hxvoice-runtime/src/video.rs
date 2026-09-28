@@ -137,8 +137,10 @@ struct Slot {
 /// The newest frame of every stream, shared between the appsinks'
 /// streaming threads and the main thread. A stream keeps one frame; a
 /// UI that falls behind skips frames rather than queueing them.
+///
+/// Public so the UI benchmark can deliver frames the way the appsinks do.
 #[derive(Default)]
-pub(crate) struct FrameStore {
+pub struct FrameStore {
     slots: Mutex<HashMap<StreamKey, Slot>>,
     pending: AtomicBool,
 }
@@ -147,7 +149,7 @@ impl FrameStore {
     /// Store `frame` as the newest for `key`. Returns true when the
     /// caller should schedule a main-loop notification — i.e. none is
     /// already on its way.
-    pub(crate) fn put(&self, key: StreamKey, frame: VideoFrame) -> bool {
+    pub fn put(&self, key: StreamKey, frame: VideoFrame) -> bool {
         if let Ok(mut slots) = self.slots.lock() {
             let slot = slots.entry(key).or_default();
             slot.frame = Some(frame);
@@ -159,12 +161,12 @@ impl FrameStore {
 
     /// Called on the main thread when the notification runs, before
     /// observers are told: frames stored after this schedule another.
-    pub(crate) fn clear_pending(&self) {
+    pub fn clear_pending(&self) {
         self.pending.store(false, Ordering::Release);
     }
 
     /// The newest frame for `key` if it arrived since the last take.
-    pub(crate) fn take(&self, key: StreamKey) -> Option<VideoFrame> {
+    pub fn take(&self, key: StreamKey) -> Option<VideoFrame> {
         let mut slots = self.slots.lock().ok()?;
         let slot = slots.get_mut(&key)?;
         if !slot.fresh {
@@ -175,7 +177,7 @@ impl FrameStore {
     }
 
     /// Frames stored for `key` since it was last removed.
-    pub(crate) fn count(&self, key: StreamKey) -> u64 {
+    pub fn count(&self, key: StreamKey) -> u64 {
         self.slots
             .lock()
             .ok()
