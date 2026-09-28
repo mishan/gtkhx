@@ -92,12 +92,21 @@ pub unsafe extern "C" fn hx_emoji_button_new(
     button.add_css_class("flat");
     button.set_tooltip_text(Some(&tr("Insert emoji")));
 
-    let chooser = gtk::EmojiChooser::new();
-    {
+    // The chooser is built the first time the button opens, not here.
+    // GTK fills one with every emoji as it's created, measuring each
+    // glyph, which took most of the main thread for about half a second
+    // after the window first appeared — once per chat input, for a picker
+    // most sessions never open.
+    let view = view.clone();
+    button.set_create_popup_func(move |button| {
+        if button.popover().is_some() {
+            return;
+        }
+        let chooser = gtk::EmojiChooser::new();
         let view = view.clone();
         chooser.connect_emoji_picked(move |_chooser, text| on_emoji_picked(&view, text));
-    }
-    button.set_popover(Some(&chooser));
+        button.set_popover(Some(&chooser));
+    });
 
     into_floating_ptr(button)
 }
@@ -451,4 +460,37 @@ pub unsafe extern "C" fn hx_emoji_typeahead_detach(target_text_view: *mut gtk::f
         pop.unparent();
     }
     drop(ta); // frees the box + releases its widget refs
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// The picker's chooser doesn't exist until the button first opens, and
+    /// opening it builds one. Called from the display-backed test.
+    pub(crate) fn check_chooser_is_built_on_first_open() {
+        let view = gtk::TextView::new();
+        let raw = unsafe { hx_emoji_button_new(view.upcast_ref::<gtk::Widget>().as_ptr().cast()) };
+        assert!(!raw.is_null());
+        let button: gtk::MenuButton =
+            unsafe { glib::translate::from_glib_none(raw as *mut gtk::ffi::GtkMenuButton) };
+        assert!(
+            button.popover().is_none(),
+            "no chooser before the first open"
+        );
+        // A popover needs a surface to open from.
+        let window = gtk::Window::new();
+        window.set_child(Some(&button));
+        window.present();
+        button.popup();
+        assert!(
+            button
+                .popover()
+                .and_downcast::<gtk::EmojiChooser>()
+                .is_some(),
+            "opening the button builds its chooser"
+        );
+        button.popdown();
+        window.destroy();
+    }
 }

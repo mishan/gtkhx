@@ -3,7 +3,7 @@
 #
 #   tools/uibench.sh [scenarios] [repeats]
 #
-# `scenarios` is the GTKHX_BENCH list, default "chat=20000,files=10000,users=1000,tracker=2000,media=50".
+# `scenarios` is the GTKHX_BENCH list, default "startup,chat=20000,files=10000,users=1000,tracker=2000,media=50".
 # Repeats default to 3 and matter more than they look: frame timings on a
 # live compositor are noisy, and one run can't tell a real difference from
 # scheduler luck. Read the spread, not the single number.
@@ -18,7 +18,7 @@
 
 set -eu
 
-SCENARIOS="${1:-chat=20000,files=10000,users=1000,tracker=2000,media=50}"
+SCENARIOS="${1:-startup,chat=20000,files=10000,users=1000,tracker=2000,media=50}"
 REPEATS="${2:-3}"
 BIN="${GTKHX_BIN:-./build/src/gtkhx}"
 
@@ -45,6 +45,15 @@ while [ "$i" -le "$REPEATS" ]; do
     echo
     echo "--- run $i/$REPEATS ---"
     rc=0
+    # The startup scenario times from here, in wall-clock µs. GNU date only;
+    # elsewhere the app falls back to /proc, or reports it has no launch time.
+    t0=$(date +%s%6N)
+    case "$t0" in '' | *[!0-9]*) t0= ;; esac
+    if [ -n "$t0" ]; then
+        export GTKHX_BENCH_T0="$t0"
+    else
+        unset GTKHX_BENCH_T0
+    fi
     GTKHX_BENCH="$SCENARIOS" GTKHX_BENCH_QUIT=1 \
         "$BIN" 2>"$errlog" >"$errlog.out" || rc=$?
     sed -n '/^=== /,/^====/p' "$errlog.out"

@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -75,7 +75,7 @@ Still to add:
 ### Tier 3 — UI scenarios
 
 ```sh
-tools/uibench.sh                              # chat=20000,files=10000,users=1000,tracker=2000,media=50, 3 repeats
+tools/uibench.sh                              # startup,chat=20000,…,media=50, 3 repeats
 tools/uibench.sh files=10000 5                # one scenario, 5 repeats
 GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 ```
@@ -112,12 +112,13 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 
 | `tracker[=N]` | The real tracker window, opened without fetching: a listing of N servers delivered the way a fetch's drain delivers them — `tracker-batch-begin`, then per server an event from `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the Tasks progress tick, all in one main-loop turn; then two searches typed into the window's own entry a key at a time, each cleared after: one that narrows the list from its first keys, one that keeps every server until its last few. Keys are inserted as typing inserts them, and the entry's typing delay is held off, so each keystroke measures the filter. Refuses to run in a tracker window the user already has open. | N servers listed; each search shows exactly the servers its regex matches, counted independently; clearing shows all N. |
 | `media[=N]` | The main window's real chat view, cleared, then filled with N animated inline images followed by a few hundred lines of text, so pinned to the bottom it shows none of them. Three states, a few seconds each: text only, the images out of view, the images on screen — frames the clock ran, paints and main-thread CPU, per second. The acceptance test for offscreen animation. The text cursor's blink is off for the run; it repaints every frame while it fades. | On screen, the animation repaints; out of view, it doesn't. |
+| `startup` | Launch to a usable main window, timed from `GTKHX_BENCH_T0` (the launch time `tools/uibench.sh` stamps) or else from `/proc` to 10 ms: the chat panel built (the bench hook, before the main loop starts), the chat view's first paint, and settled — the main loop's first low-priority idle after it — plus the main thread's CPU to first paint. Always runs first. The first run on a fresh configuration is a first run: Settings opens, and caches start empty. | The moments come in order; a launch time was found. |
 
 The Files panel has no filter, so none is measured. The Users scenario
 refuses to run on a connected session: it writes fake users into the public
 chat and clears it afterwards.
 
-Still to add: chat-history replay on join; video tiles; startup.
+Still to add: chat-history replay on join; video tiles.
 
 ### Tier 4 — end to end
 
@@ -373,11 +374,22 @@ frames a second, median of three. "Before" is this branch with finding
 | on screen: frames / paints a second | 60 / 10 | 60 / 10 |
 | on screen: main-thread CPU | 13.3 ms/s | 13.1 ms/s |
 
+The startup scenario, **2026-09-27**, same setup, median of four normal
+launches (a first run excluded). "Before" is this branch without finding
+21's fix.
+
+| Startup, from launch | Before | After |
+|---|---|---|
+| chat panel built (bench hook) | 228 ms | 228 ms |
+| first paint | 372 ms | 366 ms |
+| settled (main loop idle) | 975 ms | 392 ms |
+| main-thread CPU to first paint | 312 ms | 310 ms |
+
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13, 15 and 16 are fixed and 14 is worked around; the rest are leads.
-Findings 6 onwards are from the UI scenarios.
+12, 13, 15, 16, 18 and 21 are fixed and 14 is worked around; the rest are
+leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -563,3 +575,16 @@ Findings 6 onwards are from the UI scenarios.
     frames, 10 paints and 9.7 ms of CPU a second before. The
     user list's animated avatars have the same shape on their own timer in
     `gif_avatar.c`, and are still ungated.
+21. **Every chat input built GTK's emoji chooser at startup.** The emoji
+    button made its `GtkEmojiChooser` up front, and GTK fills a new chooser
+    with every emoji, measuring each glyph, in idle batches — most of the
+    main thread for about 600 ms after the window first appeared, and again
+    for every private chat and message window, for a picker most sessions
+    never open. **Fixed:** the chooser is built the first time the button
+    opens. The main loop now settles 392 ms after launch instead of 975.
+22. **Startup is almost all CPU, spread thin.** About 310 ms of the ~365 ms
+    to first paint is main-thread CPU. A warm-launch profile shows no single
+    hot spot: page faults (~11%) and the dynamic linker resolving symbols
+    (~7%) — a good part of it loading and linking a large binary and its
+    libraries — with the rest spread across allocation, CSS and GL setup.
+    A lead.
