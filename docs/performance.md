@@ -29,7 +29,7 @@ any new harness.
 | Tier | What | Where | Status |
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
-| 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
+| 2 | Throughput and latency over loopback, headless | bench binaries against an in-process fake server | Started: the connection pipeline |
 | 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup, chat history, video tiles |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
@@ -64,9 +64,40 @@ Still to add:
 
 ### Tier 2 — loopback
 
-- The connection pipeline: frames per second from socket read through
-  framing, cipher and the `hxbridge` ferry to a session signal, and the
-  latency of one frame along that path. Plain, HOPE-Blowfish, AEAD, TLS.
+```sh
+cd rust
+cargo bench -p hxnet --bench loopback          # every transport
+cargo bench -p hxnet --bench loopback -- aead  # one
+```
+
+**The connection pipeline** (`hxnet/benches/loopback.rs`). Each transport
+— plain, TLS, HOPE with Blowfish, HOPE with ChaCha20-Poly1305 — connects
+through the production entry point, `hxnet_connection_open_*`, to a fake
+server on 127.0.0.1 with its own thread and runtime. A frame then takes a
+server's frame's path: socket read, TLS or the HOPE cipher, framing, the
+actor's event channel, the ferry to the GLib main loop, and the event
+callback. The callback only checks the frame and frees it; dispatch, the
+handler and the session signal are in the binary, not the crate, and
+aren't measured. Per transport:
+
+- **connect**: open call to handshake done.
+- **throughput**: a 100,000-frame burst of chat-sized frames; frames a
+  second, and the CPU each thread spent per frame — the main thread (the
+  ferry and the callback), the client's runtime (read, decrypt, framing)
+  and the server. The server buffers its writes, as a busy one would; a
+  write per frame measured the server's syscalls instead of the client.
+  Each frame is still its own cipher record — under TLS the buffer sits
+  beneath it — so the client decrypts per frame, as it would from a real
+  server.
+- **latency**: one frame at a time, from just before the server's write —
+  its encryption included — to the callback, p50 and p99.
+
+Known values: every frame arrives, in order, byte for byte; and the
+latency's p50 and p99 sit above a raw loopback floor's — the same pings,
+unencrypted, read off a plain socket on a thread of their own.
+
+Still to add:
+
 - HTXF: MB/s for a large file each way; per-file overhead for a folder of
   many small files; and the rate of progress idles reaching the main loop,
   so a fast transfer cannot starve the UI.
@@ -436,11 +467,29 @@ Frame notices ran at about 270 a second for nine cameras, one per frame —
 the streams run out of step, so little lands together to coalesce — at
 6 µs each.
 
+### Loopback
+
+**2026-09-28**, same machine, median of three runs of the bench's own
+median of five. "Before" is without finding 24's fix — its read buffer
+set to pass-through. Latency and connect time didn't move and are given
+once.
+
+| Connection pipeline | Before: frames/s | After: frames/s | Client runtime, ns/frame, before → after | Main thread, ns/frame | Latency p50 / p99 |
+|---|---|---|---|---|---|
+| plain | 609,000 | 2,380,000 | 1,640 → 420 | 370 | 16 / 25 µs |
+| TLS | 1,640,000 | 1,600,000 | 610 → 620 | 330 | 17 / 26 µs |
+| HOPE-Blowfish | 125,000 | 159,000 | 8,000 → 6,300 | 245 | 19 / 101 µs |
+| HOPE-AEAD | 314,000 | 583,000 | 3,180 → 1,710 | 250 | 20 / 36 µs |
+
+The raw socket floor is 10 µs p50, 15 µs p99; connecting takes 0.2 ms, or
+3 ms with TLS's handshake.
+
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13, 15, 16, 18, 19, 20, 21 and 23 are fixed and 14 is worked around;
-the rest are leads. Findings 6 onwards are from the UI scenarios.
+12, 13, 15, 16, 18, 19, 20, 21, 23 and 24 are fixed and 14 is worked
+around; the rest are leads. Findings 6 to 23 are from the UI scenarios, 24
+onwards from loopback.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -686,3 +735,23 @@ the rest are leads. Findings 6 onwards are from the UI scenarios.
     plus the panel's 150 ms debounce — up to a second more when the
     server has just asked that publisher for a keyframe for someone else.
     Fixed.
+24. **The connection read the socket a frame part at a time.** The actor
+    reads a frame as its 22-byte header and then its body, and HOPE's
+    ciphers read up to each frame boundary, straight from the socket — a
+    read call or more per frame. TLS escaped it, because rustls buffers
+    underneath, which is how a plain connection came to deliver fewer than
+    half the frames a second a TLS one did while doing less work.
+    **Fixed:**
+    every lifecycle wraps the stream in a 64 KiB read buffer once, before
+    the magic, and keeps it into the actor; ciphers sit above it and
+    decrypt as they take bytes, so HOPE-Blowfish's rekeying still happens
+    at the frame boundary. Plain went from 609,000 frames a second to
+    2.4 million, HOPE-AEAD from 314,000 to 583,000; latency is unchanged.
+25. **HOPE-Blowfish costs about 6 µs a frame, and its p99 latency is
+    100 µs.** Both are its rekeying: on about three frames in sixteen the
+    sender marks a key rotation, and each side then runs up to 63 HMAC
+    iterations over the key — the key changes every iteration, so nothing
+    carries over — and a fresh Blowfish key schedule. The latency counts
+    both sides' share, the fake server's included. It is what the
+    protocol asks for; at chat rates it is nothing. A lead only if a
+    server sends frames fast enough to notice.

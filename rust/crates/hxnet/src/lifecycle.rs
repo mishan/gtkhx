@@ -137,6 +137,24 @@ pub async fn run_plaintext_lifecycle(
     run_plaintext_over(stream, &req, cmd_rx, evt_tx).await;
 }
 
+/// How much a connection reads from its socket at a time.
+const READ_BUFFER: usize = 64 * 1024;
+
+/// Buffer `stream`'s reads for the life of the connection: the actor
+/// reads a frame as its 22-byte header and then its body, and HOPE's
+/// ciphers read up to each frame boundary, so unbuffered each frame costs
+/// a read of its own or more. Wrapped once, before the magic, and kept
+/// through the login into the actor — bytes read ahead belong to the
+/// frames after, so a second buffer, or none, would lose them. A cipher
+/// layer sits above the buffer: what is buffered is ciphertext, and it is
+/// decrypted as the layer takes it, a frame at a time as before.
+fn read_buffered<S>(stream: S) -> tokio::io::BufReader<S>
+where
+    S: tokio::io::AsyncRead,
+{
+    tokio::io::BufReader::with_capacity(READ_BUFFER, stream)
+}
+
 /// Like [`run_plaintext_lifecycle`] but wraps the connected socket in
 /// TLS (the Mobius / Janus separate-port model: TLS-from-byte-zero on
 /// a dedicated port, then the ordinary Hotline protocol over the
@@ -236,13 +254,15 @@ pub async fn run_plaintext_tls_lifecycle(
 /// so it runs identically over a raw TCP socket or a TLS stream:
 /// magic → LOGIN → reply → Option-B replay → HandshakeDone → actor.
 async fn run_plaintext_over<S>(
-    mut stream: S,
+    stream: S,
     req: &PlaintextOpenRequest,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    let mut stream = read_buffered(stream);
+
     // Phase C: magic exchange.
     if let Err(e) = run_magic_exchange(&mut stream, &evt_tx).await {
         let _ = evt_tx
@@ -428,7 +448,7 @@ pub async fn run_hope_lifecycle(
 
     let mut stream =
         match resolve_and_connect(&req.host, req.port, req.proxy.as_ref(), &evt_tx).await {
-            Ok(s) => s,
+            Ok(s) => read_buffered(s),
             Err(e) => bail!("connect: {e}"),
         };
     if evt_tx
