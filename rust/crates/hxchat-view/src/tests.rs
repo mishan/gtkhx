@@ -614,6 +614,88 @@ fn gtk_class_and_construction_smoke() {
             adj.page_size()
         );
     }
+
+    check_offscreen_animation_stops();
+}
+
+/// An animated image drawn on screen runs the frame tick; scrolled out of
+/// view, the next paint stops it, and scrolled back, the paint after that
+/// starts it again. Unmapping stops it too. Part of the one display-backed
+/// test above.
+fn check_offscreen_animation_stops() {
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::WidgetImpl;
+
+    let view = crate::view::HxChatView::new();
+    let adj = gtk4::Adjustment::new(0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+    view.set_vadjustment(Some(&adj));
+    let holder = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    holder.append(&view);
+    holder.allocate(400, 200, -1, None);
+    let frame = || {
+        view.imp_ref().snapshot(&gtk4::Snapshot::new());
+        holder.allocate(400, 200, -1, None);
+    };
+    let ticking = || view.imp_ref().anim_tick.borrow().is_some();
+
+    const TOKEN: u32 = 7;
+    view.append(hxchat_layout::Message {
+        kind: hxchat_layout::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: None,
+        blocks: vec![hxchat_layout::Block::Image {
+            token: TOKEN,
+            size: None,
+            alt: "gif".into(),
+        }],
+        flags: hxchat_layout::MessageFlags::NONE,
+    });
+    let texture = |v: u8| -> gtk4::gdk::Texture {
+        gtk4::gdk::MemoryTexture::new(
+            8,
+            8,
+            gtk4::gdk::MemoryFormat::R8g8b8a8,
+            &gtk4::glib::Bytes::from_owned(vec![v; 8 * 8 * 4]),
+            8 * 4,
+        )
+        .upcast()
+    };
+    view.set_media_frames(TOKEN, vec![(texture(10), 100), (texture(200), 100)]);
+    frame();
+    assert!(ticking(), "an animated image on screen should run the tick");
+
+    for i in 0..200 {
+        view.append(crate::view::plain_message(&format!("line {i}")));
+    }
+    frame();
+    frame();
+    assert!(
+        !view.imp_ref().drawn_media.borrow().contains(&TOKEN),
+        "the image should be out of view by now"
+    );
+    assert!(
+        !ticking(),
+        "an animation scrolled out of view must not keep the tick running"
+    );
+
+    view.scroll_to_extreme(false);
+    frame();
+    frame();
+    assert!(
+        ticking(),
+        "scrolled back into view, it should animate again"
+    );
+
+    // Hidden — a tab switched away — no snapshot runs to say the image
+    // left the screen; unmapping has to.
+    view.imp_ref().unmap();
+    assert!(
+        !ticking(),
+        "an unmapped view must not keep the tick running"
+    );
+    frame();
+    assert!(ticking(), "the next paint should start it again");
 }
 
 // ---- run-based append (C6) ------------------------------------------

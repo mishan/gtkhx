@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -75,7 +75,7 @@ Still to add:
 ### Tier 3 — UI scenarios
 
 ```sh
-tools/uibench.sh                              # chat=20000,files=10000,users=1000,tracker=2000, 3 repeats
+tools/uibench.sh                              # chat=20000,files=10000,users=1000,tracker=2000,media=50, 3 repeats
 tools/uibench.sh files=10000 5                # one scenario, 5 repeats
 GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 ```
@@ -111,14 +111,13 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 | `users[=N]` | The main window's real Users panel, fed through the real receive handlers against the unconnected session: a login's USER_LIST reply for N users; a USER_CHANGE for every one of them at once; a GIF icon for every one at once through `gtkhx_avatar_update`, as a GIF-icons server's ICON_GETLIST reply delivers them; then frames and scrolling with every icon animating. Clears the list before and after through `users-clear`. | Row count equals N; every row shows the new status after the burst; every icon decodes and animates. |
 
 | `tracker[=N]` | The real tracker window, opened without fetching: a listing of N servers delivered the way a fetch's drain delivers them — `tracker-batch-begin`, then per server an event from `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the Tasks progress tick, all in one main-loop turn; then two searches typed into the window's own entry a key at a time, each cleared after: one that narrows the list from its first keys, one that keeps every server until its last few. Keys are inserted as typing inserts them, and the entry's typing delay is held off, so each keystroke measures the filter. Refuses to run in a tracker window the user already has open. | N servers listed; each search shows exactly the servers its regex matches, counted independently; clearing shows all N. |
+| `media[=N]` | The main window's real chat view, cleared, then filled with N animated inline images followed by a few hundred lines of text, so pinned to the bottom it shows none of them. Three states, a few seconds each: text only, the images out of view, the images on screen — frames the clock ran, paints and main-thread CPU, per second. The acceptance test for offscreen animation. The text cursor's blink is off for the run; it repaints every frame while it fades. | On screen, the animation repaints; out of view, it doesn't. |
 
 The Files panel has no filter, so none is measured. The Users scenario
 refuses to run on a connected session: it writes fake users into the public
 chat and clears it afterwards.
 
-Still to add: chat-history replay on join; animated media scrolled out of
-view — the acceptance test for the known offscreen-animation defect; video
-tiles; startup.
+Still to add: chat-history replay on join; video tiles; startup.
 
 ### Tier 4 — end to end
 
@@ -363,6 +362,17 @@ through to the stores, splice included.
 | broad query: keystroke / until painted, mean | 2.3 / 16.3 ms | 6.8 / 18.2 ms |
 | clear search: until painted | 66 ms | 72 ms |
 
+The media scenario, **2026-09-27**, same setup, 50 animated images at 10
+frames a second, median of three. "Before" is this branch with finding
+18's fix backed out.
+
+| Chat view, animated images | Before | After |
+|---|---|---|
+| out of view: frames / paints a second | 60 / 10 | 0 / 0 |
+| out of view: main-thread CPU | 9.7 ms/s | 0 |
+| on screen: frames / paints a second | 60 / 10 | 60 / 10 |
+| on screen: main-thread CPU | 13.3 ms/s | 13.1 ms/s |
+
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
@@ -524,3 +534,17 @@ from the UI scenarios.
     rebuilding row widgets for the rows that change. Moving the sort below
     the filter, so a search never reaches the sort model, measured no
     different. A lead.
+18. **Animated images scrolled out of view kept the chat view busy.** The
+    view ran one frame tick whenever any image in the scrollback was
+    animated, advanced every one of them, and repainted whenever one
+    advanced — so a GIF long scrolled away kept the frame clock at 60 frames
+    a second and repainted the view at the GIF's own rate, for as long as it
+    stayed in the scrollback. **Fixed:** the snapshot records which images
+    it drew, only those advance, and the tick stops itself once none of
+    them is animated; the next snapshot that draws one starts it again.
+    Unmapping the view — a tab switched away, the window hidden — forgets
+    what was drawn, since no snapshot runs then to say so. Out of view, 50
+    animated images now cost no frames, no paints and no CPU, against 60
+    frames, 10 paints and 9.7 ms of CPU a second before. The
+    user list's animated avatars have the same shape on their own timer in
+    `gif_avatar.c`, and are still ungated.

@@ -329,8 +329,14 @@ mod imp {
         /// design — it carries only the *size*, which is all it needs
         /// to lay the row out. The token is the join.
         pub(crate) media: RefCell<std::collections::HashMap<u32, MediaEntry>>,
-        /// Frame-advance tick, running only while something animates.
+        /// Frame-advance tick, running only while an animated image is
+        /// on screen.
         pub anim_tick: RefCell<Option<gtk4::TickCallbackId>>,
+        /// The media tokens the last snapshot drew: what is on screen, and
+        /// nothing once the view is unmapped. Only these animate — one
+        /// scrolled away, or in a hidden view, holds its frame and costs
+        /// nothing until it is drawn again.
+        pub(crate) drawn_media: RefCell<std::collections::HashSet<u32>>,
         /// Last pointer position seen during a drag, widget-relative.
         ///
         /// CLAUDE.md records the xtext version of this as a known
@@ -377,6 +383,7 @@ mod imp {
                 stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
                 media: RefCell::new(std::collections::HashMap::new()),
                 anim_tick: RefCell::new(None),
+                drawn_media: RefCell::new(std::collections::HashSet::new()),
                 drag_pointer: Cell::new((0.0, 0.0)),
                 drag_start: RefCell::new(None),
                 drag_moved: Cell::new(false),
@@ -573,9 +580,33 @@ mod imp {
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
             let obj = self.obj();
+            let before = std::mem::take(&mut *self.drawn_media.borrow_mut());
             obj.snapshot_content(snapshot);
             // Chrome, drawn over the content and outside its clip.
             obj.snapshot_zoom_badge(snapshot, obj.width(), obj.height());
+            // An image back on screen restarts its current frame rather
+            // than jumping past it: its clock stopped while it was away.
+            {
+                let drawn = self.drawn_media.borrow();
+                let mut media = self.media.borrow_mut();
+                for token in drawn.difference(&before) {
+                    if let Some(entry) = media.get_mut(token) {
+                        entry.since_us = 0;
+                    }
+                }
+            }
+            // What was drawn decides whether anything needs to animate.
+            obj.sync_animation_tick();
+        }
+
+        fn unmap(&self) {
+            self.parent_unmap();
+            // Nothing is on screen once the view is unmapped — a tab
+            // switched away, the window hidden — and no snapshot will say
+            // so, since none runs until it is mapped again. That snapshot
+            // restarts the tick.
+            self.drawn_media.borrow_mut().clear();
+            self.obj().sync_animation_tick();
         }
     }
 
@@ -1298,6 +1329,7 @@ impl HxChatView {
                                 ));
                                 tex.snapshot(snapshot, dw as f64, dh as f64);
                                 snapshot.restore();
+                                imp.drawn_media.borrow_mut().insert(*token);
                                 continue;
                             }
                             (alt.as_str(), &[][..])
@@ -2828,15 +2860,31 @@ impl HxChatView {
         self.queue_resize();
     }
 
-    /// Start the frame timer if anything animates, stop it otherwise.
+    /// Whether an animated image is on screen, by the last snapshot.
+    fn animating_on_screen(&self) -> bool {
+        let imp = self.imp_();
+        let media = imp.media.borrow();
+        imp.drawn_media
+            .borrow()
+            .iter()
+            .any(|t| media.get(t).is_some_and(MediaEntry::is_animated))
+    }
+
+    /// Start the frame timer if an animated image is on screen, stop it
+    /// otherwise.
     ///
     /// One shared tick for the whole view rather than a timer per image
     /// — the same shape `gif_avatar.c` settled on for the user list, and
     /// for the same reason: dozens of independent timeouts is a lot of
     /// wakeups for something the frame clock already provides.
+    ///
+    /// Only what the last snapshot drew counts. An animation scrolled out
+    /// of view used to advance, and repaint the view, at its own frame
+    /// rate for as long as it stayed in the scrollback; now it holds its
+    /// frame, and the next snapshot that draws it starts the tick again.
     fn sync_animation_tick(&self) {
         let imp = self.imp_();
-        let animated = imp.media.borrow().values().any(|m| m.is_animated());
+        let animated = self.animating_on_screen();
         let running = imp.anim_tick.borrow().is_some();
         if animated == running {
             return;
@@ -2849,11 +2897,21 @@ impl HxChatView {
         }
         let id = self.add_tick_callback(move |view, clock| {
             let imp = view.imp_();
+            if !view.animating_on_screen() {
+                // Scrolled away since the last frame: stop, and let the
+                // next snapshot that draws an animation start again.
+                imp.anim_tick.borrow_mut().take();
+                return glib::ControlFlow::Break;
+            }
             let now = clock.frame_time();
             let mut advanced = false;
             {
+                let drawn = imp.drawn_media.borrow();
                 let mut media = imp.media.borrow_mut();
-                for entry in media.values_mut() {
+                for token in drawn.iter() {
+                    let Some(entry) = media.get_mut(token) else {
+                        continue;
+                    };
                     if !entry.is_animated() {
                         continue;
                     }
@@ -2888,6 +2946,7 @@ impl HxChatView {
     /// Drop every decoded texture. Called with `clear`.
     fn clear_media(&self) {
         self.imp_().media.borrow_mut().clear();
+        self.imp_().drawn_media.borrow_mut().clear();
         self.sync_animation_tick();
     }
 }

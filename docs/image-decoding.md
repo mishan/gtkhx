@@ -234,15 +234,9 @@ the tokio interop helpers; the `gdk4` feature is what gives
 
 ## Open
 
-- **Offscreen animation is not gated.** The original design called for a
-  `playback_visible` bit so animated media scrolled out of view stopped
-  burning frames. No such gating survived the chat-view rewrite:
-  `hxchat-view/src/view.rs` installs a single tick callback whenever
-  *any* media in the view is animated and advances every animated entry
-  on it, with no visibility test. Scrollback full of animated GIFs
-  therefore keeps advancing frames forever. The redraw is a plain
-  `queue_draw` (frame dimensions can't change, so no relayout), which
-  bounds the damage, but the frame decode-and-advance work is
-  unconditional. The user-list avatar path has the analogous
-  shared-timer shape and the same gap, mitigated there by a per-user
-  pause and a global animation preference.
+- **Animated avatars in the user list are not gated offscreen.** The chat
+  view only animates the images its last paint drew, and stops its frame
+  tick when none of those is animated (docs/performance.md finding 18). The
+  user-list avatar path has the same shared-timer shape in `gif_avatar.c`
+  and no such gate; it is mitigated by a per-user pause and a global
+  animation preference.
