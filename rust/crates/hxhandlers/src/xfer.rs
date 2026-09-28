@@ -21,7 +21,7 @@ use hxnet::htxf::{
 };
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
-    hxnet_xfer_folder_send_all, HxnetFolderParams, HxnetXferParams,
+    hxnet_xfer_folder_send_all, progress_due, HxnetFolderParams, HxnetXferParams,
 };
 use hxnet::xfer_handle::{
     hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
@@ -651,7 +651,11 @@ unsafe extern "C" fn htxf_destructor(htxf: *mut HtxfHandle) {
 unsafe extern "C" fn xfer_progress_bump(user_data: *mut c_void, delta: u64) {
     let htxf = user_data as *mut HtxfHandle;
     hx_htxf_add_total_pos(htxf, delta);
-    post_file_update(htxf);
+    // Throttled: the count above is exact, and every worker posts a last
+    // update however it ends.
+    if progress_due(htxf as usize) {
+        post_file_update(htxf);
+    }
 }
 
 /// Fill an [`HxnetXferParams`] for a receive of `file_budget` bytes off `htxf`.
@@ -732,9 +736,11 @@ unsafe fn get_thread(htxf: *mut HtxfHandle) {
         if hxnet_xfer_file_recv_one(&params) == 0 {
             play_sound(FILE_DONE);
             hx_htxf_set_total_pos(htxf, (*htxf).total_size);
-            post_file_update(htxf);
         }
     }
+    // The last progress update, however it ended: the reports along the
+    // way are throttled, so this one makes the row exact.
+    post_file_update(htxf);
     xfer_close_channel(htxf);
 }
 
@@ -747,9 +753,11 @@ unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
         if hxnet_xfer_folder_recv_all(&params) == 0 {
             play_sound(FILE_DONE);
             hx_htxf_set_total_pos(htxf, (*htxf).total_size);
-            post_file_update(htxf);
         }
     }
+    // The last progress update, however it ended: the reports along the
+    // way are throttled, so this one makes the row exact.
+    post_file_update(htxf);
     xfer_close_channel(htxf);
 }
 
@@ -777,13 +785,16 @@ unsafe fn finish_upload(htxf: *mut HtxfHandle) {
 /// Solo upload worker: connect, run the single-file send loop, see it all
 /// reach the server, chime on success.
 unsafe fn put_thread(htxf: *mut HtxfHandle) {
-    if htxf_connect(htxf) != glib::ffi::GFALSE {
+    let sent = htxf_connect(htxf) != glib::ffi::GFALSE && {
         let params = xfer_send_params(htxf);
-        if hxnet_xfer_file_send_one(&params) == 0 {
-            // All sent: the row shows it now, not after the wait below.
-            post_file_update(htxf);
-            finish_upload(htxf);
-        }
+        hxnet_xfer_file_send_one(&params) == 0
+    };
+    // The last progress update, however it went — the reports along the
+    // way are throttled — and before the wait for the server, so a sent
+    // upload's row completes now.
+    post_file_update(htxf);
+    if sent {
+        finish_upload(htxf);
     }
     xfer_close_channel(htxf);
 }
@@ -791,13 +802,17 @@ unsafe fn put_thread(htxf: *mut HtxfHandle) {
 /// Folder upload worker: connect, walk the local tree responding to the server's
 /// FILE_NEXT loop (`hxnet_xfer_folder_send_all`), chime + stamp on success.
 unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
-    if htxf_connect(htxf) != glib::ffi::GFALSE {
+    let sent = htxf_connect(htxf) != glib::ffi::GFALSE && {
         let params = xfer_folder_params(htxf);
-        if hxnet_xfer_folder_send_all(&params) == 0 {
-            hx_htxf_set_total_pos(htxf, (*htxf).total_size);
-            post_file_update(htxf);
-            finish_upload(htxf);
-        }
+        hxnet_xfer_folder_send_all(&params) == 0
+    };
+    if sent {
+        hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+    }
+    // As put_thread: the last update, before the wait for the server.
+    post_file_update(htxf);
+    if sent {
+        finish_upload(htxf);
     }
     xfer_close_channel(htxf);
 }

@@ -29,7 +29,7 @@ any new harness.
 | Tier | What | Where | Status |
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
-| 2 | Throughput and latency over loopback, headless | bench binaries against an in-process fake server | Started: the connection pipeline |
+| 2 | Throughput and latency over loopback, headless | bench binaries against an in-process fake server | The connection pipeline, HTXF transfers, the tracker fetch |
 | 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup, chat history, video tiles |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
@@ -66,11 +66,12 @@ Still to add:
 
 ```sh
 cd rust
-cargo bench -p hxnet --bench loopback          # every transport
-cargo bench -p hxnet --bench loopback -- aead  # one
+cargo bench -p hxnet --bench loopback                # everything
+cargo bench -p hxnet --bench loopback -- pipeline    # one section: pipeline, htxf, tracker
+cargo bench -p hxnet --bench loopback -- htxf aead   # one transport of it
 ```
 
-**The connection pipeline** (`hxnet/benches/loopback.rs`). Each transport
+**The connection pipeline** (`hxnet/benches/loopback/main.rs`). Each transport
 — plain, TLS, HOPE with Blowfish, HOPE with ChaCha20-Poly1305 — connects
 through the production entry point, `hxnet_connection_open_*`, to a fake
 server on 127.0.0.1 with its own thread and runtime. A frame then takes a
@@ -96,12 +97,26 @@ Known values: every frame arrives, in order, byte for byte; and the
 latency's p50 and p99 sit above a raw loopback floor's — the same pings,
 unencrypted, read off a plain socket on a thread of their own.
 
-Still to add:
+**HTXF transfers** (`benches/loopback/htxf.rs`): a 256 MiB file down and
+up, and a folder of 1,000 4 KiB files down, over plain TCP, TLS and HOPE's
+AEAD. Each connects through `hxnet_htxf_connect` and copies through the
+production workers on a thread of their own, as the app's blocking pool
+runs them; their progress callback posts to the main loop as the app's
+does, and the main loop counts the posts and its own CPU. The AEAD
+transfer's keys come from a real HOPE-AEAD login against the pipeline's
+fake server. Files go to a tmpfs where there is one, so the disk isn't
+what's timed. Known values: every byte arrives as sent, and a download
+is held under the raw loopback socket's speed, measured alongside.
 
-- HTXF: MB/s for a large file each way; per-file overhead for a folder of
-  many small files; and the rate of progress idles reaching the main loop,
-  so a fast transfer cannot starve the UI.
-- Tracker fetch of a large v3 listing, network to list model.
+**The tracker fetch** (`benches/loopback/tracker.rs`): a v3 listing of
+2,000 and of 10,000 servers from a fake tracker, opened through
+`hxnet_tracker_fetch_open` — TLS first, then in the clear, as against a
+real tracker that doesn't speak TLS — and drained the way `network.c`
+drains it, a 50 ms timeout polling until empty. Reported: the fetch, open
+to the last record; the tail, from the tracker's last write to the last
+record on the main loop; and the drain ticks it took, counting the one
+that finds the fetch finished. Known values: every
+server arrives, in order, with its name and port.
 
 ### Tier 3 — UI scenarios
 
@@ -482,13 +497,34 @@ once.
 | HOPE-AEAD | 314,000 | 583,000 | 3,180 → 1,710 | 250 | 20 / 36 µs |
 
 The raw socket floor is 10 µs p50, 15 µs p99; connecting takes 0.2 ms, or
-3 ms with TLS's handshake.
+3 ms with TLS's handshake. Plain's throughput swings between runs more
+than the others' — from 1.4 to 2.5 million frames a second — with the
+CPU per frame on both client threads moving with it, which points at
+where the scheduler places the threads rather than at the code.
+
+HTXF, same machine and day, median of two runs of the bench's own median
+of three; files on `/dev/shm`. "Before" is without finding 27's
+throttle. The raw socket floor is about 5 GB/s.
+
+| HTXF | Download: before → after | Main thread during it, before → after | Upload | Folder, per file: before → after |
+|---|---|---|---|---|
+| plain | 2.52 → 2.67 GB/s | 180 → 1.5 ms/s | 2.2 GB/s | 80 → 67 µs |
+| TLS | 1.32 → 1.58 GB/s | 330 → 1.7 ms/s | 1.5 GB/s | 122 → 113 µs |
+| AEAD | 0.95 → 1.02 GB/s | 84 → 0.8 ms/s | 0.97 GB/s | 92 → 87 µs |
+
+Progress posts went from 28,000–80,000 a second to 20–26.
+
+The tracker fetch, median of five, after finding 28's fix: 2,000 servers
+in 50 ms and 10,000 in 52 ms, every run in a single drain tick; 48 ms of
+either is the wait for that tick, the fetch itself taking a few. Before
+it, a run could take several ticks — 2,000 servers in 50 to 150 ms here,
+10,000 in up to 900 ms in a reviewer's runs.
 
 ## Findings
 
 What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
-12, 13, 15, 16, 18, 19, 20, 21, 23 and 24 are fixed and 14 is worked
-around; the rest are leads. Findings 6 to 23 are from the UI scenarios, 24
+12, 13, 15, 16, 18, 19, 20, 21, 23, 24, 26, 27 and 28 are fixed and 14
+is worked around; the rest are leads. Findings 6 to 23 are from the UI scenarios, 24
 onwards from loopback.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
@@ -755,3 +791,39 @@ onwards from loopback.
     both sides' share, the fake server's included. It is what the
     protocol asks for; at chat rates it is nothing. A lead only if a
     server sends frames fast enough to notice.
+26. **A TLS upload lost its end.** The upload workers closed the transfer
+    connection straight after the last write. With anything unread from
+    the server at that moment — a TLS 1.3 server's session tickets are
+    enough — the close reset the connection instead of ending it, and the
+    reset made the server's kernel drop what the server hadn't read yet:
+    1.8–2.2 MB of a 256 MiB upload, every time. **Fixed:** the workers
+    finish an upload first — `close_notify`, a half-close, and a wait for
+    the server to close — before closing (`hxnet_htxf_finish_send`).
+27. **A fast transfer kept the main loop busy with its progress.** The
+    workers post an update to the main loop for every chunk they copy,
+    and there was a post for each: 41,000 a second for a plain download
+    on loopback, 80,000 over TLS, which reads in 16 KiB records — 18% and
+    33% of the main thread before the Tasks panel's handler did anything
+    with them. **Fixed:** the progress callback posts at most every
+    50 ms per transfer (`progress_due`); the byte count is exact
+    regardless, and every worker posts once more when it finishes.
+    Downloads got faster with it, TLS's by a fifth.
+28. **A large tracker listing trickled in, 64 servers a tick.** The fetch
+    hands a tracker's records over in a burst once the listing is read,
+    through a channel with room for 64, and the main loop drains it on a
+    50 ms timeout until it finds it empty. When a drain outran the
+    fetch's refilling, the rest waited for the next tick: a 10,000-server
+    listing could take seconds instead of one tick. **Fixed:** the
+    channel has room for a whole listing, so it's all there for the
+    first drain. What remains is the wait for that tick, up to 50 ms;
+    draining on the fetch's own wakeup would remove it.
+29. **A TLS folder download needs the server's `close_notify`.** A
+    folder's end is the server closing, with no marker before it, and
+    rustls takes a close without `close_notify` for a truncation: the
+    folder arrives whole and the transfer is reported failed. The
+    benchmark's fake server closed that way at first. Checked against the
+    rig: Janus, its one TLS transfer server, sends `close_notify`, so it
+    doesn't bite there. What the check turned up instead was every Janus
+    folder download taking ten seconds longer than its tree — Janus
+    closes only on its own timeout — which the item-count change in #716
+    fixes. A lead only for a TLS server that closes bare.

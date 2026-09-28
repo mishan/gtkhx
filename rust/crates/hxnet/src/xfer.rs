@@ -98,6 +98,37 @@ pub struct HxnetXferParams {
     pub rsrc_size: u64,
 }
 
+/// How often a transfer's progress is worth an update on the main loop.
+/// The workers report every chunk they copy — tens of thousands a second
+/// on a fast link — and a post per chunk kept the main loop busy with
+/// progress alone. Twenty a second is as smooth as a progress bar needs.
+pub const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+thread_local! {
+    /// The transfer this worker thread last posted progress for, and when.
+    static LAST_PROGRESS: std::cell::Cell<(usize, Option<std::time::Instant>)> =
+        const { std::cell::Cell::new((0, None)) };
+}
+
+/// Whether a progress report for transfer `key` should go to the main
+/// loop now: the first for a transfer does, and after it one per
+/// [`PROGRESS_INTERVAL`]. For the progress callback, which runs on the
+/// transfer's worker thread; a thread works one transfer at a time, so
+/// the state is the thread's. The bytes are counted whether or not this
+/// says to post, so a skipped report loses nothing — the next one carries
+/// it — and the worker's caller posts once more at the end.
+pub fn progress_due(key: usize) -> bool {
+    LAST_PROGRESS.with(|last| {
+        let (k, at) = last.get();
+        let now = std::time::Instant::now();
+        let due = k != key || at.is_none_or(|t| now.duration_since(t) >= PROGRESS_INTERVAL);
+        if due {
+            last.set((key, Some(now)));
+        }
+        due
+    })
+}
+
 impl HxnetXferParams {
     unsafe fn report(&self, delta: u64) {
         if let Some(p) = self.progress {
@@ -1052,6 +1083,25 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
         }
     }
     0
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_posts_once_an_interval_per_transfer() {
+        // A thread of its own, so no other test's transfer is its last.
+        std::thread::spawn(|| {
+            assert!(progress_due(1), "a transfer's first report posts");
+            assert!(!progress_due(1), "the next, straight after, doesn't");
+            assert!(progress_due(2), "another transfer's first report posts");
+            std::thread::sleep(PROGRESS_INTERVAL);
+            assert!(progress_due(2), "one interval on, a report posts again");
+        })
+        .join()
+        .unwrap();
+    }
 }
 
 #[cfg(test)]

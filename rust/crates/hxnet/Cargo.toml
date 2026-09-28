@@ -158,9 +158,11 @@ tokio = { workspace = true, features = [
     "test-util",
 ] }
 
-# Tier 2 loopback benchmarks (docs/performance.md): a plain binary rather
-# than criterion, since it reports throughput, per-thread CPU and latency
-# percentiles against a fake server of its own.
+# Tier 2 loopback benchmarks (docs/performance.md) — the connection
+# pipeline, HTXF transfers, the tracker fetch: a plain binary rather than
+# criterion, since it reports throughput, per-thread CPU and latency
+# percentiles against fake servers of its own.
 [[bench]]
 name = "loopback"
+path = "benches/loopback/main.rs"
 harness = false
