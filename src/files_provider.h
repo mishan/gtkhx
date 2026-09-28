@@ -13,7 +13,9 @@
  *   - `navigate` is async. The local provider reads the folder on
  *     a worker thread; the remote one fires an RPC and completes on
  *     reply. Either way, the "navigated" signal fires after the
- *     listing has been refreshed with the new contents.
+ *     listing has been refreshed with the new contents, and
+ *     `current_path` is the folder the listing shows — it moves
+ *     with the listing, not when `navigate` is called.
  *   - "error" fires when an operation fails; the payload is a
  *     human-readable, already-localised string suitable for an
  *     AdwToast.

@@ -27,7 +27,8 @@
 struct _HxLocalFilesProvider {
     GObject parent_instance;
     GListStore *listing; /* owns refs to HxFileEntry rows */
-    char *current_path;
+    char *current_path;  /* the folder the listing shows */
+    char *pending_path;  /* a folder asked for whose listing hasn't landed */
 };
 
 /* Signals live on the HxFilesProvider GInterface (see
@@ -49,6 +50,7 @@ hx_local_files_provider_finalize (GObject *obj)
     HxLocalFilesProvider *self = HX_LOCAL_FILES_PROVIDER (obj);
     g_clear_object (&self->listing);
     g_free (self->current_path);
+    g_free (self->pending_path);
     G_OBJECT_CLASS (hx_local_files_provider_parent_class)->finalize (obj);
 }
 
@@ -145,15 +147,33 @@ hx_local_files_provider_get_label (HxLocalFilesProvider *self)
     return _ ("Local");
 }
 
-/* gtkhx-ui files::local — reads `path` on a worker thread, then replaces
- * the listing and emits "navigated" (or "error") on the main thread. */
-extern void hx_files_local_list (GObject *provider, GListStore *listing,
-                                 const char *path);
+/* gtkhx-ui files::local — reads `path` on a worker thread, then on the
+ * main thread replaces the listing, calls `done`, and emits "navigated"
+ * (or "error"). A listing overtaken by a newer one never calls `done`. */
+extern void hx_files_local_list (
+    GObject *provider, GListStore *listing, const char *path,
+    void (*done) (GObject *provider, const char *path, gboolean listed));
+
+/* The listing for `path` has landed (`listed`) or failed. The path moves
+ * only now, so every name in the listing joins onto the folder it came
+ * from — a delete or rename in the meantime can't reach into the folder
+ * still loading. */
+static void
+on_list_done (GObject *provider, const char *path, gboolean listed)
+{
+    HxLocalFilesProvider *self = HX_LOCAL_FILES_PROVIDER (provider);
+
+    if (listed) {
+        g_free (self->current_path);
+        self->current_path = g_strdup (path);
+    }
+    g_clear_pointer (&self->pending_path, g_free);
+}
 
 static void
 do_list (HxLocalFilesProvider *self, const char *path)
 {
-    hx_files_local_list (G_OBJECT (self), self->listing, path);
+    hx_files_local_list (G_OBJECT (self), self->listing, path, on_list_done);
 }
 
 void
@@ -164,16 +184,19 @@ hx_local_files_provider_navigate (HxLocalFilesProvider *self, const char *path)
         return;
     }
 
-    g_free (self->current_path);
-    self->current_path = g_strdup (path);
-    do_list (self, self->current_path);
+    g_free (self->pending_path);
+    self->pending_path = g_strdup (path);
+    do_list (self, self->pending_path);
 }
 
 void
 hx_local_files_provider_reload (HxLocalFilesProvider *self)
 {
     g_return_if_fail (HX_IS_LOCAL_FILES_PROVIDER (self));
-    do_list (self, self->current_path);
+    /* A reload mid-navigation lists where the user is going, or it would
+     * overtake that listing and cancel the navigation. */
+    do_list (self,
+             self->pending_path ? self->pending_path : self->current_path);
 }
 
 void

@@ -10,11 +10,17 @@
 //! [`hx_files_local_list`] for every navigate and reload. The contract it
 //! keeps is the provider interface's: "navigated" fires once the listing
 //! holds the new folder, and "error" carries a message ready for a toast.
+//! Just before either, the provider's `done` hook hears how it went, so its
+//! current path moves with the listing rather than ahead of it.
+//!
+//! Only the newest listing for a provider counts. Starting one cancels the
+//! read before it — a multi-file delete reloads once per file — and a read
+//! that finishes anyway after being overtaken is dropped.
 
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr};
 
-use glib::translate::from_glib_none;
+use glib::translate::{from_glib_none, IntoGlib};
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
@@ -26,6 +32,8 @@ use crate::tr::{tr, tr_fmt};
 /// The provider's count of listings started, so a slow listing that
 /// finishes after a newer one has started is dropped rather than shown.
 const GENERATION: &str = "hx-local-list-generation";
+/// The provider's `gio::Cancellable` for the read in flight.
+const CANCELLABLE: &str = "hx-local-list-cancellable";
 
 const ATTRIBUTES: &str = "standard::name,standard::display-name,standard::type,\
                           standard::size,standard::is-hidden,standard::content-type,\
@@ -48,21 +56,18 @@ struct Listing {
     partial: Option<String>,
 }
 
-/// Read `path`. `Err` when the folder can't be opened at all.
-fn enumerate(path: &str) -> Result<Listing, glib::Error> {
+/// Read `path`. `Err` when the folder can't be opened at all, or the read
+/// was cancelled.
+fn enumerate(path: &str, cancel: &gio::Cancellable) -> Result<Listing, glib::Error> {
     let dir = gio::File::for_path(path);
-    let en = dir.enumerate_children(
-        ATTRIBUTES,
-        gio::FileQueryInfoFlags::NONE,
-        gio::Cancellable::NONE,
-    )?;
+    let en = dir.enumerate_children(ATTRIBUTES, gio::FileQueryInfoFlags::NONE, Some(cancel))?;
     // A folder holds few distinct types, and the description is the costly
     // part of each entry.
     let mut kinds: HashMap<String, String> = HashMap::new();
     let mut rows = Vec::new();
     let mut partial = None;
     loop {
-        let info = match en.next_file(gio::Cancellable::NONE) {
+        let info = match en.next_file(Some(cancel)) {
             Ok(Some(info)) => info,
             Ok(None) => break,
             Err(e) => {
@@ -100,13 +105,22 @@ fn enumerate(path: &str) -> Result<Listing, glib::Error> {
     Ok(Listing { rows, partial })
 }
 
+/// How a listing went, for the provider: the path, and whether the listing
+/// now shows it.
+type Done = Box<dyn FnOnce(&glib::Object, &str, bool)>;
+
 /// Start listing `path` into `store` for `provider`, and return at once.
-fn list(provider: &glib::Object, store: gio::ListStore, path: String) {
+fn list(provider: &glib::Object, store: gio::ListStore, path: String, done: Done) {
     if path.is_empty() {
         provider.emit_by_name::<()>("error", &[&tr("No path to list")]);
         return;
     }
+    let cancel = gio::Cancellable::new();
     let generation = unsafe {
+        if let Some(before) = provider.steal_data::<gio::Cancellable>(CANCELLABLE) {
+            before.cancel();
+        }
+        provider.set_data(CANCELLABLE, cancel.clone());
         let g = provider
             .data::<u64>(GENERATION)
             .map_or(0, |p| *p.as_ref())
@@ -117,7 +131,7 @@ fn list(provider: &glib::Object, store: gio::ListStore, path: String) {
     let weak = provider.downgrade();
     glib::spawn_future_local(async move {
         let worker_path = path.clone();
-        let result = gio::spawn_blocking(move || enumerate(&worker_path)).await;
+        let result = gio::spawn_blocking(move || enumerate(&worker_path, &cancel)).await;
         // Closed while the worker ran: nobody is left to show it to.
         let Some(provider) = weak.upgrade() else {
             return;
@@ -129,11 +143,17 @@ fn list(provider: &glib::Object, store: gio::ListStore, path: String) {
         let listing = match result {
             Ok(Ok(listing)) => listing,
             Ok(Err(e)) => {
+                done(&provider, &path, false);
                 let msg = tr_fmt("Can't read %1$s: %2$s", &[&path, e.message()]);
                 provider.emit_by_name::<()>("error", &[&msg]);
                 return;
             }
-            Err(panic) => std::panic::resume_unwind(panic),
+            Err(_) => {
+                // Unwinding on through GLib's dispatch would abort.
+                glib::g_critical!("gtkhx", "files: listing {path} panicked");
+                done(&provider, &path, false);
+                return;
+            }
         };
         let folder = tr("Folder");
         let rows: Vec<glib::Object> = listing
@@ -147,6 +167,7 @@ fn list(provider: &glib::Object, store: gio::ListStore, path: String) {
         // One splice, one items-changed: each costs the panel a sort and a
         // status update.
         store.splice(0, store.n_items(), &rows);
+        done(&provider, &path, true);
         if let Some(e) = listing.partial {
             // Keep what was read and say what stopped it.
             let msg = tr_fmt("Error reading %1$s: %2$s", &[&path, &e]);
@@ -156,19 +177,29 @@ fn list(provider: &glib::Object, store: gio::ListStore, path: String) {
     });
 }
 
-/// `files_local_provider.c` — list `path` into `listing` for `provider`. The
-/// listing is replaced and "navigated" emitted later, on the main thread;
-/// a listing overtaken by a newer one for the same provider is dropped.
+/// The provider's hook: `listed` is TRUE when the listing now shows `path`.
+type DoneFn = unsafe extern "C" fn(
+    provider: *mut glib::gobject_ffi::GObject,
+    path: *const c_char,
+    listed: glib::ffi::gboolean,
+);
+
+/// `files_local_provider.c` — list `path` into `listing` for `provider`.
+/// Later, on the main thread, the listing is replaced, `done` is called,
+/// and "navigated" (or "error") is emitted; a listing overtaken by a newer
+/// one for the same provider does none of these.
 ///
 /// # Safety
 /// `provider` is a live GObject with the files provider's "error" and
-/// "navigated" signals, `listing` a live `GListStore` of `HxFileEntry`, and
-/// `path` NULL or a NUL-terminated string. Main thread only.
+/// "navigated" signals, `listing` a live `GListStore` of `HxFileEntry`,
+/// `path` NULL or a NUL-terminated string, and `done` safe to call with
+/// `provider` while it lives. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn hx_files_local_list(
     provider: *mut glib::gobject_ffi::GObject,
     listing: *mut gio::ffi::GListStore,
     path: *const c_char,
+    done: DoneFn,
 ) {
     let provider: glib::Object = from_glib_none(provider);
     let store: gio::ListStore = from_glib_none(listing);
@@ -177,7 +208,11 @@ pub unsafe extern "C" fn hx_files_local_list(
     } else {
         CStr::from_ptr(path).to_string_lossy().into_owned()
     };
-    list(&provider, store, path);
+    let done: Done = Box::new(move |provider, path, listed| {
+        let c = crate::cs(path);
+        unsafe { done(provider.as_ptr(), c.as_ptr(), listed.into_glib()) }
+    });
+    list(&provider, store, path, done);
 }
 
 #[cfg(test)]
@@ -247,7 +282,7 @@ mod tests {
         write(&dir, ".hidden", 3);
         std::fs::create_dir(dir.join("sub")).unwrap();
 
-        let mut listing = enumerate(&dir.to_string_lossy()).unwrap();
+        let mut listing = enumerate(&dir.to_string_lossy(), &gio::Cancellable::new()).unwrap();
         listing.rows.sort_by(|a, b| a.name.cmp(&b.name));
         let names: Vec<&str> = listing.rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, ["a.txt", "b.txt", "sub"]);
@@ -268,8 +303,36 @@ mod tests {
 
     #[test]
     fn enumerate_fails_on_a_missing_folder() {
-        let dir = scratch("missing").join("not-there");
-        assert!(enumerate(&dir.to_string_lossy()).is_err());
+        let base = scratch("missing");
+        let dir = base.join("not-there");
+        assert!(enumerate(&dir.to_string_lossy(), &gio::Cancellable::new()).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_cancelled_read_stops() {
+        let dir = scratch("cancelled");
+        write(&dir, "a.txt", 1);
+        let cancel = gio::Cancellable::new();
+        cancel.cancel();
+        let err = enumerate(&dir.to_string_lossy(), &cancel).err().unwrap();
+        assert!(err.matches(gio::IOErrorEnum::Cancelled));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Every `done` call, as (path, listed).
+    type Calls = Rc<RefCell<Vec<(String, bool)>>>;
+
+    fn recorder() -> (Calls, impl Fn() -> Done) {
+        let calls: Calls = Rc::default();
+        let make = {
+            let calls = calls.clone();
+            move || -> Done {
+                let calls = calls.clone();
+                Box::new(move |_, path, listed| calls.borrow_mut().push((path.to_owned(), listed)))
+            }
+        };
+        (calls, make)
     }
 
     /// Run `ctx` until `done`, or fail after a generous wait.
@@ -302,9 +365,20 @@ mod tests {
                 }
             });
 
+            let (calls, done) = recorder();
             let p = provider.upcast_ref::<glib::Object>();
-            list(p, store.clone(), first.to_string_lossy().into_owned());
-            list(p, store.clone(), second.to_string_lossy().into_owned());
+            list(
+                p,
+                store.clone(),
+                first.to_string_lossy().into_owned(),
+                done(),
+            );
+            list(
+                p,
+                store.clone(),
+                second.to_string_lossy().into_owned(),
+                done(),
+            );
             run_until(&ctx, || !navigated.borrow().is_empty());
             // Let the first listing's completion run too, if it hasn't.
             for _ in 0..50 {
@@ -312,7 +386,10 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
 
-            assert_eq!(*navigated.borrow(), [second.to_string_lossy().into_owned()]);
+            let second_path = second.to_string_lossy().into_owned();
+            assert_eq!(*navigated.borrow(), std::slice::from_ref(&second_path));
+            // The overtaken listing never tells the provider anything.
+            assert_eq!(*calls.borrow(), [(second_path, true)]);
             let mut names: Vec<String> = (0..store.n_items())
                 .map(|i| store.item(i).and_downcast::<HxFileEntry>().unwrap().name())
                 .collect();
@@ -327,7 +404,8 @@ mod tests {
 
     #[test]
     fn an_unreadable_folder_reports_an_error_and_keeps_the_listing() {
-        let missing = scratch("unreadable").join("not-there");
+        let base = scratch("unreadable");
+        let missing = base.join("not-there");
         let ctx = glib::MainContext::new();
         ctx.with_thread_default(|| {
             let provider: FakeProvider = glib::Object::new();
@@ -342,16 +420,22 @@ mod tests {
                 });
             }
 
+            let (calls, done) = recorder();
+            let missing_path = missing.to_string_lossy().into_owned();
             list(
                 provider.upcast_ref(),
                 store.clone(),
-                missing.to_string_lossy().into_owned(),
+                missing_path.clone(),
+                done(),
             );
             run_until(&ctx, || !events.borrow().is_empty());
 
             assert_eq!(*events.borrow(), ["error"]);
             assert_eq!(store.n_items(), 1);
+            // Not listed: the provider's path stays where it was.
+            assert_eq!(*calls.borrow(), [(missing_path, false)]);
         })
         .unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

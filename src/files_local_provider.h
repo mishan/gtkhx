@@ -39,10 +39,10 @@ hx_local_files_provider_get_current_path (HxLocalFilesProvider *self);
 extern const char *
 hx_local_files_provider_get_label (HxLocalFilesProvider *self);
 
-/* Navigate to a new directory. Absolute path. Async-by-name (no
- * actual async — local FS reads are blocking-but-fast); on
- * completion the "navigated" signal fires with the new path. On
- * error the "error" signal fires with a human-readable message
+/* Navigate to a new directory. Absolute path. Async: the folder is
+ * read on a worker thread, and the current path moves when its
+ * listing lands, as the "navigated" signal fires with the new path.
+ * On error the "error" signal fires with a human-readable message
  * and the provider's current path stays put. */
 extern void hx_local_files_provider_navigate (HxLocalFilesProvider *self,
                                               const char *path);

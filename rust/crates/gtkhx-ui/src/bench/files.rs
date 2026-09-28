@@ -276,9 +276,14 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
 
     // ---- local listing --------------------------------------------------
     let before = listed.get();
+    let old_path = provider.current_path();
+    let full_path = full.to_string_lossy().into_owned();
     let t = glib::monotonic_time();
-    provider.navigate(&full.to_string_lossy());
+    provider.navigate(&full_path);
     let call = glib::monotonic_time() - t;
+    // The path moves with the listing: until it lands, names in the old
+    // listing must still join onto the old folder.
+    let moved_early = provider.current_path() != old_path;
     let waited = wait_listed(&cv, &listed, before + 1).await;
     bail_if_closed!();
     let Some((until, longest)) = waited else {
@@ -301,6 +306,13 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
             &format!("rows shown, expected {n}"),
         );
     }
+    if moved_early || provider.current_path() != full_path {
+        r.line(
+            "  CHECK FAILED",
+            "",
+            "the current path didn't move with the listing",
+        );
+    }
 
     r.print();
     provider.disconnect(nav);
@@ -319,6 +331,12 @@ async fn wait_listed(cv: &gtk::ColumnView, listed: &Cell<u32>, target: u32) -> O
     for _ in 0..LIST_FRAMES {
         if listed.get() >= target {
             return Some((glib::monotonic_time() - start, longest));
+        }
+        // Frames have stopped, so every wait returns at once and the loop
+        // would never yield for the listing to land; the report already
+        // says why.
+        if super::STALLED.get() {
+            return None;
         }
         let now = next_frame(cv).await;
         longest = longest.max(now - last);

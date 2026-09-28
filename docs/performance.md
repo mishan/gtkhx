@@ -320,7 +320,7 @@ median of five, against `main` measured alongside:
 | Files panel, 10,000 entries | Before | After |
 |---|---|---|
 | local listing: navigate call (UI frozen) | 82.8 ms | 0.01 ms |
-| local listing: until painted | 110 ms | 110 ms |
+| local listing: until on screen | 110 ms (call + first paint) | 110 ms (until listed + first paint) |
 | local listing: longest frame | 110 ms — the call and the paint | 55 ms |
 
 The wall time is unchanged; what moved is where the main thread waits.
@@ -390,8 +390,11 @@ are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
    builds the rows and splices them in — about 2 ms for the rows. The
    longest frame while listing fell from 110 ms to 55 ms, and what is left
    is the splice: the column view taking the new rows and the sort, the
-   same cost a remote populate pays. A listing overtaken by a newer one is
-   dropped when it lands.
+   same cost a remote populate pays. Starting a listing cancels the read
+   before it, and one that lands after being overtaken is dropped. The
+   provider's current path moves when its listing lands, not when
+   `navigate` is called, so a delete or rename in between still acts on the
+   folder the user is looking at.
 8. **Sorting by name costs 65 ms at 10,000 rows**, against 9 ms by size.
    `cmp_name` called `g_utf8_collate` on every comparison, which re-derives
    a collation key each time. **Fixed:** each entry derives its
