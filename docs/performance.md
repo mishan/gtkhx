@@ -112,10 +112,10 @@ is held under the raw loopback socket's speed, measured alongside.
 2,000 and of 10,000 servers from a fake tracker, opened through
 `hxnet_tracker_fetch_open` — TLS first, then in the clear, as against a
 real tracker that doesn't speak TLS — and drained the way `network.c`
-drains it, a 50 ms timeout polling until empty. Reported: the fetch, open
-to the last record; the tail, from the tracker's last write to the last
-record on the main loop; and the drain ticks it took, counting the one
-that finds the fetch finished. Known values: every
+drains it, on the fetch's own wakeup (`hxnet_tracker_fetch_watch`),
+polling until empty. Reported: the fetch, open to the last record; the
+tail, from the tracker's last write to the last record on the main loop;
+and the drains it took, counting the one that finds the fetch finished. Known values: every
 server arrives, in order, with its name and port.
 
 ### Tier 3 — UI scenarios
@@ -514,11 +514,18 @@ throttle. The raw socket floor is about 5 GB/s.
 
 Progress posts went from 28,000–80,000 a second to 20–26.
 
-The tracker fetch, median of five, after finding 28's fix: 2,000 servers
-in 50 ms and 10,000 in 52 ms, every run in a single drain tick; 48 ms of
-either is the wait for that tick, the fetch itself taking a few. Before
-it, a run could take several ticks — 2,000 servers in 50 to 150 ms here,
-10,000 in up to 900 ms in a reviewer's runs.
+The tracker fetch, median of three runs of the bench's own median of
+five. "Before" drained on a 50 ms timer; "after" drains on the fetch's
+wakeup, once for the listing and once for its end.
+
+| Tracker fetch | Fetch: before → after | Tail: before → after |
+|---|---|---|
+| 2,000 servers | 50.4 → 5.4 ms | 45.6 → 0.8 ms |
+| 10,000 servers | 51.5 → 9.3 ms | 46.4 → 4.0 ms |
+
+What the tail has left is the drain itself, handing 10,000 records over.
+Before finding 28's fix, a run could take several ticks — 2,000 servers in
+50 to 150 ms here, 10,000 in up to 900 ms in a reviewer's runs.
 
 ## Findings
 
@@ -815,8 +822,11 @@ onwards from loopback.
     fetch's refilling, the rest waited for the next tick: a 10,000-server
     listing could take seconds instead of one tick. **Fixed:** the
     channel has room for a whole listing, so it's all there for the
-    first drain. What remains is the wait for that tick, up to 50 ms;
-    draining on the fetch's own wakeup would remove it.
+    first drain. That left the wait for the tick, up to 50 ms, which
+    went too: the walk now wakes the main thread once a tracker's events
+    are all in the channel (`hxnet_tracker_fetch_watch`), and the drain
+    runs then. 10,000 servers reach the main loop 9 ms after the open,
+    against 52.
 29. **A TLS folder download needs the server's `close_notify`.** A
     folder's end is the server closing, with no marker before it, and
     rustls takes a close without `close_notify` for a truncation: the

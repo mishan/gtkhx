@@ -2,8 +2,9 @@
 //!
 //! A fake v3 tracker on 127.0.0.1 answers with N servers. The fetch is
 //! opened through `hxnet_tracker_fetch_open` and drained the way
-//! `network.c` drains it — a 50 ms GLib timeout that polls until the
-//! channel is empty. The drain here only counts what it's given; in the
+//! `network.c` drains it — on the fetch's own wakeup
+//! (`hxnet_tracker_fetch_watch`), polling until the channel is empty. The
+//! drain here only counts what it's given; in the
 //! app each record becomes a `tracker-server-create` signal, which since
 //! the tracker window batches its rows costs little.
 //!
@@ -13,7 +14,7 @@
 //!
 //! Reported: the whole fetch, open to the last record; how long after the
 //! tracker finished sending the last record reached the main loop; and
-//! how many drain ticks that took. Known values: every server arrives, in
+//! how many drains that took. Known values: every server arrives, in
 //! order, with its name and port intact.
 
 use std::cell::RefCell;
@@ -24,13 +25,11 @@ use std::time::{Duration, Instant};
 
 use hxnet::ffi::{
     hxnet_tracker_fetch_close, hxnet_tracker_fetch_open, hxnet_tracker_fetch_poll,
-    HxnetTrackerEvent, HXNET_TRK_KIND_BEGIN, HXNET_TRK_KIND_RECORD, HXNET_TRK_POLL_CLOSED,
-    HXNET_TRK_POLL_EVENT,
+    hxnet_tracker_fetch_watch, HxnetTrackerEvent, HXNET_TRK_KIND_BEGIN, HXNET_TRK_KIND_RECORD,
+    HXNET_TRK_POLL_CLOSED, HXNET_TRK_POLL_EVENT,
 };
 use hxproto::parse::tracker_v3;
 
-/// The app's drain interval (`network.c`).
-const DRAIN_MS: u64 = 50;
 /// How long the fake tracker waits for a fetch.
 const SERVE_TIMEOUT: Duration = Duration::from_secs(60);
 /// `HTRK_V3_FEAT_IPV6`, which the app asks for.
@@ -111,7 +110,7 @@ struct Drain {
     begun: bool,
     records: u32,
     wrong: u32,
-    ticks: u32,
+    drains: u32,
     closed: bool,
     last_at: Option<Instant>,
 }
@@ -128,10 +127,11 @@ unsafe fn slice<'a>(p: *const u8, n: usize) -> &'a [u8] {
     }
 }
 
-/// One drain tick, as `network.c`'s `tracker_fetch_drain`: poll until
-/// empty or closed.
-fn drain_tick(handle: *mut hxnet::ffi::HxnetTrackerFetch) -> glib::ControlFlow {
-    DRAIN.with(|d| d.borrow_mut().ticks += 1);
+/// One drain, as `network.c`'s `tracker_fetch_drain`: poll until empty
+/// or closed.
+unsafe extern "C" fn drain(user_data: *mut c_void) {
+    let handle = user_data as *mut hxnet::ffi::HxnetTrackerFetch;
+    DRAIN.with(|d| d.borrow_mut().drains += 1);
     loop {
         let mut ev = std::mem::MaybeUninit::<HxnetTrackerEvent>::zeroed();
         let rc = unsafe { hxnet_tracker_fetch_poll(handle, ev.as_mut_ptr()) };
@@ -159,9 +159,8 @@ fn drain_tick(handle: *mut hxnet::ffi::HxnetTrackerFetch) -> glib::ControlFlow {
         }
         if rc == HXNET_TRK_POLL_CLOSED {
             DRAIN.with(|d| d.borrow_mut().closed = true);
-            return glib::ControlFlow::Break;
         }
-        return glib::ControlFlow::Continue;
+        return;
     }
 }
 
@@ -169,7 +168,7 @@ pub struct Fetch {
     pub total: Duration,
     /// From the tracker's last write to the last record on the main loop.
     pub tail: Duration,
-    pub ticks: u32,
+    pub drains: u32,
     pub failures: Vec<String>,
 }
 
@@ -194,12 +193,13 @@ pub fn fetch(n: u16) -> Fetch {
         )
     };
     assert!(!handle.is_null(), "tracker fetch open");
-    let handle_addr = handle as usize;
-    let source = glib::timeout_add_local(Duration::from_millis(DRAIN_MS), move || {
-        drain_tick(handle_addr as *mut _)
-    });
+    unsafe { hxnet_tracker_fetch_watch(handle, Some(drain), handle.cast()) };
     let ctx = glib::MainContext::default();
     let deadline = Instant::now() + Duration::from_secs(60);
+    // With no wakeup coming, a blocking iteration would never return to
+    // check the deadline; this makes sure one does.
+    let heartbeat =
+        glib::timeout_add_local(Duration::from_millis(100), || glib::ControlFlow::Continue);
     let mut timed_out = false;
     while !DRAIN.with(|d| d.borrow().closed) {
         if Instant::now() > deadline {
@@ -208,9 +208,7 @@ pub fn fetch(n: u16) -> Fetch {
         }
         ctx.iteration(true);
     }
-    if timed_out {
-        source.remove();
-    }
+    heartbeat.remove();
     unsafe { hxnet_tracker_fetch_close(handle) };
     let sent = server.join().expect("tracker thread");
 
@@ -230,7 +228,7 @@ pub fn fetch(n: u16) -> Fetch {
         return Fetch {
             total: Duration::ZERO,
             tail: Duration::ZERO,
-            ticks: d.ticks,
+            drains: d.drains,
             failures,
         };
     };
@@ -238,7 +236,7 @@ pub fn fetch(n: u16) -> Fetch {
     Fetch {
         total: last - t0,
         tail: last.saturating_duration_since(sent),
-        ticks: d.ticks,
+        drains: d.drains,
         failures,
     }
 }

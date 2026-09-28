@@ -357,15 +357,16 @@ and lives in Rust. A walk snapshots it, updates its copy, and stores it
 back, so a Refresh doesn't re-pay a handshake known to fail — same
 behaviour as the C cache it replaced.
 
-**Event emission.** The C bridge in `network.c` drains fetch events on a
-main-loop timeout and re-emits the existing `tracker-batch-begin` /
+**Event emission.** The C bridge in `network.c` drains fetch events when
+the fetch wakes it — once a tracker's events are all in the channel, and
+when the walk ends (`hxnet_tracker_fetch_watch`) — and re-emits the existing `tracker-batch-begin` /
 `tracker-server-create` `GtkhxSession` signals, so the view is unchanged
 and per-record progress ticks still fire. One cadence difference is worth
 knowing: the Rust engine reads a whole listing before returning it, so a
 tracker's records arrive as a burst and progress ticks per tracker rather
 than per record *within* a tracker. Acceptable for the listing sizes real
 trackers serve; cross-tracker progress is unchanged. The drain re-checks
-the handle at the top of every iteration, because a signal subscriber can
+the handle before every poll, because a signal subscriber can
 re-enter and cancel the fetch mid-drain.
 
 **Probe-watchdog timing is a test dependency.** The Tier 3 v1 path leans

@@ -1014,7 +1014,7 @@ fn tracker_fetch() -> bool {
     println!();
     println!(
         "{:<14} {:>9} {:>9} {:>9}",
-        "servers", "fetch", "tail", "ticks"
+        "servers", "fetch", "tail", "drains"
     );
     println!("{:<14} {:>9} {:>9} {:>9}", "", "ms", "ms", "");
     let mut failed = false;
@@ -1025,7 +1025,7 @@ fn tracker_fetch() -> bool {
             n,
             median(runs.iter().map(|r| r.total.as_secs_f64() * 1e3).collect()),
             median(runs.iter().map(|r| r.tail.as_secs_f64() * 1e3).collect()),
-            median(runs.iter().map(|r| f64::from(r.ticks)).collect()),
+            median(runs.iter().map(|r| f64::from(r.drains)).collect()),
         );
         for f in runs.iter().flat_map(|r| &r.failures) {
             println!("  CHECK FAILED: {n} servers: {f}");

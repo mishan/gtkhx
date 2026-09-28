@@ -2226,7 +2226,9 @@ fn _silence_unused_c_void(_p: *mut c_void) {}
 // handle/drain shape: spawn run_fetch on the global runtime, keep the
 // event receiver for poll, drop + abort on close.
 
-use crate::tracker_fetch::{run_fetch, TcpTlsConnector, TrackerEvent, VerdictCache, VerifyFn};
+use crate::tracker_fetch::{
+    run_fetch_notifying, TcpTlsConnector, TrackerEvent, VerdictCache, VerifyFn,
+};
 
 /// Opaque handle for an in-flight tracker fetch walk. Created by
 /// [`hxnet_tracker_fetch_open`], drained by [`hxnet_tracker_fetch_poll`],
@@ -2234,10 +2236,71 @@ use crate::tracker_fetch::{run_fetch, TcpTlsConnector, TrackerEvent, VerdictCach
 pub struct HxnetTrackerFetch {
     events: mpsc::Receiver<TrackerEvent>,
     join: JoinHandle<()>,
+    wake: std::sync::Arc<TrackerWake>,
     /// Backing store for the borrowed pointers handed out by the last
     /// poll. Replaced on the next poll (invalidating the prior
     /// pointers) and dropped on close.
     current: Option<TrackerEvent>,
+}
+
+/// Called on the main thread when a fetch has events waiting, or has
+/// finished; see [`hxnet_tracker_fetch_watch`].
+pub type HxnetTrackerWakeCallback = Option<unsafe extern "C" fn(user_data: *mut c_void)>;
+
+/// A fetch's main-thread wakeup. Wakeups coalesce: one is queued on the
+/// main loop at a time, and it drains whatever has arrived by the time it
+/// runs.
+#[derive(Default)]
+struct TrackerWake {
+    /// A wakeup is queued and hasn't run yet.
+    queued: std::sync::atomic::AtomicBool,
+    /// Who to call; `None` until watched, and again once closed.
+    target: std::sync::Mutex<Option<(unsafe extern "C" fn(*mut c_void), SendUserData)>>,
+}
+
+impl TrackerWake {
+    fn wake(self: &std::sync::Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        if self.queued.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let w = self.clone();
+        // An idle on the default main context rather than `invoke`, which
+        // would run the callback on this thread whenever it could take the
+        // context.
+        glib::idle_add_full(glib::Priority::DEFAULT, move || {
+            // Cleared before the drain, so an event sent after the drain's
+            // last look queues another wakeup. A swap rather than a store:
+            // its acquire pairs with the sender's, so a sender that saw the
+            // flag still set had sent before this drain looks.
+            w.queued.swap(false, Ordering::AcqRel);
+            // Copied out, not called under the lock: the drain can close
+            // the fetch, which takes it.
+            let target = w
+                .target
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .map(|(cb, ud)| (*cb, ud.0));
+            if let Some((cb, ud)) = target {
+                unsafe { cb(ud) };
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    fn set(&self, target: Option<(unsafe extern "C" fn(*mut c_void), SendUserData)>) {
+        *self.target.lock().unwrap_or_else(|e| e.into_inner()) = target;
+    }
+}
+
+/// Wakes the watcher when dropped.
+struct WakeOnDrop(std::sync::Arc<TrackerWake>);
+
+impl Drop for WakeOnDrop {
+    fn drop(&mut self) {
+        self.0.wake();
+    }
 }
 
 /// `kind` discriminants in [`HxnetTrackerEvent`]. Mirrored by the C
@@ -2250,6 +2313,11 @@ pub const HXNET_TRK_KIND_DONE: u32 = 3;
 /// [`hxnet_tracker_fetch_poll`] return codes.
 /// A tracker fetch's event channel: one listing's records — a v3 count is
 /// a `u16` — and its begin and end.
+///
+/// The watcher's wakeup depends on it. The walk wakes the main thread only
+/// once a tracker's events are all sent, so a tracker whose events didn't
+/// fit would leave the walk waiting on a full channel that no drain is
+/// coming for. Keep it at least as large as one tracker's events.
 const TRACKER_EVENT_ROOM: usize = u16::MAX as usize + 2;
 
 pub const HXNET_TRK_POLL_EMPTY: c_int = 0;
@@ -2542,13 +2610,24 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
 
     let probe_timeout = std::time::Duration::from_millis(probe_ms as u64);
     // Room for a whole listing. The walk hands a tracker's records over
-    // in one burst once they are read, and the C side drains the channel
-    // on a 50 ms timeout until it finds it empty; with less room, each
-    // tick took what fit and the rest waited for the next — 64 records a
-    // tick, eight seconds for 10,000 servers. tokio allocates a bounded
-    // channel's slots as they fill, so the room costs nothing unused.
+    // in one burst once they are read, and a drain takes what it finds
+    // until the channel is empty; with less room, a drain that outran the
+    // refilling left the rest for the next — on a 50 ms timer that was 64
+    // records a tick, eight seconds for 10,000 servers. tokio allocates a
+    // bounded channel's slots as they fill, so the room costs nothing
+    // unused.
     let (tx, rx) = mpsc::channel::<TrackerEvent>(TRACKER_EVENT_ROOM);
+    // Woken once a tracker's events are all in the channel, so a watcher
+    // drains each tracker's in one go.
+    let wake = std::sync::Arc::new(TrackerWake::default());
+    let walk_wake = wake.clone();
     let join = rt.handle().spawn(async move {
+        // The last wakeup, from a guard so a walk that panics still sends
+        // it. Declared before `tx` is moved in below, so it drops after:
+        // the channel closes first, and the drain that wakeup starts sees
+        // it closed.
+        let _last = WakeOnDrop(walk_wake.clone());
+        let tx = tx;
         let mut connector = TcpTlsConnector { verify, proxy };
         // Snapshot the process-global verdict cache so a Refresh doesn't
         // re-pay a known-failing TLS handshake, then write the result
@@ -2556,13 +2635,14 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
         // `.await` (no lock held across it); a cancelled walk that never
         // reaches the writeback just loses its updates, which is fine.
         let mut verdicts = tracker_verdicts_snapshot();
-        run_fetch(
+        run_fetch_notifying(
             &mut connector,
             &url_vec,
             features,
             probe_timeout,
             &mut verdicts,
             &tx,
+            &|| walk_wake.wake(),
         )
         .await;
         tracker_verdicts_store(verdicts);
@@ -2571,8 +2651,39 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
     Box::into_raw(Box::new(HxnetTrackerFetch {
         events: rx,
         join,
+        wake,
         current: None,
     }))
+}
+
+/// Call `cb(user_data)` on the main thread whenever the fetch has events
+/// waiting, and once more when it has finished, so the caller can drain
+/// with [`hxnet_tracker_fetch_poll`] as they arrive instead of on a timer.
+/// Wakeups coalesce, so each drain should poll until
+/// [`HXNET_TRK_POLL_EMPTY`] or [`HXNET_TRK_POLL_CLOSED`]. Events that
+/// arrived before the call wake it at once. No call is made after
+/// [`hxnet_tracker_fetch_close`], even one already queued.
+///
+/// # Safety
+///
+/// `handle` must be a live pointer from [`hxnet_tracker_fetch_open`];
+/// `user_data` must stay valid until the handle is closed. The main
+/// thread is the one running GLib's default main context.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_tracker_fetch_watch(
+    handle: *mut HxnetTrackerFetch,
+    cb: HxnetTrackerWakeCallback,
+    user_data: *mut c_void,
+) {
+    if handle.is_null() {
+        glib::g_critical!("hxnet", "hxnet_tracker_fetch_watch: NULL handle");
+        return;
+    }
+    let h = &*handle;
+    h.wake.set(cb.map(|cb| (cb, SendUserData(user_data))));
+    if cb.is_some() {
+        h.wake.wake();
+    }
 }
 
 /// Drain one event into `out`. Returns [`HXNET_TRK_POLL_EVENT`] (a new
@@ -2623,6 +2734,7 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_close(handle: *mut HxnetTrackerFetc
         return;
     }
     let h = Box::from_raw(handle);
+    h.wake.set(None);
     h.join.abort();
     drop(h);
 }
