@@ -12,13 +12,20 @@ tools/screenshots.sh chat news    # just these
 tools/screenshots.sh --check      # take them afresh; fail if any changed
 ```
 
-It needs Docker and a [shotbox](https://github.com/mishan/shotbox) checkout beside this one
-(`../shotbox`, or wherever `SHOTBOX_DIR` points).
-Everything else is in the image `tools/screenshots/Dockerfile` builds, and the image is what
-makes the pictures the same on any machine: it pins the toolkit, the fonts and the renderer (the
-CI base image, by digest), the Hotline servers (Janus by digest, hxd-ng by the rig's revision),
-and ImageMagick. GtkHx is built from the working tree inside it, into a Docker volume that keeps
-the build between runs. Bumping a digest changes pictures; regenerate them in the same commit.
+It needs only Docker. Everything else is in the image `tools/screenshots/Dockerfile` builds,
+and the image is what makes the pictures the same on any machine: it pins the toolkit, the fonts
+and the renderer (the CI base image, by digest), the Hotline servers (Janus by digest, hxd-ng by
+the rig's revision), ImageMagick, and [shotbox](https://github.com/mishan/shotbox) (the release
+from PyPI, by version and hash). GtkHx is built from the working tree inside it, into a Docker
+volume that keeps the build between runs. Bumping a digest or shotbox's version can change
+pictures; regenerate them in the same commit.
+
+To try a change to shotbox itself against these scenes, point `SHOTBOX_DIR` at a checkout of it.
+The checkout is mounted into the container and used in place of the pinned release:
+
+```sh
+SHOTBOX_DIR=../shotbox tools/screenshots.sh --check
+```
 
 ### What's in a scene
 

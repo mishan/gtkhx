@@ -30,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 CONTENT = HERE / "content"
 SRC = Path(os.environ.get("GTKHX_SRC", "/src"))
 GTKHX = os.environ.get("GTKHX_BIN", "/work/build/src/gtkhx")
-SHOTBOX = os.environ.get("SHOTBOX_BIN", "/shotbox/bin/shotbox")
+SHOTBOX = os.environ.get("SHOTBOX_BIN", "shotbox")
 WORK = Path("/tmp/shots")
 
 JANUS_PORT = 5500

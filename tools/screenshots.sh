@@ -9,13 +9,14 @@
 # Everything runs in the image tools/screenshots/Dockerfile describes, which
 # pins the toolkit, the fonts and the servers. GtkHx is built there from this
 # working tree, into a Docker volume that keeps the build between runs.
-# The pictures are taken with shotbox, from a checkout beside this one
-# (../shotbox) or wherever SHOTBOX_DIR points. See docs/screenshots.md.
+# The pictures are taken with shotbox, the release the image pins, or the
+# checkout SHOTBOX_DIR points at, for working on shotbox itself. See
+# docs/screenshots.md.
 
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-shotbox=${SHOTBOX_DIR:-$root/../shotbox}
+shotbox=
 out=$root/data/screenshots
 volume=gtkhx-screenshots-work
 check=
@@ -24,10 +25,12 @@ if [ "${1:-}" = --check ]; then
     check=1
     shift
 fi
-if [ ! -x "$shotbox/bin/shotbox" ]; then
-    echo "$0: no shotbox at $shotbox; clone https://github.com/mishan/shotbox" \
-        "there, or set SHOTBOX_DIR" >&2
-    exit 2
+if [ -n "${SHOTBOX_DIR:-}" ]; then
+    if [ ! -x "$SHOTBOX_DIR/bin/shotbox" ]; then
+        echo "$0: SHOTBOX_DIR=$SHOTBOX_DIR is not a shotbox checkout" >&2
+        exit 2
+    fi
+    shotbox=$(cd "$SHOTBOX_DIR" && pwd)
 fi
 
 docker build -q -t gtkhx-hxd-ng "$root/tests/hxd-ng" >/dev/null
@@ -45,7 +48,8 @@ docker run --rm \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     --add-host tracker.example.org:127.0.0.1 \
     -e GTKHX_DEBUG="${GTKHX_DEBUG:-}" -e EXPLORE="${EXPLORE:-}" \
-    -v "$root:/src:ro" -v "$shotbox:/shotbox:ro" -v "$volume:/work" \
+    -v "$root:/src:ro" ${shotbox:+-v "$shotbox:/shotbox:ro"} \
+    -v "$volume:/work" \
     -v "$fresh:/out" -v "$out:/ref:ro" \
     gtkhx-screenshots sh -euc '
         owner=$(stat -c %u:%g /out)
@@ -55,8 +59,11 @@ docker run --rm \
             -Dcargo_target_dir=/work/cargo-target >/work/setup.log
         meson compile -C /work/build >/work/compile.log ||
             { tail -40 /work/compile.log; exit 1; }
-        # The scenes drive the display with shotbox, from Python.
-        export PYTHONPATH=/shotbox
+        # The scenes drive the display with shotbox, from Python: the one
+        # in the image, or the checkout mounted over it.
+        if [ -d /shotbox ]; then
+            export PYTHONPATH=/shotbox SHOTBOX_BIN=/shotbox/bin/shotbox
+        fi
         python3 /src/tools/screenshots/scenes.py /out "$@"
         if [ -n "'"$check"'" ]; then
             python3 /src/tools/screenshots/scenes.py --compare /ref /out "$@"
