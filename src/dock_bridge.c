@@ -169,9 +169,8 @@ reserve_corner (const char *id)
         return;
     }
     front = gtk_stack_get_visible_child (GTK_STACK (stack));
-    mln_panes_set_corner_pinned (dock, id,
-                                 front != NULL
-                                     && find_corner_widget (front) != NULL);
+    mln_panes_set_corner_pinned (
+        dock, id, front != NULL && find_corner_widget (front) != NULL);
     clear_corner_margins (stack);
     if (margin <= 0) {
         return;
