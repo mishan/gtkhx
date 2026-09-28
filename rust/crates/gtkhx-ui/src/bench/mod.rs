@@ -8,11 +8,11 @@
 //! docs/performance.md for how the tiers divide.
 //!
 //! ```sh
-//! GTKHX_BENCH=chat=20000,files=10000,users=1000,tracker=2000,media=50 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
+//! GTKHX_BENCH=startup,chat=20000,files=10000,users=1000,tracker=2000,media=50 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 //! ```
 //!
 //! `GTKHX_BENCH` lists scenarios to run in order, each with an optional
-//! size. `GTKHX_BENCH_QUIT` exits once the last report is printed, which
+//! size — except `startup`, which always runs first and at most once. `GTKHX_BENCH_QUIT` exits once the last report is printed, which
 //! is what makes a run scriptable; `tools/uibench.sh` does the repeats.
 //!
 //! **Every report leads with the idle frame interval**, measured before
@@ -30,6 +30,7 @@
 mod chat;
 mod files;
 mod media;
+mod startup;
 mod tracker;
 mod users;
 
@@ -71,9 +72,12 @@ fn parse_requests(spec: &str) -> Result<Vec<Request>, String> {
             }
             None => (item, None),
         };
-        if !matches!(name, "chat" | "files" | "users" | "tracker" | "media") {
+        if !matches!(
+            name,
+            "chat" | "files" | "users" | "tracker" | "media" | "startup"
+        ) {
             return Err(format!(
-                "unknown scenario '{name}' (known: chat, files, users, tracker, media)"
+                "unknown scenario '{name}' (known: chat, files, users, tracker, media, startup)"
             ));
         }
         out.push(Request {
@@ -96,9 +100,19 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
     let Ok(spec) = std::env::var("GTKHX_BENCH") else {
         return;
     };
+    // First, before any bench work: the startup scenario times from here.
+    let hooked = startup::Hooked::now();
     let quit = std::env::var_os("GTKHX_BENCH_QUIT").is_some();
     let requests = match parse_requests(&spec) {
-        Ok(r) => r,
+        // Startup can only be measured once, and only before anything
+        // else has run.
+        Ok(mut r) => {
+            r.sort_by_key(|q| q.name != "startup");
+            // Once is all it can be measured.
+            let mut seen = false;
+            r.retain(|q| q.name != "startup" || !std::mem::replace(&mut seen, true));
+            r
+        }
         Err(e) => {
             // A scripted run waits for the app to exit; with nothing to
             // run, it never would.
@@ -128,6 +142,10 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
                 "tracker" => tracker::run(r.size.unwrap_or(2_000)).await,
                 "media" => match &chat_view {
                     Some(v) => media::run(v, r.size.unwrap_or(50)).await,
+                    None => glib::g_warning!("gtkhx", "GTKHX_BENCH: no chat view to measure"),
+                },
+                "startup" => match &chat_view {
+                    Some(v) => startup::run(v, hooked).await,
                     None => glib::g_warning!("gtkhx", "GTKHX_BENCH: no chat view to measure"),
                 },
                 _ => unreachable!("parse_requests only admits known names"),
