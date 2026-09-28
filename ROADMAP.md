@@ -32,7 +32,7 @@ extension is allowed to degrade the legacy path.
 
 | | |
 |---|---|
-| **Toolkit** | GTK 4 + libadwaita + libpanel. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, threaded news, voice and video are dockable panels in a persistable split layout; the file browser (one per connection), the tracker and the file preview are standalone windows. |
+| **Toolkit** | GTK 4 + libadwaita, with mullion-gtk for the dock. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, threaded news, voice and video are dockable panels in a persistable split layout; the file browser (one per connection), the tracker and the file preview are standalone windows. |
 | **Build** | Meson + Cargo. Autotools, the RPM spec and the old `debian/` tree are gone. |
 | **Language** | Hybrid C + Rust, with Rust now the larger half. C no longer grows: a CI check fails any pull request that adds net lines of C. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
 | **Shared code** | The wire protocol, the file-transfer codec and the HFS sidecars come from [hx-libs](https://github.com/mishan/hx-libs), shared with the hxd-ng server. |

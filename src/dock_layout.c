@@ -8,9 +8,8 @@
  */
 
 /*
- * dock_layout.c — save / restore the main dock's HxSplit shape
- * and per-leaf panel placement. See dock_layout.h for the file
- * format and contract.
+ * dock_layout.c — the main window's layout file. See dock_layout.h for
+ * the format and contract.
  */
 
 #include "config.h"
@@ -18,84 +17,24 @@
 #include "dock_layout.h"
 #include "dock_layout_parse.h"
 
-#include "hx.h" /* session typedef — toolbar.h needs it */
-#include "hx_panel.h"
-#include "hx_panel_frame.h"
-#include "hx_split.h"
-#include "panel_registry.h"
-#include "toolbar.h" /* DEFAULT_LEAF_MIN_WIDTH */
+#include "hx.h" /* gtkhx_prefs, for the window size an import measures by */
 #include "debug.h"
 
-#include <errno.h>
-#include <stdio.h> /* sscanf — used by the [Undocked] parser */
+#include <stdio.h> /* sscanf */
 #include <string.h>
-
-#include <glib/gstdio.h>
 
 extern const char *gtkhx_config_dir (void);
 
-/* ----------------------------------------------------------------- */
-/* Module state                                                      */
-/* ----------------------------------------------------------------- */
-
-typedef struct {
-    int w;
-    int h;
-} UndockedSize;
-
 static struct {
-    gboolean loaded;               /* TRUE iff dock_layout_load
-                                       * found and parsed a file. */
-    GHashTable *id_to_frame;       /* char* (panel id) → GtkWidget*
-                                       * (PanelFrame*, borrowed). */
-    GHashTable *id_to_undock_size; /* char* (panel id) → UndockedSize*;
-                                       * panels saved as living in their
-                                       * own undocked window. Consumed by
-                                       * dock_layout_place_panel — each
-                                       * matching id triggers a one-time
-                                       * hx_panel_undock + size apply. */
-    GPtrArray *selected_ids;       /* char*, owned; one per saved leaf
-                                       * that recorded a foreground page.
-                                       * Consumed by
-                                       * dock_layout_apply_selection. */
-    GHashTable *closed_ids;        /* char* set of static panel ids the
-                                       * saved layout had nowhere in the
-                                       * dock. Read by
-                                       * dock_layout_panel_was_closed so
-                                       * startup leaves them unbuilt. */
-    GHashTable *bare_ids;          /* char* set of panel ids whose action
-                                       * row the user has hidden. Kept
-                                       * live, not rebuilt from the
-                                       * registry at save, so a closed
-                                       * panel keeps its setting. */
-    gboolean toolbar_shown;        /* the main window's pixmap toolbar */
-    gboolean pane_titles;          /* headers on single-panel frames */
-    GArray *dropped_splits;        /* guint post-order indices of saved
-                                       * splits that collapsed when a
-                                       * retired panel was pruned; their
-                                       * sizes= entries are skipped */
-    GHashTable *window_sizes;      /* char* name → "W,H"; windows that
-                                       * aren't panels (Files) */
-    GtkPaned **paned_order;        /* depth-first order, set by load
-                                       * + apply_geometry, used by save */
-    guint n_paned;
-    guint save_idle_id;
-    gboolean save_disabled; /* TRUE after dock_layout_reset until
-                                       * the next process — every save
-                                       * request is dropped on the floor.
-                                       * Without this, paned-position
-                                       * notify::s during the rest of the
-                                       * session re-create the file we
-                                       * just deleted. */
-    HxSplit *dock_root;     /* set by dock_layout_set_dock_root;
-                                       * walked at save time */
+    char *layout;             /* the dock's JSON, as it last asked to keep */
+    GHashTable *bare_ids;     /* char* set of panel ids whose action row
+                               * the user has hidden */
+    gboolean toolbar_shown;   /* the main window's pixmap toolbar */
+    gboolean pane_titles;     /* tab strips rather than corner controls */
+    GHashTable *window_sizes; /* char* name → "W,H"; windows that
+                               * aren't panels (Files) */
+    guint save_id;
 } dock = { 0 };
-
-void
-dock_layout_set_dock_root (HxSplit *root)
-{
-    dock.dock_root = root;
-}
 
 static const char *LAYOUT_FILE = "dock-layout.ini";
 static const guint SAVE_DEBOUNCE_MS = 200;
@@ -106,275 +45,23 @@ layout_file_path (void)
     return g_build_filename (gtkhx_config_dir (), LAYOUT_FILE, NULL);
 }
 
-/* ----------------------------------------------------------------- */
-/* Serialise: live HxSplit tree → string                             */
-/* ----------------------------------------------------------------- */
-
-/* Map a frame back to its role tag (start / center / bottom / end),
- * or NULL if it's a user-created leaf. The four toolbar_*_frame
- * globals carry the roles. */
-extern GtkWidget *toolbar_sidebar_frame;
-extern GtkWidget *toolbar_end_frame;
-extern GtkWidget *toolbar_bottom_frame;
-extern GtkWidget *toolbar_center_frame;
-extern GtkWidget *toolbar_window;
-
-static const char *
-role_for_frame (GtkWidget *frame)
-{
-    if (frame == toolbar_sidebar_frame) {
-        return "start";
-    }
-    if (frame == toolbar_end_frame) {
-        return "end";
-    }
-    if (frame == toolbar_bottom_frame) {
-        return "bottom";
-    }
-    if (frame == toolbar_center_frame) {
-        return "center";
-    }
-    return NULL;
-}
-
 static void
-serialize_leaf (GString *out, PanelFrame *frame)
+ensure_tables (void)
 {
-    guint n = panel_frame_get_n_pages (frame);
-    const char *role = role_for_frame (GTK_WIDGET (frame));
-    PanelWidget *visible = panel_frame_get_visible_child (frame);
-    gboolean first = TRUE;
-
-    g_string_append (out, "L[");
-    for (guint i = 0; i < n; i++) {
-        PanelWidget *p = panel_frame_get_page (frame, i);
-        if (p == NULL || !HX_IS_PANEL (p)) {
-            continue;
-        }
-        if (!first) {
-            g_string_append_c (out, ',');
-        }
-        /* '*' marks the frame's foreground page so the restore
-         * doesn't have to guess. Without it, whichever panel was
-         * constructed (or raised) last at startup won the frame,
-         * which is why a leaf holding Chat and Tasks came back
-         * showing Tasks however the user had left it. */
-        if (p == visible) {
-            g_string_append_c (out, '*');
-        }
-        g_string_append (out, hx_panel_get_id (HX_PANEL (p)));
-        first = FALSE;
+    if (dock.bare_ids == NULL) {
+        dock.bare_ids
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     }
-    if (role != NULL) {
-        g_string_append_c (out, ':');
-        g_string_append (out, role);
-    }
-    g_string_append_c (out, ']');
-}
-
-/* Walks live tree from root and appends to `out`. Returns the
- * number of internal splits encountered, in depth-first order
- * (matches the order in which paned positions get collected). */
-static void
-serialize_node (GString *out, HxSplit *node, GArray *paned_positions)
-{
-    PanelFrame *frame = hx_split_get_frame (node);
-
-    if (frame != NULL) {
-        serialize_leaf (out, frame);
-        return;
-    }
-
-    GtkOrientation o = hx_split_get_orientation (node);
-    GtkPaned *paned = hx_split_get_paned (node);
-
-    g_string_append (out, o == GTK_ORIENTATION_HORIZONTAL ? "h(" : "v(");
-    serialize_node (out, hx_split_get_child_a (node), paned_positions);
-    g_string_append_c (out, ',');
-    serialize_node (out, hx_split_get_child_b (node), paned_positions);
-    g_string_append_c (out, ')');
-
-    if (paned_positions != NULL && paned != NULL) {
-        int pos = gtk_paned_get_position (paned);
-        g_array_append_val (paned_positions, pos);
+    if (dock.window_sizes == NULL) {
+        dock.window_sizes
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
     }
 }
 
-/* Save / serialise use dock.dock_root directly — toolbar.c calls
- * dock_layout_set_dock_root once the tree is mounted in the dock,
- * and the root pointer is stable for the lifetime of the toolbar
- * window (hx_split_close_leaf refuses to close the root). */
-
 /* ----------------------------------------------------------------- */
-/* Build: DLParsedNode → live HxSplit tree                           */
+/* Save (debounced)                                                  */
 /* ----------------------------------------------------------------- */
 
-/* Builds the HxSplit subtree for `node`. Records the four
- * role-tagged leaves into out_sidebar/center/bottom/end and seeds
- * dock.id_to_frame with each leaf's panel-id list. */
-static HxSplit *
-build_node (DLParsedNode *node, GtkWidget **out_sidebar, GtkWidget **out_center,
-            GtkWidget **out_bottom, GtkWidget **out_end,
-            GPtrArray *paned_collect)
-{
-    if (node->is_leaf) {
-        PanelFrame *frame = hx_panel_frame_new ();
-        panel_frame_set_header (
-            frame, PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
-        gtk_widget_set_size_request (GTK_WIDGET (frame), DEFAULT_LEAF_MIN_WIDTH,
-                                     -1);
-
-        HxSplit *leaf = hx_split_new_with_frame (frame);
-
-        /* Wire role pointers. */
-        if (node->role != NULL) {
-            GtkWidget *fw = GTK_WIDGET (frame);
-            if (g_strcmp0 (node->role, "start") == 0) {
-                *out_sidebar = fw;
-            } else if (g_strcmp0 (node->role, "end") == 0) {
-                *out_end = fw;
-            } else if (g_strcmp0 (node->role, "bottom") == 0) {
-                *out_bottom = fw;
-            } else if (g_strcmp0 (node->role, "center") == 0) {
-                *out_center = fw;
-            }
-        }
-
-        /* Seed id_to_frame. */
-        for (guint i = 0; i < node->panel_ids->len; i++) {
-            const char *id = g_ptr_array_index (node->panel_ids, i);
-            g_hash_table_replace (dock.id_to_frame, g_strdup (id), frame);
-        }
-
-        /* Remember this leaf's foreground page by id rather than by
-         * frame. A panel id belongs to exactly one leaf, so the flat
-         * list is unambiguous, and it survives the reseat that
-         * dock_layout_place_panel may do afterwards — which a
-         * frame-keyed record would not. */
-        if (dock.selected_ids != NULL && node->selected >= 0
-            && node->selected < (int)node->panel_ids->len) {
-            g_ptr_array_add (dock.selected_ids,
-                             g_strdup (g_ptr_array_index (
-                                 node->panel_ids, (guint)node->selected)));
-        }
-        return leaf;
-    }
-
-    HxSplit *a = build_node (node->child_a, out_sidebar, out_center, out_bottom,
-                             out_end, paned_collect);
-    HxSplit *b = build_node (node->child_b, out_sidebar, out_center, out_bottom,
-                             out_end, paned_collect);
-    GtkOrientation o = (node->orientation == DL_ORIENT_HORIZONTAL)
-                           ? GTK_ORIENTATION_HORIZONTAL
-                           : GTK_ORIENTATION_VERTICAL;
-    HxSplit *split = hx_split_new_internal (a, b, o);
-    if (paned_collect != NULL) {
-        g_ptr_array_add (paned_collect, hx_split_get_paned (split));
-    }
-    return split;
-}
-
-/* ----------------------------------------------------------------- */
-/* Save: undocked-window walk                                        */
-/* ----------------------------------------------------------------- */
-
-/* hx_panel_registry_foreach callback. For each panel whose root
- * window is NOT the main toolbar window, write a [Undocked] key
- * to the GKeyFile carrying its current width / height. */
-static void
-visit_undocked_panel (HxPanel *panel, gpointer user_data)
-{
-    GKeyFile *kf;
-    GtkRoot *root;
-    int w = 0;
-    int h = 0;
-    const char *id;
-    char buf[32];
-
-    kf = (GKeyFile *)user_data;
-    root = gtk_widget_get_root (GTK_WIDGET (panel));
-    if (root == NULL || GTK_WIDGET (root) == toolbar_window) {
-        return;
-    }
-    if (!GTK_IS_WINDOW (root)) {
-        return;
-    }
-
-    gtk_window_get_default_size (GTK_WINDOW (root), &w, &h);
-    if (w <= 0 || h <= 0) {
-        return;
-    }
-
-    id = hx_panel_get_id (panel);
-    if (id == NULL || id[0] == '\0') {
-        return;
-    }
-
-    g_snprintf (buf, sizeof buf, "%d,%d", w, h);
-    g_key_file_set_string (kf, "Undocked", id, buf);
-}
-
-/* ----------------------------------------------------------------- */
-/* Save: closed-panel walk                                           */
-/* ----------------------------------------------------------------- */
-
-/* A static panel counts as OPEN when it is registered and hooked
- * into some dock's widget tree — the main dock or an undocked
- * window, both of which put a PanelFrame above it. Everything else
- * is closed: never constructed this run, or constructed and then
- * closed (the registry keeps its strong ref, so the panel is alive
- * but parentless).
- *
- * gtk_widget_get_ancestor rather than gtk_widget_get_parent for the
- * reason documented in docs/docking.md: libadwaita's AdwBin can
- * outlive the AdwTabPage that wrapped it, so a just-closed panel
- * still appears to have a parent for a moment. */
-static gboolean
-static_panel_is_open (const char *id)
-{
-    HxPanel *panel = hx_panel_registry_lookup (id);
-
-    if (panel == NULL) {
-        return FALSE;
-    }
-    return gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
-           != NULL;
-}
-
-/* Write [Dock] closed= as a ';'-separated list of the static panels
- * that aren't in any dock right now.
- *
- * Serialised as the closed set rather than the open one so that a
- * panel id this version has never heard of — one added by a later
- * release, or by a file written before this key existed — defaults
- * to open. An absent key therefore means "nothing was closed",
- * which is exactly how every layout file written before this change
- * should be read. */
-static void
-serialize_closed_panels (GKeyFile *kf)
-{
-    GString *closed = g_string_new (NULL);
-
-    for (const char *const *idp = hx_panel_static_ids; *idp != NULL; idp++) {
-        if (static_panel_is_open (*idp)) {
-            continue;
-        }
-        if (closed->len > 0) {
-            g_string_append_c (closed, ';');
-        }
-        g_string_append (closed, *idp);
-    }
-
-    if (closed->len > 0) {
-        g_key_file_set_string (kf, "Dock", "closed", closed->str);
-    }
-    g_string_free (closed, TRUE);
-}
-
-/* [Chrome]: the optional chrome. Each key is written only when it
- * differs from the default, so an absent key — a first launch, or a file
- * from before the key existed — means the default: action rows on,
- * toolbar and pane titles off. */
 static void
 serialize_chrome (GKeyFile *kf)
 {
@@ -412,42 +99,84 @@ serialize_chrome (GKeyFile *kf)
     }
 }
 
-static void
-ensure_bare_ids (void)
+static gboolean
+save_now (gpointer user_data)
 {
-    if (dock.bare_ids == NULL) {
-        dock.bare_ids
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    GKeyFile *kf = g_key_file_new ();
+    char *path = layout_file_path ();
+    char *data;
+    gsize len = 0;
+    GError *err = NULL;
+
+    (void)user_data;
+    dock.save_id = 0;
+
+    if (dock.layout != NULL) {
+        g_key_file_set_string (kf, "Dock", "layout", dock.layout);
     }
+    serialize_chrome (kf);
+
+    data = g_key_file_to_data (kf, &len, NULL);
+    if (!g_file_set_contents (path, data, (gssize)len, &err)) {
+        g_warning ("dock_layout: write %s: %s", path, err ? err->message : "?");
+        g_clear_error (&err);
+    } else {
+        debug_log ("layout", "saved: %s", path);
+    }
+
+    g_free (data);
+    g_free (path);
+    g_key_file_unref (kf);
+
+    return G_SOURCE_REMOVE;
 }
 
-/* Read [Chrome]. Independent of the tree: a file whose tree is missing
- * or malformed still carries the user's choice of bars. */
+void
+dock_layout_request_save (void)
+{
+    /* Debounce, not throttle: every request resets the timer, so a burst
+     * collapses to one write 200 ms after the last request. */
+    if (dock.save_id != 0) {
+        g_source_remove (dock.save_id);
+    }
+    dock.save_id = g_timeout_add (SAVE_DEBOUNCE_MS, save_now, NULL);
+}
+
+void
+dock_layout_keep (const char *json)
+{
+    g_free (dock.layout);
+    dock.layout = g_strdup (json);
+    dock_layout_request_save ();
+}
+
+/* ----------------------------------------------------------------- */
+/* Load                                                              */
+/* ----------------------------------------------------------------- */
+
+/* Read [Chrome] and [Windows]. Independent of the layout: a file whose
+ * layout is missing or malformed still carries the user's choice of
+ * bars. */
 static void
 load_chrome (GKeyFile *kf)
 {
     g_autofree char *bare = NULL;
+    g_auto (GStrv) keys = NULL;
 
+    ensure_tables ();
     dock.toolbar_shown = g_key_file_get_boolean (kf, "Chrome", "toolbar", NULL);
     dock.pane_titles
         = g_key_file_get_boolean (kf, "Chrome", "pane-titles", NULL);
 
-    if (dock.window_sizes == NULL) {
-        dock.window_sizes
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-    }
     g_hash_table_remove_all (dock.window_sizes);
-    {
-        g_auto (GStrv) keys = g_key_file_get_keys (kf, "Windows", NULL, NULL);
-        for (char **k = keys; k != NULL && *k != NULL; k++) {
-            char *v = g_key_file_get_string (kf, "Windows", *k, NULL);
-            if (v != NULL) {
-                g_hash_table_insert (dock.window_sizes, g_strdup (*k), v);
-            }
+    keys = g_key_file_get_keys (kf, "Windows", NULL, NULL);
+    for (char **k = keys; k != NULL && *k != NULL; k++) {
+        char *v = g_key_file_get_string (kf, "Windows", *k, NULL);
+        if (v != NULL) {
+            g_hash_table_insert (dock.window_sizes, g_strdup (*k), v);
         }
     }
 
-    ensure_bare_ids ();
     g_hash_table_remove_all (dock.bare_ids);
     bare = g_key_file_get_string (kf, "Chrome", "hidden-actions", NULL);
     if (bare != NULL) {
@@ -460,143 +189,58 @@ load_chrome (GKeyFile *kf)
     }
 }
 
-/* ----------------------------------------------------------------- */
-/* Save (coalesced)                                                  */
-/* ----------------------------------------------------------------- */
-
-static gboolean
-on_save_idle (gpointer user_data)
+/* A file from before the dock was mullion-gtk: its tree, dividers,
+ * closed panels and undocked windows, as the dock's JSON. The dividers
+ * were pixels, and are read as shares of the main window's saved size. */
+static char *
+import_legacy (GKeyFile *kf)
 {
-    (void)user_data;
-    dock.save_idle_id = 0;
+    g_autofree char *tree = g_key_file_get_string (kf, "Dock", "tree", NULL);
+    g_autofree char *sizes = g_key_file_get_string (kf, "Dock", "sizes", NULL);
+    g_autofree char *closed
+        = g_key_file_get_string (kf, "Dock", "closed", NULL);
+    g_auto (GStrv) keys = g_key_file_get_keys (kf, "Undocked", NULL, NULL);
+    GPtrArray *undocked = g_ptr_array_new_with_free_func (g_free);
+    char *json;
 
-    HxSplit *root = dock.dock_root;
-    if (root == NULL) {
-        debug_log ("layout", "save: no dock root, skipping");
-        return G_SOURCE_REMOVE;
+    if (tree == NULL) {
+        g_ptr_array_unref (undocked);
+        return NULL;
     }
 
-    /* Refuse to serialise a dock that has never been allocated.
-     *
-     * An unallocated GtkPaned reports position 0, so a save that
-     * landed here would write sizes=0;0;0 — and since
-     * dock_layout_apply_geometry ignores a saved position of 0, the
-     * next launch would silently come up with default dividers and
-     * the user's arrangement would be gone.
-     *
-     * That became reachable when tab switches started requesting a
-     * save: startup adds panels one at a time, each add fires
-     * notify::visible-child, and the resulting timer can beat the
-     * first allocation. Nothing the user did is at stake this early
-     * — the state here is exactly what was loaded — so dropping the
-     * request is right, and any real change afterwards re-arms it.
-     *
-     * Width rather than realized/mapped: the paned positions are set
-     * from a notify::max-position handler that fires *during* the
-     * first allocation pass, and a non-zero width is the property
-     * that says that pass has happened. */
-    if (gtk_widget_get_width (GTK_WIDGET (root)) <= 0) {
-        debug_log ("layout", "save: dock not allocated yet, skipping");
-        return G_SOURCE_REMOVE;
-    }
-
-    GString *tree = g_string_new (NULL);
-    GArray *sizes = g_array_new (FALSE, FALSE, sizeof (int));
-    serialize_node (tree, root, sizes);
-
-    GKeyFile *kf = g_key_file_new ();
-
-    /* The main window's size lives in gtkhxrc via
-     * gtkhx_save_window_positions and Window_Geo — don't duplicate it
-     * here. The windows that aren't panels (Files) keep theirs in
-     * [Windows] below, beside the undocked panels' sizes. */
-
-    g_key_file_set_string (kf, "Dock", "tree", tree->str);
-    /* Walk every registered panel and serialise the ones whose
-     * root is an undocked window. The [Undocked] section ends up
-     * with one key per panel, value "W,H". Empty section when
-     * nothing is undocked — GKeyFile drops empty groups so the
-     * file just doesn't gain an [Undocked] header in that case. */
-    hx_panel_registry_foreach (visit_undocked_panel, kf);
-    serialize_closed_panels (kf);
-    serialize_chrome (kf);
-    if (sizes->len > 0) {
-        GString *sz = g_string_new (NULL);
-        for (guint i = 0; i < sizes->len; i++) {
-            if (i > 0) {
-                g_string_append_c (sz, ';');
-            }
-            g_string_append_printf (sz, "%d", g_array_index (sizes, int, i));
+    for (char **k = keys; k != NULL && *k != NULL; k++) {
+        char *v = g_key_file_get_string (kf, "Undocked", *k, NULL);
+        if (v != NULL) {
+            g_ptr_array_add (undocked, g_strdup (*k));
+            g_ptr_array_add (undocked, v);
         }
-        g_key_file_set_string (kf, "Dock", "sizes", sz->str);
-        g_string_free (sz, TRUE);
     }
+    g_ptr_array_add (undocked, NULL);
 
-    gsize len = 0;
-    char *data = g_key_file_to_data (kf, &len, NULL);
-    char *path = layout_file_path ();
-    GError *err = NULL;
-    if (!g_file_set_contents (path, data, (gssize)len, &err)) {
-        g_warning ("dock_layout: write %s: %s", path, err ? err->message : "?");
-        g_clear_error (&err);
+    json = dl_import_legacy (tree, sizes, closed, (char **)undocked->pdata,
+                             gtkhx_prefs.geo.tool.xsize,
+                             gtkhx_prefs.geo.tool.ysize);
+    g_ptr_array_unref (undocked);
+
+    if (json == NULL) {
+        g_warning ("dock_layout: the saved tree does not parse; "
+                   "the default layout comes up");
     } else {
-        debug_log ("layout", "saved: %s", path);
+        debug_log ("layout", "imported the layout from before mullion-gtk");
     }
-    g_free (data);
-    g_free (path);
-    g_key_file_unref (kf);
-    g_array_unref (sizes);
-    g_string_free (tree, TRUE);
 
-    return G_SOURCE_REMOVE;
+    return json;
 }
 
-void
-dock_layout_request_save (void)
-{
-    if (dock.save_disabled) {
-        return;
-    }
-    /* Debounce, not throttle: every request resets the timer so a
-     * burst of notify::position during a divider drag (or rapid
-     * undock/redock) collapses to one write 200 ms after the last
-     * request, not a write every 200 ms across the burst. */
-    if (dock.save_idle_id != 0) {
-        g_source_remove (dock.save_idle_id);
-    }
-    dock.save_idle_id = g_timeout_add (SAVE_DEBOUNCE_MS, on_save_idle, NULL);
-}
-
-/* ----------------------------------------------------------------- */
-/* Load                                                              */
-/* ----------------------------------------------------------------- */
-
-/* hx_split_foreach_leaf callback. Latches the first leaf's frame
- * pointer through user_data; subsequent leaves are ignored. */
-static void
-find_first_leaf_frame_cb (HxSplit *leaf, gpointer user_data)
-{
-    GtkWidget **out = user_data;
-    PanelFrame *frame;
-
-    if (*out != NULL) {
-        return;
-    }
-    frame = hx_split_get_frame (leaf);
-    if (frame != NULL) {
-        *out = GTK_WIDGET (frame);
-    }
-}
-
-gboolean
-dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
-                  GtkWidget **out_center_frame, GtkWidget **out_bottom_frame,
-                  GtkWidget **out_end_frame)
+char *
+dock_layout_load (void)
 {
     char *path = layout_file_path ();
     GKeyFile *kf = g_key_file_new ();
     GError *err = NULL;
-    gboolean ok = FALSE;
+    char *json = NULL;
+
+    ensure_tables ();
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, &err)) {
         if (!g_error_matches (err, G_FILE_ERROR, G_FILE_ERROR_NOENT)) {
@@ -609,374 +253,22 @@ dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
 
     load_chrome (kf);
 
-    char *tree_str = g_key_file_get_string (kf, "Dock", "tree", NULL);
-    if (tree_str == NULL) {
-        goto out;
+    json = g_key_file_get_string (kf, "Dock", "layout", NULL);
+    if (json == NULL) {
+        json = import_legacy (kf);
     }
 
-    DLParsedNode *parsed = dl_parse_tree (tree_str);
-    g_free (tree_str);
-    if (parsed == NULL) {
-        g_warning ("dock_layout: malformed tree in %s; "
-                   "falling back to defaults",
-                   path);
-        goto out;
-    }
-
-    /* Files was a dock panel and is a window now. A layout saved before
-     * that names it; a leaf it had to itself would come back empty, so
-     * prune it, and remember which splits went with it so the saved
-     * divider positions still line up with the splits that remain. */
-    if (dock.dropped_splits == NULL) {
-        dock.dropped_splits = g_array_new (FALSE, FALSE, sizeof (guint));
-    }
-    g_array_set_size (dock.dropped_splits, 0);
-    parsed = dl_tree_drop_panel (parsed, "files", dock.dropped_splits);
-
-    /* Prime / reset module state. */
-    if (dock.id_to_frame != NULL) {
-        g_hash_table_remove_all (dock.id_to_frame);
-    } else {
-        dock.id_to_frame
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-    }
-    if (dock.selected_ids != NULL) {
-        g_ptr_array_set_size (dock.selected_ids, 0);
-    } else {
-        dock.selected_ids = g_ptr_array_new_with_free_func (g_free);
-    }
-
-    GPtrArray *paneds = g_ptr_array_new ();
-    *out_sidebar_frame = NULL;
-    *out_center_frame = NULL;
-    *out_bottom_frame = NULL;
-    *out_end_frame = NULL;
-    HxSplit *root = build_node (parsed, out_sidebar_frame, out_center_frame,
-                                out_bottom_frame, out_end_frame, paneds);
-    dl_parsed_node_free (parsed);
-
-    /* Default any missing roles to the first leaf. The toolbar_*_frame
-     * globals MUST be non-NULL — static-panel factories dereference
-     * them as their panel_frame_add target. But a saved tree can
-     * legitimately lack some role tags:
-     *
-     *   - Closing a default leaf in hx_split.c's on_frame_close
-     *     reseats the matching toolbar_*_frame global onto the
-     *     surviving sibling. After closing N default leaves, all
-     *     N+1 of the still-distinct globals collapse to the same
-     *     pointer.
-     *   - role_for_frame walks the four toolbar_*_frame globals in
-     *     a fixed if-else chain and returns the first match. So
-     *     when several globals point at the same leaf, the leaf
-     *     only gets the topmost role tag (start) serialised; the
-     *     others appear missing on load.
-     *
-     * Falling back to defaults in that case would erase the user's
-     * arrangement (the "I undocked everything and now main dock is
-     * just an empty leaf" case Misha demoed). Point the missing
-     * globals at the first leaf instead; new panels added by
-     * factories land there briefly before dock_layout_place_panel
-     * moves them to their saved location or undocks them. */
-    {
-        GtkWidget *first_leaf_frame = NULL;
-        hx_split_foreach_leaf (root, find_first_leaf_frame_cb,
-                               &first_leaf_frame);
-        if (first_leaf_frame == NULL) {
-            g_warning ("dock_layout: saved tree has no leaves; "
-                       "falling back to defaults");
-            g_ptr_array_unref (paneds);
-            g_hash_table_remove_all (dock.id_to_frame);
-            g_ptr_array_set_size (dock.selected_ids, 0);
-            if (root != NULL) {
-                g_object_unref (g_object_ref_sink (root));
-            }
-            goto out;
-        }
-        if (*out_sidebar_frame == NULL) {
-            *out_sidebar_frame = first_leaf_frame;
-        }
-        if (*out_center_frame == NULL) {
-            *out_center_frame = first_leaf_frame;
-        }
-        if (*out_bottom_frame == NULL) {
-            *out_bottom_frame = first_leaf_frame;
-        }
-        if (*out_end_frame == NULL) {
-            *out_end_frame = first_leaf_frame;
-        }
-    }
-
-    *out_root = root;
-
-    /* Stash paneds for apply_geometry. */
-    g_free (dock.paned_order);
-    dock.n_paned = paneds->len;
-    dock.paned_order = (GtkPaned **)g_ptr_array_free (paneds, FALSE);
-
-    /* Stash sizes for apply_geometry. */
-    /* Stored as a static array of ints alongside the paned order;
-     * we re-read the key file in apply_geometry rather than copy
-     * here to keep this function focused. */
-
-    /* Parse [Undocked] into the pending-undock map. Consumed by
-     * dock_layout_place_panel — when each panel's factory runs and
-     * registers, the placement hook checks this map and calls
-     * hx_panel_undock with the saved size. */
-    if (dock.id_to_undock_size != NULL) {
-        g_hash_table_remove_all (dock.id_to_undock_size);
-    } else {
-        dock.id_to_undock_size
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-    }
-
-    {
-        gsize n_keys = 0;
-        char **keys = g_key_file_get_keys (kf, "Undocked", &n_keys, NULL);
-        for (gsize i = 0; keys != NULL && i < n_keys; i++) {
-            char *val = g_key_file_get_string (kf, "Undocked", keys[i], NULL);
-            int w = 0;
-            int h = 0;
-            if (val != NULL && sscanf (val, "%d,%d", &w, &h) == 2 && w > 0
-                && h > 0) {
-                UndockedSize *sz = g_new (UndockedSize, 1);
-                sz->w = w;
-                sz->h = h;
-                g_hash_table_replace (dock.id_to_undock_size,
-                                      g_strdup (keys[i]), sz);
-            }
-            g_free (val);
-        }
-        g_strfreev (keys);
-    }
-
-    /* Parse [Dock] closed= into the closed set. Read by
-     * dock_layout_panel_was_closed, which the startup panel-build
-     * path consults before calling a factory. */
-    if (dock.closed_ids != NULL) {
-        g_hash_table_remove_all (dock.closed_ids);
-    } else {
-        dock.closed_ids
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-    }
-
-    {
-        char *closed_str = g_key_file_get_string (kf, "Dock", "closed", NULL);
-        if (closed_str != NULL) {
-            char **parts = g_strsplit (closed_str, ";", -1);
-            for (guint i = 0; parts[i] != NULL; i++) {
-                char *id = g_strstrip (parts[i]);
-                if (id[0] != '\0') {
-                    g_hash_table_add (dock.closed_ids, g_strdup (id));
-                }
-            }
-            g_strfreev (parts);
-            g_free (closed_str);
-        }
-    }
-
-    dock.loaded = TRUE;
-    ok = TRUE;
+    /* What the dock is kept as until it asks for something else: a
+     * layout that loads is not a change, and a file saved before then --
+     * a chrome toggle -- keeps it. */
+    g_free (dock.layout);
+    dock.layout = g_strdup (json);
     debug_log ("layout", "loaded: %s", path);
 
 out:
     g_key_file_unref (kf);
     g_free (path);
-    return ok;
-}
-
-/* notify::max-position one-shot: GtkPaned starts with
- * max_position=0 before allocation, and gtk_paned_set_position
- * clamps to [min, max]. Setting a non-zero position before the
- * first allocation collapses to 0. Defer set_position until
- * max-position notifies a real value, then disconnect.
- *
- * pos is passed via the data pointer (GPOINTER_TO_INT). */
-static void
-on_paned_apply_saved_position (GObject *object, GParamSpec *pspec,
-                               gpointer data)
-{
-    int max_position = 0;
-    int pos = GPOINTER_TO_INT (data);
-
-    (void)pspec;
-    g_object_get (object, "max-position", &max_position, NULL);
-    if (max_position <= 0) {
-        return;
-    }
-
-    gtk_paned_set_position (GTK_PANED (object), pos);
-    g_signal_handlers_disconnect_by_func (object, on_paned_apply_saved_position,
-                                          data);
-}
-
-void
-dock_layout_apply_geometry (GtkWindow *window)
-{
-    (void)window; /* Window size lives in gtkhxrc; we only
-                    * restore paned positions here. */
-
-    if (!dock.loaded) {
-        return; /* No saved tree — nothing to restore. */
-    }
-
-    char *path = layout_file_path ();
-    GKeyFile *kf = g_key_file_new ();
-    GError *err = NULL;
-
-    if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, &err)) {
-        g_clear_error (&err);
-        goto out;
-    }
-
-    char *sizes_str = g_key_file_get_string (kf, "Dock", "sizes", NULL);
-    if (sizes_str != NULL) {
-        char **parts = g_strsplit (sizes_str, ";", -1);
-        guint i = 0; /* index into the live splits */
-        for (guint saved = 0; parts[saved] != NULL && i < dock.n_paned;
-             saved++) {
-            int pos;
-            gboolean dropped = FALSE;
-
-            /* A saved split that collapsed at load has no live paned. */
-            for (guint d = 0;
-                 dock.dropped_splits != NULL && d < dock.dropped_splits->len;
-                 d++) {
-                if (g_array_index (dock.dropped_splits, guint, d) == saved) {
-                    dropped = TRUE;
-                    break;
-                }
-            }
-            if (dropped) {
-                continue;
-            }
-            pos = (int)g_ascii_strtoll (parts[saved], NULL, 10);
-            if (pos > 0 && dock.paned_order[i] != NULL) {
-                g_signal_connect (dock.paned_order[i], "notify::max-position",
-                                  G_CALLBACK (on_paned_apply_saved_position),
-                                  GINT_TO_POINTER (pos));
-            }
-            i++;
-        }
-        g_strfreev (parts);
-        g_free (sizes_str);
-    }
-
-out:
-    g_key_file_unref (kf);
-    g_free (path);
-}
-
-/* ----------------------------------------------------------------- */
-/* Per-panel placement on registry register                          */
-/* ----------------------------------------------------------------- */
-
-void
-dock_layout_place_panel (HxPanel *panel)
-{
-    const char *id;
-
-    if (!dock.loaded) {
-        return;
-    }
-
-    id = hx_panel_get_id (panel);
-    if (id == NULL) {
-        return;
-    }
-
-    /* Main-dock reseat. The factory just placed the panel in some
-     * default frame; if the saved layout puts it elsewhere, move
-     * it now. */
-    if (dock.id_to_frame != NULL) {
-        GtkWidget *target = g_hash_table_lookup (dock.id_to_frame, id);
-        if (target != NULL) {
-            GtkWidget *current = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                                          PANEL_TYPE_FRAME);
-            if (current != target) {
-                g_object_ref (panel);
-                if (current != NULL) {
-                    panel_frame_remove (PANEL_FRAME (current),
-                                        PANEL_WIDGET (panel));
-                }
-                panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (panel));
-                hx_panel_set_home_frame (panel, target);
-                g_object_unref (panel);
-            }
-        }
-    }
-
-    /* Undock if the saved layout had this panel living in its own
-     * window. Consume the map entry so a subsequent re-register
-     * (after a redock + close) doesn't re-undock. */
-    if (dock.id_to_undock_size != NULL) {
-        UndockedSize *sz = g_hash_table_lookup (dock.id_to_undock_size, id);
-        if (sz != NULL) {
-            int w = sz->w;
-            int h = sz->h;
-            g_hash_table_remove (dock.id_to_undock_size, id);
-
-            hx_panel_undock (panel);
-
-            /* hx_panel_undock has called gtk_window_present on the
-             * new top-level by now. set_default_size on a mapped
-             * window resizes the surface on the next reconfigure
-             * — works on both X11 and Wayland in our experience.
-             * If the size doesn't take on some compositor, that's
-             * a follow-up. */
-            GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (panel));
-            if (GTK_IS_WINDOW (root)) {
-                gtk_window_set_default_size (GTK_WINDOW (root), w, h);
-            }
-        }
-    }
-}
-
-/* ----------------------------------------------------------------- */
-/* Foreground page restore                                           */
-/* ----------------------------------------------------------------- */
-
-void
-dock_layout_apply_selection (void)
-{
-    if (!dock.loaded || dock.selected_ids == NULL) {
-        return;
-    }
-
-    for (guint i = 0; i < dock.selected_ids->len; i++) {
-        const char *id = g_ptr_array_index (dock.selected_ids, i);
-        HxPanel *panel = hx_panel_registry_lookup (id);
-
-        if (panel == NULL) {
-            continue; /* saved page never got built this run */
-        }
-        /* Only raise a panel that is actually in a frame. Raising a
-         * detached one is a no-op at best; at worst it would mask a
-         * placement bug by looking like it worked. */
-        if (gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
-            == NULL) {
-            continue;
-        }
-        panel_widget_raise (PANEL_WIDGET (panel));
-        debug_log ("layout", "raised saved foreground page: %s", id);
-    }
-
-    /* One-shot, like the pending-undock map: the list describes the
-     * state at startup, and everything after that is the user
-     * choosing a tab. */
-    g_ptr_array_set_size (dock.selected_ids, 0);
-}
-
-/* ----------------------------------------------------------------- */
-/* Closed panels                                                     */
-/* ----------------------------------------------------------------- */
-
-gboolean
-dock_layout_panel_was_closed (const char *id)
-{
-    if (!dock.loaded || dock.closed_ids == NULL || id == NULL) {
-        return FALSE;
-    }
-    return g_hash_table_contains (dock.closed_ids, id);
+    return json;
 }
 
 /* ----------------------------------------------------------------- */
@@ -995,7 +287,7 @@ dock_layout_set_panel_actions_hidden (const char *id, gboolean hidden)
 {
     g_return_if_fail (id != NULL);
 
-    ensure_bare_ids ();
+    ensure_tables ();
     if (hidden) {
         g_hash_table_add (dock.bare_ids, g_strdup (id));
     } else {
@@ -1053,65 +345,10 @@ dock_layout_set_window_size (const char *name, int w, int h)
 {
     g_return_if_fail (name != NULL);
 
-    if (dock.window_sizes == NULL) {
-        dock.window_sizes
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-    }
+    ensure_tables ();
     g_hash_table_insert (dock.window_sizes, g_strdup (name),
                          g_strdup_printf ("%d,%d", w, h));
     dock_layout_request_save ();
-}
-
-HxSplit *
-dock_layout_get_dock_root (void)
-{
-    return dock.dock_root;
-}
-
-/* ----------------------------------------------------------------- */
-/* Reset                                                             */
-/* ----------------------------------------------------------------- */
-
-void
-dock_layout_reset (void)
-{
-    char *path = layout_file_path ();
-    if (g_unlink (path) != 0 && errno != ENOENT) {
-        g_warning ("dock_layout: unlink %s: %s", path, g_strerror (errno));
-    }
-    g_free (path);
-
-    if (dock.id_to_frame != NULL) {
-        g_hash_table_remove_all (dock.id_to_frame);
-    }
-    if (dock.id_to_undock_size != NULL) {
-        g_hash_table_remove_all (dock.id_to_undock_size);
-    }
-    if (dock.selected_ids != NULL) {
-        g_ptr_array_set_size (dock.selected_ids, 0);
-    }
-    if (dock.closed_ids != NULL) {
-        g_hash_table_remove_all (dock.closed_ids);
-    }
-    dock.loaded = FALSE;
-    /* The in-memory chrome choices stay as they are for the rest of this
-     * session — the bars on screen don't change until the restart — but
-     * nothing writes them back, this session's later toggles included, so
-     * the next launch comes up with the defaults: action rows on, toolbar
-     * and pane titles off. */
-
-    if (dock.save_idle_id != 0) {
-        g_source_remove (dock.save_idle_id);
-        dock.save_idle_id = 0;
-    }
-
-    /* Suppress all further saves this session. Without this, any
-     * subsequent notify::position from a divider drag (or DnD,
-     * resize, etc.) would re-create the file we just deleted —
-     * and on next launch the user would get whatever was in flight
-     * at the moment of reset, not the defaults. Matches the toast
-     * the action posts: "Layout will reset on next launch." */
-    dock.save_disabled = TRUE;
 }
 
 /* ----------------------------------------------------------------- */
@@ -1119,21 +356,12 @@ dock_layout_reset (void)
 /* ----------------------------------------------------------------- */
 
 void
-dock_layout_init (void)
-{
-    if (dock.id_to_frame == NULL) {
-        dock.id_to_frame
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-    }
-}
-
-void
 dock_layout_shutdown (void)
 {
-    if (dock.save_idle_id != 0) {
-        /* Flush pending save synchronously before quit. */
-        g_source_remove (dock.save_idle_id);
-        dock.save_idle_id = 0;
-        on_save_idle (NULL);
+    if (dock.save_id != 0) {
+        /* Flush a pending save before quit. */
+        g_source_remove (dock.save_id);
+        dock.save_id = 0;
+        save_now (NULL);
     }
 }

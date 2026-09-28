@@ -24,7 +24,8 @@ version"). Misha confirmed keep-as-is — don't strip the "or later" clause with
 meson setup build && meson compile -C build
 ```
 
-Floors: `gtk4 >= 4.10`, `libadwaita-1 >= 1.6`, `libpanel-1 >= 1.4`, `glib >= 2.56`, and
+Floors: `gtk4 >= 4.10`, `libadwaita-1 >= 1.6`, `mullion-gtk-0 >= 0.1.0` (fetched and built
+static by `subprojects/mullion-gtk.wrap` when not installed), `glib >= 2.56`, and
 rustc at the workspace MSRV (pinned to Debian stable's stock toolchain — see
 `rust/Cargo.toml`). The gtk-rs binding generation is pinned to match; **that pin is
 load-bearing** and is why the dock stays C (see `docs/docking.md`).
@@ -55,7 +56,7 @@ looking for code in the wrong place.
   (`hxnet`); most receive handlers (`hxhandlers`); the session GObject and its boxed signal
   payloads (`gtkhx-core`); the chat rendering widget (`hxchat-layout` + `hxchat-view`); and
   a growing set of windows and dialogs (`gtkhx-ui`).
-- **C owns**: the libpanel dock and layout persistence, the toolbar, the file browser, the
+- **C owns**: the dock (mullion-gtk) and layout persistence, the toolbar, the file browser, the
   tray, notifications, previews, theming, and the receive handlers still left in `rcv.c`.
   Settings is now almost entirely Rust — the values live in `hxconfig`, and the window,
   sidebar, page table and every page live in `gtkhx-ui`. What C keeps is the change
@@ -73,7 +74,7 @@ looking for code in the wrong place.
 | Subsystem | Files |
 |---|---|
 | **Entry point** | `gtkhx.c` (`main()`, GtkApplication, signal-handler wiring) |
-| **Dock / layout** | `hx_panel.c`, `hx_panel_frame.c`, `hx_split.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `dock_bridge.c`, `toolbar.c` |
+| **Dock / layout** | `dock_bridge.c` (the dock), `dock_pages.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `toolbar.c` |
 | **Settings** | `options.c` (change hooks, identity resolution, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `prefs_parser.c`, `icon_enum.c` (icon IDs for the Rust picker) |
 | **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c` |
 | **Files** | `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_ops.c` (the providers; the browser itself is `gtkhx-ui`'s `files` module) |

@@ -1,0 +1,7 @@
+[wrap-git]
+url = https://github.com/mishan/mullion-gtk.git
+revision = v0.1.0
+depth = 1
+
+[provide]
+mullion-gtk-0 = panes_dep

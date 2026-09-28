@@ -167,9 +167,8 @@ gtkhx_users_bridge_after_embed (session *sess)
 {
     g_return_if_fail (sess != NULL);
 
-    /* Auto-open + size persistence are layout-restore work. For now we
-     * just mark the panel open and trust libpanel's sidebar-width
-     * default. */
+    /* Where the panel is and how wide is the dock's, from the saved
+     * layout; this only marks it built. */
     hx_panel_mark_constructed (HX_PANEL_ID_USERS);
 
     /* This connection's post-login state, not the process-global `connected`

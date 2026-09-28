@@ -18,8 +18,8 @@
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
 # well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
 # gtksourceview-5 (syntax-highlighted source preview viewer) is
-# present in the runtime; poppler-glib, libpanel, and imagemagick
-# are NOT (poppler-glib was dropped in 49; libpanel isn't part of
+# present in the runtime; poppler-glib, mullion-gtk and imagemagick
+# are NOT (poppler-glib was dropped in 49; mullion-gtk isn't part of
 # the GNOME runtime; imagemagick is too large to ship by default).
 # We build those as inline modules below. Alert sounds no longer
 # need libcanberra/gsound — the in-tree hxsound crate uses the
@@ -59,7 +59,7 @@ command: gtkhx
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
 
-  # Pin the install libdir for every inline module (libpanel, poppler,
+  # Pin the install libdir for every inline module (poppler,
   # imagemagick). Left to itself, meson picks lib vs lib64 by probing the
   # *build host* for a real /usr/lib64, so which one we get is a property of
   # whatever org.gnome.Sdk//49 snapshot the build machine happened to have —
@@ -71,13 +71,13 @@ build-options:
   # through the ld.so.cache flatpak regenerates per (app, runtime) pair on the
   # user's own machine, which depends on their runtime commit and flatpak
   # version — so the identical bundle starts on one box and dies on another
-  # with "libpanel-1.so.1: cannot open shared object file". Pin it and the
+  # with "libpoppler-glib.so.8: cannot open shared object file". Pin it and the
   # question doesn't arise. Also keeps the typelibs in /app/lib, where the
   # default GI_TYPELIB_PATH looks.
   libdir: /app/lib
 
   # Belt and braces: if some future module's buildsystem ignores libdir and
-  # installs to lib64 anyway, a later module's `dependency('libpanel-1')` would
+  # installs to lib64 anyway, a later module's `dependency('poppler-glib')` would
   # fail to find its .pc file. Costs nothing when the directory doesn't exist.
   # (tools/build-flatpak-bundle.sh fails the build if one shows up.)
   append-pkg-config-path: /app/lib64/pkgconfig
@@ -289,12 +289,17 @@ modules:
         url: https://poppler.freedesktop.org/poppler-26.05.0.tar.xz
         sha256: 6fef27ff04f37db43054c86bcdff6128c9fb1f6af4ef3c8b369a7e9abd68d0bb
 
-  - name: libpanel
+  # The dock. A static library, built into gtkhx: the bundle keeps none
+  # of this module's files.
+  - name: mullion-gtk
     buildsystem: meson
+    cleanup:
+      - '*'
     sources:
-      - type: archive
-        url: https://download.gnome.org/sources/libpanel/1.10/libpanel-1.10.4.tar.xz
-        sha256: 593888a7691f0af8aaa6e193c9e14afa86a810c0c2f27515c6d813f18733b1cd
+      - type: git
+        url: https://github.com/mishan/mullion-gtk.git
+        tag: v0.1.0
+        commit: 1349279d9f259235bc66847024b81b1c97e28ce9
 
   - name: gtkhx
     buildsystem: meson

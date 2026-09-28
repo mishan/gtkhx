@@ -1,24 +1,10 @@
 /* Window chrome density.
  *
- * Loaded at application priority, above libpanel's own stylesheet and
+ * Loaded at application priority, above the dock's own stylesheet and
  * below the user's gtk.css. Every rule here is about how much vertical
- * room the chrome takes from the content: libpanel's frame header and
- * the stock button padding are sized for an IDE with one editor pane,
- * and GtkHx stacks several frames, each with its own action row. */
-
-/* libpanel frame header: 38px + padding stock. */
-panelframeheaderbar {
-  min-height: 28px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-panelframeheaderbar button {
-  margin: 0;
-  min-height: 24px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
+ * room the chrome takes from the content: the stock button padding is
+ * sized for an app with one content area, and GtkHx stacks several
+ * panes, each with its own action row. */
 
 /* The retro pixmap buttons: flat until hovered, with just enough
  * padding to give the hover a shape. The art carries the button. */

@@ -400,7 +400,7 @@ The small self-contained pool is drained; three larger items remain.
   crate aligning with the pinned gtk4 family, gated behind Cargo features the
   way the existing `HAVE_POPPLER` / `HAVE_GTKSOURCEVIEW` gates work. See
   [preview-porting.md](preview-porting.md). It is a plain
-  `GtkWindow` with no dock involvement, so it is free of the libpanel question.
+  `GtkWindow` with no dock involvement.
 - **System tray** (`tray.c`).
 
 ### B. Content still C inside a Rust window shell
@@ -503,12 +503,11 @@ Ports late; some of it may never need to.
   shims each Rust module reaches C through.
 - `gtkhx.c` — `main()`, `GtkApplication` init, and the `GtkhxSession`
   signal→view adapters.
-- `toolbar.c` plus the libpanel dock infrastructure (`hx_panel*.c`,
-  `panel_registry.c`, `hx_split.c`, `dock_layout*.c`, `dock_bridge.c`). **The
-  dock stays C by design** — gtk4-rs has no libpanel bindings, so Rust shells
-  register through `dock_bridge.c` without ever naming a libpanel type; see
-  [../docking.md](../docking.md). The toolbar ports with or
-  after `main()`, because it owns the `PanelDock` every shell registers into.
+- `toolbar.c` plus the dock glue (`dock_bridge.c`, `dock_pages.c`,
+  `panel_registry.c`, `dock_layout*.c`). The dock itself is mullion-gtk, a C
+  library; Rust shells register through `dock_bridge.c` without ever naming a
+  dock type; see [../docking.md](../docking.md). The toolbar ports with or
+  after `main()`, because it makes the dock every shell registers into.
 
 > One wrinkle worth remembering from the shell ports: windows that treat the
 > panel as their window object should point their `window` field at the content

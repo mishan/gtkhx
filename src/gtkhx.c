@@ -24,7 +24,6 @@
 #include <fcntl.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <libpanel.h>
 #include <gdk/gdkkeysyms.h>
 #include <time.h>
 #include <errno.h>
@@ -57,6 +56,7 @@
 #include "debug.h"
 #include "toolbar.h"
 #include "banner.h"
+#include "dock_bridge.h"
 #include "dock_layout.h"
 #include "panel_registry.h" /* HX_PANEL_ID_* for the startup auto-open */
 #include "chat.h"
@@ -1138,14 +1138,11 @@ fe_init (void)
     toolbar_present_panel (HX_PANEL_ID_NEWS, sess, TRUE);
     toolbar_present_panel (HX_PANEL_ID_USERS, sess, TRUE);
 
-    /* The last word on which page each frame shows, and it has to be
-     * last: the raises above run in a fixed order, so whichever of them
-     * touches a frame last wins it. That is why a leaf holding both Chat
-     * and Tasks came up on Tasks however the user had left it. Restoring
-     * the saved foreground here — after every panel that is going to
-     * exist has been built and placed — overrides that. No-op on first
-     * launch and after Reset Layout. */
-    dock_layout_apply_selection ();
+    /* Every panel that is going to exist has been built: raises from here
+     * on are the user's. Until now they raised nothing, so each leaf is on
+     * the tab the saved layout had in front, not on whichever of the
+     * opens above came last. */
+    gtkhx_dock_settled ();
 
     /* The first connection's tab. Invisible on its own — the strip autohides
      * below two — so this changes nothing about how the window looks until a
@@ -1547,15 +1544,6 @@ init (int argc, char **argv)
     }
 #endif
     gtk_init ();
-    /* panel_init() registers libpanel's boxed
-     * types and CSS provider. It has to run before the first
-     * libpanel widget construction; fe_init -> create_toolbar_window
-     * (below) builds the dock + grid, so init here. Idempotent and
-     * does not require an AdwApplication instance (good, because we
-     * don't have one yet — see the long comment in
-     * create_toolbar_window in toolbar.c about NULL gtkhx_app at
-     * this point in init). */
-    panel_init ();
 #ifdef HAVE_VOICE
     /* Phase 8.B: initialise GStreamer for the voice runtime. Idempotent;
      * the Rust hxvoice-runtime wraps gst::init which checks its own

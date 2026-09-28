@@ -40,7 +40,7 @@
 #include "tasks.h"
 #include "session_registry.h"
 #include "panel_registry.h"
-#include "hx_panel.h" /* HxPanel — raising the queue on a new transfer */
+#include "dock_bridge.h" /* raising the queue on a new transfer */
 
 /* Phase 5 task-row polish: each row is now an Adwaita-shaped
  * action-row layout — icon column on the left, then a vbox with
@@ -585,12 +585,7 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     if (htxf != NULL && !hx_htxf_opt_preview (htxf) && transfer_is_first
         && hx_active_session () != NULL
         && conn == hx_conn_serial (hx_active_session ()->htlc)) {
-        HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_TASKS);
-        if (panel != NULL
-            && gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME)
-                   != NULL) {
-            panel_widget_raise (PANEL_WIDGET (panel));
-        }
+        gtkhx_dock_show_if_open (HX_PANEL_ID_TASKS);
     }
 
     return gtsk;

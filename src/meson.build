@@ -42,9 +42,6 @@ gtkhx_sources = files(
   # gtkhx_session.c removed in Phase R4 — GtkhxSession is now the Rust
   # glib::subclass crate `gtkhx-core` (rust_gtkhx_session_dep below).
   'gtkhx_theme.c',
-  'hx_panel.c',
-  'hx_panel_frame.c',
-  'hx_split.c',
   'panel_registry.c',
   'gtkurl.c',
   'gtkutil.c',
@@ -99,12 +96,12 @@ gtkhx_sources = files(
   # tracker.c + tracker_row.c ported to Rust (gtkhx-ui crate, Phase R5).
   # tracker_bridge.c is the thin session/prefs shim the Rust window calls.
   'tracker_bridge.c',
-  # dock_bridge.c — generic libpanel dock-embed shim for the docked Rust
-  # window ports (Users first). See docs/docking.md.
+  # dock_bridge.c — the dock (mullion-gtk) and the pane-embed shim the
+  # docked Rust windows use. See docs/docking.md.
   'dock_bridge.c',
   # dock_pages.c — a panel's content as a set of named pages. Split out of
-  # dock_bridge.c because it is pure GtkStack manipulation with no libpanel
-  # and no dock, which is what lets it be unit-tested.
+  # dock_bridge.c because it is pure GtkStack manipulation with no dock,
+  # which is what lets it be unit-tested.
   'dock_pages.c',
   # session_registry.c — the collection of connections and which one has
   # focus. Split out of gtkhx.c when `the_session` stopped being one struct.

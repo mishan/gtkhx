@@ -13,23 +13,17 @@
  */
 
 /*
- * dock_bridge.h — generic C dock-embed shim for the Rust window ports.
+ * dock_bridge.h — the dock, and the C dock-embed shim for the Rust window
+ * ports.
  *
- * libpanel + the HxPanel / dock infrastructure (hx_panel.c,
- * panel_registry.c, hx_panel_frame.c, hx_split.c, dock_layout*.c, the
- * toolbar's dock construction) stay in C: the gtk-rs libpanel crate is
- * a whole gtk-rs generation ahead of our pinned 0.21 stack, and the dock
- * infra is the large part regardless of bindings (see
- * docs/docking.md, Option A). Instead, each docked
- * window ported to gtk4-rs builds its *content widget tree* in Rust and
- * hands it to this bridge, which does the libpanel plumbing
- * (hx_panel_new / panel_frame_add / registry). Rust never names a
- * libpanel type; the kind / area enums cross as small ints mirrored in
- * the crate's `mod dock`.
- *
- * This is the same leaf-up shape as tracker_bridge.c / gtkhx_ui_bridge.c:
- * a small, permanent shim that keeps the wire/session/dock boundary where
- * it already is.
+ * The dock is one mullion-gtk MlnPanes: a split tree of tabbed panes the
+ * user drags, splits, closes and moves into windows of its own, kept in
+ * dock-layout.ini (dock_layout.c). Every static panel (panel_registry.h)
+ * is a pane of it from startup, with an empty page stack for content;
+ * each docked window builds its *content widget tree* in Rust and hands
+ * it to this bridge, which puts it in the pane's stack as a page. Rust
+ * never names a dock type; the kind / area enums cross as small ints
+ * mirrored in the crate's `mod dock`.
  */
 
 #ifndef GTKHX_DOCK_BRIDGE_H
@@ -40,29 +34,29 @@
 
 G_BEGIN_DECLS
 
-/* Panel kind — mirrors HxPanelKind (hx_panel.h). Passed as an int so
- * Rust doesn't name the libpanel-adjacent enum. */
+/* Panel kind, as the Rust side names it. The dock does not tell them
+ * apart any more; kept for the ABI. */
 typedef enum {
     GTKHX_DOCK_KIND_CENTER = 0,  /* chat, news 1.5 (news browser), files */
     GTKHX_DOCK_KIND_SIDEBAR = 1, /* users, tasks, news */
     GTKHX_DOCK_KIND_DYNAMIC = 2, /* private chats, private messages */
 } GtkhxDockKind;
 
-/* Dock home area — mirrors the four toolbar frames. Maps to a
- * PanelArea *and* the matching toolbar_*_frame inside the bridge, so
- * the caller picks a single value and the area→frame pairing stays in
- * one place. */
+/* Dock home area: the slot a panel goes to where the layout has no place
+ * for it (see dock_bridge.c's panel table, which is what decides now; the
+ * area a caller passes is kept for the ABI). */
 typedef enum {
-    GTKHX_DOCK_AREA_START = 0,  /* toolbar_sidebar_frame — News */
-    GTKHX_DOCK_AREA_END = 1,    /* toolbar_end_frame     — Users */
-    GTKHX_DOCK_AREA_BOTTOM = 2, /* toolbar_bottom_frame  — Tasks */
-    GTKHX_DOCK_AREA_CENTER = 3, /* toolbar_center_frame  — Chat/Files/News15 */
+    GTKHX_DOCK_AREA_START = 0,  /* News */
+    GTKHX_DOCK_AREA_END = 1,    /* Users */
+    GTKHX_DOCK_AREA_BOTTOM = 2, /* Tasks */
+    GTKHX_DOCK_AREA_CENTER = 3, /* Chat, News15 */
 } GtkhxDockArea;
 
-/* Raise an already-open panel to focus; returns TRUE iff a panel with
- * this id was registered (in which case it's re-attached + raised and
- * the caller returns early instead of rebuilding content). Mirrors the
- * lookup → ensure_attached → raise head of each old create_X_window. */
+/* Raise an embedded panel to focus, out of the drawer if it was closed;
+ * returns TRUE iff the panel has content (in which case the caller returns
+ * early instead of rebuilding it). Until gtkhx_dock_settled, it raises
+ * nothing: startup's own opens would otherwise decide which tab is in
+ * front of each leaf, which the saved layout says. */
 gboolean gtkhx_dock_raise_if_open (const char *id);
 
 /* Whether `id` names an embedded panel — the same question
@@ -77,24 +71,22 @@ gboolean gtkhx_dock_raise_if_open (const char *id);
  * the user is looking at. */
 gboolean gtkhx_dock_is_embedded (const char *id);
 
-/* Set / clear the needs-attention hint on a registered panel (the dock
- * tab strip badges it when the panel isn't the visible tab). No-op if no
- * panel with this id is registered. Used by the Rust chat-tabs manager to
- * flag the Chat panel when a background tab wants attention. */
+/* Set / clear the needs-attention mark on a panel's tab, until the panel
+ * comes into view. Used by the Rust chat-tabs manager to flag the Chat
+ * panel when a background tab wants attention. */
 void gtkhx_dock_set_needs_attention (const char *id, gboolean state);
 
-/* Create-or-embed a static (CENTER / SIDEBAR) panel: builds the HxPanel
- * for `id`, titles/icons it, sets `content` as its first content page named
- * `page`, adds it to the home frame for `area`, records the home frame, and
- * registers it (the registry strong-refs it so it survives Close-all-pages).
+/* Embed a static panel's first content: titles it, and puts `content` in
+ * its pane as the first page, named `page`. The pane is the dock's from
+ * startup, wherever the layout has it; a closed one stays closed.
  *
  * `page` names the connection the content belongs to — see the per-connection
  * page section below. This is the panel's *first* page; another connection's
  * content goes in through gtkhx_dock_add_page.
  *
  * Returns TRUE on success. `content` is *always consumed* either way: on
- * success the panel takes its reference; on failure (the toolbar dock
- * isn't built yet — a g_critical) it is sunk and destroyed here, so the
+ * success the panel takes its reference; on failure (no dock yet, or no
+ * panel by that id — a g_critical) it is sunk and destroyed here, so the
  * caller never has to clean it up. Callers should skip any post-embed work
  * (e.g. after_embed) when this returns FALSE. Do not touch `content` after
  * the call regardless. */
@@ -103,19 +95,6 @@ gboolean gtkhx_dock_embed (const char *id, GtkhxDockKind kind,
                            const char *icon_name, const char *page,
                            GtkWidget *content);
 
-/* Dynamic-panel variant (per-pchat / per-PM tabs): same embed, plus a
- * close trampoline. When the tab is closed, `on_close(user_data)` fires
- * (so Rust can tear down the backing gchat / msgwin state) before the
- * panel is unregistered and finalized. `user_data` is owned by the
- * caller conceptually but the bridge keeps it alive for the panel's
- * lifetime; if `destroy` is non-NULL it runs on `user_data` when the
- * panel finalizes. The panel is always created with
- * GTKHX_DOCK_KIND_DYNAMIC.
- *
- * Returns TRUE on success. Same `content` ownership as gtkhx_dock_embed
- * (always consumed — embedded on success, destroyed on failure). On
- * failure the close callback is never installed and `destroy` is run on
- * `user_data` immediately so the caller's teardown still fires. */
 /* ---- Per-connection content pages ------------------------------------ *
  *
  * A panel holds a *set* of named content pages rather than one child, so the
@@ -130,14 +109,7 @@ gboolean gtkhx_dock_embed (const char *id, GtkhxDockKind kind,
  * An id with no panel reads as "no pages" throughout, matching what the
  * panel-level calls above do with an unknown id. */
 
-/* The page name for content that belongs to no connection in particular.
- *
- * Nothing reaches it any more: the six per-connection panels name every page
- * after a connection, and the only other caller is gtkhx_dock_embed_dynamic,
- * which has no callers of its own — private chats and PMs became tabs inside
- * the Chat panel's shared AdwTabView rather than dynamic panels. Kept because
- * a dynamic panel would still need *a* page name, and deleting the constant
- * would not make the dead function less dead. */
+/* The page name for content that belongs to no connection in particular. */
 #define HX_DOCK_PAGE_DEFAULT "default"
 
 /* Add content as a new page of an already-embedded panel. Takes ownership of
@@ -172,11 +144,40 @@ guint gtkhx_dock_page_count (const char *id);
 struct _session;
 extern void gtkhx_dock_remove_session_pages (struct _session *sess);
 
-gboolean gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area,
-                                   const char *title, const char *icon_name,
-                                   GtkWidget *content,
-                                   void (*on_close) (gpointer user_data),
-                                   gpointer user_data, GDestroyNotify destroy);
+/* Call `func' each time the panel comes into view: raised, its tab
+ * clicked, reopened. For the News browser's fetch on open. */
+void gtkhx_dock_connect_shown (const char *id, void (*func) (void));
+
+/* ---- The dock itself: C only ----------------------------------------- */
+
+/* Make the dock: every static panel a pane, the saved layout read and put
+ * up (or the default). Once, for the main window. */
+GtkWidget *gtkhx_dock_new (void);
+
+/* Startup is done opening panels: raises from here on are the user's. */
+void gtkhx_dock_settled (void);
+
+/* Whether a panel is in the dock or a window of its own, rather than
+ * closed. */
+gboolean gtkhx_dock_is_open (const char *id);
+
+/* In front, out of the drawer if it was closed, with the focus -- and its
+ * window presented, when it is in one of its own. */
+void gtkhx_dock_present (const char *id);
+
+/* In front of its leaf if it is open, without the focus; nothing if it
+ * was closed. For a panel that has something to show, as Tasks does when
+ * a transfer starts. */
+void gtkhx_dock_show_if_open (const char *id);
+
+/* Tab strips (TRUE) or the corner's icons (FALSE): Pane Titles. */
+void gtkhx_dock_set_pane_titles (gboolean on);
+
+/* The default layout, now. */
+void gtkhx_dock_reset (void);
+
+/* The per-panel Show Action Bar actions, app.pane-actions-<id>. */
+void gtkhx_dock_add_actions (GActionMap *map);
 
 G_END_DECLS
 

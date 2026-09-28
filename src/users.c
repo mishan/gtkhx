@@ -23,7 +23,6 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <libpanel.h>
 #include <ctype.h>
 #include "hx.h"
 #include "hxconn.h"
@@ -812,11 +811,9 @@ prompt_chat (session *sess, guint16 _uid)
                                     : NULL);
 }
 
-/* close_users_window dropped — the
- * standalone Users GtkWindow is gone, and the Users panel is a
- * permanent resident of the toolbar's sidebar PanelFrame. An
- * undocked Users panel's "X" affordance flows through libpanel's
- * own tab-close + Redock-on-close machinery in Phase 4. */
+/* close_users_window dropped — the standalone Users GtkWindow is gone,
+ * and the Users panel is a pane of the dock, which closes it and, from a
+ * window of its own, puts it back. */
 
 void
 user_list (session *sess)

@@ -23,7 +23,6 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <libpanel.h>
 #include <gdk/gdkkeysyms.h>
 #include <sys/types.h>
 #include <ctype.h>
@@ -33,7 +32,6 @@
 #include "gtkhx_session.h"
 #include "gtkhx_theme.h"
 #include "gtkhx_log.h"
-#include "hx_panel.h"
 #include "panel_registry.h"
 #include "toolbar.h"
 #include "network.h"

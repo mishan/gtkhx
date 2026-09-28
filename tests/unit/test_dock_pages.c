@@ -16,7 +16,7 @@
  * layer is what makes that expressible.
  *
  * It is testable at all because it was split out of `dock_bridge.c`: no
- * libpanel, no dock, no registry, just a GtkStack. The dock bridge's job is
+ * dock, no registry, just a GtkStack. The dock bridge's job is
  * to resolve a panel id to that stack and delegate, and that half needs a
  * built dock and so is not covered here.
  *

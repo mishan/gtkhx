@@ -120,8 +120,8 @@ overriding libadwaita's named colors, not by styling widgets:
 `gtkhx_theme_build_chrome_css()` turns the `[chrome.*]` roles into a
 `:root` block of `--window-bg-color`-family variables plus the matching
 `@define-color`s, and `gtkhx_refresh_css` puts that at the top of the
-application provider. Every stock widget (header bar, libpanel pane
-headers, popovers, selection) follows with no per-widget rule,
+application provider. Every stock widget (header bar, the dock's tab
+strips, popovers, selection) follows with no per-widget rule,
 and so does GtkHx's own `chrome.css`, which reads `@accent_bg_color`
 and `@window_bg_color`. Both forms are emitted because libadwaita seeds
 its variables from the named colors, and chrome.css reads the named

@@ -31,6 +31,7 @@
 
 #include "dock_layout_parse.h"
 
+#include <stdio.h>
 #include <string.h>
 
 void
@@ -46,70 +47,6 @@ dl_parsed_node_free (DLParsedNode *n)
     dl_parsed_node_free (n->child_a);
     dl_parsed_node_free (n->child_b);
     g_free (n);
-}
-
-/* NULL means "this subtree emptied and should collapse". */
-static DLParsedNode *
-drop_panel (DLParsedNode *n, const char *id, guint *split_index,
-            GArray *dropped)
-{
-    if (n->is_leaf) {
-        gboolean had_ids = n->panel_ids != NULL && n->panel_ids->len > 0;
-
-        for (guint i = 0; n->panel_ids != NULL && i < n->panel_ids->len;) {
-            if (g_strcmp0 (g_ptr_array_index (n->panel_ids, i), id) == 0) {
-                g_ptr_array_remove_index (n->panel_ids, i);
-                if (n->selected == (int)i) {
-                    n->selected = -1;
-                } else if (n->selected > (int)i) {
-                    n->selected--;
-                }
-            } else {
-                i++;
-            }
-        }
-        if (had_ids && n->panel_ids->len == 0) {
-            dl_parsed_node_free (n);
-            return NULL;
-        }
-        return n;
-    } else {
-        DLParsedNode *a = drop_panel (n->child_a, id, split_index, dropped);
-        DLParsedNode *b = drop_panel (n->child_b, id, split_index, dropped);
-        guint mine = (*split_index)++; /* post-order, like sizes= */
-
-        if (a != NULL && b != NULL) {
-            n->child_a = a;
-            n->child_b = b;
-            return n;
-        }
-        if (dropped != NULL) {
-            g_array_append_val (dropped, mine);
-        }
-        n->child_a = NULL;
-        n->child_b = NULL;
-        dl_parsed_node_free (n);
-        return a != NULL ? a : b; /* NULL when both emptied */
-    }
-}
-
-DLParsedNode *
-dl_tree_drop_panel (DLParsedNode *root, const char *id, GArray *dropped_splits)
-{
-    guint split_index = 0;
-    DLParsedNode *out;
-
-    if (root == NULL || id == NULL) {
-        return root;
-    }
-    out = drop_panel (root, id, &split_index, dropped_splits);
-    if (out == NULL) {
-        out = g_new0 (DLParsedNode, 1);
-        out->is_leaf = TRUE;
-        out->panel_ids = g_ptr_array_new_with_free_func (g_free);
-        out->selected = -1;
-    }
-    return out;
 }
 
 typedef struct {
@@ -313,4 +250,209 @@ dl_parse_tree (const char *text)
         return NULL;
     }
     return root;
+}
+
+/* ---- the old format, as mullion's JSON ------------------------------- */
+
+static void
+json_string (GString *out, const char *s)
+{
+    g_string_append_c (out, '"');
+    for (const char *c = s; *c != '\0'; c++) {
+        if (*c == '"' || *c == '\\') {
+            g_string_append_c (out, '\\');
+            g_string_append_c (out, *c);
+        } else if ((unsigned char)*c < 0x20) {
+            g_string_append_printf (out, "\\u%04x", (unsigned char)*c);
+        } else {
+            g_string_append_c (out, *c);
+        }
+    }
+    g_string_append_c (out, '"');
+}
+
+/* Every split's divider position, by the node, in the post-order sizes=
+ * was written in. */
+static void
+number_splits (DLParsedNode *n, GHashTable *at, char **sizes, guint *next)
+{
+    if (n->is_leaf) {
+        return;
+    }
+    number_splits (n->child_a, at, sizes, next);
+    number_splits (n->child_b, at, sizes, next);
+    if (sizes != NULL && *next < g_strv_length (sizes)) {
+        g_hash_table_insert (
+            at, n,
+            GINT_TO_POINTER ((int)g_ascii_strtoll (sizes[*next], NULL, 10)));
+    }
+    (*next)++;
+}
+
+/* A panel this layout leaves out of the tree: Files, now a window, and
+ * the undocked ones, which get windows of their own. */
+static gboolean
+left_out (const char *id, GHashTable *floating)
+{
+    return g_strcmp0 (id, "files") == 0 || g_hash_table_contains (floating, id);
+}
+
+/* A node as JSON, in a box `w' by `h': the extent a divider's position
+ * is a share of. An empty leaf is written too, with its slot, for the
+ * dock to hand the slot on to the leaf that takes its room. */
+static void
+node_json (GString *out, DLParsedNode *n, GHashTable *at, GHashTable *floating,
+           double w, double h)
+{
+    if (n->is_leaf) {
+        int active = -1, kept = 0;
+
+        g_string_append (out, "{\"tabs\":[");
+        for (guint i = 0; i < n->panel_ids->len; i++) {
+            const char *id = g_ptr_array_index (n->panel_ids, i);
+
+            if (left_out (id, floating)) {
+                continue;
+            }
+            if ((int)i == n->selected) {
+                active = kept;
+            }
+            if (kept++ > 0) {
+                g_string_append_c (out, ',');
+            }
+            json_string (out, id);
+        }
+        g_string_append_c (out, ']');
+        if (active > 0) {
+            g_string_append_printf (out, ",\"active\":%d", active);
+        }
+        if (n->role != NULL) {
+            g_string_append (out, ",\"slots\":[");
+            json_string (out, n->role);
+            g_string_append_c (out, ']');
+        }
+        g_string_append_c (out, '}');
+        return;
+    }
+
+    {
+        gboolean row = n->orientation == DL_ORIENT_HORIZONTAL;
+        double extent = row ? w : h;
+        double pos = GPOINTER_TO_INT (g_hash_table_lookup (at, n));
+        double share = pos > 0 && extent > 0 ? pos / extent : 0.5;
+        char a[G_ASCII_DTOSTR_BUF_SIZE], b[G_ASCII_DTOSTR_BUF_SIZE];
+
+        share = CLAMP (share, 0.05, 0.95);
+        /* Three places, which is finer than a pixel and reads back. */
+        share = (double)(int)(share * 1000 + 0.5) / 1000;
+        g_string_append_printf (
+            out, "{\"dir\":\"%s\",\"size\":[%s,%s],\"kids\":[",
+            row ? "row" : "col", g_ascii_formatd (a, sizeof a, "%g", share),
+            g_ascii_formatd (b, sizeof b, "%g", 1 - share));
+        node_json (out, n->child_a, at, floating, row ? w * share : w,
+                   row ? h : h * share);
+        g_string_append_c (out, ',');
+        node_json (out, n->child_b, at, floating, row ? w * (1 - share) : w,
+                   row ? h : h * (1 - share));
+        g_string_append (out, "]}");
+    }
+}
+
+char *
+dl_import_legacy (const char *tree, const char *sizes, const char *closed,
+                  char **undocked, int width, int height)
+{
+    DLParsedNode *parsed = tree != NULL ? dl_parse_tree (tree) : NULL;
+    GHashTable *at, *floating;
+    g_auto (GStrv) positions = NULL;
+    g_auto (GStrv) shut = NULL;
+    GString *layout, *out;
+    guint next = 0;
+    gboolean any_shut = FALSE;
+
+    if (parsed == NULL) {
+        return NULL;
+    }
+
+    at = g_hash_table_new (NULL, NULL);
+    floating = g_hash_table_new (g_str_hash, g_str_equal);
+    positions = sizes != NULL ? g_strsplit (sizes, ";", -1) : NULL;
+    number_splits (parsed, at, positions, &next);
+
+    for (char **u = undocked; u != NULL && u[0] != NULL && u[1] != NULL;
+         u += 2) {
+        g_hash_table_insert (floating, u[0], u[1]);
+    }
+
+    layout = g_string_new (NULL);
+    node_json (layout, parsed, at, floating, width > 0 ? width : 1100,
+               height > 0 ? height : 700);
+
+    shut = closed != NULL ? g_strsplit (closed, ";", -1) : NULL;
+    for (char **c = shut; c != NULL && *c != NULL; c++) {
+        g_strstrip (*c);
+        if (**c != '\0' && !left_out (*c, floating)) {
+            any_shut = TRUE;
+        }
+    }
+
+    /* The envelope only with something to put in it beside the tree:
+     * mullion reads a bare tree as the layout, and the envelope with no
+     * version only when it has closed panes or windows. */
+    if (!any_shut && g_hash_table_size (floating) == 0) {
+        out = layout;
+    } else {
+        gboolean first = TRUE;
+
+        out = g_string_new ("{\"layout\":");
+        g_string_append (out, layout->str);
+        g_string_free (layout, TRUE);
+
+        if (any_shut) {
+            g_string_append (out, ",\"closed\":[");
+            for (char **c = shut; *c != NULL; c++) {
+                if (**c == '\0' || left_out (*c, floating)) {
+                    continue;
+                }
+                if (!first) {
+                    g_string_append_c (out, ',');
+                }
+                json_string (out, *c);
+                first = FALSE;
+            }
+            g_string_append_c (out, ']');
+        }
+
+        if (g_hash_table_size (floating) > 0) {
+            first = TRUE;
+            g_string_append (out, ",\"floating\":[");
+            for (char **u = undocked; u != NULL && u[0] != NULL && u[1] != NULL;
+                 u += 2) {
+                int fw = 0, fh = 0;
+
+                if (g_strcmp0 (u[0], "files") == 0) {
+                    continue;
+                }
+                if (!first) {
+                    g_string_append_c (out, ',');
+                }
+                g_string_append (out, "{\"layout\":{\"tabs\":[");
+                json_string (out, u[0]);
+                g_string_append (out, "]}");
+                if (sscanf (u[1], "%d,%d", &fw, &fh) == 2 && fw > 0 && fh > 0) {
+                    g_string_append_printf (out, ",\"size\":[%d,%d]", fw, fh);
+                }
+                g_string_append_c (out, '}');
+                first = FALSE;
+            }
+            g_string_append_c (out, ']');
+        }
+        g_string_append_c (out, '}');
+    }
+
+    g_hash_table_unref (at);
+    g_hash_table_unref (floating);
+    dl_parsed_node_free (parsed);
+
+    return g_string_free (out, FALSE);
 }

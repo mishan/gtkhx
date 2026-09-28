@@ -96,7 +96,7 @@ jobs:
           cache: true
           pacboy: >-
             cc:p meson:p ninja:p pkgconf:p rust:p
-            gtk4:p libadwaita:p libpanel:p gettext:p
+            gtk4:p libadwaita:p gettext:p
             gstreamer:p gst-plugins-base:p gst-plugins-good:p gst-plugins-bad:p
             libnice:p
           # zip is a plain MSYS package (no mingw-w64-ucrt-x86_64- variant), so
@@ -187,7 +187,7 @@ jobs:
 
       - name: brew deps
         run: |
-          brew install meson ninja pkgconf gtk4 libadwaita libpanel gettext \
+          brew install meson ninja pkgconf gtk4 libadwaita gettext \
                        gstreamer libnice dylibbundler
 
       - name: rust toolchain
