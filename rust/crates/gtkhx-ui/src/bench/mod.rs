@@ -8,7 +8,7 @@
 //! docs/performance.md for how the tiers divide.
 //!
 //! ```sh
-//! GTKHX_BENCH=chat=20000,files=10000,users=1000 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
+//! GTKHX_BENCH=chat=20000,files=10000,users=1000,tracker=2000 GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 //! ```
 //!
 //! `GTKHX_BENCH` lists scenarios to run in order, each with an optional
@@ -29,6 +29,7 @@
 
 mod chat;
 mod files;
+mod tracker;
 mod users;
 
 use std::cell::RefCell;
@@ -69,9 +70,9 @@ fn parse_requests(spec: &str) -> Result<Vec<Request>, String> {
             }
             None => (item, None),
         };
-        if !matches!(name, "chat" | "files" | "users") {
+        if !matches!(name, "chat" | "files" | "users" | "tracker") {
             return Err(format!(
-                "unknown scenario '{name}' (known: chat, files, users)"
+                "unknown scenario '{name}' (known: chat, files, users, tracker)"
             ));
         }
         out.push(Request {
@@ -123,6 +124,7 @@ pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidge
                 },
                 "files" => files::run(r.size.unwrap_or(10_000)).await,
                 "users" => users::run(r.size.unwrap_or(1_000)).await,
+                "tracker" => tracker::run(r.size.unwrap_or(2_000)).await,
                 _ => unreachable!("parse_requests only admits known names"),
             }
         }
