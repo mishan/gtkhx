@@ -30,7 +30,7 @@ any new harness.
 |---|---|---|---|
 | 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | Rust integration tests against an in-process fake server | Not started |
-| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel |
+| 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
 
 ### Tier 1 — microbenchmarks
@@ -75,7 +75,7 @@ Still to add:
 ### Tier 3 — UI scenarios
 
 ```sh
-tools/uibench.sh                              # chat=20000,files=10000, 3 repeats
+tools/uibench.sh                              # chat=20000,files=10000,users=1000, 3 repeats
 tools/uibench.sh files=10000 5                # one scenario, 5 repeats
 GTKHX_BENCH=chat GTKHX_BENCH_QUIT=1 ./build/src/gtkhx
 ```
@@ -108,11 +108,13 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 |---|---|---|
 | `chat[=N]` | The phases of the original chat-view benchmark: ingest + first paint, relayout after a font change, scrolling. | The idle frame. |
 | `files[=N]` | The real files panel (`gtkhx-ui` `files::panel`) in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider — the call, the wait until the listing lands, and the longest frame meanwhile. | Row count equals N; rows actually in size order after the sort. |
+| `users[=N]` | The main window's real Users panel, fed through the real receive handlers against the unconnected session: a login's USER_LIST reply for N users; a USER_CHANGE for every one of them at once; a GIF icon for every one at once through `gtkhx_avatar_update`, as a GIF-icons server's ICON_GETLIST reply delivers them; then frames and scrolling with every icon animating. Clears the list before and after through `users-clear`. | Row count equals N; every row shows the new status after the burst; every icon decodes and animates. |
 
-The panel has no filter, so none is measured.
+The Files panel has no filter, so none is measured. The Users scenario
+refuses to run on a connected session: it writes fake users into the public
+chat and clears it afterwards.
 
-Still to add: users (a large login, a `USER_CHANGE` burst, every GIF icon
-at once); the tracker window (a large listing, filter typing); chat-history
+Still to add: the tracker window (a large listing, filter typing); chat-history
 replay on join; animated media scrolled out of view — the acceptance test
 for the known offscreen-animation defect; video tiles; startup.
 
@@ -325,10 +327,27 @@ median of five, against `main` measured alongside:
 
 The wall time is unchanged; what moved is where the main thread waits.
 
+The Users scenario, **2026-09-27**, same setup, median of three. "Before"
+is this branch with each fix backed out, measured in the same session; a
+decode that never finished is marked as such.
+
+| Users | Before | After |
+|---|---|---|
+| login, 1,000 users: into the store (UI frozen) | 42.7 ms | 16.0 ms |
+| login, 1,000 users: login + paint | 59.1 ms | 33.0 ms |
+| USER_CHANGE burst, 1,000 users (UI frozen) | 2.0 ms | 2.0 ms |
+| 200 GIF icons: until decoded | 3.9 s | 146 ms |
+| 200 GIF icons: longest frame | 3.7 s | 21 ms |
+| 500 GIF icons: until decoded | never | 326 ms |
+| scroll p95 with every icon animating | 16.7 ms | 16.7 ms |
+
+The first run in a session is consistently slower on the login paint (about
+75 ms after), and is the spread to expect.
+
 ## Findings
 
-What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10 and 11
-are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
+What the measurements have turned up. Findings 1, 2, 6, 7, 8, 9, 10, 11,
+12, 13 and 15 are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
 
 1. **At the scrollback cap, each new message costs O(scrollback).** The same
    benchmark with no cap is flat at about 30 µs a message at both sizes, so
@@ -429,3 +448,40 @@ are fixed; the rest are leads. Findings 6 onwards are from the UI scenarios.
     menu and styling. Those rows took 99 of the 141 ms. **Fixed:** the cell
     is a plain label, and the editor is built when a rename opens and
     removed when it closes.
+12. **Every GIF icon at once froze the UI, and past a few hundred never
+    finished.** A GIF-icons server answers ICON_GETLIST at login with every
+    user's icon, and each started a decode. A decode is a D-Bus call to
+    glycin's pooled loader, and every call waiting on its reply checks every
+    message the connection receives — on the main thread, so N decodes in
+    flight cost N² there. 50 icons froze the UI for 0.6 s and 200 for 3.7 s;
+    at 500, not one had finished after a minute. **Fixed:** decodes take one
+    of a few slots first (`hx-image-decode`'s `slots`), in order, so the
+    rest wait for free. More slots decode faster but bring the long frames
+    back, and more so on more cores, where the loader answers in bursts:
+    at 500 icons, 8 slots gave 36 ms frames on 2 cores and 350 ms on 24.
+    Four stay near 30 ms on both. Every image decode in the app shares the
+    slots, so a decode that holds one past a generous deadline fails and
+    lets it go — a loader that never answered would otherwise stall every
+    decode after it.
+13. **Animated images were decoded over and over.** glycin's
+    `next_frame` loops back to the first frame when an animation ends, and
+    the decode loop stopped only at the frame or duration cap: a two-frame
+    looping icon came back as 256 frames, and each decode took about 85 ms
+    in the loader. **Fixed:** the loop stops when glycin's frame index comes
+    round to the first frame's again. (An animation long enough to reach
+    the duration cap first stopped there instead.) With finding 12's slots, 500 icons
+    decode in 0.3 s with no frame over 24 ms, and 1,000 in 0.55 s.
+14. **glycin's loader runs out of threads after about 2,000 images.** In
+    one run of the Users scenario the last few dozen of 2,000 icons fail: the
+    loader process panics spawning a thread (`EAGAIN`) and every decode it
+    holds fails with it. glycin tells the loader when each image is done, so
+    this looks like the loader keeping something per image. The Users
+    scenario defaults to 1,000 users to stay under it. A lead, upstream.
+15. **A login added users to the list one row at a time.** Each
+    `hx_user_list_view_add` appended to the store, and each append cost the
+    sort model and the column view a round of work — the same shape as
+    finding 6. **Fixed:** the view queues new rows and adds them in one
+    splice from a high-priority idle, which runs before the next frame. At
+    1,000 users the UI is frozen for 16 ms instead of 43 — the handler and
+    the one splice, timed together — and login plus paint went from 59 ms
+    to 33 ms.

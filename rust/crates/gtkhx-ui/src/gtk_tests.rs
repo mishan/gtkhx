@@ -33,6 +33,7 @@ fn display_backed() {
     crate::conn_tabs::tests::check_live_connection_asks_before_closing();
     crate::conn_tabs::tests::check_wheel_is_wired_to_the_bar();
     crate::files::complete::tests::check_completes_and_survives_entry_destroy();
+    crate::users_view::tests::check_rows_land_in_one_batch();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_tile_shows_a_frame();
     #[cfg(feature = "voice")]

@@ -156,6 +156,12 @@ mod imp {
         /// pointer within a chat, since `chat->users` is itself uid-keyed. The
         /// row is held with a strong ref here in addition to the store's.
         pub by_uid: RefCell<HashMap<u16, HxUserRow>>,
+        /// Rows added but not yet in the store, and whether a flush is
+        /// scheduled. A login adds every user one at a time, and each
+        /// append cost the sort model and the column view a round of
+        /// work; queued, they land in one splice before the next frame.
+        pub pending: RefCell<Vec<HxUserRow>>,
+        pub flush_scheduled: Cell<bool>,
         /// Theme singleton + "changed" handler, disconnected on dispose so
         /// a destroyed view leaves no dead handler on the process-lifetime
         /// theme object (matches the old g_signal_connect_object).
@@ -172,6 +178,8 @@ mod imp {
                 selection: RefCell::new(None),
                 column_view: RefCell::new(None),
                 by_uid: RefCell::new(HashMap::new()),
+                pending: RefCell::new(Vec::new()),
+                flush_scheduled: Cell::new(false),
                 theme_conn: RefCell::new(None),
             }
         }
@@ -199,6 +207,38 @@ glib::wrapper! {
     pub struct HxUserListView(ObjectSubclass<imp::HxUserListView>);
 }
 
+thread_local! {
+    /// Every view built, weakly, so Rust code can find one without a C
+    /// round trip through `session`.
+    static VIEWS: RefCell<Vec<glib::WeakRef<HxUserListView>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The public-chat user list `sess` shows, as its column view and the
+/// unsorted store of its rows; `None` while the Users panel isn't built.
+pub(crate) fn public_list(sess: *mut Session) -> Option<(gtk::ColumnView, gio::ListStore)> {
+    let view = public_view(sess)?;
+    Some((view.column_view()?, view.store()?))
+}
+
+/// Put the rows `sess`'s public list has queued into its store now, so the
+/// benchmark can time an add through to the store.
+pub(crate) fn flush_public(sess: *mut Session) {
+    if let Some(view) = public_view(sess) {
+        view.flush_rows();
+    }
+}
+
+fn public_view(sess: *mut Session) -> Option<HxUserListView> {
+    VIEWS.with(|v| {
+        // Newest first: a rebuilt panel's view replaces the old one.
+        v.borrow()
+            .iter()
+            .rev()
+            .filter_map(|w| w.upgrade())
+            .find(|view| view.session() == sess && view.imp().cid.get() == 0)
+    })
+}
+
 impl HxUserListView {
     fn session(&self) -> *mut Session {
         self.imp().sess.get()
@@ -214,6 +254,34 @@ impl HxUserListView {
     }
     fn column_view(&self) -> Option<gtk::ColumnView> {
         self.imp().column_view.borrow().clone()
+    }
+
+    /// Queue `row` for the store; it lands with the rest of its batch.
+    fn queue_row(&self, row: HxUserRow) {
+        let imp = self.imp();
+        imp.pending.borrow_mut().push(row);
+        if imp.flush_scheduled.replace(true) {
+            return;
+        }
+        // HIGH_IDLE runs ahead of GTK's layout and paint, so queued rows
+        // still show in the frame they were added for.
+        let weak = self.downgrade();
+        glib::idle_add_local_full(glib::Priority::HIGH_IDLE, move || {
+            if let Some(view) = weak.upgrade() {
+                view.flush_rows();
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    /// Put every queued row into the store at once.
+    fn flush_rows(&self) {
+        let imp = self.imp();
+        imp.flush_scheduled.set(false);
+        let rows = imp.pending.take();
+        if let (Some(store), false) = (self.store(), rows.is_empty()) {
+            store.splice(store.n_items(), 0, &rows);
+        }
     }
 
     /// Look up the row for `uid`, if any.
@@ -569,6 +637,11 @@ pub unsafe extern "C" fn hx_user_list_view_new(
     let obj = glib::Object::new::<HxUserListView>();
     obj.imp().cid.set(cid);
     obj.build(sess, style);
+    VIEWS.with(|v| {
+        let mut views = v.borrow_mut();
+        views.retain(|w| w.upgrade().is_some());
+        views.push(obj.downgrade());
+    });
     // Transfer-full: hand our owned ref to C, leak the Rust wrapper.
     let raw = obj.as_ptr() as *mut c_void;
     std::mem::forget(obj);
@@ -627,9 +700,7 @@ pub unsafe extern "C" fn hx_user_list_view_add(
     }
     let row = HxUserRow::new_row(uid, nam, icon, color, nick_color);
     view.imp().by_uid.borrow_mut().insert(uid, row.clone());
-    if let Some(store) = view.store() {
-        store.append(&row);
-    }
+    view.queue_row(row);
 }
 
 /// Remove member `uid`'s row.
@@ -645,6 +716,12 @@ pub unsafe extern "C" fn hx_user_list_view_remove(v: *mut c_void, uid: u16) {
     let Some(row) = view.imp().by_uid.borrow_mut().remove(&uid) else {
         return;
     };
+    let mut pending = view.imp().pending.borrow_mut();
+    if let Some(i) = pending.iter().position(|r| r == &row) {
+        pending.remove(i);
+        return;
+    }
+    drop(pending);
     if let Some(store) = view.store() {
         if let Some(pos) = store.find(&row) {
             store.remove(pos);
@@ -700,6 +777,7 @@ pub unsafe extern "C" fn hx_user_list_view_clear(v: *mut c_void) {
         return;
     }
     let view = borrow(v);
+    view.imp().pending.borrow_mut().clear();
     if let Some(store) = view.store() {
         store.remove_all();
     }
@@ -752,5 +830,71 @@ pub unsafe extern "C" fn hx_user_list_view_refresh_font(v: *mut c_void) {
     }
     if let Some(cv) = borrow(v).column_view() {
         cv.queue_draw();
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// A view with a store and nothing else: the queue under test needs no
+    /// widgets, and the column view's cells are C.
+    fn bare_view() -> (HxUserListView, gio::ListStore) {
+        let view = glib::Object::new::<HxUserListView>();
+        let store = gio::ListStore::new::<HxUserRow>();
+        view.imp().store.replace(Some(store.clone()));
+        (view, store)
+    }
+
+    fn add(view: &HxUserListView, uid: u16) {
+        let name = std::ffi::CString::new(format!("user {uid}")).unwrap();
+        unsafe { hx_user_list_view_add(view.as_ptr().cast(), uid, name.as_ptr(), 128, 0, 0) };
+    }
+
+    fn uids(store: &gio::ListStore) -> Vec<u16> {
+        (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<HxUserRow>())
+            .map(|r| r.uid_of())
+            .collect()
+    }
+
+    /// Spin the main context until the view's queue has been flushed.
+    fn flush(view: &HxUserListView) {
+        let ctx = glib::MainContext::default();
+        for _ in 0..100 {
+            if !view.imp().flush_scheduled.get() {
+                return;
+            }
+            ctx.iteration(false);
+        }
+        panic!("the queued rows were never flushed");
+    }
+
+    /// Rows added in one go land in the store together, in order, with one
+    /// items-changed; a row removed or a list cleared before then never
+    /// lands at all.
+    pub(crate) fn check_rows_land_in_one_batch() {
+        let (view, store) = bare_view();
+        let changes = std::rc::Rc::new(Cell::new(0));
+        store.connect_items_changed({
+            let changes = changes.clone();
+            move |_, _, _, _| changes.set(changes.get() + 1)
+        });
+
+        for uid in [1, 2, 3] {
+            add(&view, uid);
+        }
+        assert_eq!(store.n_items(), 0, "rows wait for the flush");
+        assert!(view.row_for(2).is_some(), "the uid map is current at once");
+        unsafe { hx_user_list_view_remove(view.as_ptr().cast(), 2) };
+        flush(&view);
+        assert_eq!(uids(&store), [1, 3]);
+        assert_eq!(changes.get(), 1);
+
+        add(&view, 4);
+        unsafe { hx_user_list_view_clear(view.as_ptr().cast()) };
+        flush(&view);
+        assert_eq!(store.n_items(), 0);
+        assert!(view.row_for(4).is_none());
     }
 }

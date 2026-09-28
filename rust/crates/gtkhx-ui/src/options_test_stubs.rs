@@ -329,3 +329,15 @@ mod voice {
         std::ptr::null_mut()
     }
 }
+
+// ---- users.c, for the user list's rows ----
+
+/// The theme-default foreground: no override.
+#[no_mangle]
+pub unsafe extern "C" fn user_nick_color_rgb(
+    _nick_color: u32,
+    _status: u16,
+    _out: *mut c_void,
+) -> *const c_void {
+    std::ptr::null()
+}
