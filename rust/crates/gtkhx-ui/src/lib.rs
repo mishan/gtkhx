@@ -198,6 +198,9 @@ pub mod broadcast;
 // banner_dispatch.c). Decode / connection-state / TLS-verify are native Rust;
 // the hxnet fetch + tokio worker spawn + send/task stay on the C ABI.
 pub mod banner;
+// GIF user avatars and their animation (was gif_avatar.c). Exports the
+// gtkhx_avatar_* C ABI in gif_avatar.h.
+pub mod avatar;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

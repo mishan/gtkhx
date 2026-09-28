@@ -155,7 +155,7 @@ T=$(mktemp -d); XDG_CONFIG_HOME=$T/c XDG_DATA_HOME=$T/d XDG_CACHE_HOME=$T/k \
 |---|---|---|
 | `chat[=N]` | The phases of the original chat-view benchmark: ingest + first paint, relayout after a font change, scrolling. | The idle frame. |
 | `files[=N]` | The real files panel (`gtkhx-ui` `files::panel`) in its own window: populate from a synthetic FILE_LIST reply through the remote decode path; sort by size and by name; scrolling; listing a real N-file directory through the local provider — the call, the wait until the listing lands, and the longest frame meanwhile. | Row count equals N; rows actually in size order after the sort. |
-| `users[=N]` | The main window's real Users panel, fed through the real receive handlers against the unconnected session: a login's USER_LIST reply for N users; a USER_CHANGE for every one of them at once; a GIF icon for every one at once through `gtkhx_avatar_update`, as a GIF-icons server's ICON_GETLIST reply delivers them; then frames and scrolling with every icon animating. Clears the list before and after through `users-clear`. | Row count equals N; every row shows the new status after the burst; every icon decodes and animates. |
+| `users[=N]` | The main window's real Users panel, fed through the real receive handlers against the unconnected session: a login's USER_LIST reply for N users; a USER_CHANGE for every one of them at once; a GIF icon for every one at once through `gtkhx_avatar_update`, as a GIF-icons server's ICON_GETLIST reply delivers them; then frames with every icon animating, the list's cost at rest in view and hidden, and scrolling. Clears the list before and after through `users-clear`. | Row count equals N; every row shows the new status after the burst; every icon decodes and animates; an avatar in view moves on, and a hidden one holds its frame. |
 
 | `tracker[=N]` | The real tracker window, opened without fetching: a listing of N servers delivered the way a fetch's drain delivers them — `tracker-batch-begin`, then per server an event from `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the Tasks progress tick, all in one main-loop turn; then two searches typed into the window's own entry a key at a time, each cleared after: one that narrows the list from its first keys, one that keeps every server until its last few. Keys are inserted as typing inserts them, and the entry's typing delay is held off, so each keystroke measures the filter. Refuses to run in a tracker window the user already has open. | N servers listed; each search shows exactly the servers its regex matches, counted independently; clearing shows all N. |
 | `media[=N]` | The main window's real chat view, cleared, then filled with N animated inline images followed by a few hundred lines of text, so pinned to the bottom it shows none of them. Three states, a few seconds each: text only, the images out of view, the images on screen — frames the clock ran, paints and main-thread CPU, per second. The acceptance test for offscreen animation. Nothing has the keyboard focus for the run: a focused text cursor blinks, repainting every frame while it fades. | On screen, the animation repaints; out of view, it doesn't. |
@@ -408,6 +408,15 @@ decode that never finished is marked as such.
 
 The first run in a session is consistently slower on the login paint (about
 75 ms after), and is the spread to expect.
+
+With the avatars gated on being drawn (finding 18), **2026-09-28**, 1,000
+animated icons, headless mutter at 60 Hz, two runs each. "Before" is the
+C timer it replaced.
+
+| Users, at rest with every icon animating | Before | After |
+|---|---|---|
+| main-thread CPU, list in view | 19.5–20.0 ms/s | 14.7–19.2 ms/s |
+| main-thread CPU, list hidden | 6.8–7.2 ms/s | 0.0–0.1 ms/s |
 
 The tracker scenario, **2026-09-27**, same setup, median of three. "Before"
 is this branch with finding 16's fix backed out. The listing is timed
@@ -708,9 +717,16 @@ onwards from loopback.
     Unmapping the view — a tab switched away, the window hidden — forgets
     what was drawn, since no snapshot runs then to say so. Out of view, 50
     animated images now cost no frames, no paints and no CPU, against 60
-    frames, 10 paints and 9.7 ms of CPU a second before. The
-    user list's animated avatars have the same shape on their own timer in
-    `gif_avatar.c`, and are still ungated.
+    frames, 10 paints and 9.7 ms of CPU a second before.
+
+    The user list's animated avatars had the same shape on their own
+    timer, and worse: every tick rebound the row of every animated
+    avatar, on screen or not. **Fixed** the same way, in the move of the
+    avatar cache to Rust: each avatar is a paintable that records being
+    drawn, only drawn ones advance, and a frame change redraws the cells
+    showing it without rebinding them. With 1,000 animated icons and the
+    list hidden, the main thread went from 7 ms of CPU a second to none;
+    in view the cost is painting the visible rows, much as before.
 19. **A "Load older" page cost time growing with the scrollback, for every
     row.** The renderer inserts an older page a row at a time above one
     anchor. Each insert dirtied the buffer's id-to-row map, and the next

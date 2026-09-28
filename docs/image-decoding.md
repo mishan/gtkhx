@@ -139,7 +139,7 @@ floor. Revisit the ceiling when the toolchain floor rises.
 The cancel and free contract is identical under both policies.
 
 Consumers today: inline-media chat rows and the click-to-view dialog,
-GIF avatars (`src/gif_avatar.c`, strict, with its own tighter caps), the
+GIF avatars (`gtkhx-ui/src/avatar.rs`, strict, with its own tighter caps), the
 server banner (`gtkhx-ui/src/banner.rs`, via the native Rust entry point
 rather than the C ABI), and the file preview (`src/preview.c`, wide).
 Banner convergence onto this crate was an explicit non-goal when the
@@ -231,12 +231,3 @@ the tokio interop helpers; the `gdk4` feature is what gives
 - **A single glycin backend.** Tempting, and wrong in both directions —
   3.x-only breaks Debian stable silently, 2.x-only strands the Flatpak
   and GNOME 48+ hosts on a generation their runtime doesn't ship.
-
-## Open
-
-- **Animated avatars in the user list are not gated offscreen.** The chat
-  view only animates the images its last paint drew, and stops its frame
-  tick when none of those is animated (docs/performance.md finding 18). The
-  user-list avatar path has the same shared-timer shape in `gif_avatar.c`
-  and no such gate; it is mitigated by a per-user pause and a global
-  animation preference.

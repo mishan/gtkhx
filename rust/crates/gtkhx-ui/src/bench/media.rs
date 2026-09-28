@@ -99,14 +99,14 @@ fn thread_cpu_us() -> i64 {
 }
 
 /// Frames, paints and CPU per second over one sample.
-struct Rates {
+pub(super) struct Rates {
     frames: f64,
     paints: f64,
     cpu_ms: f64,
 }
 
 /// Sample `view`'s frame clock for [`SAMPLE_US`] with nothing else going on.
-async fn sample(view: &gtk::Widget) -> Option<Rates> {
+pub(super) async fn sample(view: &gtk::Widget) -> Option<Rates> {
     // Let work the last step started (layout of new rows) finish first.
     glib::timeout_future(std::time::Duration::from_secs(1)).await;
     let clock = view.frame_clock()?;
@@ -159,7 +159,7 @@ async fn until_quiet(view: &gtk::Widget) {
     clock.disconnect(id);
 }
 
-fn report(r: &mut Report, label: &str, rates: &Rates) {
+pub(super) fn report(r: &mut Report, label: &str, rates: &Rates) {
     r.line(label, "", "");
     r.line(
         "  frames",

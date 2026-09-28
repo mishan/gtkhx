@@ -30,7 +30,7 @@
 #include "users.h"       /* users_font_desc */
 #include "users_row.h"
 #include "users_cell.h"
-#include "gif_avatar.h" /* gtkhx_avatar_get / is_animated / is_paused / set_paused */
+#include "gif_avatar.h" /* gtkhx_avatar_get_paintable / is_animated / is_paused / set_paused */
 
 /* ============================================================ */
 /* HxUserCellName — custom widget for the Name column           */
@@ -73,9 +73,11 @@ struct _HxUserCellName {
     HxUserRow *row;        /* borrowed */
     gulong row_changed_id; /* notify handler on row */
 
-    GdkPaintable *icon; /* resolved from row->icon via load_icon, OR
-                            * the GIF avatar texture when one is cached
-                            * for this row's uid (using_avatar) */
+    /* Resolved from row->icon via load_icon, or the GIF avatar when one
+     * is cached for this row's uid (using_avatar). An avatar's frame
+     * changes redraw the cell through icon_invalidate_id. */
+    GdkPaintable *icon;
+    gulong icon_invalidate_id;
     guint16 icon_id_cached;
     /* TRUE when `icon` currently holds a GIF avatar rather than a
      * cicn sprite. Avatars take precedence over the 16-bit icon id and
@@ -119,6 +121,16 @@ struct _HxUserCellName {
 G_DEFINE_FINAL_TYPE (HxUserCellName, hx_user_cell_name, GTK_TYPE_WIDGET)
 
 static void
+drop_icon (HxUserCellName *cell)
+{
+    if (cell->icon_invalidate_id) {
+        g_signal_handler_disconnect (cell->icon, cell->icon_invalidate_id);
+        cell->icon_invalidate_id = 0;
+    }
+    g_clear_object (&cell->icon);
+}
+
+static void
 hx_user_cell_name_dispose (GObject *object)
 {
     HxUserCellName *cell = HX_USER_CELL_NAME (object);
@@ -133,7 +145,7 @@ hx_user_cell_name_dispose (GObject *object)
         cell->row_changed_id = 0;
     }
     g_clear_object (&cell->row);
-    g_clear_object (&cell->icon);
+    drop_icon (cell);
 
     /* GtkWidget needs explicit unparent — this widget doesn't
      * have children, but the parent class's dispose still
@@ -158,25 +170,28 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
     GdkPixbuf *mask_unused = NULL;
     guint16 icon_id = cell->row ? hx_user_row_get_icon (cell->row) : 0;
 
-    /* GIF avatar takes precedence over the 16-bit icon id. The cached
-     * texture is the source of truth (gif_avatar.c); we route it through
-     * the same cell->icon field + snapshot path as a cicn sprite so the
-     * avatar is sized identically — intrinsic px * theme scale, with the
-     * wide-banner left-shift for banner-width art. */
+    /* GIF avatar takes precedence over the 16-bit icon id. It goes
+     * through the same cell->icon field and snapshot path as a cicn
+     * sprite, so it is sized identically — intrinsic px * theme scale,
+     * with the wide-banner left-shift for banner-width art. It animates
+     * itself, invalidating its contents at each frame. */
     guint16 uid = cell->row ? hx_user_row_get_uid (cell->row) : 0;
-    GdkTexture *avatar
-        = uid ? gtkhx_avatar_get (hx_active_session ()->htlc, uid) : NULL;
+    GdkPaintable *avatar
+        = uid ? gtkhx_avatar_get_paintable (hx_active_session ()->htlc, uid)
+              : NULL;
     if (avatar) {
-        GdkPaintable *ap = GDK_PAINTABLE (avatar);
-        if (cell->using_avatar && cell->icon == ap) {
+        if (cell->using_avatar && cell->icon == avatar) {
             return; /* already showing this exact avatar */
         }
-        g_clear_object (&cell->icon);
-        cell->icon = g_object_ref (ap);
+        drop_icon (cell);
+        cell->icon = g_object_ref (avatar);
+        cell->icon_invalidate_id = g_signal_connect_swapped (
+            avatar, "invalidate-contents", G_CALLBACK (gtk_widget_queue_draw),
+            cell);
         cell->using_avatar = TRUE;
         /* Force a cicn re-resolve if the avatar is later cleared. */
         cell->icon_id_cached = 0;
-        int w = gdk_texture_get_width (avatar);
+        int w = gdk_paintable_get_intrinsic_width (avatar);
         cell->icon_left_pad = (w >= HX_USER_WIDE_ICON_THRESHOLD)
                                   ? MIN (HX_USER_WIDE_ICON_LEFT_PAD, w)
                                   : 0;
@@ -186,7 +201,7 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
     /* No avatar — fall back to the cicn sprite for the 16-bit icon id.
      * Drop a stale avatar first so the cached-id fast path is valid. */
     if (cell->using_avatar) {
-        g_clear_object (&cell->icon);
+        drop_icon (cell);
         cell->using_avatar = FALSE;
         cell->icon_id_cached = 0;
     }
@@ -194,7 +209,7 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
     if (icon_id == cell->icon_id_cached && cell->icon) {
         return;
     }
-    g_clear_object (&cell->icon);
+    drop_icon (cell);
     cell->icon_id_cached = icon_id;
     cell->icon_left_pad = 0;
     if (icon_id == 0) {
@@ -243,7 +258,7 @@ hx_user_cell_name_set_row (HxUserCellName *cell, HxUserRow *row)
     g_clear_object (&cell->row);
     cell->icon_id_cached = 0;
     cell->using_avatar = FALSE;
-    g_clear_object (&cell->icon);
+    drop_icon (cell);
 
     if (row) {
         cell->row = g_object_ref (row);
