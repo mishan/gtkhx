@@ -143,6 +143,24 @@ option on FILE_PUTFOLDER), `rcv_folder_put` answers with a 74-byte RFLT taken
 from a stack buffer it never fills, so the client is told arbitrary offsets.
 GtkHx never asks to resume a folder upload, so it never sees this.
 
+## A folder download's item count covers the top level only
+
+**Verified.**
+
+A FILE_GETFOLDER reply carries the number of items the download will send
+(`DATA_FILE_NFILES`). mhxd counts one `readdir` of the folder itself, skipping
+dotfiles (`rcv_folder_get`), so a tree with subfolders sends more items than
+it announced: a folder holding `a/x/y` and `b` announces 2 and sends 4. Janus
+and hlservd count the whole tree.
+
+**GtkHx:** the folder download treats the count as a guide, not a limit. Past
+it, the download still asks for the next item and reads whatever comes; it
+only gives the answer a grace instead of waiting for the server to close — a
+second, or three times the slowest answer the download has seen, whichever is
+longer. mhxd answers each request as fast as the link allows and closes as
+soon as the tree is sent, so it waits for nothing and loses nothing unless an
+answer is delayed past that grace.
+
 ## hxtrackd lists a restarted server twice
 
 **Verified.** hxtrackd identifies a registration by its UDP source address and

@@ -47,6 +47,56 @@ const FILE_NEXT_CMD: u16 = 3;
 const NFI_HEADER_LEN: usize = 6;
 /// The fixed part the nfi `len` field counts before the per-component bytes.
 const NFI_LEN_FIXED: u16 = 4;
+/// The least a folder download waits for another entry once the server's
+/// announced count has arrived. See `hxnet_xfer_folder_recv_all`.
+const FOLDER_END_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How reading an entry header within a grace ended.
+enum EntryRead {
+    /// The header, whole.
+    Entry,
+    /// The server closed before a byte of it.
+    Closed,
+    /// Not a byte of it within the grace.
+    Silent,
+    /// Anything else: an error, a reset, an abort, a header cut short.
+    Failed,
+}
+
+/// Read an entry header into `buf`, waiting up to `grace` for each read.
+/// Only a close, or silence, before its first byte may end the tree; a
+/// header cut short, a reset or an abort is a failure like any other.
+fn read_entry_within(hx: &mut HtxfConn, buf: &mut [u8], grace: std::time::Duration) -> EntryRead {
+    if hx.set_timeout(Some(grace)).is_err() {
+        return EntryRead::Failed;
+    }
+    let mut got = 0;
+    let out = loop {
+        if got == buf.len() {
+            break EntryRead::Entry;
+        }
+        match hx.read_some(&mut buf[got..]) {
+            Ok(0) if got == 0 => break EntryRead::Closed,
+            Ok(0) => break EntryRead::Failed,
+            Ok(n) => got += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e)
+                if got == 0
+                    && matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+            {
+                break EntryRead::Silent
+            }
+            Err(_) => break EntryRead::Failed,
+        }
+    };
+    if matches!(out, EntryRead::Entry) && hx.set_timeout(None).is_err() {
+        return EntryRead::Failed;
+    }
+    out
+}
 /// Cap on a received folder entry's joined relative path (matches `compat.h`'s
 /// clamped `MAXPATHLEN`); a hostile server can't drive an unbounded path.
 const MAXPATHLEN: usize = 4095;
@@ -766,20 +816,43 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
         return io_errno(&e);
     }
 
+    let expected = (*fp.hx).folder_items();
+    let mut received: u32 = 0;
+    // The longest the server has taken to answer a FILE_NEXT so far.
+    let mut slowest = std::time::Duration::ZERO;
     loop {
         // Request the next entry.
         if xfer_write(fp.hx, &FILE_NEXT_CMD.to_be_bytes()).is_err() {
             return EIO;
         }
-        // nfi header: a 0-byte read is the clean end-of-stream (server closed).
+        let asked = std::time::Instant::now();
         let mut nfi = [0u8; NFI_HEADER_LEN];
-        let n = htxf_read_full(fp.hx, &mut nfi);
-        if n == 0 {
-            return 0;
+        if expected != 0 && received >= expected {
+            // Past the announced count the tree is probably done, and some
+            // servers only close on a timeout of their own: give the next
+            // entry a grace instead. The count is only a guide — mhxd counts
+            // the top level alone (docs/mhxd-bugs.md) — so an entry that
+            // does come is read as any other, and the grace is several
+            // times the slowest answer yet, for a slow link.
+            let grace = FOLDER_END_GRACE.max(slowest * 3);
+            match read_entry_within(&mut *fp.hx, &mut nfi, grace) {
+                EntryRead::Entry => {}
+                EntryRead::Closed | EntryRead::Silent => return 0,
+                EntryRead::Failed => return EIO,
+            }
+        } else {
+            // nfi header: a 0-byte read is the clean end-of-stream (server
+            // closed).
+            let n = htxf_read_full(fp.hx, &mut nfi);
+            if n == 0 {
+                return 0;
+            }
+            if n != NFI_HEADER_LEN as isize {
+                return EIO;
+            }
         }
-        if n != NFI_HEADER_LEN as isize {
-            return EIO;
-        }
+        slowest = slowest.max(asked.elapsed());
+        received = received.saturating_add(1);
         let ftype = u16::from_be_bytes([nfi[2], nfi[3]]);
         let pathcount = u16::from_be_bytes([nfi[4], nfi[5]]);
 
@@ -1399,6 +1472,234 @@ mod folder_loopback_tests {
         let _ = std::fs::remove_dir_all(&dest);
         assert_eq!(a, b"alpha body", "downloaded a.txt");
         assert_eq!(b, b"beta!", "downloaded b.txt");
+    }
+
+    /// What the scripted folder server does for each FILE_NEXT.
+    enum Step {
+        /// A folder marker, after a pause.
+        Folder(&'static str, std::time::Duration),
+        /// A file: its marker, then its FILP body on FILE_SEND.
+        File(&'static str, Vec<u8>),
+        /// Part of an entry header, then nothing.
+        PartialHeader,
+        /// Reset the connection.
+        Reset,
+        /// Say nothing for a while, then close — as Janus does after a
+        /// tree, closing only on its own timeout.
+        Hold(std::time::Duration),
+    }
+
+    fn entry_header(name: &str, ftype: u16) -> Vec<u8> {
+        let wire_len = NFI_LEN_FIXED + 3 + name.len() as u16;
+        let mut v = Vec::new();
+        v.extend_from_slice(&wire_len.to_be_bytes());
+        v.extend_from_slice(&ftype.to_be_bytes());
+        v.extend_from_slice(&1u16.to_be_bytes());
+        v.extend_from_slice(&[0, 0, name.len() as u8]);
+        v.extend_from_slice(name.as_bytes());
+        v
+    }
+
+    /// Play a folder download's server side from `steps`, one per
+    /// FILE_NEXT, then close on the trailing one.
+    fn serve_steps(steps: Vec<Step>) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut cmd = [0u8; 2];
+            for step in steps {
+                if s.read_exact(&mut cmd).is_err() {
+                    return;
+                }
+                assert_eq!(u16::from_be_bytes(cmd), FILE_NEXT_CMD);
+                match step {
+                    Step::Folder(name, delay) => {
+                        std::thread::sleep(delay);
+                        s.write_all(&entry_header(name, 1)).unwrap();
+                    }
+                    Step::File(name, filp) => {
+                        s.write_all(&entry_header(name, 0)).unwrap();
+                        s.read_exact(&mut cmd).unwrap();
+                        assert_eq!(u16::from_be_bytes(cmd), FILE_SEND_CMD);
+                        s.write_all(&(filp.len() as u32).to_be_bytes()).unwrap();
+                        s.write_all(&filp).unwrap();
+                    }
+                    Step::PartialHeader => {
+                        s.write_all(&entry_header("z", 1)[..3]).unwrap();
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        return;
+                    }
+                    Step::Reset => {
+                        // SO_LINGER of zero: the close sends a reset.
+                        use std::os::fd::AsRawFd;
+                        let linger = libc::linger {
+                            l_onoff: 1,
+                            l_linger: 0,
+                        };
+                        unsafe {
+                            libc::setsockopt(
+                                s.as_raw_fd(),
+                                libc::SOL_SOCKET,
+                                libc::SO_LINGER,
+                                &linger as *const _ as *const c_void,
+                                std::mem::size_of::<libc::linger>() as libc::socklen_t,
+                            );
+                        }
+                        return;
+                    }
+                    Step::Hold(d) => {
+                        std::thread::sleep(d);
+                        return;
+                    }
+                }
+            }
+            let _ = s.read_exact(&mut cmd);
+        });
+        (port, server)
+    }
+
+    /// Download from the server on `port`, told to expect `items`, with
+    /// `abort_after` cancelling it from another thread. Returns the result,
+    /// the time taken and what arrived, each file with its contents.
+    fn recv_folders(
+        port: u16,
+        items: u32,
+        abort_after: Option<std::time::Duration>,
+        tag: &str,
+    ) -> (c_int, std::time::Duration, Vec<(String, Vec<u8>)>) {
+        let dest = std::env::temp_dir().join(format!("hxnet_fcount_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        unsafe { crate::htxf::hxnet_htxf_set_folder_items(&mut conn, items) };
+        let token = crate::htxf::hxnet_htxf_abort_new();
+        unsafe { crate::htxf::hxnet_htxf_abort_arm(&mut conn, token) };
+        let canceller = abort_after.map(|d| {
+            let token = token as usize;
+            std::thread::spawn(move || {
+                std::thread::sleep(d);
+                unsafe { crate::htxf::hxnet_htxf_abort(token as *const _) };
+            })
+        });
+        let base_c = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
+        let fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        let t0 = std::time::Instant::now();
+        let rv = unsafe { hxnet_xfer_folder_recv_all(&fp) };
+        let took = t0.elapsed();
+        if let Some(c) = canceller {
+            c.join().unwrap();
+        }
+        drop(conn);
+        unsafe { crate::htxf::hxnet_htxf_abort_free(token) };
+        let mut got: Vec<(String, Vec<u8>)> = std::fs::read_dir(&dest)
+            .map(|d| {
+                d.flatten()
+                    .map(|e| {
+                        let body = std::fs::read(e.path()).unwrap_or_default();
+                        (e.file_name().to_string_lossy().into_owned(), body)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        got.sort();
+        let _ = std::fs::remove_dir_all(&dest);
+        (rv, took, got)
+    }
+
+    /// What arrived, less the Finder-info sidecars written beside files.
+    fn names(got: &[(String, Vec<u8>)]) -> Vec<&str> {
+        got.iter()
+            .map(|(n, _)| n.as_str())
+            .filter(|n| !n.ends_with(".fndrinfo"))
+            .collect()
+    }
+
+    const NOW: std::time::Duration = std::time::Duration::ZERO;
+
+    // A server that closes only on its own timeout once the tree is sent:
+    // with the announced count, the download ends shortly after the last
+    // item instead of waiting it out.
+    #[test]
+    fn folder_recv_stops_soon_after_the_announced_count() {
+        let (port, server) = serve_steps(vec![
+            Step::Folder("a", NOW),
+            Step::Folder("b", NOW),
+            Step::Hold(std::time::Duration::from_secs(4)),
+        ]);
+        let (rv, took, got) = recv_folders(port, 2, None, "stop");
+        server.join().unwrap();
+        assert_eq!(rv, 0, "a clean end");
+        assert_eq!(names(&got), ["a", "b"]);
+        assert!(
+            took < FOLDER_END_GRACE + std::time::Duration::from_millis(1500),
+            "ended {took:?} in, not after the server's hold"
+        );
+    }
+
+    // A count lower than what the server sends — mhxd counts the top level
+    // only — mustn't cut the tree short, files included: the grace's
+    // timeout has to be off again before a file's body is read.
+    #[test]
+    fn folder_recv_reads_past_an_undercount() {
+        let body = b"a file past the count".to_vec();
+        let (port, server) = serve_steps(vec![
+            Step::Folder("a", NOW),
+            Step::Folder("b", NOW),
+            Step::File("f", gen_filp(&body)),
+            Step::Folder("c", NOW),
+        ]);
+        let (rv, _, got) = recv_folders(port, 1, None, "under");
+        server.join().unwrap();
+        assert_eq!(rv, 0, "a clean end");
+        assert_eq!(names(&got), ["a", "b", "c", "f"]);
+        let file = got.iter().find(|(n, _)| n == "f").map(|(_, b)| b);
+        assert_eq!(file, Some(&body), "the file past the count");
+    }
+
+    // A slow link that undercounts: every answer takes longer than the
+    // least grace, so the grace has to grow with what the link has shown.
+    #[test]
+    fn folder_recv_waits_longer_on_a_slow_link() {
+        let slow = std::time::Duration::from_millis(1300);
+        let (port, server) = serve_steps(vec![
+            Step::Folder("a", std::time::Duration::from_millis(800)),
+            Step::Folder("b", slow),
+            Step::Folder("c", slow),
+        ]);
+        let (rv, _, got) = recv_folders(port, 1, None, "slow");
+        server.join().unwrap();
+        assert_eq!(rv, 0, "a clean end");
+        assert_eq!(names(&got), ["a", "b", "c"]);
+    }
+
+    // Past the count, only a close or silence ends the tree: a reset, or
+    // an entry header cut short, is the failure it always was.
+    #[test]
+    fn folder_recv_past_the_count_still_fails_on_a_reset_or_a_cut_header() {
+        for (tag, last) in [("reset", Step::Reset), ("cut", Step::PartialHeader)] {
+            let (port, server) = serve_steps(vec![Step::Folder("a", NOW), last]);
+            let (rv, _, _) = recv_folders(port, 1, None, tag);
+            server.join().unwrap();
+            assert_ne!(rv, 0, "{tag}: reported as a clean end");
+        }
+    }
+
+    // A cancel while the grace runs is a cancel, not the end of the tree.
+    #[test]
+    fn folder_recv_cancelled_in_the_grace_fails() {
+        let (port, server) = serve_steps(vec![
+            Step::Folder("a", NOW),
+            Step::Hold(std::time::Duration::from_secs(3)),
+        ]);
+        let (rv, _, _) = recv_folders(
+            port,
+            1,
+            Some(std::time::Duration::from_millis(300)),
+            "cancel",
+        );
+        server.join().unwrap();
+        assert_ne!(rv, 0, "a cancel reported as a clean end");
     }
 
     // The plaintext transport can hand a control read fewer bytes than asked
