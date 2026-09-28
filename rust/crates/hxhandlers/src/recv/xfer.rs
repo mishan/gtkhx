@@ -257,8 +257,8 @@ pub unsafe extern "C" fn rcv_task_file_get(
 /// to HTLC_HDR_FILE_GETFOLDER (was `rcv.c`). Mirror of [`rcv_task_file_get`]:
 /// same cancellation + error handling, but no preview, the only gate is `!ref`
 /// (folders are legal at total_size 0), and the total is clamped to 1 for the
-/// progress UI when the server reports 0. `FILE_NFILES` is parsed but currently
-/// informational (the C handler ignored it too).
+/// progress UI when the server reports 0. The item count goes to the download,
+/// which uses it to tell when the tree has all arrived.
 ///
 /// # Safety
 /// See [`rcv_task_file_get`].
@@ -295,6 +295,9 @@ pub unsafe extern "C" fn rcv_task_folder_get(
     hx_htxf_set_ref(htxf, r.ref_);
     hx_htxf_set_total_size(htxf, total);
     hx_htxf_set_queue(htxf, r.queue);
+    // How the download knows it's done without waiting on a server that
+    // closes late; see hxnet_htxf_set_folder_items.
+    crate::xfer::remember_folder_items(htxf, r.nfiles);
     stamp_subchannel(htlc, htxf);
     hx_xfer_announce(htlc, htxf, r.queue);
 }

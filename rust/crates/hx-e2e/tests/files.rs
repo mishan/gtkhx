@@ -291,6 +291,118 @@ fn folder_transfers_are_granted_a_reference() {
     }
 }
 
+/// Download the folder `name` in `dir` the way the app does — its reply's
+/// item count handed to the connection — into a scratch directory, and
+/// return the worker's result, how long it took and the relative paths
+/// that arrived.
+fn download_folder(
+    c: &mut Client,
+    dir: &str,
+    name: &[u8],
+) -> (i32, std::time::Duration, Vec<String>) {
+    use hxnet::htxf::{
+        hxnet_htxf_close, hxnet_htxf_connect, hxnet_htxf_pack_preamble, hxnet_htxf_set_folder_items,
+    };
+    use hxnet::xfer::{hxnet_xfer_folder_recv_all, HxnetFolderParams};
+    use std::ffi::{c_void, CString};
+
+    unsafe extern "C" fn no_progress(_u: *mut c_void, _d: u64) {}
+
+    let utf8 = c.utf8();
+    let r = c.request(&files::get_folder(dir.as_bytes(), name, utf8).unwrap());
+    ok(c, &r, "folder download");
+    let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
+    let mut pre = [0u8; 24];
+    let n = unsafe {
+        hxnet_htxf_pack_preamble(
+            pre.as_mut_ptr(),
+            pre.len(),
+            get.ref_,
+            u64::from(get.size),
+            1,
+            0,
+            0,
+        )
+    };
+    assert!(n > 0, "a preamble");
+    let server = c.server();
+    let h = unsafe {
+        hxnet_htxf_connect(
+            server.host.as_ptr(),
+            server.host.len(),
+            server.xfer_port,
+            std::ptr::null(),
+            0,
+            0,
+            pre.as_ptr(),
+            n,
+            std::ptr::null(),
+            get.ref_,
+            None,
+            std::ptr::null_mut(),
+        )
+    };
+    assert!(!h.is_null(), "{}: transfer port", server.name);
+    unsafe { hxnet_htxf_set_folder_items(h, get.nfiles) };
+
+    let dest = std::env::temp_dir().join(format!(
+        "hx-e2e-folder-{}-{}",
+        server.name,
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dest);
+    let dest_c = CString::new(dest.to_str().unwrap()).unwrap();
+    let fp = HxnetFolderParams {
+        hx: h,
+        base_path: dest_c.as_ptr(),
+        opt_preview: 0,
+        opt_folder: 1,
+        opt_large: 0,
+        user_data: std::ptr::null_mut(),
+        progress: Some(no_progress),
+    };
+    let t0 = std::time::Instant::now();
+    let rv = unsafe { hxnet_xfer_folder_recv_all(&fp) };
+    let took = t0.elapsed();
+    unsafe { hxnet_htxf_close(h) };
+
+    fn walk(root: &std::path::Path, at: &std::path::Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(at).into_iter().flatten().flatten() {
+            let p = e.path();
+            out.push(p.strip_prefix(root).unwrap().display().to_string());
+            walk(root, &p, out);
+        }
+    }
+    let mut got = Vec::new();
+    walk(&dest, &dest, &mut got);
+    got.sort();
+    let _ = std::fs::remove_dir_all(&dest);
+    (rv, took, got)
+}
+
+/// A folder download ends when the tree has arrived — however the server
+/// ends it, and however it counts. Janus closes only on a timeout of its
+/// own, ten seconds on; mhxd counts the top level alone.
+#[test]
+fn a_folder_download_arrives_whole_and_ends_promptly() {
+    for mut c in admins() {
+        let mut s = Scratch::new(&mut c, "fget");
+        let (dir, tree) = (s.path().to_string(), s.join("tree"));
+        for p in ["", "/a", "/a/x", "/a/x/y", "/b"] {
+            mkdir(s.client(), &format!("{tree}{p}"));
+        }
+        let c = s.client();
+        let (rv, took, got) = download_folder(c, &dir, b"tree");
+        let name = c.server().name;
+        assert_eq!(rv, 0, "{name}: the download failed");
+        assert_eq!(got, ["a", "a/x", "a/x/y", "b"], "{name}: the tree");
+        assert!(
+            took < std::time::Duration::from_secs(5),
+            "{name}: took {took:?} to end"
+        );
+    }
+}
+
 // ---- as a guest, on every server ---------------------------------------------
 
 #[test]

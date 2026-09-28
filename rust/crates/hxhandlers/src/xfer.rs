@@ -17,7 +17,8 @@ use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
 use hxnet::htxf::{
-    hxnet_htxf_abort, hxnet_htxf_close, hxnet_htxf_finish_send, HtxfAbort, HtxfConn,
+    hxnet_htxf_abort, hxnet_htxf_close, hxnet_htxf_finish_send, hxnet_htxf_set_folder_items,
+    HtxfAbort, HtxfConn,
 };
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
@@ -636,6 +637,9 @@ unsafe fn xfer_close_channel(htxf: *mut HtxfHandle) {
 /// `htxf` is the handle being freed; runs on the thread doing the last unref
 /// (the main thread in practice).
 unsafe extern "C" fn htxf_destructor(htxf: *mut HtxfHandle) {
+    // A folder download's count whose worker never ran: queued, then
+    // cancelled or disconnected.
+    take_folder_items(htxf);
     hx_preview_unref((*htxf).preview);
     (*htxf).preview = std::ptr::null_mut();
     xfer_close_channel(htxf);
@@ -744,11 +748,39 @@ unsafe fn get_thread(htxf: *mut HtxfHandle) {
     xfer_close_channel(htxf);
 }
 
+/// The item counts servers announced for folder downloads, by transfer,
+/// held from the reply until the download's worker hands its count to the
+/// connection (`hxnet_htxf_set_folder_items`). Here rather than on the
+/// transfer, whose layout C shares.
+static FOLDER_ITEMS: std::sync::Mutex<Vec<(usize, u32)>> = std::sync::Mutex::new(Vec::new());
+
+fn folder_items() -> std::sync::MutexGuard<'static, Vec<(usize, u32)>> {
+    FOLDER_ITEMS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Note the item count a folder download's reply announced.
+pub(crate) fn remember_folder_items(htxf: *mut c_void, items: u32) {
+    let mut all = folder_items();
+    all.retain(|(h, _)| *h != htxf as usize);
+    all.push((htxf as usize, items));
+}
+
+/// The count noted for `htxf`, forgotten as it's taken; 0 if none.
+fn take_folder_items(htxf: *mut HtxfHandle) -> u32 {
+    let mut all = folder_items();
+    match all.iter().position(|(h, _)| *h == htxf as usize) {
+        Some(i) => all.swap_remove(i).1,
+        None => 0,
+    }
+}
+
 /// Folder download worker: connect, drive the FILE_NEXT/FILE_SEND folder-receive
 /// state machine (`hxnet_xfer_folder_recv_all` — builds each per-file path from
 /// the root internally, never mutating it), chime + stamp on success.
 unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
+    let items = take_folder_items(htxf);
     if htxf_connect(htxf) != glib::ffi::GFALSE {
+        hxnet_htxf_set_folder_items((*htxf).hx as *mut HtxfConn, items);
         let params = xfer_folder_params(htxf);
         if hxnet_xfer_folder_recv_all(&params) == 0 {
             play_sound(FILE_DONE);

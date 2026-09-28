@@ -512,10 +512,13 @@ pub struct HtxfConn {
     /// abort fails the transfer fast rather than returning the post-
     /// shutdown `Ok(0)` EOF as a clean end-of-stream.
     abort: Option<Arc<HtxfAbort>>,
+    /// A folder download's item count, as the server announced it; 0 when
+    /// unknown. See [`hxnet_htxf_set_folder_items`].
+    folder_items: u32,
 }
 
 impl HtxfConn {
-    fn is_aborted(&self) -> bool {
+    pub(crate) fn is_aborted(&self) -> bool {
         self.abort.as_ref().is_some_and(|a| a.is_aborted())
     }
 
@@ -526,6 +529,7 @@ impl HtxfConn {
         HtxfConn {
             inner: HtxfInner::Plain(HtxfChannel::new_plain(stream)),
             abort: None,
+            folder_items: 0,
         }
     }
 }
@@ -638,6 +642,7 @@ unsafe fn htxf_finish(
         Box::into_raw(Box::new(HtxfConn {
             inner: HtxfInner::Tls(Box::new(ch)),
             abort: None,
+            folder_items: 0,
         }))
     } else {
         let mut tcp = tcp;
@@ -652,6 +657,7 @@ unsafe fn htxf_finish(
         Box::into_raw(Box::new(HtxfConn {
             inner: HtxfInner::Plain(ch),
             abort: None,
+            folder_items: 0,
         }))
     }
 }
@@ -961,6 +967,49 @@ pub unsafe extern "C" fn hxnet_htxf_finish_send(handle: *mut HtxfConn) -> c_int 
     match h.inner.finish_send(FINISH_SEND_TIMEOUT) {
         Ok(()) if !h.is_aborted() => 0,
         _ => -1,
+    }
+}
+
+/// Tell a folder download on `handle` how many items the server announced
+/// for it (the reply's item count, `DATA_FILE_NFILES`), before
+/// [`hxnet_xfer_folder_recv_all`](crate::xfer::hxnet_xfer_folder_recv_all)
+/// runs. A folder has no end marker: its end is the server closing, and
+/// some servers — Janus — close only on a timeout of their own, ten
+/// seconds on, waiting for the client to stop at the count. With the
+/// count, once that many items have arrived the download gives the next
+/// one a grace rather than the server's timeout; see
+/// `hxnet_xfer_folder_recv_all`. 0 leaves it waiting for the close.
+///
+/// # Safety
+/// `handle` is NULL or a live handle from [`hxnet_htxf_connect`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_set_folder_items(handle: *mut HtxfConn, items: u32) {
+    if let Some(h) = handle.as_mut() {
+        h.folder_items = items;
+    }
+}
+
+impl HtxfConn {
+    pub(crate) fn folder_items(&self) -> u32 {
+        self.folder_items
+    }
+
+    /// One read, with its error kind kept — which [`hxnet_htxf_read`]
+    /// folds into `-1` — so a caller can tell a timeout from a failure.
+    /// An abort, before or during, is an error.
+    pub(crate) fn read_some(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.is_aborted() {
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        let n = self.inner.read(buf)?;
+        if self.is_aborted() {
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        Ok(n)
+    }
+
+    pub(crate) fn set_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        self.inner.set_read_timeout(dur)
     }
 }
 
