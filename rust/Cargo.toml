@@ -29,9 +29,10 @@ members = [
     # dependency-free — no gtk4/glib/pango — so the whole of it runs under
     # `cargo test` on display-less CI; the C2 widget supplies the font
     # backend through the TextMeasure trait. Nothing links it yet: the
-    # consumer is hxchat-view in C2. See docs/chat-view.md.
-    "crates/hxchat-layout",
-    "crates/hxchat-view",
+    # consumer is rotulus in C2. See docs/chat-view.md.
+    "crates/rotulus-layout",
+    "crates/rotulus-mirc",
+    "crates/rotulus",
     "crates/hxvoice",
     "crates/hxvoice-model",
     "crates/hxvoice-send",

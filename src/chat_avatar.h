@@ -12,8 +12,9 @@
 
 G_BEGIN_DECLS
 
-/* The texture to draw for `uid`, or NULL when the user has neither an
- * avatar nor a resolvable icon.
+/* The image to draw for the user whose uid is `key`, or NULL when they
+ * have neither an avatar nor a resolvable icon. The chat view's avatar
+ * function (RotulusAvatarFunc); `data` is unused.
  *
  * **Borrowed, and only until the next call.** Animated avatars advance
  * on a shared frame timer, so the answer changes over time — which is
@@ -23,7 +24,8 @@ G_BEGIN_DECLS
  *
  * `anchor` is any realized widget; load_icon needs one for its theme
  * lookup. */
-GdkTexture *hx_chat_avatar_for_uid (GtkWidget *anchor, guint16 uid);
+GdkPaintable *hx_chat_avatar_for_key (GtkWidget *anchor, guint64 key,
+                                      gpointer data);
 
 G_END_DECLS
 

@@ -13,6 +13,16 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+# The chat view's own domain first: its list is all Rust, so it is compared
+# whole.
+rotulus_expected=$(./tools/potfiles-rs.sh rotulus)
+rotulus_listed=$(cat rust/crates/rotulus/po/POTFILES)
+if [ "$rotulus_expected" != "$rotulus_listed" ]; then
+    echo "rust/crates/rotulus/po/POTFILES is out of date; it should read:" >&2
+    echo "$rotulus_expected" >&2
+    exit 1
+fi
+
 expected=$(./tools/potfiles-rs.sh)
 listed=$(grep '\.rs$' po/POTFILES || true)
 

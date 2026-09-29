@@ -1886,7 +1886,6 @@ dependencies = [
  "hx-image-decode",
  "hxbookmarks",
  "hxbridge",
- "hxchat-view",
  "hxconfig",
  "hxcrypto",
  "hxhandlers",
@@ -1902,6 +1901,7 @@ dependencies = [
  "hxvoice-model",
  "hxvoice-runtime",
  "hxvoice-send",
+ "rotulus",
 ]
 
 [[package]]
@@ -1933,8 +1933,6 @@ dependencies = [
  "gtkhx-proto-ffi",
  "hx-image-decode",
  "hxbookmarks",
- "hxchat-layout",
- "hxchat-view",
  "hxconfig",
  "hxhandlers",
  "hxmodel",
@@ -1947,6 +1945,8 @@ dependencies = [
  "hxvoice-runtime",
  "hxvoice-send",
  "libadwaita",
+ "rotulus",
+ "rotulus-layout",
 ]
 
 [[package]]
@@ -2105,24 +2105,6 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "tokio",
-]
-
-[[package]]
-name = "hxchat-layout"
-version = "0.1.0"
-dependencies = [
- "criterion",
-]
-
-[[package]]
-name = "hxchat-view"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
- "gtk4",
- "hxchat-layout",
- "pango 0.21.5",
- "pangocairo",
 ]
 
 [[package]]
@@ -3379,6 +3361,32 @@ checksum = "e7ceb6607dd738c99bc8cb28eff249b7cd5c8ec88b9db96c0608c1480d140fb1"
 dependencies = [
  "cpal",
  "hound",
+]
+
+[[package]]
+name = "rotulus"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+ "gtk4",
+ "pango 0.21.5",
+ "pangocairo",
+ "rotulus-layout",
+ "rotulus-mirc",
+]
+
+[[package]]
+name = "rotulus-layout"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+]
+
+[[package]]
+name = "rotulus-mirc"
+version = "0.1.0"
+dependencies = [
+ "rotulus-layout",
 ]
 
 [[package]]

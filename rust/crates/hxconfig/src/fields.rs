@@ -263,6 +263,7 @@ field_table! {
     "chat.timestamp_format"         => text,     chat.timestamp_format;
     "chat.avatars"                  => flag,     chat.avatars;
     "chat.markdown"                 => flag,     chat.markdown;
+    "chat.single_click_links"       => flag,     chat.single_click_links;
     "chat.show_joins"               => flag,     chat.show_joins;
     "chat.history_initial"          => unsigned, chat.history_initial;
     "chat.highlight_words"          => list,     chat.highlight_words;
@@ -270,7 +271,6 @@ field_table! {
 
     "chat.autocopy.text"            => flag,     chat.autocopy.text;
     "chat.autocopy.timestamp"       => flag,     chat.autocopy.timestamp;
-    "chat.autocopy.color"           => flag,     chat.autocopy.color;
 
     "chat.emoji.shortcodes"         => flag,     chat.emoji.shortcodes;
     "chat.emoji.typeahead"          => flag,     chat.emoji.typeahead;

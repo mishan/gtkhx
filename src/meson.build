@@ -257,7 +257,7 @@ executable('gtkhx',
   # Rust-only change rebuilt the archive without relinking the binary.
   # This makes the stamp a real link input.
   link_depends        : rust_build,
-  include_directories : include_directories('.'),
+  include_directories : [include_directories('.'), rotulus_inc],
   install             : true,
   # GUI subsystem on Windows so double-clicking the exe doesn't pop a console
   # window (mingw still enters through main()). Ignored on non-PE targets.

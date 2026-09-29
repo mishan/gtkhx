@@ -25,8 +25,8 @@ use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
-use hxchat_layout::{Block, Message, MessageFlags, MessageKind};
-use hxchat_view::HxChatView;
+use rotulus::RotulusView;
+use rotulus_layout::{Block, Message, MessageFlags, MessageKind};
 use std::ffi::c_void;
 
 use super::{next_frame, warm_up, Report};
@@ -85,7 +85,7 @@ fn text(body: String) -> Message {
         timestamp: 0,
         speaker: None,
         gutter: None,
-        blocks: vec![Block::text(body)],
+        blocks: vec![Block::text(body)].into(),
         flags: MessageFlags::NONE,
     }
 }
@@ -175,7 +175,7 @@ pub(super) fn report(r: &mut Report, label: &str, rates: &Rates) {
 }
 
 pub(super) async fn run(view: &gtk::Widget, n: u32) {
-    let Some(chat) = view.downcast_ref::<HxChatView>() else {
+    let Some(chat) = view.downcast_ref::<RotulusView>() else {
         glib::g_warning!("gtkhx", "GTKHX_BENCH media: not a chat view");
         return;
     };
@@ -212,7 +212,7 @@ pub(super) async fn run(view: &gtk::Widget, n: u32) {
     chat.clear();
 }
 
-async fn measure(chat: &HxChatView, view: &gtk::Widget, n: u32) {
+async fn measure(chat: &RotulusView, view: &gtk::Widget, n: u32) {
     chat.clear();
     let idle = warm_up(view).await;
     let mut r = Report::new("media", idle);
@@ -246,7 +246,8 @@ async fn measure(chat: &HxChatView, view: &gtk::Widget, n: u32) {
                 token,
                 size: None,
                 alt: format!("animated image {i}"),
-            }],
+            }]
+            .into(),
             flags: MessageFlags::NONE,
         });
         chat.set_media_frames(token, frames(i));

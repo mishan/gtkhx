@@ -46,6 +46,7 @@
 #define CFG_TIMESTAMP "TIMESTAMP"
 #define CFG_CHAT_AVATARS "CHATAVATARS"
 #define CFG_MARKDOWN "MARKDOWN"
+#define CFG_SINGLE_CLICK_LINKS "SINGLECLICKLINKS"
 #define CFG_WORDWRAP "WORDWRAP"
 #define CFG_XBUF_MAX "XBUF_MAX"
 #define CFG_FONT "FONT"
@@ -121,13 +122,11 @@
 #define CFG_THEME_LIGHT "light"
 #define CFG_THEME_DARK "dark"
 
-/* xtext autocopy controls — Settings → Advanced → Auto Copy
- * Behavior. Three independent toggles for the drag-end clipboard
- * behaviour. See chat_view.h:hx_chat_view_set_autocopy_* for the per-field
- * semantics. */
+/* Chat copying — Settings → Advanced → Auto Copy Behavior: copy on
+ * drag-end, and prefix copied rows with their timestamps. The chat view's
+ * "autocopy" and "copy-timestamps" properties. */
 #define CFG_AUTOCOPY_TEXT "AUTOCOPYTEXT"
 #define CFG_AUTOCOPY_STAMP "AUTOCOPYSTAMP"
-#define CFG_AUTOCOPY_COLOR "AUTOCOPYCOLOR"
 
 /* timestamp format. strftime(3) format string used by xtext
  * for the per-line stamp column and the autocopy_stamp clipboard

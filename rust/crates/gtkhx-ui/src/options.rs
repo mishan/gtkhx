@@ -321,6 +321,7 @@ pub(crate) mod cfg {
     pub const TIMESTAMP: &str = "TIMESTAMP";
     pub const CHAT_AVATARS: &str = "CHATAVATARS";
     pub const MARKDOWN: &str = "MARKDOWN";
+    pub const SINGLE_CLICK_LINKS: &str = "SINGLECLICKLINKS";
     pub const WORDWRAP: &str = "WORDWRAP";
     pub const XBUF_MAX: &str = "XBUF_MAX";
     pub const STAMP_FORMAT: &str = "TIMESTAMPFORMAT";
@@ -338,7 +339,6 @@ pub(crate) mod cfg {
     pub const OLD_NICKCOMP: &str = "OLD_NICKCOMPLETION";
     pub const AUTOCOPY_TEXT: &str = "AUTOCOPYTEXT";
     pub const AUTOCOPY_STAMP: &str = "AUTOCOPYSTAMP";
-    pub const AUTOCOPY_COLOR: &str = "AUTOCOPYCOLOR";
     pub const HIGHLIGHT_WORDS: &str = "HIGHLIGHTWORDS";
     pub const CHAT_HISTORY_INITIAL: &str = "CHATHISTORYINITIAL";
     pub const EMOJI_SHORTCODES: &str = "EMOJISHORTCODES";
@@ -502,6 +502,11 @@ pub(crate) fn page_chat_appearance(page: &adw::PreferencesPage) {
              messages. What you send is unchanged.",
         )),
     ));
+    output.add(&switch_row(
+        cfg::SINGLE_CLICK_LINKS,
+        &tr("Open links with a single click"),
+        Some(&tr("Otherwise, right-click a link to open or copy it")),
+    ));
     output.add(&switch_row(cfg::WORDWRAP, &tr("Word wrap"), None));
     output.add(&spin_row(
         cfg::XBUF_MAX,
@@ -613,11 +618,6 @@ pub(crate) fn page_chat_behavior(page: &adw::PreferencesPage) {
     autocopy.add(&switch_row(
         cfg::AUTOCOPY_STAMP,
         &tr("Automatically include timestamps"),
-        None,
-    ));
-    autocopy.add(&switch_row(
-        cfg::AUTOCOPY_COLOR,
-        &tr("Automatically include color information"),
         None,
     ));
     page.add(&autocopy);

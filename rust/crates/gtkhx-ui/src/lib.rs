@@ -111,6 +111,9 @@ pub mod news_browser;
 // Dock registration via dock_bridge; chat content + xtext + wire senders stay
 // C in chat.c. create_chat_window is this module's #[no_mangle] export.
 pub mod chat;
+// GtkHx's configuration of the Rotulus chat view, and the link detector
+// gtkurl.c's callers share with it.
+pub mod chat_view;
 // The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
 // gtkhx_chat_tabs_* C ABI chat.c / msg.c / users.c / gtkutil.c + chat.rs use.
 pub mod chat_tabs;

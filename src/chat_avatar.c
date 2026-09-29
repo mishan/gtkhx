@@ -51,14 +51,16 @@ icon_texture (GtkWidget *anchor, guint16 icon_id)
     return tex;
 }
 
-GdkTexture *
-hx_chat_avatar_for_uid (GtkWidget *anchor, guint16 uid)
+GdkPaintable *
+hx_chat_avatar_for_key (GtkWidget *anchor, guint64 key, gpointer data)
 {
     GdkTexture *avatar;
     struct hx_member_info info;
     struct chat *conv;
+    guint16 uid = (guint16)key;
+    (void)data;
 
-    if (uid == 0 || !anchor) {
+    if (uid == 0 || key > G_MAXUINT16 || !anchor) {
         return NULL;
     }
 
@@ -67,7 +69,7 @@ hx_chat_avatar_for_uid (GtkWidget *anchor, guint16 uid)
      * cached texture would freeze the animation. */
     avatar = gtkhx_avatar_get (hx_active_session ()->htlc, uid);
     if (avatar) {
-        return avatar;
+        return GDK_PAINTABLE (avatar);
     }
 
     /* The icon id comes from the membership model — the same record the
@@ -82,5 +84,6 @@ hx_chat_avatar_for_uid (GtkWidget *anchor, guint16 uid)
     if (!hx_member_model_get_info (hx_chat_member_model (conv), uid, &info)) {
         return NULL;
     }
-    return icon_texture (anchor, info.icon);
+    avatar = icon_texture (anchor, info.icon);
+    return avatar ? GDK_PAINTABLE (avatar) : NULL;
 }

@@ -249,7 +249,7 @@ void gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
  *
  * name/color used to live *inside* body as \003NN escapes, which the
  * view then parsed back out to find where the name ended. They are
- * parameters now — see chat_view.h's note on runs. gtkhx_log.{c,h}
+ * parameters now — see rotulus.h's note on runs. gtkhx_log.{c,h}
  * wraps this in the printf-style helpers model-side files call. */
 void gtkhx_session_emit_chat_log_line (GtkhxSession *self,
                                        struct htlc_conn *htlc, guint32 cid,

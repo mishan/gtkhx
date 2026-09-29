@@ -187,6 +187,13 @@ for d in "$BUILD_DIR"/po/*/; do
   mkdir -p "$RES/share/locale/$lang/LC_MESSAGES"
   cp "$d/LC_MESSAGES/gtkhx.mo" "$RES/share/locale/$lang/LC_MESSAGES/"
 done
+# The chat view's own strings, in the "rotulus" domain (see gtkhx.c).
+for d in "$BUILD_DIR"/rust/crates/rotulus/po/*/; do
+  [ -f "$d/LC_MESSAGES/rotulus.mo" ] || continue
+  lang=$(basename "$d")
+  mkdir -p "$RES/share/locale/$lang/LC_MESSAGES"
+  cp "$d/LC_MESSAGES/rotulus.mo" "$RES/share/locale/$lang/LC_MESSAGES/"
+done
 
 # ---- fontconfig ------------------------------------------------------------
 # Homebrew's fontconfig config path is the brew prefix, absent on an end user's

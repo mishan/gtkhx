@@ -27,7 +27,7 @@
 
 use gtk::prelude::*;
 use gtk4 as gtk;
-use hxchat_view::HxChatView;
+use rotulus::RotulusView;
 
 use super::{after_paint, next_frame, warm_up, Report, Stats};
 
@@ -42,7 +42,7 @@ const SCROLL_FRAMES: usize = 120;
 const FONT_A: &str = "Monospace 10";
 const FONT_B: &str = "Monospace 12";
 
-/// One synthetic line, through the same compat append path `chat.c` uses.
+/// One synthetic line, through the same C append path `chat.c` uses.
 /// Lengths vary so wrapping is exercised; nick widths cycle so the gutter
 /// settles early, as in a real room.
 fn append_one(view: &gtk::Widget, i: u32) {
@@ -53,20 +53,37 @@ fn append_one(view: &gtk::Widget, i: u32) {
         .map(|w| format!("word{}", (i * 7 + w) % 1000))
         .collect();
     let body = body.join(" ");
+    let run = |t: &str| rotulus::ffi::RotulusRun {
+        text: t.as_ptr().cast(),
+        len: t.len() as i32,
+        color: rotulus::ffi::ROTULUS_COLOR_DEFAULT,
+        attrs: 0,
+        background: 0,
+        rgb: 0,
+        background_rgb: 0,
+    };
+    let (gutter, body) = (run(&nick), run(&body));
+    let row = rotulus::ffi::RotulusRow {
+        kind: rotulus::ffi::ROW_MESSAGE,
+        flags: 0,
+        stamp: 0,
+        speaker: rotulus::ffi::RotulusSpeaker {
+            key: 0,
+            nick: std::ptr::null(),
+            nick_len: -1,
+        },
+        gutter: &gutter,
+        n_gutter: 1,
+        body: &body,
+        n_body: 1,
+    };
     unsafe {
-        hxchat_view::ffi::hx_chat_view_append_indent(
-            view.as_ptr() as *mut _,
-            nick.as_ptr().cast(),
-            nick.len() as i32,
-            body.as_ptr().cast(),
-            body.len() as i32,
-            0,
-        );
+        rotulus::ffi::rotulus_view_append(view.as_ptr() as *mut _, &row);
     }
 }
 
 pub(super) async fn run(view: &gtk::Widget, n: u32) {
-    let Some(chat) = view.downcast_ref::<HxChatView>() else {
+    let Some(chat) = view.downcast_ref::<RotulusView>() else {
         gtk::glib::g_warning!("gtkhx", "GTKHX_BENCH chat: not a chat view");
         return;
     };

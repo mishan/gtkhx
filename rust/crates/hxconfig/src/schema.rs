@@ -164,17 +164,15 @@ impl Default for Appearance {
 pub struct AutoCopy {
     pub text: bool,
     pub timestamp: bool,
-    pub color: bool,
 }
 
 impl Default for AutoCopy {
     fn default() -> Self {
-        // Text on matches every modern chat client; stamp and colour stay off
+        // Text on matches every modern chat client; the stamp stays off
         // because most people want a clean copy of the message body.
         AutoCopy {
             text: true,
             timestamp: false,
-            color: false,
         }
     }
 }
@@ -211,6 +209,9 @@ pub struct Chat {
     /// Render markdown in incoming messages. Sending is unaffected: markdown
     /// goes out literally, because the wire format has no styling.
     pub markdown: bool,
+    /// Open a link in chat with a single click. Off, a link has only its
+    /// right-click menu, and a click on it selects like any text.
+    pub single_click_links: bool,
     pub show_joins: bool,
     /// How many chat-history entries to pull on the initial post-login fetch
     /// and on each subsequent "Load older messages". Zero disables the initial
@@ -235,6 +236,7 @@ impl Default for Chat {
             timestamp_format: "[%H:%M:%S] ".into(),
             avatars: true,
             markdown: true,
+            single_click_links: true,
             show_joins: true,
             history_initial: 50,
             highlight_words: Vec::new(),

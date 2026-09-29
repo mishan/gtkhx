@@ -5,11 +5,11 @@
 //! "Esc closes and clears" behaviour — because two find bars in one app
 //! that behave differently is a papercut. The difference is where the
 //! matching happens: news searches a `GtkTextBuffer` from Rust, whereas
-//! here the whole engine lives in `hxchat-layout` behind the
-//! `hx_chat_view_search*` C API, so this file only drives it.
+//! here the whole engine lives in `rotulus-layout` behind the
+//! `rotulus_view_search*` C API, so this file only drives it.
 //!
 //! Built unconditionally since C5. During the A/B this checked
-//! `hx_chat_view_can_search` and skipped building the bar on xtext,
+//! `rotulus_view_can_search` and skipped building the bar on xtext,
 //! which could not search; there is one backend now and it can.
 
 use gtk::gdk;
@@ -22,20 +22,20 @@ use std::rc::Rc;
 use crate::tr::tr;
 
 extern "C" {
-    fn hx_chat_view_search(
+    fn rotulus_view_search(
         view: *mut gtk::ffi::GtkWidget,
         needle: *const std::ffi::c_char,
         case_sensitive: glib::ffi::gboolean,
         n_matches: *mut u32,
         current: *mut u32,
     );
-    fn hx_chat_view_search_step(
+    fn rotulus_view_search_step(
         view: *mut gtk::ffi::GtkWidget,
         dir: std::ffi::c_int,
         n_matches: *mut u32,
         current: *mut u32,
     );
-    fn hx_chat_view_search_clear(view: *mut gtk::ffi::GtkWidget);
+    fn rotulus_view_search_clear(view: *mut gtk::ffi::GtkWidget);
 }
 
 struct FindCtx {
@@ -67,7 +67,7 @@ impl FindCtx {
         let (mut n, mut cur) = (0u32, 0u32);
         let c = glib::GString::from(needle.as_str());
         unsafe {
-            hx_chat_view_search(self.cptr(), c.as_ptr(), 0, &mut n, &mut cur);
+            rotulus_view_search(self.cptr(), c.as_ptr(), 0, &mut n, &mut cur);
         }
         self.update_readout(needle.is_empty(), n, cur);
     }
@@ -78,7 +78,7 @@ impl FindCtx {
         self.flush();
         let (mut n, mut cur) = (0u32, 0u32);
         unsafe {
-            hx_chat_view_search_step(self.cptr(), dir, &mut n, &mut cur);
+            rotulus_view_search_step(self.cptr(), dir, &mut n, &mut cur);
         }
         self.update_readout(self.entry.text().is_empty(), n, cur);
     }
@@ -136,7 +136,7 @@ impl FindCtx {
         if let Some(id) = self.pending.take() {
             id.remove();
         }
-        unsafe { hx_chat_view_search_clear(self.cptr()) };
+        unsafe { rotulus_view_search_clear(self.cptr()) };
         self.count.set_text("");
         self.set_error(false);
         self.prev_btn.set_sensitive(false);

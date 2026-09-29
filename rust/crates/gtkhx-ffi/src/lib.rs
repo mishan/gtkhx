@@ -71,12 +71,12 @@ use hxtask as _;
 use gtkhx_files_ffi as _;
 use hx_image_decode as _;
 use hxbookmarks as _;
-use hxchat_view as _;
 use hxconfig as _;
 use hxmacres as _;
 use hxsound as _;
 use hxtext as _;
 use hxtls_trust as _;
+use rotulus as _;
 
 // --- voice (gated by -Dvoice, see rust/meson.build) ---
 #[cfg(feature = "voice")]

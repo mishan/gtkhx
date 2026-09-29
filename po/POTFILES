@@ -58,5 +58,4 @@ rust/crates/gtkhx-ui/src/users_view.rs
 rust/crates/gtkhx-ui/src/users_voice_col.rs
 rust/crates/gtkhx-ui/src/video_panel.rs
 rust/crates/gtkhx-ui/src/voice_panel.rs
-rust/crates/hxchat-view/src/view.rs
 rust/crates/hxmodel/src/files_entry/populate.rs

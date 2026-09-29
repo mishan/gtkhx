@@ -13,9 +13,9 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
-hxchat-layout = { path = "../hxchat-layout" }
+rotulus-layout = { path = "../rotulus-layout" }
 # The in-app benchmark harness (src/bench) drives the chat view directly.
-hxchat-view = { path = "../hxchat-view" }
+rotulus = { path = "../rotulus" }
 gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
 # The Files browser reads a finished transfer's size off its handle.
@@ -69,13 +69,10 @@ gtkhx-proto-ffi = { path = "../gtkhx-proto-ffi" }
 # dialog and the Connections settings page call it directly (no C bookmark
 # code remains).
 hxbookmarks = { path = "../hxbookmarks" }
-
-[dev-dependencies]
-# The `gtkhx_prefs_type` test stub delegates to the real schema lookup, so
-# every row builder takes its live path instead of the insensitive early
-# return a hardcoded "no such key" would give. Pure and file-free —
-# hxconfig_type is a `path_of` + `kind_of` pair with no loaded config behind
-# it. See options_test_stubs.rs.
+# The chat preferences the chat view applies (chat_view.rs). Also what the
+# `gtkhx_prefs_type` test stub delegates to, so every row builder takes its
+# live path instead of the insensitive early return a hardcoded "no such
+# key" would give — see options_test_stubs.rs.
 hxconfig = { path = "../hxconfig" }
 
 [features]

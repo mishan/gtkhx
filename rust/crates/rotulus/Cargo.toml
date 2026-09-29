@@ -1,0 +1,36 @@
+[package]
+rust-version.workspace = true
+name = "rotulus"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+description = "A GTK4 scrollback view for text-stream chat"
+publish = false
+
+[lib]
+# rlib only. gtkhx-ffi is the workspace's single staticlib and bundles the
+# whole rlib graph into libgtkhx_ffi.a; a second staticlib here would
+# double-define this crate's #[no_mangle] symbols at the final link. See
+# crates/gtkhx-ffi/src/lib.rs for the full rationale.
+crate-type = ["rlib"]
+
+[features]
+default = ["mirc"]
+# rotulus_mirc_parse, the C entry point to rotulus-mirc.
+mirc = ["dep:rotulus-mirc"]
+# GtkAccessibleText, so a screen reader can read the transcript. The
+# interface arrived in GTK 4.14; without the feature the view builds
+# against 4.10 and exposes only its role.
+v4_14 = ["gtk4/v4_14"]
+
+[dependencies]
+rotulus-mirc = { path = "../rotulus-mirc", optional = true }
+# The layout engine. All the interesting logic lives there and is tested
+# headless; this crate is the GTK skin over it.
+rotulus-layout = { path = "../rotulus-layout" }
+glib = { workspace = true }
+gtk4 = { workspace = true, features = ["v4_10"] }
+# Pango directly, for the TextMeasure implementation and the shaped
+# layouts the snapshot pass hands to GSK.
+pango = "0.21"
+pangocairo = "0.21"

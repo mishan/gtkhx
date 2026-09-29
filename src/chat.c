@@ -46,7 +46,7 @@
 #include "gtkutil.h"
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "chat_members.h"
-#include "chat_view.h"
+#include <rotulus.h>
 #include "users.h"
 #ifdef HAVE_VOICE
 #include "voice_panel.h"
@@ -56,7 +56,6 @@
 #include "chat.h"
 #include "chat_members.h"
 #include "chat_tabs.h"
-#include "gtkurl.h"
 #include "emoji.h"
 #include "tasks.h"
 #include "rcv.h"
@@ -75,7 +74,7 @@ extern void hx_bench_maybe_start (GtkWidget *chat_view);
 /* fogWraith chat-history extension render cursors, grouped.
  * Was five loose gtkhx_chat fields; contained here so their
  * widget-coupled lifetime is one named object. The two cursors are
- * HxChatMark handles (chat_view.h) — opaque weak references to rows in
+ * RotulusMark handles (rotulus.h) — opaque weak references to rows in
  * the output view. Chat-view phase C0 made them opaque; they used to be
  * raw textentry* into xtext's internal buffer, which is what kept this
  * render state a C view concern rather than a Rust sub-model like
@@ -101,12 +100,12 @@ struct hx_chat_history_render {
      * this anchor, so older content stays inside the chat-history block
      * instead of jumping above the server-notice preamble that
      * hx_printf wrote first. */
-    HxChatMark *anchor_ent;
+    RotulusMark *anchor_ent;
     /* Mark for the currently-rendered "↑ Load older" sentinel row, or
      * NULL when none is rendered. Refreshed every batch: removed via
-     * hx_chat_view_remove, then re-inserted before the anchor if
+     * rotulus_view_remove, then re-inserted before the anchor if
      * has_more is still true on the new batch. */
-    HxChatMark *load_older_ent;
+    RotulusMark *load_older_ent;
 };
 
 /* The per-conversation window/view. No longer stored in its own
@@ -146,7 +145,7 @@ struct gtkhx_chat {
      * hx_chat_history_render above for the per-field notes. The
      * anchor / load-older marks are weak references that a scrollback
      * trim or a clear can invalidate, so treat them as live only
-     * during a render pass; hx_chat_view_remove on a stale mark is a
+     * during a render pass; rotulus_view_remove on a stale mark is a
      * safe FALSE. */
     struct hx_chat_history_render render;
 
@@ -167,58 +166,10 @@ struct gtkhx_chat {
  * chat_with_cid(sess, cid) — they're chat state, not view state, and now
  * survive a pchat window close + reopen. */
 
-/* Compose the load-older / loading-older sentinels by translating the
- * bare phrase (e.g. "Load older messages") and stitching the leading
- * up-arrow + NBSP joiners back in. xtext's word tokenizer splits on
- * ASCII space/'\n'/'<'/'>'/NUL, so internal spaces in the translated
- * phrase become NBSPs (U+00A0 = "\xc2\xa0") to keep the row clickable
- * as one token. The leading U+2191 (up-arrow) is part of the click
- * target — chat_history_word_click compares against the same
- * composed string. */
-static char *
-hx_compose_sentinel (const char *phrase)
-{
-    GString *s = g_string_new ("\xe2\x86\x91"
-                               "\xc2\xa0"); /* ↑ + NBSP */
-    for (const char *p = phrase; *p; p++) {
-        if (*p == ' ') {
-            g_string_append (s, "\xc2\xa0"); /* NBSP */
-        } else {
-            g_string_append_c (s, *p);
-        }
-    }
-    return g_string_free (s, FALSE);
-}
-
-const char *
-hx_load_older_sentinel (void)
-{
-    static char *cached = NULL;
-    if (!cached) {
-        cached = hx_compose_sentinel (_ ("Load older messages"));
-    }
-    return cached;
-}
-
-const char *
-hx_loading_older_sentinel (void)
-{
-    static char *cached = NULL;
-    if (!cached) {
-        cached = hx_compose_sentinel (_ ("Loading older messages..."));
-    }
-    return cached;
-}
-
-#define WORD_URL 1
-#define WORD_NICK 2
-#define WORD_HOST 4
-#define WORD_EMAIL 5
-
 /*
  * The palette laid out for the chat view.
  *
- * Slot layout (see chat_view.h's HX_CHAT_PAL_* vocabulary):
+ * Slot layout (see rotulus.h's ROTULUS_PAL_* vocabulary):
  *   0..15   mIRC colors 0..15
  *   16..31  mIRC colors 16..31 (bold/extended; HexChat duplicates 0..15)
  *   32..46  UI roles: selection, fg/bg, marker line, history text,
@@ -275,12 +226,14 @@ GdkRGBA colors[] = {
      * in gtkhx_activate. The chat view fe_init builds before that reads
      * transparent as "follow the system", and it re-reads the palette
      * on every draw, so nothing is drawn with a placeholder. */
-    [HX_CHAT_PAL_COLS - 1] = { 0, 0, 0, 0 },
+    [ROTULUS_PAL_COLS - 1] = { 0, 0, 0, 0 },
 };
 
-G_STATIC_ASSERT (G_N_ELEMENTS (colors) == HX_CHAT_PAL_COLS);
+G_STATIC_ASSERT (G_N_ELEMENTS (colors) == ROTULUS_PAL_COLS);
 G_STATIC_ASSERT (HX_CHAT_LOG_INFO_COLOR == HX_CHAT_INFO_COLOR);
-G_STATIC_ASSERT (HX_CHAT_PAL_NICK_COLORS == GTKHX_NICK_COLORS_MAX);
+G_STATIC_ASSERT (ROTULUS_PAL_NICK_COLORS == GTKHX_NICK_COLORS_MAX);
+/* The decoder's frames are handed to the view as its own frame type. */
+G_STATIC_ASSERT (sizeof (HxInlineMediaFrame) == sizeof (RotulusFrame));
 
 /* Whether the active theme has any nick_colors. The slot a nick hashes to
  * never depends on how many (see hx_chat_nick_color), only on this. */
@@ -302,28 +255,28 @@ static gboolean have_nick_colors;
 void
 gtkhx_apply_theme_palette (gboolean dark)
 {
-    /* Slot ↔ role mapping. The slot numbers are chat_view.h's
-     * HX_CHAT_PAL_* vocabulary; the roles are the theme-file-visible
+    /* Slot ↔ role mapping. The slot numbers are rotulus.h's
+     * ROTULUS_PAL_* vocabulary; the roles are the theme-file-visible
      * names. */
     static const struct {
         int slot;
         GtkhxPaletteRole role;
     } role_to_slot[] = {
-        { HX_CHAT_PAL_MARK_FG, GTKHX_PAL_MARK_FG },
-        { HX_CHAT_PAL_MARK_BG, GTKHX_PAL_MARK_BG },
-        { HX_CHAT_PAL_FG, GTKHX_PAL_FG },
-        { HX_CHAT_PAL_BG, GTKHX_PAL_BG },
-        { HX_CHAT_PAL_MARKER, GTKHX_PAL_MARKER },
-        { HX_CHAT_PAL_HISTORY_MUTED, GTKHX_PAL_HISTORY_MUTED },
-        { HX_CHAT_PAL_TIMESTAMP, GTKHX_PAL_TIMESTAMP },
-        { HX_CHAT_PAL_NICK, GTKHX_PAL_NICK },
-        { HX_CHAT_PAL_SELF_NICK, GTKHX_PAL_SELF_NICK },
-        { HX_CHAT_PAL_NICK_BRACKET, GTKHX_PAL_NICK_BRACKET },
-        { HX_CHAT_PAL_SELF_BRACKET, GTKHX_PAL_SELF_BRACKET },
-        { HX_CHAT_PAL_SYSTEM, GTKHX_PAL_SYSTEM },
-        { HX_CHAT_PAL_SYSTEM_BRACKET, GTKHX_PAL_SYSTEM_BRACKET },
-        { HX_CHAT_PAL_HIGHLIGHT, GTKHX_PAL_HIGHLIGHT },
-        { HX_CHAT_PAL_RULE, GTKHX_PAL_RULE },
+        { ROTULUS_PAL_MARK_FG, GTKHX_PAL_MARK_FG },
+        { ROTULUS_PAL_MARK_BG, GTKHX_PAL_MARK_BG },
+        { ROTULUS_PAL_FG, GTKHX_PAL_FG },
+        { ROTULUS_PAL_BG, GTKHX_PAL_BG },
+        { ROTULUS_PAL_MARKER, GTKHX_PAL_MARKER },
+        { ROTULUS_PAL_MUTED, GTKHX_PAL_HISTORY_MUTED },
+        { ROTULUS_PAL_TIMESTAMP, GTKHX_PAL_TIMESTAMP },
+        { ROTULUS_PAL_NICK, GTKHX_PAL_NICK },
+        { ROTULUS_PAL_SELF_NICK, GTKHX_PAL_SELF_NICK },
+        { ROTULUS_PAL_NICK_BRACKET, GTKHX_PAL_NICK_BRACKET },
+        { ROTULUS_PAL_SELF_BRACKET, GTKHX_PAL_SELF_BRACKET },
+        { ROTULUS_PAL_SYSTEM, GTKHX_PAL_SYSTEM },
+        { ROTULUS_PAL_SYSTEM_BRACKET, GTKHX_PAL_SYSTEM_BRACKET },
+        { ROTULUS_PAL_HIGHLIGHT, GTKHX_PAL_HIGHLIGHT },
+        { ROTULUS_PAL_RULE, GTKHX_PAL_RULE },
     };
     for (size_t i = 0; i < G_N_ELEMENTS (role_to_slot); i++) {
         colors[role_to_slot[i].slot]
@@ -341,9 +294,9 @@ gtkhx_apply_theme_palette (gboolean dark)
         int n = gtkhx_theme_get_nick_colors (dark, list);
 
         have_nick_colors = n > 0;
-        for (int i = 0; i < HX_CHAT_PAL_NICK_COLORS; i++) {
-            colors[HX_CHAT_PAL_NICK_COLOR0 + i]
-                = n > 0 ? list[i % n] : colors[HX_CHAT_PAL_NICK];
+        for (int i = 0; i < ROTULUS_PAL_NICK_COLORS; i++) {
+            colors[ROTULUS_PAL_NICK_COLOR0 + i]
+                = n > 0 ? list[i % n] : colors[ROTULUS_PAL_NICK];
         }
     }
 
@@ -359,8 +312,7 @@ gtkhx_apply_theme_palette (gboolean dark)
             struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (gchat && gchat->output) {
-                hx_chat_view_set_palette (gchat->output, colors);
-                hx_chat_view_refresh (gchat->output);
+                rotulus_view_set_palette (gchat->output, colors);
             }
         }
     }
@@ -371,8 +323,7 @@ gtkhx_apply_theme_palette (gboolean dark)
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
             if (msg->outputbuf) {
-                hx_chat_view_set_palette (msg->outputbuf, colors);
-                hx_chat_view_refresh (msg->outputbuf);
+                rotulus_view_set_palette (msg->outputbuf, colors);
             }
         }
     }
@@ -384,83 +335,9 @@ gtkhx_apply_theme_palette (gboolean dark)
  * the C ABI decls; the per-htlc cap + chat-model lookups the senders need are
  * in chat_send_bridge.c. */
 
-int
-word_check (GtkWidget *xtext, char *word)
-{
-    char *at, *dot;
-    size_t i, len = strlen (word);
-    int dots;
-
-    /* Scheme + bare-prefix matching lives in gtkurl.c so the xtext
-     * hover answer (here) and the GtkTextView popup answer
-     * (gtkurl_textview_install) come off the same scheme list. Adding
-     * a new URL scheme is a one-line edit to url_schemes[] in
-     * gtkurl.c; no second change needed here. */
-    if (gtkurl_word_has_url_scheme (word)) {
-        return WORD_URL;
-    }
-
-    /*	if (find_name (sess, word))
-    return WORD_NICK; */
-
-    at = strchr (word, '@'); /* check for email addy */
-    dot = strrchr (word, '.');
-    if (at && dot) {
-        if ((unsigned long)at < (unsigned long)dot) {
-            if (strchr (word, '*')) {
-                return WORD_HOST;
-            } else {
-                return WORD_EMAIL;
-            }
-        }
-    }
-
-    /* check if it's an IP number */
-    dots = 0;
-    for (i = 0; i < len; i++) {
-        if (word[i] == '.') {
-            dots++;
-        }
-    }
-    if (dots == 3) {
-        if (g_hostname_is_ip_address (word)) {
-            return WORD_HOST;
-        }
-    }
-
-    if (!strncasecmp (word + len - 5, ".html", 5)) {
-        return WORD_HOST;
-    }
-
-    if (!strncasecmp (word + len - 4, ".org", 4)) {
-        return WORD_HOST;
-    }
-
-    if (!strncasecmp (word + len - 4, ".net", 4)) {
-        return WORD_HOST;
-    }
-
-    if (!strncasecmp (word + len - 4, ".com", 4)) {
-        return WORD_HOST;
-    }
-
-    if (!strncasecmp (word + len - 4, ".edu", 4)) {
-        return WORD_HOST;
-    }
-
-    if (len > 5) {
-        if (word[len - 3] == '.' && isalpha (word[len - 2])
-            && isalpha (word[len - 1])) {
-            return WORD_HOST;
-        }
-    }
-
-    return 0;
-}
-
 /* timecpy is gone. The "[HH:MM:SS] " inline-timestamp prefix
  * it produced is now drawn by xtext as a left-column stamp via
- * hx_chat_view_set_time_stamp on each view. xprintline / xoutput_chat
+ * the view's "show-timestamps" property. xprintline / xoutput_chat
  * just append the bare message text; the per-entry timestamp is
  * auto-set by the view on append. */
 
@@ -607,17 +484,17 @@ hx_chat_nick_color (const char *nick, gsize nick_len, gboolean is_self)
     guint32 h = 5381;
 
     if (is_self) {
-        return HX_CHAT_PAL_SELF_NICK;
+        return ROTULUS_PAL_SELF_NICK;
     }
     if (!have_nick_colors || !nick) {
-        return HX_CHAT_PAL_NICK;
+        return ROTULUS_PAL_NICK;
     }
     /* djb2 over the bytes: stable across runs and platforms, so a
      * person keeps their color from one session to the next. */
     for (gsize i = 0; i < nick_len; i++) {
         h = h * 33 + (guchar)nick[i];
     }
-    return (gint16)(HX_CHAT_PAL_NICK_COLOR0 + h % HX_CHAT_PAL_NICK_COLORS);
+    return (gint16)(ROTULUS_PAL_NICK_COLOR0 + h % ROTULUS_PAL_NICK_COLORS);
 }
 
 /* Render a single chat line into an xtext buffer with the
@@ -638,13 +515,13 @@ static void
 xprintline_render_parts (GtkWidget *text, const char *name, gsize name_len,
                          const char *body_text, gsize body_text_len,
                          gboolean is_info, gboolean is_self, gint16 info_color,
-                         HxChatSpeaker speaker)
+                         RotulusSpeaker speaker)
 {
     /* Gutter runs. At most three: "<", the name, ">". The old code
      * built these as one "\003NN<\003name\003NN>\003" string, which
      * is why the info-prefix branch below used to have to search for
      * the closing escape to find where the name ended. */
-    HxChatRun gutter[3];
+    RotulusRun gutter[3];
     int n_gutter = 0;
     const char *display_name = NULL;
     gsize display_name_len = 0;
@@ -692,23 +569,21 @@ xprintline_render_parts (GtkWidget *text, const char *name, gsize name_len,
     }
 
     if (have_nick) {
-        HxChatRun body_run;
+        RotulusRun body_run;
 
         if (is_info) {
             /* "[hx]", or a broadcast sender's name. Brackets in the
              * wrapper colour, name in whichever colour the prefix
              * asked for — both were literal text with escapes around
              * them before. */
+            gutter[n_gutter++] = ROTULUS_RUN (
+                "[", 1, HX_CHAT_INFO_BRACKET_COLOR, ROTULUS_ATTR_NONE);
             gutter[n_gutter++]
-                = (HxChatRun){ "[", 1, HX_CHAT_INFO_BRACKET_COLOR,
-                               HX_CHAT_ATTR_NONE };
-            gutter[n_gutter++]
-                = (HxChatRun){ display_name, (int)display_name_len, info_color,
-                               HX_CHAT_ATTR_NONE };
-            gutter[n_gutter++]
-                = (HxChatRun){ "]", 1, HX_CHAT_INFO_BRACKET_COLOR,
-                               HX_CHAT_ATTR_NONE };
-            body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
+                = ROTULUS_RUN (display_name, (int)display_name_len, info_color,
+                               ROTULUS_ATTR_NONE);
+            gutter[n_gutter++] = ROTULUS_RUN (
+                "]", 1, HX_CHAT_INFO_BRACKET_COLOR, ROTULUS_ATTR_NONE);
+            body_run = ROTULUS_RUN_PLAIN (display_body, (int)display_body_len);
         } else if (do_highlight) {
             /* Mention: "<nick>" in the highlight color, the name bold,
              * plain body. The brackets stay — without them a mention
@@ -716,36 +591,42 @@ xprintline_render_parts (GtkWidget *text, const char *name, gsize name_len,
              * appended a \017 reset byte to the body to stop the
              * attribute leaking into the next row; runs have no
              * running state, so there is nothing to reset. */
-            gutter[n_gutter++] = (HxChatRun){ "<", 1, HX_CHAT_HIGHLIGHT_COLOR,
-                                              HX_CHAT_ATTR_NONE };
+            gutter[n_gutter++] = ROTULUS_RUN ("<", 1, HX_CHAT_HIGHLIGHT_COLOR,
+                                              ROTULUS_ATTR_NONE);
             gutter[n_gutter++]
-                = (HxChatRun){ display_name, (int)display_name_len,
-                               HX_CHAT_HIGHLIGHT_COLOR, HX_CHAT_ATTR_BOLD };
-            gutter[n_gutter++] = (HxChatRun){ ">", 1, HX_CHAT_HIGHLIGHT_COLOR,
-                                              HX_CHAT_ATTR_NONE };
-            body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
+                = ROTULUS_RUN (display_name, (int)display_name_len,
+                               HX_CHAT_HIGHLIGHT_COLOR, ROTULUS_ATTR_BOLD);
+            gutter[n_gutter++] = ROTULUS_RUN (">", 1, HX_CHAT_HIGHLIGHT_COLOR,
+                                              ROTULUS_ATTR_NONE);
+            body_run = ROTULUS_RUN_PLAIN (display_body, (int)display_body_len);
         } else {
             /* "<nick>" — brackets and name in the theme's nick roles,
              * which tell our own lines from everyone else's. */
             gint16 brack
-                = is_self ? HX_CHAT_PAL_SELF_BRACKET : HX_CHAT_PAL_NICK_BRACKET;
-            gutter[n_gutter++]
-                = (HxChatRun){ "<", 1, brack, HX_CHAT_ATTR_NONE };
-            gutter[n_gutter++]
-                = (HxChatRun){ display_name, (int)display_name_len,
-                               hx_chat_nick_color (display_name,
-                                                   display_name_len, is_self),
-                               HX_CHAT_ATTR_NONE };
-            gutter[n_gutter++]
-                = (HxChatRun){ ">", 1, brack, HX_CHAT_ATTR_NONE };
-            body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
+                = is_self ? ROTULUS_PAL_SELF_BRACKET : ROTULUS_PAL_NICK_BRACKET;
+            gutter[n_gutter++] = ROTULUS_RUN ("<", 1, brack, ROTULUS_ATTR_NONE);
+            gutter[n_gutter++] = ROTULUS_RUN (
+                display_name, (int)display_name_len,
+                hx_chat_nick_color (display_name, display_name_len, is_self),
+                ROTULUS_ATTR_NONE);
+            gutter[n_gutter++] = ROTULUS_RUN (">", 1, brack, ROTULUS_ATTR_NONE);
+            body_run = ROTULUS_RUN_PLAIN (display_body, (int)display_body_len);
         }
 
-        hx_chat_view_append_runs (text, speaker, gutter, n_gutter, &body_run, 1,
-                                  0);
+        rotulus_view_append (
+            text, &(RotulusRow){ .flags = is_self ? ROTULUS_ROW_OUTGOING : 0,
+                                 .speaker = speaker,
+                                 .gutter = gutter,
+                                 .n_gutter = n_gutter,
+                                 .body = &body_run,
+                                 .n_body = 1 });
     } else {
-        HxChatRun body_run = HX_CHAT_RUN_PLAIN (body_text, (int)body_text_len);
-        hx_chat_view_append_runs (text, speaker, NULL, 0, &body_run, 1, 0);
+        RotulusRun body_run = ROTULUS_RUN_PLAIN (body_text, (int)body_text_len);
+        rotulus_view_append (
+            text, &(RotulusRow){ .flags = is_self ? ROTULUS_ROW_OUTGOING : 0,
+                                 .speaker = speaker,
+                                 .body = &body_run,
+                                 .n_body = 1 });
     }
 }
 
@@ -755,7 +636,7 @@ static void
 xprintline_render (GtkWidget *text, const char *line, gsize line_len,
                    gsize name_off, gsize name_len, gsize body_off,
                    gsize body_len, gboolean is_info, gboolean is_self,
-                   gint16 info_color, HxChatSpeaker speaker)
+                   gint16 info_color, RotulusSpeaker speaker)
 {
     if (name_len == 0) {
         xprintline_render_parts (text, NULL, 0, line, line_len, is_info,
@@ -869,18 +750,18 @@ chat_join_body (const char *body, gsize body_len, const char *sender,
  * Hands straight to users.c::user_popup_show — the same builder the
  * Users window and the pchat sidebars use, so there is one menu rather
  * than a chat-shaped copy that drifts from it as items are added. The
- * view supplied the uid (see HxChatSpeaker) and the pointer position;
+ * view supplied the uid (see RotulusSpeaker) and the pointer position;
  * everything else the menu needs it looks up itself.
  *
  * `user_data` carries the cid so a private chat pops the menu against
  * its own membership rather than the public room's. */
 static void
-chat_speaker_menu (GtkWidget *view, guint uid, double x, double y,
+chat_speaker_menu (GtkWidget *view, guint64 uid, double x, double y,
                    gpointer user_data)
 {
     guint32 cid = GPOINTER_TO_UINT (user_data);
 
-    if (uid == 0) {
+    if (uid == 0 || uid > G_MAXUINT16) {
         return;
     }
     user_popup_show (view, hx_active_session (), cid, (guint16)uid, x, y);
@@ -904,13 +785,11 @@ chat_speaker_menu (GtkWidget *view, guint uid, double x, double y,
  * "nick" may be server prose that merely looked like one. Guessing would
  * attach someone else's avatar and group two people's messages together,
  * which is worse than showing neither. */
-static HxChatSpeaker
+static RotulusSpeaker
 chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
-                  gsize nick_len, gboolean is_self)
+                  gsize nick_len)
 {
-    HxChatSpeaker sp = HX_CHAT_SPEAKER_NONE;
-
-    sp.outgoing = is_self;
+    RotulusSpeaker sp = ROTULUS_SPEAKER_NONE;
     struct chat *conv;
     char *nul;
 
@@ -918,7 +797,7 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
         return sp;
     }
     if (wire_uid != 0) {
-        sp.uid = wire_uid;
+        sp.key = wire_uid;
         sp.nick = nick;
         sp.nick_len = (int)nick_len;
         return sp;
@@ -928,13 +807,13 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
         return sp;
     }
     nul = g_strndup (nick, nick_len);
-    sp.uid = hx_member_model_find_by_name (hx_chat_member_model (conv), nul);
+    sp.key = hx_member_model_find_by_name (hx_chat_member_model (conv), nul);
     g_free (nul);
     /* Borrowed for the append call only, which is why this can hand back
      * a pointer into the caller's buffer — and why the length has to
      * travel with it, since that buffer is the whole chat line and the
      * name is a slice from its middle. */
-    sp.nick = sp.uid ? nick : NULL;
+    sp.nick = sp.key ? nick : NULL;
     sp.nick_len = (int)nick_len;
     return sp;
 }
@@ -947,14 +826,18 @@ static void
 xprintline_render_tagged (GtkWidget *text, const char *tag, gsize tag_len,
                           gint16 tag_color, const char *body, gsize body_len)
 {
-    HxChatRun gutter[3] = {
-        { "[", 1, HX_CHAT_INFO_BRACKET_COLOR, HX_CHAT_ATTR_NONE },
-        { tag, (int)tag_len, tag_color, HX_CHAT_ATTR_NONE },
-        { "]", 1, HX_CHAT_INFO_BRACKET_COLOR, HX_CHAT_ATTR_NONE },
+    RotulusRun gutter[3] = {
+        ROTULUS_RUN ("[", 1, HX_CHAT_INFO_BRACKET_COLOR, ROTULUS_ATTR_NONE),
+        ROTULUS_RUN (tag, (int)tag_len, tag_color, ROTULUS_ATTR_NONE),
+        ROTULUS_RUN ("]", 1, HX_CHAT_INFO_BRACKET_COLOR, ROTULUS_ATTR_NONE),
     };
-    HxChatRun body_run = HX_CHAT_RUN_PLAIN (body, (int)body_len);
+    RotulusRun body_run = ROTULUS_RUN_PLAIN (body, (int)body_len);
 
-    hx_chat_view_append_system_runs (text, gutter, 3, &body_run, 1, 0);
+    rotulus_view_append (text, &(RotulusRow){ .kind = ROTULUS_ROW_SYSTEM,
+                                              .gutter = gutter,
+                                              .n_gutter = 3,
+                                              .body = &body_run,
+                                              .n_body = 1 });
 }
 
 /* Phase 9.E (inline media): auto-fetch a media handle on arrival
@@ -1065,17 +948,17 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
 
     /* gchat may have been freed (disconnect / chat-close) and
      * a fresh one with the same cid may even exist — in which
-     * case hx_chat_view_media_mark returns NULL (the token
+     * case rotulus_view_media_mark returns NULL (the token
      * lives in the gchat's media table, which was rebuilt
      * fresh). The texture quietly drops. */
     struct gtkhx_chat *gchat = gchat_with_cid (hx_active_session (), ctx->cid);
     if (gchat && gchat->output) {
-        HxChatMark *mark = hx_chat_view_media_mark (gchat->output, ctx->token);
+        RotulusMark *mark = rotulus_view_media_mark (gchat->output, ctx->token);
         if (mark) {
             if (decoded->frames && decoded->frames->len > 1) {
-                /* Animation (G.3). Install the frames array on
-                 * the entry; xtext drives the per-frame tick
-                 * from the array's per-element delay_ms. */
+                /* Animation (G.3). Install the frames on the
+                 * row; the view drives the per-frame tick from
+                 * each frame's delay_ms. */
                 debug_log ("media",
                            "inline-media auto-fetch swap-in animation cid=%u "
                            "token=%u %dx%d frames=%u",
@@ -1083,8 +966,10 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
                            gdk_texture_get_width (decoded->texture),
                            gdk_texture_get_height (decoded->texture),
                            decoded->frames->len);
-                hx_chat_view_media_set_animation (gchat->output, mark,
-                                                  decoded->frames);
+                rotulus_view_media_set_frames (
+                    gchat->output, mark,
+                    (const RotulusFrame *)decoded->frames->data,
+                    decoded->frames->len);
             } else {
                 debug_log ("media",
                            "inline-media auto-fetch swap-in cid=%u token=%u "
@@ -1092,7 +977,7 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
                            ctx->cid, ctx->token,
                            gdk_texture_get_width (decoded->texture),
                            gdk_texture_get_height (decoded->texture));
-                hx_chat_view_media_set_texture (gchat->output, mark,
+                rotulus_view_media_set_texture (gchat->output, mark,
                                                 decoded->texture);
             }
         }
@@ -1138,7 +1023,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             const char *next_nl = memchr (cur, '\n', end - cur);
             gsize seg_len
                 = next_nl ? (gsize)(next_nl - cur) : (gsize)(end - cur);
-            hx_chat_view_append (gchat->output, cur, seg_len, 0);
+            rotulus_view_append_text (gchat->output, cur, (int)seg_len, 0);
             if (!next_nl) {
                 break;
             }
@@ -1182,7 +1067,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         joined ? joined : "", first_body_len, e->is_info, e->is_self,
         HX_CHAT_INFO_COLOR,
         chat_speaker_for (e->cid, e->uid, e->line + e->sender_off,
-                          e->sender_len, e->is_self));
+                          e->sender_len));
     g_free (joined);
     joined = NULL;
 
@@ -1191,9 +1076,9 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
      * attached them to the event), allocate a per-chat token,
      * deep-copy the metadata into the gchat's media table, and emit
      * a media-typed row. The row's alt-text is the same NBSP-
-     * joined `hxmedia:N`-embedding placeholder Phase 9.D shipped
-     * — the existing inline_media_chat_word_click handler parses
-     * the token off the clicked word and pops the dialog.
+     * placeholder Phase 9.D shipped; a click on the row reports
+     * the token (media-activated), and inline_media_chat_activated
+     * pops the dialog.
      *
      * Phase 9.E layers auto-fetch on top: when the server
      * advertises HTLC_CAP_INLINE_MEDIA, kick off
@@ -1210,10 +1095,9 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     if (e->media) {
         guint token
             = hx_media_table_register (hx_chat_media_table (conv), e->media);
-        char *placeholder
-            = hx_chat_media_placeholder_clickable (e->media, token);
+        char *placeholder = hx_chat_media_placeholder_line (e->media);
         if (placeholder) {
-            hx_chat_view_append_media (gchat->output, NULL /* texture */,
+            rotulus_view_append_media (gchat->output, NULL /* texture */,
                                        placeholder, token, 0 /* stamp */);
             g_free (placeholder);
 
@@ -1320,11 +1204,11 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
     /* evict the existing Load-older sentinel up front.
      * We'll re-insert a fresh one below if has_more is still true
-     * on the new batch. Cleared regardless of hx_chat_view_remove's
+     * on the new batch. Cleared regardless of rotulus_view_remove's
      * return — a stale mark means the row was already gone, so
      * dropping our reference is the right thing either way. */
     if (gchat->render.load_older_ent) {
-        hx_chat_view_remove (view, gchat->render.load_older_ent);
+        rotulus_view_remove (view, gchat->render.load_older_ent);
         gchat->render.load_older_ent = NULL;
     }
 
@@ -1355,17 +1239,21 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 /* Every history row is drawn in the muted palette slot, so the runs
  * only ever differ in their text. HX_MUTED builds one. */
 #define HX_MUTED(TEXT, LEN)                                                    \
-    ((HxChatRun){ (TEXT), (LEN), HX_CHAT_PAL_HISTORY_MUTED, HX_CHAT_ATTR_NONE })
+    (ROTULUS_RUN ((TEXT), (LEN), ROTULUS_PAL_MUTED, ROTULUS_ATTR_NONE))
 
 #define HX_RENDER(GUTTER, N_GUTTER, BODY, N_BODY, STAMP)                       \
     do {                                                                       \
+        RotulusRow row_ = { .kind = ROTULUS_ROW_HISTORY,                       \
+                            .stamp = (STAMP),                                  \
+                            .gutter = (GUTTER),                                \
+                            .n_gutter = (N_GUTTER),                            \
+                            .body = (BODY),                                    \
+                            .n_body = (N_BODY) };                              \
         if (prepend_mode && gchat->render.anchor_ent) {                        \
-            hx_chat_view_insert_runs_before (                                  \
-                view, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE,          \
-                (GUTTER), (N_GUTTER), (BODY), (N_BODY), (STAMP));              \
+            rotulus_view_insert_before (view, gchat->render.anchor_ent,        \
+                                        &row_);                                \
         } else {                                                               \
-            hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE, (GUTTER),    \
-                                      (N_GUTTER), (BODY), (N_BODY), (STAMP));  \
+            rotulus_view_append (view, &row_);                                 \
         }                                                                      \
     } while (0)
 
@@ -1375,16 +1263,17 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
      * chat-history block.
      *
      * Save the appended row's mark as our anchor for any future
-     * Load-older inserts — hx_chat_view_append_indent hands it back. */
+     * Load-older inserts. */
     if (!prepend_mode) {
         const char *fmt
             = g_dngettext (NULL, "chat history (%u message)",
                            "chat history (%u messages)", entries->len);
         gchar *body = g_strdup_printf (fmt, entries->len);
         gchar *divider = g_strdup_printf ("─── %s ───", body);
-        HxChatRun run = HX_MUTED (divider, (int)strlen (divider));
-        gchat->render.anchor_ent = hx_chat_view_append_runs (
-            view, HX_CHAT_SPEAKER_NONE, NULL, 0, &run, 1, 0);
+        RotulusRun run = HX_MUTED (divider, (int)strlen (divider));
+        gchat->render.anchor_ent = rotulus_view_append (
+            view, &(RotulusRow){
+                      .kind = ROTULUS_ROW_DIVIDER, .body = &run, .n_body = 1 });
         g_free (divider);
         g_free (body);
     }
@@ -1421,11 +1310,13 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
      * Load-older clicks can only fire after an initial render),
      * insert_indent_before falls back to head-insert. */
     if (has_more) {
-        gchar *row = g_strdup_printf ("─── %s ───", hx_load_older_sentinel ());
-        HxChatRun run = HX_MUTED (row, (int)strlen (row));
-        gchat->render.load_older_ent = hx_chat_view_insert_runs_before (
-            view, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE, NULL, 0, &run,
-            1, 0);
+        gchar *row
+            = g_strdup_printf ("─── ↑ %s ───", _ ("Load older messages"));
+        RotulusRun run = HX_MUTED (row, (int)strlen (row));
+        gchat->render.load_older_ent = rotulus_view_insert_before (
+            view, gchat->render.anchor_ent,
+            &(RotulusRow){
+                .kind = ROTULUS_ROW_LOAD_OLDER, .body = &run, .n_body = 1 });
         g_free (row);
     }
 
@@ -1441,7 +1332,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         if (e->flags & HX_HISTORY_FLAG_DELETED) {
             /* Tombstone — placeholder text, no nick column. */
             const char *line = "[message removed]";
-            HxChatRun run = HX_MUTED (line, (int)strlen (line));
+            RotulusRun run = HX_MUTED (line, (int)strlen (line));
             HX_RENDER (NULL, 0, &run, 1, stamp);
             continue;
         }
@@ -1451,7 +1342,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
              * no nick column. */
             gchar *line
                 = g_strdup_printf ("*** %s", e->message ? e->message : "");
-            HxChatRun run = HX_MUTED (line, (int)strlen (line));
+            RotulusRun run = HX_MUTED (line, (int)strlen (line));
             HX_RENDER (NULL, 0, &run, 1, stamp);
             g_free (line);
             continue;
@@ -1461,7 +1352,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             /* /me emote. Render as "* nick body" — mIRC convention. */
             gchar *line = g_strdup_printf ("* %s %s", e->nick ? e->nick : "",
                                            e->message ? e->message : "");
-            HxChatRun run = HX_MUTED (line, (int)strlen (line));
+            RotulusRun run = HX_MUTED (line, (int)strlen (line));
             HX_RENDER (NULL, 0, &run, 1, stamp);
             g_free (line);
             continue;
@@ -1469,13 +1360,13 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
         /* Standard message: two-column layout matching the live
          * chat path, but the whole thing rendered in the muted
-         * theme-aware palette slot (HX_CHAT_PAL_HISTORY_MUTED = 37,
+         * theme-aware palette slot (ROTULUS_PAL_MUTED = 37,
          * see chat.c::gtkhx_apply_theme_palette) instead of the
          * live palette. */
         gchar *nick_wrapped = g_strdup_printf ("<%s>", e->nick ? e->nick : "");
         const char *body_text = e->message ? e->message : "";
-        HxChatRun gutter = HX_MUTED (nick_wrapped, (int)strlen (nick_wrapped));
-        HxChatRun body_run = HX_MUTED (body_text, (int)strlen (body_text));
+        RotulusRun gutter = HX_MUTED (nick_wrapped, (int)strlen (nick_wrapped));
+        RotulusRun body_run = HX_MUTED (body_text, (int)strlen (body_text));
         HX_RENDER (&gutter, 1, &body_run, 1, stamp);
         g_free (nick_wrapped);
     }
@@ -1486,9 +1377,10 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
      * down. */
     if (!prepend_mode) {
         gchar *divider = g_strdup_printf ("─── %s ───", _ ("live messages"));
-        HxChatRun run = HX_MUTED (divider, (int)strlen (divider));
-        hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE, NULL, 0, &run, 1,
-                                  0);
+        RotulusRun run = HX_MUTED (divider, (int)strlen (divider));
+        rotulus_view_append (view, &(RotulusRow){ .kind = ROTULUS_ROW_DIVIDER,
+                                                  .body = &run,
+                                                  .n_body = 1 });
         g_free (divider);
     }
 
@@ -1496,26 +1388,9 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 #undef HX_MUTED
 }
 
-/* ----- Phase 3.3 — Load Older click handler --------------------- *
- *
- * The chat output xtext connects two word_click handlers:
- *   1. chat_history_word_click (this function) — filters on our
- *      HX_LOAD_OLDER_SENTINEL and fires the BEFORE= chat-history
- *      fetch.
- *   2. gtkurl_xtext_word_click — filters on URL-shaped words and
- *      pops the URL action menu on right/middle-click.
- *
- * Both run for every word_click. Each ignores words that aren't
- * theirs. gtkurl handles SECONDARY+MIDDLE only and we handle
- * PRIMARY only, so the two never collide on click semantics
- * either.
- *
- * The xtext widget that emitted the signal is passed in as
- * `xtext`; we walk the active session's chats (each model's view) to find which gchat owns
- * it (chat output, not pchat output userlist). */
-
+/* The chat window whose output is `view`. */
 static struct gtkhx_chat *
-find_gchat_by_output (GtkWidget *xtext)
+find_gchat_by_output (GtkWidget *view)
 {
     HxChatRegistry *chats = hx_active_session ()->chats;
     if (!chats) {
@@ -1525,48 +1400,33 @@ find_gchat_by_output (GtkWidget *xtext)
     for (guint i = 0; i < n; i++) {
         struct chat *c = hx_chats_get_at (chats, i);
         struct gtkhx_chat *g = hx_chat_view (c);
-        if (g && g->output == xtext) {
+        if (g && g->output == view) {
             return g;
         }
     }
     return NULL;
 }
 
-void
-chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
-                         gpointer data)
+/* load-more on a chat output: fetch the page of history before the
+ * oldest one rendered. */
+static void
+chat_history_load_more (GtkWidget *view, RotulusLoadDirection direction,
+                        gpointer data)
 {
-    guint button;
-    GdkEventType evtype;
     struct gtkhx_chat *gchat;
     struct htlc_conn *htlc;
     (void)data;
 
-    if (!event || !word || !*word) {
+    if (direction != ROTULUS_LOAD_OLDER) {
         return;
     }
-    evtype = gdk_event_get_event_type (event);
-    if (evtype != GDK_BUTTON_PRESS && evtype != GDK_BUTTON_RELEASE) {
-        return;
-    }
-    button = gdk_button_event_get_button (event);
-    /* Primary-button only. SECONDARY/MIDDLE flow through the URL
-     * handler. */
-    if (button != GDK_BUTTON_PRIMARY) {
-        return;
-    }
-    if (strcmp (word, hx_load_older_sentinel ()) != 0) {
-        return;
-    }
-
-    gchat = find_gchat_by_output (xtext);
+    gchat = find_gchat_by_output (view);
     if (!gchat) {
         debug_log ("chat-history",
-                   "Load-older click: no gchat matches the xtext widget");
+                   "Load-older click: no gchat matches the view");
         return;
     }
     htlc = hx_active_session ()->htlc;
-
     /* Guard: don't fire a second request while the first is
      * still in flight. The receive path (output_chat_history_batch)
      * clears render.loading on every batch — including empty ones,
@@ -1623,12 +1483,10 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
         return;
     }
 
-    /* Phase 3 follow-up B: swap the clickable sentinel for a
-     * non-clickable "Loading..." row so the user gets immediate
-     * feedback that the click registered, and a second click
-     * before the response lands is silently a no-op (the loading
-     * row's text doesn't match HX_LOAD_OLDER_SENTINEL, so this
-     * handler bails on word-mismatch).
+    /* Phase 3 follow-up B: swap the clickable row for a plain
+     * "Loading..." divider so the user gets immediate feedback that
+     * the click registered, and a second click before the response
+     * lands has nothing to click.
      *
      * The eviction-and-reinsert at the top of
      * output_chat_history_batch handles cleanup: it removes
@@ -1643,51 +1501,26 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
      * changes between the two states. */
     if (gchat->render.load_older_ent) {
         gchar *loading_row
-            = g_strdup_printf ("─── %s ───", hx_loading_older_sentinel ());
-        HxChatRun run = { loading_row, (int)strlen (loading_row),
-                          HX_CHAT_PAL_HISTORY_MUTED, HX_CHAT_ATTR_NONE };
+            = g_strdup_printf ("─── ↑ %s ───", _ ("Loading older messages..."));
+        RotulusRun run = ROTULUS_RUN (loading_row, (int)strlen (loading_row),
+                                      ROTULUS_PAL_MUTED, ROTULUS_ATTR_NONE);
 
-        hx_chat_view_remove (gchat->output, gchat->render.load_older_ent);
-        gchat->render.load_older_ent = hx_chat_view_insert_runs_before (
-            gchat->output, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE, NULL,
-            0, &run, 1, 0);
+        rotulus_view_remove (gchat->output, gchat->render.load_older_ent);
+        gchat->render.load_older_ent = rotulus_view_insert_before (
+            gchat->output, gchat->render.anchor_ent,
+            &(RotulusRow){
+                .kind = ROTULUS_ROW_DIVIDER, .body = &run, .n_body = 1 });
         g_free (loading_row);
     }
 }
 
-/* Phase 9.D inline-media click handler. Filters on words that
- * contain the `hxmedia:N` token embedded by the placeholder
- * formatter (hx_chat_media_placeholder_clickable). Looks up the
- * token in the chat's media table and pops the dialog.
- * Same is_parallel-with-other-handlers pattern as
- * chat_history_word_click — primary-button only; URL handler
- * gets secondary/middle. */
-void
-inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
-                              gpointer data)
+/* media-activated on a chat output: pop the click-to-view dialog for
+ * the inline image the token names. */
+static void
+inline_media_chat_activated (GtkWidget *view, guint token, gpointer data)
 {
     (void)data;
-    guint button;
-    GdkEventType evtype;
-
-    if (!event || !word || !*word) {
-        return;
-    }
-    evtype = gdk_event_get_event_type (event);
-    if (evtype != GDK_BUTTON_PRESS && evtype != GDK_BUTTON_RELEASE) {
-        return;
-    }
-    button = gdk_button_event_get_button (event);
-    if (button != GDK_BUTTON_PRIMARY) {
-        return;
-    }
-
-    guint token = 0;
-    if (!hx_chat_media_parse_token (word, &token)) {
-        return;
-    }
-
-    struct gtkhx_chat *gchat = find_gchat_by_output (xtext);
+    struct gtkhx_chat *gchat = find_gchat_by_output (view);
     struct chat *conv
         = gchat ? chat_with_cid (hx_active_session (), gchat->cid) : NULL;
     if (!conv) {
@@ -1706,7 +1539,7 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
                "inline-media click: dispatch token=%u mime=%s id_len=%zu",
                token, m->mime ? m->mime : "?", m->id_len);
     inline_media_show_dialog (
-        xtext, hx_active_session ()->htlc, m->id, m->id_len, m->mime,
+        view, hx_active_session ()->htlc, m->id, m->id_len, m->mime,
         m->width_present ? m->width : 0, m->height_present ? m->height : 0,
         m->bytes_present ? m->bytes : 0);
 }
@@ -1805,15 +1638,15 @@ xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
         xprintline_render_tagged (text, tag, strlen (tag), info_color, valid,
                                   valid_len);
     } else {
-        xprintline_render (text, valid, valid_len, name_off, name_len, body_off,
-                           body_len, FALSE, said_by_self, info_color,
-                           /* No wire uid: a log line never came from a
+        xprintline_render (
+            text, valid, valid_len, name_off, name_len, body_off, body_len,
+            FALSE, said_by_self, info_color,
+            /* No wire uid: a log line never came from a
                             * chat message, so the nick can only be
                             * resolved by lookup — and it has to be
                             * looked up in *this* conversation, not
                             * always the public one. */
-                           chat_speaker_for (cid, 0, valid + name_off, name_len,
-                                             said_by_self));
+            chat_speaker_for (cid, 0, valid + name_off, name_len));
     }
 
     g_free (valid);
@@ -1956,51 +1789,18 @@ create_chat (session *sess)
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        text = hx_chat_view_new (colors, TRUE);
-        hx_chat_view_set_font (text, fontname);
+        text = gtkhx_chat_view_new (colors, fontname);
         g_free (fontname);
     }
-    gtk_widget_set_can_focus (text, FALSE);
-    hx_chat_view_set_word_wrap (text, gtkhx_prefs.word_wrap);
-    hx_chat_view_set_urlcheck_function (text, word_check);
-    hx_chat_view_set_max_lines (text, gtkhx_prefs.xbuf_max);
-    /* enable the left-column timestamp rendering. The stamp draws iff
-     * the view is in indent mode and the timestamp is on; the latter is
-     * flipped from CFG_TIMESTAMP / gtkhx_prefs.timestamp. See xprintline
-     * for the rationale (stamps rendered separately from message text,
-     * so autocopy_stamp doesn't double-stamp). */
-    hx_chat_view_set_indent (text, TRUE);
-    hx_chat_view_set_time_stamp (text, gtkhx_prefs.timestamp);
-    /* Allow the indent column to grow past its initial stamp-width
-     * floor when the first message is appended: the auto-bump is gated
-     * on the current indent being below this cap, so a zero default
-     * makes the bump impossible and the nick column overlaps the
-     * timestamp. 256 px is enough room for the stamp + a medium-length
-     * nick without dominating the chat width. */
-    hx_chat_view_set_max_indent (text, 256);
-    /* Coalesce bursts from one speaker under a single nick. */
-    hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
-    hx_chat_view_set_avatar_size (
-        text, gtkhx_prefs.chat_avatars ? HX_CHAT_AVATAR_SIZE_DEFAULT : 0);
     g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
                       GUINT_TO_POINTER (0));
-    g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
+    g_signal_connect (text, "load-more", G_CALLBACK (chat_history_load_more),
                       NULL);
-    /* chat-history "Load older" sentinel handler runs
-     * alongside the URL handler — each self-filters on its own
-     * word pattern (URL scheme prefix vs HX_LOAD_OLDER_SENTINEL)
-     * and on a different button (URL = SECONDARY/MIDDLE,
-     * load-older = PRIMARY) so they never collide. */
-    g_signal_connect (text, "word_click", G_CALLBACK (chat_history_word_click),
-                      NULL);
-    /* Phase 9.D inline-media click handler — same coexistence
-     * pattern as chat_history (different word patterns, same
-     * primary-button discipline). */
-    g_signal_connect (text, "word_click",
-                      G_CALLBACK (inline_media_chat_word_click), NULL);
+    g_signal_connect (text, "media-activated",
+                      G_CALLBACK (inline_media_chat_activated), NULL);
 
     vscroll = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                                 hx_chat_view_get_vadjustment (text));
+                                 rotulus_view_get_vadjustment (text));
 
     /* Keep the xtext output + its scrollbar alive parentless (ref-sunk)
      * until the Rust content build (chat.rs::build_content) reads them back
@@ -2170,41 +1970,18 @@ pchat_new (session *sess, struct chat *chat)
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        text = hx_chat_view_new (colors, TRUE);
-        hx_chat_view_set_font (text, fontname);
+        text = gtkhx_chat_view_new (colors, fontname);
         g_free (fontname);
     }
-    hx_chat_view_set_word_wrap (text, gtkhx_prefs.word_wrap);
-    hx_chat_view_set_urlcheck_function (text, word_check);
-    hx_chat_view_set_max_lines (text, gtkhx_prefs.xbuf_max);
-    /* view-native timestamps — see the matching call in
-     * create_chat_window above for the rationale. */
-    hx_chat_view_set_indent (text, TRUE);
-    hx_chat_view_set_time_stamp (text, gtkhx_prefs.timestamp);
-    hx_chat_view_set_max_indent (text, 256);
-    /* Coalesce bursts from one speaker under a single nick. */
-    hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
-    hx_chat_view_set_avatar_size (
-        text, gtkhx_prefs.chat_avatars ? HX_CHAT_AVATAR_SIZE_DEFAULT : 0);
     g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
                       GUINT_TO_POINTER (hx_chat_cid (chat)));
-    g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
+    g_signal_connect (text, "load-more", G_CALLBACK (chat_history_load_more),
                       NULL);
-    /* chat-history "Load older" sentinel handler runs
-     * alongside the URL handler — each self-filters on its own
-     * word pattern (URL scheme prefix vs HX_LOAD_OLDER_SENTINEL)
-     * and on a different button (URL = SECONDARY/MIDDLE,
-     * load-older = PRIMARY) so they never collide. */
-    g_signal_connect (text, "word_click", G_CALLBACK (chat_history_word_click),
-                      NULL);
-    /* Phase 9.D inline-media click handler — same coexistence
-     * pattern as chat_history (different word patterns, same
-     * primary-button discipline). */
-    g_signal_connect (text, "word_click",
-                      G_CALLBACK (inline_media_chat_word_click), NULL);
+    g_signal_connect (text, "media-activated",
+                      G_CALLBACK (inline_media_chat_activated), NULL);
 
     vscroll = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                                 hx_chat_view_get_vadjustment (text));
+                                 rotulus_view_get_vadjustment (text));
 
     subject = gtk_entry_new ();
     gtkhx_apply_text_style (subject);
@@ -2581,7 +2358,7 @@ hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
     if (!gchat) {
         return;
     }
-    hx_chat_view_clear (gchat->output);
+    rotulus_view_clear (gchat->output);
     /* The subject entry belongs to the Chat panel's content, so it is
      * NULL both before the panel is first built and after it is closed
      * (gtkhx_chat_clear_content_ptrs nulls it on the content box's

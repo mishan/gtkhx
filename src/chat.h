@@ -87,43 +87,20 @@ extern void output_chat_from_event (struct htlc_conn *htlc,
 extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                        GPtrArray *entries, gboolean has_more);
 
-/* clickable "Load older messages" sentinel rendered when
- * the server says has_more=TRUE. The internal joiners are NBSP
- * (U+00A0 = "\xc2\xa0") so xtext's word tokenizer (is_del checks for
- * ASCII space / '\n' / '<' / '>' / NUL) treats the whole string as
- * one clickable token. The leading U+2191 (up-arrow, "\xe2\x86\x91")
- * also acts as a secondary signature on the off chance the user's
- * click lands on a "word" that doesn't include the full sentinel.
- *
- * Functions instead of #define: the visible text is translated via
- * gettext, and chat_history_word_click compares the received word
- * against the same function so the click match keeps working in any
- * locale. Both functions cache the composed UTF-8 on first call. The
- * translatable msgids are the bare phrases "Load older messages" and
- * "Loading older messages..."; the leading arrow + NBSP joiners are
- * stitched in at runtime so translators don't have to worry about
- * preserving non-breaking-space characters by hand. */
-extern const char *hx_load_older_sentinel (void);
-extern const char *hx_loading_older_sentinel (void);
+/* A chat output, configured for GtkHx (gtkhx-ui's chat_view.rs): the
+ * chat preferences, the hotline:// scheme, the avatar resolver, the URL
+ * menu. `palette` holds ROTULUS_PAL_COLS colors. Returned floating. */
+extern GtkWidget *gtkhx_chat_view_new (const GdkRGBA *palette,
+                                       const char *font);
+/* Re-apply the chat preferences to a view gtkhx_chat_view_new built. */
+extern void gtkhx_chat_view_configure (GtkWidget *view);
 
-/* word_click handler that recognises the Load-older sentinel and
- * fires a BEFORE= chat-history fetch. Connected on every xtext that
- * renders chat history (the main chat output plus pchat outputs)
- * alongside gtkurl_xtext_word_click — both handlers run, each self-
- * filters on its own pattern. The session pointer is the user_data;
- * the cid the click belongs to is recovered by walking session
- * gchats and matching the xtext widget. */
-extern void chat_history_word_click (GtkWidget *xtext, char *word,
-                                     GdkEvent *event, gpointer data);
+/* Palette slots the chat code reaches for, by what they mean here. */
+#define HX_CHAT_INFO_COLOR ROTULUS_PAL_SYSTEM /* "[hx]" */
+#define HX_CHAT_INFO_BRACKET_COLOR ROTULUS_PAL_SYSTEM_BRACKET
+#define HX_CHAT_HIGHLIGHT_COLOR ROTULUS_PAL_HIGHLIGHT
+#define HX_CHAT_PLACEHOLDER_COLOR ROTULUS_PAL_MUTED /* media alt text */
 
-/* Phase 9.D inline-media click handler. Filters on words that
- * embed the `hxmedia:N` token the placeholder formatter
- * generates. Looks up the token in the gchat's media_handles
- * table and pops the click-to-view dialog. Connected alongside
- * chat_history_word_click + gtkurl_xtext_word_click on every
- * chat / pchat output xtext at construction time. */
-extern void inline_media_chat_word_click (GtkWidget *xtext, char *word,
-                                          GdkEvent *event, gpointer data);
 /* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
  * gtkhx_log.{c,h}; #include "gtkhx_log.h" rather than chat.h to
  * pull the decls in (chat.h forwards the include for source
@@ -188,7 +165,6 @@ extern guint32 hx_gchat_cid (struct gtkhx_chat *g);
 struct _HxUserListView;
 extern struct _HxUserListView *hx_gchat_userlist (struct gtkhx_chat *g);
 extern void hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj);
-extern int word_check (GtkWidget *xtext, char *word);
 
 /* Install the chat / pchat input key handler on `view` (Rust, chat_input.rs) —
  * Ctrl+K, Return-to-send, Shift+Return newline, Tab completion, Up/Down
@@ -214,7 +190,7 @@ extern void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid,
                           guint16 style);
 
 /* Refresh xtext palette slots that depend on Light / Dark theme
- * (HX_CHAT_PAL_FG / HX_CHAT_PAL_BG plus the selection colours) and push the
+ * (ROTULUS_PAL_FG / ROTULUS_PAL_BG plus the selection colours) and push the
  * new palette into every live xtext widget. Called once at startup
  * after AdwStyleManager comes up, and again whenever the manager's
  * `dark` property flips. The mIRC palette slots (0..31) are theme-
