@@ -746,7 +746,7 @@ mod scaled {
             }
 
             fn flags(&self) -> gdk::PaintableFlags {
-                gdk::PaintableFlags::SIZE | gdk::PaintableFlags::CONTENTS
+                gdk::PaintableFlags::STATIC_SIZE | gdk::PaintableFlags::STATIC_CONTENTS
             }
 
             fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {

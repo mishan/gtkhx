@@ -4,9 +4,9 @@
 //! glycin 3.x / 2+ loaders, the default; `glycin-v2` → glycin 2.x /
 //! 1+ loaders, for Debian-stable-class runtimes).
 //!
-//! **The crate's public gtk-rs family is fixed at the workspace's 0.21
+//! **The crate's public gtk-rs family is fixed at the workspace's 0.22
 //! line** (`glib` / `gdk` below), independent of the backend. That is what
-//! lets gtkhx-ui / gtkhx-ffi — pinned to 0.21 — link this crate and consume
+//! lets gtkhx-ui / gtkhx-ffi — pinned to 0.22 — link this crate and consume
 //! the `gdk::Texture` that [`crate::decode::decode_first_frame_async`] returns,
 //! and it is what the C FFI `*mut GdkTexture` (`ffi_result.rs`) is built from,
 //! regardless of which glycin backend is active.
@@ -14,9 +14,9 @@
 //! glycin 2.x, however, is on gtk-rs 0.20, so its `Loader`/`Frame` speak the
 //! 0.20 family (`glib2` / `gio2` / `gdk2`, compiled only for Linux + glycin-v2).
 //! Those types never escape the crate: `decode.rs`'s `adopt_texture` bridges a
-//! glycin-2 `Texture` to the 0.21 public one by raw `GdkTexture*` (the pointer
+//! glycin-2 `Texture` to the 0.22 public one by raw `GdkTexture*` (the pointer
 //! is ABI-identical across gtk-rs versions). glycin-v3 needs no bridge — glycin
-//! 3.x already uses the public 0.21 family.
+//! 3.1 already uses the public 0.22 family.
 //!
 //! This module is `pub` (but `#[doc(hidden)]`) purely so the integration test
 //! crate (`tests/decode.rs`), which lives outside the library and therefore
@@ -40,7 +40,7 @@ compile_error!(
      loaders). Meson selects this via -Dglycin_compat."
 );
 
-// Public gtk-rs family — the workspace 0.21 line, always. Re-exported here so
+// Public gtk-rs family — the workspace 0.22 line, always. Re-exported here so
 // the rest of the crate imports gtk-rs from one place.
 pub use {::gdk, ::glib};
 

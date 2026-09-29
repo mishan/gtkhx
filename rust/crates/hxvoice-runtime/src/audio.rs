@@ -511,7 +511,7 @@ fn attach_buffer_probe(
     let counter = std::sync::atomic::AtomicU64::new(0);
     pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
         let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        if n == 1 || n % 50 == 0 {
+        if n == 1 || n.is_multiple_of(50) {
             crate::debug::log!("voice-flow", "{bin_name} {where_}: buffer #{n}");
         }
         gst::PadProbeReturn::Ok
@@ -811,7 +811,7 @@ fn attach_send_buffer_probe(element: &gst::Element, pad_name: &str, bin_name: &s
     let counter = std::sync::atomic::AtomicU64::new(0);
     pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
         let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        if n == 1 || n % 50 == 0 {
+        if n == 1 || n.is_multiple_of(50) {
             crate::debug::log!("voice-flow", "{bin_name} pay.src: buffer #{n}");
         }
         gst::PadProbeReturn::Ok

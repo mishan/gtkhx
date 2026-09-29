@@ -33,7 +33,6 @@
 //! declaration no longer has to match anything at test-link time. If a C
 //! signature changes, the mismatch surfaces in the real build, not here.
 
-#![cfg(test)]
 #![allow(clippy::missing_safety_doc)]
 
 use gtk4::glib;

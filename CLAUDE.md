@@ -26,9 +26,11 @@ meson setup build && meson compile -C build
 
 Floors: `gtk4 >= 4.10`, `libadwaita-1 >= 1.6`, `mullion-gtk-0 >= 0.2.1` (fetched and built
 static by `subprojects/mullion-gtk.wrap` when not installed), `glib >= 2.56`, and
-rustc at the workspace MSRV (pinned to Debian stable's stock toolchain — see
-`rust/Cargo.toml`). The gtk-rs binding generation is pinned to match; **that pin is
-load-bearing** and is why the dock stays C (see `docs/docking.md`).
+rustc at the workspace MSRV, which is the current gtk-rs line's (see
+`rust-toolchain.toml`): the Rust floor follows gtk-rs, not a distribution's packaged
+rustc, and the gtk-rs family moves up a line at a time, all together. The system
+library floors above are what decide where GtkHx runs, and the bindings don't raise
+them.
 
 Meson options:
 

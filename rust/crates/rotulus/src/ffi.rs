@@ -778,11 +778,7 @@ pub unsafe extern "C" fn rotulus_view_clear(w: CGtkWidget) {
 /// `w` is a valid `RotulusView *`.
 #[no_mangle]
 pub unsafe extern "C" fn rotulus_view_get_last(w: CGtkWidget) -> *mut c_void {
-    // Not with_view!: a raw pointer has no Default before Rust 1.88.
-    match view_of(w) {
-        Some(v) => v.last().map_or(std::ptr::null_mut(), mark_to_ptr),
-        None => std::ptr::null_mut(),
-    }
+    with_view!(w, v, v.last().map_or(std::ptr::null_mut(), mark_to_ptr))
 }
 
 /// # Safety

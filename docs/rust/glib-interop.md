@@ -297,27 +297,22 @@ too:
 
 ## GStreamer runtime floor
 
-The workspace pins the `gstreamer-rs` 0.24 family in
-`workspace.dependencies`. (It originally landed at 0.25 alongside the
-gtk-rs 0.22 family; both were downgraded one minor when the rustc 1.92
-MSRV the 0.22 / 0.25 line carried turned out to be incompatible with
-Debian trixie's stock rustc 1.85 — see `rust-toolchain.toml` and the
-workspace `Cargo.toml` comments for the full rationale.)
+The workspace pins the `gstreamer-rs` 0.25 family in
+`workspace.dependencies`, the line released alongside gtk-rs 0.22. (It
+spent a while one line down, on 0.24 with gtk-rs 0.21, while the Rust
+floor followed Debian stable's packaged rustc; see `rust-toolchain.toml`
+for why it no longer does.)
 
 The runtime version floor:
 
-- gstreamer-rs 0.24 has a build-time floor of GStreamer 1.14 (per
-  gstreamer-webrtc-sys 0.24's `system-deps` probe) but project meson
-  pins it harder at >= 1.20, which is where webrtcbin stabilised.
-- Debian trixie ships GStreamer **1.24** — the natural pair for
-  gstreamer-rs 0.24.
-- GNOME 49 Flatpak runtime ships GStreamer **1.26** — also fine
-  against 0.24 bindings; the bindings just don't expose any 1.26-only
-  API surface to our code, and we use none of it.
+- gstreamer-rs 0.25 has a build-time floor of GStreamer 1.14 (per the
+  `-sys` crates' `system-deps` probes) and enables no newer API by
+  default; project meson pins it harder at >= 1.20, which is where
+  webrtcbin stabilized.
+- Debian trixie ships GStreamer **1.24**, and the GNOME 49 Flatpak
+  runtime **1.26**. Both work: the bindings only reach a newer release's
+  API when a `v1_2x` feature asks for it, and the workspace enables none.
 
-No GNOME-runtime bump is required for voice with this dep tree.
-The earlier "must bump to GNOME 48 for GStreamer 1.26" action item was
-specific to the gstreamer-rs 0.25 family and is no longer load-bearing.
-If a future voice or media feature needs a 1.26-binding-level API
-(versus 1.26-runtime behaviour) we'd need to step the whole gtk-rs /
-gstreamer-rs / rustc trio back up — but nothing currently shipped does.
+If a future voice or media feature needs a 1.26-only API, enabling its
+`v1_26` feature raises the runtime floor to 1.26, which the Flatpak has
+and Debian stable doesn't.
