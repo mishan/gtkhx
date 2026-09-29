@@ -20,7 +20,7 @@ port).
 |---|---|
 | [chat-view.md](chat-view.md) | The chat rendering stack: the dependency-free layout engine, the GTK4 widget, the message model, scroll anchoring, markdown, selection and search — and the record of the retired mIRC escape vocabulary. |
 | [chat-view-benchmark.md](chat-view-benchmark.md) | A dated, unrepeatable measurement of the old widget against its replacement, plus two documented ways the benchmark lied before it was trusted. |
-| [docking.md](docking.md) | The libpanel dock: the recursive split tree, panel ownership, undocking and drag-and-drop, layout persistence, a long gotchas chapter, and why the dock stays C. |
+| [docking.md](docking.md) | The dock (mullion-gtk): the panels as panes, the corner and the tab strips, windows of their own, per-connection content, layout persistence and the import of layouts from the libpanel dock, and the `dock_bridge` contract. |
 | [theming.md](theming.md) | Why the theming model looks the way it does — two unrelated icon systems, and the hidden-base-scale problem that produced the "source art is the honest 100%" rule. |
 | [theming-file-format.md](theming-file-format.md) | The theme file schema. Reference. |
 | [files-browser.md](files-browser.md) | The orthodox two-pane file manager, the function-key mapping, and the Hotline-specific protocol quirks it has to accommodate. |

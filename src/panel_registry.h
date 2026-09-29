@@ -8,45 +8,11 @@
  */
 
 /*
- * panel_registry.h — single source of truth for "which HxPanels exist
- * and how to find them by id".
+ * panel_registry.h — the dock's panel ids, and which panels have been
+ * built.
  *
- * Phase 1 / docking. Replaces:
- *
- *   - The session-bound fields on struct _session:
- *     toolbar_window, news_window, chat_window, tasks_window,
- *     users_window. (These stay on the session struct during the
- *     Phase 2 transition — each migration drops the field and
- *     repoints any call site at the registry.)
- *
- *   - The file-static window globals:
- *     tracker_window      (tracker.c)
- *     post_window         (news.c)
- *     about_window        (about.c)
- *     connect_window      (connect.c)
- *     the_browser         (news_browser.c, since deleted)
- *     the_browser         (files_browser.c, now a per-session table)
- *
- * Lookup is by stable string id (the same one stored on HxPanel).
- * The registry holds a strong reference to each registered panel
- * for the lifetime of the registration so the panel survives a
- * Frame removal during Undock without being destroyed.
- *
- * Lifetime: the registry is a process-global singleton (a
- * GHashTable lazily created on first call to register / lookup /
- * unregister). Panels are added via an explicit
- * hx_panel_registry_register call from each per-window factory.
- * Static panels (Users, Tasks, News, Chat, Files, News15) stay
- * registered for the lifetime of the process — they're permanent
- * dock residents and re-attachment after a close goes through
- * hx_panel_ensure_attached. Dynamic panels (Phase 3 reservation)
- * call hx_panel_registry_unregister explicitly when their backing
- * model object goes away. The HxPanel finalize handler does NOT
- * touch the registry — that would create a chicken-and-egg around
- * the registry's strong ref on the panel.
- *
- * Threading: main thread only. Workers that need to display a
- * panel must marshal via g_idle_add same as every other GTK call.
+ * The panels themselves are the dock's (dock_bridge.c): every id below
+ * is a pane of it from startup, and the dock finds them by id.
  */
 
 #ifndef GTKHX_PANEL_REGISTRY_H
@@ -54,51 +20,26 @@
 
 #include <glib.h>
 
-#include "hx_panel.h"
-
 G_BEGIN_DECLS
 
-/* Standard ids — keep in sync with the per-window construction
- * sites as they're migrated in Phase 2. New ids land here so
- * collisions show up at compile time, not runtime. */
+/* Standard ids. New ids land here so collisions show up at compile
+ * time, not runtime. */
 #define HX_PANEL_ID_CHAT "chat"
 #define HX_PANEL_ID_USERS "users"
 #define HX_PANEL_ID_TASKS "tasks"
 #define HX_PANEL_ID_NEWS "news"
 #define HX_PANEL_ID_NEWS15 "news15"
 /* No HX_PANEL_ID_FILES any more: the files browser is a window per
- * connection (gtkhx-ui/src/files.rs). A saved layout that still names
- * "files" has it pruned at load (dl_tree_drop_panel), so a leaf it had to
- * itself doesn't come back as an empty pane. */
+ * connection (gtkhx-ui/src/files.rs). A layout from before that still
+ * names "files"; the import leaves it out (dl_import_legacy), and the
+ * dock drops an id it has no pane for. */
 #define HX_PANEL_ID_VIDEO "video"
 /* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
- * not a docked panel — it has never had an HxPanel. */
+ * not a docked panel. */
 
-/* Every static panel id, NULL-terminated, in the order the startup
- * path builds them — which is also the tab order within a shared
- * leaf on first launch, since panel_frame_add appends.
- *
- * "Static" as opposed to DYNAMIC panels, which come and go with a
- * model object and so can't be enumerated ahead of time. Layout
- * persistence walks this to work out which permanent panels the user
- * has closed. An id added above belongs here too — a missing entry
- * doesn't fail to build, it just quietly never persists as closed. */
+/* Every static panel id, NULL-terminated, in the order the startup path
+ * builds them. Each is a pane of the dock from startup (dock_bridge.c). */
 extern const char *const hx_panel_static_ids[];
-
-/* Register / lookup / unregister. register_panel is normally
- * called from each HxPanel-owning factory once the panel is
- * constructed; unregister is called when the panel is being
- * destroyed for good (not on a transient Undock). */
-void hx_panel_registry_register (HxPanel *panel);
-void hx_panel_registry_unregister (const char *id);
-HxPanel *hx_panel_registry_lookup (const char *id);
-
-/* Iterate over every registered panel. Iteration order is
- * undefined; the callback must not register / unregister inside
- * the loop (GLib's hash-table iter would dislike it). */
-typedef void (*HxPanelRegistryForeachFunc) (HxPanel *panel, gpointer user_data);
-void hx_panel_registry_foreach (HxPanelRegistryForeachFunc func,
-                                gpointer user_data);
 
 /* "Has this panel ever been constructed?"
  *
@@ -106,14 +47,7 @@ void hx_panel_registry_foreach (HxPanelRegistryForeachFunc func,
  * used to be a one-bit field on the preferences struct, which is why
  * that struct also carried a shadow byte beside it — a bitfield has no
  * address for the settings table to point at. Both are gone; the flag
- * was never a preference, and it lives here because the panels do.
- *
- * Deliberately NOT hx_panel_registry_lookup() != NULL, which answers the
- * stricter "is it constructed *right now*" — the registry drops its entry
- * when a panel is closed for good, and this does not. Every caller today
- * is guarding a pointer that a close would invalidate, so the stricter
- * question is arguably the one they want; switching them is a behaviour
- * change and wants its own look, not a silent ride-along with this. */
+ * was never a preference, and it lives here because the panels do. */
 void hx_panel_mark_constructed (const char *id);
 gboolean hx_panel_was_constructed (const char *id);
 

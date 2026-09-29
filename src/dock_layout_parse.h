@@ -8,14 +8,12 @@
  */
 
 /*
- * dock_layout_parse.h — pure-text dock-layout tree representation
- * and recursive-descent parser. No GTK or libpanel.
+ * dock_layout_parse.h — the dock-layout tree expression kept before the
+ * dock was mullion-gtk, its recursive-descent parser, and its import into
+ * the dock's JSON (dl_import_legacy). No GTK.
  *
- * Split off from dock_layout.c so the parser can be unit-tested
- * without bringing in GTK + libpanel + the widget tree. The live
- * build / serialise paths in dock_layout.c convert between
- * ParsedNode and HxSplit; the format and the in-memory tree
- * representation both live here.
+ * Split off from dock_layout.c so it can be unit-tested without bringing
+ * in GTK and the dock.
  *
  * Format (also documented in dock_layout.h):
  *
@@ -74,19 +72,18 @@ DLParsedNode *dl_parse_tree (const char *text);
 
 void dl_parsed_node_free (DLParsedNode *n);
 
-/* Remove panel `id` from every leaf of `root`, for a panel that no longer
- * exists (Files, once a dock panel, is a window now). A leaf left empty by
- * the removal collapses — its parent split gives way to the sibling — so
- * an old layout doesn't restore a pane with nothing in it; a leaf that was
- * already empty stays, since that was the user's. A root left empty stays
- * as one empty leaf.
- *
- * Consumes `root` and returns the tree to use. `dropped_splits`, if
- * non-NULL, gets the post-order index (the order of the saved sizes= list)
- * of every internal split that collapsed, in the numbering of the tree as
- * passed in. */
-DLParsedNode *dl_tree_drop_panel (DLParsedNode *root, const char *id,
-                                  GArray *dropped_splits);
+/* A layout kept in this format -- the [Dock] tree=, sizes= and closed=
+ * keys and the [Undocked] group -- as the JSON the dock (mullion-gtk)
+ * reads: a tree of splits with a share per child and leaves with their
+ * tabs, the page in front as "active" and the role as a slot; the
+ * closed panels as the envelope's "closed"; each undocked panel a
+ * floating window of its own. `sizes' are the old dividers in pixels,
+ * post-order, turned into shares against a window of `width' by
+ * `height'. The Files panel, which is a window now, is left out.
+ * `undocked' is NULL-terminated id, "W,H" pairs, or NULL. NULL for a
+ * tree that does not parse. Pure GLib, for the unit test. */
+char *dl_import_legacy (const char *tree, const char *sizes, const char *closed,
+                        char **undocked, int width, int height);
 
 G_END_DECLS
 

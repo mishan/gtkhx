@@ -65,16 +65,13 @@ gtk_dep     = dependency('gtk4',      version : '>= 4.10')
 # became deprecated in 1.6 and we pick up -Werror=deprecated-declarations
 # from the build flags. 1.6 was released April 2024; widely available.
 adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
-# libpanel-1 is GNOME Builder's docking widget library — PanelDock /
-# PanelGrid / PanelFrame / PanelWidget / PanelToggleButton. See
-# docs/docking.md. The dependency was de-risked against
-# Debian trixie (1.10.0) and the
-# org.gnome.Platform/49 Flatpak runtime (which ships it). Floor
-# pinned at 1.4: that's where create-frame on PanelDock/PanelGrid
-# landed (1.2) and where panel_workbench_foreach_workspace landed
-# (1.4) — anything older predates the API surface the docking work
-# leans on.
-panel_dep   = dependency('libpanel-1', version : '>= 1.4')
+# mullion-gtk: the dock -- a split tree of tabbed panes, dragged, closed,
+# undocked into windows of their own and kept between runs. See
+# docs/docking.md. An installed copy (a packager's, the Flatpak's module)
+# when pkg-config finds one; otherwise subprojects/mullion-gtk.wrap
+# fetches the tagged release and builds it static into the program.
+mullion_dep = dependency('mullion-gtk-0', version : '>= 0.2.1',
+                         fallback : 'mullion-gtk')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 threads_dep = dependency('threads')
@@ -226,7 +223,7 @@ math_dep    = cc.find_library('m',  required : false)
 deps = [
   gtk_dep,
   adw_dep,
-  panel_dep,
+  mullion_dep,
   glib_dep,
   gthread_dep,
   threads_dep,
@@ -417,7 +414,7 @@ summary(
     'GTK'           : gtk_dep.version(),
     'GLib'          : glib_dep.version(),
     'libadwaita'    : adw_dep.version(),
-    'libpanel'      : panel_dep.version(),
+    'mullion-gtk'   : mullion_dep.version(),
     'Voice (GStreamer)' : voice_enabled ? gstreamer_dep.version() : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',

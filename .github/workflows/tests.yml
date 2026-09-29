@@ -467,7 +467,6 @@ jobs:
             rust:p
             gtk4:p
             libadwaita:p
-            libpanel:p
             gettext:p
             gstreamer:p
             gst-plugins-base:p
@@ -547,7 +546,7 @@ jobs:
         # the CoreAudio frameworks, no formula needed). No lcms2/fontconfig —
         # those are glycin's Linux-only transitive libs, gated off here.
         run: |
-          brew install meson ninja pkgconf gtk4 libadwaita libpanel gettext \
+          brew install meson ninja pkgconf gtk4 libadwaita gettext \
                        gstreamer libnice
 
       - name: rust toolchain

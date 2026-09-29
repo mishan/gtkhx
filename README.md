@@ -78,8 +78,9 @@ against [mhxd](https://github.com/kangsterizer/mhxd), Janus,
 You need Meson, a C compiler, Rust (see `rust-version` in
 `rust/Cargo.toml`), and:
 
-- GTK 4.10 or newer, libadwaita 1.6 or newer, libpanel 1.4 or newer,
-  GLib 2.56 or newer
+- GTK 4.10 or newer, libadwaita 1.6 or newer, GLib 2.56 or newer
+- mullion-gtk 0.2 or newer (the dock), which Meson fetches and builds
+  into GtkHx when it is not installed
 - For voice and video: GStreamer 1.20 or newer, with its WebRTC plugin
   and libnice
 

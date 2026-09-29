@@ -9,7 +9,12 @@
   - Local folders no longer show "(4096 items)" as their size
   - Very long folder names no longer break the path sent to the server
 - Docking
-  - Drop a panel on the edge of a pane to split it
+  - A new dock, built on mullion-gtk in place of libpanel; your layout carries over
+  - A pane's tabs sit in its top corner as icons, in sight where the pane has room for them and otherwise while you are in the pane; Pane Titles puts tab strips with titles back
+  - Drag a tab onto another pane's tabs, onto a pane, or onto an edge to split it
+  - Drag a tab out of the window to give it a window of its own, and back to dock it
+  - Reset Layout puts the default layout back at once, rather than at the next launch
+  - Alt with the arrows moves between panes, and with Shift moves the pane; Alt+Enter zooms one to fill the window
   - A pane closes when its last panel is moved out or closed
   - A panel's toolbar button and menu item always bring it back after it was undocked
 - Voice and Video

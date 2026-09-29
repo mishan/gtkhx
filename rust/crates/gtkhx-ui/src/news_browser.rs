@@ -99,8 +99,8 @@ extern "C" {
     fn gtkurl_textview_install(tv: *mut gtk::ffi::GtkTextView);
     fn gtkurl_textview_apply_tags(tv: *mut gtk::ffi::GtkTextView);
 
-    // ---- panel registry + session singleton ----
-    fn hx_panel_registry_lookup(id: *const c_char) -> *mut c_void;
+    // ---- the dock ----
+    fn gtkhx_dock_connect_shown(id: *const c_char, func: extern "C" fn());
 }
 
 // One browser per connection, plus the in-flight fetch tables.
@@ -1161,14 +1161,15 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     window
 }
 
-/// Wire the one panel-level hook (`PanelWidget::presented`) once the dock has
-/// embedded us — a tab switch onto News while connected + empty auto-fetches.
+/// Wire the one panel-level hook — the News panel coming into view — once
+/// the dock has embedded us: a tab switch onto News while connected + empty
+/// auto-fetches.
 ///
 /// Once for the *panel*, not once per browser. There is one News panel holding
 /// a content page per connection, so a per-browser subscription would add a
 /// second copy of the same handler for the second connection and double every
 /// auto-fetch. The handler itself resolves the active browser, which is the
-/// right question: "presented" means the user is looking at it.
+/// right question: in view means the user is looking at it.
 fn after_embed() {
     thread_local! {
         static WIRED: Cell<bool> = const { Cell::new(false) };
@@ -1176,17 +1177,11 @@ fn after_embed() {
     if WIRED.with(|w| w.get()) {
         return;
     }
-    let id = crate::cs(dock::ID_NEWS15);
-    let panel = unsafe { hx_panel_registry_lookup(id.as_ptr()) };
-    if panel.is_null() {
-        return;
-    }
-    let panel_obj: glib::Object =
-        unsafe { from_glib_none(panel as *mut glib::gobject_ffi::GObject) };
-    panel_obj.connect_local("presented", false, |_vals| {
+    extern "C" fn shown() {
         on_panel_presented();
-        None
-    });
+    }
+    let id = crate::cs(dock::ID_NEWS15);
+    unsafe { gtkhx_dock_connect_shown(id.as_ptr(), shown) };
     WIRED.with(|w| w.set(true));
 }
 

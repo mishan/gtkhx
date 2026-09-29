@@ -13,80 +13,503 @@
  */
 
 /*
- * dock_bridge.c — see dock_bridge.h. Wraps the libpanel plumbing every
- * old create_X_window did by hand (hx_panel_new / set title+icon+child /
- * panel_frame_add / set_home_frame / registry register) behind three
- * type-free entry points so the gtk4-rs window ports never touch a
- * libpanel type.
+ * dock_bridge.c — see dock_bridge.h. The dock is one mullion-gtk MlnPanes;
+ * this makes it, keeps its layout through dock_layout.c, and puts the Rust
+ * ports' content into its panes.
  */
 
 #include "config.h"
 
 #include <glib.h>
-#include <libpanel.h>
+#include <mullion-gtk.h>
 
-#include "hx.h" /* session (toolbar.h's prototypes reference it) */
-#include "hx_panel.h"
-#include "panel_registry.h"
-#include "toolbar.h" /* toolbar_*_frame globals */
+#include "hx.h"      /* _() */
+#include "gtkutil.h" /* init_keyaccel, for the undocked windows */
+#include "gtkhx_icon.h"
+#include "gtkhx_theme.h"
+#include "debug.h"
 #include "dock_bridge.h"
+#include "dock_layout.h"
 #include "dock_pages.h"
+#include "panel_registry.h"
+#include "toolbar.h" /* DEFAULT_LEAF_MIN_WIDTH */
 
-/* Map a bridge area to its libpanel PanelArea + home PanelFrame. The
- * area→frame pairing lived, duplicated, in every create_X_window; it now
- * lives here exactly once. Returns NULL for `*frame_out` (and logs) when
- * the dock hasn't been built, which the callers treat as fatal-ish. */
-static PanelArea
-dock_area_to_panel_area (GtkhxDockArea area, GtkWidget **frame_out)
+/* A string xgettext picks up, translated where it is used. */
+#ifndef N_
+#define N_(s) (s)
+#endif
+
+static MlnPanes *dock;
+
+/* Until gtkhx_dock_settled: startup is still opening panels. */
+static gboolean settling = TRUE;
+
+/* Every static panel: its title until the content names it, the toolbar
+ * pixmap its tab shows, and the slot it goes to where a layout has no
+ * place for it (a panel new since the layout was kept, or after a
+ * reset). */
+static const struct {
+    const char *id;
+    const char *title;
+    const char *pixmap;
+    const char *slot;
+} PANES[] = {
+    { HX_PANEL_ID_USERS, N_ ("Users"), "users.png", "end" },
+    { HX_PANEL_ID_TASKS, N_ ("Tasks"), "tasks.png", "bottom" },
+    { HX_PANEL_ID_NEWS, N_ ("News"), "news.png", "start" },
+    { HX_PANEL_ID_CHAT, N_ ("Chat"), "chat.png", "center" },
+    { HX_PANEL_ID_NEWS15, N_ ("News (1.5+)"), "news_folder.png", "center" },
+#ifdef HAVE_VOICE
+    { HX_PANEL_ID_VIDEO, N_ ("Video"), NULL, "end" },
+#endif
+};
+
+/* The first run's layout, and what Reset Layout puts back: News and Tasks
+ * in a column on the left (the transfer queue is empty most of the time,
+ * and a transfer raises its tab), Chat and News 1.5 in the middle, Users on
+ * the right. The slots are where each area's panels go when nothing
+ * remembers where they were. */
+static const char *DEFAULT_LAYOUT
+    = "{\"dir\":\"row\",\"size\":[0.24,0.58,0.18],\"kids\":["
+      "{\"tabs\":[\"news\",\"tasks\"],\"slots\":[\"start\",\"bottom\"]},"
+      "{\"tabs\":[\"chat\",\"news15\"],\"slots\":[\"center\"]},"
+      "{\"tabs\":[\"users\"],\"slots\":[\"end\"]}]}";
+
+/* id -> GPtrArray of void (*) (void): what gtkhx_dock_connect_shown
+ * asked for. */
+static GHashTable *shown_hooks;
+
+static GtkWidget *
+pane_content (const char *id)
 {
-    switch (area) {
-    case GTKHX_DOCK_AREA_START:
-        *frame_out = toolbar_sidebar_frame;
-        return PANEL_AREA_START;
-    case GTKHX_DOCK_AREA_END:
-        *frame_out = toolbar_end_frame;
-        return PANEL_AREA_END;
-    case GTKHX_DOCK_AREA_BOTTOM:
-        *frame_out = toolbar_bottom_frame;
-        return PANEL_AREA_BOTTOM;
-    case GTKHX_DOCK_AREA_CENTER:
-    default:
-        *frame_out = toolbar_center_frame;
-        return PANEL_AREA_CENTER;
+    if (dock == NULL || id == NULL) {
+        return NULL;
+    }
+    return mln_panes_get_content (dock, id);
+}
+
+/* ---- Action rows and the corner ------------------------------------- */
+
+/* Show or hide every action row under `root`. Doesn't descend into a
+ * match — a row's own children are buttons, not more rows. Returns
+ * whether it found one. */
+static gboolean
+set_action_rows_visible (GtkWidget *root, gboolean visible)
+{
+    gboolean found = FALSE;
+
+    if (gtk_widget_has_css_class (root, "gtkhx-panel-actions")) {
+        gtk_widget_set_visible (root, visible);
+        return TRUE;
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        found |= set_action_rows_visible (c, visible);
+    }
+    return found;
+}
+
+/* The widgets that may share the corner's controls: an action row, or a
+ * widget tagged to make room (the chat's subject line and its tab
+ * strip). */
+static gboolean
+is_corner_widget (GtkWidget *w)
+{
+    return gtk_widget_has_css_class (w, "gtkhx-panel-actions")
+           || gtk_widget_has_css_class (w, "gtkhx-pane-reserve");
+}
+
+/* The widget that sits under the corner on one content page: the first
+ * *visible* corner widget in tree order. First, because that is the one at
+ * the top; visible, because a hidden action row isn't there to make room
+ * in. */
+static GtkWidget *
+find_corner_widget (GtkWidget *root)
+{
+    if (!gtk_widget_get_visible (root)) {
+        return NULL;
+    }
+    if (is_corner_widget (root)) {
+        return root;
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        GtkWidget *found = find_corner_widget (c);
+        if (found != NULL) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static void
+clear_corner_margins (GtkWidget *root)
+{
+    if (is_corner_widget (root)) {
+        gtk_widget_set_margin_end (root, 0);
+    }
+    for (GtkWidget *c = gtk_widget_get_first_child (root); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        clear_corner_margins (c);
     }
 }
 
-static HxPanelKind
-dock_kind_to_panel_kind (GtkhxDockKind kind)
+/* Room for the corner's controls on every one of a panel's pages -- each
+ * connection has its own, with its own corner widget -- or, with the tabs
+ * in a strip, none. And the corner kept in sight where the page on screen
+ * has made room for it, since it covers nothing there: an action row, or
+ * the chat's subject line, with the controls at its end. Elsewhere they
+ * would sit over content, and show only on hover and focus. */
+static void
+reserve_corner (const char *id)
 {
-    switch (kind) {
-    case GTKHX_DOCK_KIND_CENTER:
-        return HX_PANEL_KIND_CENTER;
-    case GTKHX_DOCK_KIND_SIDEBAR:
-        return HX_PANEL_KIND_SIDEBAR;
-    case GTKHX_DOCK_KIND_DYNAMIC:
-    default:
-        return HX_PANEL_KIND_DYNAMIC;
+    GtkWidget *stack = pane_content (id);
+    int margin = dock != NULL ? mln_panes_get_corner_width (dock, id) : 0;
+    GtkWidget *front;
+
+    if (stack == NULL) {
+        return;
+    }
+    front = gtk_stack_get_visible_child (GTK_STACK (stack));
+    mln_panes_set_corner_pinned (
+        dock, id, front != NULL && find_corner_widget (front) != NULL);
+    clear_corner_margins (stack);
+    if (margin <= 0) {
+        return;
+    }
+    for (GtkWidget *page = gtk_widget_get_first_child (stack); page != NULL;
+         page = gtk_widget_get_next_sibling (page)) {
+        GtkWidget *corner = find_corner_widget (page);
+        if (corner != NULL) {
+            gtk_widget_set_margin_end (corner, margin);
+        }
     }
 }
+
+static void
+reserve_all (void)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS (PANES); i++) {
+        reserve_corner (PANES[i].id);
+    }
+}
+
+static void
+on_corner_changed (MlnPanes *panes, gpointer data)
+{
+    (void)panes;
+    (void)data;
+    reserve_all ();
+}
+
+/* The Show Action Bar item's action, for one panel. */
+static GSimpleAction *
+actions_action (const char *id)
+{
+    GApplication *app = g_application_get_default ();
+    g_autofree char *name = g_strdup_printf ("pane-actions-%s", id);
+    GAction *a = app != NULL
+                     ? g_action_map_lookup_action (G_ACTION_MAP (app), name)
+                     : NULL;
+
+    return a != NULL ? G_SIMPLE_ACTION (a) : NULL;
+}
+
+/* The panel's action rows as the setting says, and its Show Action Bar
+ * item greyed where there is none (Chat). Again whenever a connection
+ * adds a page, so a new page arrives matching. */
+static void
+sync_actions (const char *id)
+{
+    GtkWidget *stack = pane_content (id);
+    GSimpleAction *action = actions_action (id);
+    gboolean found;
+
+    if (stack == NULL) {
+        return;
+    }
+    found = set_action_rows_visible (stack,
+                                     !dock_layout_panel_actions_hidden (id));
+    if (action != NULL) {
+        g_simple_action_set_enabled (action, found);
+    }
+    reserve_corner (id);
+}
+
+static void
+on_pane_actions_change (GSimpleAction *action, GVariant *value, gpointer data)
+{
+    const char *id = data;
+
+    g_simple_action_set_state (action, value);
+    dock_layout_set_panel_actions_hidden (id, !g_variant_get_boolean (value));
+    sync_actions (id);
+}
+
+void
+gtkhx_dock_add_actions (GActionMap *map)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS (PANES); i++) {
+        g_autofree char *name
+            = g_strdup_printf ("pane-actions-%s", PANES[i].id);
+        GSimpleAction *a = g_simple_action_new_stateful (
+            name, NULL,
+            g_variant_new_boolean (
+                !dock_layout_panel_actions_hidden (PANES[i].id)));
+
+        g_signal_connect (a, "change-state",
+                          G_CALLBACK (on_pane_actions_change),
+                          (gpointer)PANES[i].id);
+        g_action_map_add_action (map, G_ACTION (a));
+        g_object_unref (a);
+        sync_actions (PANES[i].id);
+    }
+}
+
+/* ---- The dock's signals ---------------------------------------------- */
+
+static void
+on_layout_kept (MlnPanes *panes, const char *mode, const char *layout,
+                gpointer data)
+{
+    (void)panes;
+    (void)mode;
+    (void)data;
+    dock_layout_keep (layout);
+}
+
+static void
+on_pane_shown (MlnPanes *panes, const char *id, gboolean on, gpointer data)
+{
+    GPtrArray *hooks;
+
+    (void)panes;
+    (void)data;
+
+    if (!on || shown_hooks == NULL) {
+        return;
+    }
+    hooks = g_hash_table_lookup (shown_hooks, id);
+    for (guint i = 0; hooks != NULL && i < hooks->len; i++) {
+        ((void (*) (void))hooks->pdata[i]) ();
+    }
+}
+
+/* A window for panels moved out of the main one, as the old undocked
+ * windows were: the application's, with its keys. mullion-gtk titles it
+ * and keeps its size with the layout. */
+static GtkWindow *
+make_window (MlnPanes *panes, gpointer data)
+{
+    GtkWidget *win = gtk_window_new ();
+    GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (panes));
+    GApplication *app = g_application_get_default ();
+
+    (void)data;
+
+    if (GTK_IS_WINDOW (root)) {
+        gtk_window_set_transient_for (GTK_WINDOW (win), GTK_WINDOW (root));
+    }
+    if (app != NULL) {
+        gtk_window_set_application (GTK_WINDOW (win), GTK_APPLICATION (app));
+    }
+    init_keyaccel (win);
+
+    return GTK_WINDOW (win);
+}
+
+/* ---- The dock -------------------------------------------------------- */
+
+/* Each panel's tab icon as the toolbar's buttons draw it: the symbolic
+ * icon where the theme uses them, else the theme's own pixmap or the
+ * classic one. */
+static void
+set_icons (void)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS (PANES); i++) {
+        g_autofree char *resource = NULL;
+        const char *symbolic;
+        GIcon *icon = NULL;
+
+        if (PANES[i].pixmap == NULL) {
+            continue;
+        }
+        resource = g_strconcat ("/com/nasledov/gtkhx/pixmaps/", PANES[i].pixmap,
+                                NULL);
+        symbolic = gtkhx_icon_symbolic_name (resource);
+        if (symbolic != NULL) {
+            icon = g_themed_icon_new (symbolic);
+        } else {
+            /* A GdkPixbuf is a GIcon. */
+            icon = G_ICON (gtkhx_icon_load (resource));
+        }
+        mln_panes_set_icon (dock, PANES[i].id, icon);
+        g_clear_object (&icon);
+    }
+}
+
+static void
+on_theme_changed (GtkhxTheme *theme, gpointer data)
+{
+    (void)theme;
+    (void)data;
+    set_icons ();
+}
+
+GtkWidget *
+gtkhx_dock_new (void)
+{
+    g_autofree char *kept = NULL;
+
+    g_return_val_if_fail (dock == NULL, GTK_WIDGET (dock));
+
+    dock = MLN_PANES (mln_panes_new ());
+
+    /* Closed panels come back from the main menu's Panels section, as they
+     * always have; a row of them over the layout would be a second way,
+     * taking a row of height to say so. */
+    g_object_set (dock, "show-drawer", FALSE, NULL);
+
+    for (gsize i = 0; i < G_N_ELEMENTS (PANES); i++) {
+        GtkWidget *stack = gtk_stack_new ();
+
+        /* No transition: a connection switch should be instant. */
+        gtk_stack_set_transition_type (GTK_STACK (stack),
+                                       GTK_STACK_TRANSITION_TYPE_NONE);
+        mln_panes_register (dock, PANES[i].id, _ (PANES[i].title), stack,
+                            DEFAULT_LEAF_MIN_WIDTH);
+        mln_panes_set_placement (dock, PANES[i].id, PANES[i].slot, TRUE);
+
+        {
+            GMenu *items = g_menu_new ();
+            g_autofree char *action
+                = g_strdup_printf ("app.pane-actions-%s", PANES[i].id);
+
+            g_menu_append (items, _ ("Show _Action Bar"), action);
+            mln_panes_set_pane_menu (dock, PANES[i].id, G_MENU_MODEL (items));
+            g_object_unref (items);
+        }
+    }
+
+    set_icons ();
+    /* After the theme's own handler, which drops the icon cache. */
+    g_signal_connect_after (gtkhx_theme_get_default (), "changed",
+                            G_CALLBACK (on_theme_changed), NULL);
+
+    mln_panes_set_window_func (dock, make_window, NULL, NULL);
+    g_signal_connect (dock, "layout-kept", G_CALLBACK (on_layout_kept), NULL);
+    g_signal_connect (dock, "pane-shown", G_CALLBACK (on_pane_shown), NULL);
+    g_signal_connect (dock, "corner-changed", G_CALLBACK (on_corner_changed),
+                      NULL);
+
+    mln_panes_set_default (dock, "main", DEFAULT_LAYOUT);
+    mln_panes_set_mode (dock, "main");
+
+    /* After the file is read: it says which headers. */
+    kept = dock_layout_load ();
+    mln_panes_set_header (dock, dock_layout_pane_titles_visible ()
+                                    ? MLN_HEADER_STRIP
+                                    : MLN_HEADER_CORNER);
+    if (!mln_panes_load (dock, kept) && kept != NULL) {
+        g_warning ("dock: the saved layout does not read; "
+                   "the default comes up");
+    }
+
+    gtk_widget_set_hexpand (GTK_WIDGET (dock), TRUE);
+    gtk_widget_set_vexpand (GTK_WIDGET (dock), TRUE);
+
+    return GTK_WIDGET (dock);
+}
+
+void
+gtkhx_dock_settled (void)
+{
+    settling = FALSE;
+}
+
+gboolean
+gtkhx_dock_is_open (const char *id)
+{
+    g_auto (GStrv) closed = NULL;
+
+    if (dock == NULL || mln_panes_get_content (dock, id) == NULL) {
+        return FALSE;
+    }
+    closed = mln_panes_get_closed (dock);
+    return !g_strv_contains ((const char *const *)closed, id);
+}
+
+void
+gtkhx_dock_present (const char *id)
+{
+    GtkWindow *win;
+
+    if (dock == NULL) {
+        return;
+    }
+    mln_panes_present (dock, id, TRUE);
+    win = mln_panes_get_window (dock, id);
+    if (win != NULL) {
+        gtk_window_present (win);
+    }
+}
+
+void
+gtkhx_dock_show_if_open (const char *id)
+{
+    if (gtkhx_dock_is_open (id)) {
+        mln_panes_present (dock, id, FALSE);
+    }
+}
+
+void
+gtkhx_dock_set_pane_titles (gboolean on)
+{
+    if (dock != NULL) {
+        mln_panes_set_header (dock, on ? MLN_HEADER_STRIP : MLN_HEADER_CORNER);
+    }
+}
+
+void
+gtkhx_dock_reset (void)
+{
+    if (dock != NULL) {
+        mln_panes_reset (dock);
+    }
+}
+
+void
+gtkhx_dock_connect_shown (const char *id, void (*func) (void))
+{
+    GPtrArray *hooks;
+
+    g_return_if_fail (id != NULL && func != NULL);
+
+    if (shown_hooks == NULL) {
+        shown_hooks = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+                                             (GDestroyNotify)g_ptr_array_unref);
+    }
+    hooks = g_hash_table_lookup (shown_hooks, id);
+    if (hooks == NULL) {
+        hooks = g_ptr_array_new ();
+        g_hash_table_insert (shown_hooks, g_strdup (id), hooks);
+    }
+    g_ptr_array_add (hooks, (gpointer)func);
+}
+
+/* ---- The Rust ports' ABI --------------------------------------------- */
 
 gboolean
 gtkhx_dock_raise_if_open (const char *id)
 {
-    HxPanel *panel;
-
     g_return_val_if_fail (id != NULL, FALSE);
 
-    panel = hx_panel_registry_lookup (id);
-    if (panel == NULL) {
+    if (!gtkhx_dock_is_embedded (id)) {
         return FALSE;
     }
-
-    /* The panel may have been detached by a Close-all-pages on its
-     * frame; the registry kept it alive. Splice it back into its home
-     * area (no-op if still attached) and raise it to focus. */
-    hx_panel_ensure_attached (panel);
-    panel_widget_raise (PANEL_WIDGET (panel));
+    if (!settling) {
+        mln_panes_present (dock, id, TRUE);
+    }
     return TRUE;
 }
 
@@ -95,72 +518,28 @@ gtkhx_dock_is_embedded (const char *id)
 {
     g_return_val_if_fail (id != NULL, FALSE);
 
-    return hx_panel_registry_lookup (id) != NULL;
+    return hx_dock_pages_count (pane_content (id)) > 0;
 }
 
 void
 gtkhx_dock_set_needs_attention (const char *id, gboolean state)
 {
-    HxPanel *panel;
-
     g_return_if_fail (id != NULL);
 
-    panel = hx_panel_registry_lookup (id);
-    if (panel == NULL) {
-        return;
+    if (dock != NULL) {
+        mln_panes_set_attention (dock, id, state);
     }
-    panel_widget_set_needs_attention (PANEL_WIDGET (panel), state);
 }
 
-/* Shared body for the static + dynamic embeds. Builds the panel, homes
- * it, registers it. Returns the panel (still owned by the registry's
- * strong ref) or NULL if the dock wasn't built. */
-static HxPanel *
-dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
-                   const char *title, const char *icon_name, const char *page,
-                   GtkWidget *content)
+/* Consume `content` on a failure path, so the caller never has to reason
+ * about a still-floating widget it handed us. */
+static void
+drop_content (GtkWidget *content)
 {
-    HxPanel *panel;
-    GtkWidget *home_frame = NULL;
-    PanelArea panel_area;
-
-    panel_area = dock_area_to_panel_area (area, &home_frame);
-    if (home_frame == NULL) {
-        g_critical ("gtkhx_dock_embed(%s): toolbar dock not built yet", id);
-        /* Consume `content` on the failure path too so the caller never
-         * has to reason about a still-floating widget it handed us: sink
-         * the floating ref and drop it. */
-        if (content != NULL) {
-            g_object_ref_sink (content);
-            g_object_unref (content);
-        }
-        return NULL;
+    if (content != NULL) {
+        g_object_ref_sink (content);
+        g_object_unref (content);
     }
-
-    panel = hx_panel_new (id, dock_kind_to_panel_kind (kind), panel_area);
-    if (title != NULL) {
-        panel_widget_set_title (PANEL_WIDGET (panel), title);
-    }
-    if (icon_name != NULL) {
-        panel_widget_set_icon_name (PANEL_WIDGET (panel), icon_name);
-    }
-    /* The panel's child is a page stack, not the content directly — see
-     * dock_pages.h. `page` names the connection this first page belongs to;
-     * at one connection the stack holds exactly that one and behaves as the
-     * old single child did. */
-    hx_panel_set_content (panel, hx_dock_pages_new (page, content));
-
-    hx_panel_sync_actions (panel);
-
-    panel_frame_add (PANEL_FRAME (home_frame), PANEL_WIDGET (panel));
-    hx_panel_set_home_frame (panel, home_frame);
-
-    /* Registry strong-refs the panel; do NOT unref here. hx_panel_new's
-     * initial ref is the GTK4 floating ref, already claimed by
-     * panel_frame_add's g_object_ref_sink (clears floating, no new ref).
-     * Unrefing would drop the registry's owning ref. */
-    hx_panel_registry_register (panel);
-    return panel;
 }
 
 gboolean
@@ -172,76 +551,23 @@ gtkhx_dock_embed (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
     g_return_val_if_fail (page != NULL, FALSE);
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
-    return dock_embed_common (id, kind, area, title, icon_name, page, content)
-           != NULL;
-}
+    (void)kind;
+    (void)area;
+    (void)icon_name; /* the tab shows the toolbar's pixmap (PANES) */
 
-/* Close-trampoline payload. Lives on the panel via g_object_set_data_full
- * so it's freed when the panel finalizes; hx_panel_set_close_handler
- * gets it as user_data. */
-typedef struct {
-    void (*on_close) (gpointer user_data);
-    gpointer user_data;
-    GDestroyNotify destroy;
-} DockDynClose;
-
-static void
-dock_dyn_close_free (gpointer data)
-{
-    DockDynClose *c = data;
-    if (c == NULL) {
-        return;
-    }
-    if (c->destroy != NULL && c->user_data != NULL) {
-        c->destroy (c->user_data);
-    }
-    g_free (c);
-}
-
-static void
-dock_dyn_close_trampoline (HxPanel *panel, gpointer user_data)
-{
-    DockDynClose *c = user_data;
-    (void)panel;
-    if (c != NULL && c->on_close != NULL) {
-        c->on_close (c->user_data);
-    }
-}
-
-gboolean
-gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area, const char *title,
-                          const char *icon_name, GtkWidget *content,
-                          void (*on_close) (gpointer user_data),
-                          gpointer user_data, GDestroyNotify destroy)
-{
-    HxPanel *panel;
-    DockDynClose *c;
-
-    g_return_val_if_fail (id != NULL, FALSE);
-    g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
-
-    panel = dock_embed_common (id, GTKHX_DOCK_KIND_DYNAMIC, area, title,
-                               icon_name, HX_DOCK_PAGE_DEFAULT, content);
-    if (panel == NULL) {
-        /* Embed failed (content already destroyed by dock_embed_common).
-         * The close callback was never installed, so run the caller's
-         * teardown now so its backing state still gets released. */
-        if (destroy != NULL && user_data != NULL) {
-            destroy (user_data);
-        }
+    if (pane_content (id) == NULL) {
+        g_critical ("gtkhx_dock_embed(%s): no such pane in the dock", id);
+        drop_content (content);
         return FALSE;
     }
-
-    c = g_new0 (DockDynClose, 1);
-    c->on_close = on_close;
-    c->user_data = user_data;
-    c->destroy = destroy;
-
-    /* Keep the payload alive for the panel's lifetime and free it (which
-     * runs `destroy` on user_data) on finalize. */
-    g_object_set_data_full (G_OBJECT (panel), "gtkhx-dock-dyn-close", c,
-                            dock_dyn_close_free);
-    hx_panel_set_close_handler (panel, dock_dyn_close_trampoline, c);
+    if (!hx_dock_pages_add (pane_content (id), page, content)) {
+        drop_content (content);
+        return FALSE;
+    }
+    if (title != NULL) {
+        mln_panes_set_title (dock, id, title);
+    }
+    sync_actions (id);
     return TRUE;
 }
 
@@ -249,69 +575,46 @@ gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area, const char *title,
  *
  * The panel-level API above answers "does this role have a panel?". These
  * answer "does this connection have content in it?", which is the question
- * the tab-switched layout actually asks. See dock_pages.h.
- *
- * Each resolves the id through the registry and delegates; an id with no
- * panel reads as "no pages", which is the same do-nothing answer the
- * panel-level calls give. */
-
-static GtkWidget *
-panel_content (const char *id)
-{
-    HxPanel *panel;
-
-    if (id == NULL) {
-        return NULL;
-    }
-    panel = hx_panel_registry_lookup (id);
-    if (panel == NULL) {
-        return NULL;
-    }
-    return hx_panel_get_content (panel);
-}
+ * the tab-switched layout actually asks. See dock_pages.h. */
 
 gboolean
 gtkhx_dock_add_page (const char *id, const char *page, GtkWidget *content)
 {
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
-    if (!hx_dock_pages_add (panel_content (id), page, content)) {
-        /* Consume `content` on the failure path, the same contract
-         * gtkhx_dock_embed has: the caller never has to reason about a
-         * still-floating widget it handed us. */
-        g_object_ref_sink (content);
-        g_object_unref (content);
+    if (!gtkhx_dock_is_embedded (id)
+        || !hx_dock_pages_add (pane_content (id), page, content)) {
+        drop_content (content);
         return FALSE;
     }
-    {
-        HxPanel *panel = hx_panel_registry_lookup (id);
-        if (panel != NULL) {
-            hx_panel_sync_actions (panel);
-        }
-    }
+    sync_actions (id);
     return TRUE;
 }
 
 gboolean
 gtkhx_dock_has_page (const char *id, const char *page)
 {
-    return hx_dock_pages_has (panel_content (id), page);
+    return hx_dock_pages_has (pane_content (id), page);
 }
 
 gboolean
 gtkhx_dock_show_page (const char *id, const char *page)
 {
-    return hx_dock_pages_show (panel_content (id), page);
+    gboolean shown = hx_dock_pages_show (pane_content (id), page);
+
+    /* Another connection's page, with its own corner widget or none. */
+    reserve_corner (id);
+    return shown;
 }
 
 gboolean
 gtkhx_dock_remove_page (const char *id, const char *page)
 {
-    return hx_dock_pages_remove (panel_content (id), page);
+    return hx_dock_pages_remove (pane_content (id), page);
 }
 
 guint
 gtkhx_dock_page_count (const char *id)
 {
-    return hx_dock_pages_count (panel_content (id));
+    return hx_dock_pages_count (pane_content (id));
 }

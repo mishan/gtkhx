@@ -25,7 +25,7 @@
  * so a scheme that unparented and dropped the outgoing tree would silently
  * null the state of the connection just switched away from.
  *
- * This file is deliberately free of libpanel and of the dock: it is GtkStack
+ * This file is deliberately free of the dock: it is GtkStack
  * manipulation and nothing else, so `dock_bridge.c` can resolve a panel id to
  * a stack and delegate, and a unit test can exercise the page logic without
  * standing up a dock. Everything here tolerates NULL and a non-stack widget,

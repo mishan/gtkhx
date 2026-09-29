@@ -294,7 +294,7 @@ test('htxf_cancel', test_htxf_cancel,
 # bridge source + proto_helpers.c (for hl_hdr_decode round-trip
 # verification) without dragging the GUI tree.
 # A dock panel's content as a set of named pages (dock_pages.c). Pure
-# GtkStack manipulation — no libpanel, no dock — which is what makes it
+# GtkStack manipulation — no dock — which is what makes it
 # unit-testable at all. Needs a display, so the suite runs under xvfb.
 test_dock_pages = executable('test_dock_pages',
   'unit/test_dock_pages.c',
@@ -304,28 +304,6 @@ test_dock_pages = executable('test_dock_pages',
   link_depends        : rust_build,
 )
 test('dock_pages', test_dock_pages,
-     suite : 'unit')
-
-# The close (X) button on a dock frame's header. Unlike dock_pages this
-# needs the real widgets — libpanel's frame + header template, an
-# HxSplit leaf, the frame-ops action group — because what's under test
-# is which of libpanel's action and ours wins on that button, and that
-# question only exists once they're both present. Needs a display, so
-# the suite runs under xvfb.
-test_frame_close_button = executable('test_frame_close_button',
-  'unit/test_frame_close_button.c',
-  '../src/hx_split.c',
-  '../src/hx_panel.c',
-  '../src/hx_panel_frame.c',
-  '../src/panel_registry.c',
-  '../src/dock_layout.c',
-  '../src/dock_layout_parse.c',
-  '../src/debug.c',
-  dependencies        : test_deps + [adw_dep, panel_dep],
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('frame_close_button', test_frame_close_button,
      suite : 'unit')
 
 # The C mirror of struct htlc_conn against the Rust struct that owns the
@@ -383,7 +361,7 @@ test('hotline_url', test_hotline_url,
 
 # dock_layout_parse — recursive-descent parser for the saved-layout
 # tree expression. Pure GLib so the test links just the parser .c
-# without dragging in GTK + libpanel + the rest of dock_layout.c.
+# without dragging in GTK and the rest of dock_layout.c.
 # Covers valid trees, whitespace tolerance, malformed input
 # variants, and the empty-leaf-with-role case (the all-undocked-
 # layout edge that broke before the role-default fix).

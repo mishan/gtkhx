@@ -340,7 +340,7 @@ fn on_key(
             // stepping. Otherwise this is a cursor movement and the view
             // should have it. Never with Alt or Shift held: those chords
             // belong to others — Alt+Shift+arrows move the pane
-            // (hx_panel_frame.c), Shift extends a selection.
+            // (the dock), Shift extends a selection.
             if (point != 0 && !nav) || has_chord_modifier(state) {
                 return glib::Propagation::Proceed;
             }

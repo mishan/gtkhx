@@ -12,7 +12,7 @@
 //! close tabs through the `gtkhx_chat_tabs_*` C ABI, each passing the
 //! connection its tab belongs to.
 //!
-//! The libpanel side (flag / raise the Chat dock panel) stays C behind
+//! The dock side (flag / raise the Chat dock panel) stays C behind
 //! `dock_bridge` — this module only names GTK / libadwaita types. State lives
 //! in a `thread_local!` (main-thread only, like every other window module);
 //! the close-page handler snapshots what it needs out of that cell and drops

@@ -159,3 +159,7 @@ rust/rust-workspace.stamp
 .claude
 __pycache__/
 /build-screenshots/
+
+# meson fetches these from subprojects/*.wrap
+/subprojects/*/
+/subprojects/.wraplock

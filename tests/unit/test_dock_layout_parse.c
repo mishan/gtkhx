@@ -7,7 +7,9 @@
  *
  * Pure GLib — the parser was split off from dock_layout.c into
  * dock_layout_parse.{c,h} specifically so this test can build
- * without dragging in GTK + libpanel + the widget tree.
+ * without dragging in GTK and the dock. It reads layouts kept before
+ * the dock was mullion-gtk, which dl_import_legacy turns into the
+ * dock's JSON.
  */
 
 #include "config.h"
@@ -419,74 +421,60 @@ test_deeply_nested (void)
 
 /* ---------- Test registration ---------------------------------------- */
 
-/* ---------- Dropping a retired panel -------------------------------- */
+/* ---------- The import, as mullion's JSON ---------------------------- */
 
-/* Sharing a leaf: the id goes, the leaf stays, and the foreground marker
- * follows the page it named. */
+/* The first-run tree, as it was kept: splits as shares of the window,
+ * the foreground page as "active" (the first is the default and not
+ * written), the roles as slots. Post-order, the inner split's divider is
+ * sizes[0] and the root's sizes[1]. */
 static void
-test_drop_from_shared_leaf (void)
+test_import_tree (void)
 {
-    g_autoptr (GArray) dropped = g_array_new (FALSE, FALSE, sizeof (guint));
-    DLParsedNode *n = dl_parse_tree ("L[chat,files,*news15:center]");
+    g_autofree char *json = dl_import_legacy (
+        "h(L[news,*tasks:start],h(L[*chat,news15:center],L[users:end]))",
+        "620;240", NULL, NULL, 1200, 700);
 
-    n = dl_tree_drop_panel (n, "files", dropped);
-    g_assert_true (n->is_leaf);
-    g_assert_cmpuint (n->panel_ids->len, ==, 2);
-    g_assert_cmpstr (nth_id (n, 0), ==, "chat");
-    g_assert_cmpstr (nth_id (n, 1), ==, "news15");
-    g_assert_cmpint (n->selected, ==, 1);
-    g_assert_cmpstr (n->role, ==, "center");
-    g_assert_cmpuint (dropped->len, ==, 0);
-    dl_parsed_node_free (n);
+    g_assert_cmpstr (
+        json, ==,
+        "{\"dir\":\"row\",\"size\":[0.2,0.8],\"kids\":["
+        "{\"tabs\":[\"news\",\"tasks\"],\"active\":1,\"slots\":[\"start\"]},"
+        "{\"dir\":\"row\",\"size\":[0.646,0.354],\"kids\":["
+        "{\"tabs\":[\"chat\",\"news15\"],\"slots\":[\"center\"]},"
+        "{\"tabs\":[\"users\"],\"slots\":[\"end\"]}]}]}");
 }
 
-/* Alone in a leaf: the leaf collapses and its sibling takes the parent
- * split's place, which is reported by its post-order index. */
+/* Closed panels and undocked ones in the envelope, and Files -- a window
+ * now -- nowhere: not in its leaf, not closed, not a window. */
 static void
-test_drop_collapses_sole_leaf (void)
+test_import_envelope (void)
 {
-    g_autoptr (GArray) dropped = g_array_new (FALSE, FALSE, sizeof (guint));
-    /* Post-order: the inner h( ) is split 0, the root split 1. */
-    DLParsedNode *n = dl_parse_tree (
-        "h(L[*chat,news15:center],h(L[*files],L[*users:end]))");
+    char *undocked[] = { "tasks", "400,300", "files", "900,600", NULL };
+    g_autofree char *json
+        = dl_import_legacy ("v(L[*chat,files:center],L[users:end])", "350",
+                            "news15;files", undocked, 1200, 700);
 
-    n = dl_tree_drop_panel (n, "files", dropped);
-    g_assert_false (n->is_leaf);
-    g_assert_true (n->child_a->is_leaf);
-    g_assert_cmpstr (nth_id (n->child_a, 0), ==, "chat");
-    g_assert_true (n->child_b->is_leaf);
-    g_assert_cmpstr (nth_id (n->child_b, 0), ==, "users");
-    g_assert_cmpstr (n->child_b->role, ==, "end");
-    g_assert_cmpuint (dropped->len, ==, 1);
-    g_assert_cmpuint (g_array_index (dropped, guint, 0), ==, 0);
-    dl_parsed_node_free (n);
+    g_assert_cmpstr (
+        json, ==,
+        "{\"layout\":{\"dir\":\"col\",\"size\":[0.5,0.5],\"kids\":["
+        "{\"tabs\":[\"chat\"],\"slots\":[\"center\"]},"
+        "{\"tabs\":[\"users\"],\"slots\":[\"end\"]}]},"
+        "\"closed\":[\"news15\"],"
+        "\"floating\":[{\"layout\":{\"tabs\":[\"tasks\"]},"
+        "\"size\":[400,300]}]}");
 }
 
-/* A leaf that was empty before stays: that one was the user's. */
+/* No sizes: halves. A tree that does not parse: nothing. */
 static void
-test_drop_keeps_already_empty_leaf (void)
+test_import_no_sizes_and_malformed (void)
 {
-    g_autoptr (GArray) dropped = g_array_new (FALSE, FALSE, sizeof (guint));
-    DLParsedNode *n = dl_parse_tree ("h(L[*chat:center],L[])");
+    g_autofree char *json
+        = dl_import_legacy ("h(L[chat],L[users])", NULL, NULL, NULL, 0, 0);
 
-    n = dl_tree_drop_panel (n, "files", dropped);
-    g_assert_false (n->is_leaf);
-    g_assert_cmpuint (n->child_b->panel_ids->len, ==, 0);
-    g_assert_cmpuint (dropped->len, ==, 0);
-    dl_parsed_node_free (n);
-}
-
-/* A tree holding nothing else comes back as one empty leaf. */
-static void
-test_drop_everything (void)
-{
-    DLParsedNode *n = dl_parse_tree ("L[*files]");
-
-    n = dl_tree_drop_panel (n, "files", NULL);
-    g_assert_true (n->is_leaf);
-    g_assert_cmpuint (n->panel_ids->len, ==, 0);
-    g_assert_cmpint (n->selected, ==, -1);
-    dl_parsed_node_free (n);
+    g_assert_cmpstr (json, ==,
+                     "{\"dir\":\"row\",\"size\":[0.5,0.5],\"kids\":["
+                     "{\"tabs\":[\"chat\"]},{\"tabs\":[\"users\"]}]}");
+    g_assert_null (dl_import_legacy ("h(L[chat]", NULL, NULL, NULL, 0, 0));
+    g_assert_null (dl_import_legacy (NULL, NULL, NULL, NULL, 0, 0));
 }
 
 int
@@ -553,14 +541,11 @@ main (int argc, char **argv)
     g_test_add_func ("/dock_layout_parse/punct_ids",
                      test_panel_ids_with_punctuation);
     g_test_add_func ("/dock_layout_parse/deeply_nested", test_deeply_nested);
-    g_test_add_func ("/dock_layout_parse/drop/shared_leaf",
-                     test_drop_from_shared_leaf);
-    g_test_add_func ("/dock_layout_parse/drop/collapses_sole_leaf",
-                     test_drop_collapses_sole_leaf);
-    g_test_add_func ("/dock_layout_parse/drop/keeps_already_empty_leaf",
-                     test_drop_keeps_already_empty_leaf);
-    g_test_add_func ("/dock_layout_parse/drop/everything",
-                     test_drop_everything);
+    g_test_add_func ("/dock_layout_parse/import/tree", test_import_tree);
+    g_test_add_func ("/dock_layout_parse/import/envelope",
+                     test_import_envelope);
+    g_test_add_func ("/dock_layout_parse/import/no_sizes_and_malformed",
+                     test_import_no_sizes_and_malformed);
 
     return g_test_run ();
 }

@@ -1,0 +1,8 @@
+[wrap-file]
+directory = mullion-gtk-0.2.1
+source_url = https://github.com/mishan/mullion-gtk/archive/refs/tags/v0.2.1.tar.gz
+source_filename = mullion-gtk-0.2.1.tar.gz
+source_hash = ad22370b949d195e9f4406c21ae584c8ac2c24aa68b99782c25a2e3df82f4ccd
+
+[provide]
+mullion-gtk-0 = panes_dep

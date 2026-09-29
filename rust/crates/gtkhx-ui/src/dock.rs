@@ -2,7 +2,7 @@
 //!
 //! The docked-window Rust shells (Users, Tasks, …) register their content
 //! through this — a translation of the type-free `gtkhx_dock_*` C ABI so no
-//! Rust module names a libpanel type. The `kind` / `area` ints mirror
+//! Rust module names a dock type. The `kind` / `area` ints mirror
 //! `GtkhxDockKind` / `GtkhxDockArea` in `dock_bridge.h`.
 
 use std::ffi::{c_char, c_void};
