@@ -166,12 +166,13 @@ fn install_css() {
     thread_local! {
         static INSTALLED: Cell<bool> = const { Cell::new(false) };
     }
-    if INSTALLED.replace(true) {
+    if INSTALLED.get() {
         return;
     }
     let Some(display) = gdk::Display::default() else {
         return;
     };
+    INSTALLED.set(true);
     let css = gtk::CssProvider::new();
     // load_from_string is GTK 4.12, above the bindings' floor.
     css.load_from_data(CSS);
@@ -360,14 +361,23 @@ struct PanelInner {
     /// The room's streams as the last refresh found them: (stream, paused,
     /// label). Tiles are made from it, less the unwatched.
     want: RefCell<Vec<(StreamKey, bool, String)>>,
+    /// Whether the server offers video, and whether this connection is
+    /// in a voice room, as the last refresh found them: what the empty
+    /// page says.
+    video: Cell<bool>,
+    in_room: Cell<bool>,
+    /// The room the user's choices below were made in — the runtime's id
+    /// and the chat's — so they are dropped on a move to another room or a
+    /// reconnect, and kept across a rejoin of the same one.
+    room: Cell<Option<(u64, u32)>>,
     focus: Cell<Focus>,
     /// Streams the user stopped watching: no tile, not received, and a
-    /// button in the bar at the bottom to watch again. Forgotten when the
-    /// publication ends.
+    /// button in the bar at the bottom to watch again.
     unwatched: RefCell<HashSet<StreamKey>>,
     unwatched_bar: gtk::Box,
     unwatched_list: gtk::FlowBox,
-    /// Each muted user's volume before the mute, to go back to.
+    /// Each muted user's volume before the mute, to go back to. Uids are
+    /// the connection's, so a new runtime starts it afresh.
     premute: RefCell<HashMap<u16, f64>>,
     /// The runtime this panel has an observer on, by id (0 for none).
     observing: Cell<u64>,
@@ -408,6 +418,7 @@ impl PanelInner {
             return;
         }
         self.observing.set(id);
+        self.premute.borrow_mut().clear();
         let weak = Rc::downgrade(self);
         rt.add_video_observer(Box::new(move |rt, notice| {
             let Some(panel) = weak.upgrade() else {
@@ -429,6 +440,7 @@ impl PanelInner {
                     t.picture.set_paintable(None::<&gdk::Paintable>);
                 }
             }
+            VideoNotice::Volume(_) => self.sync_mute(),
             VideoNotice::Publications | VideoNotice::Local(_) | VideoNotice::Session(_) => {
                 self.refresh();
             }
@@ -459,6 +471,15 @@ impl PanelInner {
             )
         });
 
+        if let (Some(rt), Some(cid)) = (rt, cid) {
+            let room = (rt.id(), cid);
+            if self.room.replace(Some(room)) != Some(room) {
+                self.new_room();
+            }
+        }
+        self.video.set(video);
+        self.in_room.set(in_room);
+
         // (key, paused, label)
         let mut want: Vec<(StreamKey, bool, String)> = Vec::new();
         if let (Some(rt), true, Some(cid)) = (rt, in_room, cid) {
@@ -488,20 +509,15 @@ impl PanelInner {
             }
         }
 
-        let has_tiles = self.set_tiles(&want);
-        if !has_tiles {
-            self.status.set_description(Some(&if !video {
-                tr("This server doesn't support video.")
-            } else if !in_room {
-                tr("Join voice to see who has a camera or screen on.")
-            } else if !want.is_empty() {
-                tr("You aren't watching anyone. Pick someone below to watch.")
-            } else {
-                tr("Nobody in this voice chat has a camera or screen on.")
-            }));
-        }
-        self.sync_mute();
+        self.set_tiles(&want);
         self.schedule_subscribe();
+    }
+
+    /// Forget the choices made in the last room: what to focus, what not
+    /// to watch.
+    fn new_room(&self) {
+        self.focus.set(Focus::Auto);
+        self.unwatched.borrow_mut().clear();
     }
 
     /// Lay the tiles out again from the last refresh's streams, after a
@@ -513,9 +529,13 @@ impl PanelInner {
     }
 
     /// The tile on the stage: the user's pick while it has a tile, or
-    /// someone else's screen share unless the user asked for none.
+    /// someone else's screen share unless the user asked for none. A lone
+    /// tile has the panel to itself, and no stage.
     fn focused_key(&self) -> Option<StreamKey> {
         let tiles = self.tiles.borrow();
+        if tiles.len() < 2 {
+            return None;
+        }
         match self.focus.get() {
             Focus::On(key) if tiles.contains_key(&key) => Some(key),
             Focus::Off => None,
@@ -530,19 +550,28 @@ impl PanelInner {
     fn apply_focus(&self) {
         let focused = self.focused_key();
         self.grid.set_focused(focused);
-        for (key, tile) in self.tiles.borrow().iter() {
+        let tiles = self.tiles.borrow();
+        for (key, tile) in tiles.iter() {
             tile.set_focused(Some(*key) == focused);
+            tile.focus.set_visible(tiles.len() > 1);
         }
     }
 
-    /// Put `key` on the stage, or take it off if it is there.
+    /// Put `key` on the stage, or take it off if it is there. A lone tile
+    /// has no stage to go on, and a click on it changes nothing.
     fn toggle_focus(self: &Rc<Self>, key: StreamKey) {
+        if self.tiles.borrow().len() < 2 {
+            return;
+        }
         self.focus.set(if self.focused_key() == Some(key) {
             Focus::Off
         } else {
             Focus::On(key)
         });
         self.apply_focus();
+        // The layout moved under the view without necessarily changing its
+        // extent: look again at what is in reach.
+        self.schedule_subscribe();
     }
 
     /// Stop receiving `key` and give its tile's room to the others.
@@ -572,7 +601,6 @@ impl PanelInner {
             let back = self.premute.borrow_mut().remove(&uid).unwrap_or(1.0);
             rt.set_user_volume(uid, back);
         }
-        self.sync_mute();
     }
 
     /// Show each tile's user as muted or not, as the runtime has them.
@@ -602,6 +630,8 @@ impl PanelInner {
                 VideoKind::Screen => "screen-shared-symbolic",
             });
             content.set_label(label);
+            // A long nick ellipsizes rather than widening the panel.
+            content.set_can_shrink(true);
             let button = gtk::Button::new();
             button.set_child(Some(&content));
             button.add_css_class("flat");
@@ -614,7 +644,8 @@ impl PanelInner {
             });
             self.unwatched_list.append(&button);
         }
-        self.unwatched_bar.set_visible(!unwatched.is_empty());
+        self.unwatched_bar
+            .set_visible(self.unwatched_list.first_child().is_some());
     }
 
     /// Make the tiles exactly `want` — (stream, paused, label) — less the
@@ -622,13 +653,6 @@ impl PanelInner {
     /// when there are none. Returns whether there are any.
     fn set_tiles(&self, want: &[(StreamKey, bool, String)]) -> bool {
         *self.want.borrow_mut() = want.to_vec();
-        self.unwatched
-            .borrow_mut()
-            .retain(|key| want.iter().any(|(k, _, _)| k == key));
-        if want.is_empty() {
-            // Out of the room: a new one starts from the default view.
-            self.focus.set(Focus::Auto);
-        }
         {
             let unwatched = self.unwatched.borrow();
             let shown =
@@ -654,15 +678,22 @@ impl PanelInner {
                 }
             }
         }
-        if let Focus::On(key) = self.focus.get() {
-            if !self.tiles.borrow().contains_key(&key) {
-                self.focus.set(Focus::Auto);
-            }
-        }
         self.apply_focus();
         self.fill_unwatched(want);
+        self.sync_mute();
 
         let has_tiles = !self.tiles.borrow().is_empty();
+        if !has_tiles {
+            self.status.set_description(Some(&if !self.video.get() {
+                tr("This server doesn't support video.")
+            } else if !self.in_room.get() {
+                tr("Join voice to see who has a camera or screen on.")
+            } else if !want.is_empty() {
+                tr("You aren't watching anyone. Pick someone below to watch.")
+            } else {
+                tr("Nobody in this voice chat has a camera or screen on.")
+            }));
+        }
         self.stack
             .set_visible_child_name(if has_tiles { "tiles" } else { "empty" });
         has_tiles
@@ -901,6 +932,9 @@ fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
         scroll,
         tiles: RefCell::new(HashMap::new()),
         want: RefCell::new(Vec::new()),
+        video: Cell::new(false),
+        in_room: Cell::new(false),
+        room: Cell::new(None),
         focus: Cell::new(Focus::Auto),
         unwatched: RefCell::new(HashSet::new()),
         unwatched_bar,
@@ -982,6 +1016,8 @@ impl Standalone {
         // Serial 0 is no connection: no runtime is ever found for it, and
         // no session's refresh reaches it.
         let (root, inner) = build_panel(0);
+        inner.video.set(true);
+        inner.in_room.set(true);
         Standalone { root, inner }
     }
 
@@ -1315,8 +1351,15 @@ pub(crate) mod tests {
             user_id: 0,
             kind: VideoKind::Screen,
         };
+        // A lone tile has no stage, and a click on it leaves nothing behind.
+        panel.set_tiles(&[(cam(1), "one".into())]);
+        p.toggle_focus(cam(1));
+        assert_eq!(p.focus.get(), Focus::Auto);
+        assert!(!p.tiles.borrow()[&cam(1)].focus.is_visible());
+
         panel.set_tiles(&[(cam(1), "one".into()), (cam(2), "two".into())]);
         assert_eq!(p.grid.focused(), None);
+        assert!(p.tiles.borrow()[&cam(1)].focus.is_visible());
         panel.set_tiles(&[(cam(1), "one".into()), (own_screen, "mine".into())]);
         assert_eq!(
             p.grid.focused(),
@@ -1344,6 +1387,20 @@ pub(crate) mod tests {
             p.grid.focused(),
             Some(screen),
             "cam 2 went; the default is back"
+        );
+        panel.set_tiles(&all);
+        assert_eq!(
+            p.grid.focused(),
+            Some(cam(2)),
+            "cam 2 back, the pick with it"
+        );
+
+        p.new_room();
+        panel.set_tiles(&all);
+        assert_eq!(
+            p.grid.focused(),
+            Some(screen),
+            "a new room starts from the default"
         );
     }
 
@@ -1383,16 +1440,29 @@ pub(crate) mod tests {
             Some("empty"),
             "nothing left to show"
         );
+        assert_eq!(
+            p.status.description().as_deref(),
+            Some(tr("You aren't watching anyone. Pick someone below to watch.").as_str())
+        );
         assert_eq!(buttons(), 2);
 
         p.watch(cam(1));
         assert!(panel.has_tile(cam(1)));
         assert_eq!(buttons(), 1);
 
-        // Its publication ends and comes back: a new one, watched.
+        // Its publication ends and comes back — or the room is rejoined,
+        // which empties the list for a moment: still not watched.
         panel.set_tiles(&[(cam(1), "one".into())]);
-        assert!(!p.unwatched_bar.is_visible());
+        assert!(!p.unwatched_bar.is_visible(), "nothing to watch again");
+        panel.set_tiles(&[]);
+        panel.set_tiles(&both);
+        assert!(!panel.has_tile(cam(2)));
+        assert_eq!(buttons(), 1);
+
+        // Another room: everything is watched.
+        p.new_room();
         panel.set_tiles(&both);
         assert!(panel.has_tile(cam(2)));
+        assert!(!p.unwatched_bar.is_visible());
     }
 }

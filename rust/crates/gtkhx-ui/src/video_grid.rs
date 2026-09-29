@@ -37,6 +37,11 @@ const MIN_STAGE_H: f64 = 180.0;
 const STRIP_SHARE: f64 = 0.25;
 /// The shape a gallery takes when its tiles differ.
 const MIXED_ASPECT: f64 = 4.0 / 3.0;
+/// The narrowest and widest shapes a tile takes. A stream's shape comes
+/// from the frames a peer sends, so a sliver of a picture mustn't make a
+/// sliver of a tile.
+const MIN_ASPECT: f64 = 0.25;
+const MAX_ASPECT: f64 = 4.0;
 
 /// The shape a stream's tile has before its first frame says otherwise.
 pub(crate) fn default_aspect(kind: VideoKind) -> f64 {
@@ -70,14 +75,16 @@ fn min_columns(n: usize, w: f64) -> usize {
     fit.clamp(1, n.max(1))
 }
 
-/// The height a gallery of `n` needs in width `w` with its tiles at their
-/// smallest.
-fn gallery_min_height(n: usize, w: f64) -> f64 {
+/// The height a gallery of `n` shaped `aspect` needs in width `w` with its
+/// tiles at their smallest: `MIN_TILE_W` wide, and rows no shorter than
+/// `MIN_TILE_H`.
+fn gallery_min_height(n: usize, aspect: f64, w: f64) -> f64 {
     if n == 0 {
         return 0.0;
     }
     let rows = n.div_ceil(min_columns(n, w)) as f64;
-    rows * MIN_TILE_H + (rows - 1.0) * SPACING
+    let row_h = MIN_TILE_H.max(MIN_TILE_W / aspect);
+    rows * row_h + (rows - 1.0) * SPACING
 }
 
 /// `n` tiles shaped `aspect` in the box at (`x`, `y`), `w` by `h`: the
@@ -122,15 +129,25 @@ fn gallery(n: usize, aspect: f64, x: f64, y: f64, w: f64, h: f64) -> Vec<Rect> {
         .collect()
 }
 
+/// The shapes in `aspects` other than the one at `f`.
+fn others(aspects: &[f64], f: usize) -> Vec<f64> {
+    (0..aspects.len())
+        .filter(|&i| i != f)
+        .map(|i| aspects[i])
+        .collect()
+}
+
 /// The height tiles shaped `aspects`, `focused` on the stage if any, need
 /// in width `w` at their smallest.
 pub(crate) fn min_height(aspects: &[f64], focused: Option<usize>, w: f64) -> f64 {
     match focused {
         Some(f) if aspects.len() > 1 => {
             let stage = MIN_STAGE_H.min(w / aspects[f]);
-            stage + SPACING + gallery_min_height(aspects.len() - 1, w)
+            stage
+                + SPACING
+                + gallery_min_height(aspects.len() - 1, common_aspect(&others(aspects, f)), w)
         }
-        _ => gallery_min_height(aspects.len(), w),
+        _ => gallery_min_height(aspects.len(), common_aspect(aspects), w),
     }
 }
 
@@ -142,11 +159,8 @@ pub(crate) fn arrange(aspects: &[f64], focused: Option<usize>, w: f64, h: f64) -
     let Some(f) = focused.filter(|_| aspects.len() > 1) else {
         return gallery(aspects.len(), common_aspect(aspects), 0.0, 0.0, w, h);
     };
-    let others: Vec<f64> = (0..aspects.len())
-        .filter(|&i| i != f)
-        .map(|i| aspects[i])
-        .collect();
-    let strip = (h * STRIP_SHARE).max(gallery_min_height(others.len(), w));
+    let others = others(aspects, f);
+    let strip = (h * STRIP_SHARE).max(gallery_min_height(others.len(), common_aspect(&others), w));
     let stage_h = (h - strip - SPACING)
         .min(w / aspects[f])
         .max(MIN_STAGE_H.min(w / aspects[f]));
@@ -321,6 +335,7 @@ impl VideoGrid {
         if !aspect.is_finite() || aspect <= 0.0 {
             return;
         }
+        let aspect = aspect.clamp(MIN_ASPECT, MAX_ASPECT);
         let mut entries = self.imp().entries.borrow_mut();
         if let Some(e) = entries.iter_mut().find(|e| e.key == key) {
             if (e.aspect - aspect).abs() >= 0.01 {
@@ -455,6 +470,35 @@ mod tests {
                 let p = arrange(&aspects, Some(0), w, h);
                 check(&p, w, h);
                 assert!(p[1..].iter().all(|r| r.w >= MIN_TILE_W), "n={n} w={w}");
+            }
+        }
+    }
+
+    /// Portrait streams, a phone's camera, are no narrower than any other
+    /// tile at their smallest: the rows grow instead.
+    #[test]
+    fn portrait_tiles_keep_their_width() {
+        const PHONE: f64 = 9.0 / 16.0;
+        for n in 1..=8 {
+            for w in [160.0, 300.0, 700.0] {
+                let aspects = vec![PHONE; n];
+                let h = min_height(&aspects, None, w);
+                let p = arrange(&aspects, None, w, h);
+                check(&p, w, h);
+                assert!(
+                    p.iter().all(|r| r.w >= MIN_TILE_W - 1.0),
+                    "n={n} w={w}: {p:?}"
+                );
+
+                let mut mixed = vec![PHONE; n];
+                mixed.insert(0, SCREEN);
+                let h = min_height(&mixed, Some(0), w);
+                let p = arrange(&mixed, Some(0), w, h);
+                check(&p, w, h);
+                assert!(
+                    p[1..].iter().all(|r| r.w >= MIN_TILE_W - 1.0),
+                    "n={n} w={w}: {p:?}"
+                );
             }
         }
     }

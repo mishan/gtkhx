@@ -142,8 +142,8 @@ capture source produces nothing until PLAYING — so without it a new
 capture bin waited for some unrelated state change to start.
 
 **Observers.** The UI registers `add_video_observer` closures for
-publications, local changes, session state, new frames and ended
-streams. They are keyed by the runtime's `id()`, never by a handle's
+publications, local changes, session state, new frames, ended streams
+and per-user volume. They are keyed by the runtime's `id()`, never by a handle's
 address: `VoiceRuntime` is a cheap clone and notices raised from
 GStreamer callbacks come through a different one.
 
@@ -157,10 +157,12 @@ publication keeps its tile, marked paused.
 gallery at whichever column count makes them largest, each the shape of
 its stream so the picture fills it: a camera 4:3 and a screen 16:9 until
 the first frame gives the real shape, and a gallery of mixed shapes
-shares 4:3. The block is centered and a short last row is centered under
+shares 4:3. A peer's frames can't make a tile narrower than 1:4 or wider
+than 4:1. The block is centered and a short last row is centered under
 the rest. The grid asks the scrolled window for only the height its tiles
-need at their smallest (160 wide), so the panel scrolls only when they
-can't all fit at that size; otherwise they grow into the view. Tiles go
+need at their smallest (160 wide, and for a portrait stream as tall as
+that takes), so the panel scrolls only when they can't all fit at that
+size; otherwise they grow into the view. Tiles go
 in user order, this client's own first and a user's camera before their
 screen, so they don't swap places with the order publications arrive in.
 
@@ -169,8 +171,11 @@ the width lets it be at its shape, and the others share what is left
 below — a quarter of the height at least — as a smaller gallery of their
 own. By default someone else's screen share is in focus (the lowest uid's
 if several); clicking a tile, or its focus button, puts it there instead,
-and doing it again on the focused tile shows them all alike. That choice
-holds until the focused tile goes or the room is left.
+and doing it again on the focused tile shows them all alike. A lone tile
+has the panel to itself: no stage, no focus button, and a click on it
+changes nothing. The choice lasts for the room: while the picked tile is
+away the default applies, and it takes the stage again when it comes
+back.
 
 **Each tile has controls**, shown while the pointer is over it or one has
 keyboard focus: focus, mute and stop watching.
@@ -178,12 +183,15 @@ keyboard focus: focus, mute and stop watching.
 - *Mute* is that user's voice, here only — their volume in the runtime
   set to zero, as the user list's slider does, and put back where it was
   on unmute. It is the same for their camera and their screen. A muted
-  user's mute button stays up as the mark of it. "You" tiles have none.
+  user's mute button stays up as the mark of it, and follows the slider:
+  the runtime tells video observers of every volume change. "You" tiles
+  have none.
 - *Stop watching* takes the tile away, so the others get its room, and
   stops receiving it (below). A bar at the bottom of the panel lists what
-  isn't being watched; a click there brings it back. The choice lasts as
-  long as the publication: one that ends and starts again is watched. On
-  a "You" tile it just hides the preview.
+  isn't being watched; a click there brings it back. The choice lasts for
+  the room — across a publication stopping and starting, and a rejoin of
+  the same room after a failure — and is dropped on a move to another
+  room or a reconnect. On a "You" tile it just hides the preview.
 
 **Visibility is the subscription policy.** While the panel's page is
 mapped it subscribes to every publication whose tile is in view or about

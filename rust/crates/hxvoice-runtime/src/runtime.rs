@@ -689,6 +689,9 @@ pub enum VideoNotice {
     /// The voice session changed state; a UI clears its tiles when
     /// the session leaves.
     Session(SessionState),
+    /// A participant's playback volume was set, from wherever: a tile
+    /// shows its user muted at zero.
+    Volume(u16),
 }
 
 /// A video observer. Returning `false` unregisters it, which is how a
@@ -1988,6 +1991,7 @@ impl VoiceRuntime {
             set_bin_volume(&bin, gain);
         }
         crate::debug::log!("voice-pipe", "set playback volume for uid {uid} to {gain}");
+        self.notify_video(VideoNotice::Volume(uid));
     }
 
     /// Read the stored per-listener gain for a uid, or `1.0` (unity)
@@ -5869,6 +5873,24 @@ mod tests {
         assert_eq!(runtime.user_volume(8), 1.0);
         runtime.set_user_volume(7, 1.25);
         assert_eq!(runtime.user_volume(7), 1.25);
+    }
+
+    /// A volume set from anywhere reaches the video observers, so a
+    /// tile's muted mark follows the user list's slider.
+    #[test]
+    fn set_user_volume_tells_video_observers() {
+        let (runtime, _backend) = rec();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&seen);
+        runtime.add_video_observer(Box::new(move |rt, notice| {
+            if let VideoNotice::Volume(uid) = notice {
+                sink.borrow_mut().push((*uid, rt.user_volume(*uid)));
+            }
+            true
+        }));
+        runtime.set_user_volume(7, 0.0);
+        runtime.set_user_volume(7, 0.5);
+        assert_eq!(*seen.borrow(), [(7, 0.0), (7, 0.5)]);
     }
 
     #[test]
