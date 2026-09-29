@@ -25,6 +25,8 @@
 
 #include "hx.h"      /* _() */
 #include "gtkutil.h" /* init_keyaccel, for the undocked windows */
+#include "gtkhx_icon.h"
+#include "gtkhx_theme.h"
 #include "debug.h"
 #include "dock_bridge.h"
 #include "dock_layout.h"
@@ -318,6 +320,42 @@ make_window (MlnPanes *panes, gpointer data)
 
 /* ---- The dock -------------------------------------------------------- */
 
+/* Each panel's tab icon as the toolbar's buttons draw it: the symbolic
+ * icon where the theme uses them, else the theme's own pixmap or the
+ * classic one. */
+static void
+set_icons (void)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS (PANES); i++) {
+        g_autofree char *resource = NULL;
+        const char *symbolic;
+        GIcon *icon = NULL;
+
+        if (PANES[i].pixmap == NULL) {
+            continue;
+        }
+        resource = g_strconcat ("/com/nasledov/gtkhx/pixmaps/", PANES[i].pixmap,
+                                NULL);
+        symbolic = gtkhx_icon_symbolic_name (resource);
+        if (symbolic != NULL) {
+            icon = g_themed_icon_new (symbolic);
+        } else {
+            /* A GdkPixbuf is a GIcon. */
+            icon = G_ICON (gtkhx_icon_load (resource));
+        }
+        mln_panes_set_icon (dock, PANES[i].id, icon);
+        g_clear_object (&icon);
+    }
+}
+
+static void
+on_theme_changed (GtkhxTheme *theme, gpointer data)
+{
+    (void)theme;
+    (void)data;
+    set_icons ();
+}
+
 GtkWidget *
 gtkhx_dock_new (void)
 {
@@ -342,18 +380,6 @@ gtkhx_dock_new (void)
                             DEFAULT_LEAF_MIN_WIDTH);
         mln_panes_set_placement (dock, PANES[i].id, PANES[i].slot, TRUE);
 
-        if (PANES[i].pixmap != NULL) {
-            g_autofree char *uri
-                = g_strconcat ("resource:///com/nasledov/gtkhx/pixmaps/",
-                               PANES[i].pixmap, NULL);
-            GFile *file = g_file_new_for_uri (uri);
-            GIcon *icon = g_file_icon_new (file);
-
-            mln_panes_set_icon (dock, PANES[i].id, icon);
-            g_object_unref (icon);
-            g_object_unref (file);
-        }
-
         {
             GMenu *items = g_menu_new ();
             g_autofree char *action
@@ -364,6 +390,11 @@ gtkhx_dock_new (void)
             g_object_unref (items);
         }
     }
+
+    set_icons ();
+    /* After the theme's own handler, which drops the icon cache. */
+    g_signal_connect_after (gtkhx_theme_get_default (), "changed",
+                            G_CALLBACK (on_theme_changed), NULL);
 
     mln_panes_set_window_func (dock, make_window, NULL, NULL);
     g_signal_connect (dock, "layout-kept", G_CALLBACK (on_layout_kept), NULL);
