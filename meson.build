@@ -70,7 +70,7 @@ adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 # docs/docking.md. An installed copy (a packager's, the Flatpak's module)
 # when pkg-config finds one; otherwise subprojects/mullion-gtk.wrap
 # fetches the tagged release and builds it static into the program.
-mullion_dep = dependency('mullion-gtk-0', version : '>= 0.2.0',
+mullion_dep = dependency('mullion-gtk-0', version : '>= 0.2.1',
                          fallback : 'mullion-gtk')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
