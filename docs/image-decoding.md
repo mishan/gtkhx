@@ -25,7 +25,7 @@ loader generation are not interchangeable:
 | loader generation | compatible glycin crate | gtk-rs family | ships in |
 |---|---|---|---|
 | `1+` | crate **1.x and 2.x** | 0.20 (gdk4 0.9, g\* 0.20) | Debian 13 (trixie) etc. |
-| `2+` | crate **3.x** | 0.21 (gdk4 0.10, g\* 0.21) | GNOME 48+, Flatpak |
+| `2+` | crate **3.x** | 0.22 (gdk4 0.11, g\* 0.22) for 3.1 | GNOME 48+, Flatpak |
 
 **Debian 13 packages `glycin-loaders` 1.2.x, which installs only the
 `1+` generation.** A 3.x-crate build there finds no compatible loader at
@@ -47,7 +47,7 @@ The Meson option `-Dglycin_compat` picks one:
   registrations — the same files glycin itself reads — newest generation
   first, with the `/usr/libexec/glycin-loaders/<gen>+/` binary
   directories as a fallback signal.
-- **`2`** — glycin crate `~3.0`, `2+` loaders. The Flatpak build pins
+- **`2`** — glycin crate `~3.1`, `2+` loaders. The Flatpak build pins
   this explicitly, since its configure step runs inside the runtime and
   should never rely on the probe.
 - **`1`** — glycin crate `~2.1`, `1+` loaders. Debian stable and other
@@ -116,12 +116,6 @@ WebP). **Animated GIF and APNG both collect frames** on this path;
 everything else yields a single static texture. AVIF and HEIC need C
 libraries and degrade to a decode error, the same way a glycin host
 missing those loaders would.
-
-**The `image` dependency carries a load-bearing version ceiling**
-(`>=0.25.5, <0.25.10`). 0.25.10 started using `slice_as_chunks` /
-`is_multiple_of` without bumping its declared `rust-version`, so the
-MSRV-aware resolver doesn't avoid it and it fails to compile on our Rust
-floor. Revisit the ceiling when the toolchain floor rises.
 
 ## Policy and consumers
 

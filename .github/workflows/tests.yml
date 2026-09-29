@@ -183,8 +183,7 @@ jobs:
               # its backend list turns a misconfigured display into a
               # confusing failure somewhere else.
               ( cd rust && ../tools/isolated-run.sh cargo test --workspace \
-                  --exclude hxvoice --exclude hxvoice-runtime \
-                  --ignore-rust-version )
+                  --exclude hxvoice --exclude hxvoice-runtime )
 
               # Build 2: voice ENABLED (GStreamer already present in the base
               # image). Shares the Cargo target dir with Build 1; the
@@ -198,11 +197,10 @@ jobs:
                   --print-errorlogs
               ( cd rust \
                 && ../tools/isolated-run.sh cargo test --workspace \
-                     --ignore-rust-version \
-                && cargo test -p hxnet --features socks --ignore-rust-version )
+                && cargo test -p hxnet --features socks )
               # glycin-v2 (1+ loaders) backend — compile-only lib tests.
               ( cd rust && cargo test -p hx-image-decode --lib \
-                  --no-default-features --features glycin-v2 --ignore-rust-version )
+                  --no-default-features --features glycin-v2 )
 
               # Hand the cached dirs back to the runner user so the post-job
               # cache save (runs as the runner user) can read them.
@@ -387,8 +385,7 @@ jobs:
               rc=$?
               # The Rust end-to-end suites (rust/crates/hx-e2e): GtkHx'"'"'s own
               # requests and reply parsers against the same servers.
-              ( cd rust && cargo test -p hx-e2e --features rig \
-                  --ignore-rust-version ) || rc=1
+              ( cd rust && cargo test -p hx-e2e --features rig ) || rc=1
               chown -R "$(stat -c %u:%g /src)" \
                 /src/rust-cargo-target /src/.cargo-home /src/build 2>/dev/null || true
               exit $rc
@@ -550,7 +547,8 @@ jobs:
                        gstreamer libnice
 
       - name: rust toolchain
-        # Honor the repo's rust-toolchain.toml pin (1.85) over the image default.
+        # Honor the repo's rust-toolchain.toml pin over the image default, so
+        # these jobs build on exactly the workspace's rustc floor.
         run: rustup show
 
       - name: cache rust build

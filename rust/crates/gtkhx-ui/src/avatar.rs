@@ -102,7 +102,7 @@ mod imp {
 
         fn flags(&self) -> gdk::PaintableFlags {
             // Every frame is composited onto the same canvas.
-            gdk::PaintableFlags::SIZE
+            gdk::PaintableFlags::STATIC_SIZE
         }
 
         fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {

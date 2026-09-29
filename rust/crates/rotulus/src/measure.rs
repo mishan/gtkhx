@@ -138,7 +138,7 @@ impl PangoMeasure {
 
     fn recompute_metrics(&mut self) {
         let font = self.scaled_font();
-        self.context.set_font_description(Some(&font));
+        self.context.set_font_description(&font);
         let m = self.context.metrics(Some(&font), None);
         let ascent = m.ascent() / pango::SCALE;
         let descent = m.descent() / pango::SCALE;

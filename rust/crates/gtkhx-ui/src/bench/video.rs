@@ -96,9 +96,9 @@ fn pictures(w: u32, h: u32) -> Vec<VideoFrame> {
             let bar = (w as usize * n / PICTURES)..(w as usize * (n + 1) / PICTURES);
             let mut px = vec![0u8; (stride * h) as usize];
             for row in px.chunks_exact_mut(stride as usize) {
-                for (x, p) in row.chunks_exact_mut(4).enumerate() {
+                for (x, p) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     let v = if bar.contains(&x) { 0xe0 } else { 0x50 };
-                    p.copy_from_slice(&[v, v, v, 0xff]);
+                    *p = [v, v, v, 0xff];
                 }
             }
             VideoFrame {

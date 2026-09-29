@@ -32,5 +32,5 @@ glib = { workspace = true }
 gtk4 = { workspace = true, features = ["v4_10"] }
 # Pango directly, for the TextMeasure implementation and the shaped
 # layouts the snapshot pass hands to GSK.
-pango = "0.21"
-pangocairo = "0.21"
+pango = "0.22"
+pangocairo = "0.22"

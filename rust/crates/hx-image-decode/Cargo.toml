@@ -27,7 +27,7 @@ crate-type = ["staticlib", "rlib"]
 #
 #   | glycin crate | loader gen | gtk-rs family             | ships in               |
 #   |--------------|------------|---------------------------|------------------------|
-#   | 3.0.x        | 2+         | 0.21 (gdk4 0.10, g* 0.21) | GNOME 48+, Flatpak 49  |
+#   | 3.1.x        | 2+         | 0.22 (gdk4 0.11, g* 0.22) | GNOME 48+, Flatpak 49  |
 #   | 2.1.x        | 1+         | 0.20 (gdk4 0.9,  g* 0.20) | Debian 13 (trixie) etc.|
 #
 # Per upstream's compat table, the `1+` loaders are compatible with the
@@ -48,22 +48,22 @@ crate-type = ["staticlib", "rlib"]
 # compatible. glycin `default-features = false` + `async-io` keeps us off
 # the tokio interop helpers; `gdk4` gives `Frame::texture() -> gdk::Texture`.
 
-# --- Public gtk-rs family: ALWAYS the workspace 0.21 line -------------------
+# --- Public gtk-rs family: ALWAYS the workspace 0.22 line -------------------
 # Every gtk-rs value this crate hands out — the C FFI `*mut GdkTexture`
 # (ffi_result.rs) AND the Rust `gdk::Texture` returned by
 # `decode_first_frame_async` to in-tree callers like gtkhx-ui's banner — uses
 # this family. Keeping it fixed (not backend-selected) is what lets the crate
-# be linked from gtkhx-ui / gtkhx-ffi, which are pinned to 0.21, regardless of
+# be linked from gtkhx-ui / gtkhx-ffi, which are pinned to 0.22, regardless of
 # which glycin backend is active. Cross-platform: gtk-rs builds on
 # Windows/macOS, and the non-Linux `image` path below produces the same
 # `gdk::Texture`.
 glib = { workspace = true }
-gdk  = { package = "gdk4", version = "0.10" }
+gdk  = { package = "gdk4", version = "0.11" }
 
 # --- glycin-v2's gtk-rs 0.20 family (Linux + glycin-v2 only) ----------------
 # glycin 2.x depends on gtk-rs 0.20, so its `Loader`/`Frame` produce gdk4-0.9
 # values. These are used ONLY to talk to glycin 2.x; decode.rs's
-# `adopt_texture` bridges the resulting 0.20 `Texture` to the 0.21 public
+# `adopt_texture` bridges the resulting 0.20 `Texture` to the 0.22 public
 # `gdk::Texture` by raw `GdkTexture*` (ABI-identical across gtk-rs versions),
 # so no 0.20 type ever escapes this crate. gio2 backs the temp-file `Loader`
 # input (glycin 2.1.x has no `Loader::new_bytes`; see decode.rs `TempImageFile`).
@@ -75,11 +75,11 @@ gdk2  = { package = "gdk4", version = "0.9",  optional = true }
 # the shared memory it hands decoded frames back through, plus a seccomp
 # sandbox — neither exists on macOS/Windows. So the actual glycin crates only
 # build on Linux; off-Linux the `image`-crate path below runs and `dep:glycin*`
-# is simply inert. glycin-v3 reuses the public 0.21 family above (glycin 3.x is
-# already on gtk-rs 0.21); glycin-v2 additionally pulls the 0.20 family for the
-# bridge. gtk-rs 0.20 coexists with the workspace's 0.21 only inside this crate.
+# is simply inert. glycin-v3 reuses the public 0.22 family above (glycin 3.1 is
+# on gtk-rs 0.22); glycin-v2 additionally pulls the 0.20 family for the
+# bridge. gtk-rs 0.20 coexists with the workspace's 0.22 only inside this crate.
 [target.'cfg(target_os = "linux")'.dependencies]
-glycin3 = { package = "glycin", version = "~3.0", default-features = false, features = ["async-io", "gdk4"], optional = true }
+glycin3 = { package = "glycin", version = "~3.1", default-features = false, features = ["async-io", "gdk4"], optional = true }
 glycin2 = { package = "glycin", version = "~2.1", default-features = false, features = ["async-io", "gdk4"], optional = true }
 
 # Non-Linux decode backend: pure-Rust codecs (no system libs, no subprocess
@@ -94,12 +94,7 @@ glycin2 = { package = "glycin", version = "~2.1", default-features = false, feat
 # the WIDE-policy preview path opens (bmp/ico/tiff/webp). All pure-Rust — no
 # system libs. AVIF/HEIC need C libraries and degrade to a decode error, same
 # as a glycin host missing those loaders.
-# Pinned below 0.25.10: that release started using `slice_as_chunks` /
-# `is_multiple_of` (stabilized in rustc 1.88 / 1.87) without bumping its declared
-# rust-version, so the MSRV-aware resolver doesn't avoid it and it fails to
-# compile on our 1.85 floor. 0.25.9 is the last release that builds on 1.85.
-# Revisit this ceiling when the toolchain floor rises (see rust-toolchain.toml).
-image = { version = ">=0.25.5, <0.25.10", default-features = false, features = ["jpeg", "png", "gif", "bmp", "ico", "tiff", "webp"] }
+image = { version = "0.25.5", default-features = false, features = ["jpeg", "png", "gif", "bmp", "ico", "tiff", "webp"] }
 
 [features]
 # Default to the 3.x / 2+ backend so a bare `cargo build` / `cargo test`
@@ -109,7 +104,7 @@ image = { version = ">=0.25.5, <0.25.10", default-features = false, features = [
 # re-supply of the other members' defaults) to compile the v2 backend
 # instead. Enabling both at once is a hard error (see src/compat.rs).
 #
-# glycin-v3 needs no extra gtk-rs deps — glycin 3.x is on the public 0.21
+# glycin-v3 needs no extra gtk-rs deps — glycin 3.1 is on the public 0.22
 # family already. glycin-v2 pulls the 0.20 family for the texture bridge.
 default   = ["glycin-v3"]
 glycin-v3 = ["dep:glycin3"]

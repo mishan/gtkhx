@@ -589,7 +589,7 @@ async fn run_decode(
     let first_delay = first.delay();
     let first_index = frame_index(&first);
     // `adopt_texture` is the identity under glycin-v3 and bridges the 0.20
-    // texture to the public 0.21 family under glycin-v2 (see below).
+    // texture to the public 0.22 family under glycin-v2 (see below).
     let first_tex = adopt_texture(first.texture());
 
     let Some(first_delay) = first_delay else {
@@ -921,12 +921,12 @@ fn clamp_delay_ms(d: Duration) -> u32 {
     }
 }
 
-/// Adopt a glycin frame's texture into the crate's public 0.21 `gdk::Texture`.
+/// Adopt a glycin frame's texture into the crate's public 0.22 `gdk::Texture`.
 ///
-/// Under glycin-v3 the frame texture is already the public 0.21 family, so this
+/// Under glycin-v3 the frame texture is already the public 0.22 family, so this
 /// is the identity. Under glycin-v2 (gtk-rs 0.20) it bridges by raw
 /// `GdkTexture*`: the pointer is ABI-identical across gtk-rs versions, so we
-/// consume the 0.20 wrapper into a transfer-full pointer and adopt it as a 0.21
+/// consume the 0.20 wrapper into a transfer-full pointer and adopt it as a 0.22
 /// `Texture`. This keeps every gtk-rs value the crate hands out on the public
 /// family regardless of backend.
 #[cfg(all(target_os = "linux", feature = "glycin-v3"))]
@@ -944,7 +944,7 @@ fn adopt_texture(t: crate::compat::gdk2::Texture) -> gdk::Texture {
     // the single strong ref out of the 0.20 wrapper as a raw `*mut GdkTexture`
     // (the 0.9 sys type).
     let raw: *mut crate::compat::gdk2::ffi::GdkTexture = unsafe { t.into_glib_ptr() };
-    // Adopt that same ref as a 0.21 `gdk::Texture`. The sys `GdkTexture` structs
+    // Adopt that same ref as a 0.22 `gdk::Texture`. The sys `GdkTexture` structs
     // are opaque and layout-identical across gtk-rs versions, so the pointer
     // cast is sound; from_glib_full takes the transferred ref (no leak/double).
     unsafe { gdk::Texture::from_glib_full(raw as *mut gdk::ffi::GdkTexture) }
@@ -1031,7 +1031,7 @@ impl TempImageFile {
     }
 
     // glycin 2.x's `Loader::new` takes a gtk-rs 0.20 `gio::File`, so this
-    // returns the 0.20 family's File (not the public 0.21 gio).
+    // returns the 0.20 family's File (not the public 0.22 gio).
     fn gfile(&self) -> crate::compat::gio2::File {
         crate::compat::gio2::File::for_path(&self.path)
     }

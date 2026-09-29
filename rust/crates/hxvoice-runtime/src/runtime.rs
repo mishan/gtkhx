@@ -4202,7 +4202,7 @@ fn start_receive_bin(
         let mid_owned = mid.to_string();
         src_pad.add_probe(gstreamer::PadProbeType::BUFFER, move |_pad, _info| {
             let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n == 1 || n % 50 == 0 {
+            if n == 1 || n.is_multiple_of(50) {
                 crate::debug::log!(
                     "voice-flow",
                     "webrtcbin src_0 (mid={mid_owned}): buffer #{n}"
@@ -5284,7 +5284,7 @@ impl VoiceRuntime {
                 let n = std::sync::atomic::AtomicU64::new(0);
                 src.add_probe(gstreamer::PadProbeType::BUFFER, move |_, _| {
                     let c = n.fetch_add(1, Ordering::Relaxed) + 1;
-                    if c == 1 || c % 30 == 0 {
+                    if c == 1 || c.is_multiple_of(30) {
                         crate::debug::log!("voice-flow", "{kind:?} capture: RTP buffer #{c}");
                     }
                     gstreamer::PadProbeReturn::Ok

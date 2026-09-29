@@ -17,9 +17,10 @@ marshaling is refcounted and uses an atomic end-of-stream flag.
 **Recommendation:** portable to Rust as a standalone effort (it needs none of
 the dock bridge). The one real dependency question is the **PDF and source
 viewers**, which need `poppler-rs` + `sourceview5` crates aligned to the
-pinned **gtk4 0.10 / glib 0.21** stack. `sourceview5` almost certainly has a
-matching release (0.9.x — it's a lockstep gtk-rs crate); `poppler-rs` is the
-one to actually verify. Gate both behind Cargo features mirroring the
+workspace's **gtk4 0.11 / glib 0.22** stack. Now that the workspace is on
+the current gtk-rs line, the current release of each is the one to use;
+`poppler-rs`, the less actively tracked of the two, is still the one to
+verify. Gate both behind Cargo features mirroring the
 existing `HAVE_POPPLER` / `HAVE_GTKSOURCEVIEW` meson options, so a missing /
 misaligned binding just drops that viewer to the text fallback (exactly what
 the C build already does when the C lib is absent) rather than blocking the
@@ -109,15 +110,12 @@ Three of the four viewers reach outside gtk4 itself:
   inline-media / banner already use; PICT/ImageMagick fallback stays in
   `pict_embed.c` / `pict_magick.c` and is called via FFI. No new dep.
 - **source** — needs [`sourceview5`](https://crates.io/crates/sourceview5).
-  It's a first-class lockstep gtk-rs crate (bilelmoussaoui). Current is 0.10
-  (the gtk4 0.11 cycle); the **gtk4 0.10 cycle release is 0.9.x**, which
-  matches our pin (same cycle as libadwaita 0.8). Very likely a clean add.
+  It's a first-class lockstep gtk-rs crate (bilelmoussaoui); 0.10 is the
+  gtk4 0.11 cycle, the workspace's. Very likely a clean add.
 - **pdf** — needs a poppler binding (`poppler-rs`, cairo-based). Exists in
   the gtk-rs ecosystem but is less actively tracked than sourceview5;
-  **verify a release targets gtk4 0.10 / glib 0.21 / cairo of that cycle**
-  before committing. This is the same version-alignment trap as libpanel
-  (whose current 0.6 needs gtk4-sys 0.11): the *current* poppler release
-  probably targets gtk4 0.11, so we'd pin the previous-cycle version.
+  **verify a release targets gtk4 0.11 / glib 0.22 / cairo of that cycle**
+  before committing.
 
 **Verification step (do first, at port time):** in the workspace, run
 `cargo add sourceview5@0.9 --dry-run` and the equivalent for the poppler

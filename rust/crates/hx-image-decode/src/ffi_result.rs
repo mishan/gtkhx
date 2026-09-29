@@ -17,7 +17,7 @@
 use std::ffi::c_void;
 use std::ptr;
 
-// Public gtk-rs family (always the workspace 0.21 line) — see crate::compat.
+// Public gtk-rs family (always the workspace 0.22 line) — see crate::compat.
 use crate::compat::glib::translate::IntoGlibPtr;
 use crate::compat::{gdk, glib};
 

@@ -32,7 +32,7 @@ hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
 hxvoice-send = { path = "../hxvoice-send", optional = true }
 hxtls-trust = { path = "../hxtls-trust" }
 # First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
-# pinned in the workspace (rust/Cargo.toml, gtk-rs-core 0.21 family) and
+# pinned in the workspace (rust/Cargo.toml, the gtk-rs-core family) and
 # compiled behind hxbridge's `voice` feature; this crate is the first to
 # consume them unconditionally. They build against the libgtk-4 /
 # libadwaita-1 the C binary already links, so the system-library surface

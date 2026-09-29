@@ -88,9 +88,9 @@ knowing.
 
 3. **UI toolkit: gtk4-rs + libadwaita-rs.** Same widget set as the C code, so
    the AdwHeaderBar / AdwToast / AdwPreferencesDialog choices carry across
-   unchanged. The workspace pins the gtk-rs-core 0.21 family (glib/gio 0.21,
-   gtk4 0.10, libadwaita 0.8) — see `rust/Cargo.toml` for the Debian-stable
-   rustc floor that keeps us off the next line up.
+   unchanged. The workspace uses the current gtk-rs-core family (glib/gio
+   0.22, gtk4 0.11, libadwaita 0.9) and moves up with it; the Rust floor is
+   that family's MSRV (see `rust-toolchain.toml`).
 
 4. **Async runtime: tokio in a dedicated thread, GLib MainContext on the UI.**
    The documented gtk-rs pattern. Heavy IO (transfers, banner fetch, tracker

@@ -140,11 +140,11 @@ jobs:
               # Voice-enabled feature set — mirrors the shipping meson build.
               cargo clippy --workspace --all-targets \
                 --features "hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice" \
-                --ignore-rust-version -- -D warnings
+                -- -D warnings
 
               # Default (voice-off) configuration.
               cargo clippy --workspace --all-targets \
-                --ignore-rust-version -- -D warnings
+                -- -D warnings
 
               # Hand the cache dirs back to the runner user for the post-job save.
               chown -R "$(stat -c %u:%g /src)" \

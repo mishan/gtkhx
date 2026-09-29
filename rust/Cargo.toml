@@ -54,21 +54,20 @@ members = [
 # subsequent R3+ crates (hxnet, hxvoice-runtime) inherit by writing
 # `glib.workspace = true` etc. in their own Cargo.toml.
 #
-# - gtk-rs-core 0.21 family: glib 0.21, gio 0.21, gtk4 0.10, libadwaita 0.8
-#   are the crates.io releases that ship together in this line. MSRV
-#   floor: rustc 1.83 — see rust-toolchain.toml. Chosen over the 0.22
-#   family (MSRV 1.92) so the workspace builds on Debian trixie's
-#   stock rustc 1.85; the 0.22 line's only adds at our use sites are
-#   bindings for GTK 4.20+ / libadwaita 1.7+ that we don't depend on
-#   (meson floor: gtk4 >= 4.10, libadwaita-1 >= 1.6).
-# - gstreamer-rs 0.24 family: tracks GStreamer 1.24 at runtime, which
-#   matches what Debian trixie ships. The Flatpak runtime (GNOME 49)
-#   ships GStreamer 1.26; gstreamer-rs 0.24 against libgstreamer 1.26
-#   is fine — the bindings just don't expose any 1.26-only API surface
-#   to the workspace. If a future voice or media feature needs a
-#   1.26-binding API (vs. a 1.26-runtime behavior), step the whole
-#   family up; nothing today does. See docs/voice.md.
-#   and docs/rust/glib-interop.md "GStreamer runtime floor".
+# - gtk-rs-core 0.22 family: glib 0.22, gio 0.22, gtk4 0.11, libadwaita 0.9
+#   are the crates.io releases that ship together in this line, the
+#   current one. Its MSRV (rustc 1.92) sets the workspace's; see
+#   rust-toolchain.toml. The bindings build against any GTK 4 and
+#   libadwaita 1, so they raise no system floor: meson's gtk4 >= 4.10 and
+#   libadwaita-1 >= 1.6 are what decide which distributions can run it.
+# - gstreamer-rs 0.25 family, the line released alongside. Its bindings
+#   build against GStreamer 1.14+, below meson's own 1.20 floor, and the
+#   1.26-only API surface it adds is unused, so Debian's 1.24 and the
+#   Flatpak's 1.26 both work. See docs/rust/glib-interop.md "GStreamer
+#   runtime floor".
+#
+# When gtk-rs releases a new line, move the whole family up together, and
+# the rust-version below with it.
 #
 # Pinning at major.minor rather than exact patch lets `cargo update`
 # pick up bug-fix releases within the line without ABI surprises.
@@ -80,28 +79,28 @@ members = [
 # subsequent R3.x phase activates it (R3.2 — banner.c port — is the
 # first planned consumer).
 [workspace.package]
-# Debian trixie (stable) ships rustc 1.85 — see rust-toolchain.toml for the
-# full rationale. Declaring it here (inherited by every member via
+# The gtk-rs family's MSRV — see rust-toolchain.toml for the policy.
+# Declaring it here (inherited by every member via
 # `rust-version.workspace = true`) turns on cargo's MSRV-aware resolver
 # (enabled by resolver = "3"), which prefers dependency versions whose own
-# MSRV is <= 1.85. That keeps transitive deps (icu, zbus/zvariant via glycin,
-# …) from silently jumping to a version that needs a newer rustc.
-rust-version = "1.85"
+# MSRV is within it. That keeps transitive deps from silently jumping to a
+# version that needs a newer rustc.
+rust-version = "1.92"
 
 [workspace.dependencies]
 hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "ba28f6481bf44b197b3b9312e36a243dd3893143" }
 hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "ba28f6481bf44b197b3b9312e36a243dd3893143" }
 hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "ba28f6481bf44b197b3b9312e36a243dd3893143" }
-glib = "0.21"
-gio = "0.21"
-gtk4 = "0.10"
-libadwaita = "0.8"
-gstreamer = "0.24"
-gstreamer-app = "0.24"
-gstreamer-audio = "0.24"
-gstreamer-sdp = "0.24"
-gstreamer-webrtc = "0.24"
-gstreamer-rtp = "0.24"
+glib = "0.22"
+gio = "0.22"
+gtk4 = "0.11"
+libadwaita = "0.9"
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+gstreamer-audio = "0.25"
+gstreamer-sdp = "0.25"
+gstreamer-webrtc = "0.25"
+gstreamer-rtp = "0.25"
 # R3.1 async stack. tokio's `rt-multi-thread` covers our shape (one
 # dedicated OS thread hosts the runtime; spawned tasks share that
 # thread's worker pool). `sync` brings mpsc/oneshot. `time` powers
