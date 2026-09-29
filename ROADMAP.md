@@ -213,9 +213,10 @@ These are settled. Don't reopen them without a strong new reason.
    the record.)* The original plan was to vendor HexChat's maintained xtext fork and keep
    it forever. That was the right call in its moment — it bought the GTK 2 → 3 → 4 climb
    cheaply — but a line-uniform layout model could not carry inline media or variable-height
-   rows. It was replaced by a purpose-built Rust widget and deleted. See
-   [docs/chat-view.md](docs/chat-view.md) and
-   [docs/chat-view-benchmark.md](docs/chat-view-benchmark.md).
+   rows. It was replaced by a purpose-built Rust widget, since split out as
+   [Rotulus](https://github.com/mishan/rotulus), and deleted. See
+   [docs/chat-view.md](docs/chat-view.md) and the
+   [xtext benchmark](https://github.com/mishan/rotulus/blob/main/docs/xtext-benchmark.md).
 
 ---
 

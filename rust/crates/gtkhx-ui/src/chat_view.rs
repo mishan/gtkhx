@@ -83,14 +83,22 @@ fn setup(view: &RotulusView) {
     view.set_group_gap_secs(rotulus_layout::buffer::DEFAULT_GROUP_GAP_SECS);
     let schemes: Vec<&str> = LINKS.schemes().iter().map(String::as_str).collect();
     view.set_link_schemes(&schemes);
-    unsafe {
-        rotulus::ffi::rotulus_view_set_avatar_func(
-            view.upcast_ref::<gtk::Widget>().to_glib_none().0,
-            Some(hx_chat_avatar_for_key),
-            std::ptr::null_mut(),
-            None,
-        );
-    }
+    // chat_avatar.c lends its paintable; the view keeps its own reference
+    // for the draw.
+    view.set_avatar_func(Some(Box::new(|view: &RotulusView, key| {
+        let p = unsafe {
+            hx_chat_avatar_for_key(
+                view.upcast_ref::<gtk::Widget>().to_glib_none().0,
+                key,
+                std::ptr::null_mut(),
+            )
+        };
+        if p.is_null() {
+            None
+        } else {
+            Some(unsafe { glib::translate::from_glib_none(p) })
+        }
+    })));
 
     // A hotline:// link connects; anything else goes to the desktop.
     view.connect_closure(

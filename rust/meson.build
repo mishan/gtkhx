@@ -190,32 +190,6 @@ rust_sources = files(
   'crates/hxvoice-send/src/tests.rs',
   'crates/hxtext/src/lib.rs',
   'crates/hxtext/src/tests.rs',
-  # rotulus-layout (chat-view C1) — the chat layout engine. No linkable
-  # output yet; listed so edits retrigger the cargo build and the
-  # workspace test run.
-  'crates/rotulus-layout/src/lib.rs',
-  'crates/rotulus-layout/src/span.rs',
-  'crates/rotulus-layout/src/message.rs',
-  'crates/rotulus-layout/src/markdown.rs',
-  'crates/rotulus-layout/src/measure.rs',
-  'crates/rotulus-layout/src/wrap.rs',
-  'crates/rotulus-layout/src/index.rs',
-  'crates/rotulus-layout/src/anchor.rs',
-  'crates/rotulus-layout/src/buffer.rs',
-  'crates/rotulus-layout/src/select.rs',
-  'crates/rotulus-layout/src/tests.rs',
-  'crates/rotulus-layout/src/linkify.rs',
-  'crates/rotulus-mirc/src/lib.rs',
-  # rotulus (chat-view C2) — the GTK4 widget over rotulus-layout.
-  'crates/rotulus/src/lib.rs',
-  'crates/rotulus/src/view.rs',
-  'crates/rotulus/src/measure.rs',
-  'crates/rotulus/src/ffi.rs',
-  'crates/rotulus/src/links.rs',
-  'crates/rotulus/src/tests.rs',
-  'crates/rotulus/src/a11y.rs',
-  'crates/rotulus/src/mirc_ffi.rs',
-  'crates/rotulus/include/rotulus.h',
   'crates/hxbookmarks/src/lib.rs',
   'crates/hxbookmarks/src/cipher.rs',
   'crates/hxbookmarks/src/legacy.rs',
@@ -307,9 +281,6 @@ rust_sources = files(
   'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
-  'crates/rotulus-layout/Cargo.toml',
-  'crates/rotulus/Cargo.toml',
-  'crates/rotulus-mirc/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
@@ -468,9 +439,33 @@ endif
 # Build the Rust workspace. The custom_target output is a stamp file that
 # Meson uses for dependency tracking; the actual artifacts are the .a
 # archives under rust_target_dir/release/.
-# The chat widget's C header ships inside its crate, beside the code that
-# implements it, so the crate carries its own ABI when it leaves the tree.
-rotulus_inc = include_directories('crates/rotulus/include')
+# The chat view comes from crates.io, and its crate carries the C header
+# and the translations of its own strings. Ask cargo where the locked
+# version lives rather than keep copies here; see rotulus.py.
+rotulus_dir = run_command(
+  find_program('python3'), files('rotulus.py'), 'dir',
+  cargo.full_path(), meson.current_source_dir() / 'Cargo.toml',
+  check : true,
+).stdout().strip()
+rotulus_inc = include_directories(run_command(
+  find_program('python3'), files('rotulus.py'), 'include-dir',
+  rotulus_dir, meson.project_source_root(), meson.current_source_dir(),
+  check : true,
+).stdout().strip())
+# The directory's name carries the crate's version, so reconfigure when the
+# lockfile moves; reading it is what makes it a configure dependency.
+import('fs').read('Cargo.lock')
+
+# Its strings are in their own gettext domain, "rotulus" (see gtkhx.c).
+rotulus_locale_dir = meson.current_build_dir() / 'rotulus-locale'
+custom_target('rotulus-locale',
+  command : [find_program('python3'), files('rotulus.py'), 'locale',
+             rotulus_dir, rotulus_locale_dir, '@OUTPUT@'],
+  output : 'rotulus-locale.stamp',
+  build_by_default : true,
+)
+meson.add_install_script(find_program('python3'), files('rotulus.py'),
+  'install-locale', rotulus_locale_dir, get_option('localedir'))
 
 rust_build = custom_target('rust-workspace',
   command : [

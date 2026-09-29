@@ -188,7 +188,7 @@ for d in "$BUILD_DIR"/po/*/; do
   cp "$d/LC_MESSAGES/gtkhx.mo" "$RES/share/locale/$lang/LC_MESSAGES/"
 done
 # The chat view's own strings, in the "rotulus" domain (see gtkhx.c).
-for d in "$BUILD_DIR"/rust/crates/rotulus/po/*/; do
+for d in "$BUILD_DIR"/rust/rotulus-locale/*/; do
   [ -f "$d/LC_MESSAGES/rotulus.mo" ] || continue
   lang=$(basename "$d")
   mkdir -p "$RES/share/locale/$lang/LC_MESSAGES"

@@ -277,7 +277,6 @@ endif
 subdir('rust')
 subdir('src')
 subdir('po')
-subdir('rust/crates/rotulus/po')
 
 # -----------------------------------------------------------------------------
 # Data: sounds and man page

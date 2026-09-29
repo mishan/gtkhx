@@ -107,7 +107,8 @@ reinit_gtktexts (session *sess)
                     && !hx_panel_was_constructed (HX_PANEL_ID_CHAT)) {
                     continue;
                 }
-                rotulus_view_set_font (hx_gchat_output (gchat), fontname);
+                rotulus_view_set_font (ROTULUS_VIEW (hx_gchat_output (gchat)),
+                                       fontname);
                 if (hx_gchat_input (gchat)) {
                     gtkhx_apply_input_font (hx_gchat_input (gchat));
                 }
@@ -129,7 +130,7 @@ reinit_gtktexts (session *sess)
             g_hash_table_iter_init (&iter, sess->msg_windows);
             while (g_hash_table_iter_next (&iter, NULL, &val)) {
                 struct msgwin *msg = val;
-                rotulus_view_set_font (msg->outputbuf, fontname);
+                rotulus_view_set_font (ROTULUS_VIEW (msg->outputbuf), fontname);
                 gtkhx_apply_input_font (msg->inputbuf);
             }
         }
