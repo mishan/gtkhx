@@ -13,9 +13,9 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
-rotulus-layout = { path = "../rotulus-layout" }
+rotulus-layout = { workspace = true }
 # The in-app benchmark harness (src/bench) drives the chat view directly.
-rotulus = { path = "../rotulus" }
+rotulus = { workspace = true }
 gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
 # The Files browser reads a finished transfer's size off its handle.

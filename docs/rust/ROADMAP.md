@@ -110,12 +110,17 @@ knowing.
    subclass was acceptable but rewriting it was not in scope.
 
    It was rewritten anyway, and the vendored widget is deleted. The chat output
-   surface is now `rotulus-layout` (a dependency-free layout engine — spans,
+   surface is now Rotulus, which lives in
+   [its own repository](https://github.com/mishan/rotulus) and which GtkHx
+   takes from crates.io: `rotulus-layout` (a dependency-free layout engine — spans,
    wrapping, a chunked prefix-sum height index, scroll anchoring, selection,
-   search) plus `rotulus` (the GTK4 widget). `rust/crates/rotulus/include/rotulus.h` is a
-   declaration header; there is no `chat_view.c`. See
-   `docs/chat-view.md` for the case that overturned this decision and
-   `docs/chat-view-benchmark.md` for the measurements.
+   search) plus `rotulus` (the GTK4 widget). The crate's `rotulus.h` is a
+   declaration header; there is no `chat_view.c`. See the widget's
+   [design doc](https://github.com/mishan/rotulus/blob/main/docs/design.md)
+   for how it works,
+   [its xtext benchmark](https://github.com/mishan/rotulus/blob/main/docs/xtext-benchmark.md)
+   for the measurements that overturned this decision, and
+   [chat-view.md](../chat-view.md) for how GtkHx consumes it.
 
 7. **`gtk_hlist_compat` dies on the way through, not separately.** *(Done.)*
    Its consumers were each rewritten directly against `GtkColumnView` /
@@ -163,7 +168,7 @@ the map.
 | Receive- and send-side protocol handlers | `hxhandlers::{recv,send}` | the per-opcode handler bodies in `rcv.c` and the scattered `hlwrite` call sites |
 | Task registry + the send primitive | `hxtask` | `tasks_table.c`, the variadic `hlwrite` |
 | Client-side models: chat / membership / conversation registry, news, files | `hxmodel` | `struct chat` + `gchats`, the news GUI structs, `filelist_walker.c` |
-| Chat output surface | `rotulus-layout` + `rotulus` | vendored `xtext.c` |
+| Chat output surface | `rotulus` + `rotulus-layout`, from crates.io | vendored `xtext.c` |
 | Windows and dialogs | `gtkhx-ui`, module per window | see below |
 | TLS trust store (TOFU + SHA-256 pinning) | `hxtls-trust` | `tls_trust.c`, `tls_trust_dialog.c` |
 | Bookmarks (HTsc format, legacy import, cipher vocabulary) | `hxbookmarks` | `bookmarks_io.c`, `bookmark_rc4_dialog.c`, `cipher_vocab.c` |

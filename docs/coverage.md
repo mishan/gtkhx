@@ -85,7 +85,7 @@ branch number less honest, not more.
 
 **The Rust crates.** The `filter = src/` line means the report covers the C
 tree only, and by now the majority of the codebase lives in
-`rust/crates/` — the protocol, networking, crypto, transfer, chat-view,
+`rust/crates/` — the protocol, networking, crypto, transfer,
 session-object and a growing share of the UI. A high overall percentage in this
 report says the remaining C is well tested; it says nothing at all about the
 larger half of the program.

@@ -22,7 +22,8 @@
 //! at 60 Hz), and no frame can be shorter. A phase that reports exactly
 //! one idle interval did no measurable work — or the benchmark failed to
 //! trigger the work it claims to time, which is how both of the failures
-//! recorded in docs/chat-view-benchmark.md looked.
+//! recorded in the rotulus repository's docs/xtext-benchmark.md looked
+//! (<https://github.com/mishan/rotulus/blob/main/docs/xtext-benchmark.md>).
 //!
 //! Frame timings include the compositor and depend on the display, the
 //! window size and the theme. Compare runs on one machine only, and read

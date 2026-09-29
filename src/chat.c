@@ -312,7 +312,7 @@ gtkhx_apply_theme_palette (gboolean dark)
             struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (gchat && gchat->output) {
-                rotulus_view_set_palette (gchat->output, colors);
+                rotulus_view_set_palette (ROTULUS_VIEW (gchat->output), colors);
             }
         }
     }
@@ -323,7 +323,8 @@ gtkhx_apply_theme_palette (gboolean dark)
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
             if (msg->outputbuf) {
-                rotulus_view_set_palette (msg->outputbuf, colors);
+                rotulus_view_set_palette (ROTULUS_VIEW (msg->outputbuf),
+                                          colors);
             }
         }
     }
@@ -512,7 +513,7 @@ hx_chat_nick_color (const char *nick, gsize nick_len, gboolean is_self)
  * either because hx_chat_split_nick_body didn't match (emote,
  * raw server prose) or the caller wanted a plain append. */
 static void
-xprintline_render_parts (GtkWidget *text, const char *name, gsize name_len,
+xprintline_render_parts (RotulusView *text, const char *name, gsize name_len,
                          const char *body_text, gsize body_text_len,
                          gboolean is_info, gboolean is_self, gint16 info_color,
                          RotulusSpeaker speaker)
@@ -633,7 +634,7 @@ xprintline_render_parts (GtkWidget *text, const char *name, gsize name_len,
 /* Offsets-into-one-line wrapper, for the log-line path where the name
  * and body really are slices of the same buffer. */
 static void
-xprintline_render (GtkWidget *text, const char *line, gsize line_len,
+xprintline_render (RotulusView *text, const char *line, gsize line_len,
                    gsize name_off, gsize name_len, gsize body_off,
                    gsize body_len, gboolean is_info, gboolean is_self,
                    gint16 info_color, RotulusSpeaker speaker)
@@ -823,7 +824,7 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
  * has no nick to parse and no highlight to consider — it is the one
  * shape where the caller already knows every part. */
 static void
-xprintline_render_tagged (GtkWidget *text, const char *tag, gsize tag_len,
+xprintline_render_tagged (RotulusView *text, const char *tag, gsize tag_len,
                           gint16 tag_color, const char *body, gsize body_len)
 {
     RotulusRun gutter[3] = {
@@ -953,7 +954,8 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
      * fresh). The texture quietly drops. */
     struct gtkhx_chat *gchat = gchat_with_cid (hx_active_session (), ctx->cid);
     if (gchat && gchat->output) {
-        RotulusMark *mark = rotulus_view_media_mark (gchat->output, ctx->token);
+        RotulusMark *mark = rotulus_view_media_mark (
+            ROTULUS_VIEW (gchat->output), ctx->token);
         if (mark) {
             if (decoded->frames && decoded->frames->len > 1) {
                 /* Animation (G.3). Install the frames on the
@@ -967,7 +969,7 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
                            gdk_texture_get_height (decoded->texture),
                            decoded->frames->len);
                 rotulus_view_media_set_frames (
-                    gchat->output, mark,
+                    ROTULUS_VIEW (gchat->output), mark,
                     (const RotulusFrame *)decoded->frames->data,
                     decoded->frames->len);
             } else {
@@ -977,8 +979,8 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
                            ctx->cid, ctx->token,
                            gdk_texture_get_width (decoded->texture),
                            gdk_texture_get_height (decoded->texture));
-                rotulus_view_media_set_texture (gchat->output, mark,
-                                                decoded->texture);
+                rotulus_view_media_set_texture (ROTULUS_VIEW (gchat->output),
+                                                mark, decoded->texture);
             }
         }
     }
@@ -1023,7 +1025,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             const char *next_nl = memchr (cur, '\n', end - cur);
             gsize seg_len
                 = next_nl ? (gsize)(next_nl - cur) : (gsize)(end - cur);
-            rotulus_view_append_text (gchat->output, cur, (int)seg_len, 0);
+            rotulus_view_append_text (ROTULUS_VIEW (gchat->output), cur,
+                                      (int)seg_len, 0);
             if (!next_nl) {
                 break;
             }
@@ -1063,7 +1066,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     }
 
     xprintline_render_parts (
-        gchat->output, e->line + e->sender_off, e->sender_len,
+        ROTULUS_VIEW (gchat->output), e->line + e->sender_off, e->sender_len,
         joined ? joined : "", first_body_len, e->is_info, e->is_self,
         HX_CHAT_INFO_COLOR,
         chat_speaker_for (e->cid, e->uid, e->line + e->sender_off,
@@ -1097,8 +1100,9 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             = hx_media_table_register (hx_chat_media_table (conv), e->media);
         char *placeholder = hx_chat_media_placeholder_line (e->media);
         if (placeholder) {
-            rotulus_view_append_media (gchat->output, NULL /* texture */,
-                                       placeholder, token, 0 /* stamp */);
+            rotulus_view_append_media (ROTULUS_VIEW (gchat->output),
+                                       NULL /* texture */, placeholder, token,
+                                       0 /* stamp */);
             g_free (placeholder);
 
             /* Auto-fetch. Cap-gated: on a server that didn't
@@ -1200,7 +1204,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     }
     gchat->render.has_more = has_more;
 
-    GtkWidget *view = gchat->output;
+    RotulusView *view = ROTULUS_VIEW (gchat->output);
 
     /* evict the existing Load-older sentinel up front.
      * We'll re-insert a fresh one below if has_more is still true
@@ -1410,7 +1414,7 @@ find_gchat_by_output (GtkWidget *view)
 /* load-more on a chat output: fetch the page of history before the
  * oldest one rendered. */
 static void
-chat_history_load_more (GtkWidget *view, RotulusLoadDirection direction,
+chat_history_load_more (RotulusView *view, RotulusLoadDirection direction,
                         gpointer data)
 {
     struct gtkhx_chat *gchat;
@@ -1420,7 +1424,7 @@ chat_history_load_more (GtkWidget *view, RotulusLoadDirection direction,
     if (direction != ROTULUS_LOAD_OLDER) {
         return;
     }
-    gchat = find_gchat_by_output (view);
+    gchat = find_gchat_by_output (GTK_WIDGET (view));
     if (!gchat) {
         debug_log ("chat-history",
                    "Load-older click: no gchat matches the view");
@@ -1505,9 +1509,9 @@ chat_history_load_more (GtkWidget *view, RotulusLoadDirection direction,
         RotulusRun run = ROTULUS_RUN (loading_row, (int)strlen (loading_row),
                                       ROTULUS_PAL_MUTED, ROTULUS_ATTR_NONE);
 
-        rotulus_view_remove (gchat->output, gchat->render.load_older_ent);
+        rotulus_view_remove (view, gchat->render.load_older_ent);
         gchat->render.load_older_ent = rotulus_view_insert_before (
-            gchat->output, gchat->render.anchor_ent,
+            view, gchat->render.anchor_ent,
             &(RotulusRow){
                 .kind = ROTULUS_ROW_DIVIDER, .body = &run, .n_body = 1 });
         g_free (loading_row);
@@ -1635,12 +1639,12 @@ xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
 
     if (is_info) {
         /* Whole line is the body; the gutter comes from `tag`. */
-        xprintline_render_tagged (text, tag, strlen (tag), info_color, valid,
-                                  valid_len);
+        xprintline_render_tagged (ROTULUS_VIEW (text), tag, strlen (tag),
+                                  info_color, valid, valid_len);
     } else {
         xprintline_render (
-            text, valid, valid_len, name_off, name_len, body_off, body_len,
-            FALSE, said_by_self, info_color,
+            ROTULUS_VIEW (text), valid, valid_len, name_off, name_len, body_off,
+            body_len, FALSE, said_by_self, info_color,
             /* No wire uid: a log line never came from a
                             * chat message, so the nick can only be
                             * resolved by lookup — and it has to be
@@ -1799,8 +1803,9 @@ create_chat (session *sess)
     g_signal_connect (text, "media-activated",
                       G_CALLBACK (inline_media_chat_activated), NULL);
 
-    vscroll = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                                 rotulus_view_get_vadjustment (text));
+    vscroll = gtk_scrollbar_new (
+        GTK_ORIENTATION_VERTICAL,
+        rotulus_view_get_vadjustment (ROTULUS_VIEW (text)));
 
     /* Keep the xtext output + its scrollbar alive parentless (ref-sunk)
      * until the Rust content build (chat.rs::build_content) reads them back
@@ -1980,8 +1985,9 @@ pchat_new (session *sess, struct chat *chat)
     g_signal_connect (text, "media-activated",
                       G_CALLBACK (inline_media_chat_activated), NULL);
 
-    vscroll = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                                 rotulus_view_get_vadjustment (text));
+    vscroll = gtk_scrollbar_new (
+        GTK_ORIENTATION_VERTICAL,
+        rotulus_view_get_vadjustment (ROTULUS_VIEW (text)));
 
     subject = gtk_entry_new ();
     gtkhx_apply_text_style (subject);
@@ -2358,7 +2364,7 @@ hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
     if (!gchat) {
         return;
     }
-    rotulus_view_clear (gchat->output);
+    rotulus_view_clear (ROTULUS_VIEW (gchat->output));
     /* The subject entry belongs to the Chat panel's content, so it is
      * NULL both before the panel is first built and after it is closed
      * (gtkhx_chat_clear_content_ptrs nulls it on the content box's

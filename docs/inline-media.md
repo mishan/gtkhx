@@ -132,8 +132,9 @@ depth, not a guarantee.**
   accumulator), `src/chat.c` (placeholder row + auto-fetch + swap-in),
   and the click-to-view dialog in `gtkhx-ui/src/inline_media_dialog.rs`.
 - **Chat rendering** — the `rotulus_view_append_media` /
-  `_media_mark` / `_media_set_texture` / `_media_set_animation` family
-  declared in `rust/crates/rotulus/include/rotulus.h`, implemented in the `rotulus` crate.
+  `_media_mark` / `_media_set_texture` / `_media_set_frames` family
+  declared in `rotulus.h`, from the external `rotulus` crate (see
+  [chat-view.md](chat-view.md)).
 
 Per-upload and per-download heap contexts are owned by the task table
 via a `GDestroyNotify` hook on the task, so a disconnect mid-transfer

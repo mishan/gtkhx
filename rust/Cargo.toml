@@ -24,15 +24,6 @@ members = [
     "crates/hxrequest",
     # End-to-end suites against the Docker rig, behind its `rig` feature.
     "crates/hx-e2e",
-    # Chat-view phase C1: the chat layout engine (message model, span
-    # parsers, wrapping, height index, scroll anchoring). Deliberately
-    # dependency-free — no gtk4/glib/pango — so the whole of it runs under
-    # `cargo test` on display-less CI; the C2 widget supplies the font
-    # backend through the TextMeasure trait. Nothing links it yet: the
-    # consumer is rotulus in C2. See docs/chat-view.md.
-    "crates/rotulus-layout",
-    "crates/rotulus-mirc",
-    "crates/rotulus",
     "crates/hxvoice",
     "crates/hxvoice-model",
     "crates/hxvoice-send",
@@ -88,6 +79,10 @@ members = [
 rust-version = "1.92"
 
 [workspace.dependencies]
+# The chat view, published from https://github.com/mishan/rotulus. The
+# widget crate and its layout engine release together; move them together.
+rotulus = "0.1"
+rotulus-layout = "0.1"
 hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "ba28f6481bf44b197b3b9312e36a243dd3893143" }
 hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "ba28f6481bf44b197b3b9312e36a243dd3893143" }
 hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "ba28f6481bf44b197b3b9312e36a243dd3893143" }

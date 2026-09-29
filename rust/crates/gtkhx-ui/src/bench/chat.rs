@@ -2,10 +2,12 @@
 //! the real public-chat view.
 //!
 //! This is the harness that decided the xtext replacement, moved here from
-//! C when the harness became general. docs/chat-view-benchmark.md is its
-//! record. The phases are the same, with one difference in first paint:
-//! the C harness timed it to the next frame tick, which includes waiting
-//! for vsync, and this one times it to the end of the paint. First-paint
+//! C when the harness became general. Its record is the rotulus
+//! repository's docs/xtext-benchmark.md
+//! (<https://github.com/mishan/rotulus/blob/main/docs/xtext-benchmark.md>).
+//! The phases are the same, with one difference in first paint: the C
+//! harness timed it to the next frame tick, which includes waiting for
+//! vsync, and this one times it to the end of the paint. First-paint
 //! numbers in that record read up to one refresh interval higher than this
 //! harness would report; the other phases compare directly.
 //!

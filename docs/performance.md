@@ -1,14 +1,14 @@
 # Performance testing
 
 How GtkHx's hot paths are measured, what has been measured so far, and what
-the measurements found. The chat view has its own, older record in
-[chat-view-benchmark.md](chat-view-benchmark.md); read its §6 before trusting
-any new harness.
+the measurements found. The chat view has its own, older record, the
+[xtext benchmark](https://github.com/mishan/rotulus/blob/main/docs/xtext-benchmark.md)
+in the Rotulus repository; read its §6 before trusting any new harness.
 
 ## Principles
 
 - **Check the instrument against a known value.** Both failures recorded in
-  the chat-view benchmark produced plausible, complete, wrong numbers. Every
+  the xtext benchmark produced plausible, complete, wrong numbers. Every
   harness here carries a check whose answer is known in advance — a size
   sweep that should not change the result, a raw primitive the wrapped one
   should match — and a harness whose check fails is broken until shown
@@ -28,7 +28,7 @@ any new harness.
 
 | Tier | What | Where | Status |
 |---|---|---|---|
-| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `rotulus-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
+| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | bench binaries against an in-process fake server | The connection pipeline, HTXF transfers, the tracker fetch |
 | 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup, chat history, video tiles |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
@@ -37,7 +37,6 @@ any new harness.
 
 ```sh
 cd rust
-cargo bench -p rotulus-layout          # layout engine
 cargo bench -p hxcrypto               # ciphers and hashes
 cargo bench -p hxcrypto -- aead       # one group
 cargo bench -p hxtext                 # Mac Roman, the wire encode, shortcodes
@@ -45,6 +44,10 @@ cargo bench -p hxmodel                # member list, nick completion, file list
 cargo bench -p hxmacres               # icons.rsrc: open, look up, decode
 cargo bench -p hxcrypto -- --warm-up-time 1 --measurement-time 3   # quicker
 ```
+
+The chat view's layout engine has its own suite, in the
+[Rotulus repository](https://github.com/mishan/rotulus) with the rest of the
+widget.
 
 criterion is a dev-dependency only, with its default features off; nothing
 that ships links it. Criterion keeps the previous run under
@@ -209,8 +212,10 @@ estimate. Comparable only with runs on the same machine.
 
 ### `rotulus-layout`
 
-Against `FixedMeasure`, so this is the engine without Pango shaping. Width
-800 px, viewport 600 px, 3–19-word messages with five nick widths.
+Measured while the crate was still in this tree; it and its benchmarks now
+live in the Rotulus repository. Against `FixedMeasure`, so this is the
+engine without Pango shaping. Width 800 px, viewport 600 px, 3–19-word
+messages with five nick widths.
 
 | Benchmark | 2,000 rows | 20,000 rows | Expected shape |
 |---|---|---|---|
@@ -235,8 +240,9 @@ grows a little, which fits the height index's prefix repair — O(chunks),
 not O(rows) — though that is not separately measured.
 
 The suite now also runs at 200,000 rows, and a memory report sits beside
-it (`--bench memory`); both are recorded in
-[chat-view.md](chat-view.md), "Measured". At that size the per-chunk
+it (`--bench memory`); both are recorded in the Rotulus design doc,
+["Measured"](https://github.com/mishan/rotulus/blob/main/docs/design.md#8-measured).
+At that size the per-chunk
 bookkeeping shows: every frame stays under 2 ms, but no longer flat.
 
 ### `hxcrypto`

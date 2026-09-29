@@ -465,9 +465,9 @@ create_msg (session *sess, guint16 _uid, char *name)
         g_free (fontname);
     }
 
-    msg->vscroll
-        = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                             rotulus_view_get_vadjustment (msg->outputbuf));
+    msg->vscroll = gtk_scrollbar_new (
+        GTK_ORIENTATION_VERTICAL,
+        rotulus_view_get_vadjustment (ROTULUS_VIEW (msg->outputbuf)));
     msg->inputbuf = gtk_text_view_new ();
 
     /* Theme monospace via gtk_text_view_set_monospace — see chat.c for
@@ -665,7 +665,7 @@ msg_output_render (session *sess, const char *name, guint16 uid,
             RotulusSpeaker sp
                 = { outgoing ? hx_conn_uid (sess->htlc) : uid, nam, -1 };
             rotulus_view_append (
-                msg->outputbuf,
+                ROTULUS_VIEW (msg->outputbuf),
                 &(RotulusRow){ .flags = outgoing ? ROTULUS_ROW_OUTGOING : 0,
                                .speaker = sp,
                                .gutter = gutter,
@@ -674,7 +674,8 @@ msg_output_render (session *sess, const char *name, guint16 uid,
                                .n_body = 1 });
             first = FALSE;
         } else {
-            rotulus_view_append_text (msg->outputbuf, cur, (int)seg_len, 0);
+            rotulus_view_append_text (ROTULUS_VIEW (msg->outputbuf), cur,
+                                      (int)seg_len, 0);
         }
         if (!nl) {
             break;

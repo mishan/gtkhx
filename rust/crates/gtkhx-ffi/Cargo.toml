@@ -52,10 +52,10 @@ hx-image-decode = { path = "../hx-image-decode", default-features = false }
 hxmacres = { path = "../hxmacres" }
 hxsound = { path = "../hxsound" }
 hxtext = { path = "../hxtext" }
-# The GTK4 chat widget. Exports the rotulus_view_* symbols declared in
-# rust/crates/rotulus/include/rotulus.h; C links against them directly (C5 deleted the
-# chat_view.c dispatcher along with the xtext backend it dispatched to).
-rotulus = { path = "../rotulus" }
+# The GTK4 chat widget. Exports the rotulus_view_* symbols declared in the
+# crate's include/rotulus.h, which rust/meson.build finds through cargo;
+# C links against them directly.
+rotulus = { workspace = true }
 hxtls-trust = { path = "../hxtls-trust" }
 
 # --- voice (gated by -Dvoice, see rust/meson.build) ---

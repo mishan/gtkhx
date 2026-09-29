@@ -312,9 +312,9 @@ machinery behind them:
    *The old cost estimate for this path is superseded.* It was written against a
    large vendored cairo chat widget that no longer exists, and priced in weeks
    of surgery on it plus the risk of re-merging against upstream HexChat. The
-   chat surface today is a Rust widget (`rotulus` over `rotulus-layout`)
-   behind the C ABI in `rust/crates/rotulus/include/rotulus.h`, and the palette reaches it through one
-   clean setter. The honest remaining cost is teaching that widget and its
+   chat surface today is a Rust widget, the external `rotulus` crate
+   (over its `rotulus-layout` engine), behind the C ABI in its `rotulus.h`,
+   and the palette reaches it through one clean setter. The honest remaining cost is teaching that widget and its
    layout engine to source colours from a style context rather than being handed
    an array — the layout crate is deliberately dependency-free, so that's a
    design change, not a call-site change — doing the same for the user-list

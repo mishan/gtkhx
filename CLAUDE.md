@@ -56,7 +56,7 @@ looking for code in the wrong place.
   [hx-libs](https://github.com/mishan/hx-libs)); the whole network stack including
   connect lifecycle, TLS, crypto, compression, framing, file transfers, and tracker fetch
   (`hxnet`); most receive handlers (`hxhandlers`); the session GObject and its boxed signal
-  payloads (`gtkhx-core`); the chat rendering widget (`rotulus-layout` + `rotulus`); and
+  payloads (`gtkhx-core`); the chat rendering widget (the external `rotulus` crate); and
   a growing set of windows and dialogs (`gtkhx-ui`).
 - **C owns**: the dock (mullion-gtk) and layout persistence, the toolbar, the file browser, the
   tray, notifications, previews, theming, and the receive handlers still left in `rcv.c`.
@@ -110,9 +110,9 @@ older `.c` files keep building; new code should include the narrowest one that w
 
 Also: `hotline.h` (wire struct layouts), `hotline_proto.h` (FFI declarations for the Rust
 protocol crate), `hxconn.h` + `hxconn_layout.h` (the accessor seam over the now-opaque,
-Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, in
-`rust/crates/rotulus/include/`; C links straight to Rust exports), `hl_access.h` (account
-access bits).
+Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships in the
+`rotulus` crate and is found through `rust/rotulus.py`; C links straight to Rust exports),
+`hl_access.h` (account access bits).
 
 ### Rust crates — by role
 
@@ -122,10 +122,11 @@ access bits).
 | **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
 | **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain; `hxrequest` — the requests the client sends, built as plain values with no C imports, so the end-to-end suites can send exactly what production sends |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
-| **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window), `rotulus` (the GTK4 chat widget, LGPL, headed for a repository of its own — it knows nothing about Hotline, and GtkHx configures it in `gtkhx-ui`'s `chat_view.rs`), `rotulus-layout` (its layout engine — **dependency-free**: no gtk, glib, or pango), `rotulus-mirc` (IRC formatting codes to styled runs) |
+| **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
 | **Media** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn) |
 | **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and the TOML file — the owner of every preference value at runtime), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
+| **External, from crates.io** | The chat view, `rotulus` (the GTK4 widget, LGPL) with its dependency-free layout engine `rotulus-layout` and `rotulus-mirc`. It lives in [its own repository](https://github.com/mishan/rotulus) and knows nothing about Hotline; GtkHx configures it in `gtkhx-ui`'s `chat_view.rs`. See `docs/chat-view.md` for how it is pinned, built and updated |
 | **Link façade** | `gtkhx-ffi` — bundles every FFI-exporting crate into a single `libgtkhx_ffi.a`, so the binary links exactly one archive instead of a hand-ordered list. Several crates also build a standalone `staticlib` on the side, purely so the test suite can link one crate at a time. See `docs/rust/crate-layout.md`. |
 
 ### Other directories

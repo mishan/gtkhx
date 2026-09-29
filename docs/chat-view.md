@@ -1,680 +1,312 @@
 # The chat view
 
-Reference for the chat rendering subsystem: the surface every chat,
+The GtkHx side of the chat rendering surface: the view every chat,
 private-chat and private-message window draws its output on.
 
-The widget is **Rotulus**: a GTK4 scrollback view for text-stream chat,
-LGPL-2.1-or-later, built to leave this tree as a library of its own. It
-knows nothing about Hotline. GtkHx configures it in one place,
-`rust/crates/gtkhx-ui/src/chat_view.rs` — the preferences it reads, the
-`hotline://` scheme, the avatar resolver, the URL menu — and everything
-else in this document is the widget's own behavior.
+The widget is **Rotulus**, a GTK4 scrollback view for text-stream chat,
+LGPL-2.1-or-later. It lives in its own repository,
+[mishan/rotulus](https://github.com/mishan/rotulus), and GtkHx takes it
+from crates.io like any other dependency. It knows nothing about Hotline.
+How it works — the layout engine, the message model, scroll anchoring,
+markdown, selection, search, the signals and properties an application
+hooks, and its measurements — is in its
+[design doc](https://github.com/mishan/rotulus/blob/main/docs/design.md).
+This document covers what GtkHx does with it: how the build finds it, what
+GtkHx configures, how to move to a new release, and how to change the
+widget when GtkHx needs it to do something new.
 
 It replaced a vendored copy of HexChat's xtext widget. The measured
-comparison that justified deleting xtext is
-[chat-view-benchmark.md](chat-view-benchmark.md); that comparison cannot
-be repeated, because only one backend exists now.
+comparison that justified deleting xtext is the
+[xtext benchmark](https://github.com/mishan/rotulus/blob/main/docs/xtext-benchmark.md),
+run inside GtkHx while both backends were still in the tree.
 
 ---
 
-## 1. The three layers
+## 1. Where it comes from
 
+Three crates, released together from the rotulus repository:
+
+- **`rotulus`** — the GTK4 widget, and the C ABI in `include/rotulus.h`.
+- **`rotulus-layout`** — its layout engine, with no dependencies at all.
+  GtkHx uses it directly for the link detector (`Linkifier`,
+  `DEFAULT_SCHEMES`), the compose box's markdown highlighting
+  (`scan_delims`), and the default grouping gap.
+- **`rotulus-mirc`** — mIRC formatting codes to styled runs. GtkHx doesn't
+  use it (Hotline has no in-band styling); it arrives as a dependency of
+  `rotulus`.
+
+`rust/Cargo.toml` names the first two in `[workspace.dependencies]` with a
+caret requirement (`rotulus = "0.1"`, `rotulus-layout = "0.1"`), and
+`gtkhx-ui` and `gtkhx-ffi` take them with `workspace = true`. The exact
+versions are whatever `rust/Cargo.lock` holds, so a build never moves to a
+new release on its own. The two must move together: the widget is built
+on a particular release of its layout engine, and GtkHx's direct uses of
+the engine should be the same copy, not a second one alongside it. The
+news views find links with GtkHx's `Linkifier` while the chat view uses
+the widget's, and the compose box highlights markdown with the parser the
+view renders it with; two copies could disagree on both.
+
+`rust/meson.build` turns on `rotulus/v4_14` when the GTK it builds against
+is 4.14 or newer; that feature is what makes the view implement
+`GtkAccessibleText`.
+
+The Flatpak build is offline, so the crates are vendored through
+`rust/cargo-sources.json` like every other crates.io dependency. It is
+generated from the lockfile and has to be regenerated whenever the lockfile
+changes:
+
+```sh
+python3 tools/flatpak-cargo-generator.py rust/Cargo.lock
 ```
-rotulus/include/rotulus.h   the C ABI. Declarations only — the symbols are
-                            exported from rotulus/src/ffi.rs.
-        │
-rust/crates/rotulus         gtk4-rs glib::subclass GtkWidget: measure /
-                            size_allocate / snapshot, GtkScrollable, event
-                            controllers, GSK render nodes, Pango measuring,
-                            properties, signals, GtkAccessibleText.
-        │
-rust/crates/rotulus-layout  pure layout engine, no widget: message model,
-                            markdown, link detection, wrap/measure, height
-                            index, scroll anchor, hit test, selection,
-                            search. No dependencies at all.
-
-rust/crates/rotulus-mirc    IRC formatting codes to styled runs, for an
-                            IRC client to opt into. Pure Rust.
-```
-
-The header lives in the crate, beside the code that implements it, so the
-widget carries its own interface when it leaves the tree. It was briefly
-a real dispatcher, while the new widget coexisted with xtext behind a
-runtime switch; the seam did its job — by the end xtext was referenced
-from that one file and nowhere else in the tree, which is what made
-deleting it a mechanical change rather than an archaeology project.
-
-Two properties of that seam are worth not giving back. **No struct-field
-access:** callers once wrote `GTK_XTEXT(w)->wordwrap`, `->max_lines`,
-`->urlcheck_function` and read `->buffer` and `->adj`; everything goes
-through properties and `rotulus_view_set_*` now, so the implementation owes
-callers behaviour rather than layout. **No raw entry pointers:** the
-chat-history render cursors in `struct hx_chat_history_render` used to be
-live `textentry *` into xtext's internal list, and are opaque
-`RotulusMark` handles backed by a message id. Marks are weak references —
-`rotulus_view_remove` on a stale one is a safe no-op returning `FALSE`,
-and that is the intended way to find out it went stale.
-
-### `rotulus-layout` has no dependencies
-
-Not gtk4, not glib, **not pango**. Text measurement — the one thing that
-genuinely needs a font stack — is abstracted behind the `TextMeasure`
-trait in `measure.rs`. The widget supplies a Pango-backed implementation;
-the crate's own tests supply `FixedMeasure`, where every character is
-exactly N pixels wide, which makes wrap assertions exact and readable
-instead of font-dependent and brittle. So the whole engine — wrapping,
-height indexing, scroll anchoring, span parsing, selection extraction,
-search — runs under `cargo test` on display-less CI. That is coverage
-xtext never had.
-
-The trait is also a hedge against xtext's worst performance bug. Its
-`find_next_wrap` called a width function **per character**, and that did a
-`pango_layout_set_text` + `pango_layout_get_pixel_size` round trip each
-time. `TextMeasure`'s unit of work is a *run*, never a character, so an
-implementation physically cannot repeat that mistake.
 
 ---
 
-## 2. The message model
+## 2. The C side: the header and the translations
 
-A row is a value with fields, not a byte string. Under xtext a chat line
-was bytes with in-band escapes, and a speaker, a message id, an avatar or
-a hit region had nowhere to live — which is why every feature added late had
-to be smuggled in as a magic word (`hxmedia:N`) or a magic
-non-breaking-space sentinel. `rotulus-layout::message` carries:
+The widget's symbols are exported from the `rotulus` rlib, which
+`gtkhx-ffi` bundles into `libgtkhx_ffi.a` with everything else; C links
+straight to them. There is no dispatcher file between C and the widget.
 
-- **`MessageKind`** — `Live`, `History { server_message_id }`, `Divider`,
-  `LoadMore(direction)`, `System`. `LoadMore` and `Divider` were ordinary
-  text rows under xtext whose meaning was recovered by string-matching the
-  rendered bytes: the history handler compared the clicked word against a
-  composed "↑\u{a0}Load\u{a0}older\u{a0}messages" sentinel, non-breaking
-  spaces and all, because xtext's tokenizer splits on ASCII space.
-- **`Speaker { key, nick, color }`**. `key` is the application's opaque
-  identity for the person — GtkHx passes the Hotline user id — and
-  `color` a per-person `0x00RRGGBB`.
-- **`Block`** — `Text(ParsedText)`, `Code { text, language }`,
-  `Quote { content, depth }`, `Image { token, size, alt }`. Adding a kind
-  of content is adding a variant plus a measure arm and a snapshot arm.
-  Under xtext, inline media needed a discriminator on `textentry`, a
-  side-allocated media struct, a parallel render path, and a padding hack
-  in the line-count math.
-- **`MessageFlags`** — highlight, muted, action, outgoing, deleted.
+The declarations are in `rotulus.h`, which ships inside the crate. GtkHx
+keeps no copy of it. `rust/rotulus.py` asks `cargo metadata --locked`
+where the locked `rotulus` package lives — in the cargo registry for a
+normal build, in the vendored sources for the Flatpak — and
+`rust/meson.build` uses that directory's `include/` as `rotulus_inc`, which
+`src/meson.build` adds to the C include path. The directory's name carries
+the crate's version, so `rust/meson.build` reads `Cargo.lock` at configure
+time, which makes it a configure dependency: moving the lock reconfigures
+the build and picks up the new header.
 
-The image block deliberately holds no `GdkTexture`: the layout engine only
-needs the size, and a texture cannot cross into a GTK-free crate. The view
-keys its own texture table off `token`. `size` is `None` until the decode
-lands, and the block measures as its `alt` text until then.
+The C ABI's methods take a `RotulusView *`, and GtkHx's C holds its views
+as `GtkWidget *`, so the call sites in `chat.c`, `msg.c` and `options.c`
+cast with `ROTULUS_VIEW()`.
 
-### Rows and runs: how C hands style over
+The widget's own strings (its two context menus) are in the `rotulus`
+gettext domain, and their catalogs ship in the crate's `po/`. The same
+script compiles them: a `rotulus-locale` target in `rust/meson.build`
+writes `build/rust/rotulus-locale/<lang>/LC_MESSAGES/rotulus.mo`, and an
+install script copies those under the configured `localedir`. The macOS
+and Windows bundle scripts pick them up from the same build directory.
+`gtkhx.c` binds the `rotulus` domain beside GtkHx's own at startup.
 
-C describes a row with a `RotulusRow`: a kind (`ROTULUS_ROW_MESSAGE`,
-`_SYSTEM`, `_HISTORY`, `_DIVIDER`, `_LOAD_OLDER`, `_LOAD_NEWER`), flags
-(`ROTULUS_ROW_OUTGOING`, `_ACTION`), a timestamp, a speaker, and two
-`RotulusRun` arrays — one for the gutter, one for the body — borrowed
-for the duration of the call and built on the stack.
-`rotulus_view_append`, `_insert_before` (history backfill) and `_replace`
-(an edit, a redaction, a streamed reply) all take one. The kind used to
-be inferred: a row whose every run was in the muted history color was
-history, and the load-older row was recognized by its text. Both are
-explicit now.
-
-A run is `(text, palette index, attrs)`, written with `ROTULUS_RUN`,
-plus optional fields that take effect only under their attribute bits: a
-background (`ROTULUS_ATTR_BACKGROUND`), an RGB foreground or background
-(`_RGB`, `_BACKGROUND_RGB`), and reverse video (`_REVERSE`). GtkHx uses
-the first four; `rotulus_mirc_parse` produces the rest.
-
-Named palette slots (`HX_CHAT_INFO_COLOR`, `HX_CHAT_HIGHLIGHT_COLOR`,
-`HX_CHAT_PLACEHOLDER_COLOR`, …, in `src/chat.h`) exist because these were once bare numbers
-inside printf format strings, which is how a colour choice ends up
-undocumented and unsearchable. They name theme roles, not mIRC indices, so
-the gutter — brackets, nicks, the `[hx]` tag, a mention — follows the
-theme. Nicks go through `hx_chat_nick_color`, which hashes the name onto
-the theme's `nick_colors` when it has any.
-
-### Speaker identity is the user list's identity
-
-GtkHx's `RotulusSpeaker.key` is the Hotline user id, `0` when unknown — which is
-the honest answer more often than it looks. Hotline chat is a *text
-stream*: a chat line carries a name, and the uid comes from the
-`HTLS_HDR_CHAT` UID chunk when the server sends one, or from a nick lookup
-against the conversation's membership model when it doesn't. That lookup
-can miss — the user parted, two users share a name, the "nick" is server
-prose — and a wrong uid is worse than none: it would attach someone else's
-avatar and group two people's messages together. So uid stays 0 and stays
-a miss.
-
-The lookup goes through `hx_member_model_find_by_name` against the *same*
-`HxMemberModel` the user list is built from. One user, one record,
-whichever surface you clicked. `Speaker` is a render-time projection of
-`HxMember`, not a rival model, and the thing to avoid is a third user
-structure. On a right-click over a nick or avatar the view emits
-`speaker-menu (key, x, y)` and stops there; `chat.c` answers by calling
-`users.c::user_popup_show`, the same builder the Users window and the
-pchat sidebars use, so chat and the user list pop the same menu rather
-than two that have to be kept in step.
-
-### Grouping and the avatar gutter
-
-Consecutive messages from one speaker collapse the nick column, and only
-the group head draws an avatar. `Message::group_key()` keys on **both**
-the uid and the *rendered gutter text*, and each half catches a case the
-other misses: the uid separates two people who happen to share a nick, and
-the rendered nick separates one person before and after a rename. The uid
-survives a rename, so keying on it alone would group the messages and the
-new name would simply never appear — worse than repeating it, since the
-change is exactly what the reader needs to see.
-
-System rows never group. They share a gutter (`[hx]`) without sharing a
-speaker, so keying on the drawn nick would collapse "connecting",
-"connected", "login ok" into one block under a single tag and read as one
-event rather than three. That check is on the *kind*, not on
-`speaker.is_none()`: a pre-1.5 server sends chat with no uid, and those
-rows are real messages from a real person that should still group by nick.
-
-The gap that breaks a run defaults to five minutes — short enough that a
-burst collapses under one name, long enough that coming back to a room
-shows who is talking rather than attaching your message to something you
-said an hour ago. Continuation rows still *reserve* the gutter width, so a
-run forming does not shift the column.
-
-Avatars resolve through the application's avatar function
-(`rotulus_view_set_avatar_func`); GtkHx's is `src/chat_avatar.h`, which shares the user list's
-precedence rule: a fogWraith GIF avatar wins over the classic cicn icon
-id. Duplicating that precedence would mean chat and Users disagreeing
-about which icon a user "has". The texture is borrowed and only until the
-next call — animated avatars advance on a shared frame timer, so the view
-asks per draw rather than caching a frame that would freeze. Rows whose
-speaker is unknown get no slot at all; there would be nothing to look up.
+Nothing in GtkHx translates those strings. A fix to one goes to the
+rotulus repository.
 
 ---
 
-## 3. Layout, the height index, and scroll anchoring
+## 3. What GtkHx configures, and where
 
-Each row carries an optional `LayoutCache`: a `LayoutGeneration` key
-(width, font, theme, zoom), a pixel height, the `LineBox`es for hit
-testing, the gutter width the row naturally wanted, and the avatar slot if
-it has one. A width, font, theme or zoom change bumps the generation.
-Caches are *not* eagerly rebuilt — they are rebuilt lazily when a row is
-next laid out, so a resize costs O(visible) rather than O(scrollback).
-That is the single biggest departure from xtext's `gtk_xtext_calc_lines`,
-which walked every entry on every width change.
+### `chat_view.rs`
 
-### Chunked prefix sums, not a Fenwick tree
+`rust/crates/gtkhx-ui/src/chat_view.rs` is where GtkHx tells the widget
+what it needs to know about Hotline. Every chat output is built by
+`gtkhx_chat_view_new`, which sets the palette and font, then:
 
-Variable heights need an O(log n) "what is at pixel Y" and a running
-total. A Fenwick tree is the textbook answer for prefix sums with point
-updates, and it is the wrong shape here: it is indexed from a fixed
-origin, and this buffer grows at *both* ends (chat-history backfill
-prepends) and shrinks at the front (scrollback trim). Every prepend would
-renumber the whole tree.
+- **What never changes** (`setup`): the view never takes focus, so typing
+  stays in the input box beside it; the indented two-column layout with a
+  draggable separator; the maximum gutter width; the grouping gap; the
+  link schemes; the avatar resolver; and the two link handlers.
+- **The preferences** (`configure`): word wrap, scrollback length,
+  timestamps and their format, avatars, markdown, "Open links with a single
+  click", and the autocopy settings. `gtkhx_chat_view_configure` re-applies
+  them; `options.c` calls it from one change hook, `changed_chat_view`,
+  which walks the open views once rather than once per setting.
 
-Instead rows live in fixed-target-size chunks in a `VecDeque`, each chunk
-caching its own summed height, with a lazily-repaired running prefix over
-the chunks.
+**Links.** The scheme list is `rotulus-layout`'s defaults plus
+`hotline://`, held in one `Linkifier`. The same `Linkifier` backs
+`gtkurl_scan`, which the news views' URL tagging calls, so the chat view
+and the news views cannot disagree about what a link is. A primary click
+on a `hotline://` link connects through `connect_open_hotline_url`; any
+other scheme falls through to the desktop. A right-click pops
+`gtkurl_show_popup`, the URL menu every GtkHx surface shares, whose header
+shows the resolved URL before anything opens.
 
-- Query pixel→row: binary search the chunk prefixes, then scan within one
-  chunk, bounded by the chunk target.
-- Append: touch one chunk plus the prefix tail.
-- Prepend a history batch: push chunks at the front.
-- Trim to `max_lines`: pop chunks off the front.
+**Avatars.** The resolver is `hx_chat_avatar_for_key` in
+`src/chat_avatar.c`, which applies the user list's precedence rule: a
+fogWraith GIF avatar wins over the classic cicn icon. Duplicating that
+rule would mean chat and Users disagreeing about which icon a user has.
+The C resolver *lends* its paintable, valid only until the next call,
+while the widget's avatar function returns a full reference. The C ABI
+can't bridge that, so `chat_view.rs` registers the resolver through the
+crate's Rust API, `set_avatar_func`, and takes its own reference on the
+way out.
 
-A chunk that grows past a split threshold after middle inserts is split,
-so the within-chunk scan stays bounded.
+### `chat.c` and `msg.c`
 
-**Unmeasured rows report an estimate** rather than forcing a measure; the
-index records per row whether the height is real or estimated. Rows that
-have never been on screen are never shaped. The honest cost is that the
-scrollbar's extent is approximate until estimates are replaced — which is
-survivable precisely because scroll position is not stored in pixels.
+**The palette.** `chat.c::gtkhx_apply_theme_palette` fills the view's
+palette from the active theme and pushes it to every open view with
+`rotulus_view_set_palette`. `src/chat.h` names the slots GtkHx builds rows
+with (`HX_CHAT_INFO_COLOR`, `HX_CHAT_HIGHLIGHT_COLOR`,
+`HX_CHAT_PLACEHOLDER_COLOR`, …) in terms of the header's `ROTULUS_PAL_*`
+roles, and nicks go through `hx_chat_nick_color`, which hashes the name
+onto the theme's `nick_colors` when it has any. See
+[theming.md](theming.md).
 
-The estimate is allowed to be crude. It is not allowed to be *low*, and
-the reason is the one case where an estimate does feed a pixel value:
-while the view follows the bottom, the scroll offset is
-`total_height − viewport`, and the total counts estimates. An
-under-estimate therefore puts "the bottom" above the real bottom and
-clips the newest message off the bottom edge. Over-estimating only
-misplaces the scrollbar thumb. Three things the estimator has to respect
-to stay on the safe side, all of which it originally got wrong: a body's
-*hard newlines* (dividing byte length by a column count answers "how far
-would this wrap", not "how many lines does it have", so a five-line
-message estimated as one — which is why this surfaced as a multi-line
-bug); the width the body actually wraps against, which in indent mode is
-the content width less the settled gutter; and the padding a code or
-image block adds.
+**Speaker identity.** A row's `RotulusSpeaker.key` is the Hotline user id,
+`0` when unknown. It comes from the `HTLS_HDR_CHAT` UID field when the
+server sends one, and otherwise from `hx_member_model_find_by_name` against
+the same `HxMemberModel` the user list is built from. One user, one
+record, whichever surface you clicked; the thing to avoid is a third user
+structure. A lookup that misses stays 0.
 
-Even a careful estimator cannot close the gap, because the engine has no
-font stack — a proportional font's space width makes the column count
-wildly optimistic, and a bold run is wider than the estimator can know.
-So `snapshot` **re-derives the offset after the layout pass and before it
-places anything**, and pushes the corrected value into the adjustment.
-Each pass measures strictly more rows, so it settles immediately; the
-loop bound is belt-and-braces, and the reconfigure is gated on having
-actually corrected something so the scrolled window's redraw-on-changed
-does not become a loop.
+**Signals.** `chat.c` connects the ones that need GtkHx's state:
 
-### The anchor
-
-The scroll position is `(row, offset within it, gravity)`, and the
-`GtkAdjustment` value is *derived* from it, never the source of truth.
-This is the most load-bearing design decision in the engine. A raw pixel
-scroll value is only meaningful relative to a particular set of row
-heights, and everything interesting that happens to a chat buffer changes
-those heights: a resize re-wraps, a zoom rescales, an image finishes
-decoding and a 16-pixel placeholder becomes 240 pixels, a history batch
-prepends rows above the viewport, a trim drops rows off the top.
-
-Consequences, all of which xtext hand-patched case by case:
-
-- Stick-to-bottom is `gravity == Bottom`, not a flag plus bookkeeping.
-- Prepending a history batch cannot make the view jump — the anchor names
-  a row, and that row did not move. xtext's insert path bumped
-  `pagetop_line`, `last_pixel_pos`, `old_value` and the adjustment by the
-  inserted row's subline count to approximate this, and the trim path did
-  the mirror-image decrement.
-- Resize preserves reading position exactly, even though every height
-  changed. A font change under xtext just accepted the jump.
-- Height-estimate corrections shift the thumb, never the content. Thumb
-  drift is survivable; content jumping is not.
-
-The adjustment's unit is **pixels**, with `page_size = widget height`.
-xtext's unit was fractional text lines.
-
-### Rendering
-
-`snapshot` queries the index for the visible range, ensures each visible
-row's `LayoutCache`, and emits GSK nodes — shaped layouts for text,
-paintables or texture nodes for images and avatars, colour nodes behind
-the text for selection and highlight bands. No `append_cairo()`.
-
----
-
-## 4. Markdown
-
-Markdown is the inline formatting vocabulary. It produces the same spans
-the layout engine already consumes, so it is a front-end on the parser,
-not a rendering path. It is the view's `markdown` property; GtkHx sets it
-on every chat surface from `CFG_MARKDOWN` (the "Render markdown" switch in
-Settings, default on), so they agree.
-
-**Supported subset — inline, plus two block constructs.** Chat lines are
-not documents:
-
-| Syntax | Renders as |
+| Signal | GtkHx's answer |
 |---|---|
-| `**bold**` | bold |
-| `*italic*` / `_italic_` | italic |
-| `` `code` `` | monospace, background-tinted |
-| `~~strike~~` | strikethrough |
-| `[label](url)` | link (see security below) |
-| ` ```lang ` fenced block | code block |
-| `> quote` | quoted block, at line start |
+| `speaker-menu` | `users.c::user_popup_show`, the same menu the Users window and the private-chat sidebars pop |
+| `load-more` | fetch the next page of chat history |
+| `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
 
-**Deliberately not supported:** headings (`#` opens far too many ordinary
-chat lines), images (`![]()` — inline media has a server-validated
-pipeline and must not be bypassable by an arbitrary URL), tables, raw
-HTML, reference links, footnotes, thematic breaks (`---` is common in
-plain prose), setext headings, and autolinking, which is
-`rotulus-layout::linkify`'s — see "Link detection" below.
+`link-activated` and `link-menu` are connected in `chat_view.rs`, above.
 
-Backslash escapes any construct char, code spans suppress all other
-parsing inside them, unmatched delimiters render literally (never eat a
-lone asterisk), and nesting is depth-capped so a line of five thousand
-asterisks cannot recurse the parser into the stack guard.
+**The find bar** is `rust/crates/gtkhx-ui/src/chat_find.rs`, driving
+`rotulus_view_search`, `_search_step` and `_search_clear`. The rotulus
+design doc describes its key bindings as the model for an application's
+bar.
 
-**Parser choice: a hand-written inline scanner, not `pulldown-cmark`.**
-`pulldown-cmark` is the obvious pick (pure Rust, MIT, well-tested) and was
-considered. Passed over for three reasons: it has no inline-only mode, so
-we would be filtering a block-level event stream and fighting CommonMark's
-block rules to suppress exactly the constructs listed above; its event
-stream would still need converting into byte-ranged spans, which is most
-of the work; and a scanner for a handful of constructs is exhaustively
-unit-testable and predictable on the pathological input chat actually
-produces.
+GtkHx doesn't set a last-read marker yet, and zoom has no preference
+behind it: it is per view and resets on restart.
 
-**Send side — what goes on the wire is the literal text.** The protocol
-carries plain text, so `**bold**` is transmitted as `**bold**`. Other
-GtkHx users see bold; everyone else sees asterisks. This is how Slack,
-Discord and IRC clients have always behaved; it needs no capability
-negotiation, no wire change and no server cooperation, and it is the
-reason markdown is the right choice here where a custom binary styling
-extension would not be.
+### Benchmarks
 
-**Receive side — the honest tradeoff.** Rendering markdown on *incoming*
-text means a message typed as literal `*emphasis*` on a 1997 Mac client
-renders as italics. Mitigations, in order: the subset is conservative,
-unmatched delimiters stay literal, and the toggle turns rendering off
-entirely for people who would rather see exactly what was typed. The
-toggle affects messages appended after it; rows already in a buffer keep
-the rendering they were built with, because re-parsing scrollback would
-mean holding every row's original source text alive forever — a permanent
-memory cost for a setting nobody flips twice.
-
-**Security.** `[label](url)` is a phishing vector: the visible text can
-lie about the destination. The parser allows exactly the view's link
-schemes — the ones it autolinks, so the two cannot disagree. Anything
-else — `javascript:`, `data:`, `file:`, an unrecognized scheme — makes the
-whole construct render as literal text, delimiters included, so the user
-sees exactly what was typed rather than a link they cannot inspect. In
-GtkHx a right-click on a link routes through the shared
-`gtkurl_show_popup`, whose header shows the resolved URL before anything
-opens. Fenced code is inert.
-
-Three decisions worth recording. *The gutter is never parsed* — a nick
-containing asterisks is a nick. *Only a stylistically uniform body is
-parsed*: a body assembled from several differently-styled runs is chrome
-the caller styled deliberately (a divider, a `[hx]` status line) and
-re-parsing it would fight that; in practice every real body is a single
-run, plain for live chat and muted for history. *The row's own colour is
-laid **under** the parse* — the renderer treats a gap between spans as
-*default* style, not "whatever the row was", so without this a muted
-history line would come back with only its bold words muted and everything
-else at full contrast. There is a test.
-
-Fenced code is deliberately not autolinked either: a URL inside a code
-fence is being *shown*, not offered.
-
-### Two gotchas worth keeping
-
-**Code needs a box, not a font.** The first cut relied on the `CODE`
-attribute alone, which sets the Pango font family to Monospace — and
-GtkHx's chat font is *already* monospace, so `` `code` `` rendered
-identically to code with the backticks quietly deleted. Strictly worse
-than not parsing it. Inline code now gets a tint behind it and fenced
-blocks a tinted, outlined rounded box, both derived from the theme
-foreground at low alpha so they read on light and dark without a second
-colour to keep in step. The block's box is computed from its *laid-out
-line boxes* rather than from separate geometry, so it cannot land anywhere
-other than under the code it belongs to.
-
-**A one-line fence is a code block.** ```` ```like this``` ```` is how
-people actually type one in a chat box, because chat boxes send on Enter.
-The line scanner read it as an *opening* fence, made the rest of the line
-the "language", and searched for a close that never came — yielding an
-empty block, i.e. a blank row where the text should have been.
-
-An unterminated fence runs to the end of the body. The alternative
-(treating it as literal) means a message someone is mid-way through typing
-flickers between two renderings.
-
-**Composing** is render-on-display only — no live preview, no WYSIWYG
-input. `Ctrl+B` / `Ctrl+I` / `Ctrl+Shift+C` wrap the selection (or insert
-the delimiter pair), and the input box gets subdued syntax tinting so you
-can see what will render. The `:shortcode:` emoji typeahead is unaffected:
-emoji decoding happens before span parsing and the two vocabularies do not
-collide.
-
-That tinting is a separate, shallower scanner (`markdown::scan_delims`),
-not the renderer, because it needs ranges in the *source* while the
-renderer reports ranges in the rendered text with the delimiters removed.
-Being wrong in the compose box tints a character that will not render, on
-text the user can see and is still editing; being wrong in the renderer
-would change what a message *says*. A test pins the one thing they must
-agree on: whether a delimiter is live at all.
+The in-app benchmarks that drive the chat view — `chat`, `media` and
+`history` — are in `rust/crates/gtkhx-ui/src/bench/` and run through
+`tools/uibench.sh`; see [performance.md](performance.md). The widget's own
+headless benchmarks and render tests live in the rotulus repository.
 
 ---
 
-## 5. Interaction
+## 4. Moving GtkHx to a new Rotulus release
 
-### Every controller callback captures the view weakly
+1. Raise the requirement on `rotulus` and `rotulus-layout` together in
+   `rust/Cargo.toml`, when the new release is outside the current caret
+   range (a new `0.x`). Within the range, the lockfile is the only thing
+   that moves.
+2. Update the lock for all three crates at once:
 
-`constructed` installs three groups of gestures, shortcuts and motion
-handlers, and the view owns all of them. A closure that captures a strong
-clone of the view therefore closes a cycle — view owns controller owns
-closure owns view — and the view can never reach refcount zero. It is not a
-subtle leak: the whole message buffer, the media table and the Pango
-measurer go with it, once per chat window ever opened.
+   ```sh
+   cd rust && cargo update -p rotulus -p rotulus-layout -p rotulus-mirc
+   ```
 
-That is what the codebase did, at eighteen sites. Seventeen were installed
-during construction (the zoom shortcut loop alone accounted for five, one
-per accelerator), and the eighteenth appeared the first time a scroll
-adjustment was attached. So a freshly built view had a refcount of 19
-before anything had happened to it.
+3. Regenerate the Flatpak's vendored sources:
 
-Every one of them is now `self.downgrade()` plus an `upgrade()` at the top
-of the closure, which is the idiom the user list already used and
-documented for the same reason. The upgrade cannot fail in practice — a
-controller does not outlive the widget that owns it, so the closure cannot
-run after the widget is gone — but writing the fallback is cheaper than
-arguing that it is unreachable.
+   ```sh
+   python3 tools/flatpak-cargo-generator.py rust/Cargo.lock
+   ```
 
-**The reason this survived so long is worth more than the bug.** The smoke
-test in `rotulus` asserts exactly this refcount, and had done since the
-widget landed. But GTK 4 has no headless backend, so the test began with an
-`if gtk4::init().is_err() { return; }` — and CI has no display. It reported
-success without executing a line of itself, on every run, for the entire
-life of the defect. CI now runs the Rust suite under `xvfb-run`, and a
-missing display is a failure rather than an early return.
+4. Reconfigure (the lockfile change does this on the next build) so the
+   new `rotulus.h` and translations are picked up.
+5. Adapt to API changes. Most land in `chat_view.rs`; C ABI changes land at
+   the `ROTULUS_VIEW()` call sites in `chat.c`, `msg.c` and `options.c`,
+   and in `src/chat_avatar.c` if the avatar contract moves again. The
+   `chat` bench in `gtkhx-ui` builds rows through the crate's Rust FFI
+   types directly, so it breaks loudly when those change.
 
-### Selection
+Then run the full set of gates in `CLAUDE.md`, both voice configurations
+included.
 
-Drag-select, double-click word select, triple-click line select, and
-autocopy (copy on drag-end, the `autocopy` property; `copy-timestamps`
-prefixes each copied row with its timestamp). Every change is reported by
-`selection-changed`, and `has-selection` notifies when it flips. Selection
-across an image
-block contributes the block's alt text to the copied string rather than
-xtext's all-or-nothing behaviour.
+---
 
-**Two controllers on one widget have no GTK-guaranteed ordering.**
-Double- and triple-click were broken on arrival: the multi-click handler
-set a word/row selection on press, and the drag gesture's `drag-begin`
-collapsed the selection to a caret on the same press. Whichever ran second
-won, and a code comment claiming drag "fires first" was an assumption, not
-a fact. Fixed by removing the conflict rather than sequencing it:
-`drag-begin` now only records the press point, and the collapsed selection
-is installed on first *motion* — the moment it means something.
-Click-to-dismiss consequently keys on "the pointer never moved" instead of
-"the selection is empty".
+## 5. Working on the widget itself
 
-**Auto-scroll while dragging past the viewport edge** is a
-`GtkTickCallback` driven from the last recorded drag position. xtext's
-scroll timers read a stale `select_end_y` rather than the live device
-position, because GTK 4 has no synchronous "where is the pointer"
-accessor; storing the position from the drag handler and consuming it from
-a tick callback is the real answer. The rate is frame-time based, so it
-scrolls at the same speed on a 60 Hz and a 144 Hz display.
+When a GtkHx change needs something the widget doesn't do, the change goes
+into the rotulus repository, not into GtkHx. The widget has to stay
+ignorant of Hotline: a feature GtkHx wants should be expressed as
+something any chat application could use, with GtkHx's specifics left in
+`chat_view.rs` or C.
 
-### Search
+The normal path is to make the change there, release it, and move GtkHx to
+the release as above.
 
-**Search is O(scrollback), on purpose.** `ChatBuffer::search` walks the
-*model*, not the layout, so a match in a row that has never been laid out
-is still found — which is the entire point, since the reason to search is
-to reach the part of the scrollback you have not scrolled to. The cost is
-paid with a short debounce in the find bar rather than with an index,
-because an index would have to be maintained across append, prepend, trim
-and replace for a feature used seconds at a time. Matching is literal, not
-regex: the needle is what the user typed, so there is no metacharacter
-vocabulary to explain and no pathological backtracking to defend against.
+While developing both sides at once, point Cargo at a local checkout with a
+`[patch.crates-io]` entry in `rust/Cargo.toml` — here, a rotulus checkout
+beside this one:
 
-The find bar lives in `gtkhx-ui/src/chat_find.rs` and drives
-`rotulus_view_search` / `_search_step` / `_search_clear`. Ctrl+F opens and
-focuses, selecting the existing query so typing replaces it; pressed
-*again* while the entry already has focus and a query, it advances to the
-next match instead — that is the "hit Ctrl+F, type, keep hitting Ctrl+F"
-flow, and gating it on the entry already being focused is what keeps the
-reopen-and-retype case intact. Ctrl+G / Ctrl+Shift+G and F3 / Shift+F3
-both step and both wrap, because which pair is muscle memory depends on
-where someone came from. The bar reuses the news panel's highlight colours
-exactly rather than inventing its own or widening the palette contract in
-`rotulus.h`.
+```toml
+[patch.crates-io]
+rotulus = { path = "../../rotulus/crates/rotulus" }
+rotulus-layout = { path = "../../rotulus/crates/rotulus-layout" }
+rotulus-mirc = { path = "../../rotulus/crates/rotulus-mirc" }
+```
 
-### Keyboard paging, and why a global shortcut cannot do it
-
-**PgUp/PgDn never worked in GtkHx.** Nothing in the tree ever bound them,
-and the chat view is deliberately not focusable — `chat.c` calls
-`gtk_widget_set_can_focus(FALSE)` so the message input keeps focus — so
-the focused `GtkTextView` swallowed the key with its own cursor-movement
-binding.
-
-A global-scope `GtkShortcut` would not help: global shortcuts run *after*
-normal propagation, so the TextView still wins. The binding therefore
-lives on a capture-phase key controller installed on the widget's **root**
-(the same one Ctrl+C uses, for the same reason), which runs before the
-focus path.
-
-The steal is narrow on purpose. Unmodified paging applies only when focus
-is in a text-entry widget — the message input or the subject entry, where
-paging means nothing — so the user list's `GtkColumnView` keeps its own
-page-by-page navigation. Shift+PgUp/PgDn, the long-standing IRC binding
-for "scroll the log", is unambiguous anywhere and bypasses the focus
-check. Ctrl+Home/End jump to the top of the scrollback and back to
-following the tail. A view that is not mapped (a background tab, a closed
-private chat) must not eat the window's keys, so the handler checks that
-first. A page scroll keeps one line of overlap, so the line being read
-survives the jump.
-
-### Zoom
-
-xtext had none: the only way to change chat text size was the Settings
-font pref, a modal round trip that touched nothing but the glyphs.
-
-Zoom is a *view* scale, not a font-size change — text, the timestamp
-gutter and nick column, inline media, avatars, indent and padding all
-scale together, so the layout stays proportionate. It is stored in
-per-mille and steps through a fixed ladder from 50% to 400%. Bindings are
-`Ctrl` + `+` / `-` / `0` and `Ctrl` + scroll wheel. It is distinct from
-`GtkhxTheme`'s `GTKHX_SCALE_*` areas (static per-theme structural factors
-for toolbar / user-list / task icons) and from the desktop-wide text
-scaling factor.
-
-Zoom is otherwise silent: text changes size and nothing says by how much
-or how to get back to 100%. A badge showing the percentage holds for
-around a second and then fades, drawn inside the widget's own snapshot
-rather than as an overlay widget — the chat view is packed as a bare child
-beside a scrollbar, so a `GtkOverlay` would mean restructuring every
-container that holds one for a label that shows for a second.
-
-Zoom changes every height in the buffer, which is exactly the case the
-scroll anchor already handles: the anchored row stays put and the content
-grows around it. Without anchor-based scrolling, zoom would fling the
-viewport — a concrete second payoff from that design decision, and why
-zoom landed cheaply here where it would have been painful to retrofit into
-xtext.
-
-**Zoom does not persist.** It is per-view and resets on restart; there is
-no pref backing it.
-
-### The indent separator
-
-A drag pins the gutter explicitly, and nothing but an explicit unpin
-releases it — not a buffer clear, not a stamp-width change. xtext left the
-gutter's auto-grow enabled after a drag, so a long nick could silently
-undo a narrowing the user had just made by hand; a widening only stuck
-because it happened to exceed the auto-indent cap, which switched the auto
-path off as a side effect. The grab tolerance is a few pixels rather than
-xtext's ±1, which is unhittable on a fractional-scale display, and the
-drawn rule and the hit test share one `separator_x()` so they cannot drift
-apart. The drag is clamped to a band of the viewport rather than to
-`max_indent`: that cap is about how far the gutter may grow unattended,
-and the point of the drag is to overrule it.
+`rotulus.py` follows the patch, since it asks `cargo metadata` where the
+crate is, so the header and translations come from the checkout too.
+**Never commit the patch.** It points at a path that exists only on your
+machine, the Flatpak's offline build cannot see it, and a GtkHx that
+depends on unreleased widget code cannot be built by anyone else. Release
+the widget, then move GtkHx to the release.
 
 ---
 
 ## 6. The retired mIRC escape vocabulary
 
-Rows used to be built as byte strings with in-band `\003NN` colour
-escapes. That vocabulary is gone. It is worth recording why, because the
-reasoning is the reason the structured model exists at all — and because
-of how the record went wrong once.
+GtkHx used to build chat rows as byte strings with in-band `\003NN` color
+escapes, which xtext interpreted on every render. That vocabulary is gone.
+The rotulus design doc covers why the widget takes structured rows
+instead; this section is the GtkHx half: why the escapes were never
+Hotline's, what GtkHx's call sites became, and what survives.
 
 ### The escapes were never protocol
 
-Verified two ways: by tracing every generation site in the tree, and from
-Misha directly — the vocabulary came in with the XChat 1.8.5 xtext fork
-around 2000 and was never a Hotline concept.
-
-Provenance matters here, so: the claim that it *was* protocol was **not** a
-longstanding project belief. It was introduced by an AI-assisted session
-in mid-2026 and sat in `CLAUDE.md` — a file every future session reads as
-ground truth — for a couple of months. It is corrected there now. The
-lesson worth carrying is that a plausible-sounding rationale invented for
-an existing design decision is more durable than an ordinary bug, because
-nothing downstream fails when it is wrong.
-
-The findings:
+The vocabulary came in with the XChat 1.8.5 xtext fork around 2000 and was
+never a Hotline concept. Tracing every generation site in the tree found:
 
 - **The Hotline wire format has no text styling.** `HTLS_HDR_CHAT` is
   `uid + flags + body`. `HTLS_HDR_MSG` is `uid + body`. News, broadcasts,
-  file comments, agreements — all plain text. There is no colour field and
+  file comments, agreements — all plain text. There is no color field and
   no style field anywhere in the protocol.
-- **Every `\003NN` byte in a buffer was written by GtkHx.** All of them:
-  the nick brackets, the highlight wrap, the `INFOPREFIX` constant, the
+- **Every `\003NN` byte in a buffer was written by GtkHx**: the nick
+  brackets, the highlight wrap, the `INFOPREFIX` constant, the
   history-muted rows and dividers, and the inline-media placeholder.
-- **Only three of the eight escape codes were ever generated** — colour,
+- **Only three of the eight escape codes were ever generated** — color,
   bold, reset. Italic, strikethrough, reverse and hidden had no producer
   at all; underline appeared only in divider text.
-- **Hotline's real per-user colour is a separate `u32` RGB attribute** on
+- **Hotline's real per-user color is a separate `u32` RGB attribute** on
   the user record, applied by the client when rendering a name. It is not,
   and never was, in-band markup.
 - **Nothing else consumed them.** The news viewers, agreement window,
   user-info window and broadcast dialog are all `GtkTextView` and ignore
   escapes entirely. xtext was the only consumer.
-- **A server could not inject them anyway.** `hxproto`'s
-  `strip_ansi` (`sanitize.rs`) folds bytes 14–30 into the printable range
-  on every received text field.
+- **A server could not inject them anyway.** `hxproto`'s `strip_ansi`
+  (`sanitize.rs`) folds bytes 14–30 into the printable range on every
+  received text field.
 
-### Why retiring them *was* the structured-append API
-
-A dead escape vocabulary left in the tree is how it survives another
-decade, so retiring it looked like a shim removal. It was not.
+### What the call sites became
 
 The escapes were produced at sites scattered through `chat.c`, `msg.c`,
 `gtkhx.c` and `proto_helpers.c`, encoding six distinct things: nick
-brackets in the speaker's colour, bold-red highlight, the dark-grey media
+brackets in the speaker's color, bold-red highlight, the dark-gray media
 placeholder, history-muted rows, the `[hx]` info prefix, and broadcast's
-per-sender `[name]` prefix.
+per-sender `[name]` prefix. Two of those sites, in `chat.c` and `msg.c`,
+re-parsed GtkHx's own escape output to find where a name ended. Each of
+the six is now a field of a row or a palette index on a run.
 
-Two of those sites were the real argument. `chat.c` and `msg.c`
-**re-parsed GtkHx's own escape output** to find where a name ended:
-
-```c
-static const char wrap_open[]  = " \00310[";
-static const char wrap_close[] = "\00310]\003 ";
-```
-
-That is a data structure round-tripped through a presentation format and
-parsed back out. Removing the escapes without giving the API somewhere to
-put the structure would have meant inventing a *different* string
-convention to re-parse — the same mistake with fresh bytes. The run API is
-that somewhere.
-
-The `chat-log-line` signal changed shape with it: it carries
-`(htlc, cid, name, colour, body)` rather than a pre-formatted string, so
+The `chat-log-line` session signal changed shape with it: it carries
+`(htlc, cid, name, color, body)` rather than a pre-formatted string, so
 `INFOPREFIX` is the bare string `"hx"` and broadcast passes its sender name
-and colour as parameters (`hx_printf_named`). The `hx_printf_prefix`
+and color as parameters (`hx_printf_named`). The `hx_printf_prefix`
 callers are unchanged — the prefix argument simply means the tag now.
 
-### Two security consequences of dropping the escape parser
+### Two security consequences
 
 **`broadcast_sanitise_name` used to be load-bearing for correctness.** The
-sender's name went inside a `" \00310[\003<col><name>\00310]\003 "` wrapper
-that the chat side scanned for a closing sequence, so a name containing a
-raw `\003` could terminate the wrapper early, break info-line detection, or
-smuggle its own colours into the log. That is unreachable now — there is
-no wrapper to escape from. The sanitiser stays because control bytes in a
-text layout are still undesirable, but it has been demoted from a security
-boundary to hygiene.
+sender's name went inside an escape wrapper that the chat side scanned for
+a closing sequence, so a name containing a raw `\003` could terminate the
+wrapper early, break info-line detection, or smuggle its own colors into
+the log. That is unreachable now — there is no wrapper to escape from.
+The sanitizer stays because control bytes in a text layout are still
+undesirable, but it has been demoted from a security boundary to hygiene.
 
-**Plain appends no longer interpret escapes.** The remaining callers pass
-text that came *off the wire*, so continuing to interpret escapes there
-would have let a server set colours in your chat log by sending the bytes.
-It cannot: they are characters like any other.
+**Text off the wire is characters.** The callers that append server text
+pass it as a run, which the view never interprets, so a server cannot set
+colors in the chat log by sending the bytes.
 
 ### What survives
 
-The palette. Slots 0..31 keep their historical mIRC values. After them
-come the UI roles `GtkhxTheme` fills (see `gtkhx_theme.h`'s matching
+The palette. Slots 0..31 keep their historical mIRC values; after them
+come the roles `GtkhxTheme` fills (see `gtkhx_theme.h`'s matching
 `GTKHX_PAL_*` enum and `chat.c::gtkhx_apply_theme_palette`), then the
-per-nick colors. A fully transparent role means "follow the system": the
-view carries Adwaita's `.view` class, draws such text in its CSS color, and
-skips its background fill so the CSS background shows. That is how a theme
-with no chat fg/bg matches the window around it. `rotulus.h` is now the
-sole definition of that contract. Nothing at the FFI boundary checks the
-palette's length — `ffi.rs` reads `PALETTE_COLS` entries from the C array —
-so a rotulus test reads the defines out of `rotulus.h` and fails if
-the Rust constants disagree with them. The run attribute bits and row
-constants are held to the header the same way.
+per-nick colors. `rotulus.h` is the sole definition of that layout.
 
 **One dead remnant remains, flagged rather than removed.**
 `src/proto_helpers.c` still holds a copy of the old `[hx]` prefix and
@@ -683,285 +315,3 @@ the check only ever sees server-sent text, so it cannot fire. Removing it
 means retiring the proto-test cases that feed it the literal string, which
 is its own change. Every other `\003` in the tree is inside a comment
 explaining what used to be there.
-
----
-
-## 7. What an application hooks
-
-### Signals
-
-Clicks reach the application as typed signals, never as a word to match:
-
-| Signal | When | Unhandled |
-|---|---|---|
-| `link-activated (href) → handled` | primary click on a link | the view opens it with `GtkUriLauncher` |
-| `link-menu (href, x, y) → handled` | secondary or middle click on a link | the view pops its own Open / Copy menu |
-| `speaker-activated (key)` | primary click on a nick or avatar | nothing |
-| `speaker-menu (key, x, y)` | secondary click on a nick or avatar | nothing |
-| `load-more (direction)` | click anywhere on a load-more row | nothing |
-| `media-activated (token)` | primary click on an image or its placeholder | nothing |
-| `selection-changed` | the selection is made, extended or cleared | — |
-
-They replaced xtext's `word-click`, which handed every click over as the
-whitespace-delimited word under it and left three C handlers to demux by
-string: the URL menu matched URL-shaped words, the history handler matched
-a composed "↑ Load older messages" sentinel joined with non-breaking
-spaces (so the tokenizer kept it one word), and inline media embedded
-`hxmedia:N` in its placeholder to be parsed back out. The sentinel and the
-token are gone with it. GtkHx connects `speaker-menu`, `load-more` and
-`media-activated` in `chat.c`, and `link-activated` (a `hotline://` link
-connects) and `link-menu` (the shared `gtkurl_show_popup`) in
-`chat_view.rs`.
-
-A primary click on a link used to do nothing in GtkHx, because the URL
-handler only answered the right and middle buttons. It opens the link
-now, as it does everywhere else on the desktop — unless the view's
-`activate-links` property is off, which GtkHx's "Open links with a single
-click" setting (Settings → Chat, on by default) controls. Off, a link
-behaves like any text to a primary click and keeps its right-click menu.
-
-A link whose visible text isn't its address — a markdown `[label](url)` —
-never opens on a click. It pops the link menu instead, headed by the real
-URL, so a label can't take someone somewhere they didn't see; and every
-link shows its address in a tooltip. In GtkHx that matters twice over,
-since a `hotline://` link connects to a server.
-
-(A GLib detail worth not rediscovering: signal names must be canonical —
-hyphens — because glib-rs's `Signal::builder` *panics* otherwise, and a
-panic there is an abort, since it unwinds out of `class_init` across the
-FFI.)
-
-### Properties
-
-Every setting is a GObject property, so a binding or `g_object_set` works
-as well as the C setters, and each change notifies: `font`, `word-wrap`,
-`max-lines`, `indent`, `max-indent`, `separator`, `show-timestamps`,
-`timestamp-format`, `avatar-size`, `group-gap`, `markdown`,
-`link-schemes`, `autocopy`, `copy-timestamps`, `activate-links`, `zoom`,
-and the read-only
-`has-selection`. They are per view. The markdown switch, the autocopy
-settings and the timestamp format used to be process-wide globals, which a
-library cannot have; GtkHx now applies its preferences to each view it
-builds (`gtkhx_chat_view_new`) and re-applies them on a change, through
-one hook in `options.c` rather than one walk of the views per setting.
-
-### Link detection
-
-`rotulus-layout::linkify` finds links: a scheme or a bare `www.` prefix
-at the start of a word, running to whitespace or a closing delimiter, with
-trailing sentence punctuation dropped unless the URL opened the bracket
-itself (a Wikipedia link). It is the port of `gtkurl.c`'s detector, and
-it answers every "is this a link" question the view asks: autolinking,
-the markdown allowlist, the link under the pointer. Bare email addresses
-are links too, opening as `mailto:`. The scheme list is the
-application's (`link-schemes`); the default is the set any chat client
-agrees on, and GtkHx adds `hotline://`. `gtkurl.h`'s detection functions,
-which the news views use, are Rust now too, on GtkHx's list, so the two
-cannot disagree about what a link is.
-
-### Avatars
-
-`rotulus_view_set_avatar_func` installs a function from a speaker's key to
-a `GdkPaintable`, asked on every draw so an animated avatar animates. It
-replaced an `extern` the widget used to import from GtkHx by name.
-
-### One column
-
-With `indent` off a row is a single column: the timestamp, then the nick,
-then the body on the same line, wrapping to the left edge. A body that
-cannot start beside the nick — a code block, a quote, an image, or one
-left with less than half the width — starts on the line below it. The
-height estimate follows the same rule, so it stays on the safe side. Log
-viewers and IRC-style layouts want this; the mode used to drop the nick
-altogether.
-
-### The last-read marker
-
-`rotulus_view_set_marker` draws a rule under a row, in
-`ROTULUS_PAL_MARKER`. It goes with its row — removed, trimmed or cleared —
-rather than moving to a neighbour, since a marker in the wrong place
-claims something was read that wasn't. GtkHx doesn't set one yet.
-
-### Replacing a row
-
-`rotulus_view_replace` swaps a row's content in place, keeping its id and
-its place: what an edit, a redaction or a streamed reply growing a token
-at a time needs. The scroll anchor absorbs any change in height. A search
-or a selection is dropped, since it would point at different bytes.
-
-### Accessibility
-
-The view's accessible role is `log`. Built against GTK 4.14 or newer (the
-`v4_14` cargo feature, which GtkHx's meson turns on when it finds one), it
-implements `GtkAccessibleText`: a screen reader reads the transcript as
-one text, a row per line, as timestamp, nick and message. A grouped row
-still names its speaker there, because "who said this" is the first thing
-a listener needs and the visual cue that stands in for it isn't available
-to them. The text is built the first time an assistive technology asks
-and kept in step from then on, row by row: an append, a page of history,
-a removal, a replace and the trim at the scrollback cap each report only
-the rows they touched. Only what changes every row at once — a clear, a
-new timestamp format — is reported as the whole text going and coming
-back. Below 4.14 the view exposes its role only.
-
-### IRC formatting
-
-`rotulus-mirc` converts mIRC formatting codes — bold, italic, underline,
-strikethrough, monospace, reverse, reset, colors by number or hex — into
-styled runs; C reaches it as `rotulus_mirc_parse`, which returns runs
-pointing into the caller's text. The view never interprets the codes
-itself, so it is the application that decides which messages may carry
-them. Colors 0–15 address the palette's mIRC slots, so a theme can adjust
-them; the extended colors and hex are RGB. GtkHx doesn't use it: Hotline
-has no in-band styling.
-
-### Translations
-
-The widget's strings (its two context menus) are in the `rotulus` gettext
-domain, with its own catalog in `rust/crates/rotulus/po/`. GtkHx builds
-and installs it and binds the domain at startup.
-
----
-
-## 8. Measured
-
-### Scale
-
-`cargo bench -p rotulus-layout`, headless against the fixed-width measurer,
-at 2,000, 20,000 and 200,000 rows:
-
-| Benchmark | 2,000 | 20,000 | 200,000 |
-|---|---|---|---|
-| ingest (whole scrollback) | 0.2 ms | 5 ms | 41 ms |
-| first paint after the burst | 20 µs | 83 µs | 1.9 ms |
-| relayout after a font change | 4.4 µs | 8.3 µs | 49 µs |
-| scroll walk, 120 frames | 0.31 ms | 0.48 ms | 4.3 ms |
-| one message at the scrollback cap | 1.8 µs | 3.8 µs | 24 µs |
-
-Layout stays O(visible): nothing off screen is shaped. The bookkeeping
-around it does not — the height index repairs its prefix sums per chunk,
-and the first frame after a burst sums every row's estimate — so frame
-cost grows with the scrollback, slowly: every frame at 200,000 rows is
-still under 2 ms. The in-app numbers against xtext are in
-[chat-view-benchmark.md](chat-view-benchmark.md).
-
-### Against GtkTextView and GtkListView
-
-`cargo run --release -p rotulus --example compare -- WIDGET N`, under
-`tools/isolated-run.sh`, times each widget through a real window and frame
-clock: Rotulus; a `GtkTextView` with a line per message and the nick in a
-tag (what Polari and many small clients do); and a `GtkListView` of
-wrapping labels with the nick in markup (the widget-per-message shape).
-Each appends N chat lines one call at a time, as a chat does. Medians of
-repeated runs on one machine, Xvfb at 60 Hz, so no frame is shorter than
-16.7 ms:
-
-| 20,000 messages | Rotulus | GtkTextView | GtkListView |
-|---|---|---|---|
-| ingest | 38 ms | 190 ms | 4.8 s |
-| first paint at the bottom | 11 ms | 21 ms | 53 ms |
-| settled (nothing left to do) | 12 ms | 540 ms | 77 ms |
-| resize, until settled | 7 ms | 495 ms | 12 ms |
-| worst frame while resizing | 20 ms | 24 ms | 21 ms |
-| memory | 15.6 MB | 41 MB | 40 MB |
-
-| 200,000 messages | Rotulus | GtkTextView | GtkListView |
-|---|---|---|---|
-| ingest | 365 ms | 1.95 s | 790 s |
-| first paint at the bottom | 13 ms | 22 ms | 92 ms |
-| settled | 13 ms | 4.6 s | 115 ms |
-| resize, until settled | 6.5 ms | 4.8 s | 11 ms |
-| worst frame while resizing | 20 ms | 42 ms | 20 ms |
-| memory per message | 505 B | 534 B | 487 B |
-
-What the numbers say:
-
-- **GtkTextView** paints the bottom quickly and then validates every line
-  in the background: seconds of work after each burst of history and each
-  resize at scale, during which frames run long. It is the leanest per
-  message at 200,000 rows.
-- **GtkListView** is cheap once it has its rows — resize and scroll only
-  touch the visible ones — but appending to a `GtkStringList` one item at
-  a time grows worse than linearly: 4.8 s for 20,000 messages, thirteen
-  minutes for 200,000. A client built on it would batch history and write
-  its own list model, which is real work the comparison doesn't do.
-- **Rotulus** ingests about five times faster than the text view, settles
-  when it paints, and resizes in one frame at any size. At 200,000 rows it
-  uses a little less memory per message than the text view and a little
-  more than the list view; it used the most of the three until the row
-  structure was trimmed (below).
-
-Scrolling is at the frame rate for all three.
-
-### Memory
-
-`cargo bench -p rotulus-layout --bench memory` counts heap bytes with a
-wrapping allocator, for the same corpus (chat lines of 3–19 words):
-
-| Rows | After appending | Per row | Allocations per row | Every row laid out | Per row |
-|---|---|---|---|---|---|
-| 20,000 | 11.3 MB | 566 B | 3.7 | 16.1 MB | 805 B |
-| 200,000 | 96.6 MB | 482 B | 3.7 | 144.3 MB | 721 B |
-
-A row's text is about 60 bytes, so most of that is structure: the message,
-its gutter and speaker strings, the span list, the index. Every row is laid
-out only after scrolling through all of it. GtkHx's default scrollback of
-500 rows is about a quarter of a megabyte.
-
-It was 682 bytes and 4.7 allocations a row at 200,000 rows. Three changes
-took it down, each measured on its own against the timing suite:
-
-| Change | Bytes per row (200,000) | Cost |
-|---|---|---|
-| Before | 682 | |
-| Layout cache boxed: only drawn rows carry one | 587 | none; scrolling at 200,000 rows got faster, 3.9 → 2.2 ms |
-| Messages compacted as they enter the buffer | 489 | about 40 ns per appended message |
-| A single body block held inline | 482, and one allocation fewer | none; ingest at 200,000 rows 44.7 → 39.0 ms |
-
-Two things the measuring turned up. Compacting with `shrink_to_fit` split
-every allocation in place and fragmented the heap badly enough to make
-appending three times slower and scrolling five; copying into an exact
-allocation instead frees whole blocks and costs almost nothing
-(`ParsedText::compact`). And the parser benchmark runs first, because
-running it after groups that build and free 200,000-row buffers measured
-the allocator's fragmentation rather than the parser.
-
-In the real widget (the comparison above) the same three changes took
-memory at 200,000 messages from 769 to 505 bytes a message, with ingest,
-paint, resize and scroll times unchanged.
-
-### Render tests
-
-`rust/crates/rotulus/tests/render.rs` draws four scenes — two columns, one
-column with IRC formatting, history with a marker, a selection — through a
-real window and compares them with `tests/golden/`. The font is bundled
-(DejaVu Sans Mono, with its license) and pinned through fontconfig, the
-renderer is cairo, the zone UTC, and the comparison is at half resolution
-with a tolerance, so antialiasing differences between FreeType versions
-pass and a row a line out of place does not. `ROTULUS_UPDATE_GOLDEN=1`
-re-renders them after a deliberate change.
-
----
-
-## 9. Not built
-
-### Live re-rendering of historical rows
-
-`Speaker` copies a nick and colour rather than borrowing the `HxMember`,
-so a rename or a colour change repaints the user list and not the chat
-scrollback. Copying is cheaper, and messages are arguably historical
-records of who said what under what name at the time — worth changing only
-if live re-rendering of old rows turns out to be wanted.
-
-### Announcing new messages
-
-The accessible text reports each append as an insertion, but the view does
-not call `gtk_accessible_announce` for it. Whether a screen reader should
-speak every new message, and how politely, is worth deciding with someone
-who uses one.
-
-### An introspectable row API
-
-`RotulusRow` holds pointers to run arrays, which GObject introspection
-cannot describe. Python, JavaScript and Vala will want a boxed message
-type built call by call; that belongs with packaging the widget.
