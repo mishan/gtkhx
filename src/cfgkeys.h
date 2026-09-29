@@ -46,6 +46,7 @@
 #define CFG_TIMESTAMP "TIMESTAMP"
 #define CFG_CHAT_AVATARS "CHATAVATARS"
 #define CFG_MARKDOWN "MARKDOWN"
+#define CFG_SINGLE_CLICK_LINKS "SINGLECLICKLINKS"
 #define CFG_WORDWRAP "WORDWRAP"
 #define CFG_XBUF_MAX "XBUF_MAX"
 #define CFG_FONT "FONT"
@@ -123,7 +124,7 @@
 
 /* xtext autocopy controls — Settings → Advanced → Auto Copy
  * Behavior. Three independent toggles for the drag-end clipboard
- * behaviour. See chat_view.h:hx_chat_view_set_autocopy_* for the per-field
+ * behaviour. See rotulus.h:rotulus_view_set_autocopy_* for the per-field
  * semantics. */
 #define CFG_AUTOCOPY_TEXT "AUTOCOPYTEXT"
 #define CFG_AUTOCOPY_STAMP "AUTOCOPYSTAMP"

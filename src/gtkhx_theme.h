@@ -89,8 +89,8 @@ double gtkhx_theme_scale (GtkhxScaleArea area);
 
 /* ---- Palette (UI-role color slots) -----------------------------------
  *
- * The chat palette (see chat.c::colors[] and chat_view.h's
- * HX_CHAT_PAL_*) opens with the 32 mIRC slots, which are semantically
+ * The chat palette (see chat.c::colors[] and rotulus.h's
+ * ROTULUS_PAL_*) opens with the 32 mIRC slots, which are semantically
  * locked: servers send specific color indices and expect specific
  * colors. After them come the UI roles below, which are what a theme
  * sets.

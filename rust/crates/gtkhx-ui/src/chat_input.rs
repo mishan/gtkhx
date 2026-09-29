@@ -214,16 +214,16 @@ fn apply_tint(buf: &gtk::TextBuffer) {
         .chain(std::iter::once((text.len(), text.chars().count() as i32)))
         .collect();
 
-    for sp in hxchat_layout::scan_delims(&text) {
+    for sp in rotulus_layout::scan_delims(&text) {
         let (Some(&a), Some(&b)) = (char_of.get(&sp.start), char_of.get(&sp.end)) else {
             continue;
         };
         let (ia, ib) = (buf.iter_at_offset(a), buf.iter_at_offset(b));
         let tag = if sp.delim {
             &delim
-        } else if sp.attrs.contains(hxchat_layout::Attrs::BOLD) {
+        } else if sp.attrs.contains(rotulus_layout::Attrs::BOLD) {
             &bold
-        } else if sp.attrs.contains(hxchat_layout::Attrs::CODE) {
+        } else if sp.attrs.contains(rotulus_layout::Attrs::CODE) {
             &code
         } else {
             &italic

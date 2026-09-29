@@ -575,7 +575,7 @@ extern gboolean hx_news_file_extract (const guint8 *frame, gsize frame_len,
  * name, no colon found, or a name longer than the 31-byte Hotline
  * nick cap (lines like "Subject Changed to: X" or "https://..."
  * pass through unsplit). Callers should fall back to passing the
- * whole line through hx_chat_view_append unchanged.
+ * whole line through rotulus_view_append unchanged.
  *
  * The name length cap is intentional: it lets us reliably skip
  * URLs and other long colon-containing prose that isn't a chat
@@ -747,28 +747,6 @@ extern void hx_chat_event_attach_media (HxChatEvent *ev, const guint8 *id,
  * sites that have signalled media presence but haven't extracted
  * meta yet. */
 extern char *hx_chat_media_placeholder_line (const HxChatMedia *m);
-
-/* Clickable variant of hx_chat_media_placeholder_line for the
- * xtext output path. Returns a NBSP-joined string so xtext's
- * word tokenizer (which splits on ASCII space) treats the whole
- * row as one clickable token, and embeds a `hxmedia:N` substring
- * where N is the caller's per-chat token id. The word_click
- * handler in chat.c scans for that substring on click and
- * dispatches to the inline-media dialog via a hashtable lookup
- * keyed on the token id.
- *
- * Format-wise identical to hx_chat_media_placeholder_line except
- * spaces are replaced by NBSP (U+00A0, "\xc2\xa0") and a
- * `hxmedia:N` token is interpolated before the "click to view"
- * trailer. Caller g_free()'s the result. */
-extern char *hx_chat_media_placeholder_clickable (const HxChatMedia *m,
-                                                  guint token_id);
-
-/* Walk a placeholder string for the `hxmedia:N` substring. If
- * found, returns TRUE and writes N into *out_token; otherwise
- * returns FALSE. Used by the word_click handler to recover the
- * token from the clicked word. NUL-terminated input. */
-extern gboolean hx_chat_media_parse_token (const char *word, guint *out_token);
 
 /*
  * MediaTable — the per-chat token → HxChatMedia handle table (M3;

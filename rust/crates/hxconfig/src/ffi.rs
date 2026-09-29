@@ -52,6 +52,15 @@ fn with<T>(default: T, f: impl FnOnce(&mut State) -> T) -> T {
     })
 }
 
+/// Read the loaded settings from Rust, or `None` if nothing is loaded.
+///
+/// The Rust counterpart of the by-name getters below, for code that reads
+/// several settings at once and would rather not spell each one as a
+/// string.
+pub fn with_settings<T>(f: impl FnOnce(&crate::Settings) -> T) -> Option<T> {
+    CONFIG.with(|c| c.borrow().as_ref().map(|s| f(s.config.settings())))
+}
+
 /// A C index as a slice index, or `None` if it is negative.
 ///
 /// Clamping a negative to 0 instead would answer a nonsense question with

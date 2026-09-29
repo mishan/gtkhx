@@ -321,6 +321,7 @@ pub(crate) mod cfg {
     pub const TIMESTAMP: &str = "TIMESTAMP";
     pub const CHAT_AVATARS: &str = "CHATAVATARS";
     pub const MARKDOWN: &str = "MARKDOWN";
+    pub const SINGLE_CLICK_LINKS: &str = "SINGLECLICKLINKS";
     pub const WORDWRAP: &str = "WORDWRAP";
     pub const XBUF_MAX: &str = "XBUF_MAX";
     pub const STAMP_FORMAT: &str = "TIMESTAMPFORMAT";
@@ -501,6 +502,11 @@ pub(crate) fn page_chat_appearance(page: &adw::PreferencesPage) {
             "Formats **bold**, *italic*, `code`, quotes and links in received \
              messages. What you send is unchanged.",
         )),
+    ));
+    output.add(&switch_row(
+        cfg::SINGLE_CLICK_LINKS,
+        &tr("Open links with a single click"),
+        Some(&tr("Otherwise, right-click a link to open or copy it")),
     ));
     output.add(&switch_row(cfg::WORDWRAP, &tr("Word wrap"), None));
     output.add(&spin_row(

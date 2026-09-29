@@ -78,6 +78,7 @@ pub const MAP: &[(&str, Target)] = &[
     ("OPENUSERS", Drop(PANEL_LATCH)),
     ("QUEUEDL", Path("transfers.queue")),
     ("SHOWJOIN", Path("chat.show_joins")),
+    ("SINGLECLICKLINKS", Path("chat.single_click_links")),
     ("SOUNDCHAT", Path("sound.chat")),
     ("SOUNDERROR", Path("sound.error")),
     ("SOUNDFILE", Path("sound.transfer")),
@@ -144,6 +145,9 @@ pub const NEW_PATHS: &[&str] = &[
     // Window tinting arrived with themes that color the chrome; on is the
     // look a theme is written for.
     "appearance.tint_window",
+    // Links in chat did nothing on a left click before; opening them is
+    // what every other link on the desktop does.
+    "chat.single_click_links",
 ];
 
 /// Where an old key goes, or `None` if the schema has never heard of it.

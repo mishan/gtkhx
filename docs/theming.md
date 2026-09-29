@@ -91,7 +91,7 @@ constructed, so the first measure pass already has the right factors, and emits
 signal: buttons re-render from source (and auto-unsubscribe on finalize), the
 icon resolver's cache is invalidated so the rebuild re-resolves against the new
 theme's `icons/` directory, `chat.c::gtkhx_apply_theme_palette()` pushes the
-role colours into the chat view via `hx_chat_view_set_palette`, and
+role colours into the chat view via `rotulus_view_set_palette`, and
 `gtkhx_refresh_css` / `gtkhx_refresh_userlist_css` re-emit the `.gtkhx-*` CSS
 providers.
 
@@ -288,7 +288,7 @@ machinery behind them:
   factors fed back into code. GTK CSS has no native way to express "decode a
   16×16 PNG at 200% with nearest-neighbour before handing it to a button."
 - **The chat palette.** The chat view takes its colours as an array through
-  `hx_chat_view_set_palette`; it never consults a style context. The palette
+  `rotulus_view_set_palette`; it never consults a style context. The palette
   has to be a structure someone can hand over.
 - **User-list name colours.** `src/users_cell.c` appends its Pango layout with
   an explicit `GdkRGBA`. Same story: no CSS consultation on the draw path.
@@ -312,8 +312,8 @@ machinery behind them:
    *The old cost estimate for this path is superseded.* It was written against a
    large vendored cairo chat widget that no longer exists, and priced in weeks
    of surgery on it plus the risk of re-merging against upstream HexChat. The
-   chat surface today is a Rust widget (`hxchat-view` over `hxchat-layout`)
-   behind the C ABI in `src/chat_view.h`, and the palette reaches it through one
+   chat surface today is a Rust widget (`rotulus` over `rotulus-layout`)
+   behind the C ABI in `rust/crates/rotulus/include/rotulus.h`, and the palette reaches it through one
    clean setter. The honest remaining cost is teaching that widget and its
    layout engine to source colours from a style context rather than being handed
    an array — the layout crate is deliberately dependency-free, so that's a

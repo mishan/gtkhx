@@ -22,7 +22,7 @@
 #include <glib.h>
 #include "protocol.h"
 
-/* Palette index the "[hx]" tag renders in. Mirrors chat_view.h's
+/* Palette index the "[hx]" tag renders in. Mirrors rotulus.h's
  * HX_CHAT_INFO_COLOR (chat.c asserts they agree); duplicated rather
  * than included so the non-widget callers that pull in this header
  * don't drag GTK along. */

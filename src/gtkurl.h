@@ -6,32 +6,22 @@
 /*
  * gtkurl — shared URL detection / activation across GtkHx.
  *
- * The chat / private-message / private-chat windows render through
- * the xtext widget, which already understands URL hover (changes
- * cursor to a hand) and emits a "word_click" signal on right- and
- * middle-click. The news / news15 windows render through GtkTextView
- * and need their own detection + popup wiring. This module collects
- * the bits both flavours share — URL recognition, default-browser
- * launch, alternate-browser discovery, and the Adwaita right-click
- * popover — so the call sites stay tiny.
+ * The chat views detect and underline links themselves and hand a
+ * right-click to gtkurl_show_popup (gtkhx-ui's chat_view.rs). The news
+ * windows render through GtkTextView and use the detection + popup
+ * wiring here. Detection is implemented in Rust, on the scheme list the
+ * chat view uses, so the two cannot disagree about what a link is.
  */
 
 /* TRUE if `word' looks like a URL we should treat as clickable.
- * Includes bare email tokens (foo@bar.com) — xtext uses this to
- * decide whether to draw the word as a link and pop the right-click
- * menu. */
+ * Includes bare email tokens (foo@bar.com). */
 extern gboolean gtkurl_is_url (const char *word);
 
 /* Subset of gtkurl_is_url: TRUE iff `word' starts with one of the
- * scheme prefixes we recognise as a URL (http://, https://, ftp://,
- * ftps://, irc://, mailto:, magnet:, git://, ssh://, sftp://,
- * hotline://) OR one of the bare prefixes (www., ftp., irc.). The
+ * scheme prefixes we recognise as a URL (rotulus-layout's default set
+ * plus hotline://) OR one of the bare prefixes (www., ftp., irc.). The
  * email-shape check that gtkurl_is_url does is intentionally NOT
- * included — callers like chat.c's word_check need to distinguish
- * "this is a URL" (WORD_URL) from "this is an email" (WORD_EMAIL).
- * This is the canonical scheme list; both the GtkTextView and xtext
- * paths key off it, so adding a new scheme only requires editing
- * url_schemes[] in gtkurl.c. */
+ * included. */
 extern gboolean gtkurl_word_has_url_scheme (const char *word);
 
 /* Returns a malloc'd "openable" form of `word' — prepends "https://"
@@ -57,16 +47,6 @@ extern void gtkurl_scan (const char *text, gssize length, gtkurl_match_cb cb,
  * close. */
 extern void gtkurl_show_popup (GtkWidget *anchor, const char *url, double x,
                                double y);
-
-/* WORD_CLICK signal handler for xtext consumers. Connect with
- *
- *   g_signal_connect (xtext, "word_click",
- *                     G_CALLBACK (gtkurl_xtext_word_click), NULL);
- *
- * Filters out left-click / non-URL words, calls gtkurl_show_popup
- * for everything else. */
-extern void gtkurl_xtext_word_click (GtkWidget *xtext, char *word,
-                                     GdkEvent *event, gpointer data);
 
 /* Wire up a GtkTextView to render URLs as clickable. Creates the
  * "url" tag on its buffer, installs a motion controller (cursor →

@@ -22,9 +22,9 @@ the numbers.
 | | |
 |---|---|
 | **xtext** | `src/xtext.c`, HexChat's text widget, vendored during the GTK 2 port, plus ~1,550 lines of GtkHx grafts. Line-uniform vertical layout: every coordinate derives from `fontsize × subline_count`. Wraps at append time. |
-| **hxchat** | `rust/crates/hxchat-layout` (engine) + `hxchat-view` (GTK4 widget). Pixel-based variable-height layout, retained per-row layout cache, chunked prefix-sum height index. Wraps lazily, per visible row. |
+| **hxchat** | `rust/crates/rotulus-layout` (engine) + `rotulus` (GTK4 widget). Pixel-based variable-height layout, retained per-row layout cache, chunked prefix-sum height index. Wraps lazily, per visible row. |
 
-Both were driven through the same `chat_view.h` seam, from the same
+Both were driven through the same `rotulus.h` seam, from the same
 binary, in the same window, by the same append path. `GTKHX_CHATVIEW`
 selected the backend and was the only difference between runs.
 
@@ -189,7 +189,7 @@ remembering.
 `want_hxchat()` in `chat_view.c` accepted only `"new"` and `"hxchat"`.
 (Both are gone now: with one backend there is nothing to select, so the
 `GTKHX_CHATVIEW` switch, the `want_hxchat` predicate and the whole
-`src/chat_view.c` dispatcher went with xtext. `src/chat_view.h` is a
+`src/chat_view.c` dispatcher went with xtext. `rust/crates/rotulus/include/rotulus.h` is a
 declaration header today.)
 The harness passed `GTKHX_CHATVIEW=0` and `=1` — the obvious spelling for
 a boolean, and what the harness docs, the `chat_bench.c` header and the

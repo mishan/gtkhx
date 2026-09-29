@@ -824,6 +824,7 @@ fn every_path_round_trips_a_non_default_value() {
         &mut s.chat.timestamp,
         &mut s.chat.avatars,
         &mut s.chat.markdown,
+        &mut s.chat.single_click_links,
         &mut s.chat.show_joins,
         &mut s.chat.legacy_nick_completion,
         &mut s.chat.autocopy.text,

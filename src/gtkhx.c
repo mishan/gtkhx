@@ -1518,10 +1518,15 @@ init (int argc, char **argv)
             }
         }
 #endif
-        bindtextdomain (PACKAGE, localedir);
+        /* The chat view's own strings are in the "rotulus" domain. */
+        for (const char *const *d
+             = (const char *const[]){ PACKAGE, "rotulus", NULL };
+             *d; d++) {
+            bindtextdomain (*d, localedir);
+            bind_textdomain_codeset (*d, "UTF-8");
+        }
         g_free (win_ld);
     }
-    bind_textdomain_codeset (PACKAGE, "UTF-8");
     textdomain (PACKAGE);
 
 #ifdef G_OS_WIN32

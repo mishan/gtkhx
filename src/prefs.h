@@ -69,7 +69,7 @@ struct gtkhx_prefs {
     unsigned char tint_window;
     unsigned char timestamp;
     /* Show the speaker's avatar / icon in the chat gutter. Only on the
-     * first message of a run — see chat_view.h's grouping note. */
+     * first message of a run — see rotulus.h's grouping note. */
     unsigned char chat_avatars;
     /* Render markdown in incoming messages. Sending is unaffected —
      * markdown is transmitted literally, the wire format has no styling. */
@@ -95,7 +95,7 @@ struct gtkhx_prefs {
     /* HexChat-style xtext autocopy controls — driven by
      * Settings → Advanced → Auto Copy Behavior, persisted as the
      * AUTOCOPY_TEXT / AUTOCOPY_STAMP / AUTOCOPY_COLOR keys, applied
-     * to the view via hx_chat_view_set_autocopy_*. See the comment on the
+     * to the view via rotulus_view_set_autocopy_*. See the comment on the
      * `prefs` struct in xtext.c for the per-field semantics. */
     unsigned char autocopy_text;
     unsigned char autocopy_stamp;

@@ -36,7 +36,7 @@
 #include "gtkhx.h"
 #include "gtkhx_log.h"
 #include "gtkutil.h"
-#include "chat_view.h"
+#include <rotulus.h>
 #include "rcv.h"
 #include "tasks.h"
 #include "connect.h"
@@ -45,7 +45,6 @@
 #include "toolbar.h"
 #include "users.h"
 #include "cicn.h"
-#include "gtkurl.h"
 #include "msg.h"
 
 void
@@ -462,28 +461,13 @@ create_msg (session *sess, guint16 _uid, char *name)
      * sub-widgets (xtext + input + ctrl). */
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        msg->outputbuf = hx_chat_view_new (colors, TRUE);
-        hx_chat_view_set_font (msg->outputbuf, fontname);
+        msg->outputbuf = gtkhx_chat_view_new (colors, fontname);
         g_free (fontname);
     }
-    hx_chat_view_set_word_wrap (msg->outputbuf, gtkhx_prefs.word_wrap);
-    hx_chat_view_set_urlcheck_function (msg->outputbuf, word_check);
-    hx_chat_view_set_max_lines (msg->outputbuf, gtkhx_prefs.xbuf_max);
-    /* view-native timestamps — see chat.c::create_chat_window
-     * for the rationale. */
-    hx_chat_view_set_indent (msg->outputbuf, TRUE);
-    hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
-    hx_chat_view_set_max_indent (msg->outputbuf, 256);
-    hx_chat_view_set_group_gap (msg->outputbuf, HX_CHAT_GROUP_GAP_DEFAULT);
-    hx_chat_view_set_avatar_size (
-        msg->outputbuf,
-        gtkhx_prefs.chat_avatars ? HX_CHAT_AVATAR_SIZE_DEFAULT : 0);
-    g_signal_connect (msg->outputbuf, "word_click",
-                      G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
     msg->vscroll
         = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                             hx_chat_view_get_vadjustment (msg->outputbuf));
+                             rotulus_view_get_vadjustment (msg->outputbuf));
     msg->inputbuf = gtk_text_view_new ();
 
     /* Theme monospace via gtk_text_view_set_monospace — see chat.c for
@@ -634,7 +618,7 @@ msg_output_render (session *sess, const char *name, guint16 uid,
      * for incoming. Keyed on is_self rather than direction,
      * deliberately: the colour is about *whose words* these are, which
      * is what is_self answers. */
-    brack_col = is_self ? HX_CHAT_PAL_SELF_BRACKET : HX_CHAT_PAL_NICK_BRACKET;
+    brack_col = is_self ? ROTULUS_PAL_SELF_BRACKET : ROTULUS_PAL_NICK_BRACKET;
 
     /* Validate the body bytes once. the chat view hands content to Pango,
      * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
@@ -645,13 +629,10 @@ msg_output_render (session *sess, const char *name, guint16 uid,
         return;
     }
 
-    /* Each newline-separated line in the body becomes its own
-     * xtext entry. The first one carries the nick column via
-     * hx_chat_view_append_indent (two-column layout — names
-     * on the left, message on the right, with the auto-aligned
-     * separator the chat output uses); subsequent lines append
-     * as plain continuation rows so multi-line messages don't
-     * repeat the nick column on every line. */
+    /* Each newline-separated line in the body becomes its own row.
+     * The first one carries the nick column; subsequent lines append
+     * as plain continuation rows so multi-line messages don't repeat
+     * the nick column on every line. */
     cur = valid_body;
     end = valid_body + valid_body_len;
     gboolean first = TRUE;
@@ -662,14 +643,14 @@ msg_output_render (session *sess, const char *name, guint16 uid,
             /* "<name>": the same shape as chat.c's nick column, and
              * the same three runs. */
             const char *nam = name ? name : "";
-            HxChatRun gutter[3] = {
-                { "<", 1, brack_col, HX_CHAT_ATTR_NONE },
-                { nam, (int)strlen (nam),
-                  hx_chat_nick_color (nam, strlen (nam), is_self),
-                  HX_CHAT_ATTR_NONE },
-                { ">", 1, brack_col, HX_CHAT_ATTR_NONE },
+            RotulusRun gutter[3] = {
+                ROTULUS_RUN ("<", 1, brack_col, ROTULUS_ATTR_NONE),
+                ROTULUS_RUN (nam, (int)strlen (nam),
+                             hx_chat_nick_color (nam, strlen (nam), is_self),
+                             ROTULUS_ATTR_NONE),
+                ROTULUS_RUN (">", 1, brack_col, ROTULUS_ATTR_NONE),
             };
-            HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);
+            RotulusRun body_run = ROTULUS_RUN_PLAIN (cur, (int)seg_len);
             /* PM windows are per-uid, so the speaker is known outright
              * rather than looked up — the one place in the tree where
              * that is true.
@@ -681,13 +662,19 @@ msg_output_render (session *sess, const char *name, guint16 uid,
              * stays 0, which is a miss rather than a guess. */
             /* `nam` is NUL-terminated here (it is the window's name),
              * so -1 is honest rather than a shortcut. */
-            HxChatSpeaker sp = { outgoing ? hx_conn_uid (sess->htlc) : uid, nam,
-                                 -1, outgoing };
-            hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
-                                      1, 0);
+            RotulusSpeaker sp
+                = { outgoing ? hx_conn_uid (sess->htlc) : uid, nam, -1 };
+            rotulus_view_append (
+                msg->outputbuf,
+                &(RotulusRow){ .flags = outgoing ? ROTULUS_ROW_OUTGOING : 0,
+                               .speaker = sp,
+                               .gutter = gutter,
+                               .n_gutter = 3,
+                               .body = &body_run,
+                               .n_body = 1 });
             first = FALSE;
         } else {
-            hx_chat_view_append (msg->outputbuf, cur, seg_len, 0);
+            rotulus_view_append_text (msg->outputbuf, cur, (int)seg_len, 0);
         }
         if (!nl) {
             break;
@@ -769,7 +756,7 @@ broadcast_name_color (guint16 color)
         return 14;
     case 0:
     default:
-        return HX_CHAT_COLOR_DEFAULT;
+        return ROTULUS_COLOR_DEFAULT;
     }
 }
 

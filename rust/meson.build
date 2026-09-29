@@ -124,6 +124,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/news.rs',
   'crates/gtkhx-ui/src/news_browser.rs',
   'crates/gtkhx-ui/src/chat.rs',
+  'crates/gtkhx-ui/src/chat_view.rs',
   'crates/gtkhx-ui/src/chat_tabs.rs',
   'crates/gtkhx-ui/src/conn_tabs.rs',
   'crates/gtkhx-ui/src/chat_input.rs',
@@ -189,27 +190,32 @@ rust_sources = files(
   'crates/hxvoice-send/src/tests.rs',
   'crates/hxtext/src/lib.rs',
   'crates/hxtext/src/tests.rs',
-  # hxchat-layout (chat-view C1) — the chat layout engine. No linkable
+  # rotulus-layout (chat-view C1) — the chat layout engine. No linkable
   # output yet; listed so edits retrigger the cargo build and the
   # workspace test run.
-  'crates/hxchat-layout/src/lib.rs',
-  'crates/hxchat-layout/src/span.rs',
-  'crates/hxchat-layout/src/message.rs',
-  'crates/hxchat-layout/src/markdown.rs',
-  'crates/hxchat-layout/src/measure.rs',
-  'crates/hxchat-layout/src/wrap.rs',
-  'crates/hxchat-layout/src/index.rs',
-  'crates/hxchat-layout/src/anchor.rs',
-  'crates/hxchat-layout/src/buffer.rs',
-  'crates/hxchat-layout/src/select.rs',
-  'crates/hxchat-layout/src/tests.rs',
-  # hxchat-view (chat-view C2) — the GTK4 widget over hxchat-layout.
-  'crates/hxchat-view/src/lib.rs',
-  'crates/hxchat-view/src/view.rs',
-  'crates/hxchat-view/src/measure.rs',
-  'crates/hxchat-view/src/ffi.rs',
-  'crates/hxchat-view/src/links.rs',
-  'crates/hxchat-view/src/tests.rs',
+  'crates/rotulus-layout/src/lib.rs',
+  'crates/rotulus-layout/src/span.rs',
+  'crates/rotulus-layout/src/message.rs',
+  'crates/rotulus-layout/src/markdown.rs',
+  'crates/rotulus-layout/src/measure.rs',
+  'crates/rotulus-layout/src/wrap.rs',
+  'crates/rotulus-layout/src/index.rs',
+  'crates/rotulus-layout/src/anchor.rs',
+  'crates/rotulus-layout/src/buffer.rs',
+  'crates/rotulus-layout/src/select.rs',
+  'crates/rotulus-layout/src/tests.rs',
+  'crates/rotulus-layout/src/linkify.rs',
+  'crates/rotulus-mirc/src/lib.rs',
+  # rotulus (chat-view C2) — the GTK4 widget over rotulus-layout.
+  'crates/rotulus/src/lib.rs',
+  'crates/rotulus/src/view.rs',
+  'crates/rotulus/src/measure.rs',
+  'crates/rotulus/src/ffi.rs',
+  'crates/rotulus/src/links.rs',
+  'crates/rotulus/src/tests.rs',
+  'crates/rotulus/src/a11y.rs',
+  'crates/rotulus/src/mirc_ffi.rs',
+  'crates/rotulus/include/rotulus.h',
   'crates/hxbookmarks/src/lib.rs',
   'crates/hxbookmarks/src/cipher.rs',
   'crates/hxbookmarks/src/legacy.rs',
@@ -301,8 +307,9 @@ rust_sources = files(
   'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
-  'crates/hxchat-layout/Cargo.toml',
-  'crates/hxchat-view/Cargo.toml',
+  'crates/rotulus-layout/Cargo.toml',
+  'crates/rotulus/Cargo.toml',
+  'crates/rotulus-mirc/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
@@ -425,6 +432,13 @@ else
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'
 endif
 
+# The chat view implements GtkAccessibleText, so a screen reader can read
+# the transcript, when the GTK it builds against has it (4.14). Below that
+# it exposes only its role.
+if gtk_dep.version().version_compare('>= 4.14')
+  cargo_features = cargo_features + ',rotulus/v4_14'
+endif
+
 # Voice crate gating. When voice is compiled out (see -Dvoice / the
 # `voice_enabled` boolean in the top-level meson.build), exclude the two
 # voice crates from the workspace build: hxvoice-runtime pulls in the
@@ -467,6 +481,10 @@ endif
 # Build the Rust workspace. The custom_target output is a stamp file that
 # Meson uses for dependency tracking; the actual artifacts are the .a
 # archives under rust_target_dir/release/.
+# The chat widget's C header ships inside its crate, beside the code that
+# implements it, so the crate carries its own ABI when it leaves the tree.
+rotulus_inc = include_directories('crates/rotulus/include')
+
 rust_build = custom_target('rust-workspace',
   command : [
     'sh', '-c',

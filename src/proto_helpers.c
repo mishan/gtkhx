@@ -1010,27 +1010,8 @@ format_bytes_short (guint32 bytes)
     return g_strdup_printf ("%.1f MB", (double)bytes / (1024.0 * 1024.0));
 }
 
-/* Append a piece of text to `out`, replacing every ASCII space
- * with a NBSP (U+00A0 = "\xc2\xa0") so xtext's tokenizer keeps
- * the rendered row as a single clickable word. Other bytes pass
- * through verbatim. */
-static void
-nbsp_append (GString *out, const char *s)
-{
-    if (!s) {
-        return;
-    }
-    for (const char *p = s; *p; p++) {
-        if (*p == ' ') {
-            g_string_append (out, "\xc2\xa0");
-        } else {
-            g_string_append_c (out, *p);
-        }
-    }
-}
-
-static char *
-build_placeholder (const HxChatMedia *m, gboolean nbsp_joined, guint token_id)
+char *
+hx_chat_media_placeholder_line (const HxChatMedia *m)
 {
     if (!m) {
         return g_strdup ("[image]");
@@ -1038,86 +1019,18 @@ build_placeholder (const HxChatMedia *m, gboolean nbsp_joined, guint token_id)
     const char *fmt_label = mime_short_label (m->mime);
     GString *out = g_string_new ("[image");
     if (fmt_label && *fmt_label && g_strcmp0 (fmt_label, "?") != 0) {
-        if (nbsp_joined) {
-            g_string_append (out, "\xc2\xa0\xc2\xb7\xc2\xa0"); /* NBSP·NBSP */
-            nbsp_append (out, fmt_label);
-        } else {
-            g_string_append_printf (out, " · %s", fmt_label);
-        }
+        g_string_append_printf (out, " · %s", fmt_label);
     }
     if (m->width_present && m->height_present) {
-        char dims[64];
-        g_snprintf (dims, sizeof (dims), "%u×%u", m->width, m->height);
-        if (nbsp_joined) {
-            g_string_append (out, "\xc2\xa0\xc2\xb7\xc2\xa0");
-            nbsp_append (out, dims);
-        } else {
-            g_string_append_printf (out, " · %s", dims);
-        }
+        g_string_append_printf (out, " · %u×%u", m->width, m->height);
     }
     if (m->bytes_present) {
         char *bytes_str = format_bytes_short (m->bytes);
-        if (nbsp_joined) {
-            g_string_append (out, "\xc2\xa0\xc2\xb7\xc2\xa0");
-            nbsp_append (out, bytes_str);
-        } else {
-            g_string_append_printf (out, " · %s", bytes_str);
-        }
+        g_string_append_printf (out, " · %s", bytes_str);
         g_free (bytes_str);
     }
-    if (nbsp_joined) {
-        /* Embed the click-to-dialog token. The handler scans for
-         * `hxmedia:` and parses the digits. */
-        g_string_append_printf (out, "\xc2\xa0\xc2\xb7\xc2\xa0hxmedia:%u",
-                                token_id);
-        g_string_append (out, "\xc2\xa0\xc2\xb7\xc2\xa0"
-                              "click\xc2\xa0to\xc2\xa0view]");
-    } else {
-        g_string_append (out, " · click to view]");
-    }
+    g_string_append (out, " · click to view]");
     return g_string_free (out, FALSE);
-}
-
-char *
-hx_chat_media_placeholder_line (const HxChatMedia *m)
-{
-    return build_placeholder (m, /*nbsp_joined=*/FALSE, /*token_id=*/0);
-}
-
-char *
-hx_chat_media_placeholder_clickable (const HxChatMedia *m, guint token_id)
-{
-    return build_placeholder (m, /*nbsp_joined=*/TRUE, token_id);
-}
-
-gboolean
-hx_chat_media_parse_token (const char *word, guint *out_token)
-{
-    if (!word || !out_token) {
-        return FALSE;
-    }
-    /* Locate the `hxmedia:` substring anywhere in the word. The
-     * placeholder NBSP-joins the row so the entire row arrives at
-     * the click handler as a single token, with `hxmedia:N`
-     * embedded between NBSP punctuation. */
-    const char *p = strstr (word, "hxmedia:");
-    if (!p) {
-        return FALSE;
-    }
-    p += strlen ("hxmedia:");
-    if (!*p || !g_ascii_isdigit (*p)) {
-        return FALSE;
-    }
-    guint64 v = 0;
-    while (*p && g_ascii_isdigit (*p)) {
-        v = v * 10 + (*p - '0');
-        if (v > G_MAXUINT) {
-            return FALSE;
-        }
-        p++;
-    }
-    *out_token = (guint)v;
-    return TRUE;
 }
 
 /* HxChatEvent boxed-type registration (hx_chat_event_get_type) moved to

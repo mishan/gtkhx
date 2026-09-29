@@ -32,9 +32,9 @@ use gtk4 as gtk;
 use gtkhx_core::conn::{
     hx_conn_chat_history_last_msgid, hx_conn_fd, hx_conn_set_chat_history_last_msgid, HtlcConn,
 };
-use hxchat_layout::{Block, Message, MessageFlags, MessageKind};
-use hxchat_view::HxChatView;
 use hxhandlers::recv::chat::rcv_task_chat_history;
+use rotulus::RotulusView;
+use rotulus_layout::{Block, Message, MessageFlags, MessageKind};
 
 use super::{after_paint, warm_up, Report};
 
@@ -97,13 +97,13 @@ fn row(text: String) -> Message {
         timestamp: 0,
         speaker: None,
         gutter: None,
-        blocks: vec![Block::text(text)],
+        blocks: vec![Block::text(text)].into(),
         flags: MessageFlags::NONE,
     }
 }
 
 pub(super) async fn run(view: &gtk::Widget, n: u32) {
-    let Some(chat) = view.downcast_ref::<HxChatView>() else {
+    let Some(chat) = view.downcast_ref::<RotulusView>() else {
         glib::g_warning!("gtkhx", "GTKHX_BENCH history: not a chat view");
         return;
     };
@@ -148,7 +148,7 @@ pub(super) async fn run(view: &gtk::Widget, n: u32) {
     unsafe { hx_conn_set_chat_history_last_msgid(conn, cursor) };
 }
 
-async fn measure(chat: &HxChatView, view: &gtk::Widget, htlc: *mut c_void, n: u32) {
+async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u32) {
     let idle = warm_up(view).await;
     let mut r = Report::new("chat history", idle);
     r.line("entries", &format!("{n:9}"), "");

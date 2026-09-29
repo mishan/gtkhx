@@ -387,9 +387,9 @@ and the rest of the theme applies as written.
   `src/gtkhx.gresource.xml`.
 - Icon resolver (the theme-bundle `icons/` lookup): `src/gtkhx_icon.{c,h}`.
 - Palette consumer: `src/chat.c::gtkhx_apply_theme_palette()`, which
-  pushes the array into the chat view via `hx_chat_view_set_palette`
-  (declared in `src/chat_view.h`; implemented in the Rust
-  `hxchat-view` crate).
+  pushes the array into the chat view via `rotulus_view_set_palette`
+  (declared in `rust/crates/rotulus/include/rotulus.h`; implemented in the Rust
+  `rotulus` crate).
 - CSS-surface consumers: `gtkhx_refresh_css` /
   `gtkhx_refresh_userlist_css` in `src/gtkhx.c`.
 - Scale consumers: button helpers in `src/gtkutil.c`, the task-row

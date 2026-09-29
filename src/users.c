@@ -389,7 +389,7 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
  * our popup buttons.
  *
  * Shared rather than static: the chat view's own bare-popover menu
- * (hxchat-view, view.rs::show_context_menu) wants the same affordance,
+ * (rotulus, view.rs::show_context_menu) wants the same affordance,
  * and a second provider with a second class name is how the two menus
  * start looking different from each other. */
 void

@@ -28,7 +28,7 @@ any new harness.
 
 | Tier | What | Where | Status |
 |---|---|---|---|
-| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxchat-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
+| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `rotulus-layout`, `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | bench binaries against an in-process fake server | The connection pipeline, HTXF transfers, the tracker fetch |
 | 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup, chat history, video tiles |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
@@ -37,7 +37,7 @@ any new harness.
 
 ```sh
 cd rust
-cargo bench -p hxchat-layout          # layout engine
+cargo bench -p rotulus-layout          # layout engine
 cargo bench -p hxcrypto               # ciphers and hashes
 cargo bench -p hxcrypto -- aead       # one group
 cargo bench -p hxtext                 # Mac Roman, the wire encode, shortcodes
@@ -207,7 +207,7 @@ added to the baseline below.
 **2026-09-26**, AMD Ryzen 9 5900X, `cargo bench` defaults. Criterion's median
 estimate. Comparable only with runs on the same machine.
 
-### `hxchat-layout`
+### `rotulus-layout`
 
 Against `FixedMeasure`, so this is the engine without Pango shaping. Width
 800 px, viewport 600 px, 3–19-word messages with five nick widths.
@@ -233,6 +233,11 @@ day, under more background load):
 `scroll_walk` is now flat in the scrollback size. `live_at_cap` still
 grows a little, which fits the height index's prefix repair — O(chunks),
 not O(rows) — though that is not separately measured.
+
+The suite now also runs at 200,000 rows, and a memory report sits beside
+it (`--bench memory`); both are recorded in
+[chat-view.md](chat-view.md), "Measured". At that size the per-chunk
+bookkeeping shows: every frame stays under 2 ms, but no longer flat.
 
 ### `hxcrypto`
 

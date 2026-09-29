@@ -313,7 +313,7 @@ mod imp {
                     // ("hx", or a broadcast sender), NULL for an
                     // unprefixed line; `color` its palette index. These
                     // used to be *inside* `body` as \003NN escapes that
-                    // the view then parsed back out — see chat_view.h.
+                    // the view then parsed back out — see rotulus.h.
                     Signal::builder("chat-log-line")
                         .param_types([
                             Type::POINTER,

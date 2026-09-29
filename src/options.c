@@ -28,7 +28,7 @@
 #include "hx.h"
 #include "hxconn.h"
 #include "gtkhx.h"
-#include "chat_view.h"
+#include <rotulus.h>
 #include "users.h"
 #include "chat.h"
 #include "chat_members.h" /* hx_member_model_get_info, struct hx_member_info */
@@ -106,8 +106,7 @@ reinit_gtktexts (session *sess)
                     && !hx_panel_was_constructed (HX_PANEL_ID_CHAT)) {
                     continue;
                 }
-                hx_chat_view_set_font (hx_gchat_output (gchat), fontname);
-                hx_chat_view_refresh (hx_gchat_output (gchat));
+                rotulus_view_set_font (hx_gchat_output (gchat), fontname);
                 if (hx_gchat_input (gchat)) {
                     gtkhx_apply_input_font (hx_gchat_input (gchat));
                 }
@@ -129,8 +128,7 @@ reinit_gtktexts (session *sess)
             g_hash_table_iter_init (&iter, sess->msg_windows);
             while (g_hash_table_iter_next (&iter, NULL, &val)) {
                 struct msgwin *msg = val;
-                hx_chat_view_set_font (msg->outputbuf, fontname);
-                hx_chat_view_refresh (msg->outputbuf);
+                rotulus_view_set_font (msg->outputbuf, fontname);
                 gtkhx_apply_input_font (msg->inputbuf);
             }
         }
@@ -138,118 +136,30 @@ reinit_gtktexts (session *sess)
     }
 }
 
+/* Re-apply the chat preferences to every live chat view: the chat and
+ * private-chat outputs in sess->chats, and the private-message outputs
+ * in msg_windows. The view reads the values itself
+ * (gtkhx_chat_view_configure), so one walk serves every chat preference
+ * rather than one per setting. */
 static void
-changed_xtext (session *sess)
+changed_chat_view (session *sess)
 {
-    if (sess) {
-        if (sess->chats) {
-            guint n = hx_chats_count (sess->chats);
-            for (guint i = 0; i < n; i++) {
-                struct chat *c = hx_chats_get_at (sess->chats, i);
-                struct gtkhx_chat *gchat = hx_chat_view (c);
-                if (!gchat) {
-                    continue;
-                }
-                GtkWidget *out = hx_gchat_output (gchat);
-                hx_chat_view_set_word_wrap (out, gtkhx_prefs.word_wrap);
-                hx_chat_view_set_max_lines (out, gtkhx_prefs.xbuf_max);
-                hx_chat_view_refresh (out);
-            }
-        }
-        if (sess->msg_windows) {
-            GHashTableIter iter;
-            gpointer val;
-            g_hash_table_iter_init (&iter, sess->msg_windows);
-            while (g_hash_table_iter_next (&iter, NULL, &val)) {
-                struct msgwin *msg = val;
-                hx_chat_view_set_word_wrap (msg->outputbuf,
-                                            gtkhx_prefs.word_wrap);
-                hx_chat_view_set_max_lines (msg->outputbuf,
-                                            gtkhx_prefs.xbuf_max);
-                hx_chat_view_refresh (msg->outputbuf);
-            }
-        }
-    }
-}
-
-/* CFG_MARKDOWN is process-wide in the view, so unlike the avatar and
- * timestamp toggles this needs no per-view walk — one call, and every
- * chat surface picks it up for messages appended afterwards. Rows
- * already rendered keep their current form; re-parsing scrollback would
- * mean keeping every row's original source text alive forever. */
-static void
-changed_markdown (void)
-{
-    hx_chat_view_set_markdown (gtkhx_prefs.markdown);
-}
-
-/* apply the CFG_CHAT_AVATARS toggle to every live chat view.
- *
- * Same shape as changed_timestamp below, and for the same reason: the
- * setting is per-view state, so flipping it has to walk the live views
- * rather than wait for them to be rebuilt. */
-static void
-changed_chat_avatars (session *sess)
-{
-    int px = gtkhx_prefs.chat_avatars ? HX_CHAT_AVATAR_SIZE_DEFAULT : 0;
-
-    if (!sess) {
-        return;
-    }
-    if (sess->chats) {
+    if (sess && sess->chats) {
         guint n = hx_chats_count (sess->chats);
         for (guint i = 0; i < n; i++) {
-            struct chat *c = hx_chats_get_at (sess->chats, i);
-            struct gtkhx_chat *gchat = hx_chat_view (c);
-            if (!gchat) {
-                continue;
+            struct gtkhx_chat *gchat
+                = hx_chat_view (hx_chats_get_at (sess->chats, i));
+            if (gchat) {
+                gtkhx_chat_view_configure (hx_gchat_output (gchat));
             }
-            hx_chat_view_set_avatar_size (hx_gchat_output (gchat), px);
         }
     }
-    if (sess->msg_windows) {
+    if (sess && sess->msg_windows) {
         GHashTableIter iter;
         gpointer val;
         g_hash_table_iter_init (&iter, sess->msg_windows);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct msgwin *msg = val;
-            hx_chat_view_set_avatar_size (msg->outputbuf, px);
-        }
-    }
-}
-
-/* apply the CFG_TIMESTAMP toggle to every live chat view
- * — chat / pchat outputs in gchat_list, plus PM outputs in msg_windows.
- * View-native stamps are flipped per-view via hx_chat_view_set_time_stamp.
- * hx_chat_view_refresh forces a full re-render so the new state is visible
- * without scrolling the buffer first. */
-static void
-changed_timestamp (session *sess)
-{
-    if (!sess) {
-        return;
-    }
-    if (sess->chats) {
-        guint n = hx_chats_count (sess->chats);
-        for (guint i = 0; i < n; i++) {
-            struct chat *c = hx_chats_get_at (sess->chats, i);
-            struct gtkhx_chat *gchat = hx_chat_view (c);
-            if (!gchat) {
-                continue;
-            }
-            hx_chat_view_set_time_stamp (hx_gchat_output (gchat),
-                                         gtkhx_prefs.timestamp);
-            hx_chat_view_refresh (hx_gchat_output (gchat));
-        }
-    }
-    if (sess->msg_windows) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->msg_windows);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct msgwin *msg = val;
-            hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
-            hx_chat_view_refresh (msg->outputbuf);
+            gtkhx_chat_view_configure (((struct msgwin *)val)->outputbuf);
         }
     }
 }
@@ -427,71 +337,6 @@ static void
 changed_animate_avatars (void)
 {
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
-}
-
-/* HexChat-style xtext autocopy. Each toggle in Settings →
- * Advanced → Auto Copy Behavior calls one of the three xtext setters
- * to flip the corresponding facet of the drag-end clipboard handler.
- * The persisted state is mirrored in the gtkhx_prefs.autocopy_* bytes; the
- * hook just propagates it to the view's own process-wide copy so the next
- * drag-end picks up the new behaviour without having to recreate the
- * widget. */
-static void
-changed_autocopy_text (void)
-{
-    hx_chat_view_set_autocopy_text (gtkhx_prefs.autocopy_text);
-}
-static void
-changed_autocopy_stamp (void)
-{
-    hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
-}
-static void
-changed_autocopy_color (void)
-{
-    hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
-}
-
-/* apply CFG_STAMP_FORMAT to every live chat view. The
- * setter stashes the new format in xtext's module-global, recomputes
- * stamp_width per widget (font-dependent), and grows the buffer
- * indent if the new column is wider than before. queue_draw fires
- * inside the setter so the new column shows up next frame. */
-static void
-changed_stampformat (session *sess)
-{
-    /* The format itself is process-wide; the per-view work below only
-     * recomputes column widths. A NULL view records the format and nothing
-     * else, which is the only thing that can happen when this runs at load —
-     * no chat view exists yet — and is where every view built later picks the
-     * format up from. */
-    hx_chat_view_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
-
-    if (!sess) {
-        return;
-    }
-    if (sess->chats) {
-        guint n = hx_chats_count (sess->chats);
-        for (guint i = 0; i < n; i++) {
-            struct chat *c = hx_chats_get_at (sess->chats, i);
-            struct gtkhx_chat *gchat = hx_chat_view (c);
-            if (!gchat) {
-                continue;
-            }
-            hx_chat_view_set_stamp_format (hx_gchat_output (gchat),
-                                           gtkhx_prefs.stamp_format);
-        }
-    }
-    if (sess->msg_windows) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->msg_windows);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct msgwin *msg = val;
-            hx_chat_view_set_stamp_format (msg->outputbuf,
-                                           gtkhx_prefs.stamp_format);
-        }
-    }
 }
 
 static void
@@ -712,21 +557,21 @@ struct pref_hook {
 
 static const struct pref_hook pref_hooks[] = {
     PREF_GLOBAL (CFG_ANIMATE_AVATARS, changed_animate_avatars),
-    PREF_GLOBAL (CFG_AUTOCOPY_COLOR, changed_autocopy_color),
-    PREF_GLOBAL (CFG_AUTOCOPY_STAMP, changed_autocopy_stamp),
-    PREF_GLOBAL (CFG_AUTOCOPY_TEXT, changed_autocopy_text),
-    PREF_VIEW (CFG_CHAT_AVATARS, changed_chat_avatars),
+    PREF_VIEW (CFG_AUTOCOPY_STAMP, changed_chat_view),
+    PREF_VIEW (CFG_AUTOCOPY_TEXT, changed_chat_view),
+    PREF_VIEW (CFG_CHAT_AVATARS, changed_chat_view),
     PREF_GLOBAL (CFG_DOWNLOAD, changed_downloadpath),
     PREF_GLOBAL (CFG_EMOJI_SHORTCODES, changed_emoji_shortcodes),
     PREF_VIEW (CFG_FONT, changed_font),
     PREF_CONN (CFG_ICON, changed_nickoricon),
-    PREF_GLOBAL (CFG_MARKDOWN, changed_markdown),
+    PREF_VIEW (CFG_MARKDOWN, changed_chat_view),
     PREF_CONN (CFG_NICK, changed_nickoricon),
     PREF_CONN (CFG_NICK_COLOR, changed_nick_color),
-    PREF_VIEW (CFG_STAMP_FORMAT, changed_stampformat),
+    PREF_VIEW (CFG_SINGLE_CLICK_LINKS, changed_chat_view),
+    PREF_VIEW (CFG_STAMP_FORMAT, changed_chat_view),
     PREF_GLOBAL (CFG_THEME, changed_theme),
     PREF_GLOBAL (CFG_THEME_NAME, changed_theme_name),
-    PREF_VIEW (CFG_TIMESTAMP, changed_timestamp),
+    PREF_VIEW (CFG_TIMESTAMP, changed_chat_view),
     PREF_GLOBAL (CFG_TINT_WINDOW, changed_tint_window),
     PREF_GLOBAL (CFG_TRACKER_CASE, changed_case),
     PREF_GLOBAL (CFG_TRAY, changed_tray),
@@ -738,8 +583,8 @@ static const struct pref_hook pref_hooks[] = {
     PREF_GLOBAL (CFG_VOICE_OUTPUT_DEVICE, changed_voice_output_device),
     PREF_GLOBAL (CFG_VOICE_CAMERA_DEVICE, changed_voice_camera_device),
 #endif
-    PREF_VIEW (CFG_WORDWRAP, changed_xtext),
-    PREF_VIEW (CFG_XBUF_MAX, changed_xtext),
+    PREF_VIEW (CFG_WORDWRAP, changed_chat_view),
+    PREF_VIEW (CFG_XBUF_MAX, changed_chat_view),
 };
 
 static const struct pref_hook *

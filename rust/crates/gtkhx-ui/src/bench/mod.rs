@@ -100,7 +100,7 @@ fn parse_requests(spec: &str) -> Result<Vec<Request>, String> {
 /// is one `getenv`.
 ///
 /// # Safety
-/// Called on the GTK main thread with `chat_view` a live `HxChatView *`
+/// Called on the GTK main thread with `chat_view` a live `RotulusView *`
 /// (or NULL, which skips the chat scenario).
 #[no_mangle]
 pub unsafe extern "C" fn hx_bench_maybe_start(chat_view: *mut gtk::ffi::GtkWidget) {
