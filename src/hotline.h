@@ -292,12 +292,14 @@ struct hl_user_data {
 #define HTLC_OPT_AUTO_RESPONSE ((guint16)0x0004)
 #define HTLC_DATA_CHAT_ID ((guint16)0x0072)
 /* The client's protocol version, sent in HTLC_HDR_LOGIN (field 160,
- * official since 1.5; the server's reply carries its own version in
- * the same field). GtkHx sends 185 on every login path. Servers fork
- * on it: mhxd accepts HTLC_HDR_PING only from clients >= 150 (the
- * can_ping flag in mhxd/src/hxd/rcv.c rcv_login), and the official
- * servers send the banner only to clients >= 151. */
+ * official since 1.5; a server's reply carries its own). GtkHx sends
+ * HX_CLIENT_VERSION on every login path: 254 (0xFE), GtkHx's own entry
+ * in fogWraith's list of client and server versions. It is not GtkHx's
+ * release version and stays fixed across releases. Servers fork on it:
+ * mhxd accepts HTLC_HDR_PING only from clients >= 150 (can_ping in its
+ * rcv_login), and the official servers send the banner only to >= 151. */
 #define HTLC_DATA_CLIENTVERSION ((guint16)0x00a0)
+#define HX_CLIENT_VERSION ((guint16)254)
 
 /* DATA_CAPABILITIES (0x01f0) — session capability bitmask sent in
  * LOGIN by clients that support modern protocol extensions, and

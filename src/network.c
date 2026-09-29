@@ -659,18 +659,16 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
         /* plaintext LOGIN over TLS (secure+tls is gated out upstream). */
         ok = hx_bridge_install_orchestrated_plaintext_tls (
             htlc, serverstr, port, login, pass, /*name=*/"",
-            hx_conn_icon (htlc),
-            /*version=*/185, caps, HX_LOGIN_TRANS);
+            hx_conn_icon (htlc), HX_CLIENT_VERSION, caps, HX_LOGIN_TRANS);
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
             htlc, serverstr, port, login, pass, hx_conn_name (htlc),
-            hx_conn_icon (htlc),
-            /*version=*/185, caps, HX_LOGIN_TRANS, hx_conn_cipheralg (htlc));
+            hx_conn_icon (htlc), HX_CLIENT_VERSION, caps, HX_LOGIN_TRANS,
+            hx_conn_cipheralg (htlc));
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (
             htlc, serverstr, port, login, pass, /*name=*/"",
-            hx_conn_icon (htlc),
-            /*version=*/185, caps, HX_LOGIN_TRANS);
+            hx_conn_icon (htlc), HX_CLIENT_VERSION, caps, HX_LOGIN_TRANS);
     }
     if (!ok) {
         /* Spawn refused. Roll back the sentinel and surface a

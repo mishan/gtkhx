@@ -597,7 +597,7 @@ mod tests {
             choice: &choice,
             name: b"",
             icon: 0,
-            version: 185,
+            version: crate::login::CLIENT_VERSION,
             caps: 0x001f,
             secure_login: true,
         };

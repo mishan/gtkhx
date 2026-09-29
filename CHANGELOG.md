@@ -28,6 +28,7 @@
   - Fixed HOPE-encrypted connections misreading a message split across frames
   - No more error at every login on servers that refuse your saved GIF icon
   - Sending text is faster on servers without Unicode
+  - GtkHx now tells servers it is GtkHx (client version 254) instead of the Hotline 1.8.5 client
 - Code Modernization
   - The file browser is now Rust
   - GtkHx now reads tracker listings with code shared with the hxd-ng server
