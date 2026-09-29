@@ -66,6 +66,16 @@ pub const HTLC_HDR_LOGIN: u32 = 0x0000_006b;
 /// access bit (>= 150 → PING keepalive accepted).
 pub const TAG_VERSION: u16 = tag::VERSION;
 
+/// The client version GtkHx sends in every LOGIN (the
+/// `TAG_VERSION` chunk): 254 (0xFE), GtkHx's own entry in
+/// fogWraith's list of Hotline client and server versions, so a
+/// server can tell GtkHx apart from the official 1.8.5 client.
+/// It is not GtkHx's release version and stays fixed across
+/// releases. Mirrors `HX_CLIENT_VERSION` in `src/hotline.h`, which
+/// the C login paths pass down; it clears both documented server
+/// gates (PING from 150, the banner from 151).
+pub const CLIENT_VERSION: u16 = 254;
+
 /// `HTLC_DATA_CAPABILITIES` chunk tag — 2-byte BE capability
 /// bitmask. Mirrors `HTLC_DATA_CAPABILITIES` (0x01f0) in
 /// `src/hotline.h`. Capability-aware servers (Janus) echo the
@@ -328,7 +338,7 @@ mod tests {
             password: b"y",
             name: b"Misha",
             icon: 0x7ffd,
-            version: 0x00b9,
+            version: CLIENT_VERSION,
             caps: 0,
             trans: 3,
         };
@@ -367,7 +377,7 @@ mod tests {
             password: b"",
             name: b"",
             icon: 0,
-            version: 185,
+            version: CLIENT_VERSION,
             caps: CAPS,
             trans: 1,
         };

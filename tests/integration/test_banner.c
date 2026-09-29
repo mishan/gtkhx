@@ -80,7 +80,7 @@ send_skinny_login (int fd, struct htlc_conn *htlc, guint16 icon)
     guint8 enclogin[16];
     hl_code_inline (enclogin, login, llen);
     guint16 icon_be = g_htons (icon);
-    guint16 cv_be = g_htons (185);
+    guint16 cv_be = g_htons (HX_CLIENT_VERSION);
 
     return integration_send_message (
         fd, htlc, HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/3, (int)HTLC_DATA_ICON,

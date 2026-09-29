@@ -144,7 +144,7 @@ impl Client {
             password: password.map(|p| p.as_bytes().to_vec()).unwrap_or_default(),
             name: b"hx-e2e".to_vec(),
             icon: 414,
-            version: 185,
+            version: hxnet::login::CLIENT_VERSION,
             caps,
             trans: LOGIN_TRANS,
             proxy: None,

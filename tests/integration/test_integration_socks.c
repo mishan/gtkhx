@@ -137,7 +137,7 @@ test_via_proxy_login (void)
         (const guint8 *)login, strlen (login), (const guint8 *)"",
         0,                     /* password */
         (const guint8 *)"", 0, /* name */
-        /*icon=*/0, /*version=*/185,
+        /*icon=*/0, HX_CLIENT_VERSION,
         /*caps=*/HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING,
         /*trans=*/1, (const guint8 *)proxy, strlen (proxy));
     g_assert_nonnull (h);
@@ -180,7 +180,7 @@ test_dead_proxy_fails (void)
         (const guint8 *)host, strlen (host), (guint16)port,
         (const guint8 *)login, strlen (login), (const guint8 *)"", 0,
         (const guint8 *)"", 0,
-        /*icon=*/0, /*version=*/185,
+        /*icon=*/0, HX_CLIENT_VERSION,
         /*caps=*/HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING,
         /*trans=*/1, (const guint8 *)dead_proxy, strlen (dead_proxy));
     g_assert_nonnull (h);

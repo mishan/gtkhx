@@ -117,7 +117,7 @@ test_login_via_orchestrator (void)
         (const guint8 *)login, strlen (login), (const guint8 *)"",
         0,                     /* password */
         (const guint8 *)"", 0, /* name (sent later via USER_CHANGE) */
-        /*icon=*/0, /*version=*/185,
+        /*icon=*/0, HX_CLIENT_VERSION,
         /*caps=*/HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
             | HTLC_CAP_CHAT_HISTORY,
         /*trans=*/1,

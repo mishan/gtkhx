@@ -302,8 +302,14 @@ request; a server puts its version in the Login reply. The number decides three 
 Values observed in the field: none from 1.2.3 and hlserver.com; 150 from 1.5; 151 from
 1.5.5 and 1.7.2; 182, 184, 185 and 190 from the matching official releases (182, 184
 and 190 confirmed against the running binaries); 185 from mhxd when configured as a
-1.8.5 server and from GtkHx as a client; 190 from Badmoon; 200 from Janus and from the
-HotStuff client. mhxd can be set to send none, to impersonate a 1.2.3 server.
+1.8.5 server; 190 from Badmoon; 200 from Janus and from the HotStuff client; 254 (0xFE)
+from GtkHx as a client. mhxd can be set to send none, to impersonate a 1.2.3 server.
+
+GtkHx's 254 is its own entry in fogWraith's list, not its release version, and stays
+the same from one release to the next. Releases up to 1.4.0 sent 185, which the list
+gives to the official 1.8.5 client and to Pitbull Pro, so a server could not tell them
+apart. 254 clears every gate a server is known to apply to clients (the banner at 151,
+mhxd's keepalive at 150) and nothing documented changes at 190 or above.
 
 ### Login, 1.5 and later
 

@@ -300,7 +300,7 @@ orch_open_login (struct htlc_conn *htlc, const char *host, int port,
         (const guint8 *)host, strlen (host), (guint16)port,
         (const guint8 *)login, strlen (login), (const guint8 *)pass,
         strlen (pass), (const guint8 *)name, strlen (name), icon,
-        /*version=*/185, caps,
+        HX_CLIENT_VERSION, caps,
         /*trans=*/1,
         /*proxy_uri=*/NULL, /*proxy_uri_len=*/0);
     if (!h) {
@@ -362,7 +362,7 @@ orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
         (const guint8 *)host, strlen (host), (guint16)port,
         (const guint8 *)login, strlen (login), (const guint8 *)pass,
         strlen (pass), (const guint8 *)name, strlen (name), icon,
-        /*version=*/185, caps, /*trans=*/1, (const guint8 *)calg,
+        HX_CLIENT_VERSION, caps, /*trans=*/1, (const guint8 *)calg,
         strlen (calg));
     if (!h) {
         g_test_fail_printf (
@@ -419,7 +419,7 @@ orch_open_login_tls (struct htlc_conn *htlc, const char *host, int port,
         (const guint8 *)host, strlen (host), (guint16)port,
         (const guint8 *)login, strlen (login), (const guint8 *)"",
         0, /* guest: empty password */
-        (const guint8 *)name, strlen (name), icon, /*version=*/185, caps,
+        (const guint8 *)name, strlen (name), icon, HX_CLIENT_VERSION, caps,
         /*trans=*/1, tls_test_accept_cert_cb, NULL);
     if (!h) {
         g_test_fail_printf (
@@ -828,11 +828,11 @@ integration_login_guest (int fd, struct htlc_conn *htlc,
      * AGREEMENTAGREE flow. Production deliberately does NOT send NAME at LOGIN
      * time; the builder gates the chunk on a non-empty name.
      *
-     * clientversion 185 = Hotline 1.8.5: mhxd uses it in rcv_login to set
-     * access_extra.can_ping (gated on clientversion >= 150), without which mhxd
-     * rejects HTLC_HDR_PING with a task-error. */
+     * The client version is GtkHx's own, HX_CLIENT_VERSION: mhxd uses it in
+     * rcv_login to set access_extra.can_ping (gated on clientversion >= 150),
+     * without which mhxd rejects HTLC_HDR_PING with a task-error. */
     return send_login_packet (fd, htlc, "guest", NULL, display_name, icon,
-                              /*client_version=*/185, /*caps=*/0);
+                              HX_CLIENT_VERSION, /*caps=*/0);
 }
 
 gboolean
@@ -844,7 +844,7 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
      * bits 0..15 which is everything we have today (CHAT_HISTORY is bit 4).
      * Matches the wire layout the production LOGIN path emits. */
     return send_login_packet (fd, htlc, "guest", NULL, display_name, icon,
-                              /*client_version=*/185, caps);
+                              HX_CLIENT_VERSION, caps);
 }
 
 /* Wall-clock safety bound for the drain helpers below. The per-message

@@ -97,8 +97,8 @@ admin_login (int fd, struct htlc_conn *htlc, const char *display_name,
     guint8 frame[512];
     size_t flen = hxnet_build_login_frame (
         (const guint8 *)"admin", 5, NULL, 0, (const guint8 *)dn, strlen (dn),
-        icon, /*version=*/185, /*caps=*/0, hx_conn_trans_post_inc (htlc), frame,
-        sizeof (frame));
+        icon, HX_CLIENT_VERSION, /*caps=*/0, hx_conn_trans_post_inc (htlc),
+        frame, sizeof (frame));
     if (flen == 0) {
         return FALSE;
     }
