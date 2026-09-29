@@ -109,10 +109,6 @@ hx_prefs_mirror_refresh (void)
         = hxconfig_get_bool (CFG_OLD_NICKCOMP) ? 1 : 0;
     gtkhx_prefs.nick_color = hxconfig_get_int (CFG_NICK_COLOR);
 
-    gtkhx_prefs.autocopy_text = hxconfig_get_bool (CFG_AUTOCOPY_TEXT) ? 1 : 0;
-    gtkhx_prefs.autocopy_stamp = hxconfig_get_bool (CFG_AUTOCOPY_STAMP) ? 1 : 0;
-    gtkhx_prefs.autocopy_color = hxconfig_get_bool (CFG_AUTOCOPY_COLOR) ? 1 : 0;
-
     gtkhx_prefs.emoji_shortcodes
         = hxconfig_get_bool (CFG_EMOJI_SHORTCODES) ? 1 : 0;
     gtkhx_prefs.emoji_typeahead

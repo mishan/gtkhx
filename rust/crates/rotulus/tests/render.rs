@@ -2,7 +2,7 @@
 //! them with the pictures in `tests/golden/`.
 //!
 //! What they pin is the rendering the widget promises — where rows,
-//! columns, groups, markers and selections land, and what colour they
+//! columns, groups, markers and selections land, and what color they
 //! are — not the antialiasing of a particular FreeType. So the scenes are
 //! drawn as deterministically as the stack allows (a bundled font with
 //! hinting off, the cairo renderer, a fixed DPI, UTC, an explicit
@@ -20,7 +20,7 @@
 //! both.
 //!
 //! One `#[test]`, because GTK belongs to the first thread that
-//! initialises it.
+//! initializes it.
 
 use gtk4 as gtk;
 use gtk4::prelude::*;
@@ -406,7 +406,7 @@ fn scenes_match_their_goldens() {
     pin_environment();
     assert!(
         gtk::init().is_ok(),
-        "GTK could not be initialised — run under tools/isolated-run.sh, as CI does"
+        "GTK could not be initialized — run under tools/isolated-run.sh, as CI does"
     );
     if let Some(s) = gtk::Settings::default() {
         s.set_gtk_xft_dpi(96 * 1024);

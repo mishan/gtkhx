@@ -92,15 +92,6 @@ struct gtkhx_prefs {
     unsigned char emoji_shortcodes;
     unsigned char emoji_typeahead;
 
-    /* HexChat-style xtext autocopy controls — driven by
-     * Settings → Advanced → Auto Copy Behavior, persisted as the
-     * AUTOCOPY_TEXT / AUTOCOPY_STAMP / AUTOCOPY_COLOR keys, applied
-     * to the view via rotulus_view_set_autocopy_*. See the comment on the
-     * `prefs` struct in xtext.c for the per-field semantics. */
-    unsigned char autocopy_text;
-    unsigned char autocopy_stamp;
-    unsigned char autocopy_color;
-
     /* per-event desktop notification toggles. See the
      * CFG_NOTIFY_* keys in cfgkeys.h for the user-facing surface
      * and src/notify.c for the dispatch logic. */

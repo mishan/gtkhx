@@ -339,7 +339,6 @@ pub(crate) mod cfg {
     pub const OLD_NICKCOMP: &str = "OLD_NICKCOMPLETION";
     pub const AUTOCOPY_TEXT: &str = "AUTOCOPYTEXT";
     pub const AUTOCOPY_STAMP: &str = "AUTOCOPYSTAMP";
-    pub const AUTOCOPY_COLOR: &str = "AUTOCOPYCOLOR";
     pub const HIGHLIGHT_WORDS: &str = "HIGHLIGHTWORDS";
     pub const CHAT_HISTORY_INITIAL: &str = "CHATHISTORYINITIAL";
     pub const EMOJI_SHORTCODES: &str = "EMOJISHORTCODES";
@@ -619,11 +618,6 @@ pub(crate) fn page_chat_behavior(page: &adw::PreferencesPage) {
     autocopy.add(&switch_row(
         cfg::AUTOCOPY_STAMP,
         &tr("Automatically include timestamps"),
-        None,
-    ));
-    autocopy.add(&switch_row(
-        cfg::AUTOCOPY_COLOR,
-        &tr("Automatically include color information"),
         None,
     ));
     page.add(&autocopy);

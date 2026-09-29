@@ -36,7 +36,7 @@ const MAX_DEPTH: u8 = 8;
 /// Whether a `[label](url)` link may point at `url` under the default
 /// scheme list.
 ///
-/// Anything else — `javascript:`, `data:`, `file:`, or an unrecognised
+/// Anything else — `javascript:`, `data:`, `file:`, or an unrecognized
 /// scheme — makes the whole construct render as literal text, delimiters
 /// included, so the user sees exactly what was typed rather than a link
 /// they can't inspect. A view with its own scheme list uses

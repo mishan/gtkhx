@@ -829,7 +829,6 @@ fn every_path_round_trips_a_non_default_value() {
         &mut s.chat.legacy_nick_completion,
         &mut s.chat.autocopy.text,
         &mut s.chat.autocopy.timestamp,
-        &mut s.chat.autocopy.color,
         &mut s.chat.emoji.shortcodes,
         &mut s.chat.emoji.typeahead,
         &mut s.users.animate_avatars,
@@ -1066,7 +1065,6 @@ fn the_real_profile_migrates_whole() {
     assert!(!s.chat.legacy_nick_completion);
     assert!(s.chat.autocopy.text);
     assert!(s.chat.autocopy.timestamp);
-    assert!(!s.chat.autocopy.color);
     assert!(s.chat.emoji.shortcodes && s.chat.emoji.typeahead);
 
     assert!(s.users.animate_avatars);

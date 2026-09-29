@@ -287,10 +287,10 @@ unsafe fn uniform_style(runs: *const RotulusRun, n: c_int) -> Option<Style> {
 }
 
 /// Lay `base` under `p`, so text the parser left unstyled still carries
-/// the caller's colour.
+/// the caller's color.
 ///
 /// The renderer treats a gap between spans as *default* style, not as
-/// "whatever the row's colour was", so without this a muted history line
+/// "whatever the row's color was", so without this a muted history line
 /// would come back with only its bold words muted.
 fn under(p: ParsedText, base: Style) -> ParsedText {
     if base == Style::default() {
@@ -423,8 +423,10 @@ pub(crate) unsafe fn row_message(view: &RotulusView, row: &RotulusRow) -> Messag
     // The gutter is never markdown-parsed: a nick containing asterisks is
     // a nick, not emphasis.
     let gutter = runs_to_text(row.gutter, row.n_gutter);
-    let links = view.linkifier();
+    // Borrowed rather than cloned: a clone is a dozen allocations per row.
+    let links = view.imp_ref().linkifier.borrow();
     let blocks = body_blocks(row.body, row.n_body, view.markdown(), &links);
+    drop(links);
     let mut flags = MessageFlags::NONE;
     if row.flags & ROW_OUTGOING != 0 {
         flags = flags.union(MessageFlags::OUTGOING);
@@ -776,7 +778,11 @@ pub unsafe extern "C" fn rotulus_view_clear(w: CGtkWidget) {
 /// `w` is a valid `RotulusView *`.
 #[no_mangle]
 pub unsafe extern "C" fn rotulus_view_get_last(w: CGtkWidget) -> *mut c_void {
-    with_view!(w, v, v.last().map_or(std::ptr::null_mut(), mark_to_ptr))
+    // Not with_view!: a raw pointer has no Default before Rust 1.88.
+    match view_of(w) {
+        Some(v) => v.last().map_or(std::ptr::null_mut(), mark_to_ptr),
+        None => std::ptr::null_mut(),
+    }
 }
 
 /// # Safety
@@ -829,12 +835,12 @@ pub unsafe extern "C" fn rotulus_view_append_media(
 /// `w` is a valid `RotulusView *`.
 #[no_mangle]
 pub unsafe extern "C" fn rotulus_view_media_mark(w: CGtkWidget, token: c_uint) -> *mut c_void {
-    with_view!(
-        w,
-        v,
-        v.find_image(token)
-            .map_or(std::ptr::null_mut(), mark_to_ptr)
-    )
+    match view_of(w) {
+        Some(v) => v
+            .find_image(token)
+            .map_or(std::ptr::null_mut(), mark_to_ptr),
+        None => std::ptr::null_mut(),
+    }
 }
 
 /// # Safety

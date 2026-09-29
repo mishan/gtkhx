@@ -164,17 +164,15 @@ impl Default for Appearance {
 pub struct AutoCopy {
     pub text: bool,
     pub timestamp: bool,
-    pub color: bool,
 }
 
 impl Default for AutoCopy {
     fn default() -> Self {
-        // Text on matches every modern chat client; stamp and colour stay off
+        // Text on matches every modern chat client; the stamp stays off
         // because most people want a clean copy of the message body.
         AutoCopy {
             text: true,
             timestamp: false,
-            color: false,
         }
     }
 }

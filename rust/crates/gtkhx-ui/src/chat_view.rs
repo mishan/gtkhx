@@ -7,9 +7,9 @@
 //! then [`gtkhx_chat_view_configure`], which applies the chat
 //! preferences and is called again whenever one of them changes.
 //!
-//! It is also the home of GtkHx's link detector. `gtkurl.c`'s C callers
-//! (the news views' URL tagging) ask the same question the chat view does,
-//! so they get the same answer from the same scheme list.
+//! It is also the home of GtkHx's link detector: `gtkurl_scan`, which the
+//! news views' URL tagging calls, runs on the scheme list the chat view
+//! uses, so the two agree about what a link is.
 
 use gtk4 as gtk;
 use gtk4::glib;
@@ -48,7 +48,7 @@ static LINKS: LazyLock<Linkifier> = LazyLock::new(|| {
 /// to C floating, like any GTK constructor's result.
 ///
 /// # Safety
-/// `palette` points to `ROTULUS_PAL_COLS` colours; `font` is a
+/// `palette` points to `ROTULUS_PAL_COLS` colors; `font` is a
 /// NUL-terminated Pango font description, or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_chat_view_new(
@@ -174,38 +174,7 @@ pub unsafe extern "C" fn gtkhx_chat_view_configure(w: *mut gtk::ffi::GtkWidget) 
     }
 }
 
-// ---- gtkurl.h's detection half ---------------------------------------
-
-/// # Safety
-/// `p` is NULL or NUL-terminated.
-unsafe fn word(p: *const c_char) -> Option<String> {
-    if p.is_null() {
-        return None;
-    }
-    Some(CStr::from_ptr(p).to_string_lossy().into_owned())
-}
-
-/// # Safety
-/// `w` is NULL or NUL-terminated.
-#[no_mangle]
-pub unsafe extern "C" fn gtkurl_word_has_url_scheme(w: *const c_char) -> glib::ffi::gboolean {
-    word(w).is_some_and(|w| LINKS.has_scheme(&w)).into()
-}
-
-/// # Safety
-/// `w` is NULL or NUL-terminated.
-#[no_mangle]
-pub unsafe extern "C" fn gtkurl_is_url(w: *const c_char) -> glib::ffi::gboolean {
-    word(w).is_some_and(|w| LINKS.is_url(&w)).into()
-}
-
-/// # Safety
-/// `w` is NULL or NUL-terminated. The result is freed with `g_free`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkurl_normalize(w: *const c_char) -> *mut c_char {
-    let out = word(w).map(|w| LINKS.normalize(&w)).unwrap_or_default();
-    out.as_str().to_glib_full()
-}
+// ---- gtkurl.h's scanner ----------------------------------------------
 
 /// `gtkurl_match_cb`.
 type MatchCb = unsafe extern "C" fn(*const c_char, c_int, c_int, *mut c_void);
@@ -265,24 +234,5 @@ mod tests {
             .map(|&(a, b)| &s[a as usize..b as usize])
             .collect();
         assert_eq!(words, ["hotline://hx.example", "https://example.com"]);
-    }
-
-    #[test]
-    fn words_classify_as_before() {
-        unsafe {
-            assert_ne!(gtkurl_is_url(c"hotline://hx.example".as_ptr()), 0);
-            assert_ne!(gtkurl_is_url(c"someone@example.com".as_ptr()), 0);
-            assert_eq!(
-                gtkurl_word_has_url_scheme(c"someone@example.com".as_ptr()),
-                0
-            );
-            assert_eq!(gtkurl_is_url(std::ptr::null()), 0);
-            let n = gtkurl_normalize(c"www.example.com".as_ptr());
-            assert_eq!(
-                CStr::from_ptr(n).to_str().unwrap(),
-                "https://www.example.com"
-            );
-            glib::ffi::g_free(n as *mut c_void);
-        }
     }
 }

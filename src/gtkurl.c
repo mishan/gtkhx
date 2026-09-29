@@ -21,9 +21,8 @@
 #include "hx.h"
 #include "toolbar.h"
 
-/* Detection — gtkurl_is_url, gtkurl_word_has_url_scheme,
- * gtkurl_normalize, gtkurl_scan — is Rust, in gtkhx-ui's chat_view.rs,
- * on the same scheme list the chat view links with. */
+/* Detection — gtkurl_scan — is Rust, in gtkhx-ui's chat_view.rs, on the
+ * same scheme list the chat view links with. */
 
 /* ------------------------------------------------------------------- *
  * Browser launch + alternate-browser discovery

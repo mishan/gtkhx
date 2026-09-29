@@ -273,10 +273,12 @@ pub fn layout_message(
     // it has a box or an indent of its own that the lead would break. So
     // does a body with less than half the width left beside a long nick:
     // one word per line down the right edge is worse than a line break.
+    //
+    // Either way the first line is left to the stamp and the gutter, which
+    // the view draws there; a lead is only ever nonzero because one of
+    // them is.
     if lead > 0 && (!matches!(msg.blocks.first(), Some(Block::Text(_))) || lead > body_width / 2) {
-        if gutter.is_some() {
-            y = line_h;
-        }
+        y = line_h;
         lead = 0;
     }
 
@@ -727,9 +729,7 @@ pub fn estimate_height(msg: &Message, params: &LayoutParams, measure: &dyn TextM
     // beside the gutter starts on the line below it.
     let beside = matches!(msg.blocks.first(), Some(Block::Text(_))) && lead_cols <= cols / 2;
     if lead_cols > 0 && !beside {
-        if gutter_cols.is_some() {
-            lines += 1;
-        }
+        lines += 1;
         lead_cols = 0;
     }
 

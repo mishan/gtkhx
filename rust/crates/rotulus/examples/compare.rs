@@ -2,7 +2,7 @@
 //!
 //! - `rotulus`: this crate.
 //! - `textview`: a `GtkTextView`, one line per message, the nick in a
-//!   coloured tag. What Polari and many small clients do.
+//!   colored tag. What Polari and many small clients do.
 //! - `listview`: a `GtkListView` of wrapping `GtkLabel`s, one per message,
 //!   the nick in Pango markup. The widget-per-message shape Fractal-style
 //!   clients use.

@@ -43,7 +43,7 @@ pub(crate) fn tr(s: &str) -> String {
     }
 }
 
-/// Tell gtk4-rs that GTK is already initialised.
+/// Tell gtk4-rs that GTK is already initialized.
 ///
 /// An application written in C calls `gtk_init` itself, so gtk4-rs's own
 /// init flag is never set — and its widget constructors assert on that

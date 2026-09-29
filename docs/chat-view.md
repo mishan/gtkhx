@@ -8,7 +8,7 @@ LGPL-2.1-or-later, built to leave this tree as a library of its own. It
 knows nothing about Hotline. GtkHx configures it in one place,
 `rust/crates/gtkhx-ui/src/chat_view.rs` — the preferences it reads, the
 `hotline://` scheme, the avatar resolver, the URL menu — and everything
-else in this document is the widget's own behaviour.
+else in this document is the widget's own behavior.
 
 It replaced a vendored copy of HexChat's xtext widget. The measured
 comparison that justified deleting xtext is
@@ -114,8 +114,8 @@ C describes a row with a `RotulusRow`: a kind (`ROTULUS_ROW_MESSAGE`,
 for the duration of the call and built on the stack.
 `rotulus_view_append`, `_insert_before` (history backfill) and `_replace`
 (an edit, a redaction, a streamed reply) all take one. The kind used to
-be inferred: a row whose every run was in the muted history colour was
-history, and the load-older row was recognised by its text. Both are
+be inferred: a row whose every run was in the muted history color was
+history, and the load-older row was recognized by its text. Both are
 explicit now.
 
 A run is `(text, palette index, attrs)`, written with `ROTULUS_RUN`,
@@ -353,7 +353,7 @@ memory cost for a setting nobody flips twice.
 **Security.** `[label](url)` is a phishing vector: the visible text can
 lie about the destination. The parser allows exactly the view's link
 schemes — the ones it autolinks, so the two cannot disagree. Anything
-else — `javascript:`, `data:`, `file:`, an unrecognised scheme — makes the
+else — `javascript:`, `data:`, `file:`, an unrecognized scheme — makes the
 whole construct render as literal text, delimiters included, so the user
 sees exactly what was typed rather than a link they cannot inspect. In
 GtkHx a right-click on a link routes through the shared
@@ -720,6 +720,12 @@ now, as it does everywhere else on the desktop — unless the view's
 click" setting (Settings → Chat, on by default) controls. Off, a link
 behaves like any text to a primary click and keeps its right-click menu.
 
+A link whose visible text isn't its address — a markdown `[label](url)` —
+never opens on a click. It pops the link menu instead, headed by the real
+URL, so a label can't take someone somewhere they didn't see; and every
+link shows its address in a tooltip. In GtkHx that matters twice over,
+since a `hotline://` link connects to a server.
+
 (A GLib detail worth not rediscovering: signal names must be canonical —
 hyphens — because glib-rs's `Signal::builder` *panics* otherwise, and a
 panic there is an abort, since it unwinds out of `class_init` across the
@@ -746,7 +752,8 @@ at the start of a word, running to whitespace or a closing delimiter, with
 trailing sentence punctuation dropped unless the URL opened the bracket
 itself (a Wikipedia link). It is the port of `gtkurl.c`'s detector, and
 it answers every "is this a link" question the view asks: autolinking,
-the markdown allowlist, the link under the pointer. The scheme list is the
+the markdown allowlist, the link under the pointer. Bare email addresses
+are links too, opening as `mailto:`. The scheme list is the
 application's (`link-schemes`); the default is the set any chat client
 agrees on, and GtkHx adds `hotline://`. `gtkurl.h`'s detection functions,
 which the news views use, are Rust now too, on GtkHx's list, so the two
@@ -790,19 +797,22 @@ implements `GtkAccessibleText`: a screen reader reads the transcript as
 one text, a row per line, as timestamp, nick and message. A grouped row
 still names its speaker there, because "who said this" is the first thing
 a listener needs and the visual cue that stands in for it isn't available
-to them. The text is built the first time an assistive technology asks,
-kept in step with appends from then on, and reported as a coarse remove
-and insert on anything else. Below 4.14 the view exposes its role only.
+to them. The text is built the first time an assistive technology asks
+and kept in step from then on, row by row: an append, a page of history,
+a removal, a replace and the trim at the scrollback cap each report only
+the rows they touched. Only what changes every row at once — a clear, a
+new timestamp format — is reported as the whole text going and coming
+back. Below 4.14 the view exposes its role only.
 
 ### IRC formatting
 
 `rotulus-mirc` converts mIRC formatting codes — bold, italic, underline,
-strikethrough, monospace, reverse, reset, colours by number or hex — into
+strikethrough, monospace, reverse, reset, colors by number or hex — into
 styled runs; C reaches it as `rotulus_mirc_parse`, which returns runs
 pointing into the caller's text. The view never interprets the codes
 itself, so it is the application that decides which messages may carry
-them. Colours 0–15 address the palette's mIRC slots, so a theme can adjust
-them; the extended colours and hex are RGB. GtkHx doesn't use it: Hotline
+them. Colors 0–15 address the palette's mIRC slots, so a theme can adjust
+them; the extended colors and hex are RGB. GtkHx doesn't use it: Hotline
 has no in-band styling.
 
 ### Translations
@@ -925,7 +935,7 @@ paint, resize and scroll times unchanged.
 `rust/crates/rotulus/tests/render.rs` draws four scenes — two columns, one
 column with IRC formatting, history with a marker, a selection — through a
 real window and compares them with `tests/golden/`. The font is bundled
-(DejaVu Sans Mono, with its licence) and pinned through fontconfig, the
+(DejaVu Sans Mono, with its license) and pinned through fontconfig, the
 renderer is cairo, the zone UTC, and the comparison is at half resolution
 with a tolerance, so antialiasing differences between FreeType versions
 pass and a row a line out of place does not. `ROTULUS_UPDATE_GOLDEN=1`

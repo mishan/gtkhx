@@ -3657,7 +3657,7 @@ fn the_scheme_list_is_the_applications() {
 }
 
 #[test]
-fn words_classify_and_normalise_like_the_scanner() {
+fn words_classify_and_normalize_like_the_scanner() {
     let l = crate::linkify::Linkifier::default();
     assert!(l.is_url("https://example.com"));
     assert!(l.is_url("www.example.com"));
@@ -3842,4 +3842,54 @@ fn single_column_estimates_are_never_low() {
             "{nick}/{body:?}: estimated {est} below the real {real}"
         );
     }
+}
+
+#[test]
+fn single_column_starts_a_block_below_a_lone_timestamp() {
+    // No gutter, but a stamp: an image or code block must not start on the
+    // stamp's line, where it would be painted over it.
+    let m = FixedMeasure::new(10);
+    let mut p = params(400);
+    p.stamp_width = 30;
+    let mut msg = Message::system(ParsedText::plain(""));
+    msg.blocks = vec![Block::Code {
+        text: "x = 1".into(),
+        language: None,
+    }]
+    .into();
+    let l = layout_message(&msg, &p, LayoutGeneration::default(), &m);
+    let code = l
+        .lines
+        .iter()
+        .find(|b| b.source == crate::wrap::LineSource::Block(0))
+        .unwrap();
+    assert!(
+        code.y >= 16,
+        "the block starts below the stamp's line, at {}",
+        code.y
+    );
+    assert!(
+        estimate_height(&msg, &p, &m) >= l.height,
+        "the estimate follows the same rule"
+    );
+}
+
+#[test]
+fn scan_finds_bare_email_addresses() {
+    let l = crate::linkify::Linkifier::default();
+    assert_eq!(
+        links_in(&l, "mail me at bob@example.com."),
+        ["bob@example.com"]
+    );
+    assert_eq!(links_in(&l, "(bob@example.com)"), ["bob@example.com"]);
+    assert!(
+        links_in(&l, "@everyone and a@b and x@y.").is_empty(),
+        "not addresses"
+    );
+    assert_eq!(
+        links_in(&l, "see https://user@example.com/x"),
+        ["https://user@example.com/x"],
+        "an @ inside a URL stays part of the URL"
+    );
+    assert_eq!(l.normalize("bob@example.com"), "mailto:bob@example.com");
 }

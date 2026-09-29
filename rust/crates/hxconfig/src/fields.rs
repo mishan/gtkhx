@@ -271,7 +271,6 @@ field_table! {
 
     "chat.autocopy.text"            => flag,     chat.autocopy.text;
     "chat.autocopy.timestamp"       => flag,     chat.autocopy.timestamp;
-    "chat.autocopy.color"           => flag,     chat.autocopy.color;
 
     "chat.emoji.shortcodes"         => flag,     chat.emoji.shortcodes;
     "chat.emoji.typeahead"          => flag,     chat.emoji.typeahead;

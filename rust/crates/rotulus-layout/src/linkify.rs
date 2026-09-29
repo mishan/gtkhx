@@ -128,8 +128,19 @@ impl Linkifier {
     /// an opening delimiter, and runs to whitespace or a closing one.
     /// Trailing sentence punctuation is dropped, and so is a closing
     /// paren or bracket — unless the URL opened one itself, which is the
-    /// shape of a Wikipedia link.
+    /// shape of a Wikipedia link. Bare email addresses are links too,
+    /// which [`Linkifier::normalize`] turns into `mailto:`.
     pub fn scan(&self, text: &str) -> Vec<Range<usize>> {
+        let mut out = self.scan_urls(text);
+        let emails = scan_emails(text, &out);
+        if !emails.is_empty() {
+            out.extend(emails);
+            out.sort_by_key(|r| r.start);
+        }
+        out
+    }
+
+    fn scan_urls(&self, text: &str) -> Vec<Range<usize>> {
         let bytes = text.as_bytes();
         let mut out = Vec::new();
         let mut i = 0usize;
@@ -168,6 +179,35 @@ impl Linkifier {
 
 fn starts_with_ignore_case(hay: &[u8], prefix: &[u8]) -> bool {
     hay.len() >= prefix.len() && hay[..prefix.len()].eq_ignore_ascii_case(prefix)
+}
+
+/// Bare email addresses in `text` that aren't inside one of `taken`.
+fn scan_emails(text: &str, taken: &[Range<usize>]) -> Vec<Range<usize>> {
+    let bytes = text.as_bytes();
+    let opens = |c: u8| c.is_ascii_whitespace() || matches!(c, b'<' | b'(' | b'[' | b'"' | b'\'');
+    let closes = |c: u8| c.is_ascii_whitespace() || matches!(c, b'<' | b'>' | b'"' | b'\'');
+    let mut out: Vec<Range<usize>> = Vec::new();
+    for (at, _) in text.match_indices('@') {
+        if taken.iter().chain(&out).any(|r| r.contains(&at)) {
+            continue;
+        }
+        let start = bytes[..at]
+            .iter()
+            .rposition(|&c| opens(c))
+            .map_or(0, |i| i + 1);
+        let end = bytes[at..]
+            .iter()
+            .position(|&c| closes(c))
+            .map_or(bytes.len(), |i| at + i);
+        let len = trim_trailing_punct(&bytes[start..end]);
+        let word = &text[start..start + len];
+        // A local part and a domain with a dot in it, and nothing that
+        // makes it a URL the scheme pass declined.
+        if start < at && is_email(word) && !word.contains('/') && word.matches('@').count() == 1 {
+            out.push(start..start + len);
+        }
+    }
+    out
 }
 
 fn is_email(word: &str) -> bool {

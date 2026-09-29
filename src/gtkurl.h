@@ -9,26 +9,9 @@
  * The chat views detect and underline links themselves and hand a
  * right-click to gtkurl_show_popup (gtkhx-ui's chat_view.rs). The news
  * windows render through GtkTextView and use the detection + popup
- * wiring here. Detection is implemented in Rust, on the scheme list the
+ * wiring here. gtkurl_scan is implemented in Rust, on the scheme list the
  * chat view uses, so the two cannot disagree about what a link is.
  */
-
-/* TRUE if `word' looks like a URL we should treat as clickable.
- * Includes bare email tokens (foo@bar.com). */
-extern gboolean gtkurl_is_url (const char *word);
-
-/* Subset of gtkurl_is_url: TRUE iff `word' starts with one of the
- * scheme prefixes we recognise as a URL (rotulus-layout's default set
- * plus hotline://) OR one of the bare prefixes (www., ftp., irc.). The
- * email-shape check that gtkurl_is_url does is intentionally NOT
- * included. */
-extern gboolean gtkurl_word_has_url_scheme (const char *word);
-
-/* Returns a malloc'd "openable" form of `word' — prepends "https://"
- * to bare "www.foo" / "ftp.foo" tokens so GtkUriLauncher / xdg-open
- * actually launch a browser instead of bouncing off scheme parsing.
- * Free with g_free. */
-extern char *gtkurl_normalize (const char *word);
 
 /* Scan `text' (UTF-8) and call cb (text, start_byte, end_byte, user)
  * once per detected URL substring. Used by news.c / news15.c to

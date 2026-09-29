@@ -81,7 +81,7 @@ impl std::fmt::Debug for Attrs {
 /// `Palette` indices 0..31 are the mIRC colors, which is how IRC
 /// formatting (`rotulus-mirc`) addresses them; the slots above are the
 /// theme roles (see `rotulus.h`'s `ROTULUS_PAL_*`). `Rgb` is a literal
-/// colour: an IRC extended or hex colour, or a per-person nick colour.
+/// color: an IRC extended or hex color, or a per-person nick color.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
 pub enum ColorRef {
     /// Inherit — the view's default foreground / background.

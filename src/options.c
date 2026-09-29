@@ -41,7 +41,8 @@
 #include "gif_avatar.h" /* gtkhx_avatar_set_animation_enabled (10.D pref) */
 #include "text_util.h"
 #include "tracker.h"
-#include "panel_registry.h" /* hx_panel_was_constructed */
+#include "panel_registry.h"   /* hx_panel_was_constructed */
+#include "session_registry.h" /* hx_session_count, hx_session_at */
 #ifdef HAVE_VOICE
 /* Still needed by the two device change hooks, which push the value into the
  * Rust runtime. The page that edits them is Rust now; the hooks are not. */
@@ -136,30 +137,33 @@ reinit_gtktexts (session *sess)
     }
 }
 
-/* Re-apply the chat preferences to every live chat view: the chat and
- * private-chat outputs in sess->chats, and the private-message outputs
- * in msg_windows. The view reads the values itself
+/* Re-apply the chat preferences to every live chat view, in every
+ * session: the chat and private-chat outputs in sess->chats, and the
+ * private-message outputs in msg_windows. The view reads the values itself
  * (gtkhx_chat_view_configure), so one walk serves every chat preference
  * rather than one per setting. */
 static void
-changed_chat_view (session *sess)
+changed_chat_view (void)
 {
-    if (sess && sess->chats) {
-        guint n = hx_chats_count (sess->chats);
-        for (guint i = 0; i < n; i++) {
-            struct gtkhx_chat *gchat
-                = hx_chat_view (hx_chats_get_at (sess->chats, i));
-            if (gchat) {
-                gtkhx_chat_view_configure (hx_gchat_output (gchat));
+    for (guint s = 0; s < hx_session_count (); s++) {
+        session *sess = hx_session_at (s);
+        if (sess && sess->chats) {
+            guint n = hx_chats_count (sess->chats);
+            for (guint i = 0; i < n; i++) {
+                struct gtkhx_chat *gchat
+                    = hx_chat_view (hx_chats_get_at (sess->chats, i));
+                if (gchat) {
+                    gtkhx_chat_view_configure (hx_gchat_output (gchat));
+                }
             }
         }
-    }
-    if (sess && sess->msg_windows) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->msg_windows);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            gtkhx_chat_view_configure (((struct msgwin *)val)->outputbuf);
+        if (sess && sess->msg_windows) {
+            GHashTableIter iter;
+            gpointer val;
+            g_hash_table_iter_init (&iter, sess->msg_windows);
+            while (g_hash_table_iter_next (&iter, NULL, &val)) {
+                gtkhx_chat_view_configure (((struct msgwin *)val)->outputbuf);
+            }
         }
     }
 }
@@ -557,21 +561,21 @@ struct pref_hook {
 
 static const struct pref_hook pref_hooks[] = {
     PREF_GLOBAL (CFG_ANIMATE_AVATARS, changed_animate_avatars),
-    PREF_VIEW (CFG_AUTOCOPY_STAMP, changed_chat_view),
-    PREF_VIEW (CFG_AUTOCOPY_TEXT, changed_chat_view),
-    PREF_VIEW (CFG_CHAT_AVATARS, changed_chat_view),
+    PREF_GLOBAL (CFG_AUTOCOPY_STAMP, changed_chat_view),
+    PREF_GLOBAL (CFG_AUTOCOPY_TEXT, changed_chat_view),
+    PREF_GLOBAL (CFG_CHAT_AVATARS, changed_chat_view),
     PREF_GLOBAL (CFG_DOWNLOAD, changed_downloadpath),
     PREF_GLOBAL (CFG_EMOJI_SHORTCODES, changed_emoji_shortcodes),
     PREF_VIEW (CFG_FONT, changed_font),
     PREF_CONN (CFG_ICON, changed_nickoricon),
-    PREF_VIEW (CFG_MARKDOWN, changed_chat_view),
+    PREF_GLOBAL (CFG_MARKDOWN, changed_chat_view),
     PREF_CONN (CFG_NICK, changed_nickoricon),
     PREF_CONN (CFG_NICK_COLOR, changed_nick_color),
-    PREF_VIEW (CFG_SINGLE_CLICK_LINKS, changed_chat_view),
-    PREF_VIEW (CFG_STAMP_FORMAT, changed_chat_view),
+    PREF_GLOBAL (CFG_SINGLE_CLICK_LINKS, changed_chat_view),
+    PREF_GLOBAL (CFG_STAMP_FORMAT, changed_chat_view),
     PREF_GLOBAL (CFG_THEME, changed_theme),
     PREF_GLOBAL (CFG_THEME_NAME, changed_theme_name),
-    PREF_VIEW (CFG_TIMESTAMP, changed_chat_view),
+    PREF_GLOBAL (CFG_TIMESTAMP, changed_chat_view),
     PREF_GLOBAL (CFG_TINT_WINDOW, changed_tint_window),
     PREF_GLOBAL (CFG_TRACKER_CASE, changed_case),
     PREF_GLOBAL (CFG_TRAY, changed_tray),
@@ -583,8 +587,8 @@ static const struct pref_hook pref_hooks[] = {
     PREF_GLOBAL (CFG_VOICE_OUTPUT_DEVICE, changed_voice_output_device),
     PREF_GLOBAL (CFG_VOICE_CAMERA_DEVICE, changed_voice_camera_device),
 #endif
-    PREF_VIEW (CFG_WORDWRAP, changed_chat_view),
-    PREF_VIEW (CFG_XBUF_MAX, changed_chat_view),
+    PREF_GLOBAL (CFG_WORDWRAP, changed_chat_view),
+    PREF_GLOBAL (CFG_XBUF_MAX, changed_chat_view),
 };
 
 static const struct pref_hook *

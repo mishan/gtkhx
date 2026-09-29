@@ -40,7 +40,7 @@ use Target::{Drop, Path};
 /// order here makes the two easy to diff by eye.
 pub const MAP: &[(&str, Target)] = &[
     ("ANIMATEAVATARS", Path("users.animate_avatars")),
-    ("AUTOCOPYCOLOR", Path("chat.autocopy.color")),
+    ("AUTOCOPYCOLOR", Drop(PLAIN_COPY)),
     ("AUTOCOPYSTAMP", Path("chat.autocopy.timestamp")),
     ("AUTOCOPYTEXT", Path("chat.autocopy.text")),
     ("CHATAVATARS", Path("chat.avatars")),
@@ -128,6 +128,8 @@ const PANEL_LATCH: &str =
      with no setting exposing it — so it was 1 for everyone after first run";
 const UPTIME: &str = "accumulated state rather than a preference; it went with the /stats command";
 const RETIRED: &str = "retired before the current table, and already ignored on load";
+const PLAIN_COPY: &str = "copied chat text is plain, so there was never any color information \
+     to include; the setting did nothing";
 
 /// Paths in the new schema that no old profile can have set, and so are new
 /// settings rather than renamed ones. The schema shipped as a rearrangement

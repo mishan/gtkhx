@@ -915,6 +915,53 @@ fn check_typed_signals() {
     );
     view.set_activate_links(true);
 
+    // A link whose label isn't its address opens the menu instead, so the
+    // real destination is on screen before anything opens.
+    {
+        let seen = seen.clone();
+        view.connect_closure(
+            "link-menu",
+            false,
+            gtk4::glib::closure_local!(move |_: crate::view::RotulusView,
+                                             href: String,
+                                             _x: f64,
+                                             _y: f64|
+                  -> bool {
+                seen.borrow_mut().push(format!("menu {href}"));
+                true
+            }),
+        );
+    }
+    view.append(rotulus_layout::Message {
+        kind: rotulus_layout::MessageKind::Live,
+        timestamp: 1_000,
+        speaker: None,
+        gutter: None,
+        blocks: rotulus_layout::Block::Text(rotulus_layout::markdown::parse_inline(
+            "[the docs](https://elsewhere.example)",
+        ))
+        .into(),
+        flags: rotulus_layout::MessageFlags::NONE,
+    });
+    let _holder = laid_out(&view);
+    let last = view.imp_ref().buffer.borrow().len() - 1;
+    let label = find_point(&view, last, |t| {
+        matches!(
+            t,
+            HoverTarget::Link {
+                disguised: true,
+                ..
+            }
+        )
+    })
+    .expect("the labeled link is hittable");
+    view.activate_at(label.0, label.1);
+    assert_eq!(
+        seen.borrow().last().map(String::as_str),
+        Some("menu https://elsewhere.example"),
+        "a disguised link shows its menu rather than opening"
+    );
+
     // Selection changes are announced, and has-selection follows them.
     let changes = Rc::new(std::cell::Cell::new(0));
     {

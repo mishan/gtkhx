@@ -54,30 +54,28 @@ impl TextModel {
         let mut m = TextModel::default();
         for row in 0..buf.len() {
             if let Some(id) = buf.id_at(row) {
-                m.push(buf, id, stamp);
+                m.insert_row(buf, m.rows.len(), id, stamp);
             }
         }
         m
     }
 
-    /// Append the row `id` names. Returns its character range, including
-    /// the newline that separates it from the row before.
+    /// Append the row `id` names. Returns the character range inserted,
+    /// including the newline that separates it from its neighbour.
     pub(crate) fn push(
         &mut self,
         buf: &ChatBuffer,
         id: MessageId,
         stamp: StampFn<'_>,
     ) -> (u32, u32) {
-        let Some(msg) = buf.message(id) else {
-            return (self.chars, self.chars);
-        };
-        let insert_at = self.chars;
-        if !self.rows.is_empty() {
-            self.text.push('\n');
-            self.chars += 1;
-        }
-        let byte_start = self.text.len();
-        let start = self.chars;
+        self.insert_row(buf, self.rows.len(), id, stamp)
+    }
+
+    /// The row `id` names, as read aloud, and where its parts start.
+    fn row_text(
+        msg: &rotulus_layout::Message,
+        stamp: StampFn<'_>,
+    ) -> (String, Vec<(LineSource, u32, usize)>) {
         let mut row = String::new();
         let mut parts = Vec::new();
         let mut part = |row: &mut String, source: LineSource, text: &str| {
@@ -107,15 +105,101 @@ impl TextModel {
             };
             part(&mut row, LineSource::Block(bi), text);
         }
-        self.chars += row.chars().count() as u32;
-        self.text.push_str(&row);
-        self.rows.push(RowSpan {
-            id,
-            start,
-            byte_start,
-            parts,
-        });
-        (insert_at, self.chars)
+        (row, parts)
+    }
+
+    /// Move every row from `from` on by `chars` characters and `bytes`
+    /// bytes (negative to pull them back).
+    fn shift(&mut self, from: usize, chars: i64, bytes: i64) {
+        for r in &mut self.rows[from..] {
+            r.start = (i64::from(r.start) + chars) as u32;
+            r.byte_start = (r.byte_start as i64 + bytes) as usize;
+        }
+    }
+
+    /// Insert the row `id` names at model position `index` — the same
+    /// position it has in the buffer. Returns the character range
+    /// inserted, separator included.
+    pub(crate) fn insert_row(
+        &mut self,
+        buf: &ChatBuffer,
+        index: usize,
+        id: MessageId,
+        stamp: StampFn<'_>,
+    ) -> (u32, u32) {
+        let index = index.min(self.rows.len());
+        let Some(msg) = buf.message(id) else {
+            return (self.chars, self.chars);
+        };
+        let (row, parts) = Self::row_text(msg, stamp);
+        let (at_char, at_byte, text, start, byte_start) = if self.rows.is_empty() {
+            (0, 0, row, 0, 0)
+        } else if index == self.rows.len() {
+            // At the end: a separator, then the row.
+            let (c, b) = (self.chars, self.text.len());
+            (c, b, format!("\n{row}"), c + 1, b + 1)
+        } else {
+            // Before a row: the row, then a separator.
+            let (c, b) = (self.rows[index].start, self.rows[index].byte_start);
+            (c, b, format!("{row}\n"), c, b)
+        };
+        let added = text.chars().count() as u32;
+        self.text.insert_str(at_byte, &text);
+        self.chars += added;
+        self.shift(index, i64::from(added), text.len() as i64);
+        self.rows.insert(
+            index,
+            RowSpan {
+                id,
+                start,
+                byte_start,
+                parts,
+            },
+        );
+        (at_char, at_char + added)
+    }
+
+    /// Remove the row at model position `index`. Returns the character
+    /// range removed, separator included.
+    pub(crate) fn remove_row(&mut self, index: usize) -> Option<(u32, u32)> {
+        if index >= self.rows.len() {
+            return None;
+        }
+        let r = self.rows.remove(index);
+        let (from_char, from_byte, to_char, to_byte) = if let Some(next) = self.rows.get(index) {
+            // A row with a successor takes its trailing separator.
+            (r.start, r.byte_start, next.start, next.byte_start)
+        } else if index > 0 {
+            // The last of several takes the separator before it.
+            (r.start - 1, r.byte_start - 1, self.chars, self.text.len())
+        } else {
+            (0, 0, self.chars, self.text.len())
+        };
+        self.text.replace_range(from_byte..to_byte, "");
+        let (chars, bytes) = (to_char - from_char, to_byte - from_byte);
+        self.chars -= chars;
+        self.shift(index, -i64::from(chars), -(bytes as i64));
+        Some((from_char, to_char))
+    }
+
+    /// Model position of the row `id` names.
+    pub(crate) fn index_of(&self, id: MessageId) -> Option<usize> {
+        self.rows.iter().position(|r| r.id == id)
+    }
+
+    /// Positions of rows the buffer no longer has, looking at no more than
+    /// `limit` of them from the front — where a trim takes rows from.
+    pub(crate) fn gone(&self, buf: &ChatBuffer, limit: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        for (i, r) in self.rows.iter().enumerate() {
+            if out.len() == limit {
+                break;
+            }
+            if buf.row_of(r.id).is_none() {
+                out.push(i);
+            }
+        }
+        out
     }
 
     pub(crate) fn char_len(&self) -> u32 {
@@ -312,22 +396,87 @@ mod glue {
             f(slot.as_ref()?, &buf)
         }
 
-        pub(crate) fn a11y_appended(&self, id: rotulus_layout::MessageId, grew: bool) {
-            if !grew {
-                self.a11y_reset();
-                return;
-            }
+        /// Run `f` over the accessible text if something has asked for
+        /// it, and report the ranges it changed. Nobody asking means
+        /// nobody to tell.
+        fn a11y_edit(
+            &self,
+            f: impl FnOnce(&mut TextModel, &ChatBuffer, StampFn<'_>) -> Vec<(bool, u32, u32)>,
+        ) {
             let imp = self.imp_ref();
-            let range = {
+            let changes = {
                 let mut slot = imp.a11y.borrow_mut();
                 let Some(m) = slot.as_mut() else {
-                    // Nobody has asked; there is nobody to tell.
                     return;
                 };
                 let stamp = self.a11y_stamp_fn();
-                m.push(&imp.buffer.borrow(), id, &*stamp)
+                f(m, &imp.buffer.borrow(), &*stamp)
             };
-            self.update_contents(gtk4::AccessibleTextContentChange::Insert, range.0, range.1);
+            for (inserted, a, b) in changes {
+                let change = if inserted {
+                    gtk4::AccessibleTextContentChange::Insert
+                } else {
+                    gtk4::AccessibleTextContentChange::Remove
+                };
+                self.update_contents(change, a, b);
+            }
+        }
+
+        /// A row was appended, and `trimmed` of the oldest went to make
+        /// room for it.
+        pub(crate) fn a11y_appended(&self, id: MessageId, trimmed: usize) {
+            self.a11y_edit(|m, buf, stamp| {
+                let mut changes = Vec::new();
+                // Highest first, so each position is still right when it
+                // is removed.
+                for i in m.gone(buf, trimmed).into_iter().rev() {
+                    if let Some((a, b)) = m.remove_row(i) {
+                        changes.push((false, a, b));
+                    }
+                }
+                let (a, b) = m.push(buf, id, stamp);
+                changes.push((true, a, b));
+                changes
+            });
+        }
+
+        /// A row went in above the end — a page of history.
+        pub(crate) fn a11y_inserted(&self, id: MessageId) {
+            self.a11y_edit(|m, buf, stamp| {
+                let Some(at) = buf.row_of(id) else {
+                    return Vec::new();
+                };
+                let (a, b) = m.insert_row(buf, at, id, stamp);
+                vec![(true, a, b)]
+            });
+        }
+
+        /// A row was removed from the buffer.
+        pub(crate) fn a11y_removed(&self, id: MessageId) {
+            self.a11y_edit(|m, _, _| {
+                let Some(i) = m.index_of(id) else {
+                    return Vec::new();
+                };
+                m.remove_row(i)
+                    .map(|(a, b)| vec![(false, a, b)])
+                    .unwrap_or_default()
+            });
+        }
+
+        /// A row's content was replaced in place.
+        pub(crate) fn a11y_replaced(&self, id: MessageId) {
+            self.a11y_edit(|m, buf, stamp| {
+                let Some(i) = m.index_of(id) else {
+                    return Vec::new();
+                };
+                let mut changes = Vec::new();
+                if let Some((a, b)) = m.remove_row(i) {
+                    changes.push((false, a, b));
+                }
+                let (a, b) = m.insert_row(buf, i, id, stamp);
+                changes.push((true, a, b));
+                changes
+            });
         }
 
         pub(crate) fn a11y_reset(&self) {
@@ -336,8 +485,10 @@ mod glue {
                 return;
             };
             // Everything that was there went; everything there now arrived.
-            // Coarse, but a listener told the truth coarsely is better off
-            // than one told something finer that is wrong.
+            // Coarse, and only for what changes every row at once — a
+            // clear, a new timestamp format — since a listener told the
+            // truth coarsely is better off than one told something finer
+            // that is wrong.
             self.update_contents(gtk4::AccessibleTextContentChange::Remove, 0, old.char_len());
             let len = self.with_a11y(|m, _| Some(m.char_len())).unwrap_or(0);
             if len > 0 {
@@ -356,7 +507,10 @@ mod glue {
 
 #[cfg(not(feature = "v4_14"))]
 impl crate::view::RotulusView {
-    pub(crate) fn a11y_appended(&self, _id: MessageId, _grew: bool) {}
+    pub(crate) fn a11y_appended(&self, _id: MessageId, _trimmed: usize) {}
+    pub(crate) fn a11y_inserted(&self, _id: MessageId) {}
+    pub(crate) fn a11y_removed(&self, _id: MessageId) {}
+    pub(crate) fn a11y_replaced(&self, _id: MessageId) {}
     pub(crate) fn a11y_reset(&self) {}
     pub(crate) fn a11y_selection_changed(&self) {}
 }
@@ -471,6 +625,56 @@ mod tests {
             m.text(),
             "incremental matches a rebuild"
         );
+    }
+
+    #[test]
+    fn inserts_and_removes_match_a_rebuild_and_report_their_ranges() {
+        let m8 = FixedMeasure::new(8);
+        let mut b = buffer(&[said("al", "one"), said("bo", "two"), said("cy", "three")]);
+        let mut m = TextModel::build(&b, &no_stamp);
+
+        // Above the end, the way a page of history arrives.
+        let id = b.insert_before(b.id_at(1), said("dee", "older"), &m8);
+        let (a, z) = m.insert_row(&b, b.row_of(id).unwrap(), id, &no_stamp);
+        assert_eq!(m.text(), TextModel::build(&b, &no_stamp).text());
+        assert_eq!(
+            &m.text()[a as usize..z as usize],
+            "<dee> older\n",
+            "the row and its separator"
+        );
+
+        // From the middle, the front and the end.
+        for pick in [2usize, 0, 1] {
+            let gone = b.id_at(pick).unwrap();
+            let i = m.index_of(gone).unwrap();
+            let before = m.text().to_string();
+            b.remove(gone, &m8);
+            let (a, z) = m.remove_row(i).unwrap();
+            assert_eq!(m.text(), TextModel::build(&b, &no_stamp).text());
+            assert_eq!(
+                z - a,
+                (before.chars().count() - m.text().chars().count()) as u32
+            );
+        }
+        let last = b.id_at(0).unwrap();
+        b.remove(last, &m8);
+        m.remove_row(0).unwrap();
+        assert_eq!(m.text(), "");
+    }
+
+    #[test]
+    fn a_trim_at_the_cap_finds_the_rows_that_went() {
+        let m8 = FixedMeasure::new(8);
+        let mut b = buffer(&[said("al", "one"), said("bo", "two"), said("cy", "three")]);
+        b.set_max_rows(3, &m8);
+        let mut m = TextModel::build(&b, &no_stamp);
+        let id = b.append(said("dee", "four"), &m8);
+        assert_eq!(b.len(), 3, "the append trimmed one");
+        let gone = m.gone(&b, 1);
+        assert_eq!(gone, [0]);
+        m.remove_row(0).unwrap();
+        m.push(&b, id, &no_stamp);
+        assert_eq!(m.text(), TextModel::build(&b, &no_stamp).text());
     }
 
     #[test]

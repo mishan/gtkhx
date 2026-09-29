@@ -43,7 +43,7 @@ pub const PAL_RULE: usize = 46;
 /// the theme exactly as they were for xtext.
 pub const PAL_MARK_FG: usize = 32;
 pub const PAL_MARK_BG: usize = 33;
-/// `ROTULUS_PAL_NICK_COLOR0` — the first per-nick colour.
+/// `ROTULUS_PAL_NICK_COLOR0` — the first per-nick color.
 pub const PAL_NICK_COLOR0: usize = 47;
 /// `ROTULUS_PAL_MARKER` — the last-read marker line.
 pub const PAL_MARKER: usize = 36;
@@ -118,12 +118,15 @@ impl From<rotulus_layout::LoadMoreDirection> for LoadDirection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HoverTarget {
     /// A URL: the row, the source it lives in, its byte range, and where
-    /// it goes.
+    /// it goes. `disguised` when the visible text isn't the address — a
+    /// markdown `[label](url)` — so a click can't be trusted to go where
+    /// the reader thinks.
     Link {
         message: MessageId,
         source: LineSource,
         range: std::ops::Range<usize>,
         href: String,
+        disguised: bool,
     },
     /// A speaker's nick in the gutter, or their avatar. Carries the key
     /// so the click handlers don't have to re-resolve it.
@@ -453,7 +456,7 @@ pub(crate) mod imp {
             use std::sync::OnceLock;
             static S: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
             // The first handler to say it dealt with the event stops the
-            // emission, and the view falls back to its own behaviour only
+            // emission, and the view falls back to its own behavior only
             // when nobody did.
             fn first_handled(
                 _: &glib::subclass::SignalInvocationHint,
@@ -845,7 +848,6 @@ impl RotulusView {
     }
 
     /// The private struct, for the accessibility glue and for tests.
-    #[cfg_attr(not(any(test, feature = "v4_14")), allow(dead_code))]
     pub(crate) fn imp_ref(&self) -> &imp::RotulusView {
         self.imp_()
     }
@@ -906,8 +908,15 @@ impl RotulusView {
         // trimmed above 2: a scrollback of one row is never what a
         // setting that small was asking for.
         let cap = if n > 2 { n as usize } else { 0 };
-        let m = self.imp_().measure.borrow();
-        self.imp_().buffer.borrow_mut().set_max_rows(cap, &*m);
+        let before = self.len();
+        {
+            let m = self.imp_().measure.borrow();
+            self.imp_().buffer.borrow_mut().set_max_rows(cap, &*m);
+        }
+        if self.len() != before {
+            self.after_content_change();
+            self.a11y_reset();
+        }
     }
 
     /// Edge length of the avatar slot in the gutter; 0 hides avatars.
@@ -1074,6 +1083,8 @@ impl RotulusView {
         // Relayout, not just redraw: the gutter width changed, so
         // wrapping, row heights and the scroll extent all move with it.
         self.queue_resize();
+        // Every row's accessible text leads with its stamp, or stops.
+        self.a11y_reset();
     }
 
     fn apply_stamp_format(&self, format: &str) {
@@ -1089,6 +1100,7 @@ impl RotulusView {
         *imp.stamp_format.borrow_mut() = f;
         self.recompute_stamp_width();
         self.queue_resize();
+        self.a11y_reset();
     }
 
     /// Measure the widest plausible rendering of the current format.
@@ -1212,11 +1224,10 @@ impl RotulusView {
             imp.buffer.borrow_mut().append(msg, &*m)
         };
         // The buffer grows by exactly one row unless the append trimmed
-        // the oldest ones to make room, which is a different change as
-        // far as anything tracking positions is concerned.
-        let grew = imp.buffer.borrow().len() == before + 1;
+        // the oldest ones to make room.
+        let trimmed = (before + 1).saturating_sub(imp.buffer.borrow().len());
         self.after_content_change();
-        self.a11y_appended(id, grew);
+        self.a11y_appended(id, trimmed);
         id
     }
 
@@ -1227,7 +1238,7 @@ impl RotulusView {
             imp.buffer.borrow_mut().insert_before(anchor, msg, &*m)
         };
         self.after_content_change();
-        self.a11y_reset();
+        self.a11y_inserted(id);
         id
     }
 
@@ -1242,7 +1253,7 @@ impl RotulusView {
                 self.imp_().marker.set(None);
             }
             self.after_content_change();
-            self.a11y_reset();
+            self.a11y_removed(id);
         }
         ok
     }
@@ -1265,7 +1276,7 @@ impl RotulusView {
             self.imp_().search.borrow_mut().clear();
             self.clear_selection();
             self.after_content_change();
-            self.a11y_reset();
+            self.a11y_replaced(id);
         }
         ok
     }
@@ -1954,7 +1965,7 @@ impl RotulusView {
                 let tint = gtk4::gdk::RGBA::new(fgc.red(), fgc.green(), fgc.blue(), CODE_BG_ALPHA);
                 snapshot.append_color(&tint, &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32));
             }
-            // Reverse swaps the run's own colours. A background left to
+            // Reverse swaps the run's own colors. A background left to
             // the system can't be read back to become the ink, so the ink
             // is black or white, whichever the foreground isn't.
             let (run_fg, run_bg) = {
@@ -2098,11 +2109,11 @@ pub fn default_palette() -> [gtk4::gdk::RGBA; PALETTE_COLS] {
     for (dst, v) in p.iter_mut().zip(MIRC) {
         *dst = rgb(v);
     }
-    let grey = gtk4::gdk::RGBA::new(0.5, 0.5, 0.5, 1.0);
+    let gray = gtk4::gdk::RGBA::new(0.5, 0.5, 0.5, 1.0);
     p[PAL_MARK_BG] = gtk4::gdk::RGBA::new(0.208, 0.518, 0.894, 0.35);
     p[PAL_MARKER] = rgb(0xe01b24);
-    p[PAL_HISTORY_MUTED] = grey;
-    p[PAL_TIMESTAMP] = grey;
+    p[PAL_HISTORY_MUTED] = gray;
+    p[PAL_TIMESTAMP] = gray;
     for (i, v) in NICKS.iter().enumerate() {
         p[PAL_NICK_COLOR0 + i] = rgb(*v);
     }
@@ -2315,6 +2326,25 @@ impl RotulusView {
         // every text view does and what makes "click to dismiss" work.
         let click = gtk4::GestureClick::new();
         click.set_button(gtk4::gdk::BUTTON_PRIMARY);
+        // Primary-click activation: a link, a speaker, a load-more row,
+        // an image. On release, and only when no drag happened, so
+        // selecting text doesn't also activate whatever was under the
+        // press — and not when the click is dismissing a selection.
+        //
+        // Connected first: handlers run in connection order, and the one
+        // below clears the selection, after which this one could no
+        // longer tell a dismissing click from an ordinary one.
+        let this = self.downgrade();
+        click.connect_released(move |_, n_press, x, y| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+            if n_press != 1 || this.imp_().drag_moved.get() || this.has_selection() {
+                return;
+            }
+            this.activate_at(x, y);
+        });
+
         let this = self.downgrade();
         click.connect_released(move |_, n_press, _, _| {
             let Some(this) = this.upgrade() else {
@@ -2377,20 +2407,6 @@ impl RotulusView {
             }
         });
 
-        // Primary-click activation: a link, a speaker, a load-more row,
-        // an image. On release, and only when no drag happened, so
-        // selecting text doesn't also activate whatever was under the
-        // press.
-        let this = self.downgrade();
-        click.connect_released(move |_, n_press, x, y| {
-            let Some(this) = this.upgrade() else {
-                return;
-            };
-            if n_press != 1 || this.imp_().drag_moved.get() || this.has_selection() {
-                return;
-            }
-            this.activate_at(x, y);
-        });
         self.add_controller(click);
 
         // Ctrl+C.
@@ -2849,6 +2865,20 @@ impl RotulusView {
 
 impl RotulusView {
     fn install_link_handlers(&self) {
+        // Where a link goes, on hover. For a markdown link whose label is
+        // not its address, the only way to see the destination short of
+        // the menu.
+        self.set_has_tooltip(true);
+        self.connect_query_tooltip(|view, x, y, _keyboard, tooltip| {
+            match view.hover_target_at(f64::from(x), f64::from(y)) {
+                Some(HoverTarget::Link { href, .. }) => {
+                    tooltip.set_text(Some(&href));
+                    true
+                }
+                _ => false,
+            }
+        });
+
         // Hover: pointer cursor over a link, default elsewhere.
         let motion = gtk4::EventControllerMotion::new();
         let this = self.downgrade();
@@ -2993,11 +3023,17 @@ impl RotulusView {
         }
         let range = buf.link_range_at(&caret)?;
         let (href, _) = buf.link_at(&caret)?;
+        let shown = buf
+            .source_text(buf.row_of(caret.message)?, caret.source)
+            .and_then(|t| t.get(range.clone()))
+            .unwrap_or("");
+        let disguised = self.imp_().linkifier.borrow().normalize(shown) != href;
         Some(HoverTarget::Link {
             message: caret.message,
             source: caret.source,
             range,
             href,
+            disguised,
         })
     }
 
@@ -3005,6 +3041,18 @@ impl RotulusView {
     pub(crate) fn activate_at(&self, x: f64, y: f64) {
         match self.hover_target_at(x, y) {
             Some(HoverTarget::Link { .. }) if !self.imp_().activate_links.get() => {}
+            // A link whose text isn't its address shows where it goes
+            // before anything opens: the menu, headed by the real URL.
+            Some(HoverTarget::Link {
+                href,
+                disguised: true,
+                ..
+            }) => {
+                let handled: bool = self.emit_by_name("link-menu", &[&href, &x, &y]);
+                if !handled {
+                    self.show_link_menu(&href, x, y);
+                }
+            }
             Some(HoverTarget::Link { href, .. }) => {
                 let handled: bool = self.emit_by_name("link-activated", &[&href]);
                 if !handled {
@@ -3133,7 +3181,8 @@ impl RotulusView {
                 WidgetExt::display(&this).clipboard().set_text(&url);
             }
         };
-        self.popup_menu(
+        self.popup_menu_titled(
+            Some(href),
             x,
             y,
             vec![
@@ -3146,6 +3195,12 @@ impl RotulusView {
     /// Pop a menu of `(label, enabled, action)` rows at a widget-space
     /// point.
     fn popup_menu(&self, x: f64, y: f64, rows: Vec<MenuRow>) {
+        self.popup_menu_titled(None, x, y, rows);
+    }
+
+    /// [`Self::popup_menu`], headed by `title` — for a link, the address
+    /// it goes to, so the reader sees it before choosing.
+    fn popup_menu_titled(&self, title: Option<&str>, x: f64, y: f64, rows: Vec<MenuRow>) {
         let (parent, px, py) = self.point_in_root(x, y);
 
         let popover = gtk4::Popover::new();
@@ -3163,6 +3218,18 @@ impl RotulusView {
             set(&vbox, 4);
         }
         popover.set_child(Some(&vbox));
+
+        if let Some(t) = title {
+            let header = gtk4::Label::new(Some(t));
+            header.set_ellipsize(pango::EllipsizeMode::Middle);
+            header.set_max_width_chars(48);
+            header.set_xalign(0.0);
+            header.add_css_class("dim-label");
+            header.set_margin_start(10);
+            header.set_margin_end(10);
+            header.set_margin_bottom(4);
+            vbox.append(&header);
+        }
 
         for (label, enabled, action) in rows {
             let row = menu_row(&label, enabled);

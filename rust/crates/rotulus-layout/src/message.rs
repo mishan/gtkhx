@@ -78,8 +78,8 @@ pub struct Speaker {
     /// since there would be nothing to resolve it against.
     pub key: u64,
     pub nick: String,
-    /// A per-person colour, `0x00RRGGBB`. `None` means "use the view's
-    /// default nick colour".
+    /// A per-person color, `0x00RRGGBB`. `None` means "use the view's
+    /// default nick color".
     pub color: Option<u32>,
 }
 
@@ -341,7 +341,7 @@ pub struct Message {
     pub timestamp: i64,
     pub speaker: Option<Speaker>,
     /// The nick column as the application styled it — brackets in one
-    /// colour, the name in another, a status tag — overriding the bare
+    /// color, the name in another, a status tag — overriding the bare
     /// [`Self::speaker`] nick, which only sizes the column when this is
     /// absent.
     pub gutter: Option<ParsedText>,
