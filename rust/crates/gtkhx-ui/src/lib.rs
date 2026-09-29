@@ -72,6 +72,8 @@ mod portal;
 #[cfg(feature = "voice")]
 pub mod screen_share;
 #[cfg(feature = "voice")]
+mod video_grid;
+#[cfg(feature = "voice")]
 pub mod video_panel;
 #[cfg(feature = "voice")]
 pub mod voice_panel;

@@ -149,14 +149,45 @@ GStreamer callbacks come through a different one.
 
 ## The Video panel and subscriptions
 
-A per-connection dock panel, built at startup beside Users. A screen
-share takes the stage at the top; cameras form a grid; this client's own
-publications show as "You" tiles from the preview; a paused publication
-keeps its tile, marked paused.
+A per-connection dock panel, built at startup beside Users. This
+client's own publications show as "You" tiles from the preview; a paused
+publication keeps its tile, marked paused.
+
+**Tiles fill the panel** (`video_grid.rs`). They are laid out as a
+gallery at whichever column count makes them largest, each the shape of
+its stream so the picture fills it: a camera 4:3 and a screen 16:9 until
+the first frame gives the real shape, and a gallery of mixed shapes
+shares 4:3. The block is centered and a short last row is centered under
+the rest. The grid asks the scrolled window for only the height its tiles
+need at their smallest (160 wide), so the panel scrolls only when they
+can't all fit at that size; otherwise they grow into the view. Tiles go
+in user order, this client's own first and a user's camera before their
+screen, so they don't swap places with the order publications arrive in.
+
+**One tile can be in focus.** It takes the stage at the top, as tall as
+the width lets it be at its shape, and the others share what is left
+below — a quarter of the height at least — as a smaller gallery of their
+own. By default someone else's screen share is in focus (the lowest uid's
+if several); clicking a tile, or its focus button, puts it there instead,
+and doing it again on the focused tile shows them all alike. That choice
+holds until the focused tile goes or the room is left.
+
+**Each tile has controls**, shown while the pointer is over it or one has
+keyboard focus: focus, mute and stop watching.
+
+- *Mute* is that user's voice, here only — their volume in the runtime
+  set to zero, as the user list's slider does, and put back where it was
+  on unmute. It is the same for their camera and their screen. A muted
+  user's mute button stays up as the mark of it. "You" tiles have none.
+- *Stop watching* takes the tile away, so the others get its room, and
+  stops receiving it (below). A bar at the bottom of the panel lists what
+  isn't being watched; a click there brings it back. The choice lasts as
+  long as the publication: one that ends and starts again is watched. On
+  a "You" tile it just hides the preview.
 
 **Visibility is the subscription policy.** While the panel's page is
 mapped it subscribes to every publication whose tile is in view or about
-to be; unmapped — another tab, a collapsed dock, a withdrawn window — it
+to be, less those the user stopped watching; unmapped — another tab, a collapsed dock, a withdrawn window — it
 sends the empty set. "About to be" is within half a view height of the
 view, since a stream takes a renegotiation and a keyframe to appear (on
 the local rig, about a quarter of a second after the 610; up to a second

@@ -55,7 +55,8 @@ A scene drives GtkHx the way a person would, through shotbox's Python API (`shot
 the session's display, over one X connection): it clicks, drags, types and presses keys, and
 waits for the things it can see (a window, a user arriving, a voice session or a camera in the
 server's log). After a click it waits for the window to hold still rather than for a fixed
-time, and before a picture it parks the pointer in the corner, off anything it would hover.
+time, and before a picture it parks the pointer in the corner, off anything it would hover — except
+the video scene, which rests it on a camera tile so the tile's controls show.
 Where it can only wait on the clock, for a timer in the app or live video that never holds
 still, the wait is for something that has certainly finished. `scenes.py` explains the waits
 that aren't obvious: the login toast, which pauses while the pointer rests on it and gives no

@@ -96,20 +96,67 @@ def make_assets(out):
                "-gravity", "center", "-annotate", "+0+0", a["letter"],
                out / f"{user['nick']}.gif")
     # Camera pictures for the video scene: a person at a desk, drawn flat.
-    for name, wall, shirt, skin in (("cam-ada", "#e9dccb", "#f97316", "#c98b62"),
-                                    ("cam-marco", "#d6e2e9", "#22c55e", "#8d5a3b")):
+    # ada sits in front of a bookshelf, marco by a window with a plant.
+    books = [("#b45309", 22), ("#1d4ed8", 16), ("#be123c", 26), ("#15803d", 18),
+             ("#7c3aed", 14), ("#ca8a04", 24), ("#0f766e", 20)]
+    shelves = []
+    for shelf, top in enumerate((60, 150, 240)):
+        shelves += ["-fill", "#7a5236", "-draw", f"rectangle 430,{top + 72} 620,{top + 80}"]
+        x = 440 + 9 * shelf
+        for n, (color, width) in enumerate(books[shelf:] + books[:shelf]):
+            if x + width > 612:
+                break
+            height = 58 + (n * 7 + shelf * 5) % 14
+            shelves += ["-fill", color,
+                        "-draw", f"rectangle {x},{top + 72 - height} {x + width},{top + 72}"]
+            x += width + 3
+    bookshelf = ["-fill", "#8b5e3c", "-draw", "rectangle 420,40 630,330",
+                 "-fill", "#5c3d27", "-draw", "rectangle 430,50 620,320", *shelves,
+                 "-fill", "#f5f0e6", "-draw", "rectangle 40,80 150,190",
+                 "-fill", "#d98c6a", "-draw", "rectangle 50,90 140,180",
+                 "-fill", "#f3c7a6", "-draw", "circle 95,135 95,115"]
+    window = ["-fill", "#ffffff80", "-draw", "rectangle 450,70 600,240",
+              "-fill", "#9fb7c9", "-draw", "rectangle 460,80 590,230",
+              "-fill", "#5b7f4a", "-draw", "ellipse 90,300 45,65 0,360",
+              "-fill", "#8a5a3b", "-draw", "rectangle 72,340 108,368"]
+
+    def face(lips):
+        """Eyes, brows, a nose and a smile on the head at 320,210."""
+        return ["-fill", "#2b1d16", "-draw", "ellipse 290,208 8,10 0,360",
+                "-draw", "ellipse 350,208 8,10 0,360",
+                "-fill", "#ffffff", "-draw", "circle 292,205 294,205",
+                "-draw", "circle 352,205 354,205",
+                "-fill", "none", "-stroke", "#3a2418", "-strokewidth", "5",
+                "-draw", "arc 272,178 308,196 200,340", "-draw", "arc 332,178 368,196 200,340",
+                "-stroke", "#00000030", "-strokewidth", "4", "-draw", "line 320,220 316,242",
+                "-stroke", lips, "-strokewidth", "5", "-draw", "arc 296,238 344,272 25,155",
+                "-stroke", "none"]
+
+    ada = [*bookshelf,
+           # Long hair, behind the shoulders and the face.
+           "-fill", "#5a2e1f", "-draw", "ellipse 320,200 102,98 0,360",
+           "-draw", "roundrectangle 218,180 422,372 30,30",
+           "-fill", "#c98b62", "-draw", "rectangle 297,250 343,360",
+           "-fill", "#8b5cf6", "-draw", "ellipse 320,470 165,125 180,360",
+           "-fill", "#c98b62", "-draw", "ellipse 320,210 74,92 0,360",
+           *face("#b4485a"),
+           # Parted on one side, swept over the forehead.
+           "-fill", "#5a2e1f", "-draw", "ellipse 320,150 80,46 180,360",
+           "-draw", "path 'M 240,158 Q 296,112 352,136 Q 292,146 258,204 Z'",
+           "-fill", "#f2c14e", "-draw", "circle 252,262 252,255", "-draw", "circle 388,262 388,255"]
+    marco = [*window,
+             "-fill", "#8d5a3b", "-draw", "rectangle 295,250 345,360",
+             "-fill", "#22c55e", "-draw", "ellipse 320,470 170,130 180,360",
+             "-fill", "#8d5a3b", "-draw", "ellipse 242,215 12,20 0,360",
+             "-draw", "ellipse 398,215 12,20 0,360",
+             "-draw", "ellipse 320,210 78,95 0,360",
+             *face("#5e2f22"),
+             "-fill", "#2d2019", "-draw", "ellipse 320,150 82,50 180,360"]
+    for name, wall, person in (("cam-ada", "#d9e2cf", ada), ("cam-marco", "#d6e2e9", marco)):
         # 4:3, which is what the capture pipeline sends a camera as.
         magick("-size", "640x480", f"gradient:{wall}-#b9a992", "(",
                "-size", "640x120", "xc:#6b4f3a", ")", "-gravity", "south", "-composite",
-               "-fill", "#ffffff80", "-draw", "rectangle 450,70 600,240",
-               "-fill", "#9fb7c9", "-draw", "rectangle 460,80 590,230",
-               "-fill", "#5b7f4a", "-draw", "ellipse 90,300 45,65 0,360",
-               "-fill", "#8a5a3b", "-draw", "rectangle 72,340 108,368",
-               "-fill", shirt, "-draw", "ellipse 320,470 170,130 180,360",
-               "-fill", skin, "-draw", "rectangle 295,250 345,300",
-               "-draw", "ellipse 320,210 78,95 0,360",
-               "-fill", "#2d2019", "-draw", "ellipse 320,150 82,50 180,360",
-               *strip, out / f"{name}.png")
+               "-gravity", "northwest", *person, *strip, out / f"{name}.png")
     # A shared screen: the harbor photo open in an editor.
     magick("-size", "1280x720", "xc:#1f2126",
            "-fill", "#2a2d33", "-draw", "rectangle 0,0 1280,44",
@@ -598,7 +645,10 @@ def scene_video(out, bots, assets):
         # The offer and answer, the first keyframes. The tiles never hold
         # still, so this one is on the clock.
         time.sleep(VIDEO_SETTLE)
-        display.capture(out, window="GtkHx.*", park=True)
+        # Over ada's camera, below the stage, so its controls show.
+        display.move(690, 700, window="GtkHx.*")
+        time.sleep(1)
+        display.capture(out, window="GtkHx.*")
         app.terminate()
     finally:
         for p in pubs:
