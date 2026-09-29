@@ -447,7 +447,11 @@ rotulus_dir = run_command(
   cargo.full_path(), meson.current_source_dir() / 'Cargo.toml',
   check : true,
 ).stdout().strip()
-rotulus_inc = include_directories(rotulus_dir / 'include')
+rotulus_inc = include_directories(run_command(
+  find_program('python3'), files('rotulus.py'), 'include-dir',
+  rotulus_dir, meson.project_source_root(), meson.current_source_dir(),
+  check : true,
+).stdout().strip())
 # The directory's name carries the crate's version, so reconfigure when the
 # lockfile moves; reading it is what makes it a configure dependency.
 import('fs').read('Cargo.lock')
