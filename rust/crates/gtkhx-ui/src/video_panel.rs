@@ -1,11 +1,16 @@
 //! The Video panel: the room's cameras and screen shares, as tiles.
 //!
 //! One page per connection in a dockable panel, like Users. It shows the
-//! voice room this connection is in: a screen share takes the stage at
-//! the top, cameras sit in a grid below it, and this client's own
-//! publications appear as "You" tiles from the capture's preview. A
-//! paused publication keeps its tile, marked paused — the spec's
-//! present-but-paused.
+//! voice room this connection is in as tiles laid out to fill the panel
+//! (see `video_grid`), and this client's own publications as "You" tiles
+//! from the capture's preview. A paused publication keeps its tile, marked
+//! paused — the spec's present-but-paused.
+//!
+//! One tile can be in focus: it takes the stage at the top and the others
+//! go smaller below. Someone's screen share is in focus until the user
+//! picks another or none. Each tile's controls focus it, mute its user's
+//! voice here, and stop watching it — which takes its tile away, stops
+//! receiving it, and leaves a button at the bottom to watch it again.
 //!
 //! **What this client receives is decided here.** The server delivers no
 //! video until asked (Video Subscribe, 610), and asks are the complete
@@ -24,7 +29,7 @@
 //! because a disconnect frees it.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, c_void};
 use std::rc::{Rc, Weak};
 
@@ -41,6 +46,7 @@ use hxvoice_runtime::video::{self_key, StreamKey, VideoFrame};
 
 use crate::dock;
 use crate::tr::tr;
+use crate::video_grid::VideoGrid;
 
 /// How long the subscription set may settle before it goes out.
 const SUBSCRIBE_DEBOUNCE_MS: u64 = 150;
@@ -135,38 +141,83 @@ struct Tile {
     picture: gtk::Picture,
     name: gtk::Label,
     paused: gtk::Label,
+    focus: gtk::Button,
+    mute: gtk::Button,
+    /// The newest frame's size, to notice a stream changing shape.
+    size: Cell<(u32, u32)>,
+}
+
+/// Tiles show their controls while the pointer is over them or one has
+/// keyboard focus; a muted user's mute button stays up as the mark of it.
+const CSS: &str = "
+.hx-video-tile .hx-video-controls > button {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.hx-video-tile:hover .hx-video-controls > button,
+.hx-video-tile:focus-within .hx-video-controls > button,
+.hx-video-tile .hx-video-controls > button.hx-video-muted {
+  opacity: 1;
+}
+";
+
+/// Once per process: the style is display-wide and the same for every panel.
+fn install_css() {
+    thread_local! {
+        static INSTALLED: Cell<bool> = const { Cell::new(false) };
+    }
+    if INSTALLED.get() {
+        return;
+    }
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    INSTALLED.set(true);
+    let css = gtk::CssProvider::new();
+    // load_from_string is GTK 4.12, above the bindings' floor.
+    css.load_from_data(CSS);
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &css,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+}
+
+fn control(icon: &str, tooltip: &str) -> gtk::Button {
+    let b = gtk::Button::from_icon_name(icon);
+    b.set_tooltip_text(Some(tooltip));
+    b.add_css_class("osd");
+    b.add_css_class("circular");
+    b
 }
 
 impl Tile {
-    fn new(kind: VideoKind) -> Tile {
+    /// `key`'s tile, its controls acting on `panel`. This client's own
+    /// preview has no mute: there is nothing of its own to hear.
+    fn new(key: StreamKey, panel: Weak<PanelInner>) -> Tile {
         let picture = gtk::Picture::new();
         picture.set_can_shrink(true);
         picture.set_content_fit(gtk::ContentFit::Contain);
-        picture.set_hexpand(true);
-        picture.set_vexpand(true);
-        let (w, h) = match kind {
-            VideoKind::Camera => (240, 180),
-            VideoKind::Screen => (480, 270),
-        };
-        picture.set_size_request(w, h);
         picture.add_css_class("hx-video-picture");
 
         let root = gtk::Overlay::new();
         root.set_child(Some(&picture));
         root.add_css_class("card");
+        root.add_css_class("hx-video-tile");
         root.set_overflow(gtk::Overflow::Hidden);
 
         let name = gtk::Label::new(None);
         name.set_halign(gtk::Align::Start);
         name.set_valign(gtk::Align::End);
         name.set_margin_start(6);
+        name.set_margin_end(6);
         name.set_margin_bottom(6);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
         name.add_css_class("osd");
         name.add_css_class("caption");
         root.add_overlay(&name);
 
-        let paused = gtk::Label::new(Some(&match kind {
+        let paused = gtk::Label::new(Some(&match key.kind {
             VideoKind::Camera => tr("Camera paused"),
             VideoKind::Screen => tr("Sharing paused"),
         }));
@@ -176,15 +227,74 @@ impl Tile {
         paused.set_visible(false);
         root.add_overlay(&paused);
 
+        let focus = control("view-fullscreen-symbolic", &tr("Focus"));
+        let mute = control("audio-volume-high-symbolic", &tr("Mute"));
+        mute.set_visible(key.user_id != 0);
+        let unwatch = control(
+            "window-close-symbolic",
+            &if key.user_id == 0 {
+                tr("Hide")
+            } else {
+                tr("Stop watching")
+            },
+        );
+        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        controls.add_css_class("hx-video-controls");
+        controls.set_halign(gtk::Align::End);
+        controls.set_valign(gtk::Align::Start);
+        controls.set_margin_top(6);
+        controls.set_margin_end(6);
+        controls.append(&mute);
+        controls.append(&focus);
+        controls.append(&unwatch);
+        root.add_overlay(&controls);
+
+        let on = |f: fn(&Rc<PanelInner>, StreamKey)| {
+            let panel = panel.clone();
+            move || {
+                if let Some(p) = panel.upgrade() {
+                    f(&p, key);
+                }
+            }
+        };
+        let toggle_focus = on(PanelInner::toggle_focus);
+        focus.connect_clicked(move |_| toggle_focus());
+        let toggle_mute = on(PanelInner::toggle_mute);
+        mute.connect_clicked(move |_| toggle_mute());
+        let stop = on(PanelInner::stop_watching);
+        unwatch.connect_clicked(move |_| stop());
+
+        // A click anywhere else on the tile toggles its focus too. The
+        // buttons claim their own clicks, so this never sees theirs.
+        let click = gtk::GestureClick::new();
+        let toggle_focus = on(PanelInner::toggle_focus);
+        click.connect_released(move |g, n, _, _| {
+            if n == 1 {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                toggle_focus();
+            }
+        });
+        root.add_controller(click);
+        // The volume can change from the user list; look again whenever the
+        // controls are about to show.
+        let motion = gtk::EventControllerMotion::new();
+        let sync = on(|p, _| p.sync_mute());
+        motion.connect_enter(move |_, _, _| sync());
+        root.add_controller(motion);
+
         Tile {
             root,
             picture,
             name,
             paused,
+            focus,
+            mute,
+            size: Cell::new((0, 0)),
         }
     }
 
-    fn show(&self, frame: &VideoFrame) {
+    /// Show `frame`. Returns its shape when it differs from the last one's.
+    fn show(&self, frame: &VideoFrame) -> Option<f64> {
         let texture = gdk::MemoryTexture::new(
             frame.width as i32,
             frame.height as i32,
@@ -193,7 +303,43 @@ impl Tile {
             frame.stride as usize,
         );
         self.picture.set_paintable(Some(&texture));
+        let size = (frame.width, frame.height);
+        (self.size.replace(size) != size && frame.height > 0)
+            .then(|| f64::from(frame.width) / f64::from(frame.height))
     }
+
+    fn set_focused(&self, focused: bool) {
+        if focused {
+            self.focus.set_icon_name("view-restore-symbolic");
+            self.focus.set_tooltip_text(Some(&tr("Show all")));
+        } else {
+            self.focus.set_icon_name("view-fullscreen-symbolic");
+            self.focus.set_tooltip_text(Some(&tr("Focus")));
+        }
+    }
+
+    fn set_muted(&self, muted: bool) {
+        if muted {
+            self.mute.set_icon_name("audio-volume-muted-symbolic");
+            self.mute.set_tooltip_text(Some(&tr("Unmute")));
+            self.mute.add_css_class("hx-video-muted");
+        } else {
+            self.mute.set_icon_name("audio-volume-high-symbolic");
+            self.mute.set_tooltip_text(Some(&tr("Mute")));
+            self.mute.remove_css_class("hx-video-muted");
+        }
+    }
+}
+
+/// Which tile is on the stage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Focus {
+    /// Someone else's screen share, when there is one; none otherwise.
+    Auto,
+    /// The one the user picked.
+    On(StreamKey),
+    /// None: the user asked for them all alike.
+    Off,
 }
 
 // ---------------------------------------------------------------------
@@ -205,14 +351,34 @@ struct PanelInner {
     /// Weak: the root owns this state (as widget data), so a strong ref
     /// back would keep both alive forever.
     root: glib::WeakRef<gtk::Box>,
+    /// Itself, for the tiles' controls to reach it by.
+    this: Weak<PanelInner>,
     stack: gtk::Stack,
     status: adw::StatusPage,
-    stage: gtk::Box,
-    grid: gtk::FlowBox,
-    /// The scrolled content, stage and grid, and its window.
-    tiles_box: gtk::Box,
+    grid: VideoGrid,
     scroll: gtk::ScrolledWindow,
     tiles: RefCell<HashMap<StreamKey, Tile>>,
+    /// The room's streams as the last refresh found them: (stream, paused,
+    /// label). Tiles are made from it, less the unwatched.
+    want: RefCell<Vec<(StreamKey, bool, String)>>,
+    /// Whether the server offers video, and whether this connection is
+    /// in a voice room, as the last refresh found them: what the empty
+    /// page says.
+    video: Cell<bool>,
+    in_room: Cell<bool>,
+    /// The room the user's choices below were made in — the runtime's id
+    /// and the chat's — so they are dropped on a move to another room or a
+    /// reconnect, and kept across a rejoin of the same one.
+    room: Cell<Option<(u64, u32)>>,
+    focus: Cell<Focus>,
+    /// Streams the user stopped watching: no tile, not received, and a
+    /// button in the bar at the bottom to watch again.
+    unwatched: RefCell<HashSet<StreamKey>>,
+    unwatched_bar: gtk::Box,
+    unwatched_list: gtk::FlowBox,
+    /// Each muted user's volume before the mute, to go back to. Uids are
+    /// the connection's, so a new runtime starts it afresh.
+    premute: RefCell<HashMap<u16, f64>>,
     /// The runtime this panel has an observer on, by id (0 for none).
     observing: Cell<u64>,
     subscribe_timer: RefCell<Option<glib::SourceId>>,
@@ -252,6 +418,7 @@ impl PanelInner {
             return;
         }
         self.observing.set(id);
+        self.premute.borrow_mut().clear();
         let weak = Rc::downgrade(self);
         rt.add_video_observer(Box::new(move |rt, notice| {
             let Some(panel) = weak.upgrade() else {
@@ -273,6 +440,7 @@ impl PanelInner {
                     t.picture.set_paintable(None::<&gdk::Paintable>);
                 }
             }
+            VideoNotice::Volume(_) => self.sync_mute(),
             VideoNotice::Publications | VideoNotice::Local(_) | VideoNotice::Session(_) => {
                 self.refresh();
             }
@@ -282,8 +450,8 @@ impl PanelInner {
     /// Show the newest frame of every tile that has one waiting.
     fn pull_frames(&self, take: impl Fn(StreamKey) -> Option<VideoFrame>) {
         for (key, tile) in self.tiles.borrow().iter() {
-            if let Some(frame) = take(*key) {
-                tile.show(&frame);
+            if let Some(aspect) = take(*key).and_then(|frame| tile.show(&frame)) {
+                self.grid.set_aspect(*key, aspect);
             }
         }
     }
@@ -302,6 +470,15 @@ impl PanelInner {
                 SessionState::OfferPending | SessionState::Connecting | SessionState::Connected
             )
         });
+
+        if let (Some(rt), Some(cid)) = (rt, cid) {
+            let room = (rt.id(), cid);
+            if self.room.replace(Some(room)) != Some(room) {
+                self.new_room();
+            }
+        }
+        self.video.set(video);
+        self.in_room.set(in_room);
 
         // (key, paused, label)
         let mut want: Vec<(StreamKey, bool, String)> = Vec::new();
@@ -332,47 +509,166 @@ impl PanelInner {
             }
         }
 
-        let has_tiles = self.set_tiles(&want);
-        if !has_tiles {
-            self.status.set_description(Some(&if !video {
-                tr("This server doesn't support video.")
-            } else if !in_room {
-                tr("Join voice to see who has a camera or screen on.")
-            } else {
-                tr("Nobody in this voice chat has a camera or screen on.")
-            }));
-        }
+        self.set_tiles(&want);
         self.schedule_subscribe();
     }
 
-    /// Make the tiles exactly `want` — (stream, paused, label) — and show
-    /// them, or the status page when there are none. Returns whether there
-    /// are any.
+    /// Forget the choices made in the last room: what to focus, what not
+    /// to watch.
+    fn new_room(&self) {
+        self.focus.set(Focus::Auto);
+        self.unwatched.borrow_mut().clear();
+    }
+
+    /// Lay the tiles out again from the last refresh's streams, after a
+    /// change of the user's own: what to watch, what to focus.
+    fn relayout(self: &Rc<Self>) {
+        let want = self.want.borrow().clone();
+        self.set_tiles(&want);
+        self.schedule_subscribe();
+    }
+
+    /// The tile on the stage: the user's pick while it has a tile, or
+    /// someone else's screen share unless the user asked for none. A lone
+    /// tile has the panel to itself, and no stage.
+    fn focused_key(&self) -> Option<StreamKey> {
+        let tiles = self.tiles.borrow();
+        if tiles.len() < 2 {
+            return None;
+        }
+        match self.focus.get() {
+            Focus::On(key) if tiles.contains_key(&key) => Some(key),
+            Focus::Off => None,
+            _ => tiles
+                .keys()
+                .filter(|k| k.kind == VideoKind::Screen && k.user_id != 0)
+                .min_by_key(|k| k.user_id)
+                .copied(),
+        }
+    }
+
+    fn apply_focus(&self) {
+        let focused = self.focused_key();
+        self.grid.set_focused(focused);
+        let tiles = self.tiles.borrow();
+        for (key, tile) in tiles.iter() {
+            tile.set_focused(Some(*key) == focused);
+            tile.focus.set_visible(tiles.len() > 1);
+        }
+    }
+
+    /// Put `key` on the stage, or take it off if it is there. A lone tile
+    /// has no stage to go on, and a click on it changes nothing.
+    fn toggle_focus(self: &Rc<Self>, key: StreamKey) {
+        if self.tiles.borrow().len() < 2 {
+            return;
+        }
+        self.focus.set(if self.focused_key() == Some(key) {
+            Focus::Off
+        } else {
+            Focus::On(key)
+        });
+        self.apply_focus();
+        // The layout moved under the view without necessarily changing its
+        // extent: look again at what is in reach.
+        self.schedule_subscribe();
+    }
+
+    /// Stop receiving `key` and give its tile's room to the others.
+    fn stop_watching(self: &Rc<Self>, key: StreamKey) {
+        self.unwatched.borrow_mut().insert(key);
+        self.relayout();
+    }
+
+    fn watch(self: &Rc<Self>, key: StreamKey) {
+        self.unwatched.borrow_mut().remove(&key);
+        self.relayout();
+    }
+
+    /// Mute `key`'s user here, or give them back the volume they had. It is
+    /// their voice, so it is the same for their camera and their screen,
+    /// and the same as the user list's volume slider at zero.
+    fn toggle_mute(self: &Rc<Self>, key: StreamKey) {
+        let Some(rt) = (unsafe { runtime(self.sess()) }) else {
+            return;
+        };
+        let uid = key.user_id;
+        let volume = rt.user_volume(uid);
+        if volume > 0.0 {
+            self.premute.borrow_mut().insert(uid, volume);
+            rt.set_user_volume(uid, 0.0);
+        } else {
+            let back = self.premute.borrow_mut().remove(&uid).unwrap_or(1.0);
+            rt.set_user_volume(uid, back);
+        }
+    }
+
+    /// Show each tile's user as muted or not, as the runtime has them.
+    fn sync_mute(&self) {
+        let rt = unsafe { runtime(self.sess()) };
+        for (key, tile) in self.tiles.borrow().iter() {
+            let muted = key.user_id != 0 && rt.is_some_and(|r| r.user_volume(key.user_id) == 0.0);
+            tile.set_muted(muted);
+        }
+    }
+
+    /// The bar's buttons, one per unwatched stream in `want`.
+    fn fill_unwatched(&self, want: &[(StreamKey, bool, String)]) {
+        while let Some(child) = self.unwatched_list.first_child() {
+            self.unwatched_list.remove(&child);
+        }
+        let unwatched = self.unwatched.borrow();
+        let mut streams: Vec<_> = want
+            .iter()
+            .filter(|(k, _, _)| unwatched.contains(k))
+            .collect();
+        streams.sort_by_key(|(k, _, _)| (k.user_id, k.kind));
+        for (key, _, label) in streams {
+            let content = adw::ButtonContent::new();
+            content.set_icon_name(match key.kind {
+                VideoKind::Camera => "camera-video-symbolic",
+                VideoKind::Screen => "screen-shared-symbolic",
+            });
+            content.set_label(label);
+            // A long nick ellipsizes rather than widening the panel.
+            content.set_can_shrink(true);
+            let button = gtk::Button::new();
+            button.set_child(Some(&content));
+            button.add_css_class("flat");
+            button.set_tooltip_text(Some(&tr("Watch")));
+            let (panel, key) = (self.this.clone(), *key);
+            button.connect_clicked(move |_| {
+                if let Some(p) = panel.upgrade() {
+                    p.watch(key);
+                }
+            });
+            self.unwatched_list.append(&button);
+        }
+        self.unwatched_bar
+            .set_visible(self.unwatched_list.first_child().is_some());
+    }
+
+    /// Make the tiles exactly `want` — (stream, paused, label) — less the
+    /// streams the user stopped watching, and show them, or the status page
+    /// when there are none. Returns whether there are any.
     fn set_tiles(&self, want: &[(StreamKey, bool, String)]) -> bool {
+        *self.want.borrow_mut() = want.to_vec();
         {
+            let unwatched = self.unwatched.borrow();
+            let shown =
+                |key: &StreamKey| !unwatched.contains(key) && want.iter().any(|(k, _, _)| k == key);
             let mut tiles = self.tiles.borrow_mut();
-            tiles.retain(|key, tile| {
-                let keep = want.iter().any(|(k, _, _)| k == key);
+            tiles.retain(|key, _| {
+                let keep = shown(key);
                 if !keep {
-                    if let Some(parent) = tile.root.parent() {
-                        if let Some(child) = parent.downcast_ref::<gtk::FlowBoxChild>() {
-                            self.grid.remove(child);
-                        } else {
-                            self.stage.remove(&tile.root);
-                        }
-                    }
+                    self.grid.remove(*key);
                 }
                 keep
             });
-            for (key, paused, label) in want {
+            for (key, paused, label) in want.iter().filter(|(k, _, _)| shown(k)) {
                 let tile = tiles.entry(*key).or_insert_with(|| {
-                    let t = Tile::new(key.kind);
-                    // The grid sorts on this; see tile_uid.
-                    t.root.set_widget_name(&format!("hx-video-{}", key.user_id));
-                    match key.kind {
-                        VideoKind::Screen => self.stage.append(&t.root),
-                        VideoKind::Camera => self.grid.append(&t.root),
-                    }
+                    let t = Tile::new(*key, self.this.clone());
+                    self.grid.insert(*key, &t.root);
                     t
                 });
                 tile.name.set_text(label);
@@ -382,14 +678,22 @@ impl PanelInner {
                 }
             }
         }
+        self.apply_focus();
+        self.fill_unwatched(want);
+        self.sync_mute();
 
         let has_tiles = !self.tiles.borrow().is_empty();
-        self.stage.set_visible(
-            self.tiles
-                .borrow()
-                .keys()
-                .any(|k| k.kind == VideoKind::Screen),
-        );
+        if !has_tiles {
+            self.status.set_description(Some(&if !self.video.get() {
+                tr("This server doesn't support video.")
+            } else if !self.in_room.get() {
+                tr("Join voice to see who has a camera or screen on.")
+            } else if !want.is_empty() {
+                tr("You aren't watching anyone. Pick someone below to watch.")
+            } else {
+                tr("Nobody in this voice chat has a camera or screen on.")
+            }));
+        }
         self.stack
             .set_visible_child_name(if has_tiles { "tiles" } else { "empty" });
         has_tiles
@@ -408,6 +712,17 @@ impl PanelInner {
         }
         let label = unsafe { nick(sess, cid, uid) };
         relabel(&self.tiles.borrow(), uid, &label);
+        let mut renamed = false;
+        for (key, _, l) in self.want.borrow_mut().iter_mut() {
+            if key.user_id == uid && uid != 0 {
+                l.clone_from(&label);
+                renamed = true;
+            }
+        }
+        if renamed {
+            let want = self.want.borrow().clone();
+            self.fill_unwatched(&want);
+        }
     }
 
     /// Queue the receive set to be recomputed and sent.
@@ -455,7 +770,7 @@ impl PanelInner {
             .map(|(key, tile)| {
                 let span = tile
                     .root
-                    .compute_bounds(&self.tiles_box)
+                    .compute_bounds(&self.grid)
                     .filter(|b| b.height() > 0.0)
                     .map(|b| (f64::from(b.y()), f64::from(b.y() + b.height())));
                 (*key, span)
@@ -492,6 +807,7 @@ impl PanelInner {
             let (tiles, view) = self.layout();
             let reach = in_reach(&tiles, view, &receiving);
             let tiled = |key: &StreamKey| tiles.iter().any(|(k, _)| k == key);
+            let unwatched = self.unwatched.borrow();
             rt.video_publications()
                 .into_iter()
                 .filter(|p| p.user_id != me)
@@ -501,8 +817,9 @@ impl PanelInner {
                         kind: p.kind,
                     };
                     // A publication with no tile yet is one the next
-                    // refresh adds: receive it rather than wait.
-                    !tiled(&key) || reach.contains(&key)
+                    // refresh adds, unless the user stopped watching it:
+                    // receive it rather than wait.
+                    !unwatched.contains(&key) && (!tiled(&key) || reach.contains(&key))
                 })
                 .map(|p| Stream {
                     user_id: p.user_id,
@@ -546,18 +863,6 @@ fn in_reach(
         .collect()
 }
 
-fn sort_tiles(a: &gtk::FlowBoxChild, b: &gtk::FlowBoxChild) -> gtk::Ordering {
-    tile_uid(a).cmp(&tile_uid(b)).into()
-}
-
-/// The user a grid child's tile shows, from the name `set_tiles` gave it.
-fn tile_uid(child: &gtk::FlowBoxChild) -> u16 {
-    child
-        .child()
-        .and_then(|w| w.widget_name().strip_prefix("hx-video-")?.parse().ok())
-        .unwrap_or(u16::MAX)
-}
-
 fn build_content(sess: *mut c_void) -> (gtk::Box, Rc<PanelInner>) {
     let (root, inner) = build_panel(dock::key_for_session(sess));
     inner.refresh();
@@ -576,53 +881,65 @@ fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
     status.set_title(&tr("No Video"));
     status.add_css_class("compact");
 
-    let stage = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    stage.set_margin_start(6);
-    stage.set_margin_end(6);
-    stage.set_margin_top(6);
-    stage.set_visible(false);
-
-    let grid = gtk::FlowBox::new();
-    grid.set_selection_mode(gtk::SelectionMode::None);
-    grid.set_homogeneous(true);
-    grid.set_min_children_per_line(1);
-    grid.set_max_children_per_line(4);
-    grid.set_row_spacing(6);
-    grid.set_column_spacing(6);
+    let grid = VideoGrid::new();
     grid.set_margin_start(6);
     grid.set_margin_end(6);
     grid.set_margin_top(6);
     grid.set_margin_bottom(6);
-    grid.set_valign(gtk::Align::Start);
-    // By user, not by arrival: the order publications first reach this
-    // client varies, and tiles shouldn't swap places between sessions.
-    // This client's own preview (uid 0) comes first.
-    grid.set_sort_func(sort_tiles);
-
-    let tiles_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    tiles_box.append(&stage);
-    tiles_box.append(&grid);
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
     scroll.set_vexpand(true);
-    scroll.set_child(Some(&tiles_box));
+    scroll.set_child(Some(&grid));
+
+    // Streams the user stopped watching, to watch again.
+    let unwatched_list = gtk::FlowBox::new();
+    unwatched_list.set_selection_mode(gtk::SelectionMode::None);
+    unwatched_list.set_hexpand(true);
+    unwatched_list.set_max_children_per_line(8);
+    unwatched_list.set_column_spacing(2);
+    unwatched_list.set_row_spacing(2);
+    let unwatched_label = gtk::Label::new(Some(&tr("Not watching")));
+    unwatched_label.add_css_class("dim-label");
+    unwatched_label.add_css_class("caption");
+    unwatched_label.set_valign(gtk::Align::Center);
+    let unwatched_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    unwatched_row.set_margin_start(6);
+    unwatched_row.set_margin_end(6);
+    unwatched_row.set_margin_top(2);
+    unwatched_row.set_margin_bottom(2);
+    unwatched_row.append(&unwatched_label);
+    unwatched_row.append(&unwatched_list);
+    let unwatched_bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    unwatched_bar.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    unwatched_bar.append(&unwatched_row);
+    unwatched_bar.set_visible(false);
 
     let stack = gtk::Stack::new();
     stack.add_named(&status, Some("empty"));
     stack.add_named(&scroll, Some("tiles"));
     stack.set_vexpand(true);
     root.append(&stack);
+    root.append(&unwatched_bar);
+    install_css();
 
-    let inner = Rc::new(PanelInner {
+    let inner = Rc::new_cyclic(|this| PanelInner {
         conn,
         root: root.downgrade(),
+        this: this.clone(),
         stack,
         status,
-        stage,
         grid,
-        tiles_box,
         scroll,
         tiles: RefCell::new(HashMap::new()),
+        want: RefCell::new(Vec::new()),
+        video: Cell::new(false),
+        in_room: Cell::new(false),
+        room: Cell::new(None),
+        focus: Cell::new(Focus::Auto),
+        unwatched: RefCell::new(HashSet::new()),
+        unwatched_bar,
+        unwatched_list,
+        premute: RefCell::new(HashMap::new()),
         observing: Cell::new(0),
         subscribe_timer: RefCell::new(None),
     });
@@ -699,6 +1016,8 @@ impl Standalone {
         // Serial 0 is no connection: no runtime is ever found for it, and
         // no session's refresh reaches it.
         let (root, inner) = build_panel(0);
+        inner.video.set(true);
+        inner.in_room.set(true);
         Standalone { root, inner }
     }
 
@@ -808,14 +1127,15 @@ pub(crate) mod tests {
 
     /// A tile builds and takes a frame. Driven by `crate::gtk_tests`.
     pub(crate) fn check_tile_shows_a_frame() {
-        let tile = Tile::new(VideoKind::Camera);
+        let tile = Tile::new(cam(1), Weak::new());
         let frame = VideoFrame {
             width: 4,
             height: 2,
             stride: 16,
             bytes: glib::Bytes::from_owned(vec![255u8; 32]),
         };
-        tile.show(&frame);
+        assert_eq!(tile.show(&frame), Some(2.0), "the first frame's shape");
+        assert_eq!(tile.show(&frame), None, "the same shape again");
         let p = tile
             .picture
             .paintable()
@@ -834,7 +1154,7 @@ pub(crate) mod tests {
             (6, VideoKind::Camera, "Other"),
             (0, VideoKind::Camera, "You"),
         ] {
-            let t = Tile::new(kind);
+            let t = Tile::new(StreamKey { user_id: uid, kind }, Weak::new());
             t.name.set_text(label);
             tiles.insert(StreamKey { user_id: uid, kind }, t);
         }
@@ -877,7 +1197,11 @@ pub(crate) mod tests {
             panel.inner.stack.visible_child_name().as_deref(),
             Some("tiles")
         );
-        assert!(panel.inner.stage.is_visible());
+        assert_eq!(
+            panel.inner.grid.focused(),
+            Some(screen),
+            "a share takes the stage"
+        );
 
         let frame = VideoFrame {
             width: 8,
@@ -893,7 +1217,7 @@ pub(crate) mod tests {
 
         panel.set_tiles(&[(key(1), "one".into())]);
         assert!(panel.paintable(key(2)).is_none(), "tile 2 went");
-        assert!(!panel.inner.stage.is_visible());
+        assert_eq!(panel.inner.grid.focused(), None);
         panel.set_tiles(&[]);
         assert_eq!(
             panel.inner.stack.visible_child_name().as_deref(),
@@ -988,19 +1312,157 @@ pub(crate) mod tests {
         win.destroy();
     }
 
-    /// Camera tiles sit in user order whatever order they arrive in, this
-    /// client's own preview first. Driven by `crate::gtk_tests`.
+    /// Tiles sit in user order whatever order they arrive in, this
+    /// client's own preview first and a user's camera before their screen.
+    /// Driven by `crate::gtk_tests`.
     pub(crate) fn check_tiles_sort_by_user() {
-        let grid = gtk::FlowBox::new();
-        grid.set_sort_func(sort_tiles);
-        for uid in [5u16, 2, 0, 9] {
-            let t = Tile::new(VideoKind::Camera);
-            t.root.set_widget_name(&format!("hx-video-{uid}"));
-            grid.append(&t.root);
+        let grid = VideoGrid::new();
+        let screen = StreamKey {
+            user_id: 2,
+            kind: VideoKind::Screen,
+        };
+        for key in [cam(5), screen, cam(2), cam(0), cam(9)] {
+            grid.insert(key, &gtk::Label::new(None));
         }
-        let order: Vec<u16> = (0..4)
-            .map(|i| tile_uid(&grid.child_at_index(i).expect("a child")))
-            .collect();
-        assert_eq!(order, [0, 2, 5, 9]);
+        assert_eq!(grid.keys(), [cam(0), cam(2), screen, cam(5), cam(9)]);
+        // The widgets are in the same order, for keyboard focus.
+        let mut n = 0;
+        let mut child = grid.first_child();
+        while let Some(c) = child {
+            n += 1;
+            child = c.next_sibling();
+        }
+        assert_eq!(n, 5);
+        grid.remove(screen);
+        assert_eq!(grid.keys(), [cam(0), cam(2), cam(5), cam(9)]);
+    }
+
+    /// A tile goes on the stage and off it again; a share is there by
+    /// default until the user asks for none; a focused tile that goes
+    /// takes the user's pick with it. Driven by `crate::gtk_tests`.
+    pub(crate) fn check_focus_follows_the_user() {
+        let panel = Standalone::new();
+        let p = &panel.inner;
+        let screen = StreamKey {
+            user_id: 3,
+            kind: VideoKind::Screen,
+        };
+        let own_screen = StreamKey {
+            user_id: 0,
+            kind: VideoKind::Screen,
+        };
+        // A lone tile has no stage, and a click on it leaves nothing behind.
+        panel.set_tiles(&[(cam(1), "one".into())]);
+        p.toggle_focus(cam(1));
+        assert_eq!(p.focus.get(), Focus::Auto);
+        assert!(!p.tiles.borrow()[&cam(1)].focus.is_visible());
+
+        panel.set_tiles(&[(cam(1), "one".into()), (cam(2), "two".into())]);
+        assert_eq!(p.grid.focused(), None);
+        assert!(p.tiles.borrow()[&cam(1)].focus.is_visible());
+        panel.set_tiles(&[(cam(1), "one".into()), (own_screen, "mine".into())]);
+        assert_eq!(
+            p.grid.focused(),
+            None,
+            "one's own share isn't worth the stage"
+        );
+
+        let all = [
+            (cam(1), "one".into()),
+            (cam(2), "two".into()),
+            (screen, "three".into()),
+        ];
+        panel.set_tiles(&all);
+        assert_eq!(p.grid.focused(), Some(screen));
+        p.toggle_focus(cam(1));
+        assert_eq!(p.grid.focused(), Some(cam(1)));
+        p.toggle_focus(cam(1));
+        assert_eq!(p.grid.focused(), None, "and back to all alike");
+        panel.set_tiles(&all);
+        assert_eq!(p.grid.focused(), None, "a refresh keeps the choice");
+
+        p.toggle_focus(cam(2));
+        panel.set_tiles(&[(cam(1), "one".into()), (screen, "three".into())]);
+        assert_eq!(
+            p.grid.focused(),
+            Some(screen),
+            "cam 2 went; the default is back"
+        );
+        panel.set_tiles(&all);
+        assert_eq!(
+            p.grid.focused(),
+            Some(cam(2)),
+            "cam 2 back, the pick with it"
+        );
+
+        p.new_room();
+        panel.set_tiles(&all);
+        assert_eq!(
+            p.grid.focused(),
+            Some(screen),
+            "a new room starts from the default"
+        );
+    }
+
+    /// Stopping watching takes the tile away and leaves a button to watch
+    /// again, across refreshes, until the publication itself goes. Driven
+    /// by `crate::gtk_tests`.
+    pub(crate) fn check_stop_watching_and_watch_again() {
+        let panel = Standalone::new();
+        let p = &panel.inner;
+        let buttons = || {
+            let mut n = 0;
+            let mut child = p.unwatched_list.first_child();
+            while let Some(c) = child {
+                n += 1;
+                child = c.next_sibling();
+            }
+            n
+        };
+        let both = [(cam(1), "one".into()), (cam(2), "two".into())];
+        panel.set_tiles(&both);
+        assert!(!p.unwatched_bar.is_visible());
+
+        p.toggle_focus(cam(2));
+        p.stop_watching(cam(2));
+        assert!(!panel.has_tile(cam(2)));
+        assert_eq!(p.grid.keys(), [cam(1)]);
+        assert_eq!(p.grid.focused(), None, "focus went with the tile");
+        assert!(p.unwatched_bar.is_visible());
+        assert_eq!(buttons(), 1);
+
+        panel.set_tiles(&both);
+        assert!(!panel.has_tile(cam(2)), "a refresh doesn't bring it back");
+
+        p.stop_watching(cam(1));
+        assert_eq!(
+            p.stack.visible_child_name().as_deref(),
+            Some("empty"),
+            "nothing left to show"
+        );
+        assert_eq!(
+            p.status.description().as_deref(),
+            Some(tr("You aren't watching anyone. Pick someone below to watch.").as_str())
+        );
+        assert_eq!(buttons(), 2);
+
+        p.watch(cam(1));
+        assert!(panel.has_tile(cam(1)));
+        assert_eq!(buttons(), 1);
+
+        // Its publication ends and comes back — or the room is rejoined,
+        // which empties the list for a moment: still not watched.
+        panel.set_tiles(&[(cam(1), "one".into())]);
+        assert!(!p.unwatched_bar.is_visible(), "nothing to watch again");
+        panel.set_tiles(&[]);
+        panel.set_tiles(&both);
+        assert!(!panel.has_tile(cam(2)));
+        assert_eq!(buttons(), 1);
+
+        // Another room: everything is watched.
+        p.new_room();
+        panel.set_tiles(&both);
+        assert!(panel.has_tile(cam(2)));
+        assert!(!p.unwatched_bar.is_visible());
     }
 }

@@ -45,4 +45,8 @@ fn display_backed() {
     crate::video_panel::tests::check_panel_shows_tiles_and_frames();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_reach_follows_the_scroll();
+    #[cfg(feature = "voice")]
+    crate::video_panel::tests::check_focus_follows_the_user();
+    #[cfg(feature = "voice")]
+    crate::video_panel::tests::check_stop_watching_and_watch_again();
 }
