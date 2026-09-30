@@ -1002,7 +1002,6 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame,
      * machine's mid_to_user / participants caches. */
     {
         session *sess = sess_from_htlc (htlc);
-        (void)htlc;
         if (sess && sess->voice_runtime) {
             gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
                                              blob_len);
@@ -1015,8 +1014,9 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame,
          * indicator state from raw wire data, no extra round-trip
          * required. */
         if (sess && sess->voice_model) {
-            hx_voice_model_ingest_participants (sess->voice_model, blob,
-                                                blob_len);
+            hx_voice_model_ingest_participants (
+                sess->voice_model, blob, blob_len,
+                hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
         }
     }
 }
@@ -1176,7 +1176,6 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
      * mid_to_user cache the pad-added path needs. */
     {
         session *sess = sess_from_htlc (htlc);
-        (void)htlc;
         if (sess && sess->voice_runtime) {
             gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
                                              blob_len);
@@ -1195,8 +1194,9 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
          * indicator column starts painting the moment our own
          * JOIN lands rather than waiting for the first 605. */
         if (sess && sess->voice_model) {
-            hx_voice_model_ingest_participants (sess->voice_model, blob,
-                                                blob_len);
+            hx_voice_model_ingest_participants (
+                sess->voice_model, blob, blob_len,
+                hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
         }
     }
 }

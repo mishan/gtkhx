@@ -211,7 +211,11 @@ is the spec's reason 610 takes a whole set.
 
 **The user list shows who is publishing** regardless of the panel, from
 the 611 (camera or screen glyph beside the voice indicator, dim when
-paused).
+paused). A connection that did not negotiate video — an installation
+without the VP8 decoder — gets no 611, and reads the same glyphs from
+bits 1 (camera) and 2 (screen) of each voice participant's flags, in
+the join reply and every 605. Those carry no pause, so nothing is drawn
+dim there.
 
 ## Publishing
 

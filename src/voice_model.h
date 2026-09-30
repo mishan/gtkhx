@@ -100,13 +100,11 @@ typedef enum {
  * its ingest entry points are called. */
 extern HxVoiceModel *hx_voice_model_new (void);
 
-/* Update presence + mute state from a freshly-arrived
- * VOICE_PARTICIPANTS blob (the 6-byte-per-entry packed binary as
- * defined in hxproto::voice). `blob` may be NULL with
- * `len == 0` for an empty room. uids absent from the new blob
- * transition to NONE; uids present transition to IN_VOICE/MUTED
- * depending on bit 0 of their flags field (per fogWraith
- * Capabilities-Voice.md).
+/* Update presence + mute state from a freshly-arrived VOICE_PARTICIPANTS
+ * blob (6-byte packed entries, hxproto::voice). `blob` may be NULL with
+ * `len == 0` for an empty room. uids absent from it go to NONE; uids
+ * present to IN_VOICE/MUTED by bit 0 of their flags. Without `video_cap`
+ * no 611 ever comes, so bits 1 and 2 (camera, screen) set the video flags.
  *
  * The model invokes the "indicator-changed" signal once per uid
  * whose indicator state actually changed, in unspecified order.
@@ -117,8 +115,8 @@ extern HxVoiceModel *hx_voice_model_new (void);
  * cleared atomically with the IN_VOICE → NONE transition.
  */
 extern void hx_voice_model_ingest_participants (HxVoiceModel *self,
-                                                const uint8_t *blob,
-                                                size_t len);
+                                                const uint8_t *blob, size_t len,
+                                                gboolean video_cap);
 
 /* Video flags per uid, from Video Status (611). A publication sets its
  * kind's bit; a paused one sets its paused bit as well. */
