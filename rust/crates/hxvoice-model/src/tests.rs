@@ -266,3 +266,73 @@ fn video_flags_follow_the_publication_list() {
     assert_eq!(m.get_video(4), 0);
     assert_eq!(seen.borrow().as_slice(), &[(4, 0)]);
 }
+
+#[test]
+fn a_voice_only_connection_reads_publications_from_the_participant_bits() {
+    let m = HxVoiceModel::new();
+    let seen: Rc<RefCell<Vec<(u32, u32)>>> = Rc::default();
+    {
+        let seen = seen.clone();
+        m.connect_local("video-changed", false, move |args| {
+            let uid: u32 = args[1].get().unwrap();
+            let flags: u32 = args[2].get().unwrap();
+            seen.borrow_mut().push((uid, flags));
+            None
+        });
+    }
+    // uid 4: muted with a camera; uid 9: a camera and a screen. Bit 0 is
+    // still the mute and only the mute.
+    let b = blob(&[(4, 0x0003), (9, 0x0006)]);
+    m.ingest_participants(&b);
+    m.ingest_participant_video(&b);
+    assert_eq!(m.get_indicator(4), INDICATOR_MUTED);
+    assert_eq!(m.get_indicator(9), INDICATOR_IN_VOICE);
+    assert_eq!(m.get_video(4), VIDEO_CAMERA);
+    assert_eq!(m.get_video(9), VIDEO_CAMERA | VIDEO_SCREEN);
+    assert_eq!(seen.borrow().len(), 2);
+
+    // The share ends: the next status clears the bit, with a signal.
+    seen.borrow_mut().clear();
+    let b = blob(&[(4, 0x0003), (9, 0x0002)]);
+    m.ingest_participants(&b);
+    m.ingest_participant_video(&b);
+    assert_eq!(m.get_video(9), VIDEO_CAMERA);
+    assert_eq!(seen.borrow().as_slice(), &[(9, VIDEO_CAMERA)]);
+
+    // Reserved bits are ignored rather than read as anything.
+    let b = blob(&[(4, 0xfff8)]);
+    m.ingest_participants(&b);
+    m.ingest_participant_video(&b);
+    assert_eq!(m.get_indicator(4), INDICATOR_IN_VOICE);
+    assert_eq!(m.get_video(4), 0);
+    assert_eq!(m.get_video(9), 0);
+}
+
+#[test]
+fn a_video_capable_connection_ignores_the_participant_bits() {
+    // What the C side does for a connection that negotiated video: the
+    // participants feed presence alone, and Video Status owns the flags,
+    // so a paused camera is not flattened back to a live one.
+    let m = HxVoiceModel::new();
+    m.ingest_video_publishers(&pubs(&[(4, 1, true)]));
+    let b = blob(&[(4, 0x0002)]);
+    unsafe {
+        hx_voice_model_ingest_participants(
+            m.as_ptr() as *mut c_void,
+            b.as_ptr(),
+            b.len(),
+            glib::ffi::GTRUE,
+        );
+    }
+    assert_eq!(m.get_video(4), VIDEO_CAMERA | VIDEO_CAMERA_PAUSED);
+
+    unsafe {
+        hx_voice_model_ingest_participants(
+            m.as_ptr() as *mut c_void,
+            b.as_ptr(),
+            b.len(),
+            glib::ffi::GFALSE,
+        );
+    }
+    assert_eq!(m.get_video(4), VIDEO_CAMERA);
+}

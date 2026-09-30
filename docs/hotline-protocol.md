@@ -1214,7 +1214,9 @@ A WebRTC selective forwarding unit on the server, with signaling in transactions
 control connection: 600 join, 601 leave, 602 SDP offer (server to client), 603 SDP
 answer, 604 ICE candidate (both ways), 605 room status, 606 mute. Fields 0x01F5 SDP,
 0x01F6 ICE candidate (JSON; empty = end of candidates), 0x01F7 codec, 0x01F8 muted,
-0x01F9 participants (6-byte entries: user ID, flags, codec ID), and 0x01FB transport
+0x01F9 participants (6-byte entries: user ID, flags, codec ID; flags bit 0 is mute, and
+the video extension's bits 1 and 2 say the user has a camera or a screen publication),
+and 0x01FB transport
 (plain RTP for clients without DTLS). The server is always the offerer and ICE-lite;
 audio is PCMU. Implemented by Janus and hxd-ng. GtkHx's implementation and the server
 bugs it works around are in [voice.md](voice.md).

@@ -62,6 +62,31 @@ pub const VIDEO_SCREEN: u32 = 1 << 1;
 pub const VIDEO_CAMERA_PAUSED: u32 = 1 << 2;
 pub const VIDEO_SCREEN_PAUSED: u32 = 1 << 3;
 
+/// The publication bits of a voice participant entry's flags word (bit 0
+/// is the mute). Set by the server for every recipient, so a client that
+/// could not negotiate video still learns who is publishing; they say
+/// nothing about pause, which only Video Status (611) carries.
+const WIRE_CAMERA: u16 = 0x0002;
+const WIRE_SCREEN: u16 = 0x0004;
+
+/// Project a participant list's publication bits onto per-uid flags.
+fn participant_video_flags(blob: &[u8]) -> HashMap<u16, u32> {
+    let mut out: HashMap<u16, u32> = HashMap::new();
+    for p in hxproto::voice::parse_voice_participants(blob).take(MAX_PARTICIPANTS) {
+        let mut f = 0;
+        if p.flags & WIRE_CAMERA != 0 {
+            f |= VIDEO_CAMERA;
+        }
+        if p.flags & WIRE_SCREEN != 0 {
+            f |= VIDEO_SCREEN;
+        }
+        if f != 0 {
+            out.insert(p.user_id, f);
+        }
+    }
+    out
+}
+
 /// Project a publication list onto per-uid flags.
 fn video_flags(blob: &[u8]) -> HashMap<u16, u32> {
     let mut out: HashMap<u16, u32> = HashMap::new();
@@ -310,7 +335,18 @@ impl HxVoiceModel {
     /// emitting `"video-changed"` for each uid whose flags moved. The list
     /// is complete, never a delta: a uid it omits publishes nothing.
     pub fn ingest_video_publishers(&self, blob: &[u8]) {
-        let fresh = video_flags(blob);
+        self.replace_video(video_flags(blob));
+    }
+
+    /// Replace every uid's video flags from the publication bits of a
+    /// `DATA_VOICE_PARTICIPANTS` blob — for a connection that did not
+    /// negotiate video, which gets no Video Status to read. A connection
+    /// that did reads Video Status instead, since it also carries pause.
+    pub fn ingest_participant_video(&self, blob: &[u8]) {
+        self.replace_video(participant_video_flags(blob));
+    }
+
+    fn replace_video(&self, fresh: HashMap<u16, u32>) {
         let changed: Vec<(u16, u32)> = {
             let old = self.imp().video.borrow();
             let mut changed: Vec<(u16, u32)> = fresh
@@ -400,6 +436,10 @@ pub extern "C" fn hx_voice_model_new() -> *mut c_void {
     raw
 }
 
+/// `video_cap` is whether the connection negotiated video. Without it no
+/// Video Status ever arrives, so the blob's publication bits are what the
+/// video flags come from.
+///
 /// # Safety
 /// `self_` is a valid `HxVoiceModel *`; `blob` is NULL or valid for `len`.
 #[no_mangle]
@@ -407,6 +447,7 @@ pub unsafe extern "C" fn hx_voice_model_ingest_participants(
     self_: *mut c_void,
     blob: *const u8,
     len: usize,
+    video_cap: glib::ffi::gboolean,
 ) {
     if self_.is_null() {
         return;
@@ -420,7 +461,11 @@ pub unsafe extern "C" fn hx_voice_model_ingest_participants(
     } else {
         std::slice::from_raw_parts(blob, len)
     };
-    borrow(self_).ingest_participants(slice);
+    let model = borrow(self_);
+    model.ingest_participants(slice);
+    if video_cap == glib::ffi::GFALSE {
+        model.ingest_participant_video(slice);
+    }
 }
 
 /// # Safety
