@@ -19,10 +19,19 @@
   - A panel's toolbar button and menu item always bring it back after it was undocked
 - Voice and Video
   - Changing the microphone, speaker or camera in Settings now switches a call in progress
+  - Video tiles fill the panel, each at its stream's shape, instead of fixed-height strips
+  - Click a tile to bring it into focus at the top of the panel; click it again to show everyone alike
+  - Each tile has controls to focus, mute, or stop watching someone, and you can watch them again from the bar below
+  - The users list shows who has a camera or screen share on, even when GtkHx can't play video
 - Chat
   - Chat history shows line breaks and accented characters correctly
   - Very long scrollbacks stay fast as new messages arrive and while scrolling
   - Nickname completion is faster on busy servers
+  - A link whose text isn't its address shows the real address before opening it, and every link shows its address on hover
+  - Email addresses are links again
+  - Dismissing a selection with a click no longer also opens the link under it
+  - Chat settings now reach every connection, not just the one in focus
+  - Settings → Chat can turn off opening links with a single click
 - Hotline Protocol
   - A rejected login now shows the server's own message
   - Fixed HOPE-encrypted connections misreading a message split across frames
@@ -32,6 +41,8 @@
 - Code Modernization
   - The file browser is now Rust
   - GtkHx now reads tracker listings with code shared with the hxd-ng server
+  - The chat view is now Rotulus, a standalone GTK 4 widget published on crates.io
+  - Moved to gtk-rs 0.22; building now needs Rust 1.92
 - Development
   - Performance benchmarks, from single functions up to the running app
   - End-to-end tests of GtkHx's own file requests against real servers
