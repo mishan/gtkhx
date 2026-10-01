@@ -333,8 +333,9 @@ cargo_features = 'hxbridge/runtime,hxnet/socks'
 #       crate's default glycin-v3 — enabling both backends at once is a
 #       hard compile_error (src/compat.rs) — so we pass
 #       --no-default-features. Because that flag is workspace-wide, it
-#       also drops the *other* members' defaults; only hxcrypto::compress has
-#       load-bearing ones (lz4 + zstd), so we re-supply exactly those.
+#       also drops the *other* members' defaults. The load-bearing ones are
+#       hxcrypto's lz4 + zstd codecs and the `c-abi` exports of hxcrypto,
+#       hxtext and hxrequest, so we re-supply exactly those.
 #       Any future member that grows a default feature must be added
 #       here too.
 #
@@ -393,11 +394,12 @@ endif
 if glycin_gen == '1'
   cargo_no_default = '--no-default-features'
   # --no-default-features is workspace-wide, so it also drops hxcrypto's
-  # default lz4 + zstd codecs — re-supply them (see the comment above). The
+  # default lz4 + zstd codecs and the c-abi exports — re-supply them (see
+  # the comment above). The
   # gtkhx-ffi / gtkhx-ui edges to hx-image-decode are `default-features =
   # false`, so glycin-v3 does NOT leak back in; glycin-v2 is selected on the
   # crate directly here.
-  cargo_features = cargo_features + ',hxcrypto/lz4,hxcrypto/zstd,hx-image-decode/glycin-v2'
+  cargo_features = cargo_features + ',hxcrypto/lz4,hxcrypto/zstd,hxcrypto/c-abi,hxtext/c-abi,hxrequest/c-abi,hx-image-decode/glycin-v2'
 else
   cargo_no_default = ''
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'

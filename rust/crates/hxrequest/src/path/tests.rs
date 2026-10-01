@@ -91,6 +91,7 @@ fn split_keeps_the_root_and_drops_other_trailing_separators() {
     assert_eq!(split(b"/a/"), (&b"/a"[..], &b""[..]));
 }
 
+#[cfg(feature = "c-abi")]
 #[test]
 fn the_c_abi_matches_and_hands_over_a_glib_buffer() {
     let mut len = 0u16;

@@ -214,7 +214,7 @@ fn hkdf_sha256(salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]) -> bool {
 ///
 /// # Safety
 /// All pointers must be valid for their respective lengths.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_hkdf_sha256(
     salt: *const u8,
     salt_len: usize,
@@ -262,7 +262,7 @@ pub unsafe extern "C" fn gtkhx_aead_hkdf_sha256(
 /// # Safety
 /// All pointers must be valid for their respective lengths.
 /// `encode_out` and `decode_out` must point to valid `AeadState` structs.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_derive_session_keys(
     encode_out: *mut AeadState,
     decode_out: *mut AeadState,
@@ -298,7 +298,7 @@ pub unsafe extern "C" fn gtkhx_aead_derive_session_keys(
 ///
 /// # Safety
 /// All pointers must be valid.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_derive_transfer_keys(
     xfer_encode_out: *mut AeadState,
     xfer_decode_out: *mut AeadState,
@@ -351,7 +351,7 @@ pub unsafe extern "C" fn gtkhx_aead_derive_transfer_keys(
 ///
 /// # Safety
 /// `plaintext` must be valid for `pt_len` bytes. `out` must be valid for `out_cap` bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_seal(
     state: *mut AeadState,
     plaintext: *const u8,
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn gtkhx_aead_seal(
 ///
 /// # Safety
 /// `framed` must be valid for `framed_len` bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_peek_frame_size(framed: *const u8, framed_len: usize) -> usize {
     if framed.is_null() || framed_len < AEAD_LENGTH_PREFIX {
         return 0;
@@ -453,7 +453,7 @@ pub unsafe extern "C" fn gtkhx_aead_peek_frame_size(framed: *const u8, framed_le
 ///
 /// # Safety
 /// `framed` must be valid for `framed_len` bytes. `out` must be valid for `out_cap` bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_open(
     state: *mut AeadState,
     framed: *const u8,
@@ -515,7 +515,7 @@ pub unsafe extern "C" fn gtkhx_aead_open(
 ///
 /// # Safety
 /// `plaintext` must be valid for `pt_len` bytes.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_seal_alloc(
     state: *mut AeadState,
     plaintext: *const u8,
@@ -540,7 +540,7 @@ pub unsafe extern "C" fn gtkhx_aead_seal_alloc(
 ///
 /// # Safety
 /// `ptr` must have been returned by `gtkhx_aead_seal_alloc` with the given `len`.
-#[no_mangle]
+#[cfg_attr(feature = "c-abi", no_mangle)]
 pub unsafe extern "C" fn gtkhx_aead_seal_alloc_free(ptr: *mut u8, len: usize) {
     if !ptr.is_null() && len > 0 {
         drop(Vec::from_raw_parts(ptr, len, len));

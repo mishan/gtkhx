@@ -20,12 +20,19 @@ bench = false
 
 [dependencies]
 # glib for the g_malloc'd return buffers the C ABI contract owes its callers
-# (they g_free the result).
-glib = { workspace = true }
+# (they g_free the result). Only the `c-abi` entry points need it.
+glib = { workspace = true, optional = true }
 # Native Mac Roman <-> UTF-8 (text::to_utf8 / from_utf8) + emoji shortcode
 # rewrite (emoji::emoji_to_shortcodes) — no C-ABI gtkhx_proto_* shim in the
 # path, no glib g_convert.
 hxproto = { workspace = true }
+
+[features]
+default = ["c-abi"]
+# The `gtkhx_text_*` C entry points, and the glib allocator their callers
+# free with. Off, the crate is plain Rust (`for_wire`) and builds for
+# targets with no glib, such as wasm32.
+c-abi = ["dep:glib"]
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -33,3 +40,4 @@ criterion = { workspace = true }
 [[bench]]
 name = "text"
 harness = false
+required-features = ["c-abi"]

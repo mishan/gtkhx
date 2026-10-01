@@ -3629,19 +3629,6 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rand_core/rand_core-0.6.4.crate",
-    "sha256": "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c",
-    "dest": "cargo/vendor/rand_core-0.6.4"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c\", \"files\": {}}",
-    "dest": "cargo/vendor/rand_core-0.6.4",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/rayon/rayon-1.12.0.crate",
     "sha256": "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d",
     "dest": "cargo/vendor/rayon-1.12.0"

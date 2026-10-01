@@ -10,7 +10,8 @@
 #                Fedora gtkhx-ci-base image the build uses, so the rustc /
 #                rustfmt / clippy versions match the canonical build
 #                environment exactly (avoids "formatted with a different
-#                rustfmt" drift).
+#                rustfmt" drift). Also builds the codec crates for
+#                wasm32-unknown-unknown.
 #   c-growth   — pull requests only: fails if the branch adds net lines of C
 #                to src/ (tools/check-c-growth.sh). A `C-Growth:` commit
 #                trailer records a deliberate exception.
@@ -145,6 +146,17 @@ jobs:
               # Default (voice-off) configuration.
               cargo clippy --workspace --all-targets \
                 -- -D warnings
+
+              # The codec crates also have to build for a browser: wasm32,
+              # with the C ABI and anything needing a C toolchain (zstd)
+              # left out. Fedora packages the wasm32 std on its own.
+              rpm -q rust-std-static-wasm32-unknown-unknown >/dev/null \
+                || dnf install -y rust-std-static-wasm32-unknown-unknown
+              cargo build --target wasm32-unknown-unknown --no-default-features \
+                -p hxcrypto -p hxtext -p hxrequest -p hxvoice \
+                --ignore-rust-version
+              cargo build --target wasm32-unknown-unknown --no-default-features \
+                -p hxcrypto --features lz4 --ignore-rust-version
 
               # Hand the cache dirs back to the runner user for the post-job save.
               chown -R "$(stat -c %u:%g /src)" \
