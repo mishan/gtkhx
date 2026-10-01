@@ -26,6 +26,10 @@ pub enum Command {
     /// blocks the main thread because it lives on tokio.
     WriteFrame(Vec<u8>),
 
+    /// Answer the agreement, as the user is named now (UTF-8). A no-op
+    /// with no agreement waiting.
+    Agree { nick: Vec<u8>, icon: u16 },
+
     /// Explicit shutdown. The actor flushes pending writes,
     /// drops its sender, and exits. Equivalent to dropping every
     /// [`ConnectionHandle`](crate::ConnectionHandle) clone, but

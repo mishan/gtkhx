@@ -254,10 +254,6 @@ hx_conn_release (struct htlc_conn *htlc)
         g_source_remove (id);
         hx_conn_set_ping_timer (htlc, 0);
     }
-    if ((id = hx_conn_post_login_timer (htlc)) != 0) {
-        g_source_remove (id);
-        hx_conn_set_post_login_timer (htlc, 0);
-    }
     if ((id = hx_conn_gif_icons_probe_timer (htlc)) != 0) {
         g_source_remove (id);
         hx_conn_set_gif_icons_probe_timer (htlc, 0);

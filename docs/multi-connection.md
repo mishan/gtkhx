@@ -268,7 +268,7 @@ bookmarks, about, and the settings pages.
 
 ### Single-slot connection state and timers
 
-Mostly fixed. The keepalive timer id, the post-login fallback timer and the
+Mostly fixed. The keepalive timer id and the
 orchestrated login-reply transaction now live on the connection. The keepalive
 one was a real bug rather than latent: `ping_start` early-returns when the id
 is already set, and the id was process-wide, so once *any* connection had a

@@ -79,6 +79,7 @@ void hx_htlc_close (struct htlc_conn *htlc, int expected);
 void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
 void debug_log (const char *cat, const char *fmt, ...);
 void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
+void hx_post_login_fetches (struct htlc_conn *htlc);
 
 /* Recording, not fatal: the stale-actor guard tests below are precisely
  * about whether a frame reaches dispatch, so the stub has to report that
@@ -106,6 +107,14 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
  * never feed a LOGIN_SENDING state, so it should never fire. */
 void
 hx_orchestrator_register_login_task (struct htlc_conn *htlc)
+{
+    (void)htlc;
+    g_assert_not_reached ();
+}
+
+/* Stub: fired on LOGIN_READY, which these tests never feed either. */
+void
+hx_post_login_fetches (struct htlc_conn *htlc)
 {
     (void)htlc;
     g_assert_not_reached ();
@@ -177,6 +186,21 @@ int hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
                                  const guint8 *data, guint32 len);
 void hxnet_connection_destroy (struct hxnet_connection_opaque *handle);
 void hxnet_frame_free (struct hxnet_frame_t *f);
+int hxnet_connection_agree (struct hxnet_connection_opaque *handle,
+                            const guint8 *nick, gsize nick_len, guint16 icon);
+
+/* Nothing here answers an agreement. */
+int
+hxnet_connection_agree (struct hxnet_connection_opaque *handle,
+                        const guint8 *nick, gsize nick_len, guint16 icon)
+{
+    (void)handle;
+    (void)nick;
+    (void)nick_len;
+    (void)icon;
+    g_assert_not_reached ();
+    return 0;
+}
 
 /* Recording rather than fatal: the per-connection routing tests below are
  * about *which* handle the bridge reaches for, so the stub has to report it

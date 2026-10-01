@@ -23,26 +23,57 @@ into the bridge, everything below happens in Rust:
   TCP, hand the stream to `tokio_rustls` immediately, then speak
   ordinary Hotline over the encrypted stream. Trust is WebPKI-first with
   a TOFU fallback — see "TLS trust" below.
-- **The magic exchange** (`magic.rs`).
-- **LOGIN** (`login.rs` builds and sends the frame; `login_reply.rs`
-  receives and parses it).
+- **The session** (`session.rs`): from the magic on, hx-libs'
+  `hxsession` drives the connection — the magic, the login and its reply,
+  the agreement and the two-second wait for one, a 1.2 server's user
+  change — and the actor in `session.rs` is its I/O. It runs the session
+  in raw mode, because GtkHx still has receive handlers of its own: every
+  transaction reaches C whole, and what C sends goes out as C built it.
+  See "The session", below.
 - **The optional HOPE encryption/compression negotiation** (`hope.rs`,
-  `hope_keys.rs`, `hope_blowfish.rs`): step 1, the reply, step 2, key
+  `hope_keys.rs`, `hope_blowfish.rs`, with `magic.rs` and
+  `login_reply.rs` for its own two steps): step 1, the reply, step 2, key
   derivation, then the transport is wrapped in the negotiated cipher
-  adapter (Blowfish-OFB-64 or ChaCha20-Poly1305). HOPE-over-TLS is
-  rejected up front as redundant double-encryption.
-- **Framing, crypto and compression** on the running connection
-  (`connection.rs`, `frame.rs`, `cipher.rs`, `compress.rs`,
-  `transform.rs`). The actor reads and writes plaintext Hotline frames;
-  the cipher/compression layers are composed onto the inner transport at
-  spawn time and are transparent above that point.
+  adapter (Blowfish-OFB-64 or ChaCha20-Poly1305) and the session takes
+  over at the step-2 reply. HOPE-over-TLS is rejected up front as
+  redundant double-encryption.
+- **Crypto and compression** on the running connection (`cipher.rs`,
+  `compress.rs`, `transform.rs`), composed onto the inner transport and
+  transparent above it.
 
 `lifecycle.rs` stitches these into three entry lifecycles —
 `run_plaintext_lifecycle`, `run_plaintext_tls_lifecycle`, and
 `run_hope_lifecycle` — each of which ends by handing the stream to the
-actor. State transitions ship as `Event::State(...)` along the way:
+session. State transitions ship as `Event::State(...)` along the way:
 Resolving → Connecting → Connected → (TlsHandshaking) → MagicExchange →
-LoginSending → LoginReplyWait → HandshakeDone.
+LoginSending → LoginReplyWait → HandshakeDone → LoginReady.
+
+### The session
+
+The session's own transactions — the login, HOPE's two steps, the
+agreement, a 1.2 server's user change — are numbered below
+`hxnet_first_trans` (`hxsession::RAW_TRANS_BASE`), and their replies are
+the session's. C numbers its own from there up, so the two never meet.
+
+`LoginReady` is the session saying the login is settled: the agreement
+answered, or none to answer, or none come after two seconds. It is what
+fires `hx_post_login_fetches` — before it, a 1.5+ server takes a user
+list or a news fetch as coming from a user who has not joined. An
+agreement with text reaches C as its frame and is shown, and nothing
+follows the login until it is answered: the Agree button sends
+`Command::Agree` with the user's name and icon as they are then, and
+Disagree, or closing the window, disconnects. One with nothing to show
+the session answers itself; so does one that says there is none from a
+server that gave no version, which is a 1.5 server keeping that to itself.
+
+Every reply reaches C, the session's own included: a refused agree or
+login is dispatched, traced and reported as any refused request is. C
+traces what it dispatches; the actor traces only what the session sends
+itself.
+
+Until the login is answered the actor leaves C's commands in the channel,
+so nothing goes out ahead of the login. The keep-alive is C's
+`ping_start`.
 
 ### What the C side still does
 
@@ -67,9 +98,9 @@ onto `GtkhxConnectionState` signals, does the SOCKS proxy lookup, hosts
 the TLS-verify trampoline, and turns each `Event::Frame` back into a
 `hx_dispatch_frame` call for the C receive layer.
 
-Everything downstream of the LOGIN reply — the post-login field
-extraction and side effects — is still `rcv_task_login` in `src/rcv.c`.
-See `network-endgame.md`.
+Reading the LOGIN reply's fields is still `rcv_task_login` in
+`src/rcv.c`; what follows the reply is the session's. See
+`network-endgame.md`.
 
 ### TLS trust
 
@@ -88,8 +119,7 @@ before any credentials go out.
 
 ## The LOGIN reply — replay vs. payload
 
-The orchestrator consumes the LOGIN reply itself
-(`login_reply::recv_login_reply`). The C side needs what's in it: the
+The session consumes the LOGIN reply itself. The C side needs what's in it: the
 server's `HTLS_DATA_VERSION`, the banner id, the server name, the
 capability echo, and the task-error bit. If the orchestrator swallowed
 the reply silently, all of that would be lost. Three options were
@@ -121,10 +151,10 @@ enough to read the task-error bit (success vs. failure); the rich fields
 are parsed once, in C. The real cost is the trans-pinning and
 install-ordering glue, both of which fail *silently*.
 
-This is what shipped. `LoginReply::raw_frame` retains the verbatim wire
-bytes, and each lifecycle re-emits them via `Frame::from_raw` ahead of
-`HandshakeDone` — the LOGIN reply on the plaintext and TLS paths, the
-step-2 reply on the HOPE path.
+This is what shipped. In raw mode the session hands the reply over whole
+ahead of saying it is logged in, and the actor turns that into an
+`Event::Frame` ahead of `HandshakeDone` — the LOGIN reply on the
+plaintext and TLS paths, the step-2 reply on the HOPE path.
 
 ### Option C — keep magic + LOGIN on the C side
 
@@ -168,12 +198,11 @@ carries. The orchestrator owns the send, so both sides must agree on the
 value up front — LOGIN is always the first transaction, so it is pinned
 to the constant `HX_LOGIN_TRANS`. The plaintext and TLS paths replay the
 LOGIN reply (trans `HX_LOGIN_TRANS`); the HOPE path replays the *step-2*
-reply, which carries `HX_LOGIN_TRANS + 1`. `htlc->trans` is then bumped
-past the replayed value, because the post-login follow-up sends fire from
-*inside* `rcv_task_login` during the replayed-frame dispatch and stamp
-themselves with the current counter — left unbumped they collide with the
-login task. The legacy path got that bump for free from its own LOGIN
-send; the orchestrator's send never touches the C counter.
+reply, which carries `HX_LOGIN_TRANS + 1`. `htlc->trans` then starts at
+`hxnet_first_trans`, past every trans the session uses, because the C
+counter never sees the session's sends — left lower, C's requests would
+collide with the login task or have their replies taken for the
+session's.
 
 **2. The `fd` sentinel is -1, not 0.** `hx_bridge_dispatch_frame`
 early-returns on `fd == 0` — that is the bridge's "connection closed,

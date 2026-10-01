@@ -229,6 +229,12 @@ extern int hx_bridge_send_frame (struct htlc_conn *htlc, const guint8 *data,
  */
 extern void hx_bridge_uninstall (struct htlc_conn *htlc);
 
+/* Answer the agreement `htlc`'s server showed; the session sends it. */
+extern void hx_bridge_agree (struct htlc_conn *htlc);
+
+/* The first trans our own requests take; the session's are below it. */
+extern guint32 hxnet_first_trans (void);
+
 G_END_DECLS
 
 #endif /* GTKHX_HXNET_BRIDGE_H */

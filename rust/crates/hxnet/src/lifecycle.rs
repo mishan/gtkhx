@@ -64,10 +64,10 @@ use crate::hope_blowfish::HopeMacAlg;
 use crate::hope_keys::{compute_blowfish_chain, derive_aead_keys, HopeCipherKind};
 use crate::transform::{compose, CipherLayer, CompressionKind};
 use crate::{
-    connect::resolve_and_connect, login::send_login, login::LoginRequest,
-    login_reply::recv_login_reply, magic::run_magic_exchange, Connection, ConnectionState, Event,
-    Frame, ShutdownReason,
+    connect::resolve_and_connect, login_reply::recv_login_reply, magic::run_magic_exchange,
+    ConnectionState, Event, ShutdownReason,
 };
+use hxsession::Session;
 
 /// Optional TLS certificate-verify (TOFU) callback: given a fingerprint
 /// string, returns whether to trust the peer.
@@ -251,8 +251,8 @@ pub async fn run_plaintext_tls_lifecycle(
 }
 
 /// The post-connect plaintext lifecycle, generic over the transport
-/// so it runs identically over a raw TCP socket or a TLS stream:
-/// magic → LOGIN → reply → Option-B replay → HandshakeDone → actor.
+/// so it runs identically over a raw TCP socket or a TLS stream: the
+/// session ([`crate::session`]) from the magic on.
 async fn run_plaintext_over<S>(
     stream: S,
     req: &PlaintextOpenRequest,
@@ -261,95 +261,22 @@ async fn run_plaintext_over<S>(
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let mut stream = read_buffered(stream);
-
-    // Phase C: magic exchange.
-    if let Err(e) = run_magic_exchange(&mut stream, &evt_tx).await {
-        let _ = evt_tx
-            .send(Event::Shutdown(ShutdownReason::StreamError(format!(
-                "magic: {e}"
-            ))))
-            .await;
-        return;
-    }
-
-    // Phase D: LOGIN send.
-    let login_req = LoginRequest {
-        login: &req.login,
-        password: &req.password,
-        name: &req.name,
-        icon: req.icon,
-        version: req.version,
-        caps: req.caps,
-        trans: req.trans,
-    };
-    if let Err(e) = send_login(&mut stream, &login_req, &evt_tx).await {
-        let _ = evt_tx
-            .send(Event::Shutdown(ShutdownReason::StreamError(format!(
-                "login send: {e}"
-            ))))
-            .await;
-        return;
-    }
-
-    // Phase E: LOGIN reply receive.
-    // tolerate_pre_task = true: plaintext servers (RetroMac, MacDomain)
-    // may send USER_SELFINFO / AGREEMENT before the TASK login reply;
-    // replay those and keep waiting for TASK, like the legacy rcv loop.
-    let reply = match recv_login_reply(&mut stream, &evt_tx, true).await {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = evt_tx
-                .send(Event::Shutdown(ShutdownReason::StreamError(format!(
-                    "login reply: {e}"
-                ))))
-                .await;
-            return;
-        }
-    };
-
-    if !reply.is_success() {
-        let err_text = reply
-            .error_text
-            .as_ref()
-            .map(|b| String::from_utf8_lossy(b).into_owned())
-            .unwrap_or_else(|| format!("server flag={}", reply.flag));
-        let _ = evt_tx
-            .send(Event::Shutdown(ShutdownReason::StreamError(format!(
-                "login rejected: {err_text}"
-            ))))
-            .await;
-        return;
-    }
-
-    // Phase G (Option B): replay the LOGIN reply to the consumer as a
-    // synthetic frame, BEFORE HandshakeDone — see the plaintext-path
-    // rationale in docs/rust/networking.md "Option B".
-    match Frame::from_raw(&reply.raw_frame) {
-        Some(frame) => {
-            if evt_tx.send(Event::Frame(frame)).await.is_err() {
-                return;
-            }
-        }
-        None => {
-            let _ = evt_tx
-                .send(Event::Shutdown(ShutdownReason::StreamError(
-                    "login reply raw_frame failed to decode for replay".to_string(),
-                )))
-                .await;
-            return;
-        }
-    }
-
     if evt_tx
-        .send(Event::State(ConnectionState::HandshakeDone))
+        .send(Event::State(ConnectionState::MagicExchange))
         .await
         .is_err()
     {
         return;
     }
-
-    Connection::run_actor(stream, cmd_rx, evt_tx).await;
+    let cfg = crate::session::config(
+        &req.login,
+        &req.password,
+        &req.name,
+        req.icon,
+        req.version,
+        req.caps,
+    );
+    crate::session::run(stream, Session::new(cfg, 0), false, cmd_rx, evt_tx).await;
 }
 
 /// Parameters for the HOPE-Secure-Login lifecycle. Adds the cipher
@@ -666,47 +593,22 @@ pub async fn run_hope_lifecycle(
     {
         return;
     }
-    let mut wrapped = match compose(stream, cipher_layer, CompressionKind::None) {
+    let wrapped = match compose(stream, cipher_layer, CompressionKind::None) {
         Ok(w) => w,
         Err(e) => bail!("cipher transport compose: {e}"),
     };
 
-    // ---- step-2 reply, read THROUGH the cipher (encrypted) ----
-    // HOPE step-2 reply is the next frame over the now-encrypted
-    // transport; keep it strict (tolerate_pre_task=false).
-    let step2_reply = match recv_login_reply(&mut wrapped, &evt_tx, false).await {
-        Ok(r) => r,
-        Err(e) => bail!("hope step2 reply: {e}"),
-    };
-    if !step2_reply.is_success() {
-        let txt = step2_reply
-            .error_text
-            .as_ref()
-            .map(|b| String::from_utf8_lossy(b).into_owned())
-            .unwrap_or_else(|| format!("server flag={}", step2_reply.flag));
-        bail!("hope login rejected: {txt}");
-    }
-
-    // Option B replay: hand the decrypted step-2 reply back to the C
-    // side as a synthetic frame before HandshakeDone.
-    match Frame::from_raw(&step2_reply.raw_frame) {
-        Some(frame) => {
-            if evt_tx.send(Event::Frame(frame)).await.is_err() {
-                return;
-            }
-        }
-        None => bail!("hope step2 reply raw_frame failed to decode for replay"),
-    }
-
-    if evt_tx
-        .send(Event::State(ConnectionState::HandshakeDone))
-        .await
-        .is_err()
-    {
-        return;
-    }
-
-    Connection::run_actor(wrapped, cmd_rx, evt_tx).await;
+    // The session takes over at the step-2 reply, the login's.
+    let cfg = crate::session::config(
+        &req.login,
+        &req.password,
+        &req.name,
+        req.icon,
+        req.version,
+        req.caps,
+    );
+    let session = Session::logging_in(cfg, req.trans.wrapping_add(2), 0);
+    crate::session::run(wrapped, session, true, cmd_rx, evt_tx).await;
 }
 
 #[cfg(test)]
@@ -714,6 +616,7 @@ mod tests {
     use super::*;
     use crate::magic::{HTLC_MAGIC, HTLS_MAGIC};
     use crate::Command;
+    use crate::Connection;
     use hxproto::build::{pack_message, pack_message_size, PackChunk};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

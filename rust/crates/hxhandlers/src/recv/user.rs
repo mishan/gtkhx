@@ -492,8 +492,8 @@ pub unsafe extern "C" fn hx_selfinfo_recv(htlc: *mut c_void) {
 /// sensitivity (kick/ban gate on the access bits) off the `self-updated` emit.
 ///
 /// This is NOT where post-login fetches fire: in the 1.5 flow SELFINFO arrives
-/// before the agreement, so USER_GETLIST / news are sent from
-/// `hx_send_agreement_agree`, after AGREEMENTAGREE is on the wire.
+/// before the agreement, so USER_GETLIST / news wait for the session's
+/// `LoginReady`, after AGREEMENTAGREE is on the wire.
 ///
 /// # Safety
 /// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.

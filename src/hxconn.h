@@ -269,13 +269,11 @@ extern guint16 hx_conn_serial (const struct htlc_conn *h);
  * early-returns when the timer id is already set, so a second connection
  * never got a keepalive at all.
  *
- * ping_timer and post_login_timer are GLib source ids, 0 when not armed.
+ * ping_timer is a GLib source id, 0 when not armed.
  * login_reply_trans is the transaction the orchestrator's replayed LOGIN
  * reply carries, which the login task has to be registered under. */
 extern guint hx_conn_ping_timer (const struct htlc_conn *h);
 extern void hx_conn_set_ping_timer (struct htlc_conn *h, guint v);
-extern guint hx_conn_post_login_timer (const struct htlc_conn *h);
-extern void hx_conn_set_post_login_timer (struct htlc_conn *h, guint v);
 extern guint32 hx_conn_login_reply_trans (const struct htlc_conn *h);
 extern void hx_conn_set_login_reply_trans (struct htlc_conn *h, guint32 v);
 

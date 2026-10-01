@@ -5,8 +5,9 @@
 //! `on_agreement_signal` adapter when the `GtkhxSession::agreement`
 //! signal fires. The window is stored back into `sess->agreementwin`
 //! (via the C bridge) so the disconnect-cleanup path in gtkutil.c can
-//! tear it down; Agree sends AGREEMENTAGREE and closes it, Disagree
-//! drops the connection (whose disconnect cleanup then closes it).
+//! tear it down; Agree sends AGREEMENTAGREE and closes it, and Disagree
+//! — or closing the window — drops the connection (whose disconnect
+//! cleanup then closes it).
 
 use crate::ffi as cffi;
 use crate::tr::tr;
@@ -91,9 +92,20 @@ pub unsafe extern "C" fn gtkhx_show_agreement(
     // closes this window via sess->agreementwin.
     disagreebtn.connect_clicked(move |_| unsafe { gtkhx_agreement_disagree(sess) });
 
+    // Closing the window disagrees: nothing follows the login until the
+    // agreement is answered. Dropped from the session first, so the
+    // disconnect's cleanup doesn't destroy it under GTK.
+    window.connect_close_request(move |_| {
+        unsafe {
+            gtkhx_session_set_agreementwin(sess, std::ptr::null_mut());
+            gtkhx_agreement_disagree(sess);
+        }
+        gtk::glib::Propagation::Proceed
+    });
+
     // Clear sess->agreementwin whenever the window goes away — via Agree,
     // via disconnect cleanup, or via the user closing it directly (window
-    // controls / Esc). Without this, a manual close would leave
+    // controls / Esc), which disagrees. Without this, a manual close would leave
     // sess->agreementwin dangling at a freed GtkWindow and the later
     // disconnect cleanup (gtkutil.c: destroy-then-NULL) would type-check and
     // destroy a stale pointer. Idempotent with the Agree/cleanup NULL-sets.

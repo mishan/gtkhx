@@ -4,7 +4,8 @@
 //! After the magic exchange completes (Phase C), the client
 //! sends an `HTLC_HDR_LOGIN` (opcode 0x6b) frame. The body is
 //! a chunked list with one chunk per credential / identity
-//! field. This module assembles + sends that frame.
+//! field. This module assembles that frame; the session sends
+//! production's, and this builder serves the test harness.
 //!
 //! # Wire shape (plaintext path)
 //!
@@ -45,13 +46,8 @@
 
 use std::io;
 
-use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc;
-
 use hxproto::build::{pack_message, pack_message_size, PackChunk};
 use hxproto::messages::tag;
-
-use crate::{ConnectionState, Event};
 
 /// `HTLC_HDR_LOGIN` opcode. Mirrors the C-side
 /// `#define HTLC_HDR_LOGIN ((guint32)0x0000006b)` in
@@ -217,37 +213,9 @@ pub fn build_login_frame(req: &LoginRequest<'_>) -> io::Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Send a LOGIN frame on the provided transport. Emits
-/// `Event::State(LoginSending)` before the write. Returns
-/// `Ok(())` once the bytes are flushed.
-pub async fn send_login<S>(
-    stream: &mut S,
-    req: &LoginRequest<'_>,
-    evt_tx: &mpsc::Sender<Event>,
-) -> io::Result<()>
-where
-    S: tokio::io::AsyncWrite + Unpin,
-{
-    let frame = build_login_frame(req)?;
-    if evt_tx
-        .send(Event::State(ConnectionState::LoginSending))
-        .await
-        .is_err()
-    {
-        return Err(io::Error::other(
-            "consumer dropped before LoginSending state delivered",
-        ));
-    }
-    crate::proto_trace::trace(crate::proto_trace::Dir::Out, &frame);
-    stream.write_all(&frame).await?;
-    stream.flush().await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{duplex, AsyncReadExt};
 
     /// Hand-craft the expected wire bytes for a known fixture
     /// and verify build_login_frame produces them byte-exact.
@@ -414,42 +382,5 @@ mod tests {
             assert_ne!(tag, TAG_CAPABILITIES, "caps=0 should omit the chunk");
             pos0 += 4 + len;
         }
-    }
-
-    /// send_login emits the LoginSending state event and
-    /// writes the right bytes.
-    #[tokio::test]
-    async fn send_login_emits_state_and_writes_bytes() {
-        let (mut client, mut server) = duplex(256);
-        let (evt_tx, mut evt_rx) = mpsc::channel(8);
-
-        let req = LoginRequest {
-            login: b"guest",
-            password: b"",
-            name: b"",
-            icon: 0,
-            version: 0,
-            caps: 0,
-            trans: 7,
-        };
-        let expected = build_login_frame(&req).expect("build");
-        let expected_len = expected.len();
-
-        let server_task = tokio::spawn(async move {
-            let mut buf = vec![0u8; expected_len];
-            server.read_exact(&mut buf).await.expect("server read");
-            buf
-        });
-
-        send_login(&mut client, &req, &evt_tx).await.expect("send");
-        let got_bytes = server_task.await.unwrap();
-
-        assert_eq!(got_bytes, expected);
-
-        let evt = evt_rx.recv().await.expect("state event");
-        assert!(
-            matches!(evt, Event::State(ConnectionState::LoginSending)),
-            "expected LoginSending state event, got {evt:?}"
-        );
     }
 }

@@ -119,6 +119,9 @@ pub enum ConnectionState {
     /// will emit `Event::Frame(...)` for each subsequent server
     /// frame. The terminal pre-frame state on every path.
     HandshakeDone = 10,
+    /// The login is settled: the agreement answered, or none to answer,
+    /// or no longer waited on. A 1.5+ server takes nothing else before.
+    LoginReady = 11,
 }
 
 /// One event from the actor.

@@ -149,6 +149,7 @@ typedef struct {
 #define HXNET_RECV_EMPTY 0
 #define HXNET_RECV_FRAME 1
 #define HXNET_RECV_SHUTDOWN 2
+#define HXNET_RECV_READY 3
 
 #define HXNET_SEND_OK 0
 
@@ -187,6 +188,9 @@ extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
 extern int hxnet_connection_send_frame (hxnet_connection *handle,
                                         const guint8 *data, guint len);
 extern void hxnet_connection_destroy (hxnet_connection *handle);
+extern guint32 hxnet_first_trans (void);
+extern int hxnet_connection_agree (hxnet_connection *handle, const guint8 *nick,
+                                   gsize nick_len, guint16 icon);
 extern void hxnet_frame_free (hxnet_frame_t *frame);
 /* HOPE AEAD material handle: the orchestrated login seeds htlc->hope_aead
  * from it; passed to hxnet_htxf_connect so the subchannel derives its
@@ -202,40 +206,104 @@ hxnet_connection_hope_aead_material (hxnet_connection *handle);
 #define ORCH_FD_BASE 0x40000000
 #define ORCH_MAX 8
 
-static hxnet_connection *orch_table[ORCH_MAX];
+/* One orchestrated connection: its handle, the frames read while its login
+ * settled (orch_settle), and whether it has shut down meanwhile. */
+typedef struct {
+    hxnet_connection *h;
+    GQueue *early;
+    gboolean shut;
+} orch_slot;
+
+static orch_slot orch_table[ORCH_MAX];
 
 static int
 orch_register (hxnet_connection *h)
 {
     for (int i = 0; i < ORCH_MAX; i++) {
-        if (!orch_table[i]) {
-            orch_table[i] = h;
+        if (!orch_table[i].h) {
+            orch_table[i] = (orch_slot){ h, g_queue_new (), FALSE };
             return ORCH_FD_BASE + i;
         }
     }
     return -1;
 }
 
-static hxnet_connection *
-orch_lookup (int fd)
+static orch_slot *
+orch_slot_of (int fd)
 {
     if (fd < ORCH_FD_BASE) {
         return NULL;
     }
     int i = fd - ORCH_FD_BASE;
-    if (i < 0 || i >= ORCH_MAX) {
+    if (i < 0 || i >= ORCH_MAX || !orch_table[i].h) {
         return NULL;
     }
-    return orch_table[i];
+    return &orch_table[i];
+}
+
+static hxnet_connection *
+orch_lookup (int fd)
+{
+    orch_slot *slot = orch_slot_of (fd);
+    return slot ? slot->h : NULL;
+}
+
+static void
+orch_frame_free (gpointer p)
+{
+    hxnet_frame_free (p);
+    g_free (p);
 }
 
 static void
 orch_unregister (int fd)
 {
-    hxnet_connection *h = orch_lookup (fd);
-    if (h) {
-        hxnet_connection_destroy (h);
-        orch_table[fd - ORCH_FD_BASE] = NULL;
+    orch_slot *slot = orch_slot_of (fd);
+    if (slot) {
+        hxnet_connection_destroy (slot->h);
+        g_queue_free_full (slot->early, orch_frame_free);
+        *slot = (orch_slot){ 0 };
+    }
+}
+
+/* Let the login settle as production does, agreeing at once: until
+ * LOGIN_READY a 1.5+ server takes no requests. What arrives meanwhile is
+ * kept for integration_recv_message. */
+static void
+orch_settle (int fd, const char *name, guint16 icon)
+{
+    orch_slot *slot = orch_slot_of (fd);
+    const char *nick = name ? name : "";
+    gint64 deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+    while (slot) {
+        if (g_get_monotonic_time () >= deadline) {
+            g_test_fail_printf ("the login never settled: no LOGIN_READY in "
+                                "10 s");
+            return;
+        }
+        hxnet_frame_t *f = g_new0 (hxnet_frame_t, 1);
+        int reason = 0;
+        int rc = hxnet_connection_try_recv_frame (slot->h, f, &reason);
+        if (rc == HXNET_RECV_FRAME) {
+            if (f->type_ == HTLS_HDR_AGREEMENT) {
+                /* A no-op if the session answered it already. */
+                hxnet_connection_agree (slot->h, (const guint8 *)nick,
+                                        strlen (nick), icon);
+            }
+            g_queue_push_tail (slot->early, f);
+            continue;
+        }
+        g_free (f);
+        if (rc == HXNET_RECV_READY) {
+            return;
+        }
+        if (rc == HXNET_RECV_SHUTDOWN) {
+            g_test_message ("connection closed during login (hxnet reason %d)",
+                            reason);
+            slot->shut = TRUE;
+            return;
+        }
+        g_usleep (5000); /* 5 ms */
     }
 }
 
@@ -320,17 +388,14 @@ orch_open_login (struct htlc_conn *htlc, const char *host, int port,
     }
 
     /* hlpack assigns each outgoing frame's trans from htlc->trans, then
-     * increments (proto_helpers.c). In the legacy path the LOGIN send
-     * bumps htlc->trans off zero; here the orchestrator owns LOGIN (it
-     * used trans=1 internally), so the harness's htlc->trans is still
-     * the memset-zero value. Seed it past the LOGIN trans so the first
-     * post-login send the test makes gets a unique nonzero trans —
-     * test helpers capture htlc->trans as the "expected reply trans"
-     * and g_assert it's nonzero. Mirrors production's
-     * network.c htlc->trans = reply_trans + 1 convention. */
+     * increments (proto_helpers.c). The session in hxnet numbers its own
+     * — the login, the agreement, a 1.2 server's user change — below
+     * hxnet_first_trans and reads their replies itself, so the test's
+     * start there, as production's do (network.c). */
     if (htlc) {
-        htlc->trans = 2;
+        htlc->trans = hxnet_first_trans ();
     }
+    orch_settle (fd, display_name, icon);
     return fd;
 }
 
@@ -380,13 +445,11 @@ orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
         return -1;
     }
 
-    /* The orchestrator sent step 1 as trans=1 and step 2 as trans=2;
-     * the replayed step-2 reply carries trans=2. Seed htlc->trans past
-     * it so the first post-login send the test makes gets a unique
-     * nonzero trans (mirrors orch_open_login's +1 seed for plaintext). */
+    /* As orch_open_login. */
     if (htlc) {
-        htlc->trans = 3;
+        htlc->trans = hxnet_first_trans ();
     }
+    orch_settle (fd, display_name, icon);
     return fd;
 }
 
@@ -436,11 +499,11 @@ orch_open_login_tls (struct htlc_conn *htlc, const char *host, int port,
                             ORCH_MAX);
         return -1;
     }
-    /* Plaintext LOGIN over TLS: reply trans is HX_LOGIN_TRANS (1); seed
-     * past it (mirrors orch_open_login). */
+    /* As orch_open_login. */
     if (htlc) {
-        htlc->trans = 2;
+        htlc->trans = hxnet_first_trans ();
     }
+    orch_settle (fd, display_name, icon);
     return fd;
 }
 
@@ -674,13 +737,26 @@ integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
      * 22-byte header + body into htlc->in so every downstream chunk
      * walker (dh_start / hdr_type / extractors) works byte-identically
      * to the legacy raw-read path. */
-    hxnet_connection *oh = orch_lookup (fd);
-    if (oh) {
+    orch_slot *slot = orch_slot_of (fd);
+    if (slot) {
         gint64 deadline = g_get_monotonic_time () + (gint64)timeout_ms * 1000;
         for (;;) {
             hxnet_frame_t f;
             int reason = 0;
-            int rc = hxnet_connection_try_recv_frame (oh, &f, &reason);
+            int rc;
+            hxnet_frame_t *early = g_queue_pop_head (slot->early);
+            if (early) {
+                f = *early;
+                g_free (early);
+                rc = HXNET_RECV_FRAME;
+            } else if (slot->shut) {
+                return FALSE;
+            } else {
+                rc = hxnet_connection_try_recv_frame (slot->h, &f, &reason);
+            }
+            if (rc == HXNET_RECV_READY) {
+                continue;
+            }
             if (rc == HXNET_RECV_FRAME) {
                 /* Build the frame into a fresh local buffer, then hand
                  * it to htlc->in only once it's fully populated. (Don't
@@ -1852,6 +1928,11 @@ integration_send_agreementagree_hope (int fd, struct htlc_conn *htlc,
                                       integration_hope_session *hope,
                                       const char *display_name, guint16 icon)
 {
+    /* orch_settle answered it already. */
+    if (orch_lookup (fd)) {
+        return TRUE;
+    }
+
     /* Drive the same chunk builder production uses
      * (gtkhx_proto_build_agreement_agree_chunks, hxproto).
      * Wire shape: icon as u16 BE, display name as raw bytes, options

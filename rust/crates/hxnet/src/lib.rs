@@ -79,6 +79,7 @@ pub mod login;
 pub mod login_reply;
 pub mod magic;
 pub mod proto_trace;
+pub mod session;
 pub mod tls;
 pub mod tracker;
 pub mod tracker_fetch;

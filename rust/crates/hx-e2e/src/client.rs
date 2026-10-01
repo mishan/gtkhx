@@ -12,6 +12,8 @@ use tokio::sync::mpsc;
 
 use crate::Server;
 
+/// `HTLS_HDR_AGREEMENT` — the server's agreement, shown after the login.
+const HTLS_HDR_AGREEMENT: u32 = 0x6d;
 /// `HTLS_HDR_TASK` — the reply to a client request.
 const HTLS_HDR_TASK: u32 = 0x0001_0000;
 /// `HTLS_DATA_CAPABILITIES` — the capability bits a server agreed to.
@@ -21,7 +23,7 @@ const TAG_FILE_LIST: u16 = 0x00c8;
 /// `HTLC_CAP_TEXT_ENCODING` / `HTLC_CAP_LARGE_FILES`.
 pub const CAP_TEXT_ENCODING: u16 = 0x0002;
 pub const CAP_LARGE_FILES: u16 = 0x0001;
-/// The trans the LOGIN goes out on; requests follow it.
+/// The trans the LOGIN goes out on.
 const LOGIN_TRANS: u32 = 1;
 /// How long a reply may take. Generous: the rig's servers are shared by
 /// parallel tests.
@@ -183,6 +185,30 @@ impl Client {
                 reply.error_text()
             ));
         }
+        // Agree as a user would, and wait for the login to settle before
+        // sending anything: hlservd hangs up on a request before then.
+        rt.block_on(async {
+            tokio::time::timeout(REPLY_TIMEOUT, async {
+                loop {
+                    match events.recv().await {
+                        Some(Event::Frame(f)) if f.header.type_ == HTLS_HDR_AGREEMENT => {
+                            let agree = Command::Agree {
+                                nick: b"hx-e2e".to_vec(),
+                                icon: 414,
+                            };
+                            let _ = handle.send(agree).await;
+                        }
+                        Some(Event::State(hxnet::ConnectionState::LoginReady)) => return Ok(()),
+                        Some(Event::Frame(_)) | Some(Event::State(_)) => continue,
+                        Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
+                        None => return Err("connection closed".to_string()),
+                    }
+                }
+            })
+            .await
+        })
+        .map_err(|_| format!("{}: the login never settled", server.name))?
+        .map_err(|e| format!("{}: disconnected during login: {e}", server.name))?;
         let agreed = reply.chunk(TAG_CAPABILITIES).map_or(0, |d| {
             d.iter().fold(0u64, |acc, b| (acc << 8) | u64::from(*b)) as u16
         });
@@ -191,7 +217,7 @@ impl Client {
             rt,
             handle,
             events,
-            trans: LOGIN_TRANS + 1,
+            trans: hxnet::session::FIRST_TRANS,
             caps: agreed & caps,
         })
     }

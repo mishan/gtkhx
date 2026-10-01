@@ -103,8 +103,6 @@ pub struct HtlcConn {
     /// keepalive at all: `ping_start` early-returns when the id is already
     /// set, and the first connection had set it.
     ping_timer: c_uint,
-    /// GLib source id for the post-login fallback fetch, or 0.
-    post_login_timer: c_uint,
     /// The transaction id the orchestrator's replayed LOGIN reply will carry.
     /// The login task has to be registered under it, so it is per-connection
     /// for the same reason the transaction counter beside it is.
@@ -377,12 +375,6 @@ scalar!(
     hx_conn_ping_timer,
     hx_conn_set_ping_timer,
     ping_timer,
-    c_uint
-);
-scalar!(
-    hx_conn_post_login_timer,
-    hx_conn_set_post_login_timer,
-    post_login_timer,
     c_uint
 );
 scalar!(
@@ -783,7 +775,7 @@ pub extern "C" fn hx_conn_alignof() -> usize {
 /// Pin the layout: if this fires, `HtlcConn` and the C mirror in
 /// `hxconn_layout.h` have drifted. The C side pins the same value with
 /// `_Static_assert (sizeof (struct htlc_conn) == HXCONN_SIZEOF)`.
-pub const HXCONN_SIZEOF: usize = 808;
+pub const HXCONN_SIZEOF: usize = 800;
 const _: () = assert!(std::mem::size_of::<HtlcConn>() == HXCONN_SIZEOF);
 
 #[cfg(test)]
