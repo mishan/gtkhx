@@ -5553,30 +5553,36 @@
   {
     "type": "git",
     "url": "https://github.com/mishan/hx-libs.git",
-    "commit": "ba28f6481bf44b197b3b9312e36a243dd3893143",
-    "dest": "cargo/git/hx-libs-ba28f6481bf4/hx-libs"
+    "commit": "e33286a8f7cfbf6b5c9f5929cd327a320d26219e",
+    "dest": "cargo/git/hx-libs-e33286a8f7cf/hx-libs"
   },
   {
     "type": "inline",
     "contents": "{\"package\": null, \"files\": {}}",
-    "dest": "cargo/git/hx-libs-ba28f6481bf4/hx-libs/crates/hxfiles-xfer",
+    "dest": "cargo/git/hx-libs-e33286a8f7cf/hx-libs/crates/hxfiles-xfer",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "inline",
     "contents": "{\"package\": null, \"files\": {}}",
-    "dest": "cargo/git/hx-libs-ba28f6481bf4/hx-libs/crates/hxhfs",
+    "dest": "cargo/git/hx-libs-e33286a8f7cf/hx-libs/crates/hxhfs",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "inline",
     "contents": "{\"package\": null, \"files\": {}}",
-    "dest": "cargo/git/hx-libs-ba28f6481bf4/hx-libs/crates/hxproto",
+    "dest": "cargo/git/hx-libs-e33286a8f7cf/hx-libs/crates/hxproto",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "inline",
-    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"/run/build/gtkhx/cargo/vendor\"\n\n[source.\"git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143\"]\ngit = \"https://github.com/mishan/hx-libs.git\"\nrev = \"ba28f6481bf44b197b3b9312e36a243dd3893143\"\nreplace-with = \"vendored-git-0\"\n\n[source.vendored-git-0]\ndirectory = \"/run/build/gtkhx/cargo/git/hx-libs-ba28f6481bf4/hx-libs/crates\"\n",
+    "contents": "{\"package\": null, \"files\": {}}",
+    "dest": "cargo/git/hx-libs-e33286a8f7cf/hx-libs/crates/hxsession",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "inline",
+    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"/run/build/gtkhx/cargo/vendor\"\n\n[source.\"git+https://github.com/mishan/hx-libs.git?rev=e33286a8f7cfbf6b5c9f5929cd327a320d26219e\"]\ngit = \"https://github.com/mishan/hx-libs.git\"\nrev = \"e33286a8f7cfbf6b5c9f5929cd327a320d26219e\"\nreplace-with = \"vendored-git-0\"\n\n[source.vendored-git-0]\ndirectory = \"/run/build/gtkhx/cargo/git/hx-libs-e33286a8f7cf/hx-libs/crates\"\n",
     "dest": "cargo",
     "dest-filename": "config.toml"
   }

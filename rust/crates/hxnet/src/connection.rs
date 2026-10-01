@@ -39,15 +39,12 @@
 
 use std::io;
 
-use hxproto::parse::{decode_header_full, HeaderDecoded};
+use hxsession::frame::{FrameError, FrameReader as Transactions};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::{Command, Event, Frame, ShutdownReason, MAX_BODY_LEN};
-
-/// Header size on the wire (`hl_hdr` = 22 bytes).
-const HL_HDR_LEN: usize = hxproto::HL_HDR_LEN;
+use crate::{Command, Event, Frame, ShutdownReason};
 
 /// Default capacity of the event channel (actor → consumer).
 /// 64 buffers a typical chat burst without locking out the
@@ -363,14 +360,13 @@ where
 
 /// Internal error from [`FrameReader::next`].
 enum ReadFrameError {
-    /// Clean EOF before any header bytes were read. Distinct
-    /// from a mid-frame EOF, which surfaces as
-    /// `Io(UnexpectedEof)`.
+    /// Clean EOF between frames. Distinct from EOF partway through
+    /// one, which surfaces as `Io(UnexpectedEof)`.
     Eof,
     /// Any other I/O failure.
     Io(io::Error),
-    /// Wire frame claimed a body larger than
-    /// [`crate::MAX_BODY_LEN`] — refuse to allocate.
+    /// A frame, or a transaction split across frames, claimed more than
+    /// the frame reader takes — refused before allocating for it.
     FrameTooLarge { wire_len: u32 },
 }
 
@@ -380,83 +376,72 @@ impl From<io::Error> for ReadFrameError {
     }
 }
 
-/// Reads frames off the stream, keeping the frame in progress in itself
-/// rather than in a future.
+/// How much one read asks the stream for.
+const READ_CHUNK: usize = 16 * 1024;
+
+/// Reads frames off the stream.
 ///
-/// Nothing read lives only in a future: every read here is a single `read`
-/// call, which is cancel-safe — dropped before it completes, it has taken
-/// nothing — and what it returns goes straight into `self`. So a read that
-/// is interrupted carries on where it stopped the next time it's polled.
-/// The actor's read side runs alongside its write side rather than taking
-/// turns with it, so nothing interrupts a read today short of the
-/// connection ending; this keeps it correct however it comes to be polled.
-#[derive(Default)]
+/// The cutting is hx-libs' `hxsession` frame reader, the one the browser
+/// client uses: frames delimited by DataSize, and a transaction a server
+/// splits across several frames joined back into one before it is handed
+/// on. This side only reads. Every read is a single `read` call, which is
+/// cancel-safe — dropped before it completes, it has taken nothing — and
+/// what it returns goes straight into the reader, so an interrupted read
+/// carries on where it stopped the next time it is polled.
 struct FrameReader {
-    header: [u8; HL_HDR_LEN],
-    header_filled: usize,
-    /// Once the header is in: it, the body buffer, and how much of the
-    /// body has arrived.
-    body: Option<(HeaderDecoded, Vec<u8>, usize)>,
+    transactions: Transactions,
+    buf: Vec<u8>,
+}
+
+impl Default for FrameReader {
+    fn default() -> Self {
+        FrameReader {
+            transactions: Transactions::new(),
+            buf: vec![0u8; READ_CHUNK],
+        }
+    }
 }
 
 impl FrameReader {
-    /// The next complete frame. EOF on the very first byte of a frame is
-    /// a clean shutdown; EOF anywhere else is an error.
+    /// The next complete transaction. EOF between transactions is a
+    /// clean shutdown; EOF partway through one is an error.
     async fn next<S>(&mut self, stream: &mut S) -> Result<Frame, ReadFrameError>
     where
         S: AsyncRead + Unpin,
     {
         loop {
-            if let Some((_, body, filled)) = &mut self.body {
-                if *filled < body.len() {
-                    let n = stream.read(&mut body[*filled..]).await?;
-                    if n == 0 {
-                        return Err(ReadFrameError::Io(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "EOF mid-body",
-                        )));
-                    }
-                    *filled += n;
-                    continue;
+            match self.transactions.next_transaction() {
+                Ok(Some(t)) => {
+                    // A split transaction given up on — the same trans
+                    // starting over, or too many in flight — answers no
+                    // request; its task waits, as one whose frames were
+                    // dropped always did.
+                    let _ = self.transactions.take_abandoned();
+                    // Joined, its header says the joined size, so the
+                    // frame reads as any other.
+                    return Frame::from_raw(&t.buf).ok_or_else(|| {
+                        ReadFrameError::Io(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "a transaction the frame reader passed does not decode",
+                        ))
+                    });
                 }
-                let (header, body, _) = self.body.take().expect("checked above");
-                return Ok(Frame::new(header, body));
-            }
-
-            if self.header_filled < HL_HDR_LEN {
-                let n = stream.read(&mut self.header[self.header_filled..]).await?;
-                if n == 0 {
-                    if self.header_filled == 0 {
-                        return Err(ReadFrameError::Eof);
-                    }
-                    return Err(ReadFrameError::Io(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "EOF mid-header",
-                    )));
+                Ok(None) => {}
+                Err(FrameError::TooLarge(wire_len)) => {
+                    return Err(ReadFrameError::FrameTooLarge { wire_len });
                 }
-                self.header_filled += n;
-                continue;
             }
-
-            // The header is in. Decode it without clamping, so body_len
-            // mirrors the wire, and refuse an oversized frame by the raw
-            // wire `len` before allocating for it — rather than reading
-            // clamped, misaligned bytes off the socket. (`wire_len`
-            // includes the 2-byte `hc` field, hence the +2.)
-            self.header_filled = 0;
-            let header = decode_header_full(&self.header, u32::MAX).ok_or_else(|| {
-                ReadFrameError::Io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "header decode returned None — should be unreachable on 22-byte input",
-                ))
-            })?;
-            if header.wire_len > MAX_BODY_LEN.saturating_add(2) {
-                return Err(ReadFrameError::FrameTooLarge {
-                    wire_len: header.wire_len,
-                });
+            let n = stream.read(&mut self.buf).await?;
+            if n == 0 {
+                if self.transactions.is_idle() {
+                    return Err(ReadFrameError::Eof);
+                }
+                return Err(ReadFrameError::Io(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "EOF mid-frame",
+                )));
             }
-            let len = header.body_len as usize;
-            self.body = Some((header, vec![0u8; len], 0));
+            self.transactions.push(&self.buf[..n]);
         }
     }
 }

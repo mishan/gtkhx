@@ -29,6 +29,9 @@ socks = ["dep:tokio-socks"]
 [dependencies]
 hxcrypto = { path = "../hxcrypto" }
 hxproto = { workspace = true }
+# The frame reader: the stream cut into whole transactions, split ones
+# joined, shared with the browser client through hx-libs.
+hxsession = { workspace = true }
 # S0 (xfer_handle module): the struct htxf_conn storage mirror needs libc for the
 # platform-correct `timeval` layout so the #[repr(C)] mirror matches the C
 # compiler on every target. (MAXPATHLEN is a hard-coded 4095 — compat.h clamps

@@ -244,6 +244,8 @@ Things that cost real time to learn and would cost it again.
   side probability exactly. Don't tidy it.
 - **Frame the read stream by `DataSize`, not `TotalSize`.** Getting this wrong
   desynced against a fragmenting server and surfaced as "unknown header type".
+  The frame reader is now `hxsession`'s, which also joins a fragmented
+  transaction rather than passing on its first frame and dropping the rest.
 - **`#[non_exhaustive]` on the opcode enum.** The 1.9 additions live alongside
   the 1.2/1.5 ones and servers occasionally add more.
 
@@ -681,6 +683,53 @@ There is also a standing cleanup item worth folding into whatever touches it:
 the crate boundaries that still talk over `extern "C"` where a Cargo dependency
 would do — see `crate-layout.md` §3 for which ones those are and which are
 irreducible.
+
+---
+
+## The protocol core: `hxsession`
+
+hx-libs' `hxsession` is the classic client's protocol logic with no I/O of its
+own: bytes and the time in, bytes and typed events out. It was written for the
+browser client (hx-ng reaches classic servers through it, compiled to wasm),
+and it is GtkHx's behavior — the login without a nickname, the agreement and
+its two-second fallback, the keep-alive, transaction ids — tested against the
+same rig. GtkHx moving onto it means one implementation of the classic session
+instead of two, and C retired as it goes: much of what it replaces is in
+`rcv.c`, `tasks.c` and `network.c`.
+
+What stays in `hxnet` is everything below the byte stream: the socket, TLS,
+SOCKS, and the tokio runtime that drives them. `hxsession` sits on top of
+that stream as the frame reader does today.
+
+The order, each step its own branch and each checked against the rig:
+
+1. **The frame reader.** `hxnet`'s connection actor cuts the stream with
+   `hxsession::frame::FrameReader`. It brings the fragmented-transaction join
+   GtkHx never had. *In progress.*
+2. **The handshake, login and agreement.** `hxnet`'s lifecycle and the
+   login-reply parse, and the post-login sequencing in `rcv.c`, become the
+   session's: `hxnet` feeds it bytes and acts on its events, and C hears
+   about the login through the session signals it already uses.
+3. **Transaction ids and the keep-alive.** The task table's correlation in
+   `rcv.c`/`tasks.c` and the ping timer in `network.c` move into the session;
+   a GtkHx task keeps its view-side state, keyed by the trans the session
+   gives it.
+4. **HOPE and compression.** The handshake steps and key derivation are pure
+   functions in `hxnet` already (`hope.rs`, `hope_keys.rs`); they move to
+   hx-libs with `hxcrypto` and become session-side codecs, which is also what
+   hxd-ng needs to accept HOPE (*Shared code with hxd-ng*, below).
+5. **The receive handlers, domain by domain.** Chat, users, messages, news,
+   files: each moves from `rcv.c` and `hxhandlers` onto session events. Until
+   a domain moves, its frames reach GtkHx whole, as `Event::Unhandled` and
+   `Session::request` already allow.
+6. **Transfers.** The HTXF state machines — single files, folders, resume,
+   upload — rewritten around bytes in and bytes out. The largest step, last.
+
+Two things gate the later steps. The extensions GtkHx negotiates (voice and
+video signaling, inline media, chat history, GIF icons, colored nicknames,
+Large Files, text encoding) need their session-side handling before the
+domains that use them move; hxproto has the codecs. And HOPE comes before
+step 2 can cover every login GtkHx makes.
 
 ---
 

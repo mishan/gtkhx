@@ -194,6 +194,12 @@ transaction in one frame, as do mhxd and GtkHx. A receiver **must** find the end
 frame from the data size (offset 16), not the total size (offset 12): framing by the
 total size desyncs the stream on the first fragmented transaction.
 
+GtkHx reads frames through hx-libs' `hxsession`, which does both: it frames by the
+data size and joins a fragmented transaction before handing it on. A frame whose
+fields already fill it is taken whole whatever its total size says, since a server
+overstating the total is likelier than a split that ends exactly on a field
+boundary.
+
 **Limits in the 1.9 server:**
 
 - A frame whose total size or data size is **0**, or larger than the maximum, **kills
