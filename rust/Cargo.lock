@@ -2133,7 +2133,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143#ba28f6481bf44b197b3b9312e36a243dd3893143"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e33286a8f7cfbf6b5c9f5929cd327a320d26219e#e33286a8f7cfbf6b5c9f5929cd327a320d26219e"
 dependencies = [
  "sha2",
 ]
@@ -2156,7 +2156,7 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143#ba28f6481bf44b197b3b9312e36a243dd3893143"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e33286a8f7cfbf6b5c9f5929cd327a320d26219e#e33286a8f7cfbf6b5c9f5929cd327a320d26219e"
 
 [[package]]
 name = "hxmacres"
@@ -2191,6 +2191,7 @@ dependencies = [
  "hxfiles-xfer",
  "hxhfs",
  "hxproto",
+ "hxsession",
  "libc",
  "lz4_flex",
  "rustls-native-certs",
@@ -2205,7 +2206,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ba28f6481bf44b197b3b9312e36a243dd3893143#ba28f6481bf44b197b3b9312e36a243dd3893143"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e33286a8f7cfbf6b5c9f5929cd327a320d26219e#e33286a8f7cfbf6b5c9f5929cd327a320d26219e"
 
 [[package]]
 name = "hxrequest"
@@ -2214,6 +2215,14 @@ dependencies = [
  "glib 0.22.10",
  "hxproto",
  "hxtext",
+]
+
+[[package]]
+name = "hxsession"
+version = "0.1.0"
+source = "git+https://github.com/mishan/hx-libs.git?rev=e33286a8f7cfbf6b5c9f5929cd327a320d26219e#e33286a8f7cfbf6b5c9f5929cd327a320d26219e"
+dependencies = [
+ "hxproto",
 ]
 
 [[package]]

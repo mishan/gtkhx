@@ -128,60 +128,82 @@ async fn reads_two_frames_in_sequence() {
 /// never come, and desyncing the stream — so a second, ordinary frame
 /// right after would never arrive intact. The `timeout`s turn that
 /// regression into a fast failure instead of a hang.
-#[tokio::test]
-async fn frames_by_datasize_when_totalsize_is_larger() {
-    use std::time::Duration;
+/// The next event, which must be a frame and must come promptly.
+async fn next_frame(events: &mut tokio::sync::mpsc::Receiver<Event>, what: &str) -> hxnet::Frame {
+    match tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .unwrap_or_else(|_| panic!("{what} timely"))
+        .expect("event channel open")
+    {
+        Event::Frame(f) => f,
+        e => panic!("{what}: unexpected {e:?}"),
+    }
+}
 
+#[tokio::test]
+async fn a_split_transaction_is_joined_and_the_stream_stays_aligned() {
     let (mut server, client) = tokio::io::duplex(4096);
     let (_handle, mut events, _join) =
         Connection::spawn(client).expect("spawn under tokio runtime");
 
-    // Frame 1: TotalSize claims a 1000-byte transaction, but this frame
-    // carries only 4 body bytes (DataSize = 4 + 2 hc). A reader that
-    // trusted TotalSize would try to read ~1000 bytes and stall.
-    let hdr1 = build_header_split(
-        0x65,
-        10,
-        0,
-        /*total_wire=*/ 1000 + 2,
-        /*data_wire=*/ 4 + 2,
-        0,
-    );
-    // Frame 2: an ordinary complete frame immediately after — only read
-    // intact if frame 1 consumed exactly its DataSize.
-    let hdr2 = build_header(0x66, 11, 0, 4, 0);
-    server.write_all(&hdr1).await.unwrap();
-    server.write_all(b"aaaa").await.unwrap();
-    server.write_all(&hdr2).await.unwrap();
+    // One news reply of a single 994-byte field, cut in two the way a
+    // fragmenting server sends it: TotalSize (offset 12) repeated in
+    // each fragment, each with its own DataSize (offset 16), and only the
+    // first holding the field count.
+    let mut data = Vec::new();
+    data.extend_from_slice(&1u16.to_be_bytes()); // field count
+    data.extend_from_slice(&0x65u16.to_be_bytes());
+    data.extend_from_slice(&994u16.to_be_bytes());
+    data.extend(std::iter::repeat_n(b'n', 994));
+    let total = data.len() as u32; // 1000
+    let fragment = |chunk: &[u8]| {
+        let mut f = Vec::new();
+        f.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        f.extend_from_slice(&10u32.to_be_bytes());
+        f.extend_from_slice(&0u32.to_be_bytes());
+        f.extend_from_slice(&total.to_be_bytes());
+        f.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+        f.extend_from_slice(chunk);
+        f
+    };
+    server.write_all(&fragment(&data[..300])).await.unwrap();
+    // Another transaction between the fragments goes through on its own,
+    // and arrives intact only if the first fragment took exactly its
+    // DataSize off the stream.
+    server
+        .write_all(&build_header(0x66, 11, 0, 4, 0))
+        .await
+        .unwrap();
     server.write_all(b"bbbb").await.unwrap();
+    server.write_all(&fragment(&data[300..])).await.unwrap();
 
-    let f1 = match tokio::time::timeout(Duration::from_secs(5), events.recv())
-        .await
-        .expect("frame 1 timely (a TotalSize-framing regression would hang here)")
-        .expect("event channel open")
-    {
-        Event::Frame(f) => f,
-        e => panic!("unexpected: {e:?}"),
-    };
-    let f2 = match tokio::time::timeout(Duration::from_secs(5), events.recv())
-        .await
-        .expect("frame 2 timely (stream stayed aligned)")
-        .expect("event channel open")
-    {
-        Event::Frame(f) => f,
-        e => panic!("unexpected: {e:?}"),
-    };
+    let between = next_frame(&mut events, "the frame between").await;
+    assert_eq!(between.header.trans, 11);
+    assert_eq!(&between.body, b"bbbb");
+    let joined = next_frame(&mut events, "the joined transaction").await;
+    assert_eq!(joined.header.trans, 10);
+    assert_eq!(joined.header.hc, 1);
+    assert_eq!(joined.body, data[2..], "every fragment's bytes, in order");
+}
 
-    // Frame 1 body is DataSize-sized (4), NOT TotalSize-sized (1000).
-    assert_eq!(f1.header.trans, 10);
-    assert_eq!(
-        f1.header.body_len, 4,
-        "body sized by DataSize (len2), not TotalSize"
-    );
-    assert_eq!(&f1.body, b"aaaa");
-    // Frame 2 arrived intact ⇒ the read loop stayed aligned.
-    assert_eq!(f2.header.trans, 11);
-    assert_eq!(&f2.body, b"bbbb");
+#[tokio::test]
+async fn a_whole_frame_with_an_overstated_totalsize_is_read_as_it_is() {
+    let (mut server, client) = tokio::io::duplex(4096);
+    let (_handle, mut events, _join) =
+        Connection::spawn(client).expect("spawn under tokio runtime");
+
+    // TotalSize claims more than the frame, but its one field fills it:
+    // a server miscounting, not a split. It is delivered as the frame it
+    // is, as GtkHx always read it.
+    let mut body = Vec::new();
+    body.extend_from_slice(&0x65u16.to_be_bytes());
+    body.extend_from_slice(&2u16.to_be_bytes());
+    body.extend_from_slice(b"hi");
+    let hdr = build_header_split(0x6a, 0, 0, 1000 + 2, body.len() as u32 + 2, 1);
+    server.write_all(&hdr).await.unwrap();
+    server.write_all(&body).await.unwrap();
+    let f = next_frame(&mut events, "the frame").await;
+    assert_eq!(f.body, body);
 }
 
 #[tokio::test]
@@ -256,7 +278,7 @@ async fn eof_emits_shutdown_event_then_closes() {
 }
 
 #[tokio::test]
-async fn mid_header_eof_is_stream_error_not_clean_eof() {
+async fn mid_frame_eof_is_stream_error_not_clean_eof() {
     let (mut server, client) = tokio::io::duplex(4096);
     let (_handle, mut events, _join) =
         Connection::spawn(client).expect("spawn under tokio runtime");
@@ -269,7 +291,7 @@ async fn mid_header_eof_is_stream_error_not_clean_eof() {
     match evt {
         Event::Shutdown(ShutdownReason::StreamError(msg)) => {
             assert!(
-                msg.contains("mid-header"),
+                msg.contains("mid-frame"),
                 "stream error should name the truncation site: {msg}"
             );
         }
