@@ -28,6 +28,7 @@
 #include "hotline_proto.h" /* gtkhx_proto_pack_header (wire header encode) */
 #include "gtkhx_session.h" /* GtkhxConnectionState + emit (Phase G state cb) */
 #include "network.h" /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
+#include "rcv.h"     /* hx_post_login_fetches (LOGIN_READY) */
 #include "hxnet_htxf.h" /* HxnetHopeAead (orchestrated HOPE AEAD material) */
 #include "host_port.h"  /* gtkhx_join_host_port (proxy lookup URI) */
 
@@ -284,10 +285,14 @@ typedef int (*hxnet_verify_cert_cb_t) (const guint8 *fp, gsize fp_len,
 #define HXNET_BRIDGE_STATE_CONNECTED 2
 #define HXNET_BRIDGE_STATE_LOGIN_SENDING 5
 #define HXNET_BRIDGE_STATE_HANDSHAKE_DONE 10
+#define HXNET_BRIDGE_STATE_LOGIN_READY 11
 
 extern int hxnet_connection_send_frame (hxnet_connection_opaque *handle,
                                         const guint8 *data, guint32 len);
 extern void hxnet_connection_destroy (hxnet_connection_opaque *handle);
+extern int hxnet_connection_agree (hxnet_connection_opaque *handle,
+                                   const guint8 *nick, gsize nick_len,
+                                   guint16 icon);
 extern void hxnet_frame_free (hxnet_frame_t *f);
 
 /* Phase G: hxnet drives the whole plaintext lifecycle (DNS + TCP +
@@ -563,11 +568,8 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
                                              GTKHX_CONNECTION_HANDSHAKE_DONE);
         hx_orchestrator_register_login_task (htlc);
         break;
-    case HXNET_BRIDGE_STATE_HANDSHAKE_DONE:
-        /* Rust's end-of-handshake state. No view transition here: the
-         * coarse HANDSHAKE_DONE already fired at LOGIN_SENDING above,
-         * and login completion is signalled by LOGIN_READY, which
-         * rcv_task_login emits when the replayed reply dispatches. */
+    case HXNET_BRIDGE_STATE_LOGIN_READY:
+        hx_post_login_fetches (htlc);
         break;
     default:
         break;
@@ -869,6 +871,21 @@ hx_bridge_send_frame (struct htlc_conn *htlc, const guint8 *data, guint32 len)
                     rc);
     }
     return rc;
+}
+
+void
+hx_bridge_agree (struct htlc_conn *htlc)
+{
+    hxnet_connection_opaque *h = conn_handle (htlc);
+    const char *nick = hx_conn_name (htlc);
+
+    /* Not an error: Agree can beat the shutdown of a connection gone. */
+    if (h
+        && hxnet_connection_agree (h, (const guint8 *)nick, strlen (nick),
+                                   hx_conn_icon (htlc))
+               != 0) {
+        g_message ("hxnet_bridge: the agreement could not be answered");
+    }
 }
 
 void

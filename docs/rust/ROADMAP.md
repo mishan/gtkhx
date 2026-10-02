@@ -703,13 +703,16 @@ that stream as the frame reader does today.
 
 The order, each step its own branch and each checked against the rig:
 
-1. **The frame reader.** `hxnet`'s connection actor cuts the stream with
-   `hxsession::frame::FrameReader`. It brings the fragmented-transaction join
-   GtkHx never had. *In progress.*
-2. **The handshake, login and agreement.** `hxnet`'s lifecycle and the
-   login-reply parse, and the post-login sequencing in `rcv.c`, become the
-   session's: `hxnet` feeds it bytes and acts on its events, and C hears
-   about the login through the session signals it already uses.
+1. **The frame reader.** `hxnet` cuts the stream with
+   `hxsession::frame::FrameReader`, which brought the fragmented-transaction
+   join GtkHx never had. *Done.*
+2. **The handshake, login and agreement.** The session, in raw mode, drives
+   the connection from the magic on (`hxnet`'s `session.rs`): the login,
+   the agreement and the wait for it, a 1.2 server's user change, and when
+   the post-login fetches may go out (`LoginReady`). C reads the login
+   reply's fields, shows the agreement, and keeps everything after.
+   HOPE's two steps stay in `hxnet` until step 4; the session takes over
+   at their reply. *In progress.*
 3. **Transaction ids and the keep-alive.** The task table's correlation in
    `rcv.c`/`tasks.c` and the ping timer in `network.c` move into the session;
    a GtkHx task keeps its view-side state, keyed by the trans the session
@@ -725,11 +728,13 @@ The order, each step its own branch and each checked against the rig:
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
 
-Two things gate the later steps. The extensions GtkHx negotiates (voice and
-video signaling, inline media, chat history, GIF icons, colored nicknames,
-Large Files, text encoding) need their session-side handling before the
-domains that use them move; hxproto has the codecs. And HOPE comes before
-step 2 can cover every login GtkHx makes.
+Until step 3 there are two transaction counters, the session's and C's;
+C's start at `hxnet_first_trans`, past the session's few.
+
+The extensions GtkHx negotiates (voice and video signaling, inline media,
+chat history, GIF icons, colored nicknames, Large Files, text encoding)
+need their session-side handling before the domains that use them move;
+hxproto has the codecs.
 
 ---
 

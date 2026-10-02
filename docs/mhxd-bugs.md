@@ -31,6 +31,22 @@ every two seconds made it stop happening, which points at a timing race.
 waiting for SELFINFO" or "no LOGIN reply" against mhxd is most likely this.
 Restart the container if the watchdog hasn't.
 
+## An icon change reaches connections still in the handshake
+
+**Verified.**
+
+`rcv_icon_change` (`rcv.c`) sends ICON_CHANGE to every connection in
+`htlc_list`, including ones whose TRTP magic it has not answered yet. Such a
+client reads `00 00 07 48 00 00 00 01`, the transaction's header, where
+`TRTP\0\0\0\0` belongs, and rightly gives up on the handshake. In the rig it
+happens when the GIF-icons tests change an icon while another test is
+connecting: the other test fails at once with "timed out waiting for
+SELFINFO", and its connection ends with `magic: the server answered [00, 00,
+07, 48, …]`.
+
+**GtkHx:** nothing to do on the client side. The fix is for the broadcast to
+skip connections that have not logged in.
+
 ## Rename and move silently replace what is already there
 
 **Verified for an empty folder; from the source for files.**

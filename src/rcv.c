@@ -70,59 +70,9 @@
  * before their definitions land later in the file. Prototypes come
  * from the headers we already #include. */
 
-/* post-login state-machine. The 1.5 flow per
- * Capabilities/connect-spec is:
- *
- *   C → S  TranLogin
- *   S → C  TranLogin reply (version, server name, banner_id, uid)
- *   S → C  TranUserAccess (HTLS_HDR_USER_SELFINFO, access bits)
- *   S → C  TranShowAgreement (or "no agreement" indicator)
- *   C → S  TranAgreed (NAME + ICON + OPTIONS) — identity arrives HERE
- *   S → C  TranNotifyChangeUser broadcast (others are told we joined)
- *   S → C  TranServerBanner
- *   S → C  TranAgreed reply
- *
- * Only AFTER our TranAgreed has gone out is the server willing to
- * treat us as a fully-joined user — that's when USER_GETLIST /
- * news fetches make sense. fogWraith reported (2026-05) that we
- * were firing those on SELFINFO receipt, which is too early in
- * the 1.5 flow: server logs showed "Get user list" / "Get messages"
- * arriving before "Accept agreement". The fix is to gate the post-
- * login fetches on the AGREEMENTAGREE-send path (concurrence on
- * Agree click, or the auto-send in hx_rcv_agreement_file for
- * HX_AGREEMENT_NONE / NOT_FOUND).
- *
- * 1.2 servers don't send AGREEMENTAGREE either way — name + icon
- * are in the LOGIN packet, agreement (if any) is informational
- * with no response opcode. For those we rely on the 2-second
- * fallback timer armed in rcv_task_login.
- *
- * `hx_conn_post_login_fetched (htlc)` is the single-fire guard:
- * whichever path runs first sets it, the other path becomes a
- * no-op. Reset in hx_htlc_close so the next connect starts
- * fresh. Stored on the htlc rather than as a file-local static
- * so the files-browser's remote provider (and other consumers
- * that need the "fully joined" gate) can read it directly. */
-/* Cancel this connection's post-login fallback timer, if armed.
- *
- * The id lives on the connection rather than in a file-static: two
- * connections can be mid-login at once, and a shared slot meant the second
- * one's arming overwrote the first's id — leaking a source that would then
- * fire against a connection nothing was tracking. */
-static void
-hx_post_login_timer_stop (struct htlc_conn *htlc)
-{
-    guint id = htlc ? hx_conn_post_login_timer (htlc) : 0;
-
-    if (id) {
-        g_source_remove (id);
-        hx_conn_set_post_login_timer (htlc, 0);
-    }
-}
-
-/* Public entry — network.c::hx_send_agreement_agree calls this
- * right after the hlwrite so post-login fetches fire on the spec-
- * correct boundary (after AGREEMENTAGREE, not after SELFINFO). */
+/* What follows the login, on the session's LOGIN_READY: a 1.5+ server
+ * takes requests before AGREEMENTAGREE as from a user not yet joined. The
+ * files browser's remote provider waits on hx_conn_post_login_fetched. */
 void
 hx_post_login_fetches (struct htlc_conn *htlc)
 {
@@ -131,7 +81,13 @@ hx_post_login_fetches (struct htlc_conn *htlc)
     }
     hx_conn_set_post_login_fetched (htlc, 1);
 
-    hx_post_login_timer_stop (htlc);
+    /* AGREEMENTAGREE carries no DATA_COLOR, so our color goes in a
+     * USER_CHANGE, which is also the opt-in to others' colors. A 1.2 server
+     * knows nothing of colors and has our name already. */
+    if (hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE
+        && hx_conn_version (htlc) != 0) {
+        hx_change_name_icon (htlc);
+    }
 
     /* Fetch users + (gated) news. rcv_task_news_users handles
      * both — it calls rcv_task_user_list on the USER_GETLIST
@@ -211,32 +167,6 @@ hx_post_login_fetches (struct htlc_conn *htlc)
      * 1.5+ servers and outright disconnects on the stricter ones. */
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_LOGIN_READY);
-}
-
-static gboolean
-post_login_fallback (gpointer data)
-{
-    struct htlc_conn *htlc = data;
-
-    if (htlc) {
-        hx_conn_set_post_login_timer (htlc, 0);
-    }
-    if (htlc && hx_conn_fd (htlc) && !hx_conn_post_login_fetched (htlc)) {
-        debug_log (
-            "login",
-            "AGREEMENTAGREE didn't fire after 2s, firing fetches anyway");
-        hx_post_login_fetches (htlc);
-    }
-    return G_SOURCE_REMOVE;
-}
-
-void
-rcv_login_reset (struct htlc_conn *htlc)
-{
-    hx_post_login_timer_stop (htlc);
-    /* The post_login_fetched bit on htlc->flags is reset alongside
-     * the other flags in hx_htlc_close — same reset point as
-     * flags.logged_in. */
 }
 
 /*
@@ -376,57 +306,22 @@ hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 }
 
-/* Agreement show-vs-auto-agree decision + emit — Rust hxhandlers::recv::agreement module.
- * Returns HX_AGREEMENT_ACT_AUTO_AGREE (C sends AGREEMENTAGREE) or
- * HX_AGREEMENT_ACT_SHOWN (the agreement signal fired; the view pops the
- * Agree window). */
-#define HX_AGREEMENT_ACT_AUTO_AGREE 0
-#define HX_AGREEMENT_ACT_SHOWN 1
-extern int hx_agreement_recv (void *sess, int has_agreement, const char *buf,
-                              guint16 len);
-
+/* An agreement with text is shown; the session has answered any other. */
 void
 hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
                        gsize frame_len)
 {
-    /* chunk-walking + sanitisation lives in
-     * hx_agreement_extract. The 16 KiB cap is generous; mhxd
-     * agreements hover around 1-2 KiB on the public servers and
-     * the protocol's chunk length is uint16 (max 65535) anyway. */
+    /* The protocol's chunk length is 16 bits; mhxd agreements on public
+     * servers run 1-2 KiB. */
     char buf[16384];
     gsize body_len = 0;
     hx_agreement_result r
         = hx_agreement_extract (frame, frame_len, buf, sizeof (buf), &body_len);
 
-    /* no-agreement auto-path — the user has nothing to
-     * click Agree on, so we send AGREEMENTAGREE ourselves to:
-     *   - complete login on mhxd-style servers (where finish_login
-     *     runs inside rcv_agreementagree)
-     *   - deliver NAME + ICON to the server in both flavours
-     *   - trigger HTLS_HDR_BANNER emission on banner-configured
-     *     servers (the banner write is unconditional on banner.type
-     *     inside rcv_agreementagree, ungated on in_login)
-     *
-     * HX_AGREEMENT_NONE: server config has agreement disabled.
-     * HX_AGREEMENT_NOT_FOUND: malformed payload.
-     * For HX_AGREEMENT_OK, fall through to popping the agreement
-     * window — concurrence() handles the wire op on Agree click,
-     * using the same AGREEMENTAGREE message.
-     *
-     * Earlier code gated this on !flags.logged_in (to avoid a
-     * suspected MacSecret disconnect on AGREEMENTAGREE-for-logged-
-     * in). That gate was almost certainly chasing a misdiagnosed
-     * symptom — see gtkhx.c::concurrence for the long comment —
-     * and was suppressing banner delivery on every 1.9 server. */
-    /* HX_AGREEMENT_OK → show it (crate emits the agreement signal). Otherwise
-     * (HX_AGREEMENT_NONE = agreement disabled, HX_AGREEMENT_NOT_FOUND =
-     * malformed) there's nothing to click, so the crate returns AUTO_AGREE and
-     * we send AGREEMENTAGREE ourselves — that completes login on no-agreement
-     * servers and triggers the banner on banner-configured ones. */
-    if (hx_agreement_recv (sess_from_htlc (htlc), r == HX_AGREEMENT_OK, buf,
-                           (guint16)body_len)
-        == HX_AGREEMENT_ACT_AUTO_AGREE) {
-        hx_send_agreement_agree (htlc);
+    if (r == HX_AGREEMENT_OK && body_len > 0) {
+        gtkhx_session_emit_agreement (gtkhx_session_get_default (),
+                                      sess_from_htlc (htlc), buf,
+                                      (guint16)body_len);
     }
 }
 
@@ -713,7 +608,7 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
  * button reads), and emits self-updated via hx_selfinfo_recv so the view
  * refreshes toolbar sensitivity. Post-login fetches are deliberately NOT fired
  * here — in the 1.5 flow SELFINFO precedes the agreement, so USER_GETLIST / news
- * go out from hx_send_agreement_agree after AGREEMENTAGREE. The dispatch switch
+ * wait for the session's LOGIN_READY, after AGREEMENTAGREE. The dispatch switch
  * below calls it by name (declared in rcv.h); no C body remains here. */
 
 void
@@ -1376,15 +1271,6 @@ rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
  * register them via RCV_TASK_FN(); the symbols resolve against the Rust crate at
  * link. rcv_task_kick stays here (it logs via the variadic hx_printf_prefix). */
 
-/* Post-login fetch sequencing decision — Rust hxproto (login module).
- * Returns HX_POST_LOGIN_FETCH_NOW (1.0/1.2: fire fetches now),
- * HX_POST_LOGIN_ARM_FALLBACK (1.5+: wait for AGREEMENTAGREE, arm the 2s timer),
- * or HX_POST_LOGIN_NOTHING (already fetched). */
-#define HX_POST_LOGIN_NOTHING 0
-#define HX_POST_LOGIN_FETCH_NOW 1
-#define HX_POST_LOGIN_ARM_FALLBACK 2
-extern int hx_post_login_route (guint16 version, int already_fetched);
-
 void
 rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                 char *pass)
@@ -1430,26 +1316,6 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
             hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
         }
         hx_conn_set_hope_aead (htlc, hx_bridge_orchestrated_hope_aead (htlc));
-
-        /* Reset post-login fetch state before scheduling so
-         * a reconnection during this process state starts clean.
-         *
-         * The check on already_fetched used to cover a race where
-         * SELFINFO arrived before the login TASK reply and fired
-         * the fetches already; that race no longer matters because
-         * SELFINFO is not a fetch trigger anymore (fetches fire
-         * from hx_send_agreement_agree). The check is harmless
-         * to keep — it's a no-op when the flag is FALSE, which is
-         * the new common case. The fetched-bit itself lives on
-         * hx_conn_post_login_fetched (htlc) now (so the files browser
-         * can read it), and so is the running timer id — two connections
-         * can be mid-login at once, and a shared slot meant the second
-         * one's arming overwrote the first's. */
-        gboolean already_fetched = hx_conn_post_login_fetched (htlc);
-        if (!already_fetched) {
-            hx_conn_set_post_login_fetched (htlc, 0);
-            hx_post_login_timer_stop (htlc);
-        }
 
         /* Phase 9.A: clear inline-media advisory limits BEFORE
          * walking the LOGIN reply. Each MAX_* field is
@@ -1624,45 +1490,6 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
          * implements PING, and excludes the ones that don't. */
         if (hx_conn_version (htlc) >= 150) {
             ping_start (htlc);
-        }
-
-        /* 1.0/1.2 detection: the server did not include an
-         * HTLS_DATA_VERSION chunk in this LOGIN reply, so it
-         * doesn't speak the 1.5 agreement / AGREEMENTAGREE
-         * flow. The LOGIN packet we sent followed the 1.5
-         * spec (no HTLC_DATA_NAME), so the server has no name
-         * for us yet — USER_GETLIST replies would return our
-         * record with an uninitialised name field (fogWraith's
-         * hlserver.com trace showed exactly this: "00 07 00
-         * 86 00 00 00 05 f0 d0 73 28 2d"). Deliver NAME + ICON
-         * via USER_CHANGE now, and fire the post-login fetches
-         * immediately — no agreement is coming, so there is no
-         * "after AGREEMENTAGREE" boundary to wait for.
-         *
-         * 1.5+ servers (version >= 150 here) take the AGREEMENT-
-         * AGREE path: gtkhx.c::concurrence on the Agree click,
-         * or hx_rcv_agreement_file's HX_AGREEMENT_NONE auto-
-         * send when the account has AccessNoAgreement. Both
-         * call hx_post_login_fetches after the wire send. The
-         * 2s fallback timer below arms as a last resort if the
-         * agreement opcode doesn't arrive at all. */
-        switch (hx_post_login_route (hx_conn_version (htlc), already_fetched)) {
-        case HX_POST_LOGIN_FETCH_NOW:
-            /* 1.0/1.2 server: no agreement flow — deliver NAME + ICON and fire
-             * the fetches now (no AGREEMENTAGREE boundary is coming). */
-            hx_change_name_icon (htlc);
-            hx_post_login_fetches (htlc);
-            break;
-        case HX_POST_LOGIN_ARM_FALLBACK:
-            /* 1.5+ server: hx_send_agreement_agree / the Agree click fire the
-             * fetches after the AGREEMENTAGREE round-trip. Do NOT fire
-             * HTLC_HDR_USER_GETLIST yet; arm a 2s fallback in case a misbehaving
-             * server sends no agreement opcode at all. */
-            hx_conn_set_post_login_timer (
-                htlc, g_timeout_add_seconds (2, post_login_fallback, htlc));
-            break;
-        default: /* HX_POST_LOGIN_NOTHING — fetches already fired */
-            break;
         }
     }
 }

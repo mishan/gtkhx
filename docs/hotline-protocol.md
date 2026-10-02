@@ -864,14 +864,9 @@ loop:
   the user can't see, and in the "waiting for next" state silently discards codes other
   than 3.
 - mhxd does not recurse: subfolders arrive as empty folder items.
-- The large-file spec describes the folder download with the server speaking first.
-  Every implementation, and the official document, do what is described here. Its path
-  encoding now matches the one above.
-- In large-file mode the `u32 size` before a FILP is advisory: an item whose FILP does
-  not fit in 32 bits is announced as 0, and the receiver finds the item's end from the
-  FILP's own fork headers. GtkHx does so when the size is 0, waiting for the resource
-  fork's header when the FILP declares a third fork and reading the empty one servers
-  send anyway on a short timeout.
+- The large-file spec describes the folder download with the server speaking first and
+  a different path encoding. Every implementation, and the official document, do what
+  is described here.
 
 ### Banner
 

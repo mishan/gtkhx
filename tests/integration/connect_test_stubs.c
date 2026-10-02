@@ -29,7 +29,7 @@
  *     hx_htlc_close nick_color re-seed doesn't read uninitialised
  *     memory if a future test exercises the reconnect path.
  *   - hx_clear_chat, close_connected_windows, error_dialog,
- *     banner_clear, rcv_login_reset, hx_rcv_hdr, hx_post_login
+ *     banner_clear, hx_rcv_hdr, hx_post_login
  *     _fetches, task_new, task_update, task_delete — no-ops.
  *
  * The cumulative effect: the test exercises the REAL hx_connect
@@ -156,12 +156,6 @@ error_dialog (char *title, char *msg)
 
 void
 banner_clear (struct htlc_conn *htlc)
-{
-    (void)htlc;
-}
-
-void
-rcv_login_reset (struct htlc_conn *htlc)
 {
     (void)htlc;
 }

@@ -18,5 +18,4 @@
 
 pub mod dispatch;
 pub mod ffi;
-pub mod login;
 pub mod user_change;

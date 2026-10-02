@@ -7,7 +7,6 @@
 //! matching `GtkhxSession` signal, and return a discriminant telling the C
 //! caller which branch was taken.
 
-pub mod agreement;
 pub mod chat;
 pub mod files;
 pub mod icon;

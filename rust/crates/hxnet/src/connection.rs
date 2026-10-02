@@ -348,6 +348,8 @@ where
                     return ShutdownReason::StreamError(e.to_string());
                 }
             }
+            // There is no session here to answer an agreement.
+            Some(Command::Agree { .. }) => {}
             Some(Command::Shutdown) | None => {
                 // Best-effort flush — if it errors, we were going to
                 // shut down anyway.

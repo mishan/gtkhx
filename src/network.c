@@ -150,7 +150,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     session *sess = sess_from_htlc (htlc);
 
     ping_stop (htlc);
-    rcv_login_reset (htlc);
     banner_clear (htlc);
 
     /* Reset the per-session login flag so the next connect starts
@@ -372,74 +371,17 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  * gtkhx_session_emit_tracker_server_create / hx_printf_prefix calls
  * happen directly. */
 
-/* HTLC_HDR_AGREEMENTAGREE with NAME + ICON. Sent from
- * gtkhx.c::concurrence (Agree button) once the agreement-window
- * is dismissed. Two server-side effects:
- *
- *   1. mhxd's rcv_agreementagree finishes login (calls account_read
- *      against our login, sets access bits, broadcasts join), and
- *      sends SELFINFO + USER_GETLIST.
- *   2. If the server config has banner.type set, mhxd unconditionally
- *      sends HTLS_HDR_BANNER from inside that handler.
- *
- * ICON comes from hx_conn_icon (htlc) (preserved across the connect), NAME
- * from hx_conn_name (htlc) (set from prefs.nick at connect time). */
+/* The Agree button. If the fetches went out already — the agreement came
+ * after the session stopped waiting — our color went before the agree,
+ * which Janus ignores, so it goes again. */
 void
 hx_send_agreement_agree (struct htlc_conn *htlc)
 {
-    /* Same as hx_change_name_icon — encode the nick to
-     * the negotiated wire encoding. is_body = FALSE (nicks are
-     * single-line). Encoding happens here (not inside the shared
-     * builder) so the Rust builder stays free of the iconv
-     * dependency that text_util.c brings in. */
-    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
-    gsize name_len = 0;
-    char *name_wire = gtkhx_text_for_wire ((const char *)hx_conn_name (htlc),
-                                           strlen (hx_conn_name (htlc)), utf8,
-                                           /*is_body=*/FALSE, &name_len);
-
-    /* Build the AGREEMENTAGREE chunk array through the shared
-     * builder so the test harness (integration_send_agreementagree
-     * _hope) and production stay locked to the same wire shape. The
-     * OPTIONS-bitmap-is-mandatory rule (Mobius panics without it,
-     * see commit history) is enforced by the builder, not here. */
-    struct hx_chunk chunks[HX_AGREEMENT_AGREE_MAX_CHUNKS];
-    guint8 scratch[HX_AGREEMENT_AGREE_SCRATCH_SIZE];
-    int hc = (int)gtkhx_proto_build_agreement_agree_chunks (
-        hx_conn_icon (htlc), (const uint8_t *)name_wire, name_len,
-        /*options=*/0, chunks, HX_AGREEMENT_AGREE_MAX_CHUNKS, scratch,
-        sizeof (scratch));
-    if (hc > 0) {
-        hlwrite_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
-    }
-    g_free (name_wire);
-
-    /* Colored-Nicknames: AGREEMENTAGREE carries NAME + ICON
-     * + OPTIONS but not DATA_COLOR — the spec only lists USER_CHANGE
-     * / CHAT_USER_CHANGE / SELFINFO as color-carrying opcodes, so
-     * extending AGREEMENTAGREE unilaterally would be off-spec. Instead
-     * push a follow-up USER_CHANGE that carries our preferred color,
-     * which doubles as the spec's auto-opt-in trigger ("once the
-     * server sees DATA_COLOR from us, decorate other users' USER_
-     * CHANGE broadcasts to us with their colors"). The 1.0/1.2 login
-     * path calls hx_change_name_icon directly (rcv.c, version==0
-     * branch) so this only matters for the 1.5+/AGREEMENTAGREE path.
-     * Gate on nick_color != NONE so a no-color client doesn't ride
-     * the auto-opt-in train it doesn't want. */
-    if (hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE) {
+    hx_bridge_agree (htlc);
+    if (hx_conn_post_login_fetched (htlc)
+        && hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE) {
         hx_change_name_icon (htlc);
     }
-
-    /* fogWraith caught us mixing 1.2 + 1.5 conventions: per the
-     * 1.5 spec, USER_GETLIST and the news/messages fetch must not
-     * land at the server until AFTER the client sends TranAgreed
-     * — that's when the server officially treats us as joined.
-     * Used to fire from hx_rcv_user_selfinfo, which arrives BEFORE
-     * the agreement in 1.5 — too early. Single-fire guard makes
-     * the call idempotent: the 2s fallback timer in rcv_task_login
-     * (which still arms in case a 1.2 server skips the agreement
-     * step entirely) is harmless once this has run. */
-    hx_post_login_fetches (htlc);
 }
 
 /* Orchestrator (hxnet) TOFU verify. The Rust TLS lifecycle computes
@@ -486,9 +428,8 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
  * The replayed reply dispatches here via hx_rcv_hdr -> task_with_trans,
  * so the task must be keyed on the connection's login_reply_trans. The
  * NULL ptr arg selects rcv_task_login's post-login (else) branch.
- * htlc->trans is currently the post-login send counter
- * (reply_trans + 1); set it to reply_trans for the task_new key, then
- * restore so post-login sends don't collide. */
+ * htlc->trans is currently our send counter (hxnet_first_trans); set it
+ * to reply_trans for the task_new key, then restore it. */
 void
 hx_orchestrator_register_login_task (struct htlc_conn *htlc)
 {
@@ -601,9 +542,8 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * lazily from the bridge's LOGIN_SENDING state callback
      * (hx_orchestrator_register_login_task), which fires after magic
      * and before the replayed reply — matching legacy's send_login
-     * timing. The +1 bump keeps post-login follow-up sends (issued
-     * from inside rcv_task_login) from colliding with the login task;
-     * the deferred registration restores this value afterwards.
+     * timing. Our own requests are numbered from hxnet_first_trans, past
+     * the session's; the deferred registration restores it afterwards.
      *
      * The replayed reply's trans differs by mode: the plaintext path
      * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
@@ -611,7 +551,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
     hx_conn_set_login_reply_trans (htlc, secure ? (HX_LOGIN_TRANS + 1)
                                                 : HX_LOGIN_TRANS);
-    hx_conn_set_trans (htlc, hx_conn_login_reply_trans (htlc) + 1);
+    hx_conn_set_trans (htlc, hxnet_first_trans ());
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
@@ -652,13 +592,13 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
         caps |= HTLC_CAP_VIDEO;
     }
 #endif
-    /* HOPE sends the display name in step 2; the plaintext paths defer
-     * it to a post-login USER_CHANGE, so they omit the name here. */
+    /* The name goes with the agreement, or to a 1.2 server in a user
+     * change; HOPE also sends it in its step 2. */
     gboolean ok;
     if (tls) {
         /* plaintext LOGIN over TLS (secure+tls is gated out upstream). */
         ok = hx_bridge_install_orchestrated_plaintext_tls (
-            htlc, serverstr, port, login, pass, /*name=*/"",
+            htlc, serverstr, port, login, pass, hx_conn_name (htlc),
             hx_conn_icon (htlc), HX_CLIENT_VERSION, caps, HX_LOGIN_TRANS);
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
@@ -667,7 +607,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
             hx_conn_cipheralg (htlc));
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (
-            htlc, serverstr, port, login, pass, /*name=*/"",
+            htlc, serverstr, port, login, pass, hx_conn_name (htlc),
             hx_conn_icon (htlc), HX_CLIENT_VERSION, caps, HX_LOGIN_TRANS);
     }
     if (!ok) {

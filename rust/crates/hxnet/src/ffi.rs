@@ -198,6 +198,8 @@ pub const HXNET_RECV_FRAME: c_int = 1;
 /// [`hxnet_connection_destroy`] to clean up. The reason is
 /// signalled via the matching `HXNET_SHUTDOWN_*` constants.
 pub const HXNET_RECV_SHUTDOWN: c_int = 2;
+/// `ConnectionState::LoginReady`; no frame comes with it.
+pub const HXNET_RECV_READY: c_int = 3;
 
 /// Shutdown reason codes, written into `*out_reason` when
 /// try_recv returns `HXNET_RECV_SHUTDOWN`.
@@ -273,19 +275,8 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
                 *out_reason = shutdown_code(reason);
                 return HXNET_RECV_SHUTDOWN;
             }
-            Ok(Event::State(_)) => {
-                // Polling API has no surface to expose
-                // connection-state events on. No connect entry
-                // currently produces a pollable handle (the connect
-                // paths are all callback-driven), so State events
-                // don't reach here in practice. If a future caller
-                // wires the polling API through a connect path,
-                // we'll grow a separate `try_recv_state` entry; for now
-                // silently drop state events and continue the
-                // try_recv loop so the caller still gets to
-                // see Frame / Shutdown.
-                continue;
-            }
+            Ok(Event::State(crate::ConnectionState::LoginReady)) => return HXNET_RECV_READY,
+            Ok(Event::State(_)) => continue,
             Err(mpsc::error::TryRecvError::Empty) => return HXNET_RECV_EMPTY,
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 // The actor finished without emitting Shutdown (we
@@ -512,6 +503,42 @@ pub unsafe extern "C" fn hxnet_connection_send_frame(
     }
 }
 
+/// [`Command::Agree`]. Returns the same codes as
+/// [`hxnet_connection_send_frame`].
+///
+/// # Safety
+///
+/// `handle` must be non-NULL and valid; `nick` is NULL with `nick_len` 0
+/// or points at `nick_len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_agree(
+    handle: *mut HxnetConnection,
+    nick: *const u8,
+    nick_len: usize,
+    icon: u16,
+) -> c_int {
+    if handle.is_null() || (nick.is_null() && nick_len != 0) || nick_len > isize::MAX as usize {
+        glib::g_critical!("hxnet", "hxnet_connection_agree: invalid arguments");
+        return HXNET_SEND_INVALID;
+    }
+    let nick = if nick_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(nick, nick_len).to_vec()
+    };
+    match (*handle).cmd.try_send(Command::Agree { nick, icon }) {
+        Ok(()) => HXNET_SEND_OK,
+        Err(mpsc::error::TrySendError::Full(_)) => HXNET_SEND_FULL,
+        Err(mpsc::error::TrySendError::Closed(_)) => HXNET_SEND_CLOSED,
+    }
+}
+
+/// [`crate::session::FIRST_TRANS`].
+#[no_mangle]
+pub extern "C" fn hxnet_first_trans() -> u32 {
+    crate::session::FIRST_TRANS
+}
+
 /// Drop the handle and abort its spawned task. The task is
 /// cancelled at its next await point (see the body for why an
 /// abort is required rather than just dropping the cmd sender), so
@@ -723,6 +750,7 @@ pub const HXNET_STATE_HOPE_STEP1: c_uint = 7;
 pub const HXNET_STATE_HOPE_STEP2: c_uint = 8;
 pub const HXNET_STATE_CIPHER_TRANSITION: c_uint = 9;
 pub const HXNET_STATE_HANDSHAKE_DONE: c_uint = 10;
+pub const HXNET_STATE_LOGIN_READY: c_uint = 11;
 
 const _: () = {
     // Pin the discriminant mapping at compile time. Any reorder
@@ -740,6 +768,7 @@ const _: () = {
     assert!(crate::ConnectionState::HopeStep2 as u32 == HXNET_STATE_HOPE_STEP2);
     assert!(crate::ConnectionState::CipherTransition as u32 == HXNET_STATE_CIPHER_TRANSITION);
     assert!(crate::ConnectionState::HandshakeDone as u32 == HXNET_STATE_HANDSHAKE_DONE);
+    assert!(crate::ConnectionState::LoginReady as u32 == HXNET_STATE_LOGIN_READY);
 };
 
 /// Open a Hotline connection with hxnet driving the entire pre-

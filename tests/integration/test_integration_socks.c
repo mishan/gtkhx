@@ -68,6 +68,7 @@ typedef struct {
 #define HXNET_RECV_EMPTY 0
 #define HXNET_RECV_FRAME 1
 #define HXNET_RECV_SHUTDOWN 2
+#define HXNET_RECV_READY 3
 
 extern hxnet_connection *hxnet_connection_open_plaintext_polling (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
@@ -90,7 +91,7 @@ poll_frame (hxnet_connection *h, hxnet_frame_t *out, int *reason,
     gint64 deadline = g_get_monotonic_time () + (gint64)timeout_ms * 1000;
     for (;;) {
         int rc = hxnet_connection_try_recv_frame (h, out, reason);
-        if (rc != HXNET_RECV_EMPTY) {
+        if (rc != HXNET_RECV_EMPTY && rc != HXNET_RECV_READY) {
             return rc;
         }
         if (g_get_monotonic_time () >= deadline) {

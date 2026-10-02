@@ -261,9 +261,7 @@ fn connect_state_is_per_connection() {
         // The whole point: arming a's keepalive leaves b able to arm its own.
         assert_eq!(hx_conn_ping_timer(b), 0);
 
-        hx_conn_set_post_login_timer(a, 5);
         hx_conn_set_login_reply_trans(a, 2);
-        assert_eq!(hx_conn_post_login_timer(b), 0);
         assert_eq!(hx_conn_login_reply_trans(b), 0);
 
         hx_conn_free(a);
@@ -279,13 +277,11 @@ fn connect_state_is_cleared_by_a_reset() {
     unsafe {
         let h = hx_conn_new();
         hx_conn_set_ping_timer(h, 9);
-        hx_conn_set_post_login_timer(h, 9);
         hx_conn_set_login_reply_trans(h, 9);
 
         hx_conn_reset(h);
 
         assert_eq!(hx_conn_ping_timer(h), 0);
-        assert_eq!(hx_conn_post_login_timer(h), 0);
         assert_eq!(hx_conn_login_reply_trans(h), 0);
 
         hx_conn_free(h);
