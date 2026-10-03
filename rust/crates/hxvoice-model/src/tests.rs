@@ -336,3 +336,63 @@ fn a_video_capable_connection_ignores_the_participant_bits() {
     }
     assert_eq!(m.get_video(4), VIDEO_CAMERA);
 }
+
+fn install_start_recorder(m: &HxVoiceModel) -> Records {
+    let recs: Records = Rc::default();
+    let sink = recs.clone();
+    m.connect_local("video-started", false, move |args| {
+        sink.borrow_mut()
+            .push((args[1].get().unwrap(), args[2].get().unwrap()));
+        None
+    });
+    recs
+}
+
+#[test]
+fn video_started_fires_for_a_new_share_after_the_first_list() {
+    let m = HxVoiceModel::new();
+    m.set_self_uid(1);
+    let started = install_start_recorder(&m);
+
+    // The list that arrives with the join: shares already running.
+    m.ingest_video_publishers(&pubs(&[(4, 1, false)]));
+    assert!(started.borrow().is_empty());
+
+    // uid 4 adds a screen, uid 9 a paused camera, and we start our own.
+    m.ingest_video_publishers(&pubs(&[
+        (4, 1, false),
+        (4, 2, false),
+        (9, 1, true),
+        (1, 1, false),
+    ]));
+    let mut got = started.borrow().clone();
+    got.sort();
+    assert_eq!(got, vec![(4, VIDEO_SCREEN), (9, VIDEO_CAMERA)]);
+
+    // A resume is not a start.
+    started.borrow_mut().clear();
+    m.ingest_video_publishers(&pubs(&[(4, 1, false), (4, 2, false), (9, 1, false)]));
+    assert!(started.borrow().is_empty());
+
+    // After a leave the next list is a fresh room's.
+    m.clear();
+    m.ingest_video_publishers(&pubs(&[(7, 2, false)]));
+    assert!(started.borrow().is_empty());
+    m.ingest_video_publishers(&pubs(&[(7, 2, false), (8, 2, false)]));
+    assert_eq!(started.borrow().as_slice(), &[(8, VIDEO_SCREEN)]);
+}
+
+#[test]
+fn video_started_fires_from_the_participant_bits_too() {
+    let m = HxVoiceModel::new();
+    let started = install_start_recorder(&m);
+    for (b, want) in [
+        (blob(&[(4, 0x0002)]), vec![]),
+        (blob(&[(4, 0x0006)]), vec![(4, VIDEO_SCREEN)]),
+    ] {
+        started.borrow_mut().clear();
+        m.ingest_participants(&b);
+        m.ingest_participant_video(&b);
+        assert_eq!(*started.borrow(), want);
+    }
+}

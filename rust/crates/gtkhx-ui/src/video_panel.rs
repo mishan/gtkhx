@@ -67,6 +67,15 @@ extern "C" {
         respect_saved_state: glib::ffi::gboolean,
     );
     fn hx_session_voice_runtime(sess: *mut c_void) -> *mut c_void;
+    fn hx_session_voice_model(sess: *mut c_void) -> *mut c_void;
+    fn hx_printf_prefix(
+        htlc: *mut c_void,
+        cid: u32,
+        prefix: *const c_char,
+        fmt: *const c_char,
+        ...
+    );
+    static INFOPREFIX: *const c_char;
     fn hx_session_with_serial(serial: u16) -> *mut c_void;
     fn hx_session_htlc(sess: *mut c_void) -> *mut c_void;
     fn hx_htlc_video_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
@@ -1122,6 +1131,61 @@ pub(crate) fn present(sess: *mut c_void) {
     // connection, not only this one.
     let id = crate::cs(dock::ID_VIDEO);
     unsafe { toolbar_present_panel(id.as_ptr(), sess, glib::ffi::GFALSE) };
+}
+
+/// Say in the voice room's chat when someone starts sharing, wherever the
+/// Video panel is or isn't. Hooked to the session's voice model once; the
+/// model lives as long as the session does.
+///
+/// # Safety
+/// `sess` is a valid `session *`; called on the GTK main thread.
+pub(crate) unsafe fn announce_shares(sess: *mut c_void) {
+    let model = hx_session_voice_model(sess);
+    if model.is_null() {
+        return;
+    }
+    let model: glib::Object =
+        glib::translate::from_glib_none(model as *mut glib::gobject_ffi::GObject);
+    if model.data::<bool>("gtkhx-announce-shares").is_some() {
+        return;
+    }
+    model.set_data("gtkhx-announce-shares", true);
+    let conn = dock::key_for_session(sess);
+    model.connect_local("video-started", false, move |args| {
+        let uid = args[1].get::<u32>().ok()? as u16;
+        let kind = args[2].get::<u32>().ok()?;
+        announce_share(conn, uid, kind);
+        None
+    });
+}
+
+/// The model has already applied the presence chime's gate — never our own
+/// share, nor one running when we joined — so what is left is the chat's,
+/// the preference join and leave lines answer to.
+fn announce_share(conn: dock::ConnKey, uid: u16, kind: u32) {
+    if !hxconfig::ffi::with_settings(|s| s.chat.show_joins).unwrap_or(false) {
+        return;
+    }
+    let sess = unsafe { hx_session_with_serial(conn) };
+    let Some(cid) = unsafe { runtime(sess) }.and_then(|rt| rt.active_cid()) else {
+        return;
+    };
+    let name = unsafe { nick(sess, cid, uid) };
+    let line = if kind == hxvoice_model::VIDEO_SCREEN {
+        crate::tr::tr1("%s started sharing their screen", &name)
+    } else {
+        crate::tr::tr1("%s turned their camera on", &name)
+    };
+    let line = crate::cs(&(line + "\n"));
+    unsafe {
+        hx_printf_prefix(
+            hx_session_htlc(sess),
+            cid,
+            INFOPREFIX,
+            c"%s".as_ptr(),
+            line.as_ptr(),
+        )
+    };
 }
 
 #[cfg(test)]

@@ -147,6 +147,9 @@ mod imp {
         pub(crate) seeded: Cell<bool>,
         /// uid → `VIDEO_*` flags, from the last Video Status. Absent is 0.
         pub(crate) video: RefCell<HashMap<u16, u32>>,
+        /// `seeded`, for the video flags: the first list after a join
+        /// describes shares already running, which started nothing.
+        pub(crate) video_seeded: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -180,6 +183,13 @@ mod imp {
                     // publishing whether or not anyone is watching them,
                     // which is what the spec asks of a client.
                     Signal::builder("video-changed")
+                        .param_types([u32::static_type(), u32::static_type()])
+                        .build(),
+                    // "video-started" (uid: u32, kind: u32) — someone else
+                    // began publishing `VIDEO_CAMERA` or `VIDEO_SCREEN`,
+                    // under the same gate as the presence chime. A resume
+                    // is not a start.
+                    Signal::builder("video-started")
                         .param_types([u32::static_type(), u32::static_type()])
                         .build(),
                 ]
@@ -361,9 +371,19 @@ impl HxVoiceModel {
             );
             changed
         };
-        *self.imp().video.borrow_mut() = fresh;
+        let old = std::mem::replace(&mut *self.imp().video.borrow_mut(), fresh);
+        let notify = self.imp().video_seeded.replace(true);
         for (uid, flags) in changed {
             self.emit_by_name::<()>("video-changed", &[&(uid as u32), &flags]);
+            if !notify || uid == self.imp().self_uid.get() {
+                continue;
+            }
+            let was = old.get(&uid).copied().unwrap_or(0);
+            for kind in [VIDEO_CAMERA, VIDEO_SCREEN] {
+                if flags & kind != 0 && was & kind == 0 {
+                    self.emit_by_name::<()>("video-started", &[&(uid as u32), &kind]);
+                }
+            }
         }
     }
 
@@ -393,6 +413,7 @@ impl HxVoiceModel {
         }
         self.imp().by_uid.borrow_mut().clear();
         self.imp().seeded.set(false);
+        self.imp().video_seeded.set(false);
     }
 
     /// Computed indicator for `uid` (NONE for unknown uids). O(1).

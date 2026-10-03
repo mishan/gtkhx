@@ -12,7 +12,7 @@
 //! edits them is gated.
 
 use crate::options::{cfg, combo_row, group, pref_get_string, pref_set_string, switch_row};
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 use gtk4 as gtk;
 use gtk4::glib::translate::IntoGlib;
 use gtk4::prelude::*;
@@ -117,6 +117,14 @@ fn video_group(page: &adw::PreferencesPage) {
             .into_iter()
             .map(|c| (c.name, c.display_name)),
     );
+    // Inside the sandbox nothing is listed until camera access is granted,
+    // which says nothing about whether the saved camera is still there.
+    if !crate::camera_portal::needed() {
+        pairs.extend(missing_camera(
+            &pairs,
+            &pref_get_string(cfg::VOICE_CAMERA_DEVICE),
+        ));
+    }
     let values: Vec<&str> = pairs.iter().map(|(v, _)| v.as_str()).collect();
     let labels: Vec<&str> = pairs.iter().map(|(_, l)| l.as_str()).collect();
     grp.add(&combo_row(
@@ -126,6 +134,14 @@ fn video_group(page: &adw::PreferencesPage) {
         &labels,
     ));
     page.add(&grp);
+}
+
+/// An entry for the saved camera when the scan didn't find it, so an
+/// unplugged camera reads as itself rather than as "First camera found",
+/// which the row would otherwise show while still storing the old device.
+fn missing_camera(listed: &[(String, String)], saved: &str) -> Option<(String, String)> {
+    (!listed.iter().any(|(v, _)| v == saved))
+        .then(|| (saved.to_owned(), tr1("%s (missing)", saved)))
 }
 
 // ------------------------------------------------------------ push-to-talk --
@@ -287,4 +303,28 @@ pub(crate) fn build(page: &adw::PreferencesPage) {
     device_group(page);
     video_group(page);
     ptt_group(page);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_camera;
+
+    #[test]
+    fn missing_camera_only_for_an_unlisted_saved_device() {
+        let listed = vec![
+            (String::new(), "First camera found".to_owned()),
+            ("/dev/video0".to_owned(), "Webcam".to_owned()),
+        ];
+        for (saved, want) in [
+            ("", None),
+            ("/dev/video0", None),
+            ("/dev/video2", Some("/dev/video2 (missing)")),
+        ] {
+            let got = missing_camera(&listed, saved);
+            assert_eq!(got.as_ref().map(|(_, l)| l.as_str()), want, "{saved:?}");
+            if let Some((v, _)) = got {
+                assert_eq!(v, saved);
+            }
+        }
+    }
 }

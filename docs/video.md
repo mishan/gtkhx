@@ -39,7 +39,7 @@ client asks for a stream by name with Video Subscribe (610).
 | Pipeline | `hxvoice-runtime`: `video.rs` (receive and capture bins, frame store), `runtime.rs` (binding senders, pad routing, observers) |
 | Senders | `hxvoice-send`: `hx_send_video_start` / `_stop` / `_state` / `_subscribe` |
 | Receive | `rcv.c`: `hx_rcv_video_status`, the 607 refusal path, login limits → `hx_conn_*_video_limits` |
-| Presence | `hxvoice-model`: per-uid camera / screen / paused flags and a `video-changed` signal, shown by `users_voice_col.rs` |
+| Presence | `hxvoice-model`: per-uid camera / screen / paused flags and the `video-changed` and `video-started` signals, shown by `users_voice_col.rs` and announced in chat by `video_panel.rs` |
 | UI | `gtkhx-ui`: `video_panel.rs` (the dockable panel), `voice_panel.rs` (camera and screen buttons), `screen_share.rs` (portal, consent, banner), `options_voice.rs` (camera picker) |
 | Settings | `hxconfig` `voice.camera_device` |
 
@@ -217,6 +217,14 @@ bits 1 (camera) and 2 (screen) of each voice participant's flags, in
 the join reply and every 605. Those carry no pause, so nothing is drawn
 dim there.
 
+**The chat says when someone starts sharing**: "*name* turned their
+camera on", "*name* started sharing their screen", in the voice room's
+chat. The voice model raises it (`video-started`) under the presence
+chime's gate — never for this client's own share, and not for the shares
+already running when it joined, which the first list after a join
+describes. A resume is not a start. The line follows "Show join / leave
+in chat", the preference join and leave lines answer to.
+
 ## Publishing
 
 The **camera button** in the voice panel is shown when the server
@@ -258,10 +266,13 @@ session, for testing it outside the sandbox.
 The **camera picker** is a Video group on the Voice settings page
 (`voice.camera_device`, a stable device path, empty for the first
 camera). Cameras are keyed by path rather than `gst::Device::name()`,
-which libcamera leaves NULL. The page is built the first time it is
-selected, not when Settings opens, so the camera scan — which wakes every
-GStreamer device provider — happens only when someone actually looks at
-the picker.
+which libcamera leaves NULL. A saved camera the scan doesn't find is
+listed as "*path* (missing)" and stays selected, rather than the row
+showing "First camera found" over a setting that still names it; inside
+the sandbox, where nothing is listed before access is granted, it isn't.
+The page is built the first time it is selected, not when Settings
+opens, so the camera scan — which wakes every GStreamer device provider
+— happens only when someone actually looks at the picker.
 
 Picking another camera while the camera is live moves the publication
 onto it at once, the way the audio pickers do (`docs/voice.md`): only

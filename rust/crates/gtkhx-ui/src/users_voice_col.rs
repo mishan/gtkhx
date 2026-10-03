@@ -153,16 +153,26 @@ mod voice_impl {
     fn video_cell_refresh(img: &gtk::Image, model: &glib::Object, uid: u16) {
         let f = unsafe { hx_voice_model_get_video(model.as_ptr() as *mut c_void, uid) };
         let shown = if f & VIDEO_SCREEN != 0 {
+            let paused = f & VIDEO_SCREEN_PAUSED != 0;
             Some((
                 "screen-shared-symbolic",
-                f & VIDEO_SCREEN_PAUSED != 0,
-                crate::tr::tr("Sharing their screen"),
+                paused,
+                if paused {
+                    crate::tr::tr("Screen sharing paused")
+                } else {
+                    crate::tr::tr("Sharing their screen")
+                },
             ))
         } else if f & VIDEO_CAMERA != 0 {
+            let paused = f & VIDEO_CAMERA_PAUSED != 0;
             Some((
                 "camera-video-symbolic",
-                f & VIDEO_CAMERA_PAUSED != 0,
-                crate::tr::tr("Camera on"),
+                paused,
+                if paused {
+                    crate::tr::tr("Camera paused")
+                } else {
+                    crate::tr::tr("Camera on")
+                },
             ))
         } else {
             None
@@ -171,6 +181,7 @@ mod voice_impl {
             Some((icon, paused, tip)) => {
                 img.set_icon_name(Some(icon));
                 img.set_tooltip_text(Some(&tip));
+                img.update_property(&[gtk::accessible::Property::Label(&tip)]);
                 img.set_visible(true);
                 if paused {
                     img.add_css_class("dim-label");

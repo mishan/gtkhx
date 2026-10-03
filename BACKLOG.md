@@ -18,7 +18,6 @@ record.
 - **Narrower subscriptions.** Tiles scrolled out of view are no longer
   received; a window behind others, and a metered-connection preference,
   should shrink the receive set too.
-- **A chat notice when someone starts sharing**, gated like the voice chimes.
 - **Renderer cost.** The panel builds a new `GdkMemoryTexture` for every frame,
   and GTK uploads each one to the GPU. `gtk4paintablesink` would keep frames on
   the GPU, but neither the GNOME runtime nor the bundle scripts ship it. A
@@ -28,11 +27,6 @@ record.
   camera picker opens or a capture starts. A camera plugged in after that only
   appears once one of those runs again. A `GstDeviceMonitor` bus watch would
   keep it current.
-- **Settings don't show a missing camera.** When the saved camera is unplugged,
-  the combo shows "First camera found" while the stored value still names the
-  old device. A "(missing)" entry would be clearer.
-- **Accessible labels** for the icon-only camera and screen toggles and the
-  user-list video glyph. They have tooltips; an explicit label would be better.
 
 ### Robustness
 
