@@ -891,28 +891,22 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame,
                    (ents[i].flags & 0x0001) ? " MUTED" : "");
     }
 
-    /* Phase 8.D runtime wiring: forward the raw blob. The Rust
-     * side re-parses via hxproto::voice::parse_voice_participants
-     * (same parser the typed walk above used) and feeds the state
-     * machine's mid_to_user / participants caches. */
-    {
-        session *sess = sess_from_htlc (htlc);
-        if (sess && sess->voice_runtime) {
-            gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
-                                             blob_len);
-        }
-        /* Speaker indicator: refresh the canonical per-uid voice
-         * model from the new participants blob. The model emits
-         * "indicator-changed" per uid whose state flipped; the
-         * user list view subscribes and repaints the affected
-         * rows. Independent of the runtime — the C side computes
-         * indicator state from raw wire data, no extra round-trip
-         * required. */
-        if (sess && sess->voice_model) {
-            hx_voice_model_ingest_participants (
-                sess->voice_model, blob, blob_len,
-                hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
-        }
+    /* The runtime re-parses the blob for its mid -> user map. The voice
+     * model behind the speaker indicators takes only the room this client
+     * is in, as the 611 path does: a 605 for a room just left would land
+     * after the model was cleared and become the next room's baseline. */
+    session *sess = sess_from_htlc (htlc);
+    if (sess && sess->voice_runtime) {
+        gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
+                                         blob_len);
+    }
+    uint32_t active_cid = 0;
+    if (sess && sess->voice_model && sess->voice_runtime
+        && gtkhx_voice_runtime_active_cid (sess->voice_runtime, &active_cid)
+        && active_cid == r.cid) {
+        hx_voice_model_ingest_participants (
+            sess->voice_model, blob, blob_len,
+            hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
     }
 }
 
@@ -1064,35 +1058,29 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
                    (ents[i].flags & 0x0001) ? " MUTED" : "");
     }
 
-    /* Phase 8.D runtime wiring: the JOIN reply carries the
-     * server's SDP offer + initial participants. Drive both into
-     * the state machine — SdpOfferReceived starts the answer-
-     * generation walk, ParticipantsUpdated populates the
-     * mid_to_user cache the pad-added path needs. */
-    {
-        session *sess = sess_from_htlc (htlc);
-        if (sess && sess->voice_runtime) {
-            gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
-                                             blob_len);
-            if (sdp_ptr && sdp_len > 0) {
-                char *sdp_str = g_malloc (sdp_len + 1);
-                memcpy (sdp_str, sdp_ptr, sdp_len);
-                sdp_str[sdp_len] = '\0';
-                gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid,
-                                               sdp_str);
-                g_free (sdp_str);
-            }
+    /* The reply's SDP offer starts the answer; its participants fill the
+     * runtime's mid -> user map and, for the room this client is in, are
+     * the voice model's first list. A reply for a room already switched
+     * away from would otherwise become the next room's baseline. */
+    session *sess = sess_from_htlc (htlc);
+    if (sess && sess->voice_runtime) {
+        gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
+                                         blob_len);
+        if (sdp_ptr && sdp_len > 0) {
+            char *sdp_str = g_malloc (sdp_len + 1);
+            memcpy (sdp_str, sdp_ptr, sdp_len);
+            sdp_str[sdp_len] = '\0';
+            gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid, sdp_str);
+            g_free (sdp_str);
         }
-        /* Speaker indicator: feed the canonical voice model too.
-         * The JOIN reply's participants blob is the first
-         * authoritative list we'll see for this room, so the
-         * indicator column starts painting the moment our own
-         * JOIN lands rather than waiting for the first 605. */
-        if (sess && sess->voice_model) {
-            hx_voice_model_ingest_participants (
-                sess->voice_model, blob, blob_len,
-                hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
-        }
+    }
+    uint32_t active_cid = 0;
+    if (sess && sess->voice_model && sess->voice_runtime
+        && gtkhx_voice_runtime_active_cid (sess->voice_runtime, &active_cid)
+        && active_cid == r.cid) {
+        hx_voice_model_ingest_participants (
+            sess->voice_model, blob, blob_len,
+            hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
     }
 }
 
