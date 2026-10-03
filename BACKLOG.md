@@ -34,13 +34,6 @@ record.
 - **Accessible labels** for the icon-only camera and screen toggles and the
   user-list video glyph. They have tooltips; an explicit label would be better.
 
-### Robustness
-
-- **RTP ahead of every offer.** An offer's SSRCs are indexed the moment it
-  arrives, but RTP for an SSRC no offer has declared yet still falls back to
-  the transceiver's mid. Holding such a pad until the next offer is indexed,
-  rather than routing it by transceiver, would close that too.
-
 ## Voice
 
 - **`voice_rejoin_media` against Janus is intermittent.** B sometimes stays in

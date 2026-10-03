@@ -134,14 +134,22 @@ stream on the pad of a *different* section — seen in practice as a
 camera arriving on the pad of that user's silent audio section. The
 spec requires the offer to declare each forwarded section's SSRC, and
 the pad's caps carry the SSRC, so the runtime keeps an SSRC → mid map
-from the offers (FID groups included) and resolves a pad through it,
-falling back to the transceiver's mid only when the SSRC isn't
-declared. An offer is indexed as it arrives, not when it is applied: one
-that arrives mid-answer is queued, and its RTP can come first. Entries
-are added, never pruned until the session ends — an SSRC names one
-stream for its life. What the mid names picks the bin: audio for `send` / `user-N`,
-VP8 for the video mids, and a discarding bin for anything else — the
-spec's "mirror it, never play it".
+from the offers (FID groups included) and resolves a pad through it.
+An offer is indexed as it arrives, not when it is applied: one that
+arrives mid-answer is queued, and its RTP can come first. RTP can also
+beat its offer over the network, so a video pad whose SSRC no offer has
+declared yet, from a server that declares SSRCs at all, is held — its
+buffers dropped, not blocked — until an offer declaring it is indexed,
+and then routed by the section that offer declares it in. The
+transceiver's mid is the fallback for a pad with no SSRC, a server that
+declares none, a held pad no offer declares within a second, and any
+undeclared audio: holding audio would silence a voice while it waits,
+and audio is where the transceiver has been right. A pad held across a
+session teardown goes nowhere. Entries are added, never pruned until
+the session ends — an SSRC names one stream for its life. What the mid
+names picks the bin: audio for `send` / `user-N`, VP8 for the video
+mids, and a discarding bin for anything else — the spec's "mirror it,
+never play it".
 
 ## Where it lives
 

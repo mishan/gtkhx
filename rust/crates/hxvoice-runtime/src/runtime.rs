@@ -716,11 +716,88 @@ pub type VideoObserver = Box<dyn Fn(&VoiceRuntime, &VideoNotice) -> bool>;
 /// one stream for that stream's life, so an old entry misroutes nothing,
 /// and replacing the map when an offer is applied would drop the SSRCs of
 /// one still queued behind it. The map is cleared with the session.
-pub(crate) type SsrcMids = Arc<std::sync::Mutex<HashMap<u32, String>>>;
+///
+/// RTP can still beat its offer over the network. A video pad whose SSRC
+/// no offer has declared, from a server that declares them, is held — its
+/// buffers dropped, so it neither stalls nor reports not-linked — until an
+/// offer declaring it is indexed, and then routed by what that offer says.
+/// See [`pad_route`].
+pub(crate) type SsrcMids = Arc<std::sync::Mutex<SsrcRouting>>;
+
+#[derive(Default)]
+pub(crate) struct SsrcRouting {
+    mids: HashMap<u32, String>,
+    held: Vec<HeldPad>,
+    next_held: u64,
+    /// Bumped with every session, so a release already on its way to the
+    /// main loop can tell its pad belongs to a session since torn down.
+    generation: u64,
+}
+
+impl SsrcRouting {
+    fn clear(&mut self) {
+        self.mids.clear();
+        self.held.clear();
+        self.generation += 1;
+    }
+}
+
+/// A receive pad waiting for an offer to name its SSRC. `release` routes
+/// it, by the mid given or, given none, by its transceiver.
+struct HeldPad {
+    id: u64,
+    ssrc: u32,
+    release: Release,
+}
+
+type Release = Box<dyn FnOnce(Option<String>) + Send>;
+
+/// How long a held pad waits for an offer declaring it before it is
+/// routed by its transceiver after all. Offers are indexed as they
+/// arrive, so the race is only RTP over UDP against the offer over TCP;
+/// the deadline is for a server that forwards an SSRC it never declares.
+const HOLD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What a receive pad carrying `ssrc` is routed by.
+#[derive(Debug, PartialEq)]
+enum PadRoute {
+    /// The section an offer declared it in.
+    Mid(String),
+    /// Nothing an offer said: no SSRC on the pad, a server that declares
+    /// none, or audio, so its transceiver is all there is.
+    Transceiver,
+    /// An offer will say: the server declares SSRCs, just not this one
+    /// yet.
+    Hold(u32),
+}
+
+/// Only video is held: holding audio would silence a voice for as long as
+/// its offer takes, and audio pads are where the transceiver guess has
+/// held up.
+fn pad_route(ssrc: Option<u32>, video: bool, mids: &HashMap<u32, String>) -> PadRoute {
+    match ssrc {
+        Some(ssrc) => match mids.get(&ssrc) {
+            Some(mid) => PadRoute::Mid(mid.clone()),
+            None if mids.is_empty() || !video => PadRoute::Transceiver,
+            None => PadRoute::Hold(ssrc),
+        },
+        None => PadRoute::Transceiver,
+    }
+}
+
+/// Index an offer (see [`index_offer_ssrcs`]) and route the pads it was
+/// holding. Routed from an idle callback: the caller holds the runtime.
+fn index_offer(sdp: &str, map: &SsrcMids) {
+    for (release, mid) in index_offer_ssrcs(sdp, map) {
+        gstreamer::glib::idle_add_once(move || release(Some(mid)));
+    }
+}
 
 /// Add an offer to `map`: every `a=ssrc:<n>` and every member of an
-/// `a=ssrc-group:FID`, keyed to the section's mid.
-fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) {
+/// `a=ssrc-group:FID`, keyed to the section's mid. Returns the held pads
+/// this offer declares, to release, each with its mid. The rest stay
+/// held: another offer may still be on its way for them.
+fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) -> Vec<(Release, String)> {
     let mut fresh: HashMap<u32, String> = HashMap::new();
     let mut mid: Option<String> = None;
     let mut pending: Vec<u32> = Vec::new();
@@ -751,19 +828,111 @@ fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) {
         }
     }
     flush(&mut mid, &mut pending);
-    if let Ok(mut m) = map.lock() {
-        m.extend(fresh);
-    }
+    let Ok(mut m) = map.lock() else {
+        return Vec::new();
+    };
+    let (declared, still): (Vec<_>, Vec<_>) = std::mem::take(&mut m.held)
+        .into_iter()
+        .partition(|h| fresh.contains_key(&h.ssrc));
+    m.held = still;
+    let released = declared
+        .into_iter()
+        .map(|h| (h.release, fresh[&h.ssrc].clone()))
+        .collect();
+    m.mids.extend(fresh);
+    released
 }
 
-/// The mid a receive pad carries: by its SSRC when the offer declared
-/// one, else by its transceiver.
-fn resolve_pad_mid(pad: &gstreamer::Pad, ssrc_mids: &SsrcMids) -> Option<String> {
-    let by_ssrc = pad
-        .current_caps()
-        .and_then(|c| c.structure(0).and_then(|s| s.get::<u32>("ssrc").ok()))
-        .and_then(|ssrc| ssrc_mids.lock().ok()?.get(&ssrc).cloned());
-    by_ssrc.or_else(|| lookup_pad_mid(pad))
+/// A receive pad's SSRC, and whether it carries video.
+fn pad_rtp(pad: &gstreamer::Pad) -> (Option<u32>, bool) {
+    let caps = pad.current_caps();
+    let s = caps.as_ref().and_then(|c| c.structure(0));
+    (
+        s.and_then(|s| s.get::<u32>("ssrc").ok()),
+        s.and_then(|s| s.get::<&str>("media").ok()) == Some("video"),
+    )
+}
+
+/// Routes a receive pad by the mid given, or by its transceiver given none.
+type Route = Arc<dyn Fn(&gstreamer::Pad, Option<String>) + Send + Sync>;
+
+/// A receive pad from webrtcbin: route it, or hold it for an offer (see
+/// [`SsrcMids`]) with its deadline on `ctx`.
+fn on_receive_pad(
+    pad: &gstreamer::Pad,
+    ssrc_mids: &SsrcMids,
+    route: &Route,
+    ctx: &gstreamer::glib::MainContext,
+) {
+    let (ssrc, video) = pad_rtp(pad);
+    let Ok(mut routing) = ssrc_mids.lock() else {
+        route(pad, None);
+        return;
+    };
+    let ssrc = match pad_route(ssrc, video, &routing.mids) {
+        PadRoute::Hold(ssrc) => ssrc,
+        PadRoute::Mid(mid) => {
+            drop(routing);
+            return route(pad, Some(mid));
+        }
+        PadRoute::Transceiver => {
+            drop(routing);
+            return route(pad, None);
+        }
+    };
+    // Dropped rather than blocked: a blocked streaming thread would hold
+    // the jitterbuffer's queue for nothing.
+    let probe = pad.add_probe(
+        gstreamer::PadProbeType::BUFFER | gstreamer::PadProbeType::BUFFER_LIST,
+        |_, _| gstreamer::PadProbeReturn::Drop,
+    );
+    let id = routing.next_held;
+    routing.next_held += 1;
+    let generation = routing.generation;
+    let release = {
+        let route = Arc::clone(route);
+        let map = Arc::clone(ssrc_mids);
+        let pad = pad.clone();
+        move |mid: Option<String>| {
+            // A pad removed while held, or from a session since torn
+            // down, has nothing left to go to.
+            let current = map.lock().is_ok_and(|r| r.generation == generation);
+            if current && pad.parent().is_some() {
+                route(&pad, mid);
+            }
+            if let Some(probe) = probe {
+                pad.remove_probe(probe);
+            }
+        }
+    };
+    routing.held.push(HeldPad {
+        id,
+        ssrc,
+        release: Box::new(release),
+    });
+    drop(routing);
+    crate::debug::log!(
+        "voice-pipe",
+        "pad-added pad={} ssrc={ssrc} not declared yet; holding",
+        pad.name()
+    );
+    let map = Arc::clone(ssrc_mids);
+    gstreamer::glib::timeout_source_new(
+        HOLD_DEADLINE,
+        None,
+        gstreamer::glib::Priority::DEFAULT,
+        move || {
+            let held = map.lock().ok().and_then(|mut r| {
+                let i = r.held.iter().position(|h| h.id == id)?;
+                Some(r.held.remove(i))
+            });
+            if let Some(h) = held {
+                (h.release)(None);
+            }
+            gstreamer::glib::ControlFlow::Break
+        },
+    )
+    .attach(Some(ctx));
 }
 
 /// The runtime's video state: per-kind capture legs, the frame store,
@@ -813,7 +982,7 @@ impl VideoRt {
             ],
             screen_source: None,
             observers: Vec::new(),
-            ssrc_mids: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            ssrc_mids: SsrcMids::default(),
         }
     }
 
@@ -2142,7 +2311,7 @@ impl VoiceRuntime {
         // Index an offer's SSRCs on arrival, before the machine can park
         // it behind an answer in progress. See [`SsrcMids`].
         if let Event::SdpOfferReceived { sdp, .. } = &event {
-            index_offer_ssrcs(sdp, &self.inner.borrow().video.ssrc_mids);
+            index_offer(sdp, &self.inner.borrow().video.ssrc_mids);
         }
         // Enqueue the event. If we're already dispatching (this is
         // a nested call from inside a Backend invocation), just
@@ -2626,8 +2795,9 @@ impl VoiceRuntime {
                 // promise's eventual resolution is correctly
                 // dropped as stale.
                 // Indexed already on arrival; again here for an offer
-                // dispatched without one. Adding is idempotent.
-                index_offer_ssrcs(&sdp, &self.inner.borrow().video.ssrc_mids);
+                // dispatched without one. Adding is idempotent, and the
+                // pads this offer declares were released the first time.
+                index_offer(&sdp, &self.inner.borrow().video.ssrc_mids);
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
                     inner.answer_generation = inner.answer_generation.wrapping_add(1);
@@ -3264,9 +3434,10 @@ fn lookup_local_sdp_mid(webrtcbin: &gstreamer::Element, mline_index: u32) -> Opt
 ///
 /// Skips non-`Src` pads — webrtcbin also exposes sink pads (request
 /// pads from the send leg) and we shouldn't try to bind a receive
-/// bin to those. The `mid` is resolved through the pad's
-/// `transceiver` property's `mid`; a pad without a transceiver
-/// (rare; data-channel pads don't have one) or one whose
+/// bin to those. The `mid` is resolved by the pad's SSRC (see
+/// [`SsrcMids`], which may hold the pad for an offer first), else
+/// through the pad's `transceiver` property's `mid`; a pad without a
+/// transceiver (rare; data-channel pads don't have one) or one whose
 /// transceiver doesn't have a `mid` yet is dropped with a warning.
 ///
 /// Same `Send + 'static` callback shape as `connect_on_ice_candidate`:
@@ -3284,13 +3455,10 @@ fn connect_pad_added(
 ) {
     let main_ctx = gstreamer::glib::MainContext::default();
     let pipeline = pipeline.clone();
-    webrtcbin.connect_pad_added(move |_bin, pad| {
-        if pad.direction() != gstreamer::PadDirection::Src {
-            // Sink pads (request pads from the send leg) come
-            // through this signal too; nothing to do with them.
-            return;
-        }
-        let mid = match resolve_pad_mid(pad, &ssrc_mids) {
+    // Route a pad by `mid`, or by its transceiver given none. From the
+    // streaming thread, or the main thread for a held pad.
+    let route = Arc::new(move |pad: &gstreamer::Pad, mid: Option<String>| {
+        let mid = match mid.or_else(|| lookup_pad_mid(pad)) {
             Some(m) => m,
             None => {
                 crate::debug::log!(
@@ -3489,6 +3657,16 @@ fn connect_pad_added(
                 });
             });
         });
+    });
+    let route: Route = route;
+    let ctx = gstreamer::glib::MainContext::default();
+    webrtcbin.connect_pad_added(move |_bin, pad| {
+        if pad.direction() != gstreamer::PadDirection::Src {
+            // Sink pads (request pads from the send leg) come
+            // through this signal too; nothing to do with them.
+            return;
+        }
+        on_receive_pad(pad, &ssrc_mids, &route, &ctx);
     });
 }
 
@@ -7750,12 +7928,12 @@ a=inactive\r\n";
     fn ssrc_mid(runtime: &VoiceRuntime, ssrc: u32) -> Option<String> {
         let map = Arc::clone(&runtime.inner.borrow().video.ssrc_mids);
         let m = map.lock().expect("ssrc map");
-        m.get(&ssrc).cloned()
+        m.mids.get(&ssrc).cloned()
     }
 
     #[test]
     fn offer_ssrcs_map_to_their_sections_mid() {
-        let map: SsrcMids = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let map = SsrcMids::default();
         index_offer_ssrcs(
             "v=0\r\n\
 a=ssrc:1 cname:session-level\r\n\
@@ -7769,7 +7947,7 @@ a=ssrc:20 cname:x\r\n\
 a=ssrc:21 cname:x\r\n",
             &map,
         );
-        let m = map.lock().unwrap();
+        let m = &map.lock().unwrap().mids;
         assert_eq!(
             m.get(&10).map(String::as_str),
             Some("user-4"),
@@ -7782,6 +7960,108 @@ a=ssrc:21 cname:x\r\n",
             "FID member"
         );
         assert_eq!(m.get(&1), None, "session-level lines belong to no section");
+    }
+
+    /// Video for an SSRC no offer has named yet waits for one, from a
+    /// server that names them; with nothing named, no SSRC, or audio,
+    /// there is only the transceiver to go by.
+    #[test]
+    fn an_undeclared_video_ssrc_is_held_only_where_offers_declare_them() {
+        let mids = HashMap::from([(10, "user-4".to_string())]);
+        for (ssrc, video, mids, want) in [
+            (Some(10), true, &mids, PadRoute::Mid("user-4".into())),
+            (Some(20), true, &mids, PadRoute::Hold(20)),
+            (Some(20), false, &mids, PadRoute::Transceiver),
+            (None, true, &mids, PadRoute::Transceiver),
+            (Some(20), true, &HashMap::new(), PadRoute::Transceiver),
+        ] {
+            assert_eq!(
+                pad_route(ssrc, video, mids),
+                want,
+                "ssrc {ssrc:?} video {video}"
+            );
+        }
+    }
+
+    /// A receive pad as webrtcbin hands it over: in an element, with RTP
+    /// caps naming its SSRC.
+    fn rtp_pad(bin: &gstreamer::Bin, ssrc: u32, media: &str) -> gstreamer::Pad {
+        let pad = gstreamer::Pad::builder(gstreamer::PadDirection::Src)
+            .name(format!("src_{ssrc}"))
+            .build();
+        pad.set_active(true).unwrap();
+        bin.add_pad(&pad).unwrap();
+        for event in [
+            gstreamer::event::StreamStart::new("test"),
+            gstreamer::event::Caps::new(
+                &gstreamer::Caps::builder("application/x-rtp")
+                    .field("media", media)
+                    .field("ssrc", ssrc)
+                    .build(),
+            ),
+        ] {
+            pad.store_sticky_event(&event).unwrap();
+        }
+        pad
+    }
+
+    /// The hold, end to end short of webrtcbin: an undeclared video pad
+    /// waits through an offer that doesn't declare it and is routed by
+    /// the one that does; another is routed by its transceiver at the
+    /// deadline; one released after its session was torn down goes
+    /// nowhere; undeclared audio is never held.
+    #[test]
+    fn a_held_pad_goes_where_its_offer_says() {
+        gstreamer::init().unwrap();
+        let ctx = gstreamer::glib::MainContext::new();
+        let _owner = ctx.acquire().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let route: Route =
+            Arc::new(move |pad, mid| tx.send((pad.name().to_string(), mid)).unwrap());
+        let map = SsrcMids::default();
+        map.lock().unwrap().mids.insert(10, "user-4".into());
+        let bin = gstreamer::Bin::new();
+
+        on_receive_pad(&rtp_pad(&bin, 21, "audio"), &map, &route, &ctx);
+        assert_eq!(rx.try_recv().unwrap(), ("src_21".into(), None));
+
+        on_receive_pad(&rtp_pad(&bin, 20, "video"), &map, &route, &ctx);
+        on_receive_pad(&rtp_pad(&bin, 30, "video"), &map, &route, &ctx);
+        assert!(rx.try_recv().is_err(), "both held");
+
+        let other = "v=0\nm=audio 9 RTP/SAVPF 0\na=mid:user-6\na=ssrc:40 cname:z\n";
+        assert!(index_offer_ssrcs(other, &map).is_empty());
+        let declaring = "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-5\na=ssrc:20 cname:y\n";
+        for (release, mid) in index_offer_ssrcs(declaring, &map) {
+            release(Some(mid));
+        }
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ("src_20".into(), Some("cam-user-5".into()))
+        );
+        assert_eq!(map.lock().unwrap().held.len(), 1, "30 still waits");
+
+        let deadline = std::time::Instant::now() + HOLD_DEADLINE * 3;
+        let got = loop {
+            ctx.iteration(false);
+            if let Ok(got) = rx.try_recv() {
+                break got;
+            }
+            assert!(std::time::Instant::now() < deadline, "no deadline");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(got, ("src_30".into(), None));
+
+        on_receive_pad(&rtp_pad(&bin, 50, "video"), &map, &route, &ctx);
+        let released = index_offer_ssrcs(
+            "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-7\na=ssrc:50 cname:y\n",
+            &map,
+        );
+        map.lock().unwrap().clear();
+        for (release, mid) in released {
+            release(Some(mid));
+        }
+        assert!(rx.try_recv().is_err(), "a torn-down session's pad");
     }
 
     /// An offer that arrives while the last answer is still being made
