@@ -875,12 +875,14 @@ fn pad_rtp(pad: &gstreamer::Pad) -> (Option<u32>, bool) {
 type Route = Arc<dyn Fn(&gstreamer::Pad, Option<String>) + Send + Sync>;
 
 /// A receive pad from webrtcbin: route it, or hold it for an offer (see
-/// [`SsrcMids`]) with its deadline on `ctx`.
+/// [`SsrcMids`]) with its deadline on `ctx`. `transceiver` names the mid
+/// a held pad falls back to at the deadline.
 fn on_receive_pad(
     pad: &gstreamer::Pad,
     ssrc_mids: &SsrcMids,
     route: &Route,
     ctx: &gstreamer::glib::MainContext,
+    transceiver: fn(&gstreamer::Pad) -> Option<String>,
 ) {
     let (ssrc, video) = pad_rtp(pad);
     let Ok(mut routing) = ssrc_mids.lock() else {
@@ -912,6 +914,7 @@ fn on_receive_pad(
         let map = Arc::clone(ssrc_mids);
         let pad = pad.clone();
         move |mid: Option<String>| {
+            let mid = mid.or_else(|| transceiver(&pad));
             // A pad removed while held, from a session since torn down,
             // or whose section has since gone inactive has nothing left
             // to go to.
@@ -3687,7 +3690,7 @@ fn connect_pad_added(
             // through this signal too; nothing to do with them.
             return;
         }
-        on_receive_pad(pad, &ssrc_mids, &route, &ctx);
+        on_receive_pad(pad, &ssrc_mids, &route, &ctx, lookup_pad_mid);
     });
 }
 
@@ -8052,6 +8055,11 @@ a=ssrc:21 cname:x\r\n",
         (sink, count)
     }
 
+    /// The test pads' transceivers: only `src_80`'s has a mid.
+    fn test_transceiver(pad: &gstreamer::Pad) -> Option<String> {
+        (pad.name() == "src_80").then(|| "cam-user-9".into())
+    }
+
     /// Push a buffer and a list of two through `pad`, as RTP would.
     fn push_rtp(pad: &gstreamer::Pad) {
         assert_eq!(
@@ -8068,7 +8076,8 @@ a=ssrc:21 cname:x\r\n",
     /// waits through an offer that doesn't declare it and is routed by
     /// the one that does; another is routed by its transceiver at the
     /// deadline; one released after its session was torn down, or after
-    /// its section went inactive, goes nowhere; undeclared audio is never
+    /// its section (or at the deadline, its transceiver's) went inactive,
+    /// goes nowhere; undeclared audio is never
     /// held. Held RTP is dropped quietly, and flows once released.
     #[test]
     fn a_held_pad_goes_where_its_offer_says() {
@@ -8082,13 +8091,25 @@ a=ssrc:21 cname:x\r\n",
         map.lock().unwrap().mids.insert(10, "user-4".into());
         let bin = gstreamer::Bin::new();
 
-        on_receive_pad(&rtp_pad(&bin, 21, "audio"), &map, &route, &ctx);
+        on_receive_pad(
+            &rtp_pad(&bin, 21, "audio"),
+            &map,
+            &route,
+            &ctx,
+            test_transceiver,
+        );
         assert_eq!(rx.try_recv().unwrap(), ("src_21".into(), None));
 
         let held = rtp_pad(&bin, 20, "video");
         let (_sink, delivered) = counting_sink(&held);
-        on_receive_pad(&held, &map, &route, &ctx);
-        on_receive_pad(&rtp_pad(&bin, 30, "video"), &map, &route, &ctx);
+        on_receive_pad(&held, &map, &route, &ctx, test_transceiver);
+        on_receive_pad(
+            &rtp_pad(&bin, 30, "video"),
+            &map,
+            &route,
+            &ctx,
+            test_transceiver,
+        );
         assert!(rx.try_recv().is_err(), "both held");
         // Held, RTP is dropped without an error to stall or end the stream.
         push_rtp(&held);
@@ -8109,6 +8130,18 @@ a=ssrc:21 cname:x\r\n",
         push_rtp(&held);
         assert_eq!(delivered.load(Ordering::SeqCst), 3);
 
+        // 80's transceiver section goes inactive while it waits, so its
+        // deadline routes it nowhere.
+        on_receive_pad(
+            &rtp_pad(&bin, 80, "video"),
+            &map,
+            &route,
+            &ctx,
+            test_transceiver,
+        );
+        let stopped = "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-9\na=inactive\n";
+        assert!(index_offer_ssrcs(stopped, &map).is_empty());
+
         let deadline = std::time::Instant::now() + HOLD_DEADLINE * 3;
         let got = loop {
             ctx.iteration(false);
@@ -8119,8 +8152,20 @@ a=ssrc:21 cname:x\r\n",
             std::thread::sleep(std::time::Duration::from_millis(10));
         };
         assert_eq!(got, ("src_30".into(), None));
+        while !map.lock().unwrap().held.is_empty() {
+            assert!(std::time::Instant::now() < deadline, "no deadline for 80");
+            ctx.iteration(false);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(rx.try_recv().is_err(), "an inactive transceiver's pad");
 
-        on_receive_pad(&rtp_pad(&bin, 50, "video"), &map, &route, &ctx);
+        on_receive_pad(
+            &rtp_pad(&bin, 50, "video"),
+            &map,
+            &route,
+            &ctx,
+            test_transceiver,
+        );
         let released = index_offer_ssrcs(
             "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-7\na=ssrc:50 cname:y\n",
             &map,
@@ -8134,7 +8179,13 @@ a=ssrc:21 cname:x\r\n",
         // A release still on its way when a newer offer stops its section
         // builds nothing; an offer reviving the section routes again.
         map.lock().unwrap().mids.insert(10, "user-4".into());
-        on_receive_pad(&rtp_pad(&bin, 60, "video"), &map, &route, &ctx);
+        on_receive_pad(
+            &rtp_pad(&bin, 60, "video"),
+            &map,
+            &route,
+            &ctx,
+            test_transceiver,
+        );
         let released = index_offer_ssrcs(
             "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-8\na=ssrc:60 cname:y\n",
             &map,
@@ -8145,7 +8196,13 @@ a=ssrc:21 cname:x\r\n",
             release(Some(mid));
         }
         assert!(rx.try_recv().is_err(), "a stopped section's pad");
-        on_receive_pad(&rtp_pad(&bin, 70, "video"), &map, &route, &ctx);
+        on_receive_pad(
+            &rtp_pad(&bin, 70, "video"),
+            &map,
+            &route,
+            &ctx,
+            test_transceiver,
+        );
         for (release, mid) in index_offer_ssrcs(
             "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-8\na=ssrc:70 cname:y\n",
             &map,

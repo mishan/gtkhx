@@ -145,9 +145,11 @@ transceiver's mid is the fallback for a pad with no SSRC, a server that
 declares none, a held pad no offer declares within a second, and any
 undeclared audio: holding audio would silence a voice while it waits,
 and audio is where the transceiver has been right. A pad held across a
-session teardown goes nowhere, and so does one whose section a newer
-offer has made `a=inactive` before its release ran: its bin would play
-a stream already stopped. Entries are added, never pruned until
+session teardown goes nowhere, and so does one whose section — or, at
+the deadline, its transceiver's — a newer offer has made `a=inactive`
+before its release ran: its bin would play a stream already stopped. A
+section revived later is routed again only for a new pad; a skipped pad
+that `webrtcbin` reuses is not, as with any stopped stream. Entries are added, never pruned until
 the session ends — an SSRC names one stream for its life. What the mid
 names picks the bin: audio for `send` / `user-N`, VP8 for the video
 mids, and a discarding bin for anything else — the spec's "mirror it,
