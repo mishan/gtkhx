@@ -83,10 +83,10 @@ rust-version = "1.92"
 # widget crate and its layout engine release together; move them together.
 rotulus = "0.1"
 rotulus-layout = "0.1"
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "6346cffe3b08cefa393c24cf0671dfae5643de2b" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "6346cffe3b08cefa393c24cf0671dfae5643de2b" }
-hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "6346cffe3b08cefa393c24cf0671dfae5643de2b" }
-hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "6346cffe3b08cefa393c24cf0671dfae5643de2b" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "3566029da112c396931fa2ca3cfee665c57ed794" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "3566029da112c396931fa2ca3cfee665c57ed794" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "3566029da112c396931fa2ca3cfee665c57ed794" }
+hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "3566029da112c396931fa2ca3cfee665c57ed794" }
 glib = "0.22"
 gio = "0.22"
 gtk4 = "0.11"
