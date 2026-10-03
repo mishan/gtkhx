@@ -30,15 +30,18 @@
  * probe's order of magnitude. */
 #define GIF_ICONS_PROBE_TIMEOUT_S 2
 
-void
+guint32
 hx_icon_getlist (struct htlc_conn *htlc)
 {
     if (!htlc) {
-        return;
+        return 0;
     }
     /* ICON_GETLIST is a zero-chunk request. */
-    task_new (htlc, RCV_TASK_FN (rcv_task_icon_getlist), NULL, 0, "icon-list");
+    guint32 trans = task_new (htlc, RCV_TASK_FN (rcv_task_icon_getlist), NULL,
+                              0, "icon-list")
+                        ->trans;
     hlwrite_chunks (htlc, HTLC_HDR_ICON_GETLIST, 0, NULL, 0);
+    return trans;
 }
 
 static gboolean
@@ -73,11 +76,7 @@ hx_icon_probe (struct htlc_conn *htlc)
     if (hx_conn_gif_icons_probe_timer (htlc)) {
         g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
     }
-    /* hx_icon_getlist's task_new snapshots htlc->trans (the increment
-     * happens later inside hlwrite_chunks), so the trans the probe task
-     * is keyed on is htlc->trans right now. Stash it for the watchdog. */
-    hx_conn_set_gif_icons_probe_trans (htlc, hx_conn_trans (htlc));
-    hx_icon_getlist (htlc);
+    hx_conn_set_gif_icons_probe_trans (htlc, hx_icon_getlist (htlc));
     hx_conn_set_gif_icons_probe_timer (
         htlc, g_timeout_add_seconds (GIF_ICONS_PROBE_TIMEOUT_S,
                                      gif_icons_probe_timeout, htlc));

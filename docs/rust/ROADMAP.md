@@ -189,8 +189,9 @@ below.
 **Concurrency.** There is no `pthread_create` in the tree. Worker threads are
 tokio tasks (or blocking-pool tasks) that marshal to the main thread through
 the `hxbridge` ferry or `g_idle_add`; the GLib timers that remain are the ones
-that drive C-side state and gain nothing from a tokio `Interval` — the ping
-keepalive, the post-login SELFINFO fallback, the fetch drains, UI debounce.
+that drive C-side state and gain nothing from a tokio `Interval` — the
+post-login SELFINFO fallback, the fetch drains, UI debounce. The keepalive
+is the session's, timed by `hxnet`'s actor.
 
 ---
 
@@ -712,11 +713,14 @@ The order, each step its own branch and each checked against the rig:
    the post-login fetches may go out (`LoginReady`). C reads the login
    reply's fields, shows the agreement, and keeps everything after.
    HOPE's two steps stay in `hxnet` until step 4; the session takes over
-   at their reply. *In progress.*
-3. **Transaction ids and the keep-alive.** The task table's correlation in
-   `rcv.c`/`tasks.c` and the ping timer in `network.c` move into the session;
-   a GtkHx task keeps its view-side state, keyed by the trans the session
-   gives it.
+   at their reply. *Done.*
+3. **Transaction ids and the keep-alive.** The session numbers every
+   transaction from one counter, and a GtkHx task keeps its view-side
+   state, keyed by the trans the session gives it
+   (`hxnet_connection_take_trans`). The keep-alive is the session's, in
+   place of the ping timer in `network.c`. *Done.* Matching a reply to
+   its task is still `hx_rcv_task` and `hxtask`'s table; it moves with
+   the replies, in step 5.
 4. **HOPE and compression.** The handshake steps and key derivation are pure
    functions in `hxnet` already (`hope.rs`, `hope_keys.rs`); they move to
    hx-libs with `hxcrypto` and become session-side codecs, which is also what
@@ -724,12 +728,11 @@ The order, each step its own branch and each checked against the rig:
 5. **The receive handlers, domain by domain.** Chat, users, messages, news,
    files: each moves from `rcv.c` and `hxhandlers` onto session events. Until
    a domain moves, its frames reach GtkHx whole, as `Event::Unhandled` and
-   `Session::request` already allow.
+   `Session::request` already allow. A domain's replies move with it, and
+   the task table's correlation (`hx_rcv_task`, `hxtask`) goes once the
+   last of them has.
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
-
-Until step 3 there are two transaction counters, the session's and C's;
-C's start at `hxnet_first_trans`, past the session's few.
 
 The extensions GtkHx negotiates (voice and video signaling, inline media,
 chat history, GIF icons, colored nicknames, Large Files, text encoding)

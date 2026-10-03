@@ -230,7 +230,7 @@ hx_session_remove (session *sess)
 /* Free a connection, releasing anything it is still holding first.
  *
  * Everything below is normally already released: `hx_htlc_close` stops the
- * keepalive and the GIF-icons probe, `rcv.c` stops the post-login fallback,
+ * GIF-icons probe, `rcv.c` stops the post-login fallback,
  * and the HOPE material and the transport handle go the same way. But
  * `hx_session_close` only runs that path for a connection that still has a
  * socket, and this is the last moment anything can be released at all — a
@@ -250,10 +250,6 @@ hx_conn_release (struct htlc_conn *htlc)
         return;
     }
 
-    if ((id = hx_conn_ping_timer (htlc)) != 0) {
-        g_source_remove (id);
-        hx_conn_set_ping_timer (htlc, 0);
-    }
     if ((id = hx_conn_gif_icons_probe_timer (htlc)) != 0) {
         g_source_remove (id);
         hx_conn_set_gif_icons_probe_timer (htlc, 0);

@@ -62,6 +62,7 @@ use crate::hope::{
 };
 use crate::hope_blowfish::HopeMacAlg;
 use crate::hope_keys::{compute_blowfish_chain, derive_aead_keys, HopeCipherKind};
+use crate::session::SharedSession;
 use crate::transform::{compose, CipherLayer, CompressionKind};
 use crate::{
     connect::resolve_and_connect, login_reply::recv_login_reply, magic::run_magic_exchange,
@@ -96,6 +97,22 @@ pub struct PlaintextOpenRequest {
     pub proxy: Option<crate::connect::ProxyConfig>,
 }
 
+impl PlaintextOpenRequest {
+    /// The session the lifecycle drives from the magic on, made before
+    /// it starts so the consumer can number requests from it at once.
+    pub fn session(&self) -> SharedSession {
+        let cfg = crate::session::config(
+            &self.login,
+            &self.password,
+            &self.name,
+            self.icon,
+            self.version,
+            self.caps,
+        );
+        SharedSession::new(Session::new(cfg, 0).into())
+    }
+}
+
 /// Drive the plaintext-Hotline lifecycle end-to-end. On success,
 /// transitions into the actor loop and runs until the actor
 /// exits. On failure, emits a synthetic `Event::Shutdown` and
@@ -107,6 +124,7 @@ pub struct PlaintextOpenRequest {
 /// async task starts.
 pub async fn run_plaintext_lifecycle(
     req: PlaintextOpenRequest,
+    session: SharedSession,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
@@ -134,7 +152,7 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    run_plaintext_over(stream, &req, cmd_rx, evt_tx).await;
+    run_plaintext_over(stream, session, cmd_rx, evt_tx).await;
 }
 
 /// How much a connection reads from its socket at a time.
@@ -168,6 +186,7 @@ where
 /// [`crate::tls`].
 pub async fn run_plaintext_tls_lifecycle(
     req: PlaintextOpenRequest,
+    session: SharedSession,
     verify: TlsVerifyFn,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
@@ -247,7 +266,7 @@ pub async fn run_plaintext_tls_lifecycle(
         }
     }
 
-    run_plaintext_over(tls, &req, cmd_rx, evt_tx).await;
+    run_plaintext_over(tls, session, cmd_rx, evt_tx).await;
 }
 
 /// The post-connect plaintext lifecycle, generic over the transport
@@ -255,7 +274,7 @@ pub async fn run_plaintext_tls_lifecycle(
 /// session ([`crate::session`]) from the magic on.
 async fn run_plaintext_over<S>(
     stream: S,
-    req: &PlaintextOpenRequest,
+    session: SharedSession,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) where
@@ -268,15 +287,7 @@ async fn run_plaintext_over<S>(
     {
         return;
     }
-    let cfg = crate::session::config(
-        &req.login,
-        &req.password,
-        &req.name,
-        req.icon,
-        req.version,
-        req.caps,
-    );
-    crate::session::run(stream, Session::new(cfg, 0), false, cmd_rx, evt_tx).await;
+    crate::session::run(stream, session, false, cmd_rx, evt_tx).await;
 }
 
 /// Parameters for the HOPE-Secure-Login lifecycle. Adds the cipher
@@ -303,6 +314,23 @@ pub struct HopeOpenRequest {
     /// Optional SOCKS proxy to tunnel through; `None` connects direct.
     /// See [`PlaintextOpenRequest::proxy`].
     pub proxy: Option<crate::connect::ProxyConfig>,
+}
+
+impl HopeOpenRequest {
+    /// As [`PlaintextOpenRequest::session`], for a session that takes over
+    /// at the step-2 reply: HOPE's two steps go out on `trans` and the
+    /// one after.
+    pub fn session(&self) -> SharedSession {
+        let cfg = crate::session::config(
+            &self.login,
+            &self.password,
+            &self.name,
+            self.icon,
+            self.version,
+            self.caps,
+        );
+        SharedSession::new(Session::logging_in(cfg, self.trans.wrapping_add(2), 0).into())
+    }
 }
 
 /// Map a wire MAC-algorithm label onto the rekey enum the
@@ -358,6 +386,7 @@ pub type HopeAeadSlot = std::sync::Arc<std::sync::Mutex<Option<HopeAeadMaterial>
 
 pub async fn run_hope_lifecycle(
     req: HopeOpenRequest,
+    session: SharedSession,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
     hope_slot: HopeAeadSlot,
@@ -599,15 +628,6 @@ pub async fn run_hope_lifecycle(
     };
 
     // The session takes over at the step-2 reply, the login's.
-    let cfg = crate::session::config(
-        &req.login,
-        &req.password,
-        &req.name,
-        req.icon,
-        req.version,
-        req.caps,
-    );
-    let session = Session::logging_in(cfg, req.trans.wrapping_add(2), 0);
     crate::session::run(wrapped, session, true, cmd_rx, evt_tx).await;
 }
 
@@ -677,7 +697,12 @@ mod tests {
             proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
+        let lifecycle = tokio::spawn(run_plaintext_lifecycle(
+            req.clone(),
+            req.session(),
+            cmd_rx,
+            evt_tx,
+        ));
 
         // Drain state events.
         let mut seen: Vec<ConnectionState> = Vec::new();
@@ -802,7 +827,12 @@ mod tests {
             proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
+        let lifecycle = tokio::spawn(run_plaintext_lifecycle(
+            req.clone(),
+            req.session(),
+            cmd_rx,
+            evt_tx,
+        ));
 
         let mut shutdown_msg: Option<String> = None;
         let mut saw_handshake_done = false;
@@ -866,7 +896,13 @@ mod tests {
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let hope_slot: HopeAeadSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let lc = tokio::spawn(run_hope_lifecycle(req, cmd_rx, evt_tx, hope_slot));
+        let lc = tokio::spawn(run_hope_lifecycle(
+            req.clone(),
+            req.session(),
+            cmd_rx,
+            evt_tx,
+            hope_slot,
+        ));
         let mut saw_hd = false;
         let mut saw_frame = false;
         while let Some(evt) = tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
@@ -930,7 +966,13 @@ mod tests {
             eprintln!("CERT fingerprint: {fp}");
             true
         }));
-        let lc = tokio::spawn(run_plaintext_tls_lifecycle(req, verify, cmd_rx, evt_tx));
+        let lc = tokio::spawn(run_plaintext_tls_lifecycle(
+            req.clone(),
+            req.session(),
+            verify,
+            cmd_rx,
+            evt_tx,
+        ));
         let mut saw_hd = false;
         let mut saw_frame = false;
         while let Some(evt) = tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
@@ -983,7 +1025,12 @@ mod tests {
             proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
+        let lifecycle = tokio::spawn(run_plaintext_lifecycle(
+            req.clone(),
+            req.session(),
+            cmd_rx,
+            evt_tx,
+        ));
 
         let mut saw_connected = false;
         let mut shutdown_msg: Option<String> = None;
@@ -1067,7 +1114,12 @@ mod tests {
             .await
             .expect("queue shutdown");
 
-        let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
+        let lifecycle = tokio::spawn(run_plaintext_lifecycle(
+            req.clone(),
+            req.session(),
+            cmd_rx,
+            evt_tx,
+        ));
 
         let mut saw_handshake_done = false;
         let mut saw_shutdown = false;

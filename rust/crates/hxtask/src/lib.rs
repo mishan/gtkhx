@@ -89,6 +89,8 @@ fn trans_key(trans: u32) -> gpointer {
 
 #[cfg(not(test))]
 use gtkhx_core::session::{gtkhx_session_emit_task_update, gtkhx_session_get_default};
+#[cfg(not(test))]
+use send::next_trans;
 
 #[cfg(not(test))]
 extern "C" {
@@ -99,8 +101,6 @@ extern "C" {
     fn hx_session_tasks(sess: *mut Session) -> *mut GHashTable;
     /// `sess->tasks = table` (tasks_bridge.c).
     fn hx_session_set_tasks(sess: *mut Session, table: *mut GHashTable);
-    /// `htlc->trans` accessor (tasks_bridge.c).
-    fn hx_htlc_trans(htlc: *mut HtlcConn) -> u32;
     /// Drop the matching UI task row (view side, tasks.c) — called before the
     /// model entry is removed so the row can read the task if it needs to.
     fn gtask_delete_tsk(sess: *mut Session, trans: u32);
@@ -157,7 +157,7 @@ pub unsafe extern "C" fn tasks_init(sess: *mut Session) {
 
 /// `struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr,
 /// void *data, const char *str)` — allocate + register a task keyed on the
-/// htlc's current `trans`, and fire `task-update` so the UI sees it. `str` is
+/// trans the next request on `htlc` goes out on, and fire `task-update` so the UI sees it. `str` is
 /// copied (`g_strdup`); `ptr_free` starts NULL (callers set it after if the
 /// `ptr` context needs disconnect-time cleanup).
 ///
@@ -174,7 +174,7 @@ pub unsafe extern "C" fn task_new(
     let sess = hx_sess_from_htlc(htlc);
     let tsk = glib::ffi::g_malloc0(std::mem::size_of::<Task>()) as *mut Task;
     let t = &mut *tsk;
-    t.trans = hx_htlc_trans(htlc);
+    t.trans = next_trans(htlc);
     t.data = data;
     t.str_ = if str_.is_null() {
         std::ptr::null_mut()
@@ -249,7 +249,7 @@ unsafe fn hx_session_set_tasks(sess: *mut Session, table: *mut GHashTable) {
     (*(sess as *mut TestSession)).tasks = table;
 }
 #[cfg(test)]
-unsafe fn hx_htlc_trans(htlc: *mut HtlcConn) -> u32 {
+unsafe fn next_trans(htlc: *mut HtlcConn) -> u32 {
     (*(htlc as *mut TestSession)).trans
 }
 #[cfg(test)]

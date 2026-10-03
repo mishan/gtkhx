@@ -114,6 +114,10 @@ pub struct HxnetConnection {
     /// negotiated. Read by `hxnet_connection_hope_aead_material` so an
     /// HTXF subchannel can derive transfer keys in-process.
     hope_aead: Option<crate::lifecycle::HopeAeadSlot>,
+    /// The session the actor drives, which numbers the consumer's
+    /// requests. `None` on a bare actor with no session
+    /// (`hxnet_connection_open_tcp`).
+    session: Option<crate::session::SharedSession>,
 }
 
 /// Callback-mode FFI state. Holds the tokio→async_channel pump
@@ -533,10 +537,27 @@ pub unsafe extern "C" fn hxnet_connection_agree(
     }
 }
 
-/// [`crate::session::FIRST_TRANS`].
+/// The trans for the next request the consumer sends on this
+/// connection, from the session's own counter
+/// ([`hxsession::Session::take_trans`]); the frame goes out through
+/// [`hxnet_connection_send_frame`]. 0, which the session never hands
+/// out, for a NULL handle or a bare actor with no session.
+///
+/// # Safety
+///
+/// `handle` is NULL or valid.
 #[no_mangle]
-pub extern "C" fn hxnet_first_trans() -> u32 {
-    crate::session::FIRST_TRANS
+pub unsafe extern "C" fn hxnet_connection_take_trans(handle: *mut HxnetConnection) -> u32 {
+    match handle.as_ref().and_then(|h| h.session.as_ref()) {
+        // A panic in the actor while it held the lock ends that connection,
+        // not the app: the counter is still sound, so number from it anyway
+        // rather than abort across the FFI.
+        Some(s) => s
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take_trans(),
+        None => 0,
+    }
 }
 
 /// Drop the handle and abort its spawned task. The task is
@@ -898,6 +919,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
         on_shutdown,
         on_state,
         user_data,
+        None,
     )
 }
 
@@ -1134,8 +1156,10 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         proxy,
     };
 
+    let session = req.session();
+    let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_plaintext_lifecycle(req, cmd_rx, evt_tx).await;
+        crate::lifecycle::run_plaintext_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
     });
 
     wire_callback_state_with_on_state(
@@ -1147,6 +1171,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         on_shutdown,
         on_state,
         user_data,
+        Some(session),
     )
 }
 
@@ -1285,8 +1310,10 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         trans,
         proxy,
     };
+    let session = req.session();
+    let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_plaintext_lifecycle(req, cmd_rx, evt_tx).await;
+        crate::lifecycle::run_plaintext_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
     });
 
     // Polling-mode handle: keep the event receiver for
@@ -1297,6 +1324,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         _callback_state: None,
         _join: join,
         hope_aead: None,
+        session: Some(session),
     });
     Box::into_raw(handle)
 }
@@ -1476,8 +1504,17 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         boxed
     });
 
+    let session = req.session();
+    let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_plaintext_tls_lifecycle(req, verify_closure, cmd_rx, evt_tx).await;
+        crate::lifecycle::run_plaintext_tls_lifecycle(
+            req,
+            lifecycle_session,
+            verify_closure,
+            cmd_rx,
+            evt_tx,
+        )
+        .await;
     });
 
     wire_callback_state_with_on_state(
@@ -1489,6 +1526,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         on_shutdown,
         on_state,
         user_data,
+        Some(session),
     )
 }
 
@@ -1637,8 +1675,17 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         });
         boxed
     });
+    let session = req.session();
+    let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_plaintext_tls_lifecycle(req, verify_closure, cmd_rx, evt_tx).await;
+        crate::lifecycle::run_plaintext_tls_lifecycle(
+            req,
+            lifecycle_session,
+            verify_closure,
+            cmd_rx,
+            evt_tx,
+        )
+        .await;
     });
 
     // Polling-mode handle: keep the event receiver for try_recv_frame;
@@ -1649,6 +1696,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         _callback_state: None,
         _join: join,
         hope_aead: None,
+        session: Some(session),
     });
     Box::into_raw(handle)
 }
@@ -1841,8 +1889,17 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     let hope_slot: crate::lifecycle::HopeAeadSlot =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let lifecycle_slot = hope_slot.clone();
+    let session = req.session();
+    let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_hope_lifecycle(req, cmd_rx, evt_tx, lifecycle_slot).await;
+        crate::lifecycle::run_hope_lifecycle(
+            req,
+            lifecycle_session,
+            cmd_rx,
+            evt_tx,
+            lifecycle_slot,
+        )
+        .await;
     });
 
     let handle = wire_callback_state_with_on_state(
@@ -1854,6 +1911,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         on_shutdown,
         on_state,
         user_data,
+        Some(session),
     );
     // Attach the HOPE AEAD slot so an HTXF subchannel can later derive
     // transfer keys off the negotiated session material.
@@ -2027,8 +2085,17 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
     let hope_slot: crate::lifecycle::HopeAeadSlot =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let lifecycle_slot = hope_slot.clone();
+    let session = req.session();
+    let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_hope_lifecycle(req, cmd_rx, evt_tx, lifecycle_slot).await;
+        crate::lifecycle::run_hope_lifecycle(
+            req,
+            lifecycle_session,
+            cmd_rx,
+            evt_tx,
+            lifecycle_slot,
+        )
+        .await;
     });
 
     // Polling-mode handle: keep the event receiver for try_recv_frame;
@@ -2039,6 +2106,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         _callback_state: None,
         _join: join,
         hope_aead: Some(hope_slot),
+        session: Some(session),
     });
     Box::into_raw(handle)
 }
@@ -2138,6 +2206,7 @@ fn wire_callback_state_with_on_state(
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
     user_data: *mut c_void,
+    session: Option<crate::session::SharedSession>,
 ) -> *mut HxnetConnection {
     let main_ctx = glib::MainContext::ref_thread_default();
     let _acquire_guard = if main_ctx.is_owner() {
@@ -2163,6 +2232,7 @@ fn wire_callback_state_with_on_state(
         _callback_state: None,
         _join: join,
         hope_aead: None,
+        session,
     });
     let handle_ptr = Box::into_raw(handle_box);
 
@@ -2766,4 +2836,41 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_close(handle: *mut HxnetTrackerFetc
     h.wake.set(None);
     h.join.abort();
     drop(h);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_connection_numbers_requests_from_its_session() {
+        let host = b"127.0.0.1";
+        unsafe {
+            // Nothing listens on port 1; the handle and its session exist
+            // before the connect is even tried.
+            let h = hxnet_connection_open_plaintext_polling(
+                host.as_ptr(),
+                host.len(),
+                1,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+                414,
+                hxsession::CLIENT_VERSION,
+                0,
+                1,
+                std::ptr::null(),
+                0,
+            );
+            assert!(!h.is_null());
+            // Past the login's 1, and each one new.
+            assert_eq!(hxnet_connection_take_trans(h), 2);
+            assert_eq!(hxnet_connection_take_trans(h), 3);
+            hxnet_connection_destroy(h);
+            assert_eq!(hxnet_connection_take_trans(std::ptr::null_mut()), 0);
+        }
+    }
 }

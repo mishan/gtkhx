@@ -150,11 +150,9 @@ the module's rustdoc; the short version:
   tasks across worker threads. The GLib half of the bridge is where
   `!Send` UI state lives; the tokio half stays `Send`-clean.
 - **`enable_io` + `enable_time`.** I/O for `hxnet`'s sockets; time so
-  `tokio::time` (sleeps, timeouts) works under the runtime. The ping
-  keepalive deliberately stayed a GLib `g_timeout_add_seconds` in
-  `network.c` — it drives C-side connection state, so a tokio
-  `Interval` would buy nothing. See the timer audit in
-  `docs/rust/ROADMAP.md`.
+  `tokio::time` (sleeps, timeouts) works under the runtime, including
+  the session actor's, which times the keepalive. See the timer audit
+  in `docs/rust/ROADMAP.md`.
 
 ```rust
 use hxbridge::runtime::Runtime;

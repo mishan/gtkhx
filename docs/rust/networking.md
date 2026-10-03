@@ -50,10 +50,17 @@ LoginSending → LoginReplyWait → HandshakeDone → LoginReady.
 
 ### The session
 
-The session's own transactions — the login, HOPE's two steps, the
-agreement, a 1.2 server's user change — are numbered below
-`hxnet_first_trans` (`hxsession::RAW_TRANS_BASE`), and their replies are
-the session's. C numbers its own from there up, so the two never meet.
+The session numbers every transaction on the connection, C's
+included, from one counter. Its own are the login, the agreement, a 1.2
+server's user change and the keep-alive (HOPE's two steps, which `hxnet`
+still sends, go on `HX_LOGIN_TRANS` and the one after, and the session's
+counter starts past them). A C request takes its trans from the session
+when its task is keyed (`task_new`, through
+`hxnet_connection_take_trans`), and the send that follows goes out on
+it; the connection holds that one trans reserved in between
+(`htlc->trans`, 0 when none). The connection handle and the actor share
+the session (`SharedSession`), which is made when the connection opens
+so a request can be numbered before the login is answered.
 
 `LoginReady` is the session saying the login is settled: the agreement
 answered, or none to answer, or none come after two seconds. It is what
@@ -72,8 +79,18 @@ traces what it dispatches; the actor traces only what the session sends
 itself.
 
 Until the login is answered the actor leaves C's commands in the channel,
-so nothing goes out ahead of the login. The keep-alive is C's
-`ping_start`.
+so nothing goes out ahead of the login.
+
+The keep-alive is the session's: a 1.5+ server (version 150 and up, the
+bar mhxd's PING handler sets) is sent an empty `HTLC_HDR_PING` once the
+login has settled and 60 seconds have passed with nothing sent, C's
+requests included; a 1.0/1.2 server, which refuses the opcode, never is.
+Its reply is the session's and does not reach C, so a server between 1.5
+and 1.8.5 that refuses the opcode no longer costs the user an error toast
+and sound every minute. A ping only when
+nothing else has gone out is all an idle timer needs, and waiting for the
+login to settle keeps it from reaching a 1.5+ server ahead of the
+agreement.
 
 ### What the C side still does
 
@@ -198,11 +215,9 @@ carries. The orchestrator owns the send, so both sides must agree on the
 value up front — LOGIN is always the first transaction, so it is pinned
 to the constant `HX_LOGIN_TRANS`. The plaintext and TLS paths replay the
 LOGIN reply (trans `HX_LOGIN_TRANS`); the HOPE path replays the *step-2*
-reply, which carries `HX_LOGIN_TRANS + 1`. `htlc->trans` then starts at
-`hxnet_first_trans`, past every trans the session uses, because the C
-counter never sees the session's sends — left lower, C's requests would
-collide with the login task or have their replies taken for the
-session's.
+reply, which carries `HX_LOGIN_TRANS + 1`. Everything after the login is
+numbered by the session (see "The session"), so no request collides with
+the login task or the session's own.
 
 **2. The `fd` sentinel is -1, not 0.** `hx_bridge_dispatch_frame`
 early-returns on `fd == 0` — that is the bridge's "connection closed,

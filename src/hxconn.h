@@ -265,26 +265,22 @@ extern guint16 hx_conn_serial (const struct htlc_conn *h);
 /* ---- Per-connection connect / login state --------------------------------
  *
  * These were file-statics in network.c and rcv.c, which meant one value for
- * the whole process. The keepalive one was an outright bug: ping_start
- * early-returns when the timer id is already set, so a second connection
- * never got a keepalive at all.
+ * the whole process.
  *
- * ping_timer is a GLib source id, 0 when not armed.
  * login_reply_trans is the transaction the orchestrator's replayed LOGIN
  * reply carries, which the login task has to be registered under. */
-extern guint hx_conn_ping_timer (const struct htlc_conn *h);
-extern void hx_conn_set_ping_timer (struct htlc_conn *h, guint v);
 extern guint32 hx_conn_login_reply_trans (const struct htlc_conn *h);
 extern void hx_conn_set_login_reply_trans (struct htlc_conn *h, guint32 v);
 
-/* ---- Outgoing transaction counter ----------------------------------------
+/* ---- The next request's trans ---------------------------------------------
  *
- * The monotonically-increasing trans id stamped on each outgoing request. A
- * task is keyed on the value current at send time (task_new snapshots it
- * before hlpack_chunks bumps it), so the packer reads-then-increments via
- * hx_conn_trans_post_inc (returns the pre-increment value). hx_conn_trans /
- * hx_conn_set_trans cover the login-replay save/restore in network.c and the
- * trace/task snapshots that just read it. */
+ * The session numbers every transaction. task_new reserves the next request's
+ * trans from it and keys the task on it; hlwrite_chunks sends on it and clears
+ * it, 0 meaning none is reserved (the session never hands out 0).
+ * hx_conn_set_trans covers the login-task save/restore in network.c.
+ * The integration harness, which builds its frames with hlpack_chunks and has
+ * no session to number them, counts with it instead, through
+ * hx_conn_trans_post_inc. */
 extern guint32 hx_conn_trans (const struct htlc_conn *h);
 extern void hx_conn_set_trans (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_trans_post_inc (struct htlc_conn *h);

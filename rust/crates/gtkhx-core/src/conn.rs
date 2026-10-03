@@ -36,6 +36,7 @@ pub struct HtlcConn {
     tls: c_char,
     ip_addr: [c_char; HOSTLEN],
     fd: c_int,
+    /// The trans reserved for the next request, 0 for none; see `hxconn.h`.
     trans: u32,
     icon: u16,
     uid: u16,
@@ -97,15 +98,8 @@ pub struct HtlcConn {
     /// `test_hxconn_layout` compares offsets: a field placed in padding is
     /// exactly the case `sizeof` cannot pin.
     serial: u16,
-    /// GLib source id for the PING keepalive, or 0.
-    ///
-    /// A file-static until now, which is why a second connection never got a
-    /// keepalive at all: `ping_start` early-returns when the id is already
-    /// set, and the first connection had set it.
-    ping_timer: c_uint,
     /// The transaction id the orchestrator's replayed LOGIN reply will carry.
-    /// The login task has to be registered under it, so it is per-connection
-    /// for the same reason the transaction counter beside it is.
+    /// The login task has to be registered under it, so it is per-connection.
     login_reply_trans: u32,
     /// The video extension's per-kind ceilings from the LOGIN reply
     /// (`DATA_VIDEO_LIMITS`, repeated once per kind), camera then screen.
@@ -372,20 +366,14 @@ scalar!(
     u32
 );
 scalar!(
-    hx_conn_ping_timer,
-    hx_conn_set_ping_timer,
-    ping_timer,
-    c_uint
-);
-scalar!(
     hx_conn_login_reply_trans,
     hx_conn_set_login_reply_trans,
     login_reply_trans,
     u32
 );
 
-/// `guint32 hx_conn_trans_post_inc` — return the current trans, then increment
-/// (the hlpack trans-stamp idiom).
+/// `guint32 hx_conn_trans_post_inc` — return the current trans, then increment:
+/// the integration harness's own count, which `hlpack_chunks` stamps.
 ///
 /// # Safety
 /// `h` must be a non-null, live `*mut HtlcConn` obtained from `hx_conn_new`
@@ -756,7 +744,6 @@ offsetof_export! {
     hx_conn_offsetof_bridge_handle => bridge_handle,
     hx_conn_offsetof_caps => caps,
     hx_conn_offsetof_serial => serial,
-    hx_conn_offsetof_ping_timer => ping_timer,
     hx_conn_offsetof_video_limits => video_limits,
 }
 

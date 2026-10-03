@@ -56,8 +56,8 @@ hx_useredit_create (struct htlc_conn *htlc, const char *login, const char *pass,
     }
 
     /* chunk layout moved to gtkhx_proto_build_account_modify
-     * _chunks. Build BEFORE task_new — task_new snapshots htlc->trans
-     * into a pending entry; a builder failure must not leave a phantom
+     * _chunks. Build BEFORE task_new — task_new reserves a trans for
+     * a pending entry; a builder failure must not leave a phantom
      * "user create" task in the task table. */
     struct hx_chunk chunks[4];
     guint8 scratch[8];

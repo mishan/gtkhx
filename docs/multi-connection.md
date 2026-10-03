@@ -268,11 +268,11 @@ bookmarks, about, and the settings pages.
 
 ### Single-slot connection state and timers
 
-Mostly fixed. The keepalive timer id and the
-orchestrated login-reply transaction now live on the connection. The keepalive
-one was a real bug rather than latent: `ping_start` early-returns when the id
-is already set, and the id was process-wide, so once *any* connection had a
-keepalive running every other connection silently went without one.
+Mostly fixed. The orchestrated login-reply transaction now lives on the
+connection, and the keepalive is the connection's session's (hxsession). The
+keepalive was a real bug rather than latent while it was a C timer: its id was
+process-wide, so once *any* connection had a keepalive running every other
+connection silently went without one.
 
 The in-flight connect cancellable turned out to be dead — the legacy
 GSocketClient connect path was the only thing that ever assigned it, and that

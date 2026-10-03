@@ -1433,8 +1433,8 @@ file_update (session *sess, struct htxf_conn *htxf)
  * (rust/crates/hxtask). It keeps sess->tasks a real GHashTable and preserves the
  * exact C ABI these callers link against; gtask_delete_tsk (above) is the view
  * hook task_delete calls before removing the model entry. The field accessors
- * the crate needs (hx_session_tasks / hx_session_set_tasks / hx_htlc_trans) live
- * in tasks_bridge.c. */
+ * the crate needs (hx_session_tasks / hx_session_set_tasks) live in
+ * tasks_bridge.c. */
 
 /* task_error_extract lives in proto_helpers.c so the Tier 2 unit
  * tests can drive it without a GTK build. The prototype is in

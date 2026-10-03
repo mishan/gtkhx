@@ -43,8 +43,9 @@ enum {
  * servers (one ignored transaction + a short timer). */
 void hx_icon_probe (struct htlc_conn *htlc);
 
-/* Request the full per-user avatar list (ICON_GETLIST / 1861). */
-void hx_icon_getlist (struct htlc_conn *htlc);
+/* Request the full per-user avatar list (ICON_GETLIST / 1861); the trans
+ * its reply will carry. */
+guint32 hx_icon_getlist (struct htlc_conn *htlc);
 
 /* Request one user's avatar (ICON_GET / 1863). */
 void hx_icon_get (struct htlc_conn *htlc, guint16 uid);

@@ -34,8 +34,8 @@
  *
  * The cumulative effect: the test exercises the REAL hx_connect
  * code path through TCP connect + magic write + magic read +
- * validation + send_login's preamble (including the LOGIN packet
- * build + hlwrite_chunks). What we lose is everything that
+ * validation, up to the point the LOGIN goes out (hxnet's session
+ * sends it). What we lose is everything that
  * happens AFTER the LOGIN bytes hit the kernel buffer — there's
  * no real receive loop, no task dispatch, no chat rendering. For
  * the connect-state-machine test that's exactly the right
@@ -296,8 +296,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 /* tasks.c stubs — production task_new allocates a struct task,
  * registers it in the_session.tasks hashtable, fires a
  * GtkhxSession::task-update signal. The test doesn't read tasks
- * back; a NULL return is fine and matches what network.c::
- * send_login does with the result (it doesn't use it). */
+ * back, so a NULL return is fine. */
 struct task;
 struct task *
 task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
@@ -346,10 +345,9 @@ gtask_delete_tsk (session *sess, guint32 trans)
 /* hlwrite_chunks — the production send primitive is now Rust (hxtask::send),
  * which we can't link here: its task_new / task_with_trans / task_delete /
  * gtask_delete_tsk are exactly the no-op stubs above, so linking hxtask would
- * double-define them. Provide a minimal in-test equivalent that does what
- * send_login needs — pack the frame via hlpack_chunks (still C, proto_helpers.c)
- * and hand the bytes to the hxnet send bridge — so real_connect can push the
- * LOGIN packet to the server. No proto_trace / close-on-fail: the connect-state
+ * double-define them. Provide a minimal in-test equivalent — pack the frame via
+ * hlpack_chunks (still C, proto_helpers.c) and hand the bytes to the hxnet send
+ * bridge — for whatever the connect path sends after the login. No proto_trace / close-on-fail: the connect-state
  * and tracker-signal tests don't need them (tracker_signals never calls this;
  * it only has to link). Forward-declared inline to avoid the proto_helpers.h /
  * hxnet_bridge.h header piles, same pattern as the stubs above. */

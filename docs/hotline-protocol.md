@@ -366,8 +366,9 @@ first User Name List reply may show the client with an empty name until it arriv
   away timers. The official client sends it after 3 minutes of silence to servers
   ≥ 185, and Get User Name List (300) to older ones. Servers older than 1.8.5 answer
   500 with an error ("Uh, no." from some); hlserver.com drops idle connections, so a
-  client should keep pre-1.8.5 sessions alive with 300. GtkHx pings every 60 seconds
-  when the server version is ≥ 150.
+  client should keep pre-1.8.5 sessions alive with 300. GtkHx pings servers ≥ 150 once
+  the login has settled and 60 seconds have passed with nothing sent, and ignores
+  the reply, error or not.
 - The 1.9 server disconnects a connection that hasn't logged in within 60 seconds.
 - After 10 minutes without a transaction, the server marks the user away (flag bit 0)
   and broadcasts 301. Any transaction clears it. There is no idle disconnect for
