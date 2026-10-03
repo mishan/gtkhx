@@ -732,12 +732,17 @@ pub(crate) struct SsrcRouting {
     /// Bumped with every session, so a release already on its way to the
     /// main loop can tell its pad belongs to a session since torn down.
     generation: u64,
+    /// Mids the latest offer to mention them made `a=inactive`: a release
+    /// on its way to one of them would build a bin for a stream already
+    /// stopped.
+    inactive: std::collections::HashSet<String>,
 }
 
 impl SsrcRouting {
     fn clear(&mut self) {
         self.mids.clear();
         self.held.clear();
+        self.inactive.clear();
         self.generation += 1;
     }
 }
@@ -799,20 +804,26 @@ fn index_offer(sdp: &str, map: &SsrcMids) {
 /// held: another offer may still be on its way for them.
 fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) -> Vec<(Release, String)> {
     let mut fresh: HashMap<u32, String> = HashMap::new();
+    let mut sections: Vec<(String, bool)> = Vec::new();
     let mut mid: Option<String> = None;
+    let mut inactive = false;
     let mut pending: Vec<u32> = Vec::new();
-    let mut flush = |mid: &mut Option<String>, pending: &mut Vec<u32>| {
+    let mut flush = |mid: &mut Option<String>, inactive: &mut bool, pending: &mut Vec<u32>| {
         if let Some(m) = mid.take() {
             for ssrc in pending.drain(..) {
                 fresh.insert(ssrc, m.clone());
             }
+            sections.push((m, *inactive));
         }
+        *inactive = false;
         pending.clear();
     };
     for line in sdp.lines() {
         let line = line.trim_end_matches('\r');
         if line.starts_with("m=") {
-            flush(&mut mid, &mut pending);
+            flush(&mut mid, &mut inactive, &mut pending);
+        } else if line == "a=inactive" {
+            inactive = true;
         } else if let Some(m) = line.strip_prefix("a=mid:") {
             mid = Some(m.trim().to_string());
         } else if let Some(v) = line.strip_prefix("a=ssrc-group:FID ") {
@@ -827,10 +838,17 @@ fn index_offer_ssrcs(sdp: &str, map: &SsrcMids) -> Vec<(Release, String)> {
             }
         }
     }
-    flush(&mut mid, &mut pending);
+    flush(&mut mid, &mut inactive, &mut pending);
     let Ok(mut m) = map.lock() else {
         return Vec::new();
     };
+    for (mid, inactive) in sections {
+        if inactive {
+            m.inactive.insert(mid);
+        } else {
+            m.inactive.remove(&mid);
+        }
+    }
     let (declared, still): (Vec<_>, Vec<_>) = std::mem::take(&mut m.held)
         .into_iter()
         .partition(|h| fresh.contains_key(&h.ssrc));
@@ -894,9 +912,12 @@ fn on_receive_pad(
         let map = Arc::clone(ssrc_mids);
         let pad = pad.clone();
         move |mid: Option<String>| {
-            // A pad removed while held, or from a session since torn
-            // down, has nothing left to go to.
-            let current = map.lock().is_ok_and(|r| r.generation == generation);
+            // A pad removed while held, from a session since torn down,
+            // or whose section has since gone inactive has nothing left
+            // to go to.
+            let current = map.lock().is_ok_and(|r| {
+                r.generation == generation && mid.as_ref().is_none_or(|m| !r.inactive.contains(m))
+            });
             if current && pad.parent().is_some() {
                 route(&pad, mid);
             }
@@ -7999,17 +8020,56 @@ a=ssrc:21 cname:x\r\n",
                     .field("ssrc", ssrc)
                     .build(),
             ),
+            gstreamer::event::Segment::new(
+                &gstreamer::FormattedSegment::<gstreamer::ClockTime>::new(),
+            ),
         ] {
             pad.store_sticky_event(&event).unwrap();
         }
         pad
     }
 
+    /// A sink linked to `pad`, and a count of the buffers that reach it.
+    /// A pad doesn't hold its peer, so the caller keeps the sink.
+    fn counting_sink(
+        pad: &gstreamer::Pad,
+    ) -> (gstreamer::Pad, Arc<std::sync::atomic::AtomicUsize>) {
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (one, list) = (Arc::clone(&count), Arc::clone(&count));
+        let sink = gstreamer::Pad::builder(gstreamer::PadDirection::Sink)
+            .chain_function(move |_, _, _| {
+                one.fetch_add(1, Ordering::SeqCst);
+                Ok(gstreamer::FlowSuccess::Ok)
+            })
+            .chain_list_function(move |_, _, l| {
+                list.fetch_add(l.len(), Ordering::SeqCst);
+                Ok(gstreamer::FlowSuccess::Ok)
+            })
+            .event_function(|_, _, _| true)
+            .build();
+        sink.set_active(true).unwrap();
+        pad.link(&sink).unwrap();
+        (sink, count)
+    }
+
+    /// Push a buffer and a list of two through `pad`, as RTP would.
+    fn push_rtp(pad: &gstreamer::Pad) {
+        assert_eq!(
+            pad.push(gstreamer::Buffer::new()),
+            Ok(gstreamer::FlowSuccess::Ok)
+        );
+        let mut list = gstreamer::BufferList::new();
+        list.get_mut().unwrap().add(gstreamer::Buffer::new());
+        list.get_mut().unwrap().add(gstreamer::Buffer::new());
+        assert_eq!(pad.push_list(list), Ok(gstreamer::FlowSuccess::Ok));
+    }
+
     /// The hold, end to end short of webrtcbin: an undeclared video pad
     /// waits through an offer that doesn't declare it and is routed by
     /// the one that does; another is routed by its transceiver at the
-    /// deadline; one released after its session was torn down goes
-    /// nowhere; undeclared audio is never held.
+    /// deadline; one released after its session was torn down, or after
+    /// its section went inactive, goes nowhere; undeclared audio is never
+    /// held. Held RTP is dropped quietly, and flows once released.
     #[test]
     fn a_held_pad_goes_where_its_offer_says() {
         gstreamer::init().unwrap();
@@ -8025,9 +8085,14 @@ a=ssrc:21 cname:x\r\n",
         on_receive_pad(&rtp_pad(&bin, 21, "audio"), &map, &route, &ctx);
         assert_eq!(rx.try_recv().unwrap(), ("src_21".into(), None));
 
-        on_receive_pad(&rtp_pad(&bin, 20, "video"), &map, &route, &ctx);
+        let held = rtp_pad(&bin, 20, "video");
+        let (_sink, delivered) = counting_sink(&held);
+        on_receive_pad(&held, &map, &route, &ctx);
         on_receive_pad(&rtp_pad(&bin, 30, "video"), &map, &route, &ctx);
         assert!(rx.try_recv().is_err(), "both held");
+        // Held, RTP is dropped without an error to stall or end the stream.
+        push_rtp(&held);
+        assert_eq!(delivered.load(Ordering::SeqCst), 0);
 
         let other = "v=0\nm=audio 9 RTP/SAVPF 0\na=mid:user-6\na=ssrc:40 cname:z\n";
         assert!(index_offer_ssrcs(other, &map).is_empty());
@@ -8040,6 +8105,9 @@ a=ssrc:21 cname:x\r\n",
             ("src_20".into(), Some("cam-user-5".into()))
         );
         assert_eq!(map.lock().unwrap().held.len(), 1, "30 still waits");
+        // Released, it flows.
+        push_rtp(&held);
+        assert_eq!(delivered.load(Ordering::SeqCst), 3);
 
         let deadline = std::time::Instant::now() + HOLD_DEADLINE * 3;
         let got = loop {
@@ -8062,6 +8130,32 @@ a=ssrc:21 cname:x\r\n",
             release(Some(mid));
         }
         assert!(rx.try_recv().is_err(), "a torn-down session's pad");
+
+        // A release still on its way when a newer offer stops its section
+        // builds nothing; an offer reviving the section routes again.
+        map.lock().unwrap().mids.insert(10, "user-4".into());
+        on_receive_pad(&rtp_pad(&bin, 60, "video"), &map, &route, &ctx);
+        let released = index_offer_ssrcs(
+            "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-8\na=ssrc:60 cname:y\n",
+            &map,
+        );
+        let stopped = "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-8\na=inactive\n";
+        assert!(index_offer_ssrcs(stopped, &map).is_empty());
+        for (release, mid) in released {
+            release(Some(mid));
+        }
+        assert!(rx.try_recv().is_err(), "a stopped section's pad");
+        on_receive_pad(&rtp_pad(&bin, 70, "video"), &map, &route, &ctx);
+        for (release, mid) in index_offer_ssrcs(
+            "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-8\na=ssrc:70 cname:y\n",
+            &map,
+        ) {
+            release(Some(mid));
+        }
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ("src_70".into(), Some("cam-user-8".into()))
+        );
     }
 
     /// An offer that arrives while the last answer is still being made
