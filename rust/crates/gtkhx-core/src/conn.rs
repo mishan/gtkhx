@@ -98,9 +98,6 @@ pub struct HtlcConn {
     /// `test_hxconn_layout` compares offsets: a field placed in padding is
     /// exactly the case `sizeof` cannot pin.
     serial: u16,
-    /// The transaction id the orchestrator's replayed LOGIN reply will carry.
-    /// The login task has to be registered under it, so it is per-connection.
-    login_reply_trans: u32,
     /// The video extension's per-kind ceilings from the LOGIN reply
     /// (`DATA_VIDEO_LIMITS`, repeated once per kind), camera then screen.
     /// A kind the server didn't describe stays unset, so it can't inherit
@@ -363,12 +360,6 @@ scalar!(
     hx_conn_gif_icons_probe_trans,
     hx_conn_set_gif_icons_probe_trans,
     gif_icons_probe_trans,
-    u32
-);
-scalar!(
-    hx_conn_login_reply_trans,
-    hx_conn_set_login_reply_trans,
-    login_reply_trans,
     u32
 );
 
@@ -762,7 +753,7 @@ pub extern "C" fn hx_conn_alignof() -> usize {
 /// Pin the layout: if this fires, `HtlcConn` and the C mirror in
 /// `hxconn_layout.h` have drifted. The C side pins the same value with
 /// `_Static_assert (sizeof (struct htlc_conn) == HXCONN_SIZEOF)`.
-pub const HXCONN_SIZEOF: usize = 800;
+pub const HXCONN_SIZEOF: usize = 792;
 const _: () = assert!(std::mem::size_of::<HtlcConn>() == HXCONN_SIZEOF);
 
 #[cfg(test)]

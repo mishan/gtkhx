@@ -616,6 +616,10 @@ extern int integration_open_login_hope_or_skip (
     const char *display_name, guint16 icon, const char *cipheralg,
     const char *compressalg);
 
+/* The compression a HOPE login on `fd` agreed: 0 none, 1 GZIP, 2 LZ4,
+ * 3 ZSTD. */
+extern guint32 integration_hope_compression (int fd);
+
 /*
  * Release any malloc'd state inside `hope`. Safe to call on a
  * zeroed struct.

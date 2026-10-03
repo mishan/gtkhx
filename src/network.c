@@ -351,13 +351,6 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
  * docs/rust/networking.md. */
 #define HX_LOGIN_TRANS 1u
 
-/* The trans of the replayed LOGIN (or HOPE step-2) reply lives on the
- * connection (hx_conn_login_reply_trans): stashed by
- * hx_connect_via_orchestrator, consumed by
- * hx_orchestrator_register_login_task when the bridge's LOGIN_SENDING state
- * fires. Per-connection because two connects can be mid-handshake at once,
- * and because the task it keys is looked up in that connection's session. */
-
 /* Register the orchestrator's "login" protocol task. Called from the
  * bridge's LOGIN_SENDING state callback — i.e. after magic completes
  * and just before the credentials reply comes back, matching the
@@ -366,10 +359,11 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
  * "Connecting" task the way an up-front registration did).
  *
  * The replayed reply dispatches here via hx_rcv_hdr -> task_with_trans,
- * so the task must be keyed on the connection's login_reply_trans. The
- * NULL ptr arg selects rcv_task_login's post-login (else) branch.
- * task_new keys on htlc->trans, the trans reserved for our next request;
- * set it to reply_trans for the task_new key, then restore it. */
+ * so the task must be keyed on the trans the session sent the login on
+ * (HOPE's step 2 under HOPE). The NULL ptr arg selects rcv_task_login's
+ * post-login (else) branch. task_new keys on htlc->trans, the trans
+ * reserved for our next request; set it to the login's for the task_new
+ * key, then restore it. */
 void
 hx_orchestrator_register_login_task (struct htlc_conn *htlc)
 {
@@ -378,12 +372,12 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
     }
     /* Idempotent: never double-register (LOGIN_SENDING fires once, but
      * guard anyway so a stray repeat can't strand a duplicate row). */
-    if (task_with_trans (sess_from_htlc (htlc),
-                         hx_conn_login_reply_trans (htlc))) {
+    guint32 login_trans = hx_bridge_login_trans (htlc);
+    if (task_with_trans (sess_from_htlc (htlc), login_trans)) {
         return;
     }
     guint32 saved = hx_conn_trans (htlc);
-    hx_conn_set_trans (htlc, hx_conn_login_reply_trans (htlc));
+    hx_conn_set_trans (htlc, login_trans);
     task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
     hx_conn_set_trans (htlc, saved);
 }
@@ -478,20 +472,13 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * concurrently with the coarse "Connecting" task for the whole
      * connect — different from the legacy path, where the login task
      * only appears once the connection is up and credentials are going
-     * out. Instead we stash the reply trans and register the task
-     * lazily from the bridge's LOGIN_SENDING state callback
-     * (hx_orchestrator_register_login_task), which fires after magic
-     * and before the replayed reply — matching legacy's send_login
-     * timing. No trans is reserved yet: the session numbers our requests
+     * out. Instead we register the task lazily from the bridge's
+     * LOGIN_SENDING state callback (hx_orchestrator_register_login_task),
+     * which fires after magic and before the replayed reply — matching
+     * legacy's send_login timing — under the trans the session gives the
+     * login. No trans is reserved yet: the session numbers our requests
      * from its own counter, and one left from the last connection is not
-     * this session's.
-     *
-     * The replayed reply's trans differs by mode: the plaintext path
-     * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
-     * replays the step-2 reply, which carries HX_LOGIN_TRANS+1 (the
-     * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
-    hx_conn_set_login_reply_trans (htlc, secure ? (HX_LOGIN_TRANS + 1)
-                                                : HX_LOGIN_TRANS);
+     * this session's. */
     hx_conn_set_trans (htlc, 0);
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
@@ -544,8 +531,8 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
             htlc, serverstr, port, login, pass, hx_conn_name (htlc),
-            hx_conn_icon (htlc), HX_CLIENT_VERSION, caps, HX_LOGIN_TRANS,
-            hx_conn_cipheralg (htlc));
+            hx_conn_icon (htlc), HX_CLIENT_VERSION, caps,
+            hx_conn_cipheralg (htlc), hx_conn_compressalg (htlc));
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (
             htlc, serverstr, port, login, pass, hx_conn_name (htlc),

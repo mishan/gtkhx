@@ -5,7 +5,7 @@ connect lifecycle, proxy support, and the tracker fetch — all of which
 live in the Rust `hxnet` crate. The C side that remains is glue. This is
 also the design record for the decisions that are easy to re-break: the
 LOGIN-reply replay, the three silent-failure axes around it, why the proxy
-config comes from where it does, and what compression still doesn't do.
+config comes from where it does, and how compression is negotiated.
 Companion docs: `network-endgame.md` (the C receive layer still being
 retired), `ROADMAP.md` (sequencing).
 
@@ -30,37 +30,35 @@ into the bridge, everything below happens in Rust:
   in raw mode, because GtkHx still has receive handlers of its own: every
   transaction reaches C whole, and what C sends goes out as C built it.
   See "The session", below.
-- **The optional HOPE encryption/compression negotiation** (`hope.rs`,
-  `hope_keys.rs`, `hope_blowfish.rs`, with `magic.rs` and
-  `login_reply.rs` for its own two steps): step 1, the reply, step 2, key
-  derivation, then the transport is wrapped in the negotiated cipher
-  adapter (Blowfish-OFB-64 or ChaCha20-Poly1305) and the session takes
-  over at the step-2 reply. HOPE-over-TLS is rejected up front as
-  redundant double-encryption.
-- **Crypto and compression** on the running connection (`cipher.rs`,
-  `compress.rs`, `transform.rs`), composed onto the inner transport and
-  transparent above it.
+- **HOPE**, the secure login, is the session's too
+  (`Session::with_hope`, over hx-libs' `hxhope`): step 1, its reply, step
+  2, and from step 2's reply on, the cipher (Blowfish OFB-64 or
+  ChaCha20-Poly1305) and the compression it agreed, as a codec between the
+  session and the socket. What the actor moves is the socket's bytes,
+  whatever they are. HOPE-over-TLS is rejected up front as redundant
+  double-encryption.
 
 `lifecycle.rs` stitches these into three entry lifecycles —
 `run_plaintext_lifecycle`, `run_plaintext_tls_lifecycle`, and
-`run_hope_lifecycle` — each of which ends by handing the stream to the
-session. State transitions ship as `Event::State(...)` along the way:
+`run_hope_lifecycle` — each of which connects and hands the stream to the
+session; the plaintext and HOPE ones differ only in the session they are
+given. State transitions ship as `Event::State(...)` along the way:
 Resolving → Connecting → Connected → (TlsHandshaking) → MagicExchange →
 LoginSending → LoginReplyWait → HandshakeDone → LoginReady.
 
 ### The session
 
-The session numbers every transaction on the connection, C's
-included, from one counter. Its own are the login, the agreement, a 1.2
-server's user change and the keep-alive (HOPE's two steps, which `hxnet`
-still sends, go on `HX_LOGIN_TRANS` and the one after, and the session's
-counter starts past them). A C request takes its trans from the session
-when its task is keyed (`task_new`, through
-`hxnet_connection_take_trans`), and the send that follows goes out on
-it; the connection holds that one trans reserved in between
-(`htlc->trans`, 0 when none). The connection handle and the actor share
-the session (`SharedSession`), which is made when the connection opens
-so a request can be numbered before the login is answered.
+The session numbers every transaction on the connection, C's included,
+from one counter. Its own are the login (HOPE's two steps, on 1 and 2),
+the agreement, a 1.2 server's user change and the keep-alive. C keys its
+login task on the trans the login's reply will carry, which it asks the
+session for (`hxnet_connection_login_trans`): 1, or 2 under HOPE. A C
+request takes its trans from the session when its task is keyed
+(`task_new`, through `hxnet_connection_take_trans`), and the send that
+follows goes out on it; the connection holds that one trans reserved in
+between (`htlc->trans`, 0 when none). The connection handle and the actor
+share the session (`SharedSession`), which is made when the connection
+opens so a request can be numbered before the login is answered.
 
 `LoginReady` is the session saying the login is settled: the agreement
 answered, or none to answer, or none come after two seconds. It is what
@@ -266,25 +264,40 @@ no longer drives a view transition; login completion is signalled by
 `LOGIN_READY`, as in legacy. Net sequence: CONNECTING → TCP_CONNECTED →
 HANDSHAKE_DONE (login task appears) → reply → LOGIN_READY.
 
-## Open: compression is never negotiated
+## Compression
 
-The orchestrator advertises an **empty compression-algorithm list** in
-HOPE step 1, so no server ever picks one, and the transport is composed
-with `CompressionKind::None`. No connection compresses on the current
-path.
+A HOPE login offers the one compression the user picked in the connect
+dialog or the bookmark — GZIP, LZ4 or ZSTD — and none when the row says
+NONE, which is the default. The server takes it or not; a server that
+names none (an empty list, an empty name, or "NONE") gets none. A bookmark
+saved by the original 2000-era client stores its compression as a byte
+whose 1 meant GZIP and now reads as ZSTD; against an mhxd-family server,
+which has only GZIP, that asks for something it lacks and the login runs
+uncompressed rather than failing.
 
-`hope::select_algorithms` leaves `compress_alg` at `None` deliberately,
-and the reasoning is in the code comment there: echoing a `COMPRESS_ALG`
-in step 2 that the transport wouldn't actually apply would commit us to
-compressing while sending plaintext, desyncing the server. Wiring
-compression means all three together — advertise algorithms in step 1,
-populate the choice from the parsed reply, and pass the matching
-`CompressionKind` to `compose()` in the lifecycle. Doing one or two of
-those is worse than doing none.
+It is opt-in because under a cipher, compression leaks: how long a
+compressed record is depends on what it says, and an observer who can
+also put text of their own into the stream — a chat line, a file name —
+can learn from the lengths whether it matched something secret
+(CRIME-style). Without compression a record's length says only how long
+the plaintext was.
 
-This is genuinely open work, not a shrug: the compression adapters
-(`compress.rs` in `hxcrypto`) exist and are tested; only the negotiation
-is unwired.
+mhxd takes GZIP, with or without a cipher. Janus takes any of the three
+under ChaCha20-Poly1305, and GZIP or ZSTD under Blowfish; LZ4 under
+Blowfish it accepts and then reads nothing the client sends until the
+connection closes ([janus-bugs.md](../janus-bugs.md)), so GtkHx never
+offers LZ4 with Blowfish and that login runs uncompressed. The suite
+covers each working pair against a server that has it: `hope_compression`
+asks mhxd for GZIP under Blowfish, and the rig's Janus, whose compression
+is on, for ZSTD and LZ4 under ChaCha20-Poly1305 and for GZIP and ZSTD
+under Blowfish. Every other test offers none and runs uncompressed.
+
+The compression sits beneath the cipher, sending and receiving, and one
+`take_outgoing`'s worth of transactions is one unit: a zlib full flush,
+an LZ4 frame, a Zstandard frame. Under a compression Blowfish carries no
+rekey marker either way, as mhxd sends none: the cipher sees compressed
+bytes, with no transactions in them to mark. The codecs are hx-libs'
+`hxhope`.
 
 ## Proxy support
 
@@ -463,9 +476,9 @@ guards the send side.
 There is **no automated legacy-server regression target**. The container
 matrix has no 1.0/1.2 server — mhxd speaks 1.x with HOPE, Janus is 1.9 —
 so 1.0/1.2 behaviour is covered by manual smoke against old Mac servers
-plus the pre-TASK-frame tolerance in `login_reply.rs`. A 1.0/1.2 mock
-target would be a real regression guard; it is a nice-to-have, and worth
-less than a real server.
+plus the session's tolerance of transactions ahead of the login reply. A
+1.0/1.2 mock target would be a real regression guard; it is a
+nice-to-have, and worth less than a real server.
 
 Post-login protocol handling (chat/news/file round-trips through the
 production receive path) also can't run headless while receive handlers

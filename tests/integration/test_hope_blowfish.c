@@ -95,27 +95,13 @@ test_hope_blowfish_login_and_ping (void)
         return;
     }
 
-    /* If we got here, the HOPE state machine completed. Under the legacy
-     * harness transport the harness owns the cipher and switches to
-     * CIPHER_MODE_STREAM; under orchestration the production actor (Rust)
-     * owns the cipher and the harness hope session stays zeroed — there
-     * the ping round-trips below are the end-to-end proof the Rust
-     * Blowfish transport is wire-compatible with the server. */
-
-    /* Send 32 PINGs. The legacy HOPE rekey marker stamps the header
-     * type's high byte with probability 3/16 per outgoing message;
-     * with N=32 outbound + ~32 server replies the chance of NO
-     * rekey firing in either direction is (13/16)^64 ≈ 0.004%,
-     * effectively deterministic. After the loop we assert
-     * hope.decode_rekey_count > 0 — the harness increments that
-     * every time it applies cipher_change_decode_key — so a
-     * regression that broke marker stamping (server side) or
-     * detection (our side) fails the test loudly instead of
-     * passing silently because the dice never came up. The
-     * desync this whole test infrastructure was built to catch
-     * only manifests AFTER a successful rotation; without that
-     * count assertion, a future bug that suppressed all rotations
-     * would slip through as a green test. */
+    /* Logged in, with no compression offered: Blowfish marks its
+     * transactions only without one. Send 32 PINGs: mhxd stamps a rekey
+     * marker on about 3 replies in 16 and the client on about 3 requests
+     * in 16, so with 64 transactions the odds that none is marked are
+     * (13/16)^64, about 0.004%. A marker that either side mishandles
+     * desyncs the keystream, and the pings after it stop round-tripping:
+     * the replies are the proof. */
     for (int i = 0; i < 32; i++) {
         guint32 ping_trans = htlc.trans;
         g_assert_true (integration_send_message_hope (
@@ -141,13 +127,6 @@ test_hope_blowfish_login_and_ping (void)
          * LOGIN time. */
         g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
     }
-
-    /* The point of this whole test: verify the rotation actually
-     * fired at least once on the recv path. See the loop comment
-     * above for the probability argument. decode_rekey_count is a
-     * harness-crypto counter; under orchestration the rekey machinery
-     * lives inside the Rust transport, so the count stays zero and the
-     * successful encrypted ping round-trips above are the proof. */
 
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);

@@ -24,7 +24,7 @@ test_deps = [
 ]
 
 # All crypto primitives (hash, stream cipher, AEAD, compression) live in
-# the Rust hxcrypto crate, and the C
+# hx-libs' hxcrypto and hxhope, and the C
 # dispatchers that wrapped them (cipher.c, cipher_aead.c, hope.c) plus the
 # nettle-using tests are gone — so neither the tests nor protocol.h /
 # compress.h pull in any C cipher library. No nettle dependency here.
@@ -141,23 +141,6 @@ test_text_sanitisers = executable('test_text_sanitisers',
 )
 test('text_sanitisers', test_text_sanitisers,
      suite : 'unit')
-
-# hmac — the HOPE handshake's MAC dispatcher. Phase R1 moved the
-# implementation to Rust (rust/crates/hxcrypto::hash); protocol.h
-# now exposes hmac_xxx as a static inline that delegates to
-# gtkhx_hmac_xxx. This binary still tests the dispatch glue + the
-# RFC 2104 / RFC 2202 canonical vectors + the legacy unprefixed
-# key||text construction; the test's call sites are unchanged
-# because the shim preserves the signature.
-test_hmac = executable('test_hmac',
-  'unit/test_hmac.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep],
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('hmac', test_hmac,
-     suite : 'unit')
-
 
 # safe_local_basename — sanitizer that defangs a remote-supplied
 # file name before joining it onto the local download path.
@@ -1029,7 +1012,7 @@ integration_harness_lib = static_library(
   # (hxnet_connection_open_plaintext_polling / try_recv_frame /
   # send_frame), so the suite pulls in the hxnet staticlib and its
   # compression dependency.
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1071,7 +1054,7 @@ test_integration_real_connect = executable(
   '../src/debug.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
   link_depends        : rust_build,
 )
@@ -1106,7 +1089,7 @@ test_integration_tracker_signals = executable(
   '../src/debug.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
   link_depends        : rust_build,
 )
@@ -1123,7 +1106,7 @@ test('tracker_signals', test_integration_tracker_signals,
 test_integration_orchestrator_harness = executable(
   'test_integration_orchestrator_harness',
   'integration/test_orchestrator_harness.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
   link_depends        : rust_build,
 )
@@ -1139,7 +1122,7 @@ test('orchestrator_harness', test_integration_orchestrator_harness,
 test_integration_socks = executable(
   'test_integration_socks',
   'integration/test_integration_socks.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
   link_depends        : rust_build,
 )
@@ -1176,7 +1159,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/debug.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
   link_depends        : rust_build,
 )
@@ -2058,6 +2041,20 @@ test_integration_hope_blowfish = executable('test_integration_hope_blowfish',
   link_depends        : rust_build,
 )
 test('hope_blowfish', test_integration_hope_blowfish,
+     suite   : 'integration',
+     timeout : 60)
+
+# hope_compression — HOPE compression as the user asks for it: GZIP under
+# Blowfish against mhxd, ZSTD and LZ4 under ChaCha20-Poly1305 against
+# Janus (whose rig config turns compression on).
+test_integration_hope_compression = executable('test_integration_hope_compression',
+  'integration/test_hope_compression.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+  link_depends        : rust_build,
+)
+test('hope_compression', test_integration_hope_compression,
      suite   : 'integration',
      timeout : 60)
 

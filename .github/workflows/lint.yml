@@ -153,10 +153,8 @@ jobs:
               rpm -q rust-std-static-wasm32-unknown-unknown >/dev/null \
                 || dnf install -y rust-std-static-wasm32-unknown-unknown
               cargo build --target wasm32-unknown-unknown --no-default-features \
-                -p hxcrypto -p hxtext -p hxrequest -p hxvoice \
+                -p hxtext -p hxrequest -p hxvoice \
                 --ignore-rust-version
-              cargo build --target wasm32-unknown-unknown --no-default-features \
-                -p hxcrypto --features lz4 --ignore-rust-version
 
               # Hand the cache dirs back to the runner user for the post-job save.
               chown -R "$(stat -c %u:%g /src)" \

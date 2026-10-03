@@ -80,7 +80,7 @@ Meson wiring: the resolved `2` path leaves cargo defaults on. The
 resolved `1` path passes `--no-default-features` to suppress the default
 `glycin-v3` — and because that flag is workspace-wide it also drops
 other members' defaults, so the cargo line re-supplies the load-bearing
-ones (the compression features on `hxcrypto`).
+ones (the `c-abi` features on `hxtext` and `hxrequest`).
 
 ### The concrete API delta
 

@@ -28,7 +28,7 @@ in the Rotulus repository; read its §6 before trusting any new harness.
 
 | Tier | What | Where | Status |
 |---|---|---|---|
-| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxcrypto`, `hxtext`, `hxmodel`, `hxmacres` |
+| 1 | CPU microbenchmarks, headless | criterion `benches/` in each crate | Started: `hxcrypto` (in hx-libs), `hxtext`, `hxmodel`, `hxmacres` |
 | 2 | Throughput and latency over loopback, headless | bench binaries against an in-process fake server | The connection pipeline, HTXF transfers, the tracker fetch |
 | 3 | UI scenarios through the real frame clock | `gtkhx-ui`'s `bench` module, run by `tools/uibench.sh` | Started: chat, Files panel, Users panel, tracker window, chat media, startup, chat history, video tiles |
 | 4 | End to end against the Docker rig | the integration tests' Docker rig | Not started |
@@ -37,13 +37,14 @@ in the Rotulus repository; read its §6 before trusting any new harness.
 
 ```sh
 cd rust
-cargo bench -p hxcrypto               # ciphers and hashes
-cargo bench -p hxcrypto -- aead       # one group
 cargo bench -p hxtext                 # Mac Roman, the wire encode, shortcodes
 cargo bench -p hxmodel                # member list, nick completion, file list
 cargo bench -p hxmacres               # icons.rsrc: open, look up, decode
-cargo bench -p hxcrypto -- --warm-up-time 1 --measurement-time 3   # quicker
+cargo bench -p hxtext -- --warm-up-time 1 --measurement-time 3   # quicker
 ```
+
+The ciphers and hashes are hx-libs' now, and so is their suite: in an
+hx-libs checkout, `cargo bench -p hxcrypto` (`-- aead` for one group).
 
 The chat view's layout engine has its own suite, in the
 [Rotulus repository](https://github.com/mishan/rotulus) with the rest of the
@@ -60,7 +61,8 @@ Still to add:
 - `hxproto` (in hx-libs, so hxd-ng gets them too): frame decode and dispatch
   of common transactions, a large user-list reply, a 10k-entry file list, a
   news listing.
-- `hxcrypto` compression, once it is negotiated.
+- `hxhope` (in hx-libs): the transport's encode and decode, each cipher
+  with and without each compression.
 - `hxfiles-xfer`, `hxhfs` (in hx-libs), `hx-image-decode`: the
   fork-header codec, sidecar reads, PICT decode, per-frame GIF decode.
 - The tracker codec, once it moves to hx-libs.
@@ -256,7 +258,6 @@ bookkeeping shows: every frame stays under 2 ms, but no longer flat.
 
 | Benchmark | Time |
 |---|---|
-| `blowfish_rollback` (save + restore) | 1.3 ns |
 | `hope_rekey_63`, HMAC-MD5 | 51 µs |
 | `hope_rekey_63`, HMAC-SHA1 | 34 µs |
 

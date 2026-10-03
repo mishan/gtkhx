@@ -128,8 +128,9 @@ grep -A99 'extern "C" {' rust/crates/<c>/src/*.rs | grep -cP '^\s*(pub )?fn '
 grep -c "rust_<c>_dep" tests/meson.build
 ```
 
-This is also why the crypto/compression merge worked: all its members are leaf
-primitives with no C externs, so the merged archive is still self-contained.
+This is also why the crypto/compression merge worked: all its members were
+leaf primitives with no C externs, so the merged archive was still
+self-contained. (That crate, `hxcrypto`, has since moved to hx-libs.)
 
 ### 2c. Deliberate dependency floors
 
@@ -203,8 +204,10 @@ hxd.
 1.0/1.2/1.5/1.9 wire parser and builder — the crate with the widest genuine
 appeal to other Hotline clients and servers), `hxhfs` (CAP / AppleDouble /
 Netatalk sidecar metadata; genuinely generic, and the real loss here — it is
-the one with appeal well outside this world), and `hxmacres` (Mac resource-fork
-parsing plus `cicn` decode).
+the one with appeal well outside this world), `hxmacres` (Mac resource-fork
+parsing plus `cicn` decode), and `hxcrypto` and `hxhope`, now in hx-libs:
+HOPE came from the hxd family, and they replace `hmac.c`, `cipher.c` and
+`compress.c`, which GtkHx shared with it.
 
 They can still be *published* under the GPL. The realistic audience for a
 Hotline protocol crate descends from the same tree and is already GPL, so the
@@ -240,13 +243,17 @@ over an existing crate to justify a public API and its maintenance.
 
 ## 5. Shared-crate status and open work
 
-`hxproto`, `hxfiles-xfer` and `hxhfs` now live in
-[hx-libs](https://github.com/mishan/hx-libs), and GtkHx pins them as git
-dependencies. hxd-ng consumes the same crates, so protocol changes land once and
-are validated by both applications. GtkHx's C ABI over them stayed here, in
-`gtkhx-proto-ffi` and `gtkhx-files-ffi`. The remaining candidates stay local
-until a real second consumer justifies moving them; the ones that now have
-one, and their order, are in [ROADMAP.md](ROADMAP.md#shared-code-with-hxd-ng).
+`hxproto`, `hxfiles-xfer`, `hxhfs`, `hxsession`, `hxcrypto` and `hxhope` now
+live in [hx-libs](https://github.com/mishan/hx-libs), and GtkHx pins them as
+git dependencies. hxd-ng consumes the protocol crates too, so protocol changes
+land once and are validated by both applications; `hxsession` is the browser
+client's (hx-ng) as well as GtkHx's, and `hxhope` has the server's side of
+HOPE waiting for hxd-ng. GtkHx's C ABI over them stayed here, in
+`gtkhx-proto-ffi` and `gtkhx-files-ffi`. `hxcrypto`'s went: no C called it
+but a test, whose vectors moved to hx-libs with the code. The remaining
+candidates stay local until a real second consumer justifies moving them;
+the ones that now have one, and their order, are in
+[ROADMAP.md](ROADMAP.md#shared-code-with-hxd-ng).
 
 - **Relicense** `hx-image-decode` and `hxtls-trust` to `MIT OR Apache-2.0`
   after the file-by-file read-through above. Blocks the packaging work.

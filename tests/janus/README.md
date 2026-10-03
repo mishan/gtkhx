@@ -143,6 +143,12 @@ Out of the box:
        (`:8973`), which writes a `HOPEPassword:` blob into the
        account's YAML. Works from 2.0.13, including after a
        restart. Neither bundled account uses this path.
+- **HOPE compression** (`EnableCompression: true`), under a
+  cipher, for a client that offers it: GZIP, LZ4 and ZSTD under
+  ChaCha20-Poly1305, GZIP and ZSTD under Blowfish (LZ4 under
+  Blowfish stalls; see `docs/janus-bugs.md`).
+  `test_hope_compression` asks for each working pair. A client
+  that offers none, as every other test does, runs uncompressed.
 - Large-file (>4 GiB) transfers.
 - Text encoding negotiation (UTF-8 / Mac Roman).
 - File-mode banner (Janus ships a `banner.gif`).

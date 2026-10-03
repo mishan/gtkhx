@@ -68,16 +68,8 @@ impl<S> HtxfChannel<S> {
     pub fn new_plain(inner: S) -> Self {
         Self {
             inner,
-            encode: AeadState {
-                key: [0; 32],
-                counter: 0,
-                dir: 0,
-            },
-            decode: AeadState {
-                key: [0; 32],
-                counter: 0,
-                dir: 0,
-            },
+            encode: AeadState::new([0; 32], 0),
+            decode: AeadState::new([0; 32], 0),
             aead_active: false,
             rx_plain: Vec::new(),
             rx_plain_pos: 0,
@@ -547,30 +539,7 @@ unsafe fn htxf_derive_aead(
     hope_aead: *const crate::ffi::HxnetHopeAead,
     xfer_ref: u32,
 ) -> Option<(AeadState, AeadState)> {
-    if hope_aead.is_null() {
-        return None;
-    }
-    let m = &(*hope_aead).material;
-    let mut xfer_encode = AeadState {
-        key: [0u8; 32],
-        counter: 0,
-        dir: 0,
-    };
-    let mut xfer_decode = AeadState {
-        key: [0u8; 32],
-        counter: 0,
-        dir: 0,
-    };
-    hxcrypto::aead::gtkhx_aead_derive_transfer_keys(
-        &mut xfer_encode,
-        &mut xfer_decode,
-        m.session_key.as_ptr(),
-        m.session_key.len(),
-        &m.ctrl_encode,
-        &m.ctrl_decode,
-        xfer_ref,
-    );
-    Some((xfer_encode, xfer_decode))
+    hope_aead.as_ref().map(|h| h.material.transfer(xfer_ref))
 }
 
 /// Finish opening an HTXF subchannel over a connected, blocking `tcp`:
@@ -1138,8 +1107,43 @@ pub unsafe extern "C" fn hxnet_htxf_close(handle: *mut HtxfConn) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hxcrypto::aead::{AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
+    use hxcrypto::aead::AEAD_DIR_CLIENT_TO_SERVER;
     use std::io::Cursor;
+
+    /// Both ends' transfer keys, from a ChaCha20-Poly1305 HOPE login run in
+    /// memory between hxhope's client and server.
+    fn hope_chacha_transfer_keys() -> (hxhope::TransferKeys, hxhope::TransferKeys) {
+        use hxhope::{client, server, Cipher, Mac};
+        let offer = client::Offer {
+            ciphers: vec![Cipher::ChaCha20Poly1305],
+            ..client::Offer::new(*b"TEST")
+        };
+        let policy = server::Policy {
+            macs: Mac::ALL.to_vec(),
+            ciphers: vec![Cipher::ChaCha20Poly1305],
+            compressions: Vec::new(),
+            require_cipher: true,
+        };
+        let who = client::Login {
+            login: b"",
+            password: b"pw",
+            name: b"",
+            icon: 0,
+            version: 0,
+            caps: 0,
+        };
+        let step1 = client::step1(&offer, 1).unwrap();
+        let (srv, reply) = server::answer(&policy, &step1, [0x5a; 64], 1).unwrap();
+        let est = client::step2(&offer, &reply, &who, 2, Box::new(|_: &mut [u8]| {})).unwrap();
+        let step2 = srv.step2(&est.step2).unwrap();
+        let (_, agreed) = srv
+            .accept(&step2, b"pw", Box::new(|_: &mut [u8]| {}))
+            .unwrap();
+        (
+            est.negotiated.transfer_keys.unwrap(),
+            agreed.transfer_keys.unwrap(),
+        )
+    }
 
     fn key() -> [u8; 32] {
         [0x37u8; 32]
@@ -1149,18 +1153,10 @@ mod tests {
     /// reader's `decode` must start identical (same key/dir/counter=0)
     /// to interoperate, exactly like the two ends of a real transfer.
     fn enc() -> AeadState {
-        AeadState {
-            key: key(),
-            counter: 0,
-            dir: AEAD_DIR_CLIENT_TO_SERVER,
-        }
+        AeadState::new(key(), AEAD_DIR_CLIENT_TO_SERVER)
     }
     fn dec() -> AeadState {
-        AeadState {
-            key: key(),
-            counter: 0,
-            dir: AEAD_DIR_CLIENT_TO_SERVER,
-        }
+        AeadState::new(key(), AEAD_DIR_CLIENT_TO_SERVER)
     }
 
     #[test]
@@ -1276,44 +1272,13 @@ mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let k = key();
         // The transfer keys are derived INSIDE hxnet_htxf_connect from
-        // the control connection's retained HOPE material + the transfer
-        // ref. Build that material here and derive the matching
-        // per-transfer states for the server thread so both ends agree.
-        let session_key = vec![0x5au8; 64];
-        let ctrl_encode = AeadState {
-            key: k,
-            counter: 0,
-            dir: AEAD_DIR_CLIENT_TO_SERVER,
-        };
-        let ctrl_decode = AeadState {
-            key: k,
-            counter: 0,
-            dir: AEAD_DIR_SERVER_TO_CLIENT,
-        };
+        // what the control connection's HOPE agreed and the transfer ref;
+        // the server derives its side from what its end of the same
+        // handshake agreed.
+        let (client_keys, server_keys) = hope_chacha_transfer_keys();
         let xref: u32 = 42;
-        let mut xe = AeadState {
-            key: [0u8; 32],
-            counter: 0,
-            dir: 0,
-        };
-        let mut xd = AeadState {
-            key: [0u8; 32],
-            counter: 0,
-            dir: 0,
-        };
-        unsafe {
-            hxcrypto::aead::gtkhx_aead_derive_transfer_keys(
-                &mut xe,
-                &mut xd,
-                session_key.as_ptr(),
-                session_key.len(),
-                &ctrl_encode,
-                &ctrl_decode,
-                xref,
-            );
-        }
+        let (xe, xd) = server_keys.transfer(xref);
         // Server's outgoing = SERVER_TO_CLIENT = xfer_decode (xd);
         // incoming = CLIENT_TO_SERVER = xfer_encode (xe).
         let (s_enc, s_dec) = (xd, xe);
@@ -1334,11 +1299,7 @@ mod tests {
         // Client passes the opaque HOPE material handle; hxnet_htxf_connect
         // derives the same xe/xd internally from material + xref.
         let hope = crate::ffi::HxnetHopeAead {
-            material: crate::lifecycle::HopeAeadMaterial {
-                session_key,
-                ctrl_encode,
-                ctrl_decode,
-            },
+            material: client_keys,
         };
 
         let host = "127.0.0.1";

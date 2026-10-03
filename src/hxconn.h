@@ -262,16 +262,6 @@ extern void hx_conn_set_bridge_handle (struct htlc_conn *h, void *p);
  * the field comment in gtkhx-core's conn.rs. */
 extern guint16 hx_conn_serial (const struct htlc_conn *h);
 
-/* ---- Per-connection connect / login state --------------------------------
- *
- * These were file-statics in network.c and rcv.c, which meant one value for
- * the whole process.
- *
- * login_reply_trans is the transaction the orchestrator's replayed LOGIN
- * reply carries, which the login task has to be registered under. */
-extern guint32 hx_conn_login_reply_trans (const struct htlc_conn *h);
-extern void hx_conn_set_login_reply_trans (struct htlc_conn *h, guint32 v);
-
 /* ---- The next request's trans ---------------------------------------------
  *
  * The session numbers every transaction. task_new reserves the next request's

@@ -106,15 +106,6 @@ pub enum ConnectionState {
     LoginSending = 5,
     /// Waiting for the server's TASK reply to LOGIN.
     LoginReplyWait = 6,
-    /// HOPE handshake step 1 (server MAC choice + sessionkey
-    /// seed). Emitted only when the server negotiates HOPE.
-    HopeStep1 = 7,
-    /// HOPE handshake step 2 (client response, server cipher
-    /// confirmation). Emitted only when the server negotiates HOPE.
-    HopeStep2 = 8,
-    /// Cipher transition — re-wrap the transport in the
-    /// negotiated cipher adapter. Emitted only on the HOPE path.
-    CipherTransition = 9,
     /// Handshake complete; the actor is now in frame mode and
     /// will emit `Event::Frame(...)` for each subsequent server
     /// frame. The terminal pre-frame state on every path.

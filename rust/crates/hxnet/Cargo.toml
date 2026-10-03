@@ -27,11 +27,13 @@ crate-type = ["staticlib", "rlib"]
 socks = ["dep:tokio-socks"]
 
 [dependencies]
-hxcrypto = { path = "../hxcrypto" }
 hxproto = { workspace = true }
-# The frame reader: the stream cut into whole transactions, split ones
-# joined, shared with the browser client through hx-libs.
-hxsession = { workspace = true }
+# The session over the control connection, HOPE and its transport included
+# (Zstandard among the compressions it offers); and the AEAD primitives and
+# HOPE's transfer keys, for HTXF.
+hxsession = { workspace = true, features = ["hope", "zstd"] }
+hxhope.workspace = true
+hxcrypto.workspace = true
 # S0 (xfer_handle module): the struct htxf_conn storage mirror needs libc for the
 # platform-correct `timeval` layout so the #[repr(C)] mirror matches the C
 # compiler on every target. (MAXPATHLEN is a hard-coded 4095 — compat.h clamps
@@ -43,44 +45,10 @@ libc = "0.2"
 # the same process-global config the C callers set via hfs_set_config).
 hxfiles-xfer.workspace = true
 hxhfs.workspace = true
-# R3.3.c cipher adapters: BlowfishStream uses the Blowfish-OFB-64
-# primitive; AeadStream uses the ChaCha20-Poly1305 frame codec.
-# Both crates already live in the workspace and are linked into
-# the C binary via their own staticlibs — bringing them in as
-# rlib deps here doesn't change the link surface.
-# R3.3.e-4g: HopeBlowfishStream needs HMAC iteration to mirror
-# the legacy cipher_change_decode_key / cipher_change_encode_key
-# rekey rotation. We call the safe inner helper directly rather
-# than the C-shaped gtkhx_hmac_xxx wrapper.
-# Phase F-2 (post-HOPE cipher transition): the AEAD key
-# derivation uses HKDF-SHA256 directly. hxcrypto::aead has the
-# same HKDF helper internally but doesn't expose it; pulling
-# the primitives in here keeps Phase F-2 self-contained.
-hkdf = "0.12"
-sha2 = "0.10"
-# R3.3.e-4g: HopeBlowfishStream's write side needs OS randomness
-# for the marker-decision nibble. Same `getrandom(2)` backend
-# src/rand.c uses on the C side.
+# The randomness that places HOPE-Blowfish's rekey markers.
 getrandom = "0.3"
-# R3.3.d compression adapters: GZIP via flate2, LZ4 via lz4_flex,
-# ZSTD via zstd. We pull each crate directly (rather than going
-# through hxcrypto::compress's FFI-shaped opaque enum) because the
-# AsyncRead+AsyncWrite adapter's natural shape — feed input on
-# poll_write, Sync-flush per write / one frame per write,
-# decompress incrementally on poll_read — calls these libraries
-# differently from how hxcrypto::compress's transaction-shaped FFI does.
-# Same underlying crates and same wire format, just a different
-# framing strategy — hxnet's per-poll_write calls
-# (e.g. zstd::bulk::compress / lz4_flex::FrameEncoder per write,
-# flate2 Sync-flush per write) are wire-compatible with
-# hxcrypto::compress's persistent-encoder pipeline but not necessarily
-# byte-identical to it (block boundaries and stored-block headers
-# can differ when the encoder is reused across calls vs. fresh
-# per call). Versions track hxcrypto::compress so both paths decode the
-# same way on the other end.
-flate2 = "1"
-lz4_flex = "0.11"
-zstd = { version = "0.13", default-features = false }
+# A TLS certificate's SHA-256 fingerprint, for the trust check.
+sha2 = "0.10"
 # hxbridge with `runtime` feature gives us Runtime::global() — the
 # shared process-wide tokio runtime R3.1 set up. R3.3.b's FFI uses
 # it for spawn; having two tokio runtimes in one process is the
