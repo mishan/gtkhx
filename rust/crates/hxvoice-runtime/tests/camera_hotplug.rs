@@ -148,20 +148,42 @@ fn a_watched_camera_comes_and_goes() {
     };
     // Until the monitor has listed a camera, an empty list may only be a
     // provider hiding one, and autovideosrc still gets to try.
-    assert_eq!(
-        video::publish_available(VideoKind::Camera),
-        encodable
-            && (!video::list_cameras().is_empty()
-                || gst::ElementFactory::find("autovideosrc").is_some())
-    );
+    let fallback = || {
+        assert_eq!(
+            video::publish_available(VideoKind::Camera),
+            encodable
+                && (!video::list_cameras().is_empty()
+                    || gst::ElementFactory::find("autovideosrc").is_some())
+        )
+    };
+    fallback();
+
+    // A screen-cast node is no camera, so it doesn't count as one seen.
+    let screen: TestCamera = glib::Object::builder()
+        .property("display-name", "GtkHx Test Screen")
+        .property("device-class", "Video/Source")
+        .property("caps", gst::Caps::new_empty_simple("video/x-raw"))
+        .property(
+            "properties",
+            gst::Structure::builder("props")
+                .field("media.role", "Screen")
+                .build(),
+        )
+        .build();
+    provider.device_add(&screen);
+    pump(1);
+    assert!(video::list_cameras()
+        .iter()
+        .all(|c| c.display_name != "GtkHx Test Screen"));
+    fallback();
 
     provider.device_add(&camera);
-    pump(1);
+    pump(2);
     assert!(listed());
     button();
 
     provider.device_remove(&camera);
-    pump(2);
+    pump(3);
     assert!(!listed());
     button();
 
@@ -180,7 +202,7 @@ fn a_watched_camera_comes_and_goes() {
         ctx.iteration(false);
     }
     assert_eq!(second.get(), 1);
-    assert_eq!(changes.get(), 2);
+    assert_eq!(changes.get(), 3);
     assert!(listed());
     assert_eq!(STARTS.load(Ordering::SeqCst), 1, "one monitor for both");
     assert_eq!(STOPS.load(Ordering::SeqCst), 0);
