@@ -1271,6 +1271,7 @@ mod pipeline_tests {
                 MidLabel::ScrSend => Track::VideoSend(VideoKind::Screen),
                 MidLabel::CamUser(u) => Track::Video(u, VideoKind::Camera),
                 MidLabel::ScrUser(u) => Track::Video(u, VideoKind::Screen),
+                other => panic!("{other:?} has no Track"),
             });
             assert_eq!(parse_mid(mid), theirs, "{mid:?}");
         }

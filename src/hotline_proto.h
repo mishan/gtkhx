@@ -1509,7 +1509,7 @@ extern bool gtkhx_proto_parse_voice_reply (const uint8_t *buf, size_t len,
                                            struct gtkhx_proto_voice_reply *out);
 
 /* Video reply / Video Status (611) body. The slices borrow `buf`; an
- * absent field has a NULL pointer, an absent kind is 0. */
+ * absent field has a NULL pointer, an absent cid or kind is 0. */
 struct gtkhx_proto_video_reply {
     uint32_t cid;
     uint16_t kind;

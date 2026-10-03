@@ -4362,19 +4362,21 @@ pub unsafe extern "C" fn gtkhx_proto_parse_voice_mid_label(
     let Some(label) = hxproto::voice::parse_voice_mid_label(s) else {
         return GTKHX_PROTO_VOICE_MID_INVALID;
     };
-    if let Some(uid) = label.user_id() {
-        if !out_uid.is_null() {
-            *out_uid = uid;
-        }
-    }
-    match label {
+    let kind = match label {
         MidLabel::Send => GTKHX_PROTO_VOICE_MID_SEND,
         MidLabel::User(_) => GTKHX_PROTO_VOICE_MID_USER,
         MidLabel::CamSend => GTKHX_PROTO_VOICE_MID_CAM_SEND,
         MidLabel::ScrSend => GTKHX_PROTO_VOICE_MID_SCR_SEND,
         MidLabel::CamUser(_) => GTKHX_PROTO_VOICE_MID_CAM_USER,
         MidLabel::ScrUser(_) => GTKHX_PROTO_VOICE_MID_SCR_USER,
+        _ => return GTKHX_PROTO_VOICE_MID_INVALID,
+    };
+    if let Some(uid) = label.user_id() {
+        if !out_uid.is_null() {
+            *out_uid = uid;
+        }
     }
+    kind
 }
 
 /// C-ABI summary of an SDP offer/answer. Scalar fields only — the
@@ -4640,7 +4642,7 @@ pub unsafe extern "C" fn gtkhx_proto_build_voice_ice_json(
 /// the kind (on a 607 reply), and borrowed slices of the codec name and
 /// the `DATA_VIDEO_PUBLISHERS` blob. The slices point into the caller's
 /// buffer and are valid only as long as it is. A field that was absent
-/// has a NULL pointer; `kind` is 0 when absent.
+/// has a NULL pointer; `cid` and `kind` are 0 when absent.
 #[repr(C)]
 pub struct VideoReplyOut {
     pub cid: u32,
@@ -4676,7 +4678,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_video_reply(
         .map(|p| (p.as_ptr(), p.len()))
         .unwrap_or((std::ptr::null(), 0));
     *out = VideoReplyOut {
-        cid: r.cid,
+        cid: r.cid.unwrap_or(0),
         kind: r.kind.unwrap_or(0),
         codec_ptr,
         codec_len,
@@ -4736,7 +4738,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_voice_reply(
     let s = as_slice(buf, len);
     let r = hxproto::voice::parse_voice_reply(s, s.len());
     *out = VoiceReplyOut {
-        cid: r.cid,
+        cid: r.cid.unwrap_or(0),
         muted: r.muted.unwrap_or(0),
         muted_present: r.muted.is_some(),
         sdp_present: r.sdp.is_some(),

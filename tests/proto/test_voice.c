@@ -174,7 +174,8 @@ test_parse_voice_sdp_summary_extracts_pcmu_and_mids (void)
                       "a=mid:user-5\r\n"
                       "a=rtpmap:0 PCMU/8000\r\n"
                       "m=audio 9 UDP/TLS/RTP/SAVPF 0\r\n"
-                      "a=mid:send\r\n";
+                      "a=mid:send\r\n"
+                      "a=rtpmap:0 PCMU/8000\r\n";
     struct gtkhx_proto_voice_sdp_summary sum;
     g_assert_true (gtkhx_proto_parse_voice_sdp_summary ((const uint8_t *)sdp,
                                                         strlen (sdp), &sum));
