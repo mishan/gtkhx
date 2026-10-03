@@ -368,6 +368,8 @@ pub(crate) mod cfg {
     pub const VOICE_PTT_ENABLED: &str = "VOICEPTTENABLED";
     #[cfg(feature = "voice")]
     pub const VOICE_PTT_KEY: &str = "VOICEPTTKEY";
+    #[cfg(feature = "voice")]
+    pub const VOICE_METERED_ONE_VIDEO: &str = "VOICEMETEREDONEVIDEO";
     pub const SND_VOICE_JOIN: &str = "SOUNDVOICEJOIN";
     pub const SND_VOICE_LEAVE: &str = "SOUNDVOICELEAVE";
     // Paths / transfers

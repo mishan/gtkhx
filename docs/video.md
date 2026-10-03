@@ -41,7 +41,7 @@ client asks for a stream by name with Video Subscribe (610).
 | Receive | `rcv.c`: `hx_rcv_video_status`, the 607 refusal path, login limits → `hx_conn_*_video_limits` |
 | Presence | `hxvoice-model`: per-uid camera / screen / paused flags and the `video-changed` and `video-started` signals, shown by `users_voice_col.rs` and announced in chat by `video_panel.rs` |
 | UI | `gtkhx-ui`: `video_panel.rs` (the dockable panel), `voice_panel.rs` (camera and screen buttons), `screen_share.rs` (portal, consent, banner), `options_voice.rs` (camera picker) |
-| Settings | `hxconfig` `voice.camera_device` |
+| Settings | `hxconfig` `voice.camera_device`, `voice.metered_one_video` |
 
 No new meson option: video is part of `-Dvoice`, and a voice-off build
 compiles none of it and advertises neither bit.
@@ -195,9 +195,11 @@ keyboard focus: focus, mute and stop watching.
 
 **Visibility is the subscription policy.** While the panel's page is
 mapped it subscribes to every publication whose tile is in view or about
-to be, less those the user stopped watching; unmapped — another tab, a collapsed dock, a withdrawn window — it
-sends the empty set. "About to be" is within half a view height of the
-view, since a stream takes a renegotiation and a keyframe to appear (on
+to be, less those the user stopped watching; unmapped — another tab, a
+collapsed dock, a withdrawn window — it sends the empty set, and so it
+does while its window is minimized or suspended (below). "About to be" is
+within half a view height of the view, since a stream takes a
+renegotiation and a keyframe to appear (on
 the local rig, about a quarter of a second after the 610; up to a second
 more when another viewer has just asked the same publisher for a
 keyframe, since servers allow one a second). A tile already
@@ -208,6 +210,28 @@ go goes blank, as a stopped publication's does. A burst of 611s costs one
 150 ms, rather than one along the way. A collapsed
 panel or a tile scrolled away costs no bandwidth and no decoding, which
 is the spec's reason 610 takes a whole set.
+
+Suspended (`GDK_TOPLEVEL_STATE_SUSPENDED`, GTK 4.12) is the compositor
+saying none of the window can be seen — minimized, on another workspace,
+or wholly covered where the compositor tracks that — and is the only such
+signal a Wayland client gets, xdg-shell having no minimized state; X11
+reports minimized, and nothing for a window merely covered. Backdrop (the
+window lost focus) is deliberately not one of them: a window beside the
+one in use is still in plain view. The panel watches its window's state
+from map to unmap, since undocking moves it to another window.
+
+**On a metered network each server gets one stream.** While
+`GNetworkMonitor` reports the network metered, and "Receive one video on
+metered connections" (Settings → Voice, `voice.metered_one_video`, on by
+default) is set, the set each connection's panel would send is cut to a
+single stream, chosen from those it would otherwise receive: the tile in
+focus; else the one already received, for as long as it stays in reach —
+even while its publisher is paused — so streams don't swap under the
+user; else the first unpaused tile in grid order; else the first, even if
+paused. The other tiles in reach stay, blank like a tile scrolled away but
+captioned "Paused on a metered connection · click to watch", and clicking
+one puts it in focus and so receives it instead. A change of either the
+network or the preference resends every panel's set.
 
 **The user list shows who is publishing** regardless of the panel, from
 the 611 (camera or screen glyph beside the voice indicator, dim when

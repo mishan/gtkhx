@@ -111,6 +111,7 @@ pub const MAP: &[(&str, Target)] = &[
     ("VOICECAMERADEVICE", Path("voice.camera_device")),
     ("VOICEPTTENABLED", Path("voice.ptt_enabled")),
     ("VOICEPTTKEY", Path("voice.ptt_key")),
+    ("VOICEMETEREDONEVIDEO", Path("voice.metered_one_video")),
     ("WORDWRAP", Path("chat.word_wrap")),
     ("XBUF_MAX", Path("chat.scrollback_lines")),
     // Keys from versions before the current table. They were already being
@@ -150,6 +151,9 @@ pub const NEW_PATHS: &[&str] = &[
     // Links in chat did nothing on a left click before; opening them is
     // what every other link on the desktop does.
     "chat.single_click_links",
+    // Video subscriptions arrived after gtkhxrc; saving a metered link's
+    // data is what a migrated user would want too.
+    "voice.metered_one_video",
 ];
 
 /// Where an old key goes, or `None` if the schema has never heard of it.

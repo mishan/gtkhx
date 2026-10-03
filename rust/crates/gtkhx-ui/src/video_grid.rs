@@ -199,7 +199,7 @@ struct Entry {
 /// Tiles in user order, this client's own first: the order publications
 /// reach the client varies, and tiles shouldn't swap places between
 /// sessions. A user's camera comes before their screen.
-fn order(key: &StreamKey) -> (u16, VideoKind) {
+pub(crate) fn order(key: &StreamKey) -> (u16, VideoKind) {
     (key.user_id, key.kind)
 }
 

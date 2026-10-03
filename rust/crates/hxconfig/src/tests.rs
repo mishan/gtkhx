@@ -857,6 +857,7 @@ fn every_path_round_trips_a_non_default_value() {
         &mut s.transfers.queue,
         &mut s.trackers.case_sensitive,
         &mut s.voice.ptt_enabled,
+        &mut s.voice.metered_one_video,
     ] {
         *flag = !*flag;
     }

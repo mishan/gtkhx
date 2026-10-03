@@ -15,9 +15,6 @@ record.
   follows `ssrc-group:FID`, but the answer pins VP8 without RTX. If a server did
   negotiate RTX, its stream would expose a pad that can't link to
   `rtpvp8depay`.
-- **Narrower subscriptions.** Tiles scrolled out of view are no longer
-  received; a window behind others, and a metered-connection preference,
-  should shrink the receive set too.
 - **Renderer cost.** The panel builds a new `GdkMemoryTexture` for every frame,
   and GTK uploads each one to the GPU. `gtk4paintablesink` would keep frames on
   the GPU, but neither the GNOME runtime nor the bundle scripts ship it. A
@@ -27,6 +24,9 @@ record.
   synchronously, a PipeWire round trip plus libcamera's manager, a few
   tenths of a second; a hung PipeWire would freeze the join. Starting it
   off the main thread would fix that.
+- **A covered window on X11.** A hidden window stops receiving video when
+  it is minimized or suspended, but X11 reports neither for a window that
+  is merely covered by others, so there it keeps receiving.
 
 ### Robustness
 
