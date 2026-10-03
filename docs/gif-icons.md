@@ -116,9 +116,8 @@ uses a watchdog, the same shape the tracker-v3 probe already uses.
 
 As built (`src/gif_icons.c`):
 
-1. After login, fire Get Icon List once, recording the transaction ID it
-   will be keyed on (`task_new` snapshots the counter before
-   `hlwrite_chunks` increments it).
+1. After login, fire Get Icon List once, recording the transaction ID its
+   task is keyed on, which is the one it goes out on.
 2. Arm a 2-second watchdog.
 3. A reply marks the session capable — ingest the entries, enable the
    send path, and auto-send the user's saved avatar if there is one.

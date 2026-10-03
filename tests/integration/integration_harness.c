@@ -188,7 +188,12 @@ extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
 extern int hxnet_connection_send_frame (hxnet_connection *handle,
                                         const guint8 *data, guint len);
 extern void hxnet_connection_destroy (hxnet_connection *handle);
-extern guint32 hxnet_first_trans (void);
+/* hlpack assigns each outgoing frame's trans from htlc->trans, then
+ * increments (proto_helpers.c). The session in hxnet numbers its own — the
+ * agreement, a 1.2 server's user change, a ping a minute — from 2, and
+ * production takes its requests' from the same counter; the harness's
+ * frames number themselves from far past anywhere a test's session gets. */
+#define HARNESS_FIRST_TRANS 0x10000
 extern int hxnet_connection_agree (hxnet_connection *handle, const guint8 *nick,
                                    gsize nick_len, guint16 icon);
 extern void hxnet_frame_free (hxnet_frame_t *frame);
@@ -387,13 +392,8 @@ orch_open_login (struct htlc_conn *htlc, const char *host, int port,
         return -1;
     }
 
-    /* hlpack assigns each outgoing frame's trans from htlc->trans, then
-     * increments (proto_helpers.c). The session in hxnet numbers its own
-     * — the login, the agreement, a 1.2 server's user change — below
-     * hxnet_first_trans and reads their replies itself, so the test's
-     * start there, as production's do (network.c). */
     if (htlc) {
-        htlc->trans = hxnet_first_trans ();
+        htlc->trans = HARNESS_FIRST_TRANS;
     }
     orch_settle (fd, display_name, icon);
     return fd;
@@ -447,7 +447,7 @@ orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
 
     /* As orch_open_login. */
     if (htlc) {
-        htlc->trans = hxnet_first_trans ();
+        htlc->trans = HARNESS_FIRST_TRANS;
     }
     orch_settle (fd, display_name, icon);
     return fd;
@@ -501,7 +501,7 @@ orch_open_login_tls (struct htlc_conn *htlc, const char *host, int port,
     }
     /* As orch_open_login. */
     if (htlc) {
-        htlc->trans = hxnet_first_trans ();
+        htlc->trans = HARNESS_FIRST_TRANS;
     }
     orch_settle (fd, display_name, icon);
     return fd;

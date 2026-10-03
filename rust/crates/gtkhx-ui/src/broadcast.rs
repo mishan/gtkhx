@@ -110,7 +110,7 @@ fn send_broadcast(text: &str) {
         let hc = build_broadcast_chunks(&BroadcastRequest { body: wire_slice }, &mut chunks);
         if hc > 0 {
             // No-reply task (rcv fn NULL) registered before the write — see
-            // hx_send_msg: task_new snapshots htlc->trans before hlpack bumps it.
+            // hx_send_msg: task_new reserves the trans the write goes out on.
             task_new(
                 htlc,
                 None,

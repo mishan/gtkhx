@@ -83,65 +83,6 @@
  * hxnet_connection_destroy, which aborts the lifecycle task so a
  * mid-handshake actor releases its socket. */
 
-/* PING keepalive. Some servers (hlserver.com is the known
- * case) drop idle connections after a few minutes of silence. mhxd
- * defines HTLC_HDR_PING / HTLS_HDR_PING for client-driven keepalive;
- * we send an empty PING every PING_INTERVAL_SEC seconds while
- * connected, and the server resets its idle timer on receipt. The
- * server replies with HTLS_HDR_TASK flag=0 (no chunks) — we treat
- * it like any other no-op task reply.
- *
- * Old (1.0/1.2) servers will respond with a task error to the
- * unknown opcode, which task_error() now toasts (instead of modal-
- * dialoging) — annoying but not fatal. If that proves to be a
- * compat problem in the wild, we can gate sending on a
- * server-supports-ping flag detected from version info, but for
- * now sending unconditionally matches mhxd's hx client behaviour. */
-
-#define PING_INTERVAL_SEC 60
-
-static gboolean
-ping_tick (gpointer data)
-{
-    struct htlc_conn *htlc = data;
-
-    if (!htlc || !hx_conn_fd (htlc)) {
-        if (htlc) {
-            hx_conn_set_ping_timer (htlc, 0);
-        }
-        return G_SOURCE_REMOVE;
-    }
-    /* PING is a zero-chunk opcode. Send directly through
-     * hlwrite_chunks with hc=0 so the trace path matches the rest of
-     * the SEND opcodes (no fallback to the variadic hlwrite). */
-    hlwrite_chunks (htlc, HTLC_HDR_PING, 0, NULL, 0);
-    return G_SOURCE_CONTINUE;
-}
-
-void
-ping_start (struct htlc_conn *htlc)
-{
-    /* The already-armed check is per-connection. It used to read a
-     * file-static, so once any connection had a keepalive running every
-     * other connection silently went without one. */
-    if (!htlc || hx_conn_ping_timer (htlc) || !hx_conn_fd (htlc)) {
-        return;
-    }
-    hx_conn_set_ping_timer (
-        htlc, g_timeout_add_seconds (PING_INTERVAL_SEC, ping_tick, htlc));
-}
-
-void
-ping_stop (struct htlc_conn *htlc)
-{
-    guint id = htlc ? hx_conn_ping_timer (htlc) : 0;
-
-    if (id) {
-        g_source_remove (id);
-        hx_conn_set_ping_timer (htlc, 0);
-    }
-}
-
 void
 hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
@@ -149,7 +90,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     session *sess = sess_from_htlc (htlc);
 
-    ping_stop (htlc);
     banner_clear (htlc);
 
     /* Reset the per-session login flag so the next connect starts
@@ -428,8 +368,8 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
  * The replayed reply dispatches here via hx_rcv_hdr -> task_with_trans,
  * so the task must be keyed on the connection's login_reply_trans. The
  * NULL ptr arg selects rcv_task_login's post-login (else) branch.
- * htlc->trans is currently our send counter (hxnet_first_trans); set it
- * to reply_trans for the task_new key, then restore it. */
+ * task_new keys on htlc->trans, the trans reserved for our next request;
+ * set it to reply_trans for the task_new key, then restore it. */
 void
 hx_orchestrator_register_login_task (struct htlc_conn *htlc)
 {
@@ -542,8 +482,9 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * lazily from the bridge's LOGIN_SENDING state callback
      * (hx_orchestrator_register_login_task), which fires after magic
      * and before the replayed reply — matching legacy's send_login
-     * timing. Our own requests are numbered from hxnet_first_trans, past
-     * the session's; the deferred registration restores it afterwards.
+     * timing. No trans is reserved yet: the session numbers our requests
+     * from its own counter, and one left from the last connection is not
+     * this session's.
      *
      * The replayed reply's trans differs by mode: the plaintext path
      * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
@@ -551,7 +492,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
     hx_conn_set_login_reply_trans (htlc, secure ? (HX_LOGIN_TRANS + 1)
                                                 : HX_LOGIN_TRANS);
-    hx_conn_set_trans (htlc, hxnet_first_trans ());
+    hx_conn_set_trans (htlc, 0);
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame

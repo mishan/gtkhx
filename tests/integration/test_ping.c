@@ -2,10 +2,9 @@
  * tests/integration/test_ping.c — verify mhxd accepts the
  * HTLC_HDR_PING keepalive opcode without erroring.
  *
- * GtkHx sends HTLC_HDR_PING (0x000001f4) every 60 s when connected
- * to a Hotline 1.5+ server. The Phase 5 fix gated this on
- * htlc->version >= 150 so legacy servers (hlserver.com responds at
- * version=0) wouldn't error-toast every minute.
+ * GtkHx's session (hxsession) sends HTLC_HDR_PING (0x000001f4) after
+ * 60 s with nothing sent to a Hotline 1.5+ server, and never to a
+ * legacy one (hlserver.com responds at version=0).
  *
  * mhxd built with --enable-hxd handles PING. We're running mhxd
  * configured as Hotline 1.8.5 (version=185 in our Dockerfile

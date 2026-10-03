@@ -194,7 +194,6 @@ struct htlc_conn {
      * would otherwise linger forever). */
     guint32 gif_icons_probe_trans;
     guint16 serial;
-    guint ping_timer;
     guint32 login_reply_trans;
     /* Video extension: DATA_VIDEO_LIMITS from the LOGIN reply, camera
      * then screen. Read through hx_conn_video_limits. */

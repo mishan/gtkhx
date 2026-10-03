@@ -192,7 +192,7 @@ As of this writing the C bodies group into:
 - **Login and post-login sequencing** — `rcv_task_login`, which walks the
   LOGIN reply through the Rust parser and then does everything after:
   seeds the HOPE AEAD handle, applies the parsed fields, emits logged-in,
-  starts the ping keepalive on 1.5+ servers, and routes the fetch
+  and routes the fetch
   decision. Plus `hx_post_login_fetches`, its fallback timer, and the
   reset hook.
 - **Server-initiated handlers still in C** — private message / broadcast

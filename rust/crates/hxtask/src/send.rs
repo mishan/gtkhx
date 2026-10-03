@@ -43,10 +43,13 @@ use crate::HtlcConn;
 extern "C" {
     /// gtkhx-core — `htlc->fd` (0 = no live socket).
     fn hx_conn_fd(h: *const HtlcConn) -> c_int;
-    /// gtkhx-core — `htlc->trans` snapshot (no increment), for the trace id.
+    /// gtkhx-core — the trans reserved for the next request, 0 for none.
     fn hx_conn_trans(h: *const HtlcConn) -> u32;
-    /// gtkhx-core — return `htlc->trans`, then increment it (the frame stamp).
-    fn hx_conn_trans_post_inc(h: *mut HtlcConn) -> u32;
+    fn hx_conn_set_trans(h: *mut HtlcConn, v: u32);
+    /// gtkhx-core — the connection's hxnet handle.
+    fn hx_conn_bridge_handle(h: *const HtlcConn) -> *mut std::os::raw::c_void;
+    /// hxnet — the next trans from the connection's session; 0 with none.
+    fn hxnet_connection_take_trans(handle: *mut std::os::raw::c_void) -> u32;
     /// proto_trace.c — Hotline wire trace (`GTKHX_DEBUG=proto`).
     fn proto_trace_send_begin(ty: u32, trans: u32, hc: u16);
     fn proto_trace_send_chunk(ty: u16, len: u16, data: *const u8);
@@ -79,6 +82,20 @@ unsafe fn infoprefix() -> *const c_char {
     INFOPREFIX
 }
 
+/// The trans the next request on `htlc` goes out on. The session numbers
+/// every transaction; the first ask takes one from it, and it stays this
+/// connection's next until a send uses it, because a request's task is keyed
+/// on it (`task_new`) before the send that follows.
+pub(crate) unsafe fn next_trans(htlc: *mut HtlcConn) -> u32 {
+    let reserved = hx_conn_trans(htlc);
+    if reserved != 0 {
+        return reserved;
+    }
+    let trans = hxnet_connection_take_trans(hx_conn_bridge_handle(htlc));
+    hx_conn_set_trans(htlc, trans);
+    trans
+}
+
 /// `void hlwrite_chunks(struct htlc_conn *htlc, guint32 type, guint32 flag,
 /// const struct hx_chunk *chunks, int hc)` — the chunk-array send primitive
 /// (ported from network.c). Packs the frame in Rust, traces it, and hands the
@@ -108,10 +125,9 @@ pub unsafe extern "C" fn hlwrite_chunks(
         return;
     }
 
-    // Snapshot the trans id for the trace (no increment yet); the counter is
-    // advanced only when we actually pack, matching the old C ordering where a
-    // pack-guard trip left `htlc->trans` untouched.
-    let my_trans = hx_conn_trans(htlc);
+    // Used up only when we actually pack: a pack-guard trip leaves it
+    // reserved.
+    let my_trans = next_trans(htlc);
 
     // Pack the frame. `pack_message_size` predicts the exact byte count, so a
     // zero size (too many chunks / overflow) or a write that isn't exactly
@@ -121,13 +137,13 @@ pub unsafe extern "C" fn hlwrite_chunks(
     let packed: Result<Vec<u8>, ()> = if needed == 0 {
         Err(())
     } else {
-        let trans = hx_conn_trans_post_inc(htlc); // == my_trans; advances the counter
+        hx_conn_set_trans(htlc, 0);
         let mut buf = vec![0u8; needed];
         let written = gtkhx_proto_pack_message(
             buf.as_mut_ptr(),
             needed,
             ty,
-            trans,
+            my_trans,
             flag,
             chunks,
             hc as usize,
@@ -216,7 +232,10 @@ mod doubles {
     pub struct Env {
         // inputs
         pub fd: c_int,
+        /// What `htlc->trans` holds: the reserved trans, 0 for none.
         pub trans: u32,
+        /// The session's counter.
+        pub session_trans: u32,
         pub installed: bool,
         pub send_rc: c_int,
         // observations
@@ -235,11 +254,11 @@ mod doubles {
         pub static ENV: RefCell<Env> = RefCell::new(Env::default());
     }
 
-    pub fn reset(fd: c_int, trans: u32, installed: bool, send_rc: c_int) {
+    pub fn reset(fd: c_int, session_trans: u32, installed: bool, send_rc: c_int) {
         ENV.with(|e| {
             *e.borrow_mut() = Env {
                 fd,
-                trans,
+                session_trans,
                 installed,
                 send_rc,
                 ..Env::default()
@@ -253,11 +272,17 @@ mod doubles {
     pub unsafe fn hx_conn_trans(_h: *const HtlcConn) -> u32 {
         ENV.with(|e| e.borrow().trans)
     }
-    pub unsafe fn hx_conn_trans_post_inc(_h: *mut HtlcConn) -> u32 {
+    pub unsafe fn hx_conn_set_trans(_h: *mut HtlcConn, v: u32) {
+        ENV.with(|e| e.borrow_mut().trans = v);
+    }
+    pub unsafe fn hx_conn_bridge_handle(_h: *const HtlcConn) -> *mut std::os::raw::c_void {
+        std::ptr::null_mut()
+    }
+    pub unsafe fn hxnet_connection_take_trans(_handle: *mut std::os::raw::c_void) -> u32 {
         ENV.with(|e| {
             let mut env = e.borrow_mut();
-            let t = env.trans;
-            env.trans = t.wrapping_add(1);
+            let t = env.session_trans;
+            env.session_trans = t + 1;
             t
         })
     }
@@ -301,9 +326,9 @@ mod doubles {
 
 #[cfg(test)]
 use doubles::{
-    debug_log_str, hx_bridge_is_installed, hx_bridge_send_frame, hx_conn_fd, hx_conn_trans,
-    hx_conn_trans_post_inc, hx_htlc_close, hx_printf_prefix, infoprefix, proto_trace_send_begin,
-    proto_trace_send_chunk, proto_trace_send_end,
+    debug_log_str, hx_bridge_is_installed, hx_bridge_send_frame, hx_conn_bridge_handle, hx_conn_fd,
+    hx_conn_set_trans, hx_conn_trans, hx_htlc_close, hx_printf_prefix, hxnet_connection_take_trans,
+    infoprefix, proto_trace_send_begin, proto_trace_send_chunk, proto_trace_send_end,
 };
 
 #[cfg(test)]
@@ -383,7 +408,7 @@ mod tests {
         }
         ENV.with(|e| {
             let env = e.borrow();
-            // trans snapshot taken before the pack, reached the trace
+            // the session's next trans, on the trace
             assert_eq!(env.trace_begin_trans, Some(42));
             assert_eq!(env.trace_chunks, 1);
             assert_eq!(env.send_calls, 1);
@@ -393,9 +418,21 @@ mod tests {
             // whichever one happened to be installed last
             assert_eq!(env.last_send_htlc, fake_htlc());
             assert_eq!(env.close_calls, 0);
-            // counter advanced by exactly one
-            assert_eq!(env.trans, 43);
+            // and used up
+            assert_eq!(env.trans, 0);
         });
+    }
+
+    #[test]
+    fn the_trans_a_task_is_keyed_on_is_the_one_its_send_goes_out_on() {
+        doubles::reset(1, 42, true, 0);
+        unsafe {
+            assert_eq!(next_trans(fake_htlc()), 42);
+            assert_eq!(next_trans(fake_htlc()), 42, "asked again before the send");
+            hlwrite_chunks(fake_htlc(), 200, 0, std::ptr::null(), 0);
+            assert_eq!(next_trans(fake_htlc()), 43);
+        }
+        ENV.with(|e| assert_eq!(e.borrow().trace_begin_trans, Some(42)));
     }
 
     #[test]
@@ -410,7 +447,7 @@ mod tests {
             assert_eq!(env.trace_chunks, 0);
             assert_eq!(env.send_calls, 1);
             assert_eq!(env.close_calls, 0);
-            assert_eq!(env.trans, 4);
+            assert_eq!(env.trans, 0);
         });
     }
 
@@ -445,8 +482,8 @@ mod tests {
             assert_eq!(env.trace_begin_trans, Some(42));
             assert_eq!(env.send_calls, 0);
             assert_eq!(env.close_calls, 0);
-            // still stamped one frame's trans
-            assert_eq!(env.trans, 43);
+            // still used up one trans
+            assert_eq!(env.trans, 0);
         });
     }
 
@@ -464,7 +501,7 @@ mod tests {
             let env = e.borrow();
             assert_eq!(env.send_calls, 0);
             assert_eq!(env.close_calls, 1);
-            // trans not advanced — the pack was rejected before the stamp.
+            // the trans stays reserved — the pack was rejected before use.
             assert_eq!(env.trans, 42);
         });
     }

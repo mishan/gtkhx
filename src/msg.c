@@ -60,10 +60,10 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
         = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
 
     /* chunk layout moved to gtkhx_proto_build_msg_chunks.
-     * Build chunks BEFORE registering the task — task_new() snapshots
-     * the current htlc->trans into a new task table entry (which then
-     * waits for the server's matching TASK reply); the actual increment
-     * of htlc->trans happens later inside hlpack_chunks during packing.
+     * Build chunks BEFORE registering the task — task_new() reserves
+     * the next request's trans and keys a new task table entry on it
+     * (which then waits for the server's matching TASK reply); the
+     * send that follows goes out on it.
      * If we registered the task first and the builder then failed
      * (validation reject), hlwrite_chunks would be skipped — leaving a
      * pending task with no on-wire request to reply to and hanging the

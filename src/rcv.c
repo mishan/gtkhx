@@ -1478,19 +1478,6 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
          * is what lets this be a single settle instead of the old
          * set-then-re-run dance. */
         gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
-
-        /* PING keepalive only on confirmed 1.5+ servers.
-         * hx_conn_version (htlc) is populated by the HTLS_DATA_VERSION
-         * chunk just parsed above; servers that don't advertise
-         * a version (1.0/1.2 originals like hlserver.com) leave
-         * it at 0, and sending HTLC_HDR_PING to them earns a
-         * task-error toast every minute ("Uh, no.") plus the
-         * ERROR sound. >= 150 is the bar — that covers every
-         * server we've seen (Badmoon at 190, mhxd at 150+) that
-         * implements PING, and excludes the ones that don't. */
-        if (hx_conn_version (htlc) >= 150) {
-            ping_start (htlc);
-        }
     }
 }
 

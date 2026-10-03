@@ -22,7 +22,4 @@ session *hx_sess_from_htlc (struct htlc_conn *htlc);
 GHashTable *hx_session_tasks (session *sess);
 void hx_session_set_tasks (session *sess, GHashTable *table);
 
-/* htlc->trans — the current outbound transaction id task_new keys on. */
-guint32 hx_htlc_trans (struct htlc_conn *htlc);
-
 #endif /* HX_TASKS_BRIDGE_H */

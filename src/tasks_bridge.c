@@ -12,7 +12,6 @@
 #include <stddef.h>
 
 #include "protocol.h" /* struct htlc_conn, struct task */
-#include "hxconn.h"   /* hx_conn_trans */
 #include "session.h"  /* struct _session (for ->tasks) */
 #include "tasks_bridge.h"
 
@@ -41,12 +40,6 @@ void
 hx_session_set_tasks (session *sess, GHashTable *table)
 {
     sess->tasks = table;
-}
-
-guint32
-hx_htlc_trans (struct htlc_conn *htlc)
-{
-    return hx_conn_trans (htlc);
 }
 
 /* Pin struct task's layout (protocol.h) so the #[repr(C)] Task mirror in

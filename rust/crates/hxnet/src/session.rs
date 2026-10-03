@@ -1,9 +1,11 @@
 //! The connection actor as the I/O of hx-libs' `hxsession`, which drives
-//! the magic, the login and the agreement.
+//! the magic, the login, the agreement and the keep-alive, and numbers
+//! every transaction.
 //!
 //! The session runs in raw mode, because GtkHx still has receive handlers
 //! of its own: every transaction reaches the consumer whole, and frames
-//! the consumer sends go out as built. What the session says becomes:
+//! the consumer sends go out as built, on a trans it took from the
+//! session ([`SharedSession`]). What the session says becomes:
 //!
 //! - every transaction → `Event::Frame`
 //! - logged in → `ConnectionState::HandshakeDone`
@@ -14,7 +16,7 @@
 //! The agreement is shown from its frame; answering it is
 //! [`Command::Agree`].
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use hxsession::{Closed, Session};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -24,17 +26,18 @@ use tokio::time::Instant;
 use crate::proto_trace::{trace, Dir};
 use crate::{Command, ConnectionState, Event, Frame, ShutdownReason};
 
-/// The first transaction id the consumer numbers its own requests from;
-/// the session's own are below it.
-pub const FIRST_TRANS: u32 = hxsession::RAW_TRANS_BASE;
+/// The session, shared by the actor that drives it and the connection's
+/// handle, which numbers the consumer's requests from it
+/// ([`Session::take_trans`]) before they are sent: the consumer keys a
+/// request's reply on its trans as it builds it.
+pub type SharedSession = Arc<Mutex<Session>>;
 
 const READ_CHUNK: usize = 16 * 1024;
 
 /// The session's settings for a GtkHx login.
 ///
 /// `nick` and `icon` go with the agreement, or to a 1.2 server in a user
-/// change; the login itself carries no name. The keep-alive is GtkHx's
-/// own (`ping_start`), and raw mode leaves it to the caller.
+/// change; the login itself carries no name.
 pub fn config(
     login: &[u8],
     password: &[u8],
@@ -53,7 +56,7 @@ pub fn config(
         caps,
         handshake_timeout_ms: crate::HANDSHAKE_TIMEOUT_SECS * 1000,
         agreement_wait_ms: 2_000,
-        keepalive_ms: u64::MAX,
+        keepalive_ms: 60_000,
         raw: true,
     }
 }
@@ -61,7 +64,7 @@ pub fn config(
 /// What the three sides of the actor share. Each lock is held only
 /// between awaits, so none is ever waited on for long.
 struct Shared {
-    session: Mutex<Session>,
+    session: SharedSession,
     start: Instant,
     /// What the session has queued and the write side has not written.
     out: Mutex<Vec<u8>>,
@@ -111,7 +114,7 @@ impl Shared {
 /// HOPE's two steps; otherwise the session's first bytes are the magic.
 pub async fn run<S>(
     stream: S,
-    session: Session,
+    session: SharedSession,
     login_sent: bool,
     mut cmd_rx: mpsc::Receiver<Command>,
     evt_tx: mpsc::Sender<Event>,
@@ -119,7 +122,7 @@ pub async fn run<S>(
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let shared = Shared {
-        session: Mutex::new(session),
+        session,
         start: Instant::now(),
         out: Mutex::new(Vec::new()),
         login_sent: Mutex::new(login_sent),
@@ -230,6 +233,11 @@ where
                         }
                     };
                     shared.out.lock().expect("never held across a panic").extend_from_slice(&queued);
+                    // A send puts the keep-alive off from when the session
+                    // next reads the clock: read it now.
+                    shared.session().tick(shared.now());
+                    shared.queue_out();
+                    shared.to_deliver.notify_one();
                 }
                 Some(Command::Agree { nick, icon }) => {
                     // Nothing waiting to be answered is not an error: an
@@ -411,6 +419,7 @@ mod tests {
     }
 
     struct Client {
+        session: SharedSession,
         cmd: mpsc::Sender<Command>,
         events: mpsc::Receiver<Event>,
     }
@@ -444,7 +453,8 @@ mod tests {
         let (cmd_tx, cmd_rx) = mpsc::channel(8);
         let (evt_tx, evt_rx) = mpsc::channel(8);
         let cfg = config(b"", b"", b"me", 414, hxsession::CLIENT_VERSION, 0);
-        tokio::spawn(run(near, Session::new(cfg, 0), false, cmd_rx, evt_tx));
+        let session = Arc::new(Mutex::new(Session::new(cfg, 0)));
+        tokio::spawn(run(near, session.clone(), false, cmd_rx, evt_tx));
         (
             Server {
                 io: far,
@@ -452,6 +462,7 @@ mod tests {
             },
             Client {
                 cmd: cmd_tx,
+                session,
                 events: evt_rx,
             },
         )
@@ -471,15 +482,17 @@ mod tests {
     #[tokio::test]
     async fn an_agreement_waits_for_the_user_and_its_answer_settles_the_login() {
         let (mut server, mut client) = start();
-        // Sent before the login is answered: it waits for it.
-        let early = Request::new(300).pack(FIRST_TRANS).unwrap();
+        // Numbered and sent before the login is answered: it waits for it.
+        let trans = client.session.lock().unwrap().take_trans();
+        assert_eq!(trans, 2, "the login went out on 1");
+        let early = Request::new(300).pack(trans).unwrap();
         client
             .cmd
             .send(Command::WriteFrame(early.clone()))
             .await
             .unwrap();
         logged_in(&mut server, &mut client).await;
-        assert_eq!(server.next().await, (300, FIRST_TRANS));
+        assert_eq!(server.next().await, (300, trans));
 
         server
             .send(&server_says(AGREEMENT, 0, &[(0x0065, b"Be nice.")]))
@@ -493,14 +506,14 @@ mod tests {
             })
             .await
             .unwrap();
-        // The session's own trans, below the consumer's.
-        assert_eq!(server.next().await, (AGREE, 2));
+        // Numbered from the same counter as the consumer's.
+        assert_eq!(server.next().await, (AGREE, 3));
         client.expect_state(ConnectionState::LoginReady).await;
 
         // Its answer reaches the consumer too.
-        server.send(&server_says(TASK, 2, &[])).await;
-        server.send(&server_says(TASK, FIRST_TRANS, &[])).await;
-        for trans in [2, FIRST_TRANS] {
+        server.send(&server_says(TASK, trans, &[])).await;
+        server.send(&server_says(TASK, 3, &[])).await;
+        for trans in [trans, 3] {
             match client.next().await {
                 Event::Frame(f) => assert_eq!(f.header.trans, trans),
                 other => panic!("{other:?}"),
@@ -566,6 +579,35 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_quiet_connection_is_pinged_and_a_send_puts_the_ping_off() {
+        let (mut server, mut client) = start();
+        logged_in(&mut server, &mut client).await;
+        server
+            .send(&server_says(AGREEMENT, 0, &[(0x009a, &[0, 1])]))
+            .await;
+        assert_eq!(server.next().await.0, AGREE);
+        client.expect_frame(AGREEMENT).await;
+        client.expect_state(ConnectionState::LoginReady).await;
+
+        // Each chat goes out before a ping would have, had it not put
+        // the ping off.
+        let mut trans = 0;
+        for wait in [30, 59] {
+            tokio::time::advance(Duration::from_secs(wait)).await;
+            trans = client.session.lock().unwrap().take_trans();
+            let chat = Request::new(105).pack(trans).unwrap();
+            client.cmd.send(Command::WriteFrame(chat)).await.unwrap();
+            assert_eq!(server.next().await, (105, trans));
+        }
+        tokio::time::advance(Duration::from_secs(60)).await;
+        assert_eq!(server.next().await, (500, trans + 1));
+        // The ping's answer is the session's own.
+        server.send(&server_says(TASK, trans + 1, &[])).await;
+        server.send(&server_says(0x6a, 0, &[])).await;
+        client.expect_frame(0x6a).await;
     }
 
     /// Read past states and frames to how the connection ended.

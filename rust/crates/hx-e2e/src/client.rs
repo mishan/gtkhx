@@ -34,7 +34,8 @@ pub struct Client {
     rt: Runtime,
     handle: ConnectionHandle,
     events: mpsc::Receiver<Event>,
-    trans: u32,
+    /// What numbers requests, as in production.
+    session: hxnet::session::SharedSession,
     caps: u16,
 }
 
@@ -151,7 +152,13 @@ impl Client {
             trans: LOGIN_TRANS,
             proxy: None,
         };
-        rt.spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
+        let session = req.session();
+        rt.spawn(run_plaintext_lifecycle(
+            req,
+            session.clone(),
+            cmd_rx,
+            evt_tx,
+        ));
 
         // The LOGIN reply. Not necessarily the first frame: a server can
         // broadcast another user's arrival ahead of it.
@@ -217,7 +224,7 @@ impl Client {
             rt,
             handle,
             events,
-            trans: hxnet::session::FIRST_TRANS,
+            session,
             caps: agreed & caps,
         })
     }
@@ -249,8 +256,11 @@ impl Client {
 
     /// Send `req` and return its trans.
     pub fn send(&mut self, req: &Request) -> u32 {
-        let trans = self.trans;
-        self.trans += 1;
+        let trans = self
+            .session
+            .lock()
+            .expect("the session lock is never held across a panic")
+            .take_trans();
         let frame = req.pack(trans);
         self.rt
             .block_on(self.handle.send(Command::WriteFrame(frame)))
