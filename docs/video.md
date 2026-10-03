@@ -238,7 +238,17 @@ The **camera button** in the voice panel is shown when the server
 confirmed video and enabled while in voice in that panel's room, with
 access bit 59 and a camera. First press sends 607 and brings the Video
 panel forward; after that it pauses and resumes (609). Leaving voice
-ends everything, and the server would anyway.
+ends everything, and the server would anyway. While the user is in
+voice in that panel's room, outside the sandbox, a `GstDeviceMonitor`
+for `Video/Source` runs with a bus watch, so a camera plugged in or out
+grays the button or lights it; the monitor stops when the user leaves
+and the Settings window is closed. A live camera keeps its button
+pressable, so it can be turned off after its camera is unplugged. Until
+the monitor has listed a camera, a camera is assumed wherever
+`autovideosrc` is installed and the attempt says if there is none: the
+PipeWire and libcamera providers hide V4L2's, so a camera only V4L2
+reaches, or a virtual one, can be missing from the list. Once one has
+been listed, an empty list grays the button.
 
 The **screen button** needs bit 60. On Linux it goes through the
 xdg-desktop-portal ScreenCast interface: CreateSession, SelectSources
@@ -277,9 +287,13 @@ which libcamera leaves NULL. A saved camera the scan doesn't find is
 listed as "*path* (missing)" and stays selected, rather than the row
 showing "First camera found" over a setting that still names it; inside
 the sandbox, where nothing is listed before access is granted, it isn't.
-The page is built the first time it is selected, not when Settings
+The list is built when the group is first shown, not when Settings
 opens, so the camera scan — which wakes every GStreamer device provider
-— happens only when someone actually looks at the picker.
+— happens there only when someone actually looks at the picker. The
+device monitor started then keeps the list current until the Settings
+window closes: a saved camera unplugged meanwhile turns into its
+"(missing)" entry, still selected, and plugging it back in replaces the
+entry with the camera. A rebuild never rewrites the setting.
 
 Picking another camera while the camera is live moves the publication
 onto it at once, the way the audio pickers do (`docs/voice.md`): only
@@ -304,7 +318,8 @@ an explicit `LIBCAMERA_LOG_LEVELS` in the environment is left alone.
   publishers, subscriptions, limits, login limits); the state machine's
   transitions; the frame store and encode targets; that both capture
   kinds produce RTP; the mid scanners agreeing; the senders; the
-  presence model.
+  presence model; a camera plugged in and out of a test device provider
+  reaching a camera watch, the camera list and the button's answer.
 - **Proto** (`tests/proto/test_voice.c`): the C ABI for video mids, the
   611 parse, and the login limits.
 - **Integration, control** (`test_video_control.c`): bit 10 with bit 2
