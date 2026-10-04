@@ -15,7 +15,8 @@
 # other password.
 #
 # Then both accounts get the VoiceChat and SendMedia access bits,
-# below.
+# a `novideo` account is copied from guest, and guest and admin get
+# the VideoChat and ScreenShare bits, below.
 #
 # Janus isn't running during any of this, so nothing writes the
 # YAMLs back over the edits.
@@ -113,4 +114,22 @@ for u in guest admin; do
     fi
 done
 
-echo "account seed OK (admin: empty password; VoiceChat + SendMedia on guest + admin)"
+# novideo / novideo: voice but neither video bit, for the video access
+# refusal tests, as on hxd-ng (tests/hxd-ng/conf/accounts). The hash is
+# bcrypt of `novideo`.
+sed -e 's/^Login:.*/Login: novideo/' -e 's/^Name:.*/Name: novideo/' \
+    -e 's|^Password:.*|Password: $2a$10$fCz87tTgStQqP6amxYMaM.RiCFFMk3YCDiYtMQ2JwHY1f9/c1.ZG6|' \
+    "$JANUS_DIR/Users/guest.yaml" > "$JANUS_DIR/Users/novideo.yaml"
+
+for u in guest admin; do
+    for bit in VideoChat ScreenShare; do
+        sed -i -E "s/^([[:space:]]*$bit:)[[:space:]]+false[[:space:]]*$/\\1 true/" \
+            "$JANUS_DIR/Users/$u.yaml"
+        if ! grep -qE "^[[:space:]]*$bit:[[:space:]]+true" "$JANUS_DIR/Users/$u.yaml"; then
+            echo "$bit seed failed for $u" >&2
+            exit 1
+        fi
+    done
+done
+
+echo "account seed OK (admin: empty password; VoiceChat + SendMedia on guest + admin; video bits on guest + admin; novideo)"

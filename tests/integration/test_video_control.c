@@ -10,7 +10,7 @@
 /*
  * tests/integration/test_video_control.c — Tier 3 control-channel tests
  * for the video extension (hxd-ng docs/capabilities-video.md), against
- * hxd-ng.
+ * each video server.
  *
  * Covers the client's side of what hxd-ng's own tests/video.rs covers
  * from the server's: bit 10 negotiated only alongside bit 2, one
@@ -27,8 +27,8 @@
  * chunk layout otherwise, and every reply is read with the parsers
  * rcv.c uses.
  *
- * Server gating: HX_TEST_CAP_VIDEO, which only hxd-ng has. No silent
- * skip: a matrix without it fails.
+ * Server gating: HX_TEST_CAP_VIDEO (Janus and hxd-ng), each in turn. No
+ * silent skip: a matrix without it fails.
  */
 
 #include "config.h"
@@ -46,22 +46,6 @@
 #include "server_matrix.h"
 
 #define VOICE_VIDEO (HTLC_CAP_VOICE | HTLC_CAP_VIDEO)
-
-static const hx_test_server *
-pick_video_server (void)
-{
-    GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_VIDEO);
-    const hx_test_server *srv
-        = (servers && servers->len > 0) ? g_ptr_array_index (servers, 0) : NULL;
-    if (servers) {
-        g_ptr_array_unref (servers);
-    }
-    if (!srv) {
-        g_test_fail_printf ("no video-capable server in the matrix "
-                            "(GTKHX_TEST_SERVERS excluded hxd-ng?)");
-    }
-    return srv;
-}
 
 /* One logged-in client. */
 typedef struct {
@@ -280,15 +264,12 @@ await (client *c, guint32 trans, gboolean want_status, guint16 uid,
 /* ---- Tests ---------------------------------------------------------- */
 
 /* Bit 10 comes back with bit 2, and the LOGIN reply carries a limits
- * field for each kind. The rig runs [voice.video] with the spec's
+ * field for each kind. The rig runs video with the spec's
  * default ceilings, so those are the numbers to expect. */
 static void
-test_cap_and_limits (void)
+test_cap_and_limits (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client c;
     if (!client_open (&c, srv, "Cap")) {
         client_close (&c);
@@ -314,12 +295,9 @@ test_cap_and_limits (void)
 /* A client that asks for video without voice gets neither: bit 10
  * depends on bit 2, and a server must not confirm it alone. */
 static void
-test_video_needs_voice_bit (void)
+test_video_needs_voice_bit (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client c;
     if (!client_open_as (&c, srv, "NoVoice", "guest", NULL, HTLC_CAP_VIDEO)) {
         client_close (&c);
@@ -331,12 +309,9 @@ test_video_needs_voice_bit (void)
 
 /* Video Start outside a voice room is refused. */
 static void
-test_start_needs_voice_room (void)
+test_start_needs_voice_room (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client c;
     if (!client_open (&c, srv, "NoRoom")) {
         client_close (&c);
@@ -353,12 +328,9 @@ test_start_needs_voice_room (void)
 /* Start, pause, resume, stop: each answered, each reflected in a 611 to
  * the publisher itself — the room includes it. */
 static void
-test_start_pause_stop (void)
+test_start_pause_stop (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client c;
     if (!client_open (&c, srv, "Pub") || !join_voice (&c, 0)) {
         client_close (&c);
@@ -405,12 +377,9 @@ test_start_pause_stop (void)
 /* A publication is a room-wide fact: another participant's 611 lists
  * it, and loses it when the publisher leaves. */
 static void
-test_status_reaches_the_room (void)
+test_status_reaches_the_room (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client a, b;
     memset (&b, 0, sizeof (b));
     b.fd = -1;
@@ -440,12 +409,9 @@ test_status_reaches_the_room (void)
 /* The room has one screen slot. A second sharer is refused, told why,
  * and the first share is not preempted. */
 static void
-test_second_screen_share_is_refused (void)
+test_second_screen_share_is_refused (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client a, b;
     memset (&b, 0, sizeof (b));
     b.fd = -1;
@@ -484,12 +450,9 @@ test_second_screen_share_is_refused (void)
  * a screen share, and is still echoed the capability — the capability
  * says the server supports video, the bits say what this user may do. */
 static void
-test_access_bits_gate_publishing (void)
+test_access_bits_gate_publishing (gconstpointer data)
 {
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        return;
-    }
+    const hx_test_server *srv = data;
     client c;
     if (!client_open_as (&c, srv, "NoBit", "novideo", "novideo", VOICE_VIDEO)
         || !join_voice (&c, 0)) {
@@ -516,18 +479,23 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-    g_test_add_func ("/integration/video/cap_and_limits", test_cap_and_limits);
-    g_test_add_func ("/integration/video/needs_voice_bit",
-                     test_video_needs_voice_bit);
-    g_test_add_func ("/integration/video/start_needs_voice_room",
-                     test_start_needs_voice_room);
-    g_test_add_func ("/integration/video/start_pause_stop",
-                     test_start_pause_stop);
-    g_test_add_func ("/integration/video/status_reaches_the_room",
-                     test_status_reaches_the_room);
-    g_test_add_func ("/integration/video/second_screen_share_is_refused",
-                     test_second_screen_share_is_refused);
-    g_test_add_func ("/integration/video/access_bits_gate_publishing",
-                     test_access_bits_gate_publishing);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "cap_and_limits", test_cap_and_limits);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "needs_voice_bit", test_video_needs_voice_bit);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "start_needs_voice_room",
+                            test_start_needs_voice_room);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "start_pause_stop", test_start_pause_stop);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "status_reaches_the_room",
+                            test_status_reaches_the_room);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "second_screen_share_is_refused",
+                            test_second_screen_share_is_refused);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "access_bits_gate_publishing",
+                            test_access_bits_gate_publishing);
     return g_test_run ();
 }

@@ -2,10 +2,10 @@
 #
 # hxd-ng for the GtkHx Tier 3 rig.
 #
-# hxd-ng (https://github.com/mishan/hxd-ng) is the only Hotline server
-# that implements the video extension, so it is the target for every
-# video test. The server itself comes from the image hxd-ng's own CI
-# publishes to GHCR for every commit on main, so nothing compiles here;
+# hxd-ng (https://github.com/mishan/hxd-ng) implements the video
+# extension, and every video test runs against it as well as Janus. The
+# server itself comes from the image hxd-ng's own CI publishes to GHCR
+# for every commit on main, so nothing compiles here;
 # this layer adds only the rig's config, accounts and entrypoint. Pinned
 # by commit tag and digest, like the other servers are pinned: an
 # unpinned main has broken this rig before. Bump both deliberately, with

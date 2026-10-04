@@ -545,9 +545,10 @@ load-bearing content in this document.
 
 ## Test targets
 
-Janus (VesperNet) is the voice integration target; hxd-ng is the video
-one ([video.md](video.md)), and its media tests exercise voice against
-an ICE-lite SFU as a matter of course. The container runs with host networking so
+Janus (VesperNet) is the voice integration target; the video tests
+([video.md](video.md)) run against it and hxd-ng, whose ICE-lite SFU
+they exercise voice against as a matter of course. The container runs
+with host networking so
 libnice can negotiate ICE against localhost — Docker's default bridge
 strips the kernel route the server-reflexive candidate path needs — and
 because host networking makes the container's listen ports the host

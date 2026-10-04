@@ -243,10 +243,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=janus
 
       - name: build hxd-ng test container
-        # hxd-ng — the only server with the video extension, so the video
-        # tests' target. Nothing compiles: tests/hxd-ng/Dockerfile layers the
-        # rig's config on the image hxd-ng's CI publishes to GHCR, pinned by
-        # digest.
+        # hxd-ng — the video tests' other target, beside Janus. Nothing
+        # compiles: tests/hxd-ng/Dockerfile layers the rig's config on the
+        # image hxd-ng's CI publishes to GHCR, pinned by digest.
         uses: docker/build-push-action@v6
         with:
           context: tests/hxd-ng
@@ -308,7 +307,7 @@ jobs:
         # reuses them and never rebuilds. Host ports match server_matrix.c /
         # tracker_matrix.c:
         #   mhxd     5500/5501
-        #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice)
+        #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice + video)
         #   hxd-ng   5520 + 5524/udp (voice + video; advertises the runner's
         #            primary IPv4, see tests/hxd-ng/entrypoint.sh)
         #   hlservd  5530/5531 (+ HTTP tunnel 5532/5533)

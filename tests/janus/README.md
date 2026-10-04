@@ -168,6 +168,13 @@ Out of the box:
   `tests/integration/test_voice_*.c` and gate on
   `HX_TEST_CAP_VOICE`; they take the first such row, Janus, though
   hxd-ng advertises it too.
+- **Video extension** (`EnableVideo: true`), on the voice
+  connection, with the default ceilings: one screen share a room, so
+  the second-sharer refusal is testable. `seed-accounts.sh` gives
+  `guest` and `admin` the VideoChat and ScreenShare bits, and adds
+  `novideo` / `novideo`, with voice but neither video bit, for the
+  access refusal tests. The video tests (`test_video_*.c`) run here and
+  against hxd-ng.
 
 Also enabled:
 

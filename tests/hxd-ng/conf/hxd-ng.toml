@@ -1,5 +1,5 @@
-# hxd-ng for the GtkHx Tier 3 rig: the one server that speaks the video
-# extension. Ports sit clear of mhxd (5500) and Janus (5510) on the
+# hxd-ng for the GtkHx Tier 3 rig: with Janus, a server that speaks the
+# video extension. Ports sit clear of mhxd (5500) and Janus (5510) on the
 # host network the whole rig shares; see tests/COMPOSE.md.
 
 [server]

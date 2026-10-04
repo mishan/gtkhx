@@ -270,6 +270,11 @@ VoiceUDPPort: 5514
 # Maximum participants per voice room (default: 16).
 VoiceMaxPerRoom: 16
 
+# Camera video and screen sharing in voice rooms (requires EnableVoice).
+# The default ceilings stand, among them one screen share a room, so the
+# second-sharer refusal is testable.
+EnableVideo: true
+
 # ─── Inline Media (Images in Chat) ──────────────────────────────────────────
 # Capability extension that lets capable clients exchange small images
 # inline in public and private chat. Disabled by default. Sending
