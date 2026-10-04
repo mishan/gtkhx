@@ -1,11 +1,11 @@
 //! The History scenario: a chat-history replay on join, and a "Load older"
 //! page on top of it, in the real public-chat view.
 //!
-//! The replay takes the path a server's GET_CHAT_HISTORY reply takes: a
-//! synthetic reply of N entries goes through `rcv_task_chat_history` — the
-//! parse, the `chat-history-batch` signal, and `chat.c`'s renderer, which
-//! appends the divider, the "Load older" row and every entry — against the
-//! unconnected session's own connection and public chat.
+//! The replay takes the path a server's GET_CHAT_HISTORY reply takes on the
+//! main thread, once the session has read it: N entries go through
+//! `recv::chat::history` — the `chat-history-batch` signal, and `chat.c`'s
+//! renderer, which appends the divider, the "Load older" row and every entry
+//! — against the unconnected session's own connection and public chat.
 //!
 //! "Load older" can't take that path: `chat.c` only inserts above the
 //! history when its own click handler has just sent a request, and that
@@ -32,7 +32,7 @@ use gtk4 as gtk;
 use gtkhx_core::conn::{
     hx_conn_chat_history_last_msgid, hx_conn_fd, hx_conn_set_chat_history_last_msgid, HtlcConn,
 };
-use hxhandlers::recv::chat::rcv_task_chat_history;
+use hxhandlers::recv::chat::history;
 use rotulus::RotulusView;
 use rotulus_layout::{Block, Message, MessageFlags, MessageKind};
 
@@ -42,9 +42,6 @@ extern "C" {
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
 }
 
-/// `DATA_HISTORY_ENTRY` and `DATA_HISTORY_HAS_MORE`.
-const TAG_ENTRY: u16 = 0x0f05;
-const TAG_HAS_MORE: u16 = 0x0f06;
 /// The replay's rows besides its entries: the opening divider, the "Load
 /// older" row and the closing "live messages" divider.
 const REPLAY_EXTRA_ROWS: usize = 3;
@@ -59,32 +56,18 @@ fn line_of(i: u32) -> String {
         .join(" ")
 }
 
-/// A GET_CHAT_HISTORY reply of `n` entries, oldest first, with more to come.
-fn history_reply(n: u32) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&0u32.to_be_bytes());
-    v.extend_from_slice(&[0u8; 18]);
-    let mut chunk = |tag: u16, data: &[u8]| {
-        v.extend_from_slice(&tag.to_be_bytes());
-        v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-        v.extend_from_slice(data);
-    };
-    for i in 0..n {
-        let nick = NICKS[i as usize % NICKS.len()];
-        let body = hxproto::build::build_history_entry(
-            u64::from(i) + 1,
-            1_700_000_000 + i64::from(i) * 30,
-            0,
-            128,
-            nick.as_bytes(),
-            line_of(i).as_bytes(),
-            &[],
-        )
-        .expect("a short entry fits a chunk");
-        chunk(TAG_ENTRY, &body);
-    }
-    chunk(TAG_HAS_MORE, &[1]);
-    v
+/// `n` entries of history, oldest first.
+fn entries(n: u32) -> Vec<hxsession::HistoryEntry> {
+    (0..n)
+        .map(|i| hxsession::HistoryEntry {
+            message_id: u64::from(i) + 1,
+            timestamp: 1_700_000_000 + i64::from(i) * 30,
+            flags: 0,
+            icon: 128,
+            nick: NICKS[i as usize % NICKS.len()].into(),
+            text: line_of(i),
+        })
+        .collect()
 }
 
 /// A row of an older page: history, as every row `chat.c` draws in the
@@ -159,22 +142,14 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     );
 
     // ---- replay on join ---------------------------------------------------
-    let reply = history_reply(n);
+    let page = entries(n);
     let before = chat.len();
     let t = glib::monotonic_time();
-    unsafe {
-        rcv_task_chat_history(
-            htlc,
-            reply.as_ptr(),
-            reply.len(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
+    unsafe { history(htlc, 0, 0, &page, true) };
     let call = glib::monotonic_time() - t;
     let t = glib::monotonic_time();
     let paint = after_paint(view).await - t;
-    r.ms("replay", call, "parse + signal + render, UI frozen");
+    r.ms("replay", call, "signal + render, UI frozen");
     r.ms("  first paint", paint, "");
     r.ms("  replay + paint", call + paint, "compare this one");
     let added = chat.len() - before;
@@ -253,29 +228,4 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     }
 
     r.print();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_synthetic_reply_parses_back_to_every_entry() {
-        let buf = history_reply(120);
-        let mut entries = 0;
-        let mut has_more = false;
-        for c in hxproto::wire::ChunkIter::over_message(&buf, buf.len()) {
-            match c.tag {
-                TAG_ENTRY => {
-                    let e = hxproto::parse::parse_history_entry(c.data).expect("entry");
-                    entries += 1;
-                    assert_eq!(e.message_id, entries);
-                }
-                TAG_HAS_MORE => has_more = c.data == [1],
-                _ => {}
-            }
-        }
-        assert_eq!(entries, 120);
-        assert!(has_more);
-    }
 }

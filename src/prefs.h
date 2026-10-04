@@ -109,15 +109,6 @@ struct gtkhx_prefs {
     int out_bps;
     int in_bps;
 
-    /* fogWraith chat-history extension — number of
-     * entries to pull on the initial post-login fetch AND on each
-     * subsequent "Load older messages" click. 0 disables the
-     * initial pull entirely (the click handler still uses 50 as
-     * a floor when 0 is set, so the affordance still works once
-     * the user manually engages it). Persisted as
-     * CFG_CHAT_HISTORY_INITIAL. */
-    int chat_history_initial;
-
     /* Colored-Nicknames extension — our own 32-bit
      * 0x00RRGGBB nickname color. -1 (== HX_NICK_COLOR_NONE cast to
      * signed int) is the "no color set" sentinel and means

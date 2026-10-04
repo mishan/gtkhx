@@ -5,11 +5,14 @@
 //! socket's bytes, whatever they are.
 //!
 //! The session runs in raw mode, because GtkHx still has receive handlers
-//! of its own: every transaction reaches the consumer whole, and frames
-//! the consumer sends go out as built, on a trans it took from the
-//! session ([`SharedSession`]). What the session says becomes:
+//! of its own: every transaction the session does not handle itself
+//! reaches the consumer whole, and frames the consumer sends go out as
+//! built, on a trans it took from the session ([`SharedSession`]). What
+//! the session says becomes:
 //!
-//! - every transaction → `Event::Frame`
+//! - every transaction it hands over whole → `Event::Frame`
+//! - what it makes of the rest, the replies the consumer expected, and
+//!   with the tap on each transaction as it came → `Event::Session`
 //! - logged in → `ConnectionState::HandshakeDone`
 //! - the login settled, the agreement answered or not waited on any
 //!   longer → `ConnectionState::LoginReady`
@@ -47,6 +50,7 @@ pub fn config(
     icon: u16,
     version: u16,
     caps: u16,
+    handled: hxsession::Handled,
 ) -> hxsession::Config {
     hxsession::Config {
         // C hands these over as UTF-8.
@@ -60,6 +64,7 @@ pub fn config(
         agreement_wait_ms: 2_000,
         keepalive_ms: 60_000,
         raw: true,
+        handled,
     }
 }
 
@@ -311,8 +316,8 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
     loop {
         let event = shared.session().poll_event()?;
         let out = match event {
-            // Traced by the consumer as it dispatches them, the session's
-            // own replies among them.
+            // Traced from the session's tap, the session's own replies
+            // among them.
             hxsession::Event::Reply { frame, .. } | hxsession::Event::Unhandled { frame, .. } => {
                 match Frame::from_raw(&frame) {
                     Some(f) => Event::Frame(f),
@@ -327,7 +332,8 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
             hxsession::Event::Ready => Event::State(ConnectionState::LoginReady),
             hxsession::Event::Closed(why) => return Some(closed(why)),
             // The agreement reaches the consumer as its frame.
-            _ => continue,
+            hxsession::Event::Agreement(_) => continue,
+            e => Event::Session(e),
         };
         if evt_tx.send(out).await.is_err() {
             return Some(ShutdownReason::HandleDropped);
@@ -462,10 +468,14 @@ mod tests {
     }
 
     fn start() -> (Server, Client) {
+        start_handling(hxsession::Handled::NONE)
+    }
+
+    fn start_handling(handled: hxsession::Handled) -> (Server, Client) {
         let (near, far) = duplex(64 * 1024);
         let (cmd_tx, cmd_rx) = mpsc::channel(8);
         let (evt_tx, evt_rx) = mpsc::channel(8);
-        let cfg = config(b"", b"", b"me", 414, hxsession::CLIENT_VERSION, 0);
+        let cfg = config(b"", b"", b"me", 414, hxsession::CLIENT_VERSION, 0, handled);
         let session = Arc::new(Mutex::new(Session::new(cfg, 0)));
         tokio::spawn(run(near, session.clone(), cmd_rx, evt_tx));
         (
@@ -621,6 +631,29 @@ mod tests {
         server.send(&server_says(TASK, trans + 1, &[])).await;
         server.send(&server_says(0x6a, 0, &[])).await;
         client.expect_frame(0x6a).await;
+    }
+
+    #[tokio::test]
+    async fn what_the_session_handles_arrives_among_the_frames_in_order() {
+        let (mut server, mut client) = start_handling(hxsession::Handled::CHAT);
+        logged_in(&mut server, &mut client).await;
+        let sent = [
+            server_says(0x6a, 0, &[(0x0065, b"one")]),
+            server_says(0x12d, 0, &[]),
+            server_says(0x77, 0, &[(0x0073, b"two")]),
+        ];
+        server.send(&sent.concat()).await;
+        match client.next().await {
+            Event::Session(hxsession::Event::Chat { text, .. }) => assert_eq!(text, "one"),
+            other => panic!("{other:?}"),
+        }
+        client.expect_frame(0x12d).await;
+        match client.next().await {
+            Event::Session(hxsession::Event::ChatSubject { subject, .. }) => {
+                assert_eq!(subject, "two")
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// Read past states and frames to how the connection ended.

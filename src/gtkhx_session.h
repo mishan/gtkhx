@@ -69,8 +69,8 @@ GtkhxSession *gtkhx_session_get_default (void);
 /* The "chat" signal payload was once raw bytes (body + len). It's
  * now a single boxed HxChatEvent so every subscriber sees the same
  * UTF-8-validated, sender/body-split, info/self-classified view of
- * the line. The emitter constructs the event from wire bytes via
- * hx_chat_event_new; subscribers get a borrowed pointer for the
+ * the line. The emitter builds the event from the decoded line with
+ * gtkhx-core's chat_event_new; subscribers get a borrowed pointer for the
  * duration of the signal emission (boxed copy/free run if a
  * subscriber needs to keep it). */
 void gtkhx_session_emit_chat (GtkhxSession *self, struct htlc_conn *htlc,

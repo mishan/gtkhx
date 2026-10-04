@@ -86,7 +86,10 @@ unsafe fn infoprefix() -> *const c_char {
 /// every transaction; the first ask takes one from it, and it stays this
 /// connection's next until a send uses it, because a request's task is keyed
 /// on it (`task_new`) before the send that follows.
-pub(crate) unsafe fn next_trans(htlc: *mut HtlcConn) -> u32 {
+///
+/// # Safety
+/// `htlc` is a live connection; main thread.
+pub unsafe fn next_trans(htlc: *mut HtlcConn) -> u32 {
     let reserved = hx_conn_trans(htlc);
     if reserved != 0 {
         return reserved;

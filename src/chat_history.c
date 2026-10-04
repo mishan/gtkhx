@@ -17,7 +17,7 @@
 /* Every function that used to live here moved to Rust:
  *   - hx_history_entry_parse / hx_history_entry_free → the gtkhx-core crate
  *     (rust/crates/gtkhx-core/src/boxed/history.rs).
- *   - hx_get_chat_history (the TRAN 700 sender) → the hxhandlers crate
+ *   - the TRAN 700 senders (hx_chat_history_fetch_*) → the hxhandlers crate
  *     (rust/crates/hxhandlers/src/send/chat_history.rs).
  *   - hx_get_chat_history_build_chunks (the pure chunk builder) → hxproto
  *     (native build_get_chat_history_chunks + the C-ABI shim of the same name in

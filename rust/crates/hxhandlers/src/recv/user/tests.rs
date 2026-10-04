@@ -534,14 +534,14 @@ fn user_list_adopts_self_uid_when_unset() {
 }
 
 #[test]
-fn user_list_chat_subject_seeds_and_emits() {
+fn user_list_chat_subject_seeds_and_emits_it_decoded() {
     test_env::reset();
     test_env::CHAT_CID.with(|c| c.set(0));
-    let f = frame(0, &[(HTLS_DATA_CHAT_SUBJECT, b"Welcome".to_vec())]);
+    let f = frame(0, &[(HTLS_DATA_CHAT_SUBJECT, b"Caf\x8e".to_vec())]);
     unsafe { call_user_list(&f) };
     assert_eq!(
         test_env::SUBJECT_EMITTED.with(|c| c.borrow().clone()),
-        Some((0, b"Welcome".to_vec()))
+        Some((0, "Café".as_bytes().to_vec()))
     );
 }
 

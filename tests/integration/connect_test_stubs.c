@@ -293,6 +293,16 @@ hx_post_login_fetches (struct htlc_conn *htlc)
     (void)htlc;
 }
 
+/* What the session handles itself goes to hxhandlers, which these tests
+ * do not link; none of them reads it. */
+void hx_recv_session_event (struct htlc_conn *htlc, const void *ev);
+void
+hx_recv_session_event (struct htlc_conn *htlc, const void *ev)
+{
+    (void)htlc;
+    (void)ev;
+}
+
 /* tasks.c stubs — production task_new allocates a struct task,
  * registers it in the_session.tasks hashtable, fires a
  * GtkhxSession::task-update signal. The test doesn't read tasks

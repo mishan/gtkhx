@@ -36,7 +36,7 @@
  *
  *   - Every send is no-op'd (returns FALSE) if the session didn't
  *     negotiate HTLC_CAP_VOICE — same convention as
- *     chat_history.c::hx_get_chat_history. Sending a 600-606 to a
+ *     the chat-history senders. Sending a 600-606 to a
  *     non-voice-capable server earns a task-error every time.
  *   - The optional access-bit check (HL_ACCESS_VOICE_CHAT) is enforced
  *     by the server, not here — Phase 8.D's UI will grey out the

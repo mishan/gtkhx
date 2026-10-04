@@ -247,8 +247,7 @@ main (int argc, char **argv)
                      test_parse_null_data_returns_null);
 
     /* The send-side cases (cap-gate + cursor / limit chunk shape + opcode)
-     * moved to the hxhandlers Rust crate's send/chat_history.rs unit tests
-     * when hx_get_chat_history became Rust — they run under
+     * are the hxhandlers crate's send/chat_history.rs unit tests, under
      * `cargo test -p hxhandlers`. This proto test keeps the parser cases,
      * which drive the Rust hx_history_entry_parse through its C ABI. */
 

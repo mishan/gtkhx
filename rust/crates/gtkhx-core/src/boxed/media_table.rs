@@ -139,7 +139,7 @@ mod tests {
     use std::ffi::c_char;
     use std::mem::size_of;
 
-    /// Build a heap `HxChatMedia` the way `hx_chat_event_attach_media` would.
+    /// Build a heap `HxChatMedia` the way `chat_event_new` would.
     unsafe fn make_media(id: &[u8], mime: &str, w: u32, h: u32) -> *mut HxChatMedia {
         let m = g_malloc0(size_of::<HxChatMedia>()) as *mut HxChatMedia;
         (*m).id_len = id.len();

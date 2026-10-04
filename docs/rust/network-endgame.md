@@ -146,6 +146,8 @@ seam, which is what makes the rest tractable rather than a rewrite:
 `hxhandlers::recv` has a module per protocol domain (chat, user, msg,
 news, files, xfer, icon, agreement); it absorbed what were previously
 separate per-domain receive crates, so those crate names no longer exist.
+A domain the session handles itself (chat, so far) reaches its module as
+the session's events, through `hx_recv_session_event`, not as frames.
 
 # Part 2 — What remains, and in what order
 
@@ -153,7 +155,8 @@ Two C artifacts are left in the receive path. **`src/hxnet_bridge.c`** is
 the C↔Rust seam: it owns the single live hxnet handle, wires the event /
 shutdown / state callbacks, maps connection states onto `GtkhxSession`
 signals, hosts the SOCKS proxy lookup and the TLS-verify trampoline, and
-turns each `Event::Frame` into a `hx_dispatch_frame` call. **`src/rcv.c`**
+turns each `Event::Frame` into a `hx_dispatch_frame` call and each
+`Event::Session` into an `hx_recv_session_event` call. **`src/rcv.c`**
 holds the frame-dispatch switch, the transaction correlator, the
 post-login sequencing, and the receive handlers that still have C bodies.
 

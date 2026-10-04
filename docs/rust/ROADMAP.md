@@ -730,13 +730,36 @@ The order, each step its own branch and each checked against the rig:
    `Session::request` already allow. A domain's replies move with it, and
    the task table's correlation (`hx_rcv_task`, `hxtask`) goes once the
    last of them has.
+
+   Chat has moved. The session handles it (`Config::handled`,
+   `Handled::CHAT`), and `hxnet` hands what it makes of a chat line and the
+   picture it carries, an invitation, a subject and a page of history to
+   `hx_recv_session_event` on the main thread, among the frames and in
+   their order. `hxhandlers::recv::chat` keeps the model — the ignore list,
+   each chat's subject, the history cursor — and emits the signals it
+   always did; the chat event itself is built in `gtkhx-core`. A history
+   request or an invitation has its reply expected by the session
+   (`Session::expect`), so neither is a task any more, and a refusal comes
+   back as `Failed`. What arrives is traced from the session's tap.
+   *In progress.* What remains:
+   - the users, messages, news and files domains;
+   - the replies to creating and joining a private chat and to a user
+     change, still read through tasks (`hx_rcv_user_change`,
+     `rcv_task_user_list_switch`);
+   - inline media's upload and download;
+   - the C chat extractor tests (`test_chat.c`, `test_small_handlers.c`,
+     and the integration tests that read chat, invitations and history
+     through `hx_chat_extract`, `hx_chat_subject_extract`,
+     `hx_chat_invite_extract` and `hx_history_entry_parse`), which move to
+     `hx-e2e`, retiring those extractors.
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
 
-The extensions GtkHx negotiates (voice and video signaling, inline media,
-chat history, GIF icons, colored nicknames, Large Files, text encoding)
-need their session-side handling before the domains that use them move;
-hxproto has the codecs.
+Of the extensions GtkHx negotiates, text encoding, chat history and the
+picture a chat line carries have their session-side handling; the rest
+(voice and video signaling, inline media's upload and download, GIF
+icons, colored nicknames, Large Files) need theirs before the domains
+that use them move. hxproto has the codecs.
 
 ---
 

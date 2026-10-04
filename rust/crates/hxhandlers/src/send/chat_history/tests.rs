@@ -1,27 +1,20 @@
-//! Send-path unit tests for `hx_get_chat_history`. The native
-//! `hxproto::build::build_get_chat_history_chunks` runs for real; the cap
-//! check and the write primitive are stubbed here (recording what the wrapper
-//! handed to `hlwrite_chunks`), so the cargo-test build needs no gtkhx-core
-//! accessor / network.c.
+//! What each history fetch puts on the wire. The native builder runs for
+//! real; the cap check, the cursor and the write primitive are stubbed,
+//! recording what was handed to `hlwrite_chunks`.
 
 use super::*;
 use std::cell::{Cell, RefCell};
 
 use hxproto::messages::tag;
 
-/// One captured `hlwrite_chunks` call: the wire opcode + each chunk's
-/// (tag, copied data bytes).
-struct Sent {
-    ty: u32,
-    chunks: Vec<(u16, Vec<u8>)>,
-}
+/// A request's chunks: (tag, data).
+type Fields = Vec<(u16, Vec<u8>)>;
 
 thread_local! {
     static CAP: Cell<bool> = const { Cell::new(false) };
-    static LAST_SEND: RefCell<Option<Sent>> = const { RefCell::new(None) };
+    static NEWEST: Cell<u64> = const { Cell::new(0) };
+    static SENT: RefCell<Option<Fields>> = const { RefCell::new(None) };
 }
-
-// ---- stubs (the module imports these under cfg(test)) ----------------------
 
 pub(crate) unsafe fn hx_conn_has_cap(_htlc: *const c_void, _cap: u64) -> gboolean {
     if CAP.with(|c| c.get()) {
@@ -31,6 +24,16 @@ pub(crate) unsafe fn hx_conn_has_cap(_htlc: *const c_void, _cap: u64) -> gboolea
     }
 }
 
+pub(crate) unsafe fn hx_conn_chat_history_last_msgid(_htlc: *const c_void) -> u64 {
+    NEWEST.with(|c| c.get())
+}
+
+pub(crate) unsafe fn debug_log_str(
+    _cat: *const std::os::raw::c_char,
+    _msg: *const std::os::raw::c_char,
+) {
+}
+
 pub(crate) unsafe fn hlwrite_chunks(
     _htlc: *mut c_void,
     ty: u32,
@@ -38,121 +41,88 @@ pub(crate) unsafe fn hlwrite_chunks(
     chunks: *const HxChunk,
     hc: c_int,
 ) {
-    let mut out = Vec::new();
-    for i in 0..hc as usize {
-        let c = &*chunks.add(i);
-        let data = if c.data.is_null() || c.len == 0 {
-            Vec::new()
-        } else {
-            std::slice::from_raw_parts(c.data, c.len as usize).to_vec()
-        };
-        out.push((c.tag, data));
-    }
-    LAST_SEND.with(|s| *s.borrow_mut() = Some(Sent { ty, chunks: out }));
+    assert_eq!(ty, ClientHdr::GetChatHistory as u32);
+    let fields = (0..hc as usize)
+        .map(|i| {
+            let c = &*chunks.add(i);
+            (
+                c.tag,
+                std::slice::from_raw_parts(c.data, c.len as usize).to_vec(),
+            )
+        })
+        .collect();
+    SENT.with(|s| *s.borrow_mut() = Some(fields));
 }
 
-// ---- helpers ---------------------------------------------------------------
-
-/// A non-NULL sentinel htlc (the stubs never dereference it).
 const HTLC: *mut c_void = std::ptr::dangling_mut::<c_void>();
 
-fn reset(cap: bool) {
-    CAP.with(|c| c.set(cap));
-    LAST_SEND.with(|s| *s.borrow_mut() = None);
-}
-
-fn last() -> Option<Sent> {
-    LAST_SEND.with(|s| s.borrow_mut().take())
-}
-
-fn chunk(s: &Sent, t: u16) -> Option<&Vec<u8>> {
-    s.chunks.iter().find(|(tag, _)| *tag == t).map(|(_, d)| d)
-}
-
-// ---- tests -----------------------------------------------------------------
-
 #[test]
-fn skipped_without_cap() {
-    reset(/*cap=*/ false);
-    let sent = unsafe { hx_get_chat_history(HTLC, 0, 0, 0, 0) };
-    assert_eq!(sent, GFALSE);
-    assert!(last().is_none()); // nothing written
-}
-
-#[test]
-fn null_htlc_is_false() {
-    reset(/*cap=*/ true);
-    let sent = unsafe { hx_get_chat_history(std::ptr::null_mut(), 0, 0, 0, 0) };
-    assert_eq!(sent, GFALSE);
-    assert!(last().is_none());
-}
-
-#[test]
-fn bare_request_is_channel_only() {
-    reset(/*cap=*/ true);
-    assert_eq!(unsafe { hx_get_chat_history(HTLC, 0, 0, 0, 0) }, GTRUE);
-    let s = last().expect("sent");
-    assert_eq!(s.ty, ClientHdr::GetChatHistory as u32); // opcode 700
-    assert_eq!(s.chunks.len(), 1);
-    assert_eq!(chunk(&s, tag::CHANNEL_ID), Some(&vec![0, 0, 0, 0]));
-}
-
-#[test]
-fn before_cursor_and_limit() {
-    reset(/*cap=*/ true);
-    assert_eq!(
-        unsafe {
-            hx_get_chat_history(
-                HTLC, 0, /*before=*/ 1000, /*after=*/ 0, /*limit=*/ 50,
-            )
-        },
-        GTRUE
-    );
-    let s = last().expect("sent");
-    assert_eq!(chunk(&s, tag::CHANNEL_ID), Some(&vec![0, 0, 0, 0]));
-    assert_eq!(
-        chunk(&s, tag::HISTORY_BEFORE),
-        Some(&1000u64.to_be_bytes().to_vec())
-    );
-    assert_eq!(
-        chunk(&s, tag::HISTORY_LIMIT),
-        Some(&50u16.to_be_bytes().to_vec())
-    );
-    assert!(chunk(&s, tag::HISTORY_AFTER).is_none()); // after omitted when 0
+fn each_fetch_asks_for_what_it_should() {
+    let channel = |cid: u32| (tag::CHANNEL_ID, cid.to_be_bytes().to_vec());
+    let limit = |n: u16| (tag::HISTORY_LIMIT, n.to_be_bytes().to_vec());
+    // (cap, newest line seen, which fetch, what goes out)
+    let cases = [
+        (false, 0, None, None),
+        (true, 0, None, Some(vec![channel(0), limit(50)])),
+        (
+            true,
+            5000,
+            None,
+            Some(vec![
+                channel(0),
+                (tag::HISTORY_AFTER, 5000u64.to_be_bytes().to_vec()),
+            ]),
+        ),
+        (
+            true,
+            5000,
+            Some((3, 1000)),
+            Some(vec![
+                channel(3),
+                (tag::HISTORY_BEFORE, 1000u64.to_be_bytes().to_vec()),
+                limit(50),
+            ]),
+        ),
+        (false, 0, Some((3, 1000)), None),
+    ];
+    for (cap, newest, older, want) in cases {
+        CAP.with(|c| c.set(cap));
+        NEWEST.with(|c| c.set(newest));
+        SENT.with(|s| *s.borrow_mut() = None);
+        crate::send::expected::take();
+        let sent = unsafe {
+            match older {
+                None => hx_chat_history_fetch_initial(HTLC),
+                Some((cid, before)) => hx_chat_history_fetch_older(HTLC, cid, before),
+            }
+        };
+        let what = format!("cap {cap}, newest {newest}, older {older:?}");
+        assert_eq!(sent != GFALSE, want.is_some(), "{what}");
+        assert_eq!(SENT.with(|s| s.borrow_mut().take()), want, "{what}");
+        let cid = older.map_or(0, |o| o.0);
+        let expected = crate::send::expected::take();
+        if sent != GFALSE {
+            assert_eq!(
+                expected,
+                [(1, hxsession::Expect::ChatHistory { cid })],
+                "{what}"
+            );
+        } else {
+            assert!(expected.is_empty(), "{what}");
+        }
+    }
 }
 
 #[test]
-fn after_cursor_only() {
-    reset(/*cap=*/ true);
-    assert_eq!(
-        unsafe {
-            hx_get_chat_history(HTLC, 0, 0, /*after=*/ 5000, 0)
-        },
-        GTRUE
-    );
-    let s = last().expect("sent");
-    assert_eq!(
-        chunk(&s, tag::HISTORY_AFTER),
-        Some(&5000u64.to_be_bytes().to_vec())
-    );
-    assert!(chunk(&s, tag::HISTORY_BEFORE).is_none());
-    assert!(chunk(&s, tag::HISTORY_LIMIT).is_none());
-}
-
-#[test]
-fn range_query_has_before_after_limit() {
-    reset(/*cap=*/ true);
-    assert_eq!(
-        unsafe {
-            hx_get_chat_history(
-                HTLC, 0, /*before=*/ 600, /*after=*/ 200, /*limit=*/ 50,
-            )
-        },
-        GTRUE
-    );
-    let s = last().expect("sent");
-    assert!(chunk(&s, tag::HISTORY_BEFORE).is_some());
-    assert!(chunk(&s, tag::HISTORY_AFTER).is_some());
-    assert!(chunk(&s, tag::HISTORY_LIMIT).is_some());
-    assert_eq!(s.chunks.len(), 4); // channel + before + after + limit
+fn a_null_connection_sends_nothing() {
+    CAP.with(|c| c.set(true));
+    SENT.with(|s| *s.borrow_mut() = None);
+    unsafe {
+        assert_eq!(hx_chat_history_fetch_initial(std::ptr::null_mut()), GFALSE);
+        assert_eq!(
+            hx_chat_history_fetch_older(std::ptr::null_mut(), 0, 1),
+            GFALSE
+        );
+    }
+    assert!(SENT.with(|s| s.borrow().is_none()));
 }

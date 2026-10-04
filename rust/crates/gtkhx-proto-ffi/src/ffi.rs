@@ -1033,8 +1033,8 @@ pub unsafe extern "C" fn gtkhx_proto_build_chat_chunks(
 /// C-ABI wrapper over [`build::build_get_chat_history_chunks`] — retains the
 /// historical `hx_get_chat_history_build_chunks` symbol (`src/chat_history.h`)
 /// so the integration harness's synchronous chat-history request builder links
-/// unchanged. The sender proper (`hx_get_chat_history`) moved to the hxhandlers
-/// Rust crate; only this pure chunk-builder is kept for the harness.
+/// unchanged. The senders proper (`hx_chat_history_fetch_*`) are the
+/// hxhandlers crate's; only this pure chunk-builder is kept for the harness.
 ///
 /// `scratch` points at a `struct hx_get_chat_history_scratch` — the harness only
 /// uses it as backing storage for the chunks' bytes (never reads the fields), so

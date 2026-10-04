@@ -103,8 +103,6 @@ hx_prefs_mirror_refresh (void)
     gtkhx_prefs.chat_avatars = hxconfig_get_bool (CFG_CHAT_AVATARS) ? 1 : 0;
     gtkhx_prefs.markdown = hxconfig_get_bool (CFG_MARKDOWN) ? 1 : 0;
     gtkhx_prefs.showjoin = hxconfig_get_bool (CFG_SHOWJOIN) ? 1 : 0;
-    gtkhx_prefs.chat_history_initial
-        = hxconfig_get_int (CFG_CHAT_HISTORY_INITIAL);
     gtkhx_prefs.old_nickcompletion
         = hxconfig_get_bool (CFG_OLD_NICKCOMP) ? 1 : 0;
     gtkhx_prefs.nick_color = hxconfig_get_int (CFG_NICK_COLOR);

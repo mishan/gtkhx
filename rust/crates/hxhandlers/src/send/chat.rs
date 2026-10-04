@@ -64,9 +64,6 @@ extern "C" {
     // native HxChunk (repr(C), layout-pinned identical to C's struct hx_chunk).
     fn task_new(
         htlc: *mut c_void,
-        // Nullable: the CHAT_INVITE ack registers a task with no reply handler
-        // (`task_new(htlc, 0, …)` in the C original). Option<fn> is the
-        // null-optimized FFI-safe way to pass that 0.
         rcv: Option<RcvTaskFn>,
         ptr: *mut c_void,
         data: *mut c_void,
@@ -200,7 +197,8 @@ pub unsafe extern "C" fn hx_chat_user(htlc: *mut c_void, uid: u16) {
 }
 
 /// `void hx_invite_user(struct htlc_conn *htlc, guint16 uid, guint32 cid)` —
-/// invite `uid` into chat `cid` (CHAT_INVITE; ack task, no handler).
+/// invite `uid` into chat `cid` (CHAT_INVITE). Its reply says nothing unless
+/// the server refused, which the session reports.
 ///
 /// # Safety
 /// See `hx_chat_user`.
@@ -213,13 +211,7 @@ pub unsafe extern "C" fn hx_invite_user(htlc: *mut c_void, uid: u16, cid: u32) {
     let mut scratch = [0u8; 6];
     let hc = build::build_chat_invite_chunks(cid, uid, &mut chunks, &mut scratch);
     if hc > 0 {
-        task_new(
-            htlc,
-            None,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            c"invite".as_ptr(),
-        );
+        super::expect_next(htlc, hxsession::Expect::ChatInvite);
         hlwrite_chunks(htlc, HTLC_HDR_CHAT_INVITE, 0, chunks.as_ptr(), hc as c_int);
     }
 }

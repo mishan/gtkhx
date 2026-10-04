@@ -133,11 +133,11 @@ The decode pass deliberately does **not** live in the general inbound
 sanitiser — that function also handles server names, file names, and
 news metadata, and a filename like `report:final:v2` must not get
 mangled. It is scoped to chat and private-message bodies, applied in the
-event constructors in `src/proto_helpers.c` (`hx_chat_event_new` and
-`hx_msg_event_new`) via a shared helper.
+event constructors: `chat_event_new` in `gtkhx-core` (boxed/chat.rs) and
+`hx_msg_event_new` in `src/proto_helpers.c`.
 
-**The chat decode runs over the whole line**, before the info-prefix
-check and the nick split, with the split then run on the decoded text so
+**The chat decode runs over the whole line**, before the nick split,
+with the split then run on the decoded text so
 the sender/body offsets stay consistent. Whole-line rather than
 body-only was a deliberate revision: an integration test against a live
 server found that **mhxd formats public chat without a `Nick:` colon**
@@ -261,11 +261,12 @@ to its own emoji — this is what flagged and drove the fix for the ☂/☔
 `C:\`, empty `::`, adjacent `:a::b:`), cluster longest-match, colour-byte
 skipping, and the typeahead match ranking. Wire fixtures assert the
 outbound bytes and that the chat event's sender/body offsets, highlight
-detection and info-prefix detection still line up after substitution.
-An integration test runs two clients against live mhxd: A encodes 🎉
-through the real legacy send path, mhxd relays it (asserting the wire
-form is pure ASCII — "don't break Mac Roman"), and B decodes it back to
-🎉. That test is what surfaced the whole-line-decode revision.
+detection still line up after substitution. An end-to-end test
+(`hx-e2e`'s `chat.rs`) runs two clients against every rig server: A
+encodes 🎉 through the real legacy send path, the server relays it
+(asserting the wire form is pure ASCII — "don't break Mac Roman"), and B
+decodes it back to 🎉. Its C predecessor is what surfaced the
+whole-line-decode revision.
 
 The popover's live behaviour and the trigger detection both need a
 display, so neither is auto-tested.

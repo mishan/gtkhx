@@ -65,8 +65,10 @@ const SERVER_BUFFER: usize = 64 * 1024;
 const PINGS: u32 = 2_000;
 /// Runs of each measurement; the report gives the median.
 const RUNS: usize = 5;
-/// The chat opcode the burst is made of, and its text: a typical line.
-const CHAT: u32 = 106;
+/// The opcode the burst is made of, a private message, which still reaches
+/// the consumer as a frame where chat goes as the session's events; and
+/// its text: a typical line.
+const MSG: u32 = 104;
 const TEXT: &[u8] = b"a line of chat about the length of a typical one, give or take";
 /// The chunk carrying a frame's sequence number, ahead of the text.
 const TAG_SEQ: u16 = 0x7f01;
@@ -122,7 +124,7 @@ fn chat_frame(seq: u32) -> Vec<u8> {
         },
     ];
     let mut out = vec![0u8; pack_message_size(&chunks)];
-    pack_message(&mut out, CHAT, 0, 0, &chunks).expect("pack a chat frame");
+    pack_message(&mut out, MSG, 0, 0, &chunks).expect("pack a chat frame");
     out
 }
 
@@ -447,7 +449,7 @@ fn check_frame(body: &[u8]) -> Option<u32> {
 unsafe extern "C" fn on_event(_c: *mut HxnetConnection, frame: *mut HxnetFrame, _u: *mut c_void) {
     let now = Instant::now();
     let f = &*frame;
-    if f.type_ == CHAT {
+    if f.type_ == MSG {
         let body = if f.body_ptr.is_null() {
             &[][..]
         } else {
@@ -511,6 +513,7 @@ fn open(transport: Transport, port: u16) -> *mut HxnetConnection {
                 Some(on_event),
                 Some(on_shutdown),
                 Some(on_state),
+                None,
                 ud,
             ),
             Transport::Tls => hxnet_connection_open_plaintext_tls(
@@ -532,6 +535,7 @@ fn open(transport: Transport, port: u16) -> *mut HxnetConnection {
                 Some(on_event),
                 Some(on_shutdown),
                 Some(on_state),
+                None,
                 Some(trust_any),
                 ud,
             ),
@@ -559,6 +563,7 @@ fn open(transport: Transport, port: u16) -> *mut HxnetConnection {
                     Some(on_event),
                     Some(on_shutdown),
                     Some(on_state),
+                    None,
                     ud,
                 )
             }

@@ -66,7 +66,7 @@ extern void xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
 
 /* chat-signal renderer. Takes a pre-parsed HxChatEvent
  * (sender/body slices + is_info/is_self flags from
- * hx_chat_event_new). Bypasses the legacy hx_printf round-trip
+ * gtkhx-core's chat_event_new). Bypasses the legacy hx_printf round-trip
  * the log-line path still uses. */
 struct _HxChatEvent;
 extern void output_chat_from_event (struct htlc_conn *htlc,
@@ -199,7 +199,7 @@ extern void gtkhx_apply_theme_palette (gboolean dark);
 
 /* View-side handler for the "chat-subject-notice" signal — the "Subject Changed
  * to: <subject>" chat line emitted by the Rust chat-subject receive handler
- * (hxhandlers::recv::chat, hx_rcv_chat_subject). Applies gettext + INFOPREFIX. Connected in
+ * (hxhandlers::recv::chat). Applies gettext + INFOPREFIX. Connected in
  * gtkhx_connect_signals. */
 extern void chat_subject_notice_handler (GtkhxSession *emitter,
                                          struct htlc_conn *htlc, guint cid,

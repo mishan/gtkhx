@@ -7,6 +7,7 @@ use hxnet::{Command, Connection, ConnectionHandle, Event, Frame};
 use hxproto::parse::HeaderDecoded;
 use hxproto::wire::ChunkIter;
 use hxrequest::Request;
+use hxsession::{Expect, Handled};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -134,6 +135,20 @@ impl Client {
         password: Option<&str>,
         caps: u16,
     ) -> Result<Client, String> {
+        Client::login_handling(server, login, password, caps, Handled::NONE, "hx-e2e")
+    }
+
+    /// As [`Client::login`], going by `nick`, with the session acting on
+    /// `handled` itself, as production's does: what those domains bring
+    /// arrives as `Event::Session`, among the frames.
+    pub fn login_handling(
+        server: &'static Server,
+        login: &str,
+        password: Option<&str>,
+        caps: u16,
+        handled: Handled,
+        nick: &str,
+    ) -> Result<Client, String> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -145,14 +160,14 @@ impl Client {
             port: server.port,
             login: login.as_bytes().to_vec(),
             password: password.map(|p| p.as_bytes().to_vec()).unwrap_or_default(),
-            name: b"hx-e2e".to_vec(),
+            name: nick.as_bytes().to_vec(),
             icon: 414,
             version: hxnet::login::CLIENT_VERSION,
             caps,
             trans: LOGIN_TRANS,
             proxy: None,
         };
-        let session = req.session();
+        let session = req.session(handled);
         rt.spawn(run_plaintext_lifecycle(
             req,
             session.clone(),
@@ -173,8 +188,7 @@ impl Client {
                             {
                                 return Ok(f);
                             }
-                            Some(Event::Frame(_)) => continue,
-                            Some(Event::State(_)) => continue,
+                            Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
                             Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
                             None => return Err("connection closed".to_string()),
                         }
@@ -200,13 +214,13 @@ impl Client {
                     match events.recv().await {
                         Some(Event::Frame(f)) if f.header.type_ == HTLS_HDR_AGREEMENT => {
                             let agree = Command::Agree {
-                                nick: b"hx-e2e".to_vec(),
+                                nick: nick.as_bytes().to_vec(),
                                 icon: 414,
                             };
                             let _ = handle.send(agree).await;
                         }
                         Some(Event::State(hxnet::ConnectionState::LoginReady)) => return Ok(()),
-                        Some(Event::Frame(_)) | Some(Event::State(_)) => continue,
+                        Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
                         Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
                         None => return Err("connection closed".to_string()),
                     }
@@ -256,11 +270,24 @@ impl Client {
 
     /// Send `req` and return its trans.
     pub fn send(&mut self, req: &Request) -> u32 {
-        let trans = self
-            .session
-            .lock()
-            .expect("the session lock is never held across a panic")
-            .take_trans();
+        self.send_expecting(req, None)
+    }
+
+    /// Send `req`, having told the session what its reply is to become, as
+    /// production does (`hxnet::ffi::connection_expect`).
+    pub fn send_expecting(&mut self, req: &Request, expect: Option<Expect>) -> u32 {
+        let trans = {
+            let mut s = self
+                .session
+                .lock()
+                .expect("the session lock is never held across a panic");
+            let trans = s.take_trans();
+            if let Some(what) = expect {
+                s.expect(trans, what)
+                    .unwrap_or_else(|e| panic!("expecting trans {trans}: {e:?}"));
+            }
+            trans
+        };
         let frame = req.pack(trans);
         self.rt
             .block_on(self.handle.send(Command::WriteFrame(frame)))
@@ -282,7 +309,7 @@ impl Client {
                         {
                             return Ok(Reply::from_frame(f));
                         }
-                        Some(Event::Frame(_)) | Some(Event::State(_)) => continue,
+                        Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
                         Some(Event::Shutdown(r)) => {
                             return Err(format!("{name}: disconnected: {r:?}"));
                         }
@@ -292,6 +319,28 @@ impl Client {
             })
             .await
             .unwrap_or_else(|_| Err(format!("{name}: no reply to trans {trans}")))
+        })
+    }
+
+    /// The next frame or session event, past state changes.
+    pub fn next_event(&mut self) -> Result<Event, String> {
+        let name = self.server.name;
+        let events = &mut self.events;
+        self.rt.block_on(async {
+            tokio::time::timeout(REPLY_TIMEOUT, async {
+                loop {
+                    match events.recv().await {
+                        Some(Event::State(_)) => continue,
+                        Some(Event::Shutdown(r)) => {
+                            return Err(format!("{name}: disconnected: {r:?}"));
+                        }
+                        Some(e) => return Ok(e),
+                        None => return Err(format!("{name}: connection closed")),
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| Err(format!("{name}: nothing more arrived")))
         })
     }
 

@@ -80,7 +80,7 @@ looking for code in the wrong place.
 | **Settings** | `options.c` (change hooks, identity resolution, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `prefs_parser.c`, `icon_enum.c` (icon IDs for the Rust picker) |
 | **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c` |
 | **Files** | `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_ops.c` (the providers; the browser itself is `gtkhx-ui`'s `files` module) |
-| **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the frame-dispatch switch, the transaction correlator), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
+| **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the dispatch switch for the frames the session hands over whole, the transaction correlator; chat reaches `hxhandlers` as the session's events instead), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
 | **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (user editor wire senders), `tasks.c` |
 | **Sessions** | `session_registry.c` (the connection collection, the factory, and which connection has focus) |

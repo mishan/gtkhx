@@ -70,6 +70,7 @@
 #include "voice_model.h"
 #endif
 #include "tray.h"
+#include "sound.h"
 #include "sound_events.h"
 #include "options.h"
 #include "cfgkeys.h"
@@ -1623,6 +1624,19 @@ on_chat_history_batch_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     output_chat_history_batch (htlc, (guint32)cid, entries, has_more);
 }
 
+/* A request the server refused, with its reason: shown and heard as
+ * task_error shows one. */
+static void
+on_request_failed_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                          gpointer reason, gpointer user_data)
+{
+    (void)emitter;
+    (void)htlc;
+    (void)user_data;
+    toolbar_show_toast ((const char *)reason);
+    play_sound (ERROR);
+}
+
 static void
 on_chat_invitation_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                            guint cid, gpointer name, gpointer user_data)
@@ -2142,6 +2156,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_chat_invitation_signal), NULL);
     g_signal_connect (emitter, "chat-history-batch",
                       G_CALLBACK (on_chat_history_batch_signal), NULL);
+    g_signal_connect (emitter, "request-failed",
+                      G_CALLBACK (on_request_failed_signal), NULL);
     g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
     g_signal_connect (emitter, "logged-in", G_CALLBACK (on_logged_in_signal),
                       NULL);

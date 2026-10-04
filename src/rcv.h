@@ -1,8 +1,6 @@
 #ifndef HX_RCV_H
 #define HX_RCV_H
 
-extern void hx_rcv_chat (struct htlc_conn *htlc, const guint8 *frame,
-                         gsize frame_len);
 extern void hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame,
                         gsize frame_len);
 extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
@@ -15,10 +13,6 @@ extern void hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len);
 extern void hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame,
                               gsize frame_len);
-extern void hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame,
-                                 gsize frame_len);
-extern void hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len);
 extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame,
                                   gsize frame_len);
 extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame,
@@ -96,20 +90,6 @@ extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame,
 extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len);
 
-/* TRAN_GET_CHAT_HISTORY (700) reply walker. Moved to the hxhandlers Rust crate
- * (recv/chat.rs): it walks the reply chunks natively, builds the
- * GPtrArray<HxHistoryEntry*> via glib + the native hx_history_entry_parse,
- * advances the newest-msgid cursor, and emits GtkhxSession::chat-history-batch.
- * The channel id rides the task ptr (GUINT_TO_POINTER) since the reply doesn't
- * repeat it. The prototype stays for the RCV_TASK_FN(task_new) registrations at
- * the send call sites (chat.c's Load-older flow and rcv.c's
- * hx_post_login_fetches, which register the reply task before calling
- * hx_get_chat_history); the symbol resolves against the Rust crate at link. The
- * Rust body takes the canonical rcv_task_fn shape, so the prototype matches it
- * (ptr = channel id, data unused) rather than the historical short form. */
-extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame,
-                                   gsize frame_len, void *channel_ptr,
-                                   void *data);
 /* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers, in the
  * hxhandlers Rust crate (recv/icon.rs); gif_icons.c registers them via
  * RCV_TASK_FN(task_new).

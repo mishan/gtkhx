@@ -67,6 +67,7 @@ use std::ffi::c_void;
 use std::os::raw::{c_int, c_uint};
 
 use hxbridge::runtime::Runtime;
+use hxsession::Handled;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -275,7 +276,7 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
                 return HXNET_RECV_SHUTDOWN;
             }
             Ok(Event::State(crate::ConnectionState::LoginReady)) => return HXNET_RECV_READY,
-            Ok(Event::State(_)) => continue,
+            Ok(Event::State(_)) | Ok(Event::Session(_)) => continue,
             Err(mpsc::error::TryRecvError::Empty) => return HXNET_RECV_EMPTY,
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 // The actor finished without emitting Shutdown (we
@@ -555,6 +556,24 @@ pub unsafe extern "C" fn hxnet_connection_take_trans(handle: *mut HxnetConnectio
     }
 }
 
+/// Have the session turn the reply to the request on `trans` into what
+/// `what` says ([`hxsession::Session::expect`]), before that request is
+/// sent. Nothing for a NULL handle or a bare actor with no session.
+///
+/// # Safety
+///
+/// `handle` is NULL or valid.
+pub unsafe fn connection_expect(handle: *mut HxnetConnection, trans: u32, what: hxsession::Expect) {
+    if let Some(s) = handle.as_ref().and_then(|h| h.session.as_ref()) {
+        let mut s = s.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A trans the session handed out and awaits nothing on: refused
+        // only by a caller bug, whose reply then arrives as a frame.
+        if let Err(e) = s.expect(trans, what) {
+            glib::g_critical!("hxnet", "connection_expect: trans {}: {:?}", trans, e);
+        }
+    }
+}
+
 /// The compression a HOPE login agreed: 0 none, 1 GZIP, 2 LZ4, 3 ZSTD.
 /// 0 too for a NULL handle, a connection without HOPE, or one not yet
 /// past step 2.
@@ -705,6 +724,13 @@ pub unsafe extern "C" fn hxnet_connection_destroy(handle: *mut HxnetConnection) 
 pub type HxnetEventCallback =
     Option<unsafe extern "C" fn(*mut HxnetConnection, *mut HxnetFrame, *mut c_void)>;
 
+/// C-side callback for what the session made of what the server sent
+/// (`Event::Session`), on the GLib main thread. The event is an
+/// `hxsession::Event`, borrowed for the call: the consumer hands it to
+/// Rust that reads it, and keeps nothing.
+pub type HxnetSessionCallback =
+    Option<unsafe extern "C" fn(*mut HxnetConnection, *const c_void, *mut c_void)>;
+
 /// C-side per-shutdown callback. Invoked at most once, on the
 /// GLib main thread, when the actor exits. After this callback
 /// returns, no further callbacks will fire on this handle; the
@@ -731,9 +757,20 @@ pub type HxnetShutdownCallback =
 /// for asserting Send manually.
 struct SendCallbacks {
     on_event: HxnetEventCallback,
+    on_session: HxnetSessionCallback,
     on_shutdown: HxnetShutdownCallback,
     user_data: *mut c_void,
     handle_ptr: *mut HxnetConnection,
+}
+
+/// The session of a connection whose consumer is on the main thread,
+/// which traces what arrives through the session's tap: what the session
+/// handles itself never reaches the consumer whole.
+fn traced(session: &crate::session::SharedSession) {
+    session
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .set_tap(crate::proto_trace::enabled());
 }
 
 /// Default channel capacity for the tokio→GLib ferry. Big
@@ -946,6 +983,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
         on_event,
         on_shutdown,
         on_state,
+        None,
         user_data,
         None,
     )
@@ -1007,6 +1045,12 @@ pub(crate) unsafe fn parse_proxy_arg(
 /// side can drive the toolbar throbber off the same `on_state`
 /// callback wiring it already uses.
 ///
+/// The session handles chat itself (`Handled::CHAT`): what it makes of
+/// it, and of the replies the consumer expects
+/// ([`connection_expect`]), reaches `on_session` rather than `on_event`,
+/// in the order the server sent it. The same holds for
+/// `hxnet_connection_open_plaintext_tls` and `hxnet_connection_open_hope`.
+///
 /// All input slices are non-NUL-terminated:
 ///
 /// - `host` (length `host_len`) — DNS name or IP literal,
@@ -1061,6 +1105,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
+    on_session: HxnetSessionCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
     if host.is_null() || host_len == 0 {
@@ -1184,7 +1229,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         proxy,
     };
 
-    let session = req.session();
+    let session = req.session(Handled::CHAT);
+    traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
@@ -1198,6 +1244,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         on_event,
         on_shutdown,
         on_state,
+        on_session,
         user_data,
         Some(session),
     )
@@ -1338,7 +1385,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         trans,
         proxy,
     };
-    let session = req.session();
+    let session = req.session(Handled::NONE);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
@@ -1400,6 +1447,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
+    on_session: HxnetSessionCallback,
     verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
@@ -1531,7 +1579,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         boxed
     });
 
-    let session = req.session();
+    let session = req.session(Handled::CHAT);
+    traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_tls_lifecycle(
@@ -1552,6 +1601,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         on_event,
         on_shutdown,
         on_state,
+        on_session,
         user_data,
         Some(session),
     )
@@ -1702,7 +1752,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         });
         boxed
     });
-    let session = req.session();
+    let session = req.session(Handled::NONE);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_tls_lifecycle(
@@ -1774,6 +1824,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
+    on_session: HxnetSessionCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
     if host.is_null() || host_len == 0 {
@@ -1940,7 +1991,8 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         proxy,
     };
 
-    let session = req.session();
+    let session = req.session(Handled::CHAT);
+    traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_hope_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
@@ -1954,6 +2006,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         on_event,
         on_shutdown,
         on_state,
+        on_session,
         user_data,
         Some(session),
     )
@@ -2148,7 +2201,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         // the SOCKS integration test.)
         proxy: None,
     };
-    let session = req.session();
+    let session = req.session(Handled::NONE);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_hope_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
@@ -2254,6 +2307,7 @@ fn wire_callback_state_with_on_state(
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
+    on_session: HxnetSessionCallback,
     user_data: *mut c_void,
     session: Option<crate::session::SharedSession>,
 ) -> *mut HxnetConnection {
@@ -2295,6 +2349,7 @@ fn wire_callback_state_with_on_state(
 
     let cb = SendCallbacks {
         on_event,
+        on_session,
         on_shutdown,
         user_data,
         handle_ptr,
@@ -2313,6 +2368,14 @@ fn wire_callback_state_with_on_state(
             if let Some(on_event) = cb.on_event {
                 unsafe {
                     on_event(cb.handle_ptr, frame_ptr, cb.user_data);
+                }
+            }
+        }
+        Event::Session(ev) => {
+            if let Some(on_session) = cb.on_session {
+                let ev: *const hxsession::Event = &ev;
+                unsafe {
+                    on_session(cb.handle_ptr, ev.cast(), cb.user_data);
                 }
             }
         }

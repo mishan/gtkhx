@@ -94,47 +94,27 @@ typedef struct {
  *
  * NOTE: both functions moved to the Rust gtkhx-core crate
  * (boxed/history.rs) — parse delegates to
- * hxproto::parse::parse_history_entry, free releases the glib
+ * hxsession::HistoryEntry::parse, free releases the glib
  * buffers. The struct above stays C-visible (chat.c reads its fields)
  * and its layout is pinned by _Static_asserts in chat_history.c. */
 extern HxHistoryEntry *hx_history_entry_parse (const guint8 *data, gsize len);
 
 extern void hx_history_entry_free (HxHistoryEntry *entry);
 
-/* ---- Request sender -------------------------------------------- */
+/* ---- Requests -------------------------------------------------- */
 
-/*
- * Send TRAN 700 (HTLC_HDR_GET_CHAT_HISTORY) for `channel_id`. The
- * three cursor / limit args are optional — pass zero for any of
- * them to omit the chunk on the wire (server treats absence as
- * "default"):
+/* GET_CHAT_HISTORY (TRAN 700), sent only where the server agreed to
+ * chat history, its reply handed on by the session as the
+ * chat-history-batch signal (hxhandlers send/chat_history.rs). Each
+ * returns whether it sent anything.
  *
- *   before == 0 && after == 0  → "most recent N messages"
- *   before  > 0                → "messages older than before"
- *   after   > 0                → "messages newer than after"
- *   both    > 0                → "messages in range (after, before)"
- *
- *   limit   == 0  → server picks (typically 50, capped at 200)
- *   limit   > 0   → client request, server MAY cap lower
- *
- * Channel 0 is the public chat. The spec reserves 1+ for future
- * named channels, but no server implements them yet.
- *
- * No-op (returns FALSE without sending) if the session didn't
- * negotiate CAP_CHAT_HISTORY — sending TRAN 700 to a server that
- * doesn't speak the extension earns a task-error toast every
- * time.
- *
- * Body moved to the hxhandlers Rust crate (send/chat_history.rs): it
- * cap-gates, builds the chunks with the native
- * hxproto::build::build_get_chat_history_chunks, and calls
- * hlwrite_chunks. The prototype stays for the C callers (chat.c's
- * Load-older flow, rcv.c's hx_post_login_fetches). Callers still
- * task_new()-register rcv_task_chat_history first (keyed on htlc->trans).
- */
-extern gboolean hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
-                                     guint64 before, guint64 after,
-                                     guint16 limit);
+ * _initial: the public chat's history once the login has settled — the
+ * catch-up since the newest line seen after a reconnect to the same
+ * server, or else the last chat.history_initial lines.
+ * _older: the page of chat `cid` before line `before`. */
+extern gboolean hx_chat_history_fetch_initial (struct htlc_conn *htlc);
+extern gboolean hx_chat_history_fetch_older (struct htlc_conn *htlc,
+                                             guint32 cid, guint64 before);
 
 /* Caller-owned backing storage for hx_get_chat_history_build_chunks.
  * The struct hx_chunk array it fills points into these fields, so the
@@ -152,15 +132,14 @@ struct hx_chunk;
 
 /*
  * Build the HTLC_DATA_* chunk array for a GET_CHAT_HISTORY request
- * (TRAN 700). Same "0 means omit" semantics as hx_get_chat_history:
- * channel_id is mandatory, before/after/limit are emitted only when
+ * (TRAN 700). channel_id is mandatory, before/after/limit are emitted only when
  * non-zero. Returns the chunk count (always <= 4), or 0 on bad args.
  *
  * Moved to the Rust hxproto crate: a C-ABI shim over the native
  * build_get_chat_history_chunks, kept under this historical name for the
  * one remaining C caller — the integration test harness, which packs the
  * chunks via hlpack_chunks and sends them synchronously over its blocking
- * fd. Production sends through hx_get_chat_history above.
+ * fd. Production sends through hx_chat_history_fetch_* above.
  */
 extern int
 hx_get_chat_history_build_chunks (guint32 channel_id, guint64 before,

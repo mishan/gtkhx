@@ -584,8 +584,11 @@ pub unsafe extern "C" fn rcv_task_user_list(
                 );
             }
             HTLS_DATA_CHAT_SUBJECT => {
-                let slen = chunk.data.len().min(255);
-                hx_chat_set_subject(chat.cast(), chunk.data.as_ptr() as *const c_char, slen);
+                // Read as the session reads a subject that changes, so this
+                // one sent again is not taken for news.
+                let subject = hxproto::text::to_utf8(&chunk.data[..chunk.data.len().min(255)]);
+                let s = crate::recv::chat::fit_subject(&subject);
+                hx_chat_set_subject(chat.cast(), s.as_ptr() as *const c_char, s.len());
                 hx_chat_subject_emit(htlc, hx_chat_cid(chat.cast()), hx_chat_subject(chat.cast()));
             }
             _ => {}

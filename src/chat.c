@@ -57,8 +57,6 @@
 #include "chat_members.h"
 #include "chat_tabs.h"
 #include "emoji.h"
-#include "tasks.h"
-#include "rcv.h"
 #include "connect.h"
 #include "debug.h"
 #include "compat.h" /* _() i18n macro */
@@ -1014,7 +1012,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         return;
     }
 
-    if (e->sender_len == 0 && !e->is_info) {
+    if (e->sender_len == 0) {
         /* Server prose that didn't parse as "Nick: body" — emote,
          * announcement, etc. Render verbatim, splitting on
          * newlines so each visible line is its own xtext entry
@@ -1067,7 +1065,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 
     xprintline_render_parts (
         ROTULUS_VIEW (gchat->output), e->line + e->sender_off, e->sender_len,
-        joined ? joined : "", first_body_len, e->is_info, e->is_self,
+        joined ? joined : "", first_body_len, FALSE, e->is_self,
         HX_CHAT_INFO_COLOR,
         chat_speaker_for (e->cid, e->uid, e->line + e->sender_off,
                           e->sender_len));
@@ -1111,10 +1109,9 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
              * conversation isn't possible there either, so a
              * cap-less server emitting a media-bearing
              * relay row is itself a contract violation —
-             * but defend just in case). The id buffer comes
-             * from rcv.c via hx_chat_event_attach_media — the
-             * deep-copy on event_attach_media keeps it valid
-             * for the synchronous send call. */
+             * but defend just in case). The event owns its own
+             * copy of the id, valid for the synchronous send
+             * call. */
             if (inline_media_cap_ok (htlc) && e->media->id_len > 0
                 && e->media->id_len <= 65535) {
                 struct hx_media_autofetch_ctx *ctx
@@ -1216,12 +1213,11 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         gchat->render.load_older_ent = NULL;
     }
 
-    /* Empty batch — server confirmed CAP_CHAT_HISTORY but has no
-     * messages stored (yet). The Load-older eviction above
-     * already handled the stale sentinel; has_more is FALSE here
-     * by definition (server has nothing to point at), so we don't
-     * re-add one and the buffer ends up clean. */
-    if (entries->len == 0) {
+    /* Empty batch — the server has nothing (more) stored, and the
+     * eviction above leaves the buffer clean. A Load-older page that
+     * comes back empty but still says has_more was refused, and its row
+     * goes back below to be clicked again. */
+    if (entries->len == 0 && !(prepend_mode && has_more)) {
         return;
     }
 
@@ -1442,50 +1438,11 @@ chat_history_load_more (RotulusView *view, RotulusLoadDirection direction,
         return;
     }
 
-    /* CAP_CHAT_HISTORY is a hard prerequisite. hx_get_chat_history
-     * already gates on this and returns FALSE, but check up front
-     * so we don't even try to register the task. */
-    if (!(hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY))) {
-        debug_log ("chat-history",
-                   "Load-older click: server didn't negotiate "
-                   "CAP_CHAT_HISTORY (caps=0x%" G_GINT64_MODIFIER "x)",
-                   hx_conn_caps (htlc));
+    if (!hx_chat_history_fetch_older (htlc, gchat->cid,
+                                      gchat->render.oldest_msgid)) {
         return;
     }
-
-    debug_log ("chat-history",
-               "Load-older click: cid=%u, before=%" G_GUINT64_FORMAT,
-               gchat->cid, gchat->render.oldest_msgid);
-
-    /* Use the same per-batch count as the initial post-login pull
-     * (gtkhx_prefs.chat_history_initial, default 50). If the user
-     * has set initial=0 to suppress the auto-pull, fall back to a
-     * 50-message floor here — the user explicitly engaged the
-     * affordance, so they want a meaningful number of messages
-     * back, not zero. Clamp positive values to uint16 range
-     * (matches the spec's LIMIT field width). */
-    int limit = gtkhx_prefs.chat_history_initial;
-    if (limit <= 0) {
-        limit = 50;
-    }
-    if (limit > 0xffff) {
-        limit = 0xffff;
-    }
-
     gchat->render.loading = TRUE;
-    task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
-              GUINT_TO_POINTER (gchat->cid), 0, "chat-history-older");
-    if (!hx_get_chat_history (htlc, gchat->cid, gchat->render.oldest_msgid,
-                              /*after=*/0, (guint16)limit)) {
-        /* Sender refused (e.g. cap dropped mid-session). Roll back
-         * the loading flag — the task we just registered will sit
-         * unmatched but a future cap-bearing reply on that trans
-         * id is extremely unlikely; tasks expire harmlessly. */
-        gchat->render.loading = FALSE;
-        debug_log ("chat-history",
-                   "Load-older click: hx_get_chat_history refused");
-        return;
-    }
 
     /* Phase 3 follow-up B: swap the clickable row for a plain
      * "Loading..." divider so the user gets immediate feedback that
@@ -2050,12 +2007,11 @@ pchat_close (struct htlc_conn *htlc, guint32 cid)
 }
 
 /* pure view function — just paints the
- * new subject into the chat-window subject entry. The broadcast
- * handler in rcv.c (hx_rcv_chat_subject) is responsible for the
- * 'Subject Changed to X' chat log line; the initial-subject
- * discovery path in rcv_task_user_list calls this too but without
- * the announce, since "joined a chat that already had a subject"
- * isn't a subject change from the user's perspective.
+ * new subject into the chat-window subject entry. A subject change
+ * (hxhandlers::recv::chat) also logs the 'Subject Changed to X' chat
+ * line; the initial-subject discovery path in rcv_task_user_list
+ * paints without the announce, since "joined a chat that already had a
+ * subject" isn't a subject change from the user's perspective.
  *
  * htlc is unused here — only kept for vtable signature uniformity
  * with the other output_functions members. */
@@ -2069,31 +2025,15 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
     if (!gchat || !gchat->subject) {
         return;
     }
-    /* buf comes from the conversation subject — set by hx_rcv_chat_subject
-     * (HTLS_HDR_CHAT_SUBJECT broadcast) and by the
-     * HTLS_DATA_CHAT_SUBJECT branch of rcv_task_user_list
-     * (initial-subject-discovery). Both paths copy the raw wire
-     * bytes verbatim, so a Mac-Roman-only server (Heidrun's Inn:
-     * 0xd5 = curly apostrophe in "Heidrun's Inn") delivers
-     * bytes that aren't valid UTF-8.
-     *
-     * Pango's editable widget accepts only valid UTF-8 and emits
-     * a runtime warning otherwise — gtkhx_text_to_utf8 walks the
-     * common encodings (UTF-8 / Latin-1 / Mac Roman) and returns
-     * a fresh g_malloc'd UTF-8 copy that we hand to GTK. The
-     * chat-line log path already runs through hx_printf which
-     * does the same conversion; this matches the subject widget
-     * to that path. */
-    gsize utf8_len = 0;
-    char *utf8 = gtkhx_text_to_utf8 (buf, strlen (buf), &utf8_len);
-    gtk_editable_set_text (GTK_EDITABLE (gchat->subject), utf8 ? utf8 : buf);
-    g_free (utf8);
+    /* Both paths decode the subject to UTF-8 before it gets here, which
+     * is all Pango's editable widget accepts. */
+    gtk_editable_set_text (GTK_EDITABLE (gchat->subject), buf);
 }
 
 /* View-side handler for the "chat-subject-notice" signal — the "Subject Changed
  * to: <subject>" chat-output line for a real subject change (the chat-subject
  * signal already updated the subject bar). The Rust chat-subject receive handler
- * (hxhandlers::recv::chat, hx_rcv_chat_subject) emits it; the gettext + INFOPREFIX live
+ * (hxhandlers::recv::chat) emits it; the gettext + INFOPREFIX live
  * here on the view side, same as every other model→view notification. Connected
  * in gtkhx_connect_signals at startup. */
 void
