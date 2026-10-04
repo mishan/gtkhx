@@ -42,6 +42,22 @@ points GTK/GStreamer at the bundled Resources before exec'ing the real binary.
 `tools/build-flatpak-bundle.sh` (unchanged) builds `gtkhx.flatpak` from
 `com.nasledov.gtkhx.yml`. The runtime is pulled from Flathub on install.
 
+## Version and update notices
+
+`-Dbuild_version=<version>` sets the version a build reports, in About and
+to the update check; empty falls back to the project version. The package
+workflow passes the version it was given, so a beta says `1.4.1b1`, not
+`1.4.1-dev`. For the Flatpak it adds the option to the manifest, since
+flatpak-builder takes options from nowhere else.
+
+The macOS `Info.plist` and the Windows executable's numeric version fields
+still take the project version.
+
+The Windows and macOS builds check for updates by default (`-Dupdate_check`
+is `auto`), and the manifest passes `enabled`. A Homebrew, MacPorts or MSYS2
+package should pass `-Dupdate_check=disabled`: its package manager does that
+job. See `docs/updates.md`.
+
 ## Status / known gaps
 
 These collectors are a first cut; expect a CI round or two to settle. Known

@@ -39,6 +39,8 @@ Meson options:
 | `-Dvoice` (`auto`/`enabled`/`disabled`) | Voice chat. Needs GStreamer 1.20+. `auto` drops it silently when GStreamer is absent; `enabled` makes that a hard error. When off, the voice crates aren't built, the capability bit isn't advertised, and every voice source and call site compiles out behind `HAVE_VOICE`. |
 | `-Dglycin_compat` (`auto`/`1`/`2`) | Which glycin loader generation the image decoder targets. Auto-detects the host's generation. See `docs/image-decoding.md`. |
 | `-Dtests` | The test suite. |
+| `-Dupdate_check` (`auto`/`enabled`/`disabled`) | Update notices. A combo, so `--auto-features` doesn't touch it. `auto` is on for Windows and macOS hosts (Homebrew/MacPorts/MSYS2 packages pass `disabled`); the Flatpak manifest passes `enabled`. See `docs/updates.md`. |
+| `-Dbuild_version` | The version the build reports (About, the update check). Empty uses the project version; the package workflow sets it. |
 | `-Dcargo_target_dir` | Cargo target dir, for CI caching. |
 
 Optional deps, each behind a `HAVE_*` define: poppler (PDF preview), gtksourceview-5
@@ -125,7 +127,7 @@ Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
 | **Media** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn) |
-| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and the TOML file — the owner of every preference value at runtime), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
+| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and the TOML file — the owner of every preference value at runtime), `hxupdate` (update-check version ordering, feed and decision), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
 | **External, from crates.io** | The chat view, `rotulus` (the GTK4 widget, LGPL) with its dependency-free layout engine `rotulus-layout` and `rotulus-mirc`. It lives in [its own repository](https://github.com/mishan/rotulus) and knows nothing about Hotline; GtkHx configures it in `gtkhx-ui`'s `chat_view.rs`. See `docs/chat-view.md` for how it is pinned, built and updated |
 | **Link façade** | `gtkhx-ffi` — bundles every FFI-exporting crate into a single `libgtkhx_ffi.a`, so the binary links exactly one archive instead of a hand-ordered list. Several crates also build a standalone `staticlib` on the side, purely so the test suite can link one crate at a time. See `docs/rust/crate-layout.md`. |
 

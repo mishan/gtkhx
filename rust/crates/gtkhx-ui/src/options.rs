@@ -334,6 +334,7 @@ pub(crate) mod cfg {
     pub const THEME_NAME: &str = "THEMENAME";
     pub const TRAY: &str = "TRAY";
     pub const TINT_WINDOW: &str = "TINTWINDOW";
+    pub const UPDATE_CHECK: &str = "UPDATECHECK";
     // Chat behaviour / output
     pub const SHOWJOIN: &str = "SHOWJOIN";
     pub const OLD_NICKCOMP: &str = "OLD_NICKCOMPLETION";
@@ -445,7 +446,8 @@ fn gtkhx_theme_combo() -> adw::ComboRow {
     combo_row(cfg::THEME_NAME, &tr("GtkHx theme"), &vrefs, &lrefs)
 }
 
-/// General (Appearance theme combos + tray).
+/// General (Appearance theme combos, tray, and the update check in a build
+/// that has one).
 pub(crate) fn page_general(page: &adw::PreferencesPage) {
     let appearance = group(&tr("Appearance"));
     appearance.set_description(Some(&tr(
@@ -483,6 +485,21 @@ pub(crate) fn page_general(page: &adw::PreferencesPage) {
         )),
     ));
     page.add(&system);
+
+    if crate::updates::BUILD_ENABLED && crate::updates::CHECKS_WIRED {
+        let updates = group(&tr("Updates"));
+        let how = if crate::updates::in_flatpak() {
+            tr("Uses Flatpak to check for updates.")
+        } else {
+            tr("Asks dl.gtkhx.org once a day. Sends no information about you or your servers.")
+        };
+        updates.add(&switch_row(
+            cfg::UPDATE_CHECK,
+            &tr("Check for updates"),
+            Some(&how),
+        ));
+        page.add(&updates);
+    }
 }
 
 /// Chat → Appearance (output toggles + scrollback + timestamp format + font).

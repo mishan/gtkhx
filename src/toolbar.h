@@ -17,6 +17,9 @@ extern void toolbar_set_status (const char *text);
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);
 
+/* gtkhx-ui: the main window's notice banners. Transfer none. */
+extern GtkWidget *gtkhx_main_banners (void);
+
 /* register the hamburger-menu's GActions on the application.
  * Call from gtkhx_activate after the AdwApplication is constructed —
  * fe_init() runs create_toolbar_window earlier (before

@@ -121,6 +121,10 @@ pub mod chat_tabs;
 // and with it every per-connection panel's content page. Not chat_tabs, which
 // switches conversations *within* whichever connection is showing.
 pub mod conn_tabs;
+// The main window's stacked notice banners, and the update notice among them.
+// Exports gtkhx_main_banners.
+pub mod main_banners;
+mod updates;
 // Every display-backed test in the crate, in one #[test]. There can only be
 // one; the module note says why.
 #[cfg(test)]

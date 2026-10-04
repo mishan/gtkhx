@@ -373,6 +373,26 @@ impl Default for Trackers {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Updates {
+    /// Look for a newer GtkHx. Only a build configured with update checks
+    /// reads it, so on is the default there without turning anything on in a
+    /// distribution's package.
+    pub check: bool,
+    /// The release the user chose to skip. Empty means none; a newer release
+    /// than this one is announced again.
+    pub skip_version: String,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Updates {
+            check: true,
+            skip_version: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Voice {
     /// A stable device name. Empty means "system default", which the runtime
     /// resolves through `autoaudiosrc` / `autoaudiosink`.
@@ -436,6 +456,7 @@ pub struct Settings {
     pub sound: Sound,
     pub transfers: Transfers,
     pub trackers: Trackers,
+    pub updates: Updates,
     pub voice: Voice,
     pub window: Window,
 }

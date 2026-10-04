@@ -117,6 +117,8 @@ rust_sources = files(
   'crates/gtkhx-ui/src/chat_view.rs',
   'crates/gtkhx-ui/src/chat_tabs.rs',
   'crates/gtkhx-ui/src/conn_tabs.rs',
+  'crates/gtkhx-ui/src/main_banners.rs',
+  'crates/gtkhx-ui/src/updates.rs',
   'crates/gtkhx-ui/src/chat_input.rs',
   'crates/gtkhx-ui/src/chat_invite.rs',
   'crates/gtkhx-ui/src/msg.rs',
@@ -255,6 +257,7 @@ rust_sources = files(
   # compiles. Empty lib; see its Cargo.toml.
   'crates/feature-unify/src/lib.rs',
   'crates/hxsound/src/lib.rs',
+  'crates/hxupdate/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
   'crates/gtkhx-ffi/Cargo.toml',
@@ -275,6 +278,7 @@ rust_sources = files(
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
   'crates/hxsound/Cargo.toml',
+  'crates/hxupdate/Cargo.toml',
 )
 # cargo-sources.json is regenerated from Cargo.lock for the Flatpak
 # offline build; it is not consumed by `cargo build` directly. Cargo.lock
@@ -467,9 +471,12 @@ rust_build = custom_target('rust-workspace',
       cargo_voice_args,
     ),
   ],
-  # Pass the meson project version to the cargo build so the gtkhx-ui
-  # About dialog can embed it via option_env!("GTKHX_VERSION").
-  env : {'GTKHX_VERSION': meson.project_version()},
+  # The version this build reports (About, the update check), and whether
+  # it may look for updates; gtkhx-ui reads both with option_env!.
+  env : {
+    'GTKHX_VERSION': gtkhx_version,
+    'GTKHX_UPDATE_CHECK': update_check_enabled ? '1' : '0',
+  },
   depend_files : rust_sources,
   output : 'rust-workspace.stamp',
   build_by_default : true,

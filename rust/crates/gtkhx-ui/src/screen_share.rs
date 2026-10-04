@@ -30,7 +30,6 @@ use std::ffi::c_void;
 
 use gtk4 as gtk;
 use gtk4::glib;
-use gtk4::prelude::*;
 use libadwaita as adw;
 #[cfg(not(target_os = "linux"))]
 use libadwaita::prelude::*;
@@ -381,13 +380,9 @@ fn update_banner() {
 }
 
 /// The indicator: an `AdwBanner` for the main window's top bars, revealed
-/// while anything is shared. Its button stops every share.
-///
-/// # Safety
-/// GTK main thread. Transfer none: this module keeps the reference.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_screen_share_banner_new() -> *mut gtk::ffi::GtkWidget {
-    crate::ensure_gtk_init();
+/// while anything is shared. Its button stops every share. A banner rather
+/// than a toast, because what it guards against is forgetting the share is on.
+pub(crate) fn banner() -> adw::Banner {
     let banner = adw::Banner::new(&tr("You are sharing your screen"));
     banner.set_button_label(Some(&tr("Stop Sharing")));
     banner.set_revealed(false);
@@ -398,6 +393,5 @@ pub unsafe extern "C" fn gtkhx_screen_share_banner_new() -> *mut gtk::ffi::GtkWi
         }
     });
     BANNER.with(|b| *b.borrow_mut() = Some(banner.clone()));
-    let widget: &gtk::Widget = banner.upcast_ref();
-    glib::translate::ToGlibPtr::to_glib_none(widget).0
+    banner
 }
