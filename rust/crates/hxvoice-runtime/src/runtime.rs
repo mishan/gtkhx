@@ -2333,9 +2333,14 @@ impl VoiceRuntime {
     /// signal that the UI's voice button reacts to.
     pub fn handle_event(&self, event: Event) -> SessionState {
         // Index an offer's SSRCs on arrival, before the machine can park
-        // it behind an answer in progress. See [`SsrcMids`].
-        if let Event::SdpOfferReceived { sdp, .. } = &event {
-            index_offer(sdp, &self.inner.borrow().video.ssrc_mids);
+        // it behind an answer in progress. See [`SsrcMids`]. Only one the
+        // machine will take: a late offer for another room must neither
+        // release a held pad nor stop a section.
+        if let Event::SdpOfferReceived { cid, sdp } = &event {
+            let inner = self.inner.borrow();
+            if inner.machine.accepts_offer(*cid) {
+                index_offer(sdp, &inner.video.ssrc_mids);
+            }
         }
         // Enqueue the event. If we're already dispatching (this is
         // a nested call from inside a Backend invocation), just
@@ -2821,6 +2826,11 @@ impl VoiceRuntime {
                 // Indexed already on arrival; again here for an offer
                 // dispatched without one. Adding is idempotent, and the
                 // pads this offer declares were released the first time.
+                // Its inactive sections are set again too, which is the
+                // same answer: no newer offer is indexed in between, since
+                // one arriving meanwhile replaces this one in the queue,
+                // and none arrives during a dispatch (frames reach
+                // handle_event from the main loop, and sends only queue).
                 index_offer(&sdp, &self.inner.borrow().video.ssrc_mids);
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
@@ -8213,6 +8223,44 @@ a=ssrc:21 cname:x\r\n",
             rx.try_recv().unwrap(),
             ("src_70".into(), Some("cam-user-8".into()))
         );
+    }
+
+    /// An offer the machine drops — here, a late one for another room —
+    /// leaves the index alone: a held pad stays held, and a section it
+    /// calls inactive stays live, until the room's own offer says.
+    #[test]
+    fn a_rejected_offer_leaves_held_pads_alone() {
+        let (runtime, _backend) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\nm=audio 9 RTP/SAVPF 0\na=mid:user-4\na=ssrc:10 cname:x\n".into(),
+        });
+        let map = Arc::clone(&runtime.inner.borrow().video.ssrc_mids);
+        map.lock().unwrap().held.push(HeldPad {
+            id: 0,
+            ssrc: 20,
+            release: Box::new(|_| {}),
+        });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 2,
+            sdp: "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-5\na=ssrc:20 cname:y\n\
+                  m=video 9 RTP/SAVPF 96\na=mid:cam-user-6\na=inactive\n"
+                .into(),
+        });
+        {
+            let m = map.lock().unwrap();
+            assert_eq!(m.held.len(), 1, "still held");
+            assert!(!m.mids.contains_key(&20));
+            assert!(!m.inactive.contains("cam-user-6"));
+        }
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\nm=video 9 RTP/SAVPF 96\na=mid:cam-user-5\na=ssrc:20 cname:y\n".into(),
+        });
+        let m = map.lock().unwrap();
+        assert!(m.held.is_empty(), "released by the room's own offer");
+        assert_eq!(m.mids.get(&20).map(String::as_str), Some("cam-user-5"));
     }
 
     /// An offer that arrives while the last answer is still being made

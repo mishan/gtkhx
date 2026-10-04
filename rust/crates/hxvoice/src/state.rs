@@ -227,6 +227,19 @@ impl SessionMachine {
         self.active_cid
     }
 
+    /// Whether an offer for `cid` would be taken now rather than dropped:
+    /// the room this machine is in, in a state with an arm for it.
+    pub fn accepts_offer(&self, cid: u32) -> bool {
+        self.active_cid == Some(cid)
+            && matches!(
+                self.state,
+                SessionState::JoinSent
+                    | SessionState::Connecting
+                    | SessionState::Connected
+                    | SessionState::OfferPending
+            )
+    }
+
     /// Current local mute state.
     pub fn is_muted(&self) -> bool {
         self.muted
