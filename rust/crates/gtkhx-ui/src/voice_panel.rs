@@ -1000,7 +1000,16 @@ fn join_now(inner: &PanelInner) {
                     let model = hx_session_voice_model(sess);
                     if !model.is_null() {
                         hx_voice_model_set_self_uid(model, uid);
+                        // A switch from another room sends no 601, so nothing
+                        // else clears the model, and the old room's presence
+                        // would be what this room's join reply is diffed
+                        // against.
+                        let mut held = 0u32;
+                        if gtkhx_voice_runtime_active_cid(rt, &mut held) != 0 && held != cid {
+                            hx_voice_model_clear(model);
+                        }
                     }
+                    crate::video_panel::announce_shares(sess);
                     gtkhx_voice_runtime_join(rt, cid);
                     // Join muted by default. The explicit 606 MUST be the UI's
                     // job — the wire-frame bridge skips runtime-emitted MUTE —
@@ -1152,6 +1161,11 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
     let screen_btn = gtk::ToggleButton::new();
     cam_btn.set_visible(false);
     screen_btn.set_visible(false);
+    // Icon-only toggles: the label names the control and the pressed state
+    // says whether it is on. The tooltip, which follows the state, stays
+    // the description.
+    cam_btn.update_property(&[gtk::accessible::Property::Label(&tr("Camera"))]);
+    screen_btn.update_property(&[gtk::accessible::Property::Label(&tr("Share screen"))]);
     panel.append(&join_btn);
     panel.append(&mute_btn);
     panel.append(&cam_btn);

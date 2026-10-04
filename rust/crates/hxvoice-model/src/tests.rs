@@ -314,8 +314,9 @@ fn a_video_capable_connection_ignores_the_participant_bits() {
     // participants feed presence alone, and Video Status owns the flags,
     // so a paused camera is not flattened back to a live one.
     let m = HxVoiceModel::new();
-    m.ingest_video_publishers(&pubs(&[(4, 1, true)]));
     let b = blob(&[(4, 0x0002)]);
+    m.ingest_participants(&b);
+    m.ingest_video_publishers(&pubs(&[(4, 1, true)]));
     unsafe {
         hx_voice_model_ingest_participants(
             m.as_ptr() as *mut c_void,
@@ -335,4 +336,108 @@ fn a_video_capable_connection_ignores_the_participant_bits() {
         );
     }
     assert_eq!(m.get_video(4), VIDEO_CAMERA);
+}
+
+fn install_start_recorder(m: &HxVoiceModel) -> Records {
+    let recs: Records = Rc::default();
+    let sink = recs.clone();
+    m.connect_local("video-started", false, move |args| {
+        sink.borrow_mut()
+            .push((args[1].get().unwrap(), args[2].get().unwrap()));
+        None
+    });
+    recs
+}
+
+/// A participant list as rcv.c hands it over: the join reply, then 605s.
+fn participants(m: &HxVoiceModel, entries: &[(u16, u16)], video_cap: bool) {
+    let b = blob(entries);
+    unsafe {
+        hx_voice_model_ingest_participants(
+            m.as_ptr() as *mut c_void,
+            b.as_ptr(),
+            b.len(),
+            video_cap.into_glib(),
+        );
+    }
+}
+
+#[test]
+fn video_started_fires_for_a_new_share_after_the_join() {
+    let m = HxVoiceModel::new();
+    m.set_self_uid(1);
+    let started = install_start_recorder(&m);
+
+    // The join reply and the Video Status after it: a share already running.
+    participants(&m, &[(1, 0), (4, 0x0002)], true);
+    m.ingest_video_publishers(&pubs(&[(4, 1, false)]));
+    assert!(started.borrow().is_empty());
+
+    // uid 4 adds a screen, uid 9 a paused camera, and we start our own.
+    m.ingest_video_publishers(&pubs(&[
+        (4, 1, false),
+        (4, 2, false),
+        (9, 1, true),
+        (1, 1, false),
+    ]));
+    let mut got = started.borrow().clone();
+    got.sort();
+    assert_eq!(got, vec![(4, VIDEO_SCREEN), (9, VIDEO_CAMERA)]);
+
+    // A resume is not a start.
+    started.borrow_mut().clear();
+    m.ingest_video_publishers(&pubs(&[(4, 1, false), (4, 2, false), (9, 1, false)]));
+    assert!(started.borrow().is_empty());
+
+    // After a leave the next join is a fresh room's.
+    m.clear();
+    participants(&m, &[(7, 0x0004)], true);
+    m.ingest_video_publishers(&pubs(&[(7, 2, false)]));
+    assert!(started.borrow().is_empty());
+    m.ingest_video_publishers(&pubs(&[(7, 2, false), (8, 2, false)]));
+    assert_eq!(started.borrow().as_slice(), &[(8, VIDEO_SCREEN)]);
+}
+
+#[test]
+fn video_started_diffs_against_the_join_reply() {
+    // Each case: uid 4's bits in the join reply, then what follows it.
+    type Then = fn(&HxVoiceModel);
+    type Case = (&'static str, bool, u16, Then, &'static [(u32, u32)]);
+    let cases: [Case; 4] = [
+        (
+            "the server skips the post-join 611",
+            true,
+            0x0002,
+            |m| m.ingest_video_publishers(&pubs(&[(4, 1, false), (4, 2, false)])),
+            &[(4, VIDEO_SCREEN)],
+        ),
+        (
+            "a share already running, paused",
+            true,
+            0x0002,
+            |m| m.ingest_video_publishers(&pubs(&[(4, 1, true)])),
+            &[],
+        ),
+        (
+            "no video negotiated",
+            false,
+            0x0002,
+            |m| participants(m, &[(4, 0x0006)], false),
+            &[(4, VIDEO_SCREEN)],
+        ),
+        (
+            "neither publication bits nor a 611",
+            true,
+            0,
+            |m| participants(m, &[(4, 0)], true),
+            &[],
+        ),
+    ];
+    for (name, video_cap, join, then, want) in cases {
+        let m = HxVoiceModel::new();
+        let started = install_start_recorder(&m);
+        participants(&m, &[(4, join)], video_cap);
+        then(&m);
+        assert_eq!(started.borrow().as_slice(), want, "{name}");
+    }
 }
