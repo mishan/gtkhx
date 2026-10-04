@@ -31,18 +31,25 @@
 #define LZ4 2
 #define ZSTD 3
 
+/* Log in to the matrix's HOPE server named `server` with `cipher` and
+ * `compress`, and check `want` was agreed and pings cross. */
 static void
-login_and_ping (guint32 cap, const char *cipher, const char *compress,
+login_and_ping (const char *server, const char *cipher, const char *compress,
                 guint32 want)
 {
-    GPtrArray *candidates = hx_test_servers_with (cap);
-    const hx_test_server *srv
-        = candidates && candidates->len ? candidates->pdata[0] : NULL;
+    GPtrArray *candidates = hx_test_servers_with (HX_TEST_CAP_HOPE);
+    const hx_test_server *srv = NULL;
+    for (guint i = 0; candidates && i < candidates->len && !srv; i++) {
+        const hx_test_server *s = g_ptr_array_index (candidates, i);
+        if (g_strcmp0 (s->name, server) == 0) {
+            srv = s;
+        }
+    }
     if (candidates) {
         g_ptr_array_unref (candidates);
     }
     if (!srv) {
-        g_test_fail_printf ("no server in the matrix has %s", cipher);
+        g_test_fail_printf ("no %s with HOPE in the matrix", server);
         return;
     }
 
@@ -80,33 +87,31 @@ login_and_ping (guint32 cap, const char *cipher, const char *compress,
 static void
 test_gzip_on_mhxd (void)
 {
-    login_and_ping (HX_TEST_CAP_BLOWFISH, "BLOWFISH", "GZIP", GZIP);
+    login_and_ping ("mhxd", "BLOWFISH", "GZIP", GZIP);
 }
 
-/* Janus is the matrix's only HX_TEST_CAP_CHACHA20 server; the Blowfish
- * cases pick by that cap only to land on it. */
 static void
 test_blowfish_gzip_on_janus (void)
 {
-    login_and_ping (HX_TEST_CAP_CHACHA20, "BLOWFISH", "GZIP", GZIP);
+    login_and_ping ("janus", "BLOWFISH", "GZIP", GZIP);
 }
 
 static void
 test_blowfish_zstd_on_janus (void)
 {
-    login_and_ping (HX_TEST_CAP_CHACHA20, "BLOWFISH", "ZSTD", ZSTD);
+    login_and_ping ("janus", "BLOWFISH", "ZSTD", ZSTD);
 }
 
 static void
 test_zstd_on_janus (void)
 {
-    login_and_ping (HX_TEST_CAP_CHACHA20, "CHACHA20-POLY1305", "ZSTD", ZSTD);
+    login_and_ping ("janus", "CHACHA20-POLY1305", "ZSTD", ZSTD);
 }
 
 static void
 test_lz4_on_janus (void)
 {
-    login_and_ping (HX_TEST_CAP_CHACHA20, "CHACHA20-POLY1305", "LZ4", LZ4);
+    login_and_ping ("janus", "CHACHA20-POLY1305", "LZ4", LZ4);
 }
 
 int

@@ -167,7 +167,19 @@ where
             };
         }
         let now = shared.now();
-        shared.session().feed(&buf[..n], now);
+        {
+            let mut s = shared.session();
+            let before = s.negotiated().is_some();
+            s.feed(&buf[..n], now);
+            // The step-1 reply is the session's own and reaches no one;
+            // the trace says what it agreed.
+            if let Some(n) = s.negotiated().filter(|_| !before) {
+                crate::proto_trace::note(&format!(
+                    "HOPE agreed: MAC {:?}, cipher {:?}, compression {:?}",
+                    n.mac, n.cipher, n.compression
+                ));
+            }
+        }
         let wrote = shared.queue_out();
         // Whether or not it queued anything, what was fed may have moved
         // the session's deadlines, or let the consumer's commands through.
