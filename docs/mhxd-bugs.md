@@ -44,8 +44,9 @@ connecting: the other test fails at once with "timed out waiting for
 SELFINFO", and its connection ends with `magic: the server answered [00, 00,
 07, 48, …]`.
 
-**GtkHx:** nothing to do on the client side. The fix is for the broadcast to
-skip connections that have not logged in.
+**GtkHx:** nothing to do on the client side. Fixed upstream in
+[kangsterizer/mhxd#6](https://github.com/kangsterizer/mhxd/pull/6), which the
+rig's image includes; servers running an older mhxd still do it.
 
 ## Rename and move silently replace what is already there
 
