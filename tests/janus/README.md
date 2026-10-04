@@ -162,12 +162,12 @@ Out of the box:
   `seed-accounts.sh` (the upstream YAML schema is one
   boolean per access bit, two-space-indented under `Access:`).
 
-  GtkHx Phase 8 (A-E) ships end-to-end DTLS-SRTP voice against
-  this container; the Phase 8.F Tier 3 voice tests exercise the
-  control-channel wire shape (600-606 + 0x01F5-0x01F9 fields)
-  against it. The voice tests live in
+  GtkHx runs end-to-end DTLS-SRTP voice against this container,
+  and the voice tests exercise the control-channel wire shape
+  (600-606 + 0x01F5-0x01F9 fields) against it. The voice tests live in
   `tests/integration/test_voice_*.c` and gate on
-  `HX_TEST_CAP_VOICE`, which only Janus advertises.
+  `HX_TEST_CAP_VOICE`; they take the first such row, Janus, though
+  hxd-ng advertises it too.
 
 Also enabled:
 

@@ -279,9 +279,8 @@ repeat count:
 - A path field shorter than 6 bytes, or absent, means the root.
 - A component of `..` must be refused. The official server validates names in its
   platform layer; mhxd rejects `..` and `/`.
-- Each component is at most 255 bytes. Janus fails on components of 253 bytes or more
-  ([janus-bugs.md](janus-bugs.md)), and a Windows-hosted server is limited by the host's
-  path length.
+- Each component is at most 255 bytes. Janus 2.0.13 and earlier fails on components of
+  253 bytes or more, and a Windows-hosted server is limited by the host's path length.
 
 ---
 
@@ -1377,7 +1376,7 @@ a client bug:
 | Badmoon | A confirmed 1.9 server (190), serving flat and threaded news. |
 | mhxd | Configurable version (0 = act as 1.2.3). Fake "everything" access in 354. Rename and move replace existing items; `/` in names misbehaves; transfer references leak ([mhxd-bugs.md](mhxd-bugs.md)). Kill Download is defined but never dispatched. |
 | Mobius | Panics on Agreed without field 113. Reads 326 as a post's parent and ignores 334. |
-| Janus | Silent on unknown transactions. Plain logins with a password fail. Components of 253+ bytes panic ([janus-bugs.md](janus-bugs.md)). Delivers the user ID in the Login reply. |
+| Janus | 2.0.13 and earlier: silent on unknown transactions, and components of 253+ bytes panic. Before 2.0.13: plain logins with a password fail. Delivers the user ID in the Login reply. |
 | Heidrun (older) | Echoed the request type in reply headers. |
 | Old Mac servers (RetroMac, MacDomain) | Push User Access, Agreement and Banner before the Login reply. |
 

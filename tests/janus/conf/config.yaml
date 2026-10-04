@@ -316,11 +316,7 @@ InlineMedia:
   # 100 — see fogWraith Capabilities-Inline-Media.md
   # § Resource Limits).
   RateLimit:
-    # Janus's Go YAML parser treats `0s` as 'unset / use default'
-    # (the 10s spec default fires anyway), so use an explicit
-    # tiny non-zero value here. 1ms is below the round-trip
-    # latency of any reasonable test sequence.
-    PerAccountInterval: 1ms
+    PerAccountInterval: 0s
     PerAccountHourly:   1000    # Generous hourly cap.
     PerIPHourly:        10000   # Generous per-IP cap.
 

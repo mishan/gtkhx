@@ -418,20 +418,15 @@ client_runtime_unmute (voice_client *c)
 /* ------------------------------------------------------------------ */
 
 static const hx_test_server *
-pick_voice_server (const char *name)
+pick_voice_server (void)
 {
     GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_VOICE);
     if (!servers) {
         return NULL;
     }
-    /* The first voice server (Janus), unless the test names one. */
-    const hx_test_server *srv = NULL;
-    for (guint i = 0; i < servers->len && !srv; i++) {
-        const hx_test_server *row = g_ptr_array_index (servers, i);
-        if (name == NULL || g_strcmp0 (row->name, name) == 0) {
-            srv = row;
-        }
-    }
+    /* The first voice server: Janus. */
+    const hx_test_server *srv
+        = servers->len > 0 ? g_ptr_array_index (servers, 0) : NULL;
     g_ptr_array_unref (servers);
     if (!srv) {
         return NULL;
@@ -709,7 +704,7 @@ test_voice_rejoin_media (void)
 
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server (NULL);
+    const hx_test_server *srv = pick_voice_server ();
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -897,7 +892,7 @@ test_voice_vad_speaker (void)
 
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server (NULL);
+    const hx_test_server *srv = pick_voice_server ();
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -1108,7 +1103,7 @@ test_voice_concurrent_join (void)
 
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server (NULL);
+    const hx_test_server *srv = pick_voice_server ();
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -1288,12 +1283,12 @@ hs_tick (gpointer data)
 }
 
 static void
-run_two_way_call (const char *server, gboolean simultaneous, gboolean swap)
+run_two_way_call (gboolean simultaneous, gboolean swap)
 {
     harness_select_audio_source ("1");
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
 
-    const hx_test_server *srv = pick_voice_server (server);
+    const hx_test_server *srv = pick_voice_server ();
     if (!srv) {
         g_test_fail_printf ("no voice-capable server in the matrix.");
         return;
@@ -1350,20 +1345,15 @@ out:
 static void
 test_voice_device_hotswap (void)
 {
-    run_two_way_call (NULL, FALSE, TRUE);
+    run_two_way_call (FALSE, TRUE);
 }
 
 /* Both participants join in the same instant — two users clicking Join
- * together, or a room both auto-join. Each must still hear the other.
- *
- * Runs against hxd-ng: Janus fails it on the server side, never offering
- * the second joiner a section for a first joiner whose track arrived after
- * the second joined (docs/janus-bugs.md). GTKHX_VOICE_TEST_PORT=5510
- * points it at Janus to check whether a release has fixed that. */
+ * together, or a room both auto-join. Each must still hear the other. */
 static void
 test_voice_simultaneous_join (void)
 {
-    run_two_way_call ("hxd-ng", TRUE, FALSE);
+    run_two_way_call (TRUE, FALSE);
 }
 
 int
