@@ -2255,9 +2255,14 @@ test_integration_video_media = executable(
   link_with           : integration_harness_lib,
   link_depends        : rust_build,
 )
+# The depayloader's and RTP session's debug output, so the next run that
+# decodes nothing of a stream shows whether keyframes were requested and
+# whether any arrived. Remove once that failure is understood.
 test('video_media', test_integration_video_media,
      suite       : 'integration',
      is_parallel : false,
+     env         : ['GST_DEBUG=rtpvp8depay:5,rtpbasedepayload:5,rtpsession:5',
+                    'GST_DEBUG_NO_COLOR=1'],
      timeout     : 180)
 
 test_integration_voice_join = executable('test_integration_voice_join',
