@@ -242,7 +242,9 @@ EnableHOPE: true
 # Enable HOPE transport compression (GZIP, LZ4, ZSTD).
 # Requires EnableHOPE and a negotiated transport cipher.
 # The server and client negotiate the best mutual algorithm automatically.
-EnableCompression: false
+# On so test_hope_compression can ask for ZSTD and LZ4; a client that
+# offers no compression still gets none.
+EnableCompression: true
 
 # ─── Voice Chat ─────────────────────────────────────────────────────────────
 # Enable WebRTC voice chat support. Requires clients that negotiate the

@@ -55,7 +55,6 @@ use hxbridge as _;
 use hxnet as _;
 
 // --- crypto / compression ---
-use hxcrypto as _;
 
 // --- protocol handler layer (recv + send) ---
 use hxhandlers as _;

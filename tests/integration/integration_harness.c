@@ -159,16 +159,17 @@ extern hxnet_connection *hxnet_connection_open_plaintext_polling (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len);
 /* HOPE-Secure-Login sibling of the polling open. cipher_alg is the wire
- * cipher label ("BLOWFISH" / "CHACHA20-POLY1305"), or NULL/empty for a
- * no-cipher HMAC secure login. The actor runs the full step-1/step-2
- * handshake + cipher transition in Rust and replays the step-2 reply as
- * the first polled frame. */
+ * cipher label ("BLOWFISH" / "CHACHA20-POLY1305") and compress_alg the
+ * compression ("GZIP" / "LZ4" / "ZSTD"), each NULL/empty for none. The
+ * session runs both steps and the transport after them; the step-2
+ * reply, the login's, is the first polled frame. */
 extern hxnet_connection *hxnet_connection_open_hope_polling (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *cipher_alg,
-    gsize cipher_alg_len);
+    guint16 caps, const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *compress_alg, gsize compress_alg_len);
+extern guint32 hxnet_connection_hope_compression (hxnet_connection *handle);
 /* TLS-from-byte-zero sibling of the polling open (production rustls,
  * Mobius/Janus separate-port model). `verify_cert` decides trust on a
  * WebPKI failure — self-signed test certs need it; the harness passes an
@@ -399,23 +400,22 @@ orch_open_login (struct htlc_conn *htlc, const char *host, int port,
     return fd;
 }
 
-/* HOPE-Secure-Login sibling of orch_open_login: drive the full step-1 /
- * step-2 handshake + cipher transition through the production
- * orchestrator (hxnet's run_hope_lifecycle) and register the resulting
- * actor as a synthetic fd. `cipheralg` is the wire cipher label
+/* HOPE-Secure-Login sibling of orch_open_login: log in with HOPE through
+ * the production session (hxnet's run_hope_lifecycle) and register the
+ * resulting actor as a synthetic fd. `cipheralg` is the wire cipher label
  * ("BLOWFISH" / "CHACHA20-POLY1305"), or NULL for a no-cipher HMAC
- * secure login. Returns the synthetic fd (with the post-login drain
- * still to run, exactly like orch_open_login), or -1 on failure. The
- * caller's integration_hope_session stays zeroed: the actor owns all
- * crypto, so the harness's AEAD / stream framing in
- * integration_{send,recv}_message_hope is bypassed for the synthetic
- * fd (those wrappers pass through to integration_{send,recv}_message,
- * which route ORCH fds to the actor). */
+ * secure login; `compressalg` the compression, or NULL for none. Returns
+ * the synthetic fd (with the post-login drain still to run, exactly like
+ * orch_open_login), or -1 on failure. The caller's integration_hope_session
+ * stays zeroed: the actor owns all crypto, so the harness's AEAD / stream
+ * framing in integration_{send,recv}_message_hope is bypassed for the
+ * synthetic fd (those wrappers pass through to
+ * integration_{send,recv}_message, which route ORCH fds to the actor). */
 static int
 orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
                       const char *login, const char *password,
                       const char *display_name, guint16 icon, guint16 caps,
-                      const char *cipheralg)
+                      const char *cipheralg, const char *compressalg)
 {
     if (!login) {
         login = "guest";
@@ -423,12 +423,13 @@ orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
     const char *name = (display_name && *display_name) ? display_name : "";
     const char *pass = password ? password : "";
     const char *calg = cipheralg ? cipheralg : "";
+    const char *zalg = compressalg ? compressalg : "";
     hxnet_connection *h = hxnet_connection_open_hope_polling (
         (const guint8 *)host, strlen (host), (guint16)port,
         (const guint8 *)login, strlen (login), (const guint8 *)pass,
         strlen (pass), (const guint8 *)name, strlen (name), icon,
-        HX_CLIENT_VERSION, caps, /*trans=*/1, (const guint8 *)calg,
-        strlen (calg));
+        HX_CLIENT_VERSION, caps, (const guint8 *)calg, strlen (calg),
+        (const guint8 *)zalg, strlen (zalg));
     if (!h) {
         g_test_fail_printf (
             "hxnet_connection_open_hope_polling(%s:%d, cipher=%s) returned "
@@ -1772,6 +1773,13 @@ integration_hope_session_release (integration_hope_session *hope)
     hope->aead_active = 0;
 }
 
+guint32
+integration_hope_compression (int fd)
+{
+    hxnet_connection *h = orch_lookup (fd);
+    return h ? hxnet_connection_hope_compression (h) : 0;
+}
+
 int
 integration_open_login_hope_or_skip (const hx_test_server *srv,
                                      struct htlc_conn *htlc,
@@ -1787,10 +1795,9 @@ integration_open_login_hope_or_skip (const hx_test_server *srv,
     memset (htlc, 0, sizeof (*htlc));
     memset (hope, 0, sizeof (*hope));
 
-    /* Drive the whole HOPE handshake through the production orchestrator
-     * (run_hope_lifecycle in Rust): magic + step1 + step2 + cipher
-     * transition, with the step-2 reply replayed as the first polled
-     * frame for the shared drain below. The hope session stays zeroed —
+    /* Log in with HOPE through the production session (run_hope_lifecycle
+     * in Rust), the step-2 reply the first polled frame for the shared
+     * drain below. The hope session stays zeroed —
      * the actor owns crypto, so the integration_*_message_hope wrappers
      * pass the synthetic fd through to the actor (they engage their own
      * AEAD / stream framing only when hope->aead_active / stream_active,
@@ -1798,7 +1805,7 @@ integration_open_login_hope_or_skip (const hx_test_server *srv,
     int fd = orch_open_login_hope (
         htlc, srv->host, srv->port, username, password, display_name, icon,
         HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING | HTLC_CAP_CHAT_HISTORY,
-        cipheralg);
+        cipheralg, compressalg);
     if (fd < 0) {
         return -1;
     }

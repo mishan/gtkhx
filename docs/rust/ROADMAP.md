@@ -157,9 +157,9 @@ the map.
 | Area | Where it lives now | What it replaced |
 |---|---|---|
 | Build plumbing | `rust/meson.build` + the Cargo workspace | — |
-| Crypto + transport compression | `hxcrypto` (hash / stream / aead / compress) | `hmac.c`, `cipher.c`, `cipher_aead.c`, `compress.c`, `md5.c`, `sha.c`, `haval.c` |
+| Crypto + transport compression | hx-libs' `hxcrypto` (hash / stream / aead) and `hxhope` (the HOPE transport's ciphers and compression) | `hmac.c`, `cipher.c`, `cipher_aead.c`, `compress.c`, `md5.c`, `sha.c`, `haval.c` |
 | Wire protocol — parsers, builders, framing, Mac Roman text, dates | `hxproto` | the byte-twiddling half of `rcv.c` / `proto_helpers.c` / the `hlwrite` send path |
-| Connection lifecycle: connect, magic, LOGIN, HOPE, ciphers, compression, TLS | `hxnet` + `hxbridge` (tokio runtime + GLib ferry) | `network.c`'s connect/decode state machine, `hope.c`, `network_decode.c`, `connect_magic.c` |
+| Connection lifecycle: connect, magic, LOGIN, HOPE, ciphers, compression, TLS | `hxnet` + `hxbridge` (tokio runtime + GLib ferry), over hx-libs' `hxsession` and `hxhope` | `network.c`'s connect/decode state machine, `hope.c`, `network_decode.c`, `connect_magic.c` |
 | HTXF file transfers — subchannel transport, the recv/send/folder byte loops, `htxf_conn` storage and lifecycle, the worker shell | `hxnet::{htxf,xfer,xfer_handle}` + `hxhandlers::xfer` | `xfers.c`, `xfers_recv.c`, `xfers_send.c`, `htxf_io.c`, `htxf_subchannel.c`, `gtkthreads.c` |
 | HFS sidecar / resource-fork I/O; FFO+FILP fork-header codec | `hxhfs`, `hxfiles-xfer` | `hfs.c` and the fiddly byte math in `xfers.c` |
 | Tracker fetch (HTRK v1 + v3, TLS, probe-fallback) | `hxnet::tracker` | `network.c`'s `GSocketClient` tracker state machine |
@@ -207,22 +207,14 @@ Things that cost real time to learn and would cost it again.
   reply into a client abort. The rule since: fallible construction returns
   `Option`/`bool` from Rust, NULL across the FFI, and the C side fails closed.
 - **A shared cipher-state struct is asserted at compile time on both sides.**
-  The AEAD state was the first: `hxcrypto`'s
-  `const _: () = assert!(size_of::<AeadState>() == …)` was paired with a
+  The AEAD state was the first: a Rust `size_of` assert paired with a
   `_Static_assert` on the same size in the C header, so a field reorder on
   either side tripped a build error rather than a misalignment at decrypt time.
-  (The C half went away with the C crypto dispatchers; the Rust assert and its
-  reasoning stayed, because it also documents *why* a size pin is equivalent to
-  a field-offset pin for that struct shape.) Every cross-language struct added
-  since follows the same pattern — C `_Static_assert` against Rust `size_of` /
-  `align_of` / `offset_of` consts. `tasks_bridge.c` and `inline_media_decode.c`
-  are current examples, the latter pinning enum discriminants as well as
-  layout.
-- **Blowfish rollback snapshots state; it does not clone it.** Speculative
-  `cipher_decode` needs to be able to roll the cipher back. Cloning the whole
-  Rust state meant a key-schedule-sized allocation per Hotline transaction. The
-  shipped form exposes save/restore entry points that snapshot only the OFB
-  feedback state into a stack buffer.
+  Both halves went once no cipher state crossed to C. Every cross-language
+  struct since follows the same pattern — C `_Static_assert` against Rust
+  `size_of` / `align_of` / `offset_of` consts. `tasks_bridge.c` and
+  `inline_media_decode.c` are current examples, the latter pinning enum
+  discriminants as well as layout.
 - **The legacy `key||text` hash branches are pinned byte for byte.** Tier 1
   tests assert the hand-computed digests of the concatenated form for each
   supported hash, so a future "consistency fix" can't quietly rewrite the
@@ -712,8 +704,7 @@ The order, each step its own branch and each checked against the rig:
    the agreement and the wait for it, a 1.2 server's user change, and when
    the post-login fetches may go out (`LoginReady`). C reads the login
    reply's fields, shows the agreement, and keeps everything after.
-   HOPE's two steps stay in `hxnet` until step 4; the session takes over
-   at their reply. *Done.*
+   *Done.*
 3. **Transaction ids and the keep-alive.** The session numbers every
    transaction from one counter, and a GtkHx task keeps its view-side
    state, keyed by the trans the session gives it
@@ -721,10 +712,18 @@ The order, each step its own branch and each checked against the rig:
    place of the ping timer in `network.c`. *Done.* Matching a reply to
    its task is still `hx_rcv_task` and `hxtask`'s table; it moves with
    the replies, in step 5.
-4. **HOPE and compression.** The handshake steps and key derivation are pure
-   functions in `hxnet` already (`hope.rs`, `hope_keys.rs`); they move to
-   hx-libs with `hxcrypto` and become session-side codecs, which is also what
-   hxd-ng needs to accept HOPE (*Shared code with hxd-ng*, below).
+4. **HOPE and compression.** `hxcrypto` moved to hx-libs, and HOPE with it
+   as `hxhope`: the handshake as either side plays it, its keys, and the
+   transport it agrees — Blowfish with its rekey marker, ChaCha20-Poly1305,
+   and GZIP, LZ4 and ZSTD beneath either — as a codec between the session's
+   `feed` / `take_outgoing` and the socket. `Session::with_hope` runs both
+   steps on the session's own counter, so the login is step 2, on trans 2,
+   and C keys its login task on the trans the session reports. `hxnet` only
+   moves bytes: the HOPE lifecycle is connect plus session, and the
+   transfer keys an HTXF subchannel derives from come from what the session
+   agreed. Compression is negotiated when the user picks it, and the suite
+   runs GZIP against mhxd and ZSTD and LZ4 against Janus; see *Shared code
+   with hxd-ng* for what hxd-ng needs to accept HOPE. *Done.*
 5. **The receive handlers, domain by domain.** Chat, users, messages, news,
    files: each moves from `rcv.c` and `hxhandlers` onto session events. Until
    a domain moves, its frames reach GtkHx whole, as `Event::Unhandled` and
@@ -761,14 +760,28 @@ as the home for shared crates.
 
 The candidates that have a second consumer, most valuable first:
 
-1. **`hxcrypto` and a sans-IO HOPE handshake.** hxd-ng refuses HOPE logins
-   today. A handshake state machine in hx-libs that can play either role, with
-   `hxnet` keeping the I/O, lets the server accept HOPE without writing it a
-   second time — and gives GtkHx a server it controls to fix the
-   compression-negotiation defect against. The hx-libs README already expects
-   `hxcrypto` to move. Check the provenance notes in `crate-layout.md` §4
-   first; it stays GPL either way.
-2. **Smaller pieces for `hxproto`**: the access-bit table, and the
+**Done: HOPE.** `hxcrypto` and `hxhope` are in hx-libs; GtkHx runs HOPE
+through `hxsession`. hxd-ng still refuses HOPE logins; accepting them takes
+no HOPE code of its own, only the I/O around `hxhope::server`:
+
+- when a LOGIN is `server::is_step1`, answer it with `server::answer` and
+  a 64-byte session key it makes random, and remember the `Server`;
+- read the next LOGIN with `Server::step2`, find the account whose login it
+  names (`Step2::names`, asked of each account, the guest's as the empty
+  login), and `Server::accept` it with that account's password — which
+  means keeping the password, or something it derives from, where
+  `MAC(password, session key)` can be computed;
+- from then on run both directions through the `Transport` it returns,
+  the login reply included: `encode` before each write, `decode` after each
+  read. With ChaCha20-Poly1305, `Negotiated::transfer_keys` derives each
+  HTXF transfer's keys.
+
+Its rig image would then let GtkHx's suites run HOPE, and compression,
+against a server whose code is in hand.
+
+The candidate that remains:
+
+1. **Smaller pieces for `hxproto`**: the access-bit table, and the
    text-encoding helpers that GtkHx's `hxtext` and hxd-ng's `TextEncoding`
    each implement.
 

@@ -140,7 +140,7 @@ seam, which is what makes the rest tractable rather than a rewrite:
 | Receive handler bodies + signal emit | `hxhandlers::recv` (one module per domain) |
 | View boundary (signals) | `GtkhxSession` (`gtkhx-core::session`) |
 | Per-session collections | `HxChatRegistry`, `HxMemberModel`, `MediaTable` |
-| Transport / crypto / framing / compression | `hxnet`, `hxcrypto` |
+| Transport / crypto / framing / compression | `hxnet`; hx-libs' `hxsession`, `hxhope`, `hxcrypto` |
 | TLS trust decisions | `hxtls-trust` |
 
 `hxhandlers::recv` has a module per protocol domain (chat, user, msg,

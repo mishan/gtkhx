@@ -1121,7 +1121,9 @@ stream desyncs on the first rekey.
 **Compression.** `GZIP` on the wire is zlib (RFC 1950), one persistent stream per
 direction, each transaction flushed with `Z_SYNC_FLUSH`. Compress, then encrypt. Janus
 adds `LZ4` (one frame per transaction) and `ZSTD`, and requires a cipher for any
-compression. GtkHx never negotiates compression.
+compression. GtkHx offers the one the user picks, none by default, and sends each batch
+of transactions it writes at once as one unit, fully flushed; mhxd and Janus decode that
+as they do their own.
 
 **ChaCha20-Poly1305** is a modern HOPE cipher specified in
 [HOPE-ChaCha20-Poly1305.md](https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/HOPE-ChaCha20-Poly1305.md)

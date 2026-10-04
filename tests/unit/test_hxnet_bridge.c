@@ -259,21 +259,14 @@ hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn)
     return NULL;
 }
 
-/* R3.3.e-4d's hx_bridge_install_with_hope_state pulls in the
- * Blowfish OFB state-snapshot helper from hxcrypto::stream. The
- * Tier 1 test never invokes the install path, so a
- * g_assert_not_reached stub keeps the symbol satisfied without
- * dragging the staticlib in. */
-void gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
-                                      guint32 *out_num);
-void
-gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
-                                 guint32 *out_num)
+/* hx_bridge_login_trans asks the session; Tier 1 never installs one. */
+guint32 hxnet_connection_login_trans (struct hxnet_connection_opaque *conn);
+guint32
+hxnet_connection_login_trans (struct hxnet_connection_opaque *conn)
 {
-    (void)state;
-    (void)out_ivec;
-    (void)out_num;
+    (void)conn;
     g_assert_not_reached ();
+    return 0;
 }
 
 /* Phase G adds hx_bridge_install_orchestrated_plaintext, which
@@ -347,8 +340,9 @@ struct hxnet_connection_opaque *hxnet_connection_open_hope (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *cipher_alg, gsize cipher_alg_len,
-    const guint8 *proxy_uri, gsize proxy_uri_len, test_stub_event_cb on_event,
+    guint16 caps, const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *compress_alg, gsize compress_alg_len, const guint8 *proxy_uri,
+    gsize proxy_uri_len, test_stub_event_cb on_event,
     test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
     void *user_data);
 struct hxnet_connection_opaque *
@@ -356,8 +350,9 @@ hxnet_connection_open_hope (const guint8 *host, gsize host_len, guint16 port,
                             const guint8 *login, gsize login_len,
                             const guint8 *password, gsize password_len,
                             const guint8 *name, gsize name_len, guint16 icon,
-                            guint16 version, guint16 caps, guint32 trans,
+                            guint16 version, guint16 caps,
                             const guint8 *cipher_alg, gsize cipher_alg_len,
+                            const guint8 *compress_alg, gsize compress_alg_len,
                             const guint8 *proxy_uri, gsize proxy_uri_len,
                             test_stub_event_cb on_event,
                             test_stub_shutdown_cb on_shutdown,
@@ -375,9 +370,10 @@ hxnet_connection_open_hope (const guint8 *host, gsize host_len, guint16 port,
     (void)icon;
     (void)version;
     (void)caps;
-    (void)trans;
     (void)cipher_alg;
     (void)cipher_alg_len;
+    (void)compress_alg;
+    (void)compress_alg_len;
     (void)proxy_uri;
     (void)proxy_uri_len;
     (void)on_event;

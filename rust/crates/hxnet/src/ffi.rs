@@ -109,11 +109,6 @@ pub struct HxnetConnection {
     /// flush + exit — so the underscore prefix marks it
     /// reserved-for-future-use.
     _join: JoinHandle<()>,
-    /// HOPE control-channel AEAD material slot. `Some` only on a HOPE
-    /// connection; the lifecycle fills it when ChaCha20-Poly1305 is
-    /// negotiated. Read by `hxnet_connection_hope_aead_material` so an
-    /// HTXF subchannel can derive transfer keys in-process.
-    hope_aead: Option<crate::lifecycle::HopeAeadSlot>,
     /// The session the actor drives, which numbers the consumer's
     /// requests. `None` on a bare actor with no session
     /// (`hxnet_connection_open_tcp`).
@@ -560,6 +555,45 @@ pub unsafe extern "C" fn hxnet_connection_take_trans(handle: *mut HxnetConnectio
     }
 }
 
+/// The compression a HOPE login agreed: 0 none, 1 GZIP, 2 LZ4, 3 ZSTD.
+/// 0 too for a NULL handle, a connection without HOPE, or one not yet
+/// past step 2.
+///
+/// # Safety
+///
+/// `handle` is NULL or valid.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_hope_compression(handle: *mut HxnetConnection) -> u32 {
+    let Some(s) = handle.as_ref().and_then(|h| h.session.as_ref()) else {
+        return 0;
+    };
+    let s = s.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match s.negotiated().and_then(|n| n.compression) {
+        None => 0,
+        Some(hxhope::Compression::Gzip) => 1,
+        Some(hxhope::Compression::Lz4) => 2,
+        Some(hxhope::Compression::Zstd) => 3,
+    }
+}
+
+/// The trans the login goes out on, which its reply carries and the
+/// consumer's login task is keyed on: HOPE's step 2 on a HOPE connection.
+/// 0 for a NULL handle or a bare actor with no session.
+///
+/// # Safety
+///
+/// `handle` is NULL or valid.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_login_trans(handle: *mut HxnetConnection) -> u32 {
+    match handle.as_ref().and_then(|h| h.session.as_ref()) {
+        Some(s) => s
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .login_trans(),
+        None => 0,
+    }
+}
+
 /// Drop the handle and abort its spawned task. The task is
 /// cancelled at its next await point (see the body for why an
 /// abort is required rather than just dropping the cmd sender), so
@@ -767,9 +801,6 @@ pub const HXNET_STATE_TLS_HANDSHAKING: c_uint = 3;
 pub const HXNET_STATE_MAGIC_EXCHANGE: c_uint = 4;
 pub const HXNET_STATE_LOGIN_SENDING: c_uint = 5;
 pub const HXNET_STATE_LOGIN_REPLY_WAIT: c_uint = 6;
-pub const HXNET_STATE_HOPE_STEP1: c_uint = 7;
-pub const HXNET_STATE_HOPE_STEP2: c_uint = 8;
-pub const HXNET_STATE_CIPHER_TRANSITION: c_uint = 9;
 pub const HXNET_STATE_HANDSHAKE_DONE: c_uint = 10;
 pub const HXNET_STATE_LOGIN_READY: c_uint = 11;
 
@@ -785,9 +816,6 @@ const _: () = {
     assert!(crate::ConnectionState::MagicExchange as u32 == HXNET_STATE_MAGIC_EXCHANGE);
     assert!(crate::ConnectionState::LoginSending as u32 == HXNET_STATE_LOGIN_SENDING);
     assert!(crate::ConnectionState::LoginReplyWait as u32 == HXNET_STATE_LOGIN_REPLY_WAIT);
-    assert!(crate::ConnectionState::HopeStep1 as u32 == HXNET_STATE_HOPE_STEP1);
-    assert!(crate::ConnectionState::HopeStep2 as u32 == HXNET_STATE_HOPE_STEP2);
-    assert!(crate::ConnectionState::CipherTransition as u32 == HXNET_STATE_CIPHER_TRANSITION);
     assert!(crate::ConnectionState::HandshakeDone as u32 == HXNET_STATE_HANDSHAKE_DONE);
     assert!(crate::ConnectionState::LoginReady as u32 == HXNET_STATE_LOGIN_READY);
 };
@@ -1323,7 +1351,6 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         events: Some(events),
         _callback_state: None,
         _join: join,
-        hope_aead: None,
         session: Some(session),
     });
     Box::into_raw(handle)
@@ -1695,26 +1722,25 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         events: Some(events),
         _callback_state: None,
         _join: join,
-        hope_aead: None,
         session: Some(session),
     });
     Box::into_raw(handle)
 }
 
-/// Open a HOPE-Secure-Login connection with hxnet driving the full
-/// handshake — magic + step-1 + step-2 + cipher transition — and the
-/// post-handshake encrypted stream. The HOPE sibling of
-/// [`hxnet_connection_open_plaintext`]; runs
+/// Open a HOPE-Secure-Login connection: the session runs HOPE's two
+/// steps and everything after them through the transport they agree.
+/// The HOPE sibling of [`hxnet_connection_open_plaintext`]; runs
 /// [`crate::lifecycle::run_hope_lifecycle`].
 ///
 /// `cipher_alg` (length `cipher_alg_len`) is the wire cipher label to
-/// advertise — `b"BLOWFISH"` or `b"CHACHA20-POLY1305"`. HOPE always
-/// negotiates a cipher, so an empty `cipher_alg` is rejected.
+/// offer — `b"BLOWFISH"` or `b"CHACHA20-POLY1305"` — or empty for none,
+/// an HMAC login over a plaintext transport. `compress_alg` likewise names
+/// the one compression to offer (`b"GZIP"`, `b"LZ4"`, `b"ZSTD"`), or is
+/// empty or `b"NONE"` for none; the server takes it or not.
 ///
-/// `trans` is the **step-1** transaction id; the orchestrator sends
-/// step 2 as `trans + 1`, and the step-2 reply (which gets replayed
-/// to the C side as `Event::Frame`) carries `trans + 1`. The C caller
-/// registers its login task under that value.
+/// The step-2 reply, the login's, reaches the C side as `Event::Frame`
+/// on [`hxnet_connection_login_trans`]'s trans, which the C caller keys
+/// its login task on.
 ///
 /// `caps` is advertised in the step-2 LOGIN (BE u16 `HTLC_CAP_*`);
 /// `icon` / `version` likewise. `name` is the display name sent in
@@ -1739,9 +1765,10 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     icon: u16,
     version: u16,
     caps: u16,
-    trans: u32,
     cipher_alg: *const u8,
     cipher_alg_len: usize,
+    compress_alg: *const u8,
+    compress_alg_len: usize,
     proxy_uri: *const u8,
     proxy_uri_len: usize,
     on_event: HxnetEventCallback,
@@ -1760,21 +1787,16 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         );
         return std::ptr::null_mut();
     }
-    if trans == 0 {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_open_hope: trans=0 is reserved; pick a non-zero id"
-        );
-        return std::ptr::null_mut();
-    }
     // cipher_alg is OPTIONAL: NULL / empty means "no cipher" — the
     // server runs the HMAC secure-login over a plaintext transport
     // (mhxd's non-cipher_only mode). A NULL pointer with a non-zero
     // length is still a caller bug (it would silently drop the cipher).
-    if cipher_alg.is_null() && cipher_alg_len != 0 {
+    if (cipher_alg.is_null() && cipher_alg_len != 0)
+        || (compress_alg.is_null() && compress_alg_len != 0)
+    {
         glib::g_critical!(
             "hxnet",
-            "hxnet_connection_open_hope: NULL cipher_alg with non-zero length"
+            "hxnet_connection_open_hope: NULL cipher_alg / compress_alg with non-zero length"
         );
         return std::ptr::null_mut();
     }
@@ -1783,9 +1805,16 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     // `len * size_of::<T>() > isize::MAX`. Guard every length we turn
     // into a slice below — same defensive discipline as the other FFI
     // entry points — so a bogus length from C is a logged error.
-    if [host_len, login_len, password_len, name_len, cipher_alg_len]
-        .iter()
-        .any(|&n| (n as u64) > (isize::MAX as u64))
+    if [
+        host_len,
+        login_len,
+        password_len,
+        name_len,
+        cipher_alg_len,
+        compress_alg_len,
+    ]
+    .iter()
+    .any(|&n| (n as u64) > (isize::MAX as u64))
     {
         glib::g_critical!(
             "hxnet",
@@ -1836,10 +1865,43 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     } else {
         std::slice::from_raw_parts(name, name_len).to_vec()
     };
-    let cipher_vec = if cipher_alg_len == 0 {
-        Vec::new()
+    let cipher = if cipher_alg_len == 0 {
+        None
     } else {
-        std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec()
+        let label = std::slice::from_raw_parts(cipher_alg, cipher_alg_len);
+        match hxhope::Cipher::from_label(label) {
+            Some(c) => Some(c),
+            None => {
+                glib::g_critical!(
+                    "hxnet",
+                    "hxnet_connection_open_hope: unknown cipher {:?}",
+                    String::from_utf8_lossy(label)
+                );
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    // Empty or "NONE", as the connect dialog's own vocabulary has it,
+    // offers none.
+    let compress_label: &[u8] = if compress_alg_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(compress_alg, compress_alg_len)
+    };
+    let compression = match compress_label {
+        b"" | b"NONE" => None,
+        label => match hxhope::Compression::from_label(label) {
+            Some(c) => Some(c),
+            None => {
+                glib::g_critical!(
+                    "hxnet",
+                    "hxnet_connection_open_hope: unknown compression {:?}",
+                    String::from_utf8_lossy(label)
+                );
+                return std::ptr::null_mut();
+            }
+        },
     };
 
     let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
@@ -1873,36 +1935,18 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         icon,
         version,
         caps,
-        trans,
-        // Empty cipher_vec → advertise an empty cipher list in step 1
-        // ("no cipher offered"), not a one-entry list with an empty
-        // string. The server reads an empty list as "negotiate no
-        // cipher".
-        cipher_algs: if cipher_vec.is_empty() {
-            Vec::new()
-        } else {
-            vec![cipher_vec]
-        },
+        cipher,
+        compression,
         proxy,
     };
 
-    let hope_slot: crate::lifecycle::HopeAeadSlot =
-        std::sync::Arc::new(std::sync::Mutex::new(None));
-    let lifecycle_slot = hope_slot.clone();
     let session = req.session();
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_hope_lifecycle(
-            req,
-            lifecycle_session,
-            cmd_rx,
-            evt_tx,
-            lifecycle_slot,
-        )
-        .await;
+        crate::lifecycle::run_hope_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
     });
 
-    let handle = wire_callback_state_with_on_state(
+    wire_callback_state_with_on_state(
         rt,
         cmd,
         events,
@@ -1912,21 +1956,12 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         on_state,
         user_data,
         Some(session),
-    );
-    // Attach the HOPE AEAD slot so an HTXF subchannel can later derive
-    // transfer keys off the negotiated session material.
-    if !handle.is_null() {
-        unsafe {
-            (*handle).hope_aead = Some(hope_slot);
-        }
-    }
-    handle
+    )
 }
 
 /// Polling-mode sibling of [`hxnet_connection_open_hope`]: runs the
-/// same production HOPE-Secure-Login lifecycle ([`run_hope_lifecycle`]:
-/// magic + step-1 / step-2 + cipher transition, then the encrypted
-/// actor), but exposes events through the polling API
+/// same production HOPE-Secure-Login lifecycle ([`run_hope_lifecycle`]),
+/// but exposes events through the polling API
 /// ([`hxnet_connection_try_recv_frame`]) instead of the GLib callback
 /// forwarder.
 ///
@@ -1935,14 +1970,13 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
 /// `_chat_history`, …) through the **production** crypto stack instead
 /// of the harness's own C `hope.c` / `cipher.c` reimplementation — so
 /// the tests verify the shipped client's wire format, not dead C code.
-/// The replayed step-2 LOGIN reply arrives as the first
-/// `HXNET_RECV_FRAME`; subsequent server frames follow as the actor
-/// reads (and transparently decrypts) them. Outbound frames go via
-/// [`hxnet_connection_send_frame`] and are encrypted by the actor.
+/// The step-2 reply, the login's, arrives as the first `HXNET_RECV_FRAME`;
+/// the server's frames follow as the session decodes them. Outbound frames
+/// go via [`hxnet_connection_send_frame`] and through the transport.
 ///
-/// `cipher_alg` is OPTIONAL exactly as in [`hxnet_connection_open_hope`]
-/// (NULL / empty ⇒ no-cipher HMAC secure login over a plaintext
-/// transport). Same parameter / safety contract as that function, minus
+/// `cipher_alg` and `compress_alg` are as in
+/// [`hxnet_connection_open_hope`]. Same parameter / safety contract as
+/// that function, minus
 /// the callbacks.
 ///
 /// [`run_hope_lifecycle`]: crate::lifecycle::run_hope_lifecycle
@@ -1965,9 +1999,10 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
     icon: u16,
     version: u16,
     caps: u16,
-    trans: u32,
     cipher_alg: *const u8,
     cipher_alg_len: usize,
+    compress_alg: *const u8,
+    compress_alg_len: usize,
 ) -> *mut HxnetConnection {
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
@@ -1976,27 +2011,29 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         );
         return std::ptr::null_mut();
     }
-    if trans == 0 {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_open_hope_polling: trans=0 is reserved"
-        );
-        return std::ptr::null_mut();
-    }
     // cipher_alg is OPTIONAL (see hxnet_connection_open_hope): NULL /
     // empty ⇒ no cipher. A NULL pointer with a non-zero length is a
     // caller bug that would silently drop the cipher.
-    if cipher_alg.is_null() && cipher_alg_len != 0 {
+    if (cipher_alg.is_null() && cipher_alg_len != 0)
+        || (compress_alg.is_null() && compress_alg_len != 0)
+    {
         glib::g_critical!(
             "hxnet",
-            "hxnet_connection_open_hope_polling: NULL cipher_alg with non-zero length"
+            "hxnet_connection_open_hope_polling: NULL cipher_alg / compress_alg with non-zero length"
         );
         return std::ptr::null_mut();
     }
     // slice::from_raw_parts is UB for len * size_of::<T> > isize::MAX.
-    if [host_len, login_len, password_len, name_len, cipher_alg_len]
-        .iter()
-        .any(|&n| (n as u64) > (isize::MAX as u64))
+    if [
+        host_len,
+        login_len,
+        password_len,
+        name_len,
+        cipher_alg_len,
+        compress_alg_len,
+    ]
+    .iter()
+    .any(|&n| (n as u64) > (isize::MAX as u64))
     {
         glib::g_critical!(
             "hxnet",
@@ -2043,10 +2080,43 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
     } else {
         std::slice::from_raw_parts(name, name_len).to_vec()
     };
-    let cipher_vec = if cipher_alg_len == 0 {
-        Vec::new()
+    let cipher = if cipher_alg_len == 0 {
+        None
     } else {
-        std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec()
+        let label = std::slice::from_raw_parts(cipher_alg, cipher_alg_len);
+        match hxhope::Cipher::from_label(label) {
+            Some(c) => Some(c),
+            None => {
+                glib::g_critical!(
+                    "hxnet",
+                    "hxnet_connection_open_hope_polling: unknown cipher {:?}",
+                    String::from_utf8_lossy(label)
+                );
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    // Empty or "NONE", as the connect dialog's own vocabulary has it,
+    // offers none.
+    let compress_label: &[u8] = if compress_alg_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(compress_alg, compress_alg_len)
+    };
+    let compression = match compress_label {
+        b"" | b"NONE" => None,
+        label => match hxhope::Compression::from_label(label) {
+            Some(c) => Some(c),
+            None => {
+                glib::g_critical!(
+                    "hxnet",
+                    "hxnet_connection_open_hope_polling: unknown compression {:?}",
+                    String::from_utf8_lossy(label)
+                );
+                return std::ptr::null_mut();
+            }
+        },
     };
 
     let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
@@ -2071,31 +2141,17 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         icon,
         version,
         caps,
-        trans,
-        cipher_algs: if cipher_vec.is_empty() {
-            Vec::new()
-        } else {
-            vec![cipher_vec]
-        },
+        cipher,
+        compression,
         // This HOPE polling open is direct-only: it takes no proxy_uri
         // param. (Only hxnet_connection_open_plaintext_polling does, for
         // the SOCKS integration test.)
         proxy: None,
     };
-    let hope_slot: crate::lifecycle::HopeAeadSlot =
-        std::sync::Arc::new(std::sync::Mutex::new(None));
-    let lifecycle_slot = hope_slot.clone();
     let session = req.session();
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_hope_lifecycle(
-            req,
-            lifecycle_session,
-            cmd_rx,
-            evt_tx,
-            lifecycle_slot,
-        )
-        .await;
+        crate::lifecycle::run_hope_lifecycle(req, lifecycle_session, cmd_rx, evt_tx).await;
     });
 
     // Polling-mode handle: keep the event receiver for try_recv_frame;
@@ -2105,26 +2161,25 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         events: Some(events),
         _callback_state: None,
         _join: join,
-        hope_aead: Some(hope_slot),
         session: Some(session),
     });
     Box::into_raw(handle)
 }
 
-/// Opaque handle to a HOPE control-channel's retained AEAD material.
-/// Obtained from [`hxnet_connection_hope_aead_material`] and passed to
-/// [`hxnet_htxf_connect`] so an HTXF subchannel can derive its per-transfer
-/// keys in-process. The session key never crosses the FFI as bytes —
-/// only this opaque token does. Free with [`hxnet_hope_aead_free`].
+/// Opaque handle to what a HOPE ChaCha20-Poly1305 session's file
+/// transfers derive their keys from. Obtained from
+/// [`hxnet_connection_hope_aead_material`] and passed to
+/// [`hxnet_htxf_connect`] so an HTXF subchannel can derive its
+/// per-transfer keys in-process. The session key never crosses the FFI as
+/// bytes — only this opaque token does. Free with [`hxnet_hope_aead_free`].
 pub struct HxnetHopeAead {
-    pub(crate) material: crate::lifecycle::HopeAeadMaterial,
+    pub(crate) material: hxhope::TransferKeys,
 }
 
-/// Return an opaque handle to `conn`'s HOPE control-channel AEAD
-/// material, or NULL when `conn` is not a HOPE connection or did not
-/// negotiate a ChaCha20-Poly1305 cipher (plaintext / Blowfish /
-/// no-cipher leave the slot empty). The handle owns a copy of the
-/// material, so it is independent of `conn`'s lifetime; free it with
+/// Return an opaque handle to what `conn`'s file transfers derive their
+/// keys from, or NULL when `conn` did not negotiate ChaCha20-Poly1305
+/// (plaintext, Blowfish and no cipher have none). The handle owns a copy,
+/// so it is independent of `conn`'s lifetime; free it with
 /// [`hxnet_hope_aead_free`].
 ///
 /// # Safety
@@ -2134,26 +2189,20 @@ pub struct HxnetHopeAead {
 pub unsafe extern "C" fn hxnet_connection_hope_aead_material(
     conn: *mut HxnetConnection,
 ) -> *mut HxnetHopeAead {
-    if conn.is_null() {
+    let Some(session) = conn.as_ref().and_then(|c| c.session.as_ref()) else {
         return std::ptr::null_mut();
+    };
+    let s = session
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match s.negotiated().and_then(|n| n.transfer_keys.clone()) {
+        Some(material) => Box::into_raw(Box::new(HxnetHopeAead { material })),
+        None => std::ptr::null_mut(),
     }
-    let conn = &*conn;
-    let slot = match &conn.hope_aead {
-        Some(s) => s,
-        None => return std::ptr::null_mut(),
-    };
-    let material = match slot.lock() {
-        Ok(g) => match g.as_ref() {
-            Some(m) => m.clone(),
-            None => return std::ptr::null_mut(),
-        },
-        Err(_) => return std::ptr::null_mut(),
-    };
-    Box::into_raw(Box::new(HxnetHopeAead { material }))
 }
 
 /// Clone a HOPE AEAD material handle into a new, independently owned
-/// handle. The copy carries its own `HopeAeadMaterial`, so its lifetime
+/// handle. The copy carries its own transfer keys, so its lifetime
 /// is decoupled from the source — a caller can hand the clone to a
 /// worker that outlives the original (e.g. banner.c's HTXF fetch, where
 /// the control connection's `htlc->hope_aead` may be freed on disconnect
@@ -2231,7 +2280,6 @@ fn wire_callback_state_with_on_state(
         events: None,
         _callback_state: None,
         _join: join,
-        hope_aead: None,
         session,
     });
     let handle_ptr = Box::into_raw(handle_box);

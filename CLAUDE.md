@@ -118,8 +118,8 @@ Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships
 
 | Role | Crates |
 |---|---|
-| **Shared with hxd-ng** (from hx-libs) | `hxproto` — typed builders and parsers for every opcode, pure Rust; `hxfiles-xfer` (fork-header and HTXF codec); `hxhfs` (resource-fork sidecars). All three are git dependencies pinned in `rust/Cargo.toml`. GtkHx's C ABI over them lives here: `gtkhx-proto-ffi` (the `gtkhx_proto_*` / `hx_recv_route` / `hx_user_change_plan_resolve` shims) and `gtkhx-files-ffi`, each also a standalone staticlib for the focused tests |
-| **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
+| **Shared with hxd-ng** (from hx-libs) | `hxproto` — typed builders and parsers for every opcode, pure Rust; `hxfiles-xfer` (fork-header and HTXF codec); `hxhfs` (resource-fork sidecars); `hxsession` (the classic client session, which GtkHx drives in raw mode); `hxhope` (HOPE, the secure login: the handshake either side plays and the cipher and compression it agrees) over `hxcrypto` (its primitives). All are git dependencies pinned in `rust/Cargo.toml`. GtkHx's C ABI over them lives here: `gtkhx-proto-ffi` (the `gtkhx_proto_*` / `hx_recv_route` / `hx_user_change_plan_resolve` shims) and `gtkhx-files-ffi`, each also a standalone staticlib for the focused tests |
+| **Network** | `hxnet` (connect lifecycle, TLS, SOCKS, the session's I/O, file transfers, tracker fetch), `hxtls-trust` |
 | **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain; `hxrequest` — the requests the client sends, built as plain values with no C imports, so the end-to-end suites can send exactly what production sends |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window) |

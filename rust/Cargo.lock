@@ -1883,7 +1883,6 @@ dependencies = [
  "hxbookmarks",
  "hxbridge",
  "hxconfig",
- "hxcrypto",
  "hxhandlers",
  "hxmacres",
  "hxmodel",
@@ -2114,26 +2113,23 @@ dependencies = [
 [[package]]
 name = "hxcrypto"
 version = "0.1.0"
+source = "git+https://github.com/mishan/hx-libs.git?rev=558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba#558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba"
 dependencies = [
  "blowfish",
  "chacha20poly1305",
  "cipher 0.5.2",
- "criterion",
  "digest",
- "flate2",
  "hkdf",
  "hmac",
- "lz4_flex",
  "md-5",
  "sha1",
  "sha2",
- "zstd",
 ]
 
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=132c132c6eb2186145de1285ff96d93042e33854#132c132c6eb2186145de1285ff96d93042e33854"
+source = "git+https://github.com/mishan/hx-libs.git?rev=558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba#558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba"
 dependencies = [
  "sha2",
 ]
@@ -2156,7 +2152,19 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=132c132c6eb2186145de1285ff96d93042e33854#132c132c6eb2186145de1285ff96d93042e33854"
+source = "git+https://github.com/mishan/hx-libs.git?rev=558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba#558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba"
+
+[[package]]
+name = "hxhope"
+version = "0.1.0"
+source = "git+https://github.com/mishan/hx-libs.git?rev=558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba#558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba"
+dependencies = [
+ "flate2",
+ "hxcrypto",
+ "hxproto",
+ "lz4_flex",
+ "zstd",
+]
 
 [[package]]
 name = "hxmacres"
@@ -2182,31 +2190,28 @@ name = "hxnet"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "flate2",
  "getrandom 0.3.4",
  "glib 0.22.10",
- "hkdf",
  "hxbridge",
  "hxcrypto",
  "hxfiles-xfer",
  "hxhfs",
+ "hxhope",
  "hxproto",
  "hxsession",
  "libc",
- "lz4_flex",
  "rustls-native-certs",
  "sha2",
  "tokio",
  "tokio-rustls",
  "tokio-socks",
  "ureq",
- "zstd",
 ]
 
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=132c132c6eb2186145de1285ff96d93042e33854#132c132c6eb2186145de1285ff96d93042e33854"
+source = "git+https://github.com/mishan/hx-libs.git?rev=558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba#558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba"
 
 [[package]]
 name = "hxrequest"
@@ -2220,8 +2225,9 @@ dependencies = [
 [[package]]
 name = "hxsession"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=132c132c6eb2186145de1285ff96d93042e33854#132c132c6eb2186145de1285ff96d93042e33854"
+source = "git+https://github.com/mishan/hx-libs.git?rev=558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba#558f2e5a0393c6a1b1b15bad1739ae9bfcdb32ba"
 dependencies = [
+ "hxhope",
  "hxproto",
 ]
 
@@ -3758,7 +3764,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

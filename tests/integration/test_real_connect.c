@@ -504,10 +504,9 @@ test_orchestrator_hope_chacha20 (void)
  * HMAC-authenticated login over a plaintext transport that mhxd's
  * non-cipher_only mode supports (hxd.conf: cipher_only 0). This is the
  * case that used to fall through to the legacy GIOStream connect path;
- * the orchestrator now handles it (the Rust lifecycle composes
- * CipherLayer::None when the server negotiates no cipher, and step 2
- * omits the CIPHER_ALG chunk). Proves the full no-cipher handshake
- * round-trips to the replayed step-2 reply. mhxd specifically — a
+ * the session now handles it (no cipher agreed runs the transport
+ * plaintext, and step 2 omits the CIPHER_ALG chunk). Proves the full
+ * no-cipher handshake round-trips to the step-2 reply. mhxd specifically — a
  * cipher_only server would reject step 1. */
 static void
 test_orchestrator_hope_no_cipher (void)

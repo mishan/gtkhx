@@ -38,9 +38,11 @@
   - No more error at every login on servers that refuse your saved GIF icon
   - Sending text is faster on servers without Unicode
   - GtkHx now tells servers it is GtkHx (client version 254) instead of the Hotline 1.8.5 client
+  - HOPE secure logins now compress the connection with the Compression setting's choice (GZIP, LZ4 or ZSTD) when the server supports it
 - Code Modernization
   - The file browser is now Rust
   - GtkHx now reads tracker listings with code shared with the hxd-ng server
+  - HOPE secure login and its ciphers moved to hx-libs, the Hotline library GtkHx shares with hxd-ng and hx-ng
   - The chat view is now Rotulus, a standalone GTK 4 widget published on crates.io
   - Moved to gtk-rs 0.22; building now needs Rust 1.92
 - Development

@@ -48,13 +48,9 @@ use hxnet::ffi::{
     hxnet_connection_destroy, hxnet_connection_open_hope, hxnet_connection_open_plaintext,
     hxnet_connection_open_plaintext_tls, hxnet_frame_free, HxnetConnection, HxnetFrame,
 };
-use hxnet::hope::encode_alg_list;
-use hxnet::hope_blowfish::HopeMacAlg;
-use hxnet::hope_keys::{compute_blowfish_chain, derive_aead_keys};
-use hxnet::magic::{HTLC_MAGIC, HTLS_MAGIC};
-use hxnet::transform::{compose, BoxedDuplex, CipherLayer, CompressionKind};
 use hxnet::ConnectionState;
 use hxproto::build::{pack_message, pack_message_size, PackChunk};
+use hxsession::{CLIENT_MAGIC, SERVER_MAGIC};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_rustls::rustls;
 
@@ -103,11 +99,11 @@ impl Transport {
         }
     }
 
-    fn cipher_label(self) -> &'static [u8] {
+    fn cipher(self) -> Option<hxhope::Cipher> {
         match self {
-            Transport::HopeBlowfish => b"BLOWFISH",
-            Transport::HopeAead => b"CHACHA20-POLY1305",
-            _ => b"",
+            Transport::HopeBlowfish => Some(hxhope::Cipher::Blowfish),
+            Transport::HopeAead => Some(hxhope::Cipher::ChaCha20Poly1305),
+            _ => None,
         }
     }
 }
@@ -137,15 +133,16 @@ fn task_reply(trans: u32, chunks: &[PackChunk<'_>]) -> Vec<u8> {
     out
 }
 
-/// Read one frame: its transaction id and body.
+/// Read one frame: its transaction id, and the whole of it.
 async fn read_frame<S: AsyncRead + Unpin>(s: &mut S) -> std::io::Result<(u32, Vec<u8>)> {
-    let mut hdr = [0u8; 22];
-    s.read_exact(&mut hdr).await?;
-    let trans = u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
-    let body_len = u32::from_be_bytes([hdr[16], hdr[17], hdr[18], hdr[19]]).saturating_sub(2);
-    let mut body = vec![0u8; body_len as usize];
-    s.read_exact(&mut body).await?;
-    Ok((trans, body))
+    let mut frame = vec![0u8; 22];
+    s.read_exact(&mut frame).await?;
+    let trans = u32::from_be_bytes([frame[4], frame[5], frame[6], frame[7]]);
+    let body_len =
+        u32::from_be_bytes([frame[16], frame[17], frame[18], frame[19]]).saturating_sub(2);
+    frame.resize(22 + body_len as usize, 0);
+    s.read_exact(&mut frame[22..]).await?;
+    Ok((trans, frame))
 }
 
 // ---- the fake server ---------------------------------------------------
@@ -188,127 +185,117 @@ fn tls_server_config() -> Arc<rustls::ServerConfig> {
 }
 
 /// The HOPE session key the fake server hands out.
-fn session_key() -> Vec<u8> {
-    (0u8..64).collect()
+const SESSION_KEY: [u8; 64] = [0x42; 64];
+
+/// What the fake server takes of a HOPE offer: SHA-256, the transport's
+/// cipher, no compression.
+fn policy(transport: Transport) -> hxhope::server::Policy {
+    hxhope::server::Policy {
+        macs: vec![hxhope::Mac::Sha256],
+        ciphers: transport.cipher().into_iter().collect(),
+        compressions: Vec::new(),
+        require_cipher: true,
+    }
 }
 
-/// What a HOPE-AEAD login with the fake server agrees, as the client's
-/// retained material holds it: the session key, and the control channel's
-/// client-to-server and server-to-client states. HTXF derives its
-/// transfer keys from these.
-fn hope_keys_for_bench() -> (
-    Vec<u8>,
-    hxcrypto::aead::AeadState,
-    hxcrypto::aead::AeadState,
-) {
-    let sk = session_key();
-    let (_, keys) = compute_blowfish_chain(PASSWORD, &sk, b"HMAC-SHA256").expect("key chain");
-    let aead = derive_aead_keys(&sk, &keys.decode_key, &keys.encode_key);
-    (
-        sk,
-        hxcrypto::aead::AeadState {
-            key: aead.encode_key,
-            counter: 0,
-            dir: hxcrypto::aead::AEAD_DIR_CLIENT_TO_SERVER,
-        },
-        hxcrypto::aead::AeadState {
-            key: aead.decode_key,
-            counter: 0,
-            dir: hxcrypto::aead::AEAD_DIR_SERVER_TO_CLIENT,
-        },
-    )
+fn no_markers() -> hxhope::Random {
+    Box::new(|b: &mut [u8]| b.fill(0))
 }
 
-/// Magic, then the login the transport calls for. Returns the stream the
-/// session runs over, ciphered if HOPE chose a cipher.
-async fn handshake<S>(mut s: S, transport: Transport) -> BoxedDuplex
+/// What a HOPE-AEAD login with the fake server agrees, from the server's
+/// side: what HTXF derives its transfer keys from. The same handshake as
+/// the fake server's, run in memory.
+fn hope_keys_for_bench() -> hxhope::TransferKeys {
+    let offer = hxhope::client::Offer {
+        ciphers: vec![hxhope::Cipher::ChaCha20Poly1305],
+        ..hxhope::client::Offer::new(*b"GTKx")
+    };
+    let who = hxhope::client::Login {
+        login: LOGIN,
+        password: PASSWORD,
+        name: b"",
+        icon: 0,
+        version: 0,
+        caps: 0,
+    };
+    let step1 = hxhope::client::step1(&offer, 1).expect("step 1");
+    let (srv, reply) = hxhope::server::answer(&policy(Transport::HopeAead), &step1, SESSION_KEY, 1)
+        .expect("step 1 reply");
+    let est = hxhope::client::step2(&offer, &reply, &who, 2, no_markers()).expect("step 2");
+    let step2 = srv.step2(&est.step2).expect("step 2 read");
+    let (_, agreed) = srv.accept(&step2, PASSWORD, no_markers()).expect("accept");
+    agreed.transfer_keys.expect("ChaCha20-Poly1305 agreed")
+}
+
+trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
+
+/// The server's end once logged in: the socket, and HOPE's transport
+/// when one was agreed.
+struct Conn {
+    io: Box<dyn Io>,
+    transport: Option<hxhope::Transport>,
+}
+
+impl Conn {
+    async fn write(&mut self, frame: &[u8]) -> std::io::Result<()> {
+        match self.transport.as_mut() {
+            Some(t) => {
+                let wire = t.encode(frame).expect("encode");
+                self.io.write_all(&wire).await
+            }
+            None => self.io.write_all(frame).await,
+        }
+    }
+}
+
+/// Magic, then the login the transport calls for.
+async fn handshake<S>(mut s: S, transport: Transport) -> Conn
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let mut magic = [0u8; 12];
     s.read_exact(&mut magic).await.expect("client magic");
-    assert_eq!(&magic, HTLC_MAGIC);
-    s.write_all(HTLS_MAGIC).await.expect("server magic");
+    assert_eq!(&magic, CLIENT_MAGIC);
+    s.write_all(SERVER_MAGIC).await.expect("server magic");
     s.flush().await.expect("flush");
 
-    match transport {
-        Transport::Plain | Transport::Tls => {
-            let (trans, _) = read_frame(&mut s).await.expect("LOGIN");
-            s.write_all(&task_reply(trans, &[]))
-                .await
-                .expect("LOGIN reply");
-            s.flush().await.expect("flush");
-            compose(s, CipherLayer::None, CompressionKind::None).expect("compose")
-        }
+    let (trans, step1) = read_frame(&mut s).await.expect("LOGIN");
+    let mut conn = match transport {
+        Transport::Plain | Transport::Tls => Conn {
+            io: Box::new(s),
+            transport: None,
+        },
         Transport::HopeBlowfish | Transport::HopeAead => {
-            // Step 1: offer the one cipher the transport is about.
-            let (trans, _) = read_frame(&mut s).await.expect("HOPE step 1");
-            let sessionkey = session_key();
-            let mac = encode_alg_list(&[b"HMAC-SHA256"]).expect("MAC list");
-            let cipher = encode_alg_list(&[transport.cipher_label()]).expect("cipher list");
-            let reply = task_reply(
-                trans,
-                &[
-                    PackChunk {
-                        tag: hxnet::login_reply::TAG_SESSIONKEY,
-                        data: &sessionkey,
-                    },
-                    PackChunk {
-                        tag: hxnet::login_reply::TAG_MAC_ALG,
-                        data: &mac,
-                    },
-                    PackChunk {
-                        tag: hxnet::login_reply::TAG_S_DATA_CIPHER_ALG,
-                        data: &cipher,
-                    },
-                ],
-            );
+            let (srv, reply) =
+                hxhope::server::answer(&policy(transport), &step1, SESSION_KEY, trans)
+                    .expect("step 1 reply");
             s.write_all(&reply).await.expect("step 1 reply");
             s.flush().await.expect("flush");
-
-            // Step 2 arrives in the clear; everything after it is ciphered.
-            let (trans, _) = read_frame(&mut s).await.expect("HOPE step 2");
-            let (_, keys) =
-                compute_blowfish_chain(PASSWORD, &sessionkey, b"HMAC-SHA256").expect("key chain");
-            // The client reads with `decode_key` and writes with
-            // `encode_key`; the server is its mirror.
-            let layer = if transport == Transport::HopeBlowfish {
-                let state =
-                    |k: &[u8]| hxcrypto::stream::BlowfishOfb64State::new(k).expect("Blowfish key");
-                CipherLayer::HopeBlowfish {
-                    read_state: state(&keys.encode_key),
-                    read_key: keys.encode_key.clone(),
-                    write_state: state(&keys.decode_key),
-                    write_key: keys.decode_key.clone(),
-                    session_key: sessionkey.clone(),
-                    macalg: HopeMacAlg::Sha256,
-                }
-            } else {
-                let aead = derive_aead_keys(&sessionkey, &keys.decode_key, &keys.encode_key);
-                CipherLayer::ChaCha20Poly1305 {
-                    read: hxcrypto::aead::AeadState {
-                        key: aead.encode_key,
-                        counter: 0,
-                        dir: hxcrypto::aead::AEAD_DIR_CLIENT_TO_SERVER,
-                    },
-                    write: hxcrypto::aead::AeadState {
-                        key: aead.decode_key,
-                        counter: 0,
-                        dir: hxcrypto::aead::AEAD_DIR_SERVER_TO_CLIENT,
-                    },
-                }
+            // Step 2 arrives in the clear; everything after it is
+            // through the transport.
+            let (trans, step2) = read_frame(&mut s).await.expect("HOPE step 2");
+            let step2 = srv.step2(&step2).expect("step 2");
+            let (t, _) = srv.accept(&step2, PASSWORD, no_markers()).expect("accept");
+            let mut conn = Conn {
+                io: Box::new(s),
+                transport: Some(t),
             };
-            let mut s = compose(s, layer, CompressionKind::None).expect("compose");
-            s.write_all(&task_reply(trans, &[]))
+            conn.write(&task_reply(trans, &[]))
                 .await
                 .expect("step 2 reply");
-            s.flush().await.expect("flush");
-            s
+            conn.io.flush().await.expect("flush");
+            return conn;
         }
-    }
+    };
+    conn.write(&task_reply(trans, &[]))
+        .await
+        .expect("LOGIN reply");
+    conn.io.flush().await.expect("flush");
+    conn
 }
 
-async fn run_script(mut s: BoxedDuplex, script: Script) {
+async fn run_script(mut s: Conn, script: Script) {
     match script {
         Script::Burst { go } => {
             if go.await.is_err() {
@@ -317,16 +304,16 @@ async fn run_script(mut s: BoxedDuplex, script: Script) {
             for seq in 0..BURST {
                 // One write per frame, as a server sends them: each is
                 // its own cipher record.
-                s.write_all(&chat_frame(seq)).await.expect("burst write");
+                s.write(&chat_frame(seq)).await.expect("burst write");
             }
-            s.flush().await.expect("flush");
+            s.io.flush().await.expect("flush");
         }
         Script::Pings { mut acks, sent } => {
             for seq in 0..PINGS {
                 let frame = chat_frame(seq);
                 let _ = sent.send(Instant::now());
-                s.write_all(&frame).await.expect("ping write");
-                s.flush().await.expect("flush");
+                s.write(&frame).await.expect("ping write");
+                s.io.flush().await.expect("flush");
                 if acks.recv().await.is_none() {
                     return;
                 }
@@ -336,7 +323,7 @@ async fn run_script(mut s: BoxedDuplex, script: Script) {
     }
     // Hold the connection until the client hangs up.
     let mut sink = [0u8; 256];
-    while matches!(s.read(&mut sink).await, Ok(n) if n > 0) {}
+    while matches!(s.io.read(&mut sink).await, Ok(n) if n > 0) {}
 }
 
 /// Start a server for one connection on its own thread and runtime, so it
@@ -549,7 +536,7 @@ fn open(transport: Transport, port: u16) -> *mut HxnetConnection {
                 ud,
             ),
             Transport::HopeBlowfish | Transport::HopeAead => {
-                let cipher = transport.cipher_label();
+                let cipher = transport.cipher().map_or(&b""[..], hxhope::Cipher::label);
                 hxnet_connection_open_hope(
                     host.as_ptr(),
                     host.len(),
@@ -563,9 +550,10 @@ fn open(transport: Transport, port: u16) -> *mut HxnetConnection {
                     0,
                     190,
                     0,
-                    1,
                     cipher.as_ptr(),
                     cipher.len(),
+                    std::ptr::null(),
+                    0,
                     std::ptr::null(),
                     0,
                     Some(on_event),
@@ -754,7 +742,10 @@ fn raw_floor() -> Vec<f64> {
             let listener = tokio::net::TcpListener::from_std(listener).expect("listener");
             let (tcp, _) = listener.accept().await.expect("accept");
             tcp.set_nodelay(true).ok();
-            let s = compose(tcp, CipherLayer::None, CompressionKind::None).expect("compose");
+            let s = Conn {
+                io: Box::new(tcp),
+                transport: None,
+            };
             run_script(
                 s,
                 Script::Pings {

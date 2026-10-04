@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hxcrypto::aead::{gtkhx_aead_derive_transfer_keys, AeadState};
+use hxcrypto::aead::AeadState;
 use hxnet::ffi::{hxnet_connection_hope_aead_material, hxnet_hope_aead_free, HxnetHopeAead};
 use hxnet::htxf::{
     hxnet_htxf_close, hxnet_htxf_connect, hxnet_htxf_finish_send, hxnet_htxf_pack_preamble,
@@ -156,27 +156,8 @@ impl Write for ServerIo {
 /// The transfer keys an AEAD transfer runs under, from the server's side:
 /// (outgoing, incoming).
 fn server_transfer_keys() -> (AeadState, AeadState) {
-    let (session_key, ctrl_encode, ctrl_decode) = hope_keys_for_bench();
-    let mut xe = AeadState {
-        key: [0; 32],
-        counter: 0,
-        dir: 0,
-    };
-    let mut xd = xe;
-    unsafe {
-        gtkhx_aead_derive_transfer_keys(
-            &mut xe,
-            &mut xd,
-            session_key.as_ptr(),
-            session_key.len(),
-            &ctrl_encode,
-            &ctrl_decode,
-            XFER_REF,
-        );
-    }
-    // The client writes with the transfer's encode key, so the server
-    // writes with its decode key.
-    (xd, xe)
+    let (to_server, to_client) = hope_keys_for_bench().transfer(XFER_REF);
+    (to_client, to_server)
 }
 
 /// Accept one transfer connection and read its preamble.

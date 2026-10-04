@@ -125,19 +125,20 @@ extern gboolean hx_bridge_install_orchestrated_plaintext (
     guint16 caps, guint32 trans);
 
 /*
- * HOPE sibling of hx_bridge_install_orchestrated_plaintext: hxnet
- * drives the full HOPE-Secure-Login handshake (magic + step1 + step2
- * + cipher transition) and the encrypted post-login stream, then the
- * handle becomes the live bridge. `cipher_alg` is the wire cipher
- * label to advertise ("BLOWFISH" / "CHACHA20-POLY1305"); HOPE
- * requires a non-empty cipher. `trans` is the step-1 transaction id
- * (the step-2 reply, which gets replayed, carries `trans + 1` — the
- * caller registers its login task under that value).
+ * HOPE sibling of hx_bridge_install_orchestrated_plaintext: the session
+ * runs HOPE's two steps and everything after them through the transport
+ * they agree. `cipher_alg` is the wire cipher label to offer
+ * ("BLOWFISH" / "CHACHA20-POLY1305"), or "" for none; `compress_alg` the
+ * compression ("GZIP" / "LZ4" / "ZSTD"), or NULL / "" for none.
  */
 extern gboolean hx_bridge_install_orchestrated_hope (
     struct htlc_conn *htlc, const char *host, guint16 port, const char *login,
     const char *pass, const char *name, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const char *cipher_alg);
+    guint16 caps, const char *cipher_alg, const char *compress_alg);
+
+/* The trans the login reply carries, which the login task is keyed on:
+ * HOPE's step 2 under HOPE. 0 with no transport installed. */
+extern guint32 hx_bridge_login_trans (const struct htlc_conn *htlc);
 
 /*
  * TLS sibling of hx_bridge_install_orchestrated_plaintext: plaintext

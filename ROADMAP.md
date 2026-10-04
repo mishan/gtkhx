@@ -37,7 +37,7 @@ extension is allowed to degrade the legacy path.
 | **Language** | Hybrid C + Rust, with Rust now the larger half. C no longer grows: a CI check fails any pull request that adds net lines of C. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
 | **Shared code** | The wire protocol, the file-transfer codec and the HFS sidecars come from [hx-libs](https://github.com/mishan/hx-libs), shared with the hxd-ng server. |
 | **Connections** | Several servers at once, one tab each. Settings and connections live in TOML files owned by Rust (`hxconfig`, `hxbookmarks`). |
-| **Protocol** | 1.2 / 1.5 / 1.9 compatible. Connect, HOPE negotiation and the ciphers (Blowfish OFB-64, ChaCha20-Poly1305 AEAD) all run in Rust. RC4 retired. Compression is implemented but not currently negotiated — see the defects below. |
+| **Protocol** | 1.2 / 1.5 / 1.9 compatible. Connect, HOPE negotiation and the ciphers (Blowfish OFB-64, ChaCha20-Poly1305 AEAD) all run in Rust. RC4 retired. Compression (GZIP, LZ4, ZSTD) is negotiated when the user picks it. |
 | **Transport security** | TLS on a dedicated port, TOFU trust with fingerprint pinning. [docs/tls.md](docs/tls.md) |
 | **Extensions** | Voice chat, video chat and screen sharing, inline media, GIF icons, chat history, colored nicknames, emoji shortcodes, tracker v3. |
 | **Platforms** | Linux, macOS, Windows. Flatpak manifest + AppStream metadata are Flathub-ready. |
@@ -165,11 +165,6 @@ defining string and resource constants once instead of repeating them at each si
 
 These are real, reproduced, and unfixed. Each is described in full in its subject doc.
 
-- **Compression is never negotiated.** The Rust connect orchestrator offers an empty
-  compression-algorithm list, so zlib compression is available in the implementation but
-  never turned on against a server that would accept it. There is no server in the rig to
-  test it against; HOPE support in hxd-ng would give it one.
-  [docs/rust/networking.md](docs/rust/networking.md)
 - **Two voice defects against Janus's SFU**, both diagnosed as server-side. One is a
   publish-before-answer race, only reproducible with two real GUI processes — a client-side
   delay was tried and reverted. The other omits a spec-required attribute on renegotiation,
@@ -205,8 +200,9 @@ These are settled. Don't reopen them without a strong new reason.
    ones. A bookmark still holding the RC4 byte prompts for a replacement and is rewritten in
    place, so it only asks once.
 7. **Crypto lives in Rust.** The original plan was GnuTLS + Nettle for ciphers and GLib's
-   `GChecksum`/`GHmac` for hashes; what actually shipped is the `hxcrypto` crate plus
-   `tokio-rustls` for TLS, and the C crypto dispatchers were deleted. The reasoning that
+   `GChecksum`/`GHmac` for hashes; what actually shipped is the `hxcrypto` crate (now in
+   hx-libs, beside `hxhope`) plus `tokio-rustls` for TLS, and the C crypto dispatchers
+   were deleted. The reasoning that
    picked a clean-licensed, non-OpenSSL stack still holds — the implementation just landed
    a layer over.
 8. **The vendored chat widget was replaced, not ported.** *(Superseded decision, kept for

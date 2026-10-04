@@ -1,6 +1,8 @@
 //! The connection actor as the I/O of hx-libs' `hxsession`, which drives
 //! the magic, the login, the agreement and the keep-alive, and numbers
-//! every transaction.
+//! every transaction. Under HOPE it is the session too that runs the
+//! cipher and compression: what the actor reads and writes is the
+//! socket's bytes, whatever they are.
 //!
 //! The session runs in raw mode, because GtkHx still has receive handlers
 //! of its own: every transaction reaches the consumer whole, and frames
@@ -94,11 +96,14 @@ impl Shared {
     /// Move what the session has queued to the write side; whether there
     /// was anything.
     fn queue_out(&self) -> bool {
-        let bytes = self.session().take_outgoing();
+        let bytes = {
+            let mut s = self.session();
+            trace_out(&s.pending_plaintext());
+            s.take_outgoing()
+        };
         if bytes.is_empty() {
             return false;
         }
-        trace_out(&bytes);
         self.out
             .lock()
             .expect("never held across a panic")
@@ -109,13 +114,9 @@ impl Shared {
 }
 
 /// Run `session` over `stream` until either ends.
-///
-/// `login_sent` is whether the login is already on the wire, as after
-/// HOPE's two steps; otherwise the session's first bytes are the magic.
 pub async fn run<S>(
     stream: S,
     session: SharedSession,
-    login_sent: bool,
     mut cmd_rx: mpsc::Receiver<Command>,
     evt_tx: mpsc::Sender<Event>,
 ) where
@@ -125,7 +126,7 @@ pub async fn run<S>(
         session,
         start: Instant::now(),
         out: Mutex::new(Vec::new()),
-        login_sent: Mutex::new(login_sent),
+        login_sent: Mutex::new(false),
         to_write: Notify::new(),
         to_deliver: Notify::new(),
         delivering: tokio::sync::Mutex::new(()),
@@ -166,7 +167,19 @@ where
             };
         }
         let now = shared.now();
-        shared.session().feed(&buf[..n], now);
+        {
+            let mut s = shared.session();
+            let before = s.negotiated().is_some();
+            s.feed(&buf[..n], now);
+            // The step-1 reply is the session's own and reaches no one;
+            // the trace says what it agreed.
+            if let Some(n) = s.negotiated().filter(|_| !before) {
+                crate::proto_trace::note(&format!(
+                    "HOPE agreed: MAC {:?}, cipher {:?}, compression {:?}",
+                    n.mac, n.cipher, n.compression
+                ));
+            }
+        }
         let wrote = shared.queue_out();
         // Whether or not it queued anything, what was fed may have moved
         // the session's deadlines, or let the consumer's commands through.
@@ -454,7 +467,7 @@ mod tests {
         let (evt_tx, evt_rx) = mpsc::channel(8);
         let cfg = config(b"", b"", b"me", 414, hxsession::CLIENT_VERSION, 0);
         let session = Arc::new(Mutex::new(Session::new(cfg, 0)));
-        tokio::spawn(run(near, session.clone(), false, cmd_rx, evt_tx));
+        tokio::spawn(run(near, session.clone(), cmd_rx, evt_tx));
         (
             Server {
                 io: far,

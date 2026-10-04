@@ -36,6 +36,14 @@ fn enabled() -> bool {
     })
 }
 
+/// A line of its own in the protocol trace, for what the trace would not
+/// otherwise show.
+pub fn note(what: &str) {
+    if enabled() {
+        eprintln!("[proto] (hxnet) {what}");
+    }
+}
+
 /// Direction of a traced frame.
 #[derive(Clone, Copy)]
 pub enum Dir {

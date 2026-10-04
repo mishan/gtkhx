@@ -12,28 +12,10 @@
 //!    encoded bytes back out.
 //! 4. Tears down cleanly on EOF / cancel / handle drop.
 //!
-//! # What R3.3.a + R3.3.b + R3.3.c ship
-//!
-//! R3.3.a built the actor itself (spawn / channel pair / shutdown)
-//! over a `tokio::io::duplex` test exerciser. R3.3.b added the
-//! C-callable FFI surface ([`ffi`]) plus the meson hookup so the
-//! C binary can spawn an actor over a real fd. The FFI is the
-//! polling-style API: `hxnet_connection_try_recv_frame` returns
-//! events on demand; the callback-driven variant lands in R3.3.e
-//! alongside the production switch in network.c.
-//!
-//! R3.3.c lands the HOPE cipher adapters in [`cipher`]:
-//! [`cipher::BlowfishStream`] wraps any `AsyncRead + AsyncWrite`
-//! in the Blowfish-OFB-64 stream cipher used by the legacy HOPE
-//! handshake, and [`cipher::AeadStream`] wraps it in
-//! ChaCha20-Poly1305 length-prefixed AEAD frames. Both are
-//! transparent — the actor above still sees plaintext Hotline
-//! frames; the cipher adapter is composed onto the inner
-//! transport at spawn time. Compression adapters land in R3.3.d
-//! as a sibling module; before either layer is composed, the
-//! actor reads and writes plaintext Hotline frames (i.e. what
-//! the C code sees AFTER `hx_decode` has stripped the cipher
-//! and decompressed).
+//! What the actor carries is the socket's bytes: since the session
+//! ([`session`], over hx-libs' `hxsession`) took over the protocol, HOPE's
+//! handshake and the cipher and compression it agrees run inside it, and
+//! hxnet's part is the socket, TLS, a SOCKS proxy and the runtime.
 //!
 //! # The actor pattern
 //!
@@ -61,29 +43,21 @@
 //! See [`Connection`] for the API entry points.
 
 pub mod banner_http;
-pub mod cipher;
 pub mod command;
-pub mod compress;
 pub mod connect;
 pub mod connection;
 pub mod event;
 pub mod ffi;
 pub mod frame;
 pub mod hfs_config;
-pub mod hope;
-pub mod hope_blowfish;
-pub mod hope_keys;
 pub mod htxf;
 pub mod lifecycle;
 pub mod login;
-pub mod login_reply;
-pub mod magic;
 pub mod proto_trace;
 pub mod session;
 pub mod tls;
 pub mod tracker;
 pub mod tracker_fetch;
-pub mod transform;
 pub mod xfer;
 pub mod xfer_handle;
 
@@ -99,6 +73,3 @@ pub use command::Command;
 pub use connection::{Connection, ConnectionHandle, SpawnError};
 pub use event::{ConnectionState, Event, ShutdownReason};
 pub use frame::{Frame, MAX_BODY_LEN};
-pub use transform::{
-    compose, AsyncDuplex, BoxedDuplex, CipherKind, CipherLayer, CompressionKind, TransformStack,
-};

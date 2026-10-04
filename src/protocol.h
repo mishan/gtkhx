@@ -247,33 +247,6 @@ extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
 #define XFER_GET 0
 #define XFER_PUT 1
 
-/* ---- Crypto helpers (implementations in Rust crates) ---- */
-
-/* hmac_xxx() is implemented in Rust (rust/crates/hxcrypto::hash);
- * the C symbol is gtkhx_hmac_xxx. This static inline keeps the
- * legacy call sites compiling without renaming and translates the
- * void * key/text args to the u8 * the Rust FFI takes. The shim
- * sits in protocol.h (rather than a new hmac.h) so every TU that
- * already includes protocol.h for the wire types picks it up
- * automatically. */
-extern uint16_t gtkhx_hmac_xxx (uint8_t *md, const uint8_t *key,
-                                uint32_t keylen, const uint8_t *text,
-                                uint32_t textlen, const char *macalg);
-
-static inline uint16_t
-hmac_xxx (uint8_t *md, const void *key, uint32_t keylen, const void *text,
-          uint32_t textlen, const char *macalg)
-{
-    return gtkhx_hmac_xxx (md, (const uint8_t *)key, keylen,
-                           (const uint8_t *)text, textlen, macalg);
-}
-
-/* Cryptographic RNG used by cipher rekey, usermod password salt, and
- * any other caller that needs unpredictable bytes. Implementation in
- * src/rand.c: getrandom(2) on the happy path, /dev/urandom fallback
- * for kernels/libcs without getrandom support. Returns nbytes on
- * success or 0 on failure. */
-
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 
 #if (G_BYTE_ORDER == G_LITTLE_ENDIAN)

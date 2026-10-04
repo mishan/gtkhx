@@ -89,9 +89,8 @@ tls_banner_xfer_verify_cb (const guint8 *fp, gsize fp_len, void *user_data)
 
 /* True if the buffer starts with a recognized raster-image magic
  * (GIF / JPEG / PNG). We don't know the server-declared banner type
- * here — the orchestrator's login lifecycle treats the HTLS_HDR_BANNER
- * push as a pre-login frame and consumes it before login completes
- * (see login_reply.rs) — so instead of matching a declared type, we
+ * here — the push can come ahead of the login reply, and the session
+ * holds such frames until then — so instead of matching a declared type, we
  * assert the fetched body is a real image. A partial-decrypt or
  * framing slip at the TLS layer would leave the leading bytes garbled
  * and fail every branch. Janus serves a GIF today; JPEG/PNG are
@@ -126,10 +125,9 @@ test_banner_htxf_mode_tls (void)
      * sets htlc.tls = 1, so any HTXF subchannel we open mirrors TLS.
      *
      * We deliberately do NOT wait for the HTLS_HDR_BANNER push here.
-     * The orchestrator's login lifecycle classifies the banner push
-     * (alongside SELFINFO / AGREEMENT) as a pre-login frame and
-     * consumes it before login completes (login_reply.rs), so it never
-     * reaches the post-login drain. That's fine: the push is only an
+     * The banner push can come ahead of the login reply (as SELFINFO
+     * and AGREEMENT can), and the session holds it until then, so this
+     * drain need not see it. That's fine: the push is only an
      * advertisement — HTLC_HDR_DOWNLOAD_BANNER fetches the configured
      * banner regardless, which is what production's banner worker
      * relies on too. */

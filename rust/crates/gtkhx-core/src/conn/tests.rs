@@ -242,16 +242,16 @@ fn a_null_connection_has_serial_zero() {
     assert_eq!(unsafe { hx_conn_serial(std::ptr::null()) }, 0);
 }
 
-/// The connect/login state that used to be file-statics in network.c and
-/// rcv.c is per-connection now.
+/// State that used to be file-statics in network.c and rcv.c is
+/// per-connection now.
 #[test]
 fn connect_state_is_per_connection() {
     unsafe {
         let a = hx_conn_new();
         let b = hx_conn_new();
 
-        hx_conn_set_login_reply_trans(a, 2);
-        assert_eq!(hx_conn_login_reply_trans(b), 0);
+        hx_conn_set_gif_icons_probe_trans(a, 2);
+        assert_eq!(hx_conn_gif_icons_probe_trans(b), 0);
 
         hx_conn_free(a);
         hx_conn_free(b);
@@ -264,11 +264,11 @@ fn connect_state_is_per_connection() {
 fn connect_state_is_cleared_by_a_reset() {
     unsafe {
         let h = hx_conn_new();
-        hx_conn_set_login_reply_trans(h, 9);
+        hx_conn_set_gif_icons_probe_trans(h, 9);
 
         hx_conn_reset(h);
 
-        assert_eq!(hx_conn_login_reply_trans(h), 0);
+        assert_eq!(hx_conn_gif_icons_probe_trans(h), 0);
 
         hx_conn_free(h);
     }

@@ -307,18 +307,18 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
-/* Phase G HOPE: hxnet drives the full HOPE-Secure-Login handshake
- * (magic + step1 + step2 + cipher transition) and the encrypted
- * post-login stream. Mirror of hxnet_connection_open_hope in
- * rust/crates/hxnet/src/ffi.rs. */
+/* HOPE: the session runs HOPE's two steps and the transport they agree.
+ * Mirror of hxnet_connection_open_hope in rust/crates/hxnet/src/ffi.rs. */
 extern hxnet_connection_opaque *hxnet_connection_open_hope (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *cipher_alg, gsize cipher_alg_len,
-    const guint8 *proxy_uri, gsize proxy_uri_len, hxnet_event_cb_t on_event,
+    guint16 caps, const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *compress_alg, gsize compress_alg_len, const guint8 *proxy_uri,
+    gsize proxy_uri_len, hxnet_event_cb_t on_event,
     hxnet_shutdown_cb_t on_shutdown, hxnet_state_cb_t on_state,
     void *user_data);
+extern guint32 hxnet_connection_login_trans (hxnet_connection_opaque *conn);
 
 /* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
  * Janus separate-port model). Mirror of
@@ -732,8 +732,8 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
                                      guint16 port, const char *login,
                                      const char *pass, const char *name,
                                      guint16 icon, guint16 version,
-                                     guint16 caps, guint32 trans,
-                                     const char *cipher_alg)
+                                     guint16 caps, const char *cipher_alg,
+                                     const char *compress_alg)
 {
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
@@ -760,8 +760,9 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
     hxnet_connection_opaque *h = hxnet_connection_open_hope (
         (const guint8 *)host, strlen (host), port, (const guint8 *)login,
         strlen (login), (const guint8 *)pass, strlen (pass),
-        (const guint8 *)name, strlen (name), icon, version, caps, trans,
+        (const guint8 *)name, strlen (name), icon, version, caps,
         (const guint8 *)cipher_alg, strlen (cipher_alg),
+        (const guint8 *)compress_alg, compress_alg ? strlen (compress_alg) : 0,
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
         conn_user_data (htlc, host, port));
@@ -788,6 +789,13 @@ hx_bridge_orchestrated_hope_aead (const struct htlc_conn *htlc)
         return NULL;
     }
     return hxnet_connection_hope_aead_material (h);
+}
+
+guint32
+hx_bridge_login_trans (const struct htlc_conn *htlc)
+{
+    hxnet_connection_opaque *h = conn_handle (htlc);
+    return h ? hxnet_connection_login_trans (h) : 0;
 }
 
 /* TLS TOFU trampoline: hxnet calls this on the lifecycle task with the

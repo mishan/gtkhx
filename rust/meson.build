@@ -6,8 +6,6 @@
 # archives that src/meson.build links into the gtkhx executable.
 #
 # Current crates:
-#   hxcrypto        — HOPE crypto + transport compression (hash / stream /
-#                     aead / compress; four crates before step 3).
 #   hxproto   — Phase R2 wire protocol parsers + builders.
 #   gtkhx-core      — the extern-free GObject layer (GtkhxSession + its boxed
 #                     payloads + htlc_conn). Must stay extern-free: the Tier 2
@@ -65,13 +63,6 @@ rust_sources = files(
   'crates/gtkhx-proto-ffi/src/dispatch.rs',
   'crates/gtkhx-proto-ffi/src/ffi.rs',
   'crates/gtkhx-proto-ffi/src/user_change.rs',
-  'crates/hxcrypto/src/lib.rs',
-  'crates/hxcrypto/src/hash.rs',
-  'crates/hxcrypto/src/stream.rs',
-  'crates/hxcrypto/src/stream/blowfish_ofb.rs',
-  'crates/hxcrypto/src/aead.rs',
-  'crates/hxcrypto/src/compress.rs',
-  'crates/hxcrypto/Cargo.toml',
   'crates/hxbridge/src/lib.rs',
   # Phase R3.1+ submodules, gated behind the `runtime` Cargo feature
   # that the rust_build custom_target turns on below.
@@ -167,18 +158,14 @@ rust_sources = files(
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
   'crates/hxnet/src/hfs_config.rs',
-  'crates/hxnet/src/cipher.rs',
   'crates/hxnet/src/command.rs',
-  'crates/hxnet/src/compress.rs',
   'crates/hxnet/src/connection.rs',
   'crates/hxnet/src/event.rs',
   'crates/hxnet/src/ffi.rs',
   'crates/hxnet/src/frame.rs',
   'crates/hxnet/src/session.rs',
-  'crates/hxnet/src/hope_blowfish.rs',
   'crates/hxnet/src/htxf.rs',
   'crates/hxnet/src/tls.rs',
-  'crates/hxnet/src/transform.rs',
   'crates/hxvoice/src/lib.rs',
   'crates/hxvoice/src/event.rs',
   'crates/hxvoice/src/action.rs',
@@ -333,8 +320,8 @@ cargo_features = 'hxbridge/runtime,hxnet/socks'
 #       hard compile_error (src/compat.rs) — so we pass
 #       --no-default-features. Because that flag is workspace-wide, it
 #       also drops the *other* members' defaults. The load-bearing ones are
-#       hxcrypto's lz4 + zstd codecs and the `c-abi` exports of hxcrypto,
-#       hxtext and hxrequest, so we re-supply exactly those.
+#       the `c-abi` exports of hxtext and hxrequest, so we re-supply exactly
+#       those.
 #       Any future member that grows a default feature must be added
 #       here too.
 #
@@ -392,13 +379,12 @@ endif
 
 if glycin_gen == '1'
   cargo_no_default = '--no-default-features'
-  # --no-default-features is workspace-wide, so it also drops hxcrypto's
-  # default lz4 + zstd codecs and the c-abi exports — re-supply them (see
-  # the comment above). The
+  # --no-default-features is workspace-wide, so it also drops the c-abi
+  # exports — re-supply them (see the comment above). The
   # gtkhx-ffi / gtkhx-ui edges to hx-image-decode are `default-features =
   # false`, so glycin-v3 does NOT leak back in; glycin-v2 is selected on the
   # crate directly here.
-  cargo_features = cargo_features + ',hxcrypto/lz4,hxcrypto/zstd,hxcrypto/c-abi,hxtext/c-abi,hxrequest/c-abi,hx-image-decode/glycin-v2'
+  cargo_features = cargo_features + ',hxtext/c-abi,hxrequest/c-abi,hx-image-decode/glycin-v2'
 else
   cargo_no_default = ''
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'
@@ -488,19 +474,6 @@ rust_build = custom_target('rust-workspace',
   output : 'rust-workspace.stamp',
   build_by_default : true,
   console : true,
-)
-
-# HOPE crypto + transport compression (hash / stream / aead / compress).
-# One crate since the step 3 consolidation; the four former archives
-# (-lhxcrypto_hash, -lhxcrypto_stream, -lhxcrypto_aead, -lhxcrypto::compress) are
-# now -lhxcrypto. Kept as a standalone staticlib because the Tier 1/2
-# crypto + HOPE tests link it directly, GTK-free.
-rust_hxcrypto_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcrypto',
-  ],
 )
 
 # Wire protocol (Phase R2). Replaces the byte-twiddling in rcv.c /

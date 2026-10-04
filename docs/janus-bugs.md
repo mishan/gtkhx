@@ -90,6 +90,30 @@ a rate limit leaves the default limit in force (10 s per account for inline
 media uploads). A setting meant to disable something has to be a tiny non-zero
 value (`1ms`) instead ([inline-media.md](inline-media.md)).
 
+## LZ4 under Blowfish: nothing the client sends is read until it hangs up
+
+**Verified; present in 2.0.13 with `EnableCompression: true`.**
+
+- **Sends:** a HOPE login offering cipher `BLOWFISH` and compression `LZ4`
+  (step 1), step 2 echoing both, then, in Blowfish-enciphered LZ4 frames,
+  the agreement's answer and a user list request.
+- **Gets:** the step-2 reply and everything after it from Janus, LZ4 frames
+  under Blowfish that decode cleanly; but Janus acts on none of the client's
+  requests. Its log shows "Accept agreement" and "Get user list" only when
+  the client closes the connection, all at once.
+- **Should get:** the requests answered as they arrive, as under Blowfish
+  with GZIP or ZSTD, and under ChaCha20-Poly1305 with LZ4.
+
+Changing the client's framing doesn't help: one LZ4 frame per
+transaction or per write, Janus's own frame settings (independent 4 MiB
+blocks, a content checksum), the content size in the frame header, and a
+skippable frame or 64 KiB of padding after each frame all stall the same
+way. The reader under Blowfish appears to wait for the end of the stream
+before decompressing.
+
+**GtkHx:** does not offer LZ4 with Blowfish; that login runs uncompressed
+(`HopeOpenRequest::session` in `hxnet`).
+
 ## Adding an entry
 
 Reproduce it against the rig first, ideally as an `hx-e2e` probe, and write it
