@@ -89,6 +89,13 @@ jobs:
               v*) tag="$v" ;;
               *)  tag="v$v" ;;
             esac
+            # A published version must be one hxupdate can read; the same
+            # check as release.yml's, which a tag made here never triggers.
+            if [ "$PUBLISH" = "true" ] &&
+               ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+((b|rc)[0-9]+)?$'; then
+              echo "::error::a published version must look like 1.4.1, 1.4.1b1 or 1.4.1rc1 (got '$v')"
+              exit 1
+            fi
           else
             # No version and not publishing: name it after the commit, which
             # is what these builds were called before the field existed.

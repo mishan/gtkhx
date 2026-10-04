@@ -48,3 +48,24 @@ option('cargo_target_dir',
                 'build dirs / cargo test — none of which is possible when the ' +
                 'target dir lives under the (must-be-empty-at-setup) build '    +
                 'dir. Local and Flatpak builds leave this unset.')
+
+option('update_check',
+  type        : 'combo',
+  choices     : ['auto', 'enabled', 'disabled'],
+  value       : 'auto',
+  description : 'Tell the user when a newer GtkHx is out, with a banner in '   +
+                'the main window. "auto" (default) turns it on for Windows '   +
+                'and macOS hosts, which is meant for the builds GtkHx ships '  +
+                'itself; any package that a package manager updates '          +
+                '(a Linux distribution, Homebrew, MacPorts, MSYS2) should '    +
+                'pass "disabled". The Flatpak manifest passes "enabled". A '   +
+                'combo rather than a feature so --auto-features leaves it '    +
+                'alone. See docs/updates.md.')
+
+option('build_version',
+  type        : 'string',
+  value       : '',
+  description : 'The version this build reports, e.g. "1.4.1b1" for a beta. ' +
+                'Empty (default) uses the project version from meson.build. ' +
+                'The release workflow sets it, so the version the update '     +
+                'check compares is the one that was released.')

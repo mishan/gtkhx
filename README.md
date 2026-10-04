@@ -98,6 +98,11 @@ Voice and video are built when GStreamer is found. `-Dvoice=disabled`
 leaves them out, and `-Dvoice=enabled` makes a missing GStreamer an
 error.
 
+Update notices are on by default only when building for Windows or macOS,
+meant for the builds GtkHx ships itself. Linux distribution packagers can keep
+`-Dupdate_check` at its default; Homebrew, MacPorts and MSYS2 packagers should
+pass `-Dupdate_check=disabled`. See [docs/updates.md](docs/updates.md).
+
 ### Flatpak
 
 ```sh

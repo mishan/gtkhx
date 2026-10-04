@@ -1254,7 +1254,7 @@ create_toolbar_window (session *sess)
     /* AdwToolbarView: the canonical libadwaita way to stack
      * top/bottom chrome around a content widget. Every top bar here is
      * optional: the reconnect AdwBanner, the connection tabs and the
-     * screen-share indicator show only when they have something to say,
+     * notice banners show only when they have something to say,
      * and the pixmap toolbar only if the user keeps it on. */
     toolbar_view = adw_toolbar_view_new ();
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
@@ -1262,14 +1262,8 @@ create_toolbar_window (session *sess)
     gtk_widget_set_visible (main_toolbar, dock_layout_toolbar_visible ());
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
                                   main_toolbar);
-#ifdef HAVE_VOICE
-    /* The screen-sharing indicator the video spec requires: revealed for
-     * as long as any connection shares a screen, with a Stop button. A
-     * banner rather than a toast, because the failure it guards against
-     * is forgetting the share is on. */
     adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
-                                  gtkhx_screen_share_banner_new ());
-#endif
+                                  gtkhx_main_banners ());
 
     /* The connection tab strip, directly above the dock it switches. Last of
      * the top bars so it sits closest to the panels whose content it swaps,

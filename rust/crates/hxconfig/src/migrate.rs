@@ -104,6 +104,8 @@ pub const MAP: &[(&str, Target)] = &[
     ("TRACKER", Path("trackers.addresses")),
     ("TRACKER_CASE", Path("trackers.case_sensitive")),
     ("TRAY", Path("appearance.tray")),
+    ("UPDATECHECK", Path("updates.check")),
+    ("UPDATESKIPVERSION", Path("updates.skip_version")),
     ("USERXSIZE", Drop(PANEL_SIZE)),
     ("USERYSIZE", Drop(PANEL_SIZE)),
     ("VOICEINPUTDEVICE", Path("voice.input_device")),
@@ -154,6 +156,10 @@ pub const NEW_PATHS: &[&str] = &[
     // Video subscriptions arrived after gtkhxrc; saving a metered link's
     // data is what a migrated user would want too.
     "voice.metered_one_video",
+    // The update check arrived after gtkhxrc, and only builds that ship
+    // it read these.
+    "updates.check",
+    "updates.skip_version",
 ];
 
 /// Where an old key goes, or `None` if the schema has never heard of it.
@@ -180,6 +186,9 @@ pub fn to_document(
     // whatever order the old keys happened to sort in.
     for (path, kind) in crate::fields::FIELDS {
         let Some((key, raw)) = source_for(path, legacy) else {
+            // Hold the table's place even with nothing to put in it, so a
+            // section no old key feeds is still saved in schema order.
+            table_for(&mut doc, path);
             continue;
         };
 
@@ -319,13 +328,16 @@ fn clamp_wire_name(s: &str) -> &str {
 /// `fields::Writer::put` — no decor to preserve and no existing value to
 /// compare against, because the document is being built from nothing.
 fn put(doc: &mut DocumentMut, path: &str, value: Value) {
-    let mut segments = path.split('.').peekable();
+    let (table, leaf) = table_for(doc, path);
+    table[leaf] = Item::Value(value);
+}
+
+/// The table holding `path`'s value, created implicit if it isn't there yet,
+/// and the value's own key.
+fn table_for<'d, 'p>(doc: &'d mut DocumentMut, path: &'p str) -> (&'d mut Item, &'p str) {
+    let (tables, leaf) = path.rsplit_once('.').unwrap_or(("", path));
     let mut item: &mut Item = doc.as_item_mut();
-    while let Some(segment) = segments.next() {
-        if segments.peek().is_none() {
-            item[segment] = Item::Value(value);
-            return;
-        }
+    for segment in tables.split('.').filter(|s| !s.is_empty()) {
         let slot = &mut item[segment];
         if slot.is_none() {
             let mut table = Table::new();
@@ -334,4 +346,5 @@ fn put(doc: &mut DocumentMut, path: &str, value: Value) {
         }
         item = slot;
     }
+    (item, leaf)
 }

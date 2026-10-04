@@ -317,6 +317,8 @@ modules:
       # default to auto-detect; Debian-stable packagers can also force
       # -Dglycin_compat=1 — see docs/image-decoding.md.)
       - -Dglycin_compat=2
+      # Flatpak updates itself, so the check only asks it what is new.
+      - -Dupdate_check=enabled
     build-options:
       env:
         CARGO_HOME: /run/build/gtkhx/cargo

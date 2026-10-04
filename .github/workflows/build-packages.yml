@@ -104,8 +104,11 @@ jobs:
           install: zip
 
       - name: build (voice enabled)
+        env:
+          VER: ${{ inputs.version }}
         run: |
           meson setup build -Dvoice=enabled -Dtests=false \
+            -Dbuild_version="${VER#v}" \
             -Dcargo_target_dir="$(pwd)/rust-target"
           ninja -C build
 
@@ -194,8 +197,11 @@ jobs:
         run: rustup show
 
       - name: build (voice enabled)
+        env:
+          VER: ${{ inputs.version }}
         run: |
           meson setup build -Dvoice=enabled -Dtests=false \
+            -Dbuild_version="${VER#v}" \
             -Dcargo_target_dir="$(pwd)/rust-target"
           ninja -C build
 
@@ -298,6 +304,16 @@ jobs:
             https://flathub.org/repo/flathub.flatpakrepo
           flatpak-builder --user --install-deps-from=flathub --install-deps-only \
             --force-clean build-flatpak com.nasledov.gtkhx.yml
+
+      - name: stamp the version
+        # flatpak-builder reads meson options only from the manifest, and
+        # this checkout is thrown away after the build.
+        env:
+          VER: ${{ inputs.version }}
+        run: |
+          sed -i "s|^      - -Dupdate_check=enabled\$|&\n      - -Dbuild_version=${VER#v}|" \
+            com.nasledov.gtkhx.yml
+          grep -qF -- "-Dbuild_version=${VER#v}" com.nasledov.gtkhx.yml
 
       - name: build flatpak bundle
         run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak

@@ -654,6 +654,7 @@ fn a_fresh_file_uses_table_headers_not_inline_tables() {
         "[sound]",
         "[transfers]",
         "[trackers]",
+        "[updates]",
         "[voice]",
         "[window]",
     ] {
@@ -856,6 +857,7 @@ fn every_path_round_trips_a_non_default_value() {
         &mut s.sound.voice_leave,
         &mut s.transfers.queue,
         &mut s.trackers.case_sensitive,
+        &mut s.updates.check,
         &mut s.voice.ptt_enabled,
         &mut s.voice.metered_one_video,
     ] {
@@ -873,6 +875,7 @@ fn every_path_round_trips_a_non_default_value() {
     s.chat.highlight_words = vec!["one".into(), "two".into()];
     s.transfers.download_dir = "dir!".into();
     s.trackers.addresses = vec!["t1".into(), "t2".into(), "t3".into()];
+    s.updates.skip_version = "skip!".into();
     s.voice.input_device = "in!".into();
     s.voice.output_device = "out!".into();
     s.voice.ptt_key = "key!".into();
@@ -1602,9 +1605,11 @@ fn an_over_long_nick_is_clamped_to_the_wire_field() {
 #[test]
 fn a_migrated_file_is_laid_out_like_a_fresh_one() {
     // An upgrading user's first gtkhx.toml should not look different from a
-    // new user's. Both come out in schema order.
+    // new user's. Both come out in schema order, including a section no old
+    // key feeds.
     let (keys, form) = legacy::parse(REAL_PROFILE);
-    let migrated = migrate::to_document(&keys, form, &mut Vec::new()).to_string();
+    let doc = migrate::to_document(&keys, form, &mut Vec::new());
+    let migrated = Config::from_document(doc, Provenance::Imported { form }, Vec::new()).to_toml();
     let fresh = Config::defaults().to_toml();
 
     let headers = |s: &str| -> Vec<String> {

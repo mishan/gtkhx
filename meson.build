@@ -143,6 +143,17 @@ voice_enabled = gstreamer_dep.found() and gstreamer_app_dep.found() \
                 and gstreamer_audio_dep.found() and gstreamer_sdp_dep.found() \
                 and gstreamer_webrtc_dep.found()
 
+# `auto` stands for the Windows and macOS builds GtkHx ships itself; a build
+# a package manager updates (Homebrew, MacPorts, MSYS2) passes `disabled`.
+update_check_opt = get_option('update_check')
+update_check_enabled = update_check_opt == 'enabled' or (update_check_opt == 'auto'
+  and host_machine.system() in ['windows', 'darwin'])
+
+gtkhx_version = get_option('build_version')
+if gtkhx_version == ''
+  gtkhx_version = meson.project_version()
+endif
+
 # Glycin migration G.2: the hx-image-decode Rust crate pulls in
 # glycin → gufo / lcms2 / libseccomp / fontconfig as transitive
 # system deps. The Rust crate's build emits cargo:rustc-link-lib

@@ -23,6 +23,7 @@ port).
 | [theming.md](theming.md) | Why the theming model looks the way it does — two unrelated icon systems, and the hidden-base-scale problem that produced the "source art is the honest 100%" rule. |
 | [theming-file-format.md](theming-file-format.md) | The theme file schema. Reference. |
 | [files-browser.md](files-browser.md) | The orthodox two-pane file manager, the function-key mapping, and the Hotline-specific protocol quirks it has to accommodate. |
+| [updates.md](updates.md) | Update notices: which builds check and how, the `updates.json` feed, version ordering and channels, and what packagers should pass to `-Dupdate_check`. |
 
 ## Protocol and extensions
 

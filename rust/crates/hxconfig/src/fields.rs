@@ -307,6 +307,9 @@ field_table! {
     "trackers.addresses"            => list,     trackers.addresses;
     "trackers.case_sensitive"       => flag,     trackers.case_sensitive;
 
+    "updates.check"                 => flag,     updates.check;
+    "updates.skip_version"          => text,     updates.skip_version;
+
     "voice.input_device"            => text,     voice.input_device;
     "voice.output_device"           => text,     voice.output_device;
     "voice.camera_device"           => text,     voice.camera_device;

@@ -15,9 +15,9 @@ pub type GtkWidget = gtk4::ffi::GtkWidget;
 pub type GtkWindow = gtk4::ffi::GtkWindow;
 pub type GApplication = gio::ffi::GApplication;
 
-/// GtkHx version, embedded from meson's `project(version:)` at build time
-/// (rust/meson.build sets `GTKHX_VERSION` in the cargo env). Falls back to
-/// "dev" for a bare `cargo build` outside meson.
+/// GtkHx version: `-Dbuild_version`, or meson's `project(version:)` when that
+/// is empty (rust/meson.build sets `GTKHX_VERSION` in the cargo env). Falls
+/// back to "dev" for a bare `cargo build` outside meson.
 pub const VERSION: &str = match option_env!("GTKHX_VERSION") {
     Some(v) => v,
     None => "dev",

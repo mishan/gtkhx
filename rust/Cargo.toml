@@ -30,6 +30,9 @@ members = [
     "crates/hx-image-decode",
     "crates/feature-unify",
     "crates/hxsound",
+    # The update check's version ordering, feed and decision. Pure Rust,
+    # tested headless; the fetch and the banner live with their callers.
+    "crates/hxupdate",
     # GTK-free Files adapters. The rlib is bundled into gtkhx-ffi; its
     # standalone staticlib is reserved for integration tests.
     "crates/gtkhx-files-ffi",

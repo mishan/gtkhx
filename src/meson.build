@@ -163,7 +163,7 @@ endif
 
 conf = configuration_data()
 conf.set_quoted('PACKAGE',            meson.project_name())
-conf.set_quoted('VERSION',            meson.project_version())
+conf.set_quoted('VERSION',            gtkhx_version)
 conf.set_quoted('GETTEXT_PACKAGE',    meson.project_name())
 conf.set_quoted('PACKAGE_LOCALE_DIR', get_option('prefix') / get_option('localedir'))
 
@@ -233,7 +233,7 @@ if host_machine.system() == 'windows'
   _rc_conf.set('VER_MAJOR',   _ver.get(0, '0'))
   _rc_conf.set('VER_MINOR',   _ver.get(1, '0'))
   _rc_conf.set('VER_PATCH',   _ver.get(2, '0'))
-  _rc_conf.set('VERSION_STR', meson.project_version())
+  _rc_conf.set('VERSION_STR', gtkhx_version)
   _gtkhx_rc = configure_file(
     input         : 'gtkhx.rc.in',
     output        : 'gtkhx.rc',

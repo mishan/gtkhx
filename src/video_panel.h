@@ -32,8 +32,4 @@ extern void video_panel_refresh_all (session *sess);
  * tiles. */
 extern void video_panel_user_changed (session *sess, guint32 cid, guint16 uid);
 
-/* The "You are sharing your screen" banner for the main window's top
- * bars, revealed while any connection shares. Transfer none. */
-extern GtkWidget *gtkhx_screen_share_banner_new (void);
-
 #endif /* GTKHX_VIDEO_PANEL_H */

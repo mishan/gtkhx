@@ -1,0 +1,17 @@
+[package]
+rust-version.workspace = true
+name = "hxupdate"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GtkHx update check: version ordering, the updates.json feed, and when to notify."
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# No glib, no gtk, no network: the fetch belongs to the caller, so
+# `cargo test -p hxupdate` runs headless. Both are already in the lockfile.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
