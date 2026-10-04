@@ -86,7 +86,8 @@ codec.
 
 **Receive.** A receive pad whose mid is `cam-user-N` / `scr-user-N` gets
 `queue ! rtpvp8depay ! vp8dec ! videoconvert ! videoscale ! appsink`
-(RGBA). The depayloader waits for a keyframe and asks for one after loss;
+(RGBA). The depayloader waits for a keyframe and asks for one after loss
+(a PLI, in the client's RTCP; see below);
 the leaky queue keeps a slow decode from stalling the bundle. The appsink
 keeps the newest frame per `(uid, kind)` in a shared store and posts one
 main-loop notification per batch; the UI takes frames and wraps the
@@ -110,6 +111,15 @@ construction and on every login), with a long keyframe interval —
 receivers ask by PLI, and the server rate-limits those. A camera aims
 for 640×480 at up to 30 fps; a screen share for the ceiling's full size
 at up to 15.
+
+**RTCP needs the latency recalculated.** Send bins are linked after the
+pipeline is already playing, and rtpbin's `rtcp-sync-send-time` can't
+time a report for anything linked since the latency was last computed.
+RTCP is then missing or sporadic — for video sends mostly, since a voice
+call's audio sink passes the pipeline back through a state change that
+recomputes it — and a receiver that missed a keyframe has no PLI to ask
+with for as long as the server doesn't ask on its own. The bus watch
+recalculates the latency on every `Latency` message.
 
 **Pause stops capturing.** A pause tears the capture bin down (the camera
 light goes off) and keeps the sink pad; a resume builds a new one on the
