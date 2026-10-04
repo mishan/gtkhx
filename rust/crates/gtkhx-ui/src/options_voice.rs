@@ -104,35 +104,81 @@ fn device_group(page: &adw::PreferencesPage) {
 
 /// The camera picker. Listed from the runtime's own device scan, so the
 /// names match what the capture resolves; screen-cast nodes PipeWire lists
-/// as video sources are left out.
+/// as video sources are left out. The list is built when the group is first
+/// shown and kept current by a camera watch until Settings closes.
 fn video_group(page: &adw::PreferencesPage) {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     let grp = group(&tr("Video"));
     grp.set_description(Some(&tr(
         "The camera your video chat uses. Your camera stays off until you \
          turn it on in a voice room.",
     )));
-    let mut pairs = vec![(String::new(), tr("First camera found"))];
-    pairs.extend(
-        hxvoice_runtime::video::list_cameras()
-            .into_iter()
-            .map(|c| (c.name, c.display_name)),
-    );
-    // Inside the sandbox nothing is listed until camera access is granted,
-    // which says nothing about whether the saved camera is still there.
-    if !crate::camera_portal::needed() {
-        pairs.extend(missing_camera(
-            &pairs,
-            &pref_get_string(cfg::VOICE_CAMERA_DEVICE),
-        ));
-    }
-    let values: Vec<&str> = pairs.iter().map(|(v, _)| v.as_str()).collect();
-    let labels: Vec<&str> = pairs.iter().map(|(_, l)| l.as_str()).collect();
-    grp.add(&combo_row(
-        cfg::VOICE_CAMERA_DEVICE,
-        &tr("Camera"),
-        &values,
-        &labels,
-    ));
+    type Shown = (Vec<(String, String)>, adw::ComboRow);
+    let row: Rc<RefCell<Option<Shown>>> = Rc::default();
+    let refresh = {
+        let grp = grp.downgrade();
+        let row = row.clone();
+        move || {
+            let Some(grp) = grp.upgrade() else {
+                return;
+            };
+            let mut pairs = vec![(String::new(), tr("First camera found"))];
+            pairs.extend(
+                hxvoice_runtime::video::list_cameras()
+                    .into_iter()
+                    .map(|c| (c.name, c.display_name)),
+            );
+            // Inside the sandbox nothing is listed until camera access is
+            // granted, which says nothing about whether the saved camera is
+            // still there.
+            if !crate::camera_portal::needed() {
+                pairs.extend(missing_camera(
+                    &pairs,
+                    &pref_get_string(cfg::VOICE_CAMERA_DEVICE),
+                ));
+            }
+            let mut row = row.borrow_mut();
+            // Rebuilding would close an open dropdown for nothing.
+            if row.as_ref().is_some_and(|(shown, _)| *shown == pairs) {
+                return;
+            }
+            if let Some((_, old)) = row.take() {
+                grp.remove(&old);
+            }
+            let values: Vec<&str> = pairs.iter().map(|(v, _)| v.as_str()).collect();
+            let labels: Vec<&str> = pairs.iter().map(|(_, l)| l.as_str()).collect();
+            let combo = combo_row(cfg::VOICE_CAMERA_DEVICE, &tr("Camera"), &values, &labels);
+            grp.add(&combo);
+            *row = Some((pairs, combo));
+        }
+    };
+    // Held from the first time the group shows until the Settings window
+    // closes: starting a monitor is a synchronous scan, too slow to repeat
+    // on every switch between pages.
+    let watch: Rc<RefCell<Option<hxvoice_runtime::video::CameraWatch>>> = Rc::default();
+    let refresh = Rc::new(refresh);
+    grp.connect_map(move |grp| {
+        if watch.borrow().is_none() {
+            let r = refresh.clone();
+            watch.replace(Some(hxvoice_runtime::video::watch_cameras(move || r())));
+            if let Some(window) = grp.root() {
+                let watch = Rc::downgrade(&watch);
+                let id: Rc<RefCell<Option<gtk::glib::SignalHandlerId>>> = Rc::default();
+                let held = id.clone();
+                *id.borrow_mut() = Some(window.connect_unmap(move |window| {
+                    if let Some(watch) = watch.upgrade() {
+                        watch.take();
+                    }
+                    if let Some(id) = held.take() {
+                        window.disconnect(id);
+                    }
+                }));
+            }
+        }
+        refresh();
+    });
     page.add(&grp);
 }
 

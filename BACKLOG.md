@@ -22,11 +22,11 @@ record.
   and GTK uploads each one to the GPU. `gtk4paintablesink` would keep frames on
   the GPU, but neither the GNOME runtime nor the bundle scripts ship it. A
   hidden Video page also still turns every local preview frame into a texture.
-- **Camera hotplug.** The camera button's availability comes from the last
-  device enumeration, which runs the first time it's needed and again when the
-  camera picker opens or a capture starts. A camera plugged in after that only
-  appears once one of those runs again. A `GstDeviceMonitor` bus watch would
-  keep it current.
+- **The camera monitor starts on the main thread.** Each voice join
+  (unless Settings already holds one) starts the `GstDeviceMonitor`
+  synchronously, a PipeWire round trip plus libcamera's manager, a few
+  tenths of a second; a hung PipeWire would freeze the join. Starting it
+  off the main thread would fix that.
 
 ### Robustness
 

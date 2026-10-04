@@ -221,6 +221,9 @@ struct PanelInner {
     autojoin_done: Cell<bool>,
     autojoin_poll: RefCell<Option<glib::SourceId>>,
     autojoin_unmute: RefCell<Option<glib::SourceId>>,
+    /// Held while joined in this panel's room, where the camera button can
+    /// be pressed, so a camera plugged in or out grays it or lights it.
+    camera_watch: RefCell<Option<hxvoice_runtime::video::CameraWatch>>,
 }
 
 thread_local! {
@@ -631,6 +634,7 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
     inner.cam_btn.set_visible(video);
     inner.screen_btn.set_visible(video);
     if !video {
+        inner.camera_watch.take();
         return;
     }
     // Inside the sandbox, whether there is a camera at all is the portal's
@@ -638,6 +642,16 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
     crate::camera_portal::probe(|| for_each_panel(|_w, i| update_button_labels(i)));
     let rt = unsafe { crate::video_panel::runtime(sess) };
     let here = rt.and_then(|r| r.active_cid()) == Some(inner.cid);
+    // Elsewhere a device monitor is the watch. Starting one is a
+    // synchronous scan, so only once the button can be pressed.
+    if !(joined && here) {
+        inner.camera_watch.take();
+    } else if inner.camera_watch.borrow().is_none() {
+        let watch = hxvoice_runtime::video::watch_cameras(|| {
+            for_each_panel(|_w, i| update_button_labels(i))
+        });
+        inner.camera_watch.replace(Some(watch));
+    }
     let local = |k| rt.filter(|_| here).and_then(|r| r.video_local(k));
 
     for (btn, kind, wire) in [
@@ -652,12 +666,14 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
             VideoKind::Screen => crate::screen_share::picking(dock::key_for_session(sess)),
             VideoKind::Camera => crate::camera_portal::pending(),
         };
-        btn.set_sensitive(joined && here && access && source && !picking);
         let state = local(kind);
         let lit = match kind {
             VideoKind::Camera => state == Some(false),
             VideoKind::Screen => state.is_some(),
         };
+        // A live publication can always be turned off, even with its
+        // camera unplugged under it.
+        btn.set_sensitive(joined && here && access && (source || lit) && !picking);
         let (on, off) = match kind {
             VideoKind::Camera => ("camera-video-symbolic", "camera-disabled-symbolic"),
             VideoKind::Screen => ("screen-shared-symbolic", "video-display-symbolic"),
@@ -677,7 +693,7 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
                 VideoKind::Camera => tr("Video chat requires permission"),
                 VideoKind::Screen => tr("Screen sharing requires permission"),
             }
-        } else if !source {
+        } else if !source && !lit {
             match kind {
                 VideoKind::Camera => tr("No camera is available"),
                 VideoKind::Screen => tr("Screen sharing isn't available on this system"),
@@ -1184,6 +1200,7 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
         autojoin_done: Cell::new(false),
         autojoin_poll: RefCell::new(None),
         autojoin_unmute: RefCell::new(None),
+        camera_watch: RefCell::new(None),
     });
 
     // Toggle handlers capture a Weak to avoid a button→closure→inner→button
@@ -1239,6 +1256,7 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
                 if let Some(id) = i.autojoin_unmute.borrow_mut().take() {
                     id.remove();
                 }
+                i.camera_watch.take();
             }
             // Explicitly drop THIS panel from the registry (and prune dead
             // weaks). "destroy" fires during dispose — before finalize — so a

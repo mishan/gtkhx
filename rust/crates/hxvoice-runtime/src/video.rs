@@ -253,6 +253,15 @@ pub fn publish_available(kind: VideoKind) -> bool {
         VideoKind::Camera if camera_via_portal() => {
             gst::ElementFactory::find("pipewiresrc").is_some() && camera_portal_present()
         }
+        // A watched monitor knows, once it has seen a camera: a provider
+        // can hide a camera autovideosrc reaches (PipeWire and libcamera
+        // hide V4L2's, and a virtual camera may show in neither), so an
+        // empty set from the start keeps autovideosrc worth a try.
+        VideoKind::Camera
+            if camera_monitor().is_some() && WATCH_SAW_CAMERA.load(Ordering::Relaxed) =>
+        {
+            cameras_seen()
+        }
         VideoKind::Camera => gst::ElementFactory::find("autovideosrc").is_some() || cameras_seen(),
         VideoKind::Screen => screen_source_factory().is_some(),
     }
@@ -470,7 +479,8 @@ fn device_key(d: &gst::Device) -> String {
 static CAMERAS_SEEN: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 /// Whether this machine has a camera, enumerating only the first time.
-/// Opening the camera picker or starting a capture enumerates again.
+/// Starting a capture enumerates again, and a [`CameraWatch`] keeps it
+/// current.
 fn cameras_seen() -> bool {
     use std::sync::atomic::Ordering;
     match CAMERAS_SEEN.load(Ordering::Relaxed) {
@@ -593,9 +603,140 @@ fn portal_camera_devices() -> Vec<gst::Device> {
     devices
 }
 
+/// The monitor [`watch_cameras`] keeps running while anything holds a
+/// [`CameraWatch`]. Enumerations read it rather than start another.
+static CAMERA_MONITOR: Mutex<Option<gst::DeviceMonitor>> = Mutex::new(None);
+
+/// Whether the running monitor has listed a camera since it started.
+static WATCH_SAW_CAMERA: AtomicBool = AtomicBool::new(false);
+
+fn camera_monitor() -> Option<gst::DeviceMonitor> {
+    CAMERA_MONITOR.lock().ok().and_then(|m| m.clone())
+}
+
+struct Watching {
+    _bus: gst::bus::BusWatchGuard,
+    listeners: Vec<(u64, std::rc::Rc<dyn Fn()>)>,
+    next: u64,
+}
+
+thread_local! {
+    static WATCHING: std::cell::RefCell<Option<Watching>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps the camera monitor running. Dropping the last one stops it, so
+/// no device provider stays awake for nothing. Not `Send`: its listener
+/// lives in the creating thread's registry, and only a drop there
+/// removes it.
+#[must_use]
+pub struct CameraWatch(Option<u64>, std::marker::PhantomData<std::rc::Rc<()>>);
+
+impl Drop for CameraWatch {
+    fn drop(&mut self) {
+        let Some(id) = self.0 else {
+            return;
+        };
+        // Whatever is let go is dropped after the borrow ends: a listener
+        // may own a watch of its own.
+        let (_removed, last) = WATCHING.with(|w| {
+            let mut w = w.borrow_mut();
+            let Some(watching) = w.as_mut() else {
+                return (Vec::new(), None);
+            };
+            let (removed, kept) = std::mem::take(&mut watching.listeners)
+                .into_iter()
+                .partition(|(i, _)| *i == id);
+            watching.listeners = kept;
+            let last = if watching.listeners.is_empty() {
+                w.take()
+            } else {
+                None
+            };
+            (removed, last)
+        });
+        if let Some(watching) = last {
+            // The bus watch goes first, so nothing dispatches to a
+            // stopped monitor.
+            drop(watching);
+            if let Some(monitor) = CAMERA_MONITOR.lock().ok().and_then(|mut m| m.take()) {
+                monitor.stop();
+            }
+            WATCH_SAW_CAMERA.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Main thread only. Call `on_change` on this thread's main context
+/// whenever a camera comes or goes, for as long as the returned watch is
+/// held, and answer [`publish_available`] and [`list_cameras`] from the
+/// live set meanwhile.
+/// On the portal path the portal's `IsCameraPresent` is the watch, and
+/// this does nothing.
+pub fn watch_cameras(on_change: impl Fn() + 'static) -> CameraWatch {
+    if camera_via_portal() || gst::init().is_err() {
+        return CameraWatch(None, std::marker::PhantomData);
+    }
+    let on_change: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(on_change);
+    let joined = WATCHING.with(|w| {
+        let mut w = w.borrow_mut();
+        let watching = w.as_mut()?;
+        let id = watching.next;
+        watching.next += 1;
+        watching.listeners.push((id, on_change.clone()));
+        Some(id)
+    });
+    if joined.is_some() {
+        return CameraWatch(joined, std::marker::PhantomData);
+    }
+    let monitor = gst::DeviceMonitor::new();
+    monitor.add_filter(Some("Video/Source"), None);
+    let Ok(bus) = monitor.bus().add_watch_local(|_, msg| {
+        use gst::MessageView;
+        if matches!(
+            msg.view(),
+            MessageView::DeviceAdded(_) | MessageView::DeviceRemoved(_)
+        ) {
+            camera_devices();
+            // Copied out: a listener may drop its watch.
+            let listeners: Vec<_> = WATCHING.with(|w| {
+                w.borrow()
+                    .iter()
+                    .flat_map(|w| w.listeners.iter().map(|(_, f)| f.clone()))
+                    .collect()
+            });
+            for f in listeners {
+                f();
+            }
+        }
+        glib::ControlFlow::Continue
+    }) else {
+        return CameraWatch(None, std::marker::PhantomData);
+    };
+    if monitor.start().is_err() {
+        return CameraWatch(None, std::marker::PhantomData);
+    }
+    if let Ok(mut m) = CAMERA_MONITOR.lock() {
+        *m = Some(monitor);
+        WATCH_SAW_CAMERA.store(false, Ordering::Relaxed);
+    }
+    camera_devices();
+    WATCHING.with(|w| {
+        *w.borrow_mut() = Some(Watching {
+            _bus: bus,
+            listeners: vec![(0, on_change)],
+            next: 1,
+        })
+    });
+    CameraWatch(Some(0), std::marker::PhantomData)
+}
+
 fn camera_devices() -> Vec<gst::Device> {
+    let live = camera_monitor().filter(|_| !camera_via_portal());
     let devices = if camera_via_portal() {
         portal_camera_devices()
+    } else if let Some(monitor) = &live {
+        monitor.devices().into_iter().collect()
     } else {
         let monitor = gst::DeviceMonitor::new();
         monitor.add_filter(Some("Video/Source"), None);
@@ -628,6 +769,16 @@ fn camera_devices() -> Vec<gst::Device> {
         if devices.is_empty() { 1 } else { 2 },
         std::sync::atomic::Ordering::Relaxed,
     );
+    // Counted after the filter, so a screen-cast node isn't a camera seen.
+    // Under the lock, and only for the monitor still running: a capture
+    // thread's clone of a stopped one mustn't speak for its successor.
+    if let (Some(monitor), false) = (&live, devices.is_empty()) {
+        if let Ok(m) = CAMERA_MONITOR.lock() {
+            if m.as_ref() == Some(monitor) {
+                WATCH_SAW_CAMERA.store(true, Ordering::Relaxed);
+            }
+        }
+    }
     devices
 }
 
