@@ -4363,6 +4363,16 @@ fn attach_pipeline_bus_watch(
                         }
                     }
                 }
+                MessageView::Latency(_) => {
+                    // Send bins are linked after the pipeline is already
+                    // playing, so nothing else may configure their latency
+                    // before the next state change. Until then rtpbin's
+                    // rtcp-sync-send-time can't time a report for them, and
+                    // RTCP, PLIs included, goes missing.
+                    if let Some(pipeline) = weak_pipeline.upgrade() {
+                        let _ = pipeline.recalculate_latency();
+                    }
+                }
                 MessageView::ClockLost(_) => {
                     // The element providing the pipeline clock went away —
                     // an audio device swapped out mid-call, say. Cycling
