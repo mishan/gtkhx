@@ -2022,8 +2022,9 @@ test_integration_hope_hmac = executable('test_integration_hope_hmac',
   link_depends        : rust_build,
 )
 test('hope_hmac', test_integration_hope_hmac,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # hope_blowfish — Tier 3 coverage for the legacy HOPE stream-cipher
 # path. Same handshake state machine as hope_chacha20 but with the
@@ -2044,6 +2045,10 @@ test('hope_blowfish', test_integration_hope_blowfish,
      suite   : 'integration',
      timeout : 60)
 
+# Like every HOPE test that may land on Janus, alone: Janus can slip
+# another client's arrival or departure into a HOPE login in plaintext
+# (docs/janus-bugs.md).
+#
 # hope_compression — HOPE compression as the user asks for it: GZIP under
 # Blowfish against mhxd, ZSTD and LZ4 under ChaCha20-Poly1305 against
 # Janus (whose rig config turns compression on).
@@ -2055,8 +2060,9 @@ test_integration_hope_compression = executable('test_integration_hope_compressio
   link_depends        : rust_build,
 )
 test('hope_compression', test_integration_hope_compression,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # hope_chacha20_chat_history — Tier 3 for the fogWraith chat-history
 # extension under HOPE+ChaCha20-Poly1305 AEAD framing. Janus is the

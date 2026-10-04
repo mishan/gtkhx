@@ -114,6 +114,32 @@ before decompressing.
 **GtkHx:** does not offer LZ4 with Blowfish; that login runs uncompressed
 (`HopeOpenRequest::session` in `hxnet`).
 
+## A HOPE login racing another user's arrival or departure gets plaintext
+
+**Verified; present in 2.0.13.**
+
+- **Sends:** HOPE step 2 (LOGIN 107, with a cipher agreed: CHACHA20-POLY1305
+  or BLOWFISH, with or without compression) while another user logs in,
+  agrees or disconnects.
+- **Gets:** that user's NotifyChangeUser (301) or NotifyDeleteUser (302) in
+  plaintext, after Janus has accepted step 2 and before its login reply,
+  which is encrypted. Janus logs "HOPE login successful".
+- **Should get:** nothing in plaintext once step 2 is accepted: the
+  broadcast either goes through the cipher after the login reply, or is not
+  sent to the connection until its cipher is in place. The HOPE spec turns
+  encryption on with the step-2 reply and encrypts everything after it, and
+  mhxd sets the cipher before it replies.
+
+The connection seems to join the broadcast set before its cipher is on the
+writer. The window is tens of microseconds, so a busy server hits it when
+people come and go. Nothing arrives between the step-1 reply and step 2.
+
+**GtkHx:** decrypts the plaintext, which fails (ChaCha20-Poly1305: a record
+that does not authenticate; Blowfish: a nonsense transaction length), and
+the login is lost. No workaround: accepting plaintext where the spec
+promises encryption would let anyone on the path inject transactions. The
+HOPE integration tests that may land on Janus run alone.
+
 ## Adding an entry
 
 Reproduce it against the rig first, ideally as an `hx-e2e` probe, and write it
