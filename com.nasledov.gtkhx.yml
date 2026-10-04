@@ -55,6 +55,10 @@ sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: gtkhx
+# Keep translations in the app itself. Split out into a .Locale extension,
+# as flatpak-builder does by default, they never reach a single-file
+# bundle: build-bundle exports the app alone.
+separate-locales: false
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
