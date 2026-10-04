@@ -220,8 +220,9 @@ fn chat_user_creates_and_registers_task() {
 }
 
 #[test]
-fn invite_registers_task_without_handler() {
+fn invite_says_its_reply_is_expected_before_it_goes() {
     reset(true, 0);
+    crate::send::expected::take();
     unsafe { hx_invite_user(htlc(), 0x0009, 0x0007) };
     let s = last().unwrap();
     assert_eq!(s.ty, HTLC_HDR_CHAT_INVITE);
@@ -230,10 +231,11 @@ fn invite_registers_task_without_handler() {
     assert_eq!(s.chunks[0].1, vec![0, 0, 0, 7]);
     assert_eq!(s.chunks[1].0, TAG_UID);
     assert_eq!(s.chunks[1].1, vec![0, 9]);
-    let t = last_task().expect("CHAT_INVITE registers an ack task");
-    // The C original passes a NULL rcv fn — faithfully None here.
-    assert!(!t.has_rcv);
-    assert_eq!(t.label, "invite");
+    assert_eq!(
+        crate::send::expected::take(),
+        [(1, hxsession::Expect::ChatInvite)]
+    );
+    assert!(last_task().is_none());
 }
 
 #[test]

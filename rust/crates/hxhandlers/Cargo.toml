@@ -31,3 +31,7 @@ hxnet = { path = "../hxnet" }
 # primitive (hlwrite_chunks). hxtask deps only gtkhx-core/hxproto/glib,
 # so hxhandlers -> hxtask is acyclic.
 hxtask = { path = "../hxtask" }
+# The session's events, for the domains it handles itself.
+hxsession = { workspace = true }
+# chat.history_initial, the lines the history fetches ask for.
+hxconfig = { path = "../hxconfig" }

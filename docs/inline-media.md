@@ -128,9 +128,13 @@ depth, not a guarantee.**
   chunked dispatch). The paperclip is hidden unless the capability is
   negotiated for the live session; showing inert chrome would be
   misleading given how few servers speak the extension.
-- **Receive path** — `src/inline_media_download.c` (chunked-reply
-  accumulator), `src/chat.c` (placeholder row + auto-fetch + swap-in),
-  and the click-to-view dialog in `gtkhx-ui/src/inline_media_dialog.rs`.
+- **Receive path** — hx-libs' `hxsession` reads the companion fields
+  off a chat line, where the capability was agreed, and drops a line
+  that carries only one of the pair; the line reaches the chat as an
+  `HxChatEvent` with its `HxChatMedia` (`hxhandlers::recv::chat`). Then
+  `src/inline_media_download.c` (chunked-reply accumulator), `src/chat.c`
+  (placeholder row + auto-fetch + swap-in), and the click-to-view dialog
+  in `gtkhx-ui/src/inline_media_dialog.rs`.
 - **Chat rendering** — the `rotulus_view_append_media` /
   `_media_mark` / `_media_set_texture` / `_media_set_frames` family
   declared in `rotulus.h`, from the external `rotulus` crate (see

@@ -49,7 +49,6 @@
 #include "rcv.h"
 #include "hxconn.h"
 #include "hfs.h"
-#include "proto_trace.h"
 #include "hotline_proto.h"
 #include "debug.h"
 #include "connect.h"
@@ -104,60 +103,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
      * it unsupported. Safe against legacy servers. */
     hx_icon_probe (htlc);
 
-    /* Chat-history extension: if the server echoed our cap bit in
-     * the LOGIN reply, request a batch for public chat (channel 0).
-     * hx_get_chat_history is a no-op when the cap wasn't negotiated,
-     * so this is safe to gate on caps here too — task_new only
-     * fires when we'll actually send.
-     *
-     * Two modes:
-     *   * Initial connect (htlc->chat_history_last_msgid == 0):
-     *     limit-based fetch sized by gtkhx_prefs.chat_history_initial
-     *     (default 50). 0 disables the initial pull entirely.
-     *   * Reconnect (last_msgid > 0): AFTER=last_msgid catch-up
-     *     fetch — the server returns everything stored since our
-     *     last view of the chat. No client-side limit; the server
-     *     applies its own (history_max_msgs).
-     *
-     * The cursor is reset in network.c when the user dials a
-     * different host:port, so initial-mode is what happens when
-     * the user switches servers, and reconnect-mode is what
-     * happens when the user clicks Reconnect to the same one.
-     *
-     * Clamp negative limit values defensively — the setting is a plain
-     * integer with no floor. */
-    if (hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY)) {
-        if (hx_conn_chat_history_last_msgid (htlc) > 0) {
-            /* Reconnect catch-up — AFTER=last_msgid, no limit. */
-            debug_log ("chat-history",
-                       "reconnect catch-up: AFTER=%" G_GUINT64_FORMAT,
-                       hx_conn_chat_history_last_msgid (htlc));
-            task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
-                      GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
-                      "chat-history-catchup");
-            hx_get_chat_history (
-                htlc, HX_HISTORY_CHANNEL_PUBLIC,
-                /*before=*/0,
-                /*after=*/hx_conn_chat_history_last_msgid (htlc),
-                /*limit=*/0);
-        } else {
-            /* Initial connect — limit-based fetch. */
-            int limit = gtkhx_prefs.chat_history_initial;
-            if (limit < 0) {
-                limit = 0;
-            }
-            if (limit > 0xffff) {
-                limit = 0xffff;
-            }
-            if (limit > 0) {
-                task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
-                          GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
-                          "chat-history");
-                hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
-                                     /*before=*/0, /*after=*/0, (guint16)limit);
-            }
-        }
-    }
+    hx_chat_history_fetch_initial (htlc);
 
     /* Announce the spec-correct "fully joined" boundary to the UI.
      * Consumers (e.g. the files browser's remote provider) use this
@@ -194,13 +140,6 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
      * checking on a short buffer. */
     return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
 }
-
-/* hx_rcv_chat (HTLS_HDR_CHAT) is a #[no_mangle] fn in the hxhandlers::recv::chat module
- * it parses the body via native hxproto::parse::parse_chat,
- * pulls the inline-media companion via native inline_media::extract_chat_media_meta
- * (dropping the line on an orphan), builds + attaches the boxed HxChatEvent via
- * the C producers, delegates the ignore-gate + emit to hx_chat_recv, and frees
- * the event. The dispatch switch below calls it by name (declared in rcv.h). */
 
 /* Private-message ignore-gate + msg emit — Rust hxhandlers::recv::msg module. hx_msg_recv
  * returns HX_MSG_DROPPED (ignored), HX_MSG_EMITTED (private message, boxed msg
@@ -568,14 +507,6 @@ extern void hx_user_info_recv (struct htlc_conn *htlc, guint16 uid,
  * hx_user_part_recv, then logs the showjoin-gated "parts" line. The dispatch
  * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
-/* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
- * hxhandlers::recv::chat module module: it parses the frame,
- * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
- * and on a real change sets the model subject + emits the "chat-subject-notice"
- * signal for the "Subject Changed to" line (view-side handler in chat.c). The
- * dispatch switch below calls it by name (declared in rcv.h); no C body remains
- * here. */
-
 void
 hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
@@ -592,14 +523,6 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     banner_handle_message (htlc, bm.type, bm.has_url,
                            bm.has_url ? bm.url : NULL);
 }
-
-/* hx_rcv_chat_invite (HTLS_HDR_CHAT_INVITE) is the first receive handler whose
- * whole body lives in Rust: it's now a #[no_mangle] fn in the hxhandlers::recv::chat module
- * (rust/crates/hxhandlers/src/recv/chat.rs) that parses the frame, resolves the public chat's
- * member model via chat_with_cid/hx_chat_member_model, and delegates the
- * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
- * by name (declared in rcv.h); no C body remains here.
- * See docs/rust/network-endgame.md. */
 
 /* hx_rcv_user_selfinfo (HTLS_HDR_USER_SELFINFO) is a #[no_mangle] fn in the
  * hxhandlers::recv::user module (rust/crates/hxhandlers/src/recv/user.rs): it calls hx_selfinfo_parse
@@ -1104,28 +1027,16 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame,
 /* Dispatch a received frame. The Rust hxnet actor already parsed the header
  * and the bridge hands us the whole frame (22-byte header + body) as a
  * (frame, frame_len) slice, so this no longer re-decodes the header or runs
- * the old two-phase receive state machine — it traces, routes the opcode to a
- * body handler (via the Rust dispatch::route table behind hx_recv_route), and
- * calls it. */
+ * the old two-phase receive state machine — it routes the opcode to a body
+ * handler (via the Rust dispatch::route table behind hx_recv_route), and calls
+ * it. The session's tap has traced it already (hx_recv_session_event). */
 void
 hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                   guint32 type, guint32 trans, guint32 flag, guint32 body_len)
+                   guint32 type, guint32 trans G_GNUC_UNUSED,
+                   guint32 flag G_GNUC_UNUSED, guint32 body_len G_GNUC_UNUSED)
 {
-    /* Wire len field encodes body_len + the 2-byte hc; the proto trace wants
-     * that raw value. */
-    proto_trace_recv_hdr (type, trans, flag,
-                          body_len + (guint32)sizeof (guint16));
-    /* Here rather than in any handler: this sits upstream of the routing
-     * switch, so every incoming frame is traced whether its handler ended up
-     * in C or in Rust. The chunks used to be printed by the legacy control
-     * reader, which went with the old connect path. */
-    proto_trace_recv_chunks (frame, frame_len);
-
     void (*handler) (struct htlc_conn *, const guint8 *, gsize) = NULL;
     switch (hx_recv_route (type)) {
-    case HX_RECV_CHAT:
-        handler = hx_rcv_chat;
-        break;
     case HX_RECV_MSG:
         handler = hx_rcv_msg;
         break;
@@ -1140,12 +1051,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         break;
     case HX_RECV_TASK:
         handler = hx_rcv_task;
-        break;
-    case HX_RECV_CHAT_SUBJECT:
-        handler = hx_rcv_chat_subject;
-        break;
-    case HX_RECV_CHAT_INVITE:
-        handler = hx_rcv_chat_invite;
         break;
     case HX_RECV_USER_SELFINFO:
         handler = hx_rcv_user_selfinfo;
@@ -1495,15 +1400,6 @@ hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame,
 {
     hx_icon_change_recv (htlc, frame, frame_len);
 }
-
-/* rcv_task_chat_history (the TRAN_GET_CHAT_HISTORY 700 reply walker) moved to the
- * hxhandlers Rust crate (recv/chat.rs): it walks the reply chunks natively, builds
- * the GPtrArray<HxHistoryEntry*> via glib + the native hx_history_entry_parse,
- * advances the newest-msgid cursor, and emits chat-history-batch. The reply task
- * is registered via RCV_TASK_FN(task_new) at each send call site — chat.c's
- * Load-older flow and hx_post_login_fetches below — right before calling
- * hx_get_chat_history (chat_history.c itself stays free of tasks.h/rcv.h). The
- * symbol resolves against the Rust crate at link. */
 
 /* rcv_task_user_list / rcv_task_user_list_switch / rcv_task_user_info moved to
  * the hxhandlers Rust crate (recv/user.rs) — see the note above rcv_task_login. */

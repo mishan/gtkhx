@@ -12,6 +12,8 @@ pub enum Cap {
     TextEncoding,
     /// Negotiates 64-bit file sizes (`HTLC_CAP_LARGE_FILES`).
     LargeFiles,
+    /// Keeps public chat and answers for it (`HTLC_CAP_CHAT_HISTORY`).
+    ChatHistory,
 }
 
 #[derive(Debug)]
@@ -49,7 +51,12 @@ pub const SERVERS: &[Server] = &[
         xfer_port: 5511,
         // tests/janus gives `admin` the empty password.
         admin: "admin",
-        caps: &[Cap::FileAdmin, Cap::TextEncoding, Cap::LargeFiles],
+        caps: &[
+            Cap::FileAdmin,
+            Cap::TextEncoding,
+            Cap::LargeFiles,
+            Cap::ChatHistory,
+        ],
     },
     Server {
         name: "hlservd",

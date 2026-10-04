@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 
 use crate::session::SharedSession;
 use crate::{connect::resolve_and_connect, ConnectionState, Event, ShutdownReason};
-use hxsession::Session;
+use hxsession::{Handled, Session};
 
 /// Optional TLS certificate-verify (TOFU) callback: given a fingerprint
 /// string, returns whether to trust the peer.
@@ -45,8 +45,9 @@ pub struct PlaintextOpenRequest {
 
 impl PlaintextOpenRequest {
     /// The session the lifecycle drives from the magic on, made before
-    /// it starts so the consumer can number requests from it at once.
-    pub fn session(&self) -> SharedSession {
+    /// it starts so the consumer can number requests from it at once,
+    /// acting itself on the domains `handled` names.
+    pub fn session(&self, handled: Handled) -> SharedSession {
         let cfg = crate::session::config(
             &self.login,
             &self.password,
@@ -54,6 +55,7 @@ impl PlaintextOpenRequest {
             self.icon,
             self.version,
             self.caps,
+            handled,
         );
         SharedSession::new(Session::new(cfg, 0).into())
     }
@@ -265,7 +267,7 @@ pub struct HopeOpenRequest {
 impl HopeOpenRequest {
     /// As [`PlaintextOpenRequest::session`], for a session that logs in
     /// with HOPE.
-    pub fn session(&self) -> SharedSession {
+    pub fn session(&self, handled: Handled) -> SharedSession {
         let cfg = crate::session::config(
             &self.login,
             &self.password,
@@ -273,6 +275,7 @@ impl HopeOpenRequest {
             self.icon,
             self.version,
             self.caps,
+            handled,
         );
         // Janus, taking LZ4 under Blowfish, reads nothing a client sends
         // until the connection closes (docs/janus-bugs.md), and a client
@@ -396,7 +399,7 @@ mod tests {
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
             req.clone(),
-            req.session(),
+            req.session(Handled::NONE),
             cmd_rx,
             evt_tx,
         ));
@@ -434,6 +437,7 @@ mod tests {
                     saw_shutdown = true;
                     break;
                 }
+                Event::Session(e) => panic!("{e:?}"),
             }
         }
         lifecycle.await.expect("lifecycle task");
@@ -526,7 +530,7 @@ mod tests {
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
             req.clone(),
-            req.session(),
+            req.session(Handled::NONE),
             cmd_rx,
             evt_tx,
         ));
@@ -656,7 +660,7 @@ mod tests {
                     compression,
                     proxy: None,
                 };
-                let session = req.session();
+                let session = req.session(Handled::NONE);
                 let login_trans = session.lock().unwrap().login_trans();
                 assert_eq!(login_trans, 2, "{what}: step 2 on the trans after step 1's");
                 let (handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -671,6 +675,7 @@ mod tests {
                         Event::Frame(f) => frames.push((f.header.type_, f.header.trans)),
                         Event::Shutdown(why) => panic!("{what}: {why:?}"),
                         Event::State(_) => {}
+                        Event::Session(e) => panic!("{what}: {e:?}"),
                     }
                 }
                 assert_eq!(frames, [(0x0001_0000, login_trans), (0x6a, 0)], "{what}");
@@ -725,7 +730,7 @@ mod tests {
         }));
         let lc = tokio::spawn(run_plaintext_tls_lifecycle(
             req.clone(),
-            req.session(),
+            req.session(Handled::NONE),
             verify,
             cmd_rx,
             evt_tx,
@@ -784,7 +789,7 @@ mod tests {
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
             req.clone(),
-            req.session(),
+            req.session(Handled::NONE),
             cmd_rx,
             evt_tx,
         ));
@@ -873,7 +878,7 @@ mod tests {
 
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
             req.clone(),
-            req.session(),
+            req.session(Handled::NONE),
             cmd_rx,
             evt_tx,
         ));

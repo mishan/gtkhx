@@ -47,8 +47,8 @@
  * doesn't have to duplicate the addrinfo dance. The legacy
  * integration_connect() still routes through here. */
 /* WEAK stub for the production hlwrite_chunks defined in network.c.
- * chat_history.c references it for hx_get_chat_history's production
- * send path, but most Tier 3 binaries don't link network.c (it would
+ * Production code linked into Tier 3 binaries references it, but most
+ * Tier 3 binaries don't link network.c (it would
  * drag in the whole GIOChannel / cipher / compress / signal stack).
  *
  * Marked __attribute__((weak)) (like hx_htlc_close below) so a Tier 3

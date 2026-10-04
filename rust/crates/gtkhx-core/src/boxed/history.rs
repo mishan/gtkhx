@@ -56,7 +56,7 @@ const _: () = {
 /// them) and downstream length-aware readers (`g_strstr_len`) use the recorded
 /// length — a shorter allocation would let them walk past the buffer. `g_malloc`
 /// + copy + trailing NUL keeps allocation length and recorded length in lockstep.
-unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
+pub(crate) unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
     let p = g_malloc(src.len() + 1) as *mut u8;
     if !src.is_empty() {
         ptr::copy_nonoverlapping(src.as_ptr(), p, src.len());
@@ -67,18 +67,12 @@ unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
 
 /// `HxHistoryEntry *hx_history_entry_parse (data, len)` — decode one packed
 /// `HTLS_DATA_HISTORY_ENTRY` chunk body into a heap `HxHistoryEntry`, or NULL on
-/// a malformed entry (too short, or a declared length running past the buffer).
-/// The packed-binary decode itself is `hxproto::parse::parse_history_entry`
-/// (24-byte fixed header + nick + message + best-effort mini-TLV walk); this wraps
-/// it with the glib allocation the entry's owner expects. Caller frees via
+/// a malformed entry, as the session reads one (`hxsession::HistoryEntry`):
+/// the message's `\r` line breaks become `\n` and its stray control bytes are
+/// folded, as a live line's are, and both strings are decoded to UTF-8. A raw
+/// `\r` reaches Pango as a paragraph break the chat layout doesn't count, so a
+/// multi-line entry would draw over the rows below it. Caller frees via
 /// [`hx_history_entry_free`].
-///
-/// The text gets the same treatment `parse_chat` and the chat output path give a
-/// live line: the message has its `\r` line breaks turned into `\n` and stray
-/// control bytes folded, and both strings are decoded to UTF-8 (Mac Roman when
-/// they aren't UTF-8 already). A raw `\r` reaches Pango as a paragraph break the
-/// chat layout doesn't count, so a multi-line entry would draw over the rows
-/// below it.
 ///
 /// # Safety
 /// `data` is valid for `len` bytes, or NULL (returns NULL).
@@ -90,25 +84,28 @@ pub unsafe extern "C" fn hx_history_entry_parse(
     if data.is_null() {
         return ptr::null_mut();
     }
-    let s = std::slice::from_raw_parts(data, len);
-    let Some(e) = hxproto::parse::parse_history_entry(s) else {
-        return ptr::null_mut();
-    };
-    let entry = g_malloc0(size_of::<HxHistoryEntry>()) as *mut HxHistoryEntry;
-    (*entry).message_id = e.message_id;
-    (*entry).timestamp = e.timestamp;
-    (*entry).flags = e.flags;
-    (*entry).icon_id = e.icon_id;
-    let nick = hxproto::text::to_utf8(e.nick);
-    let mut message = e.message.to_vec();
-    hxproto::sanitize::cr2lf(&mut message);
-    hxproto::sanitize::strip_ansi(&mut message);
-    let message = hxproto::text::to_utf8(&message);
-    (*entry).nick_len = nick.len();
-    (*entry).nick = dup_by_len(nick.as_bytes());
-    (*entry).message_len = message.len();
-    (*entry).message = dup_by_len(message.as_bytes());
-    entry
+    match hxsession::HistoryEntry::parse(std::slice::from_raw_parts(data, len)) {
+        Some(e) => history_entry_new(&e),
+        None => ptr::null_mut(),
+    }
+}
+
+/// A heap `HxHistoryEntry` holding `e`, freed by [`hx_history_entry_free`].
+pub fn history_entry_new(e: &hxsession::HistoryEntry) -> *mut HxHistoryEntry {
+    // SAFETY: the allocation is zeroed and sized for the struct, and every
+    // pointer stored in it is a fresh glib allocation.
+    unsafe {
+        let entry = g_malloc0(size_of::<HxHistoryEntry>()) as *mut HxHistoryEntry;
+        (*entry).message_id = e.message_id;
+        (*entry).timestamp = e.timestamp;
+        (*entry).flags = e.flags;
+        (*entry).icon_id = e.icon;
+        (*entry).nick_len = e.nick.len();
+        (*entry).nick = dup_by_len(e.nick.as_bytes());
+        (*entry).message_len = e.text.len();
+        (*entry).message = dup_by_len(e.text.as_bytes());
+        entry
+    }
 }
 
 /// `void hx_history_entry_free (entry)` — release an entry and its glib-owned

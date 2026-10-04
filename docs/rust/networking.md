@@ -27,9 +27,13 @@ into the bridge, everything below happens in Rust:
   `hxsession` drives the connection — the magic, the login and its reply,
   the agreement and the two-second wait for one, a 1.2 server's user
   change — and the actor in `session.rs` is its I/O. It runs the session
-  in raw mode, because GtkHx still has receive handlers of its own: every
-  transaction reaches C whole, and what C sends goes out as C built it.
-  See "The session", below.
+  in raw mode, because GtkHx still has receive handlers of its own, with
+  the session handling chat itself (`Handled::CHAT`): what it makes of a
+  chat line, an invitation, a subject, or a history reply reaches the
+  main thread as `Event::Session`, on the channel the frames take, so the
+  two arrive in the order the server sent them. Every other transaction
+  reaches C whole, and what C sends goes out as C built it. See "The
+  session", below.
 - **HOPE**, the secure login, is the session's too
   (`Session::with_hope`, over hx-libs' `hxhope`): step 1, its reply, step
   2, and from step 2's reply on, the cipher (Blowfish OFB-64 or
@@ -71,9 +75,16 @@ Disagree, or closing the window, disconnects. One with nothing to show
 the session answers itself; so does one that says there is none from a
 server that gave no version, which is a 1.5 server keeping that to itself.
 
-Every reply reaches C, the session's own included: a refused agree or
-login is dispatched, traced and reported as any refused request is. C
-traces what it dispatches; the actor traces only what the session sends
+Every reply reaches C, the session's own included — a refused agree or
+login is dispatched and reported as any refused request is — but those C
+said to expect (`Session::expect`, through `connection_expect`): a
+chat-history request and a chat invitation. Their replies are the
+session's to read, and come back as its events, a refusal as `Failed`,
+which is shown and heard as any refused request is. What arrives is
+traced from the session's tap (`Session::set_tap`, on under
+`GTKHX_DEBUG=proto`): each transaction as it came, before the session
+acts on it and in plaintext under HOPE, through `proto_trace.c` on the
+main thread, whatever handles it. The actor traces what the session sends
 itself.
 
 Until the login is answered the actor leaves C's commands in the channel,
@@ -111,7 +122,9 @@ connect path; there is no legacy path and no gate. Its job is:
 handle, wires the event / shutdown / state callbacks, maps `HXNET_STATE_*`
 onto `GtkhxConnectionState` signals, does the SOCKS proxy lookup, hosts
 the TLS-verify trampoline, and turns each `Event::Frame` back into a
-`hx_dispatch_frame` call for the C receive layer.
+`hx_dispatch_frame` call for the C receive layer, and each
+`Event::Session` into an `hx_recv_session_event` call (hxhandlers) behind
+the same gates.
 
 Reading the LOGIN reply's fields is still `rcv_task_login` in
 `src/rcv.c`; what follows the reply is the session's. See

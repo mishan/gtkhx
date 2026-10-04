@@ -14,7 +14,7 @@
 //!
 //! # The struct layout stays C-visible
 //!
-//! The C producers (`hx_*_new`, `hx_chat_event_attach_media`) still
+//! The C producers that remain (`hx_msg_event_new`, the tracker's) still
 //! `g_new0` and fill these structs, and C consumers (and the media
 //! placeholder formatters) still read their fields directly. So each
 //! type is a `#[repr(C)]` mirror of the C struct, byte layout pinned on

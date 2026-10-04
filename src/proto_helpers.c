@@ -606,75 +606,6 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     return buf;
 }
 
-/* See doc-comment in proto_helpers.h. */
-gboolean
-hx_chat_split_nick_body (const char *line, gsize line_len, gsize *name_offset,
-                         gsize *name_len, gsize *body_offset, gsize *body_len)
-{
-    gsize ws, colon, body_start;
-
-    if (!line || line_len == 0) {
-        return FALSE;
-    }
-
-    /* Strip leading horizontal whitespace. Hotline servers
-     * commonly pad the line with spaces (right-aligning the
-     * nick) before the actual nick text. */
-    ws = 0;
-    while (ws < line_len && (line[ws] == ' ' || line[ws] == '\t')) {
-        ws++;
-    }
-    if (ws == line_len) {
-        return FALSE;
-    }
-
-    /* Find the first ':' after the whitespace. The
-     * "nick: body" Hotline format uses a single colon as the
-     * separator. */
-    colon = ws;
-    while (colon < line_len && line[colon] != ':') {
-        colon++;
-    }
-    if (colon == line_len) {
-        return FALSE;
-    }
-    if (colon == ws) {
-        return FALSE; /* empty nick */
-    }
-
-    /* Cap nick length at 31 — the Hotline protocol's nick
-     * field is a 31-byte STRING32. Lines whose pre-colon
-     * portion exceeds that are almost certainly not chat
-     * (URLs, "Subject Changed to:", arbitrary system prose);
-     * pass them through unsplit. */
-    if (colon - ws > 31) {
-        return FALSE;
-    }
-
-    /* Skip the spaces between ':' and the body. Conventional
-     * mhxd output pads to two spaces; one-space variants exist;
-     * a body that's all-whitespace is still a valid (empty)
-     * message. */
-    body_start = colon + 1;
-    while (body_start < line_len && line[body_start] == ' ') {
-        body_start++;
-    }
-
-    if (name_offset) {
-        *name_offset = ws;
-    }
-    if (name_len) {
-        *name_len = colon - ws;
-    }
-    if (body_offset) {
-        *body_offset = body_start;
-    }
-    if (body_len) {
-        *body_len = line_len - body_start;
-    }
-    return TRUE;
-}
-
 /* ASCII-only "is this byte alphanumeric" — used for the word-
  * boundary check below. Locale-agnostic on purpose: nick lookup
  * shouldn't care about the user's LC_CTYPE. */
@@ -731,26 +662,6 @@ hx_highlight_match (const char *body, gsize body_len, const char *const *words)
 
 /* ---- HxChatEvent --------------------------------------------------- */
 
-/* The "[hx]" info-line prefix. Local copy of the same byte sequence
- * that gtkhx.c::INFOPREFIX exports — proto_helpers must stay free of
- * the GUI tree so we can't reference the gtkhx.c symbol from the Tier
- * 2 unit tests, but the prefix bytes are stable (hx_printf_prefix
- * emits exactly these) so a duplicated constant is acceptable.
- *
- * **This is dead as of C6 and kept only until its tests come with it.**
- * The prefix is no longer produced: INFOPREFIX is the bare string "hx"
- * and the gutter tag travels as a chat-log-line signal parameter. The
- * check runs against `e->line`, which only ever holds text a *server*
- * sent, so matching now requires a server to transmit these exact
- * escape bytes — which is not a feature worth having anyway. Removing
- * it means retiring the two proto-test cases that feed the literal
- * string, which is a separate change.
- *
- * The full string is " <ETX>10[<ETX>03hx<ETX>10]<ETX> " — mIRC colour
- * 10 around brackets, colour 3 around "hx", trailing reset. */
-static const char hx_info_prefix[] = " \00310[\00303hx\00310]\003 ";
-#define HX_INFO_PREFIX_LEN (sizeof (hx_info_prefix) - 1)
-
 /* Phase E3: render Slack/Discord-style :shortcodes: as emoji at display
  * time (the inverse of the legacy send-path rewrite in
  * gtkhx_text_for_wire). Returns a newly-allocated, NUL-terminated decoded
@@ -792,94 +703,11 @@ hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
     return dec;
 }
 
-HxChatEvent *
-hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid, guint16 uid,
-                   const char *self_nick)
-{
-    HxChatEvent *e;
-    gsize line_len = 0;
-
-    e = g_new0 (HxChatEvent, 1);
-    e->cid = cid;
-    e->uid = uid;
-
-    /* gtkhx_text_to_utf8 always returns a g_strdup-ed copy, even
-     * on empty input — caller owns the result. */
-    e->line = gtkhx_text_to_utf8 (raw, raw_len, &line_len);
-    e->line_len = line_len;
-
-    /* Phase E3/E6: decode :shortcodes: → emoji across the WHOLE line,
-     * before the info-prefix check and the nick split. Whole-line (not
-     * body-only) is deliberate: some servers format public chat without a
-     * "Nick:" colon (e.g. " *** Name message"), so scoping to the
-     * post-colon "body" would let a shortcode's own colon be mistaken for
-     * the nick separator and skip the conversion. Decoding first is safe
-     * for the nick column because the grammar only matches colon-delimited
-     * lowercase tokens — a "Nick:" prefix (colon on one side only, or
-     * uppercase) never matches — and for info lines, whose mIRC-coloured
-     * "[hx]" prefix carries no shortcodes (the decoder skips colour runs
-     * regardless). The split below then runs on the final decoded text so
-     * the sender/body offsets stay consistent. */
-    {
-        gsize dlen = 0;
-        char *dec = hx_decode_emoji_shortcodes (e->line, e->line_len, &dlen);
-        if (dec) {
-            g_free (e->line);
-            e->line = dec;
-            e->line_len = dlen;
-        }
-    }
-
-    /* Detect the info-prefix branch up front — info lines should
-     * skip both the sender/body split and any highlight matching
-     * downstream. */
-    if (e->line_len >= HX_INFO_PREFIX_LEN
-        && memcmp (e->line, hx_info_prefix, HX_INFO_PREFIX_LEN) == 0) {
-        e->is_info = TRUE;
-    }
-
-    if (!e->is_info && e->line_len > 0) {
-        gsize so = 0, sl = 0, bo = 0, bl = 0;
-        if (hx_chat_split_nick_body (e->line, e->line_len, &so, &sl, &bo,
-                                     &bl)) {
-            e->sender_off = so;
-            e->sender_len = sl;
-            e->body_off = bo;
-            e->body_len = bl;
-
-            if (self_nick && *self_nick && sl > 0 && strlen (self_nick) == sl
-                && memcmp (e->line + so, self_nick, sl) == 0) {
-                e->is_self = TRUE;
-            }
-        }
-    }
-
-    return e;
-}
-
-/* Phase R4.2c: hx_chat_media_copy moved to Rust (gtkhx-core::boxed::chat,
- * private media_copy helper) along with the HxChatEvent boxed copy that
- * was its only caller. hx_chat_media_free stays here because
- * hx_chat_event_attach_media (below) still calls it. */
-
-static void
-hx_chat_media_free (HxChatMedia *m)
-{
-    if (!m) {
-        return;
-    }
-    g_free (m->id);
-    g_free (m->mime);
-    g_free (m);
-}
-
-/* Phase R4.2c: hx_chat_event_copy / hx_chat_event_free and the boxed-type
- * registration (hx_chat_event_get_type) moved to Rust —
- * rust/crates/gtkhx-core/src/boxed/chat.rs. The struct stays C-visible
- * (hx_chat_event_new + hx_chat_event_attach_media fill it; consumers and
- * the placeholder formatters read fields), so the Rust mirrors'
- * #[repr(C)] layouts are pinned against these asserts; bump both sides
- * together if either struct changes shape. */
+/* HxChatEvent is built, copied and freed in Rust
+ * (rust/crates/gtkhx-core/src/boxed/chat.rs). The struct stays C-visible
+ * (consumers and the placeholder formatter read fields), so the Rust
+ * mirrors' #[repr(C)] layouts are pinned against these asserts; bump both
+ * sides together if either struct changes shape. */
 _Static_assert (sizeof (HxChatEvent) == 72,
                 "HxChatEvent layout must match the Rust #[repr(C)] mirror "
                 "in gtkhx-core::boxed::chat");
@@ -914,38 +742,6 @@ _Static_assert (G_STRUCT_OFFSET (HxChatMedia, height_present) == 48,
                 "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatMedia, bytes_present) == 52,
                 "field offset");
-
-void
-hx_chat_event_attach_media (HxChatEvent *ev, const guint8 *id, gsize id_len,
-                            const char *mime, gsize mime_len, guint32 width,
-                            gboolean width_present, guint32 height,
-                            gboolean height_present, guint32 bytes,
-                            gboolean bytes_present)
-{
-    if (!ev) {
-        return;
-    }
-    if (ev->media) {
-        hx_chat_media_free (ev->media);
-        ev->media = NULL;
-    }
-    if (!id || id_len == 0 || !mime || mime_len == 0) {
-        return; /* detach */
-    }
-    HxChatMedia *m = g_new0 (HxChatMedia, 1);
-    m->id_len = id_len;
-    m->id = g_malloc (id_len);
-    memcpy (m->id, id, id_len);
-    m->mime_len = mime_len;
-    m->mime = g_strndup (mime, mime_len);
-    m->width = width;
-    m->width_present = width_present;
-    m->height = height;
-    m->height_present = height_present;
-    m->bytes = bytes;
-    m->bytes_present = bytes_present;
-    ev->media = m;
-}
 
 /* Map a canonical MIME like "image/png" → short label "PNG". The
  * placeholder line uses the short label so the row stays compact
@@ -984,8 +780,8 @@ mime_short_label (const char *mime)
         return "GIF";
     }
     /* Unknown MIME — only pass through verbatim if UTF-8-valid.
-     * `mime` is NUL-terminated (hx_chat_event_attach_media
-     * g_strndup'd it), so g_utf8_validate's length=-1 walk
+     * `mime` is NUL-terminated (chat_event_new g_strndup's
+     * it), so g_utf8_validate's length=-1 walk
      * terminates. Pass NULL for the end-of-valid-bytes out param;
      * we only care about the all-or-nothing verdict. */
     if (!g_utf8_validate (mime, -1, NULL)) {

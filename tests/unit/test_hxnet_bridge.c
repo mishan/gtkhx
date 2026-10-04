@@ -102,6 +102,20 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     last_dispatch_type = type;
 }
 
+/* Recording, as the frame dispatch stub is: what reaches the session's
+ * events is what the guard let through. */
+static int session_event_calls;
+static struct htlc_conn *last_session_event_htlc;
+
+void hx_recv_session_event (struct htlc_conn *htlc, const void *ev);
+void
+hx_recv_session_event (struct htlc_conn *htlc, const void *ev)
+{
+    (void)ev;
+    session_event_calls++;
+    last_session_event_htlc = htlc;
+}
+
 /* Stub: bridge_on_state_cb calls this on LOGIN_SENDING, but these
  * unit tests drive the header-pack / dispatch paths directly and
  * never feed a LOGIN_SENDING state, so it should never fire. */
@@ -281,6 +295,8 @@ hxnet_connection_login_trans (struct hxnet_connection_opaque *conn)
  * which is fine for linking. */
 typedef void (*test_stub_state_cb) (struct hxnet_connection_opaque *conn,
                                     guint32 state, void *user_data);
+typedef void (*test_stub_session_cb) (struct hxnet_connection_opaque *conn,
+                                      const void *ev, void *user_data);
 
 /* What the open_plaintext stub records and returns. Driving a real install
  * is what makes the refusal and the stale-actor guards testable at Tier 1;
@@ -290,6 +306,7 @@ static struct hxnet_connection_opaque *open_result;
 static int open_calls;
 static test_stub_event_cb last_open_event_cb;
 static test_stub_shutdown_cb last_open_shutdown_cb;
+static test_stub_session_cb last_open_session_cb;
 static void *last_open_user_data;
 typedef int (*test_stub_verify_cb) (const guint8 *fp, gsize fp_len,
                                     void *user_data);
@@ -299,7 +316,8 @@ struct hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
-    test_stub_state_cb on_state, void *user_data);
+    test_stub_state_cb on_state, test_stub_session_cb on_session,
+    void *user_data);
 struct hxnet_connection_opaque *
 hxnet_connection_open_plaintext (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
@@ -307,7 +325,8 @@ hxnet_connection_open_plaintext (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
-    test_stub_state_cb on_state, void *user_data)
+    test_stub_state_cb on_state, test_stub_session_cb on_session,
+    void *user_data)
 {
     (void)host;
     (void)host_len;
@@ -332,6 +351,7 @@ hxnet_connection_open_plaintext (
     open_calls++;
     last_open_event_cb = on_event;
     last_open_shutdown_cb = on_shutdown;
+    last_open_session_cb = on_session;
     last_open_user_data = user_data;
     return open_result;
 }
@@ -344,19 +364,17 @@ struct hxnet_connection_opaque *hxnet_connection_open_hope (
     const guint8 *compress_alg, gsize compress_alg_len, const guint8 *proxy_uri,
     gsize proxy_uri_len, test_stub_event_cb on_event,
     test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
-    void *user_data);
+    test_stub_session_cb on_session, void *user_data);
 struct hxnet_connection_opaque *
-hxnet_connection_open_hope (const guint8 *host, gsize host_len, guint16 port,
-                            const guint8 *login, gsize login_len,
-                            const guint8 *password, gsize password_len,
-                            const guint8 *name, gsize name_len, guint16 icon,
-                            guint16 version, guint16 caps,
-                            const guint8 *cipher_alg, gsize cipher_alg_len,
-                            const guint8 *compress_alg, gsize compress_alg_len,
-                            const guint8 *proxy_uri, gsize proxy_uri_len,
-                            test_stub_event_cb on_event,
-                            test_stub_shutdown_cb on_shutdown,
-                            test_stub_state_cb on_state, void *user_data)
+hxnet_connection_open_hope (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *compress_alg, gsize compress_alg_len, const guint8 *proxy_uri,
+    gsize proxy_uri_len, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    test_stub_session_cb on_session, void *user_data)
 {
     (void)host;
     (void)host_len;
@@ -379,6 +397,7 @@ hxnet_connection_open_hope (const guint8 *host, gsize host_len, guint16 port,
     (void)on_event;
     (void)on_shutdown;
     (void)on_state;
+    (void)on_session;
     (void)user_data;
     g_assert_not_reached ();
     return NULL;
@@ -390,8 +409,8 @@ struct hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
-    test_stub_state_cb on_state, test_stub_verify_cb verify_cert,
-    void *user_data);
+    test_stub_state_cb on_state, test_stub_session_cb on_session,
+    test_stub_verify_cb verify_cert, void *user_data);
 struct hxnet_connection_opaque *
 hxnet_connection_open_plaintext_tls (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
@@ -399,8 +418,8 @@ hxnet_connection_open_plaintext_tls (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
-    test_stub_state_cb on_state, test_stub_verify_cb verify_cert,
-    void *user_data)
+    test_stub_state_cb on_state, test_stub_session_cb on_session,
+    test_stub_verify_cb verify_cert, void *user_data)
 {
     (void)host;
     (void)host_len;
@@ -420,6 +439,7 @@ hxnet_connection_open_plaintext_tls (
     (void)on_event;
     (void)on_shutdown;
     (void)on_state;
+    (void)on_session;
     (void)verify_cert;
     (void)user_data;
     g_assert_not_reached ();
@@ -663,8 +683,10 @@ reset_stub_state (void)
     open_result = FAKE_A;
     last_open_event_cb = NULL;
     last_open_shutdown_cb = NULL;
+    last_open_session_cb = NULL;
     last_open_user_data = NULL;
     dispatch_calls = 0;
+    session_event_calls = 0;
     last_dispatch_htlc = NULL;
     frame_free_calls = 0;
     destroy_calls = 0;
@@ -848,6 +870,32 @@ test_events_route_to_their_own_connection (void)
     hx_conn_free (b);
 }
 
+/* The session's events pass the same gates as a frame: the live handle of an
+ * open connection, and nothing else. */
+static void
+test_session_event_from_a_stale_actor_or_a_closed_connection_is_dropped (void)
+{
+    struct htlc_conn *a = test_conn_new ();
+
+    reset_stub_state ();
+    open_result = FAKE_A;
+    void *ud_a = install_and_capture (a);
+    test_stub_session_cb on_session = last_open_session_cb;
+    g_assert_nonnull (on_session);
+
+    on_session (FAKE_A, NULL, ud_a);
+    g_assert_cmpint (session_event_calls, ==, 1);
+    g_assert_true (last_session_event_htlc == a);
+
+    on_session (FAKE_B, NULL, ud_a);
+    hx_conn_set_fd (a, 0);
+    on_session (FAKE_A, NULL, ud_a);
+    g_assert_cmpint (session_event_calls, ==, 1);
+
+    hx_bridge_uninstall (a);
+    hx_conn_free (a);
+}
+
 /* A shutdown from an actor this connection has already replaced must not tear
  * down the live one. This is the guard in the more dangerous direction: the
  * old code's failure mode was destroying the *new* handle. */
@@ -985,6 +1033,9 @@ main (int argc, char *argv[])
                      test_event_from_a_stale_actor_is_dropped);
     g_test_add_func ("/hxnet_bridge/guard/events_route_to_their_own_connection",
                      test_events_route_to_their_own_connection);
+    g_test_add_func (
+        "/hxnet_bridge/guard/session_event_from_a_stale_actor_or_closed",
+        test_session_event_from_a_stale_actor_or_a_closed_connection_is_dropped);
     g_test_add_func ("/hxnet_bridge/guard/shutdown_from_a_stale_actor",
                      test_shutdown_from_a_stale_actor_is_ignored);
     return g_test_run ();

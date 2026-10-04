@@ -339,6 +339,11 @@ mod imp {
                     Signal::builder("connection-state-changed")
                         .param_types([Type::POINTER, Type::U32])
                         .build(),
+                    // request-failed: (htlc*, reason*) — the server refused
+                    // a request and said why; the view shows and sounds it.
+                    Signal::builder("request-failed")
+                        .param_types([Type::POINTER, Type::POINTER])
+                        .build(),
                 ]
             })
         }
@@ -991,6 +996,18 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_notice(
         ptr_value(old_name as *const c_void),
     ];
     emit(self_, "user-notice", &v);
+}
+
+/// # Safety
+/// `self_`/`htlc` valid; `reason` a valid NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_request_failed(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    reason: *const c_char,
+) {
+    let v = [ptr_value(htlc), ptr_value(reason as *const c_void)];
+    emit(self_, "request-failed", &v);
 }
 
 /// # Safety

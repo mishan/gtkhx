@@ -781,13 +781,9 @@ test('news_file', test_news_file,
 # receive path moved to owned handles; the parsers are covered by hxproto's
 # native cargo tests, e.g. parse::tests::dirlist_* and catlist_*.)
 
-# chat_event — hx_chat_event_new is the parsed value-object the
-# GtkhxSession::chat signal carries to chat.c and notify.c. Pins
-# the UTF-8 fix-up, "[hx]" info-prefix detect, sender/body split,
-# and is_self compare so a future refactor of any one step doesn't
-# silently de-sync the consumers. Doesn't use the wire fixture —
-# the constructor takes already-sanitised body bytes, not a wire
-# frame.
+# chat_event — the placeholder row a chat line's inline media draws
+# (hx_chat_media_placeholder_line). The HxChatEvent itself is built in
+# Rust and tested there.
 test_chat_event = executable('test_chat_event',
   'proto/test_chat_event.c',
   '../src/proto_helpers.c',
@@ -846,9 +842,8 @@ test('capabilities', test_capabilities,
 # chat_history — fogWraith Capabilities-Chat-History.md extension.
 # Pins the field-ID and flag-bit numeric constants, exercises the
 # packed-binary HxHistoryEntry parser (typical / minimum / flag /
-# sub-field-skip / malformed inputs) and the request-sender
-# hx_get_chat_history (cap-gate refusal, bare request, before /
-# after / range cursors, header type).
+# sub-field-skip / malformed inputs). The request senders' cases run
+# under `cargo test -p hxhandlers`.
 test_chat_history = executable('test_chat_history',
   'proto/test_chat_history.c',
   '../src/chat_history.c',
@@ -1453,21 +1448,6 @@ test_integration_two_client_chat = executable('test_integration_two_client_chat'
   link_depends        : rust_build,
 )
 test('two_client_chat', test_integration_two_client_chat,
-     suite   : 'integration',
-     timeout : 30)
-
-# emoji_roundtrip — A encodes an emoji-bearing line through the legacy
-# send path (emoji → :tada:), B decodes the broadcast back to the emoji.
-# Exercises phase E2 + E3 end-to-end against the Mac Roman mhxd and guards
-# the "don't break Mac Roman" requirement (wire form stays ASCII).
-test_integration_emoji_roundtrip = executable('test_integration_emoji_roundtrip',
-  'integration/test_emoji_roundtrip.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('emoji_roundtrip', test_integration_emoji_roundtrip,
      suite   : 'integration',
      timeout : 30)
 

@@ -129,6 +129,13 @@ pub enum Event {
     /// variants once the C consumer is ready.
     Frame(Frame),
 
+    /// What the session made of what the server sent, in the domains
+    /// it handles itself (`hxsession::Config::handled`): their events,
+    /// the replies the consumer said to expect, and with the tap on,
+    /// each transaction as it came. On the same channel as the frames,
+    /// so the two arrive in the order the server sent them.
+    Session(hxsession::Event),
+
     /// The actor has stopped. After this event, the channel
     /// closes; the consumer's `recv` returns `None`. The actor
     /// never emits more events after [`Event::Shutdown`].

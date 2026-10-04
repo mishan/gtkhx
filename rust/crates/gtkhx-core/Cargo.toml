@@ -20,3 +20,6 @@ glib = { workspace = true }
 # parser can call parse_history_entry without breaking this crate's
 # "self-contained, glib-only linkage" invariant (see [lib] above).
 hxproto = { workspace = true }
+# Pure Rust too: a chat-history entry is read once, there, for the C
+# readers of HxHistoryEntry as for the session's own events.
+hxsession = { workspace = true }

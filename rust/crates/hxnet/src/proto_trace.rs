@@ -23,7 +23,7 @@ use hxproto::wire::ChunkIter;
 
 /// Cheap once-checked gate: enabled when `GTKHX_DEBUG` contains the
 /// `proto` (or `all`) category, matching `src/debug.c`'s parsing.
-fn enabled() -> bool {
+pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         std::env::var("GTKHX_DEBUG")

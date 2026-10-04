@@ -1,13 +1,10 @@
 //! `HxChatEvent` + nested `HxChatMedia` — chat-line value object
-//! (`src/proto_helpers.h`). R4.2c.
-//!
-//! Only the boxed type moves: `hx_chat_event_new` (the wire-bytes parse),
-//! `hx_chat_event_attach_media`, and the media placeholder formatters
-//! stay in C and keep reading/writing these `#[repr(C)]` structs. The
-//! nested `HxChatMedia` copy/free are private here (the C side's were
-//! `static`); C keeps its own `hx_chat_media_free` because
-//! `hx_chat_event_attach_media` still calls it.
+//! (`src/proto_helpers.h`): the boxed type, and [`chat_event_new`], which
+//! builds one from the line the session decoded. The media placeholder
+//! formatter stays in C and reads these `#[repr(C)]` structs, as do the
+//! chat output and notification consumers.
 
+use crate::boxed::history::dup_by_len;
 use crate::boxed::register_once;
 use glib::ffi::{g_free, g_malloc, g_malloc0, g_strndup, GType};
 use std::ffi::c_char;
@@ -80,6 +77,117 @@ const _: () = {
     assert!(offset_of!(HxChatEvent, media) == 64);
 };
 
+/// Where the nick and the body sit in a "nick: body" chat line, as byte
+/// ranges: `(nick_off, nick_len, body_off, body_len)`. Servers pad the line
+/// ahead of the nick, and a body may itself hold colons. `None` for a line
+/// without that shape — an emote, a server's prose — or whose part before
+/// the colon is longer than a nick can be (31 bytes), which is prose that
+/// happens to hold a colon rather than a nick.
+pub fn split_nick_body(line: &[u8]) -> Option<(usize, usize, usize, usize)> {
+    let start = line.iter().position(|&c| c != b' ' && c != b'\t')?;
+    let colon = start + line[start..].iter().position(|&c| c == b':')?;
+    if colon == start || colon - start > 31 {
+        return None;
+    }
+    let body = colon + 1 + line[colon + 1..].iter().take_while(|&&c| c == b' ').count();
+    Some((start, colon - start, body, line.len() - body))
+}
+
+/// `gboolean hx_chat_split_nick_body (line, line_len, *name_offset,
+/// *name_len, *body_offset, *body_len)` — [`split_nick_body`] for C; each
+/// out-param may be NULL.
+///
+/// # Safety
+/// `line` is NULL or valid for `line_len` bytes; each out-param is NULL or
+/// a valid `gsize *`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_split_nick_body(
+    line: *const c_char,
+    line_len: usize,
+    name_offset: *mut usize,
+    name_len: *mut usize,
+    body_offset: *mut usize,
+    body_len: *mut usize,
+) -> i32 {
+    if line.is_null() {
+        return 0;
+    }
+    let bytes = std::slice::from_raw_parts(line as *const u8, line_len);
+    let Some(parts) = split_nick_body(bytes) else {
+        return 0;
+    };
+    for (out, v) in [
+        (name_offset, parts.0),
+        (name_len, parts.1),
+        (body_offset, parts.2),
+        (body_len, parts.3),
+    ] {
+        if !out.is_null() {
+            *out = v;
+        }
+    }
+    1
+}
+
+/// A heap `HxChatEvent` for a chat line the session decoded, freed by
+/// [`hx_chat_event_free`]. With `shortcodes`, `:shortcode:`s become their
+/// emoji across the whole line before it is split: some servers format a
+/// line with no "nick:", and a body-only decode would take a shortcode's
+/// own colon for the separator. A nick is never a shortcode — those are
+/// lowercase and colon-delimited on both sides. `self_nick` is the name
+/// this connection goes by, which marks the line as its own when the
+/// sender is exactly that.
+pub fn chat_event_new(
+    cid: u32,
+    uid: u16,
+    text: &str,
+    media: Option<&hxsession::ChatMedia>,
+    self_nick: &[u8],
+    shortcodes: bool,
+) -> *mut HxChatEvent {
+    let decoded;
+    let line = if shortcodes {
+        decoded = hxproto::emoji::shortcodes_to_emoji(text);
+        decoded.as_bytes()
+    } else {
+        text.as_bytes()
+    };
+    let split = split_nick_body(line);
+    // SAFETY: the allocations are zeroed and sized for their structs, and
+    // every pointer stored in them is a fresh glib allocation.
+    unsafe {
+        let e = g_malloc0(size_of::<HxChatEvent>()) as *mut HxChatEvent;
+        (*e).cid = cid;
+        (*e).uid = uid;
+        (*e).line = dup_by_len(line);
+        (*e).line_len = line.len();
+        if let Some((so, sl, bo, bl)) = split {
+            (*e).sender_off = so;
+            (*e).sender_len = sl;
+            (*e).body_off = bo;
+            (*e).body_len = bl;
+            (*e).is_self = i32::from(!self_nick.is_empty() && &line[so..so + sl] == self_nick);
+        }
+        if let Some(m) = media.filter(|m| !m.id.is_empty() && !m.mime.is_empty()) {
+            let c = g_malloc0(size_of::<HxChatMedia>()) as *mut HxChatMedia;
+            (*c).id_len = m.id.len();
+            let id = g_malloc(m.id.len()) as *mut u8;
+            ptr::copy_nonoverlapping(m.id.as_ptr(), id, m.id.len());
+            (*c).id = id;
+            (*c).mime_len = m.mime.len();
+            (*c).mime = g_strndup(m.mime.as_ptr() as *const c_char, m.mime.len());
+            (*c).width = m.width.unwrap_or(0);
+            (*c).width_present = i32::from(m.width.is_some());
+            (*c).height = m.height.unwrap_or(0);
+            (*c).height_present = i32::from(m.height.is_some());
+            (*c).bytes = m.bytes.unwrap_or(0);
+            (*c).bytes_present = i32::from(m.bytes.is_some());
+            (*e).media = c;
+        }
+        e
+    }
+}
+
 /// Deep-copy an `HxChatMedia` (mirrors the deleted C static
 /// `hx_chat_media_copy`). `id` is raw bytes (`g_malloc` + copy), `mime`
 /// is NUL-terminated (`g_strndup`). `pub(crate)` so [`crate::boxed::media_table`]
@@ -111,8 +219,7 @@ pub(crate) unsafe fn media_copy(m: *const HxChatMedia) -> *mut HxChatMedia {
     c
 }
 
-/// Free an `HxChatMedia` (mirrors the C static `hx_chat_media_free` —
-/// which the C side keeps for `attach_media`). `pub(crate)` so
+/// Free an `HxChatMedia`. `pub(crate)` so
 /// [`crate::boxed::media_table`] can release its entries.
 ///
 /// # Safety
@@ -236,6 +343,136 @@ mod tests {
             (*e).media = m;
         }
         e
+    }
+
+    /// An event's line, and its sender and body where it split.
+    unsafe fn read(e: *const HxChatEvent) -> (String, Option<(String, String)>, bool) {
+        let line = cstr((*e).line, (*e).line_len);
+        let part = |off: usize, len: usize| line[off..off + len].to_string();
+        let split = ((*e).sender_len > 0).then(|| {
+            (
+                part((*e).sender_off, (*e).sender_len),
+                part((*e).body_off, (*e).body_len),
+            )
+        });
+        (line, split, (*e).is_self != 0)
+    }
+
+    #[test]
+    fn a_line_splits_into_its_sender_and_body() {
+        let split = |s: &str, b: &str| Some((s.to_string(), b.to_string()));
+        let cases = [
+            (
+                " misha:  hello world",
+                "",
+                split("misha", "hello world"),
+                false,
+            ),
+            (
+                "  Alice Cooper:  rock",
+                "",
+                split("Alice Cooper", "rock"),
+                false,
+            ),
+            (
+                " bob:  see http://x.org",
+                "",
+                split("bob", "see http://x.org"),
+                false,
+            ),
+            (
+                "misha: héllo wörld",
+                "",
+                split("misha", "héllo wörld"),
+                false,
+            ),
+            (" misha:  ", "", split("misha", ""), false),
+            ("misha: hi all", "misha", split("misha", "hi all"), true),
+            ("alice: hi all", "misha", split("alice", "hi all"), false),
+            ("misha: hi", "mish", split("misha", "hi"), false),
+            ("*** misha waves", "", None, false),
+            (" : oops", "", None, false),
+            ("      ", "", None, false),
+            (
+                " the long preamble I wrote before: was here",
+                "",
+                None,
+                false,
+            ),
+            ("", "misha", None, false),
+        ];
+        for (line, me, want, mine) in cases {
+            unsafe {
+                let e = chat_event_new(3, 4242, line, None, me.as_bytes(), false);
+                assert_eq!(read(e), (line.to_string(), want, mine), "{line:?}");
+                assert_eq!(((*e).cid, (*e).uid), (3, 4242));
+                assert!((*e).media.is_null());
+                hx_chat_event_free(e);
+            }
+        }
+    }
+
+    #[test]
+    fn shortcodes_become_emoji_when_asked() {
+        let cases = [
+            (
+                " misha:  :tada: party",
+                true,
+                " misha:  🎉 party",
+                Some("misha"),
+            ),
+            (" bob:  hi :fire:", true, " bob:  hi 🔥", Some("bob")),
+            (":tada: everyone", true, "🎉 everyone", None),
+            (
+                " m:  at 10:30, 4:3, :notacode:",
+                true,
+                " m:  at 10:30, 4:3, :notacode:",
+                Some("m"),
+            ),
+            (
+                " misha:  :tada: party",
+                false,
+                " misha:  :tada: party",
+                Some("misha"),
+            ),
+        ];
+        for (text, shortcodes, want, sender) in cases {
+            unsafe {
+                let e = chat_event_new(0, 0, text, None, b"", shortcodes);
+                let (line, split, _) = read(e);
+                assert_eq!(line, want, "{text:?}");
+                assert_eq!(split.map(|s| s.0).as_deref(), sender, "{text:?}");
+                hx_chat_event_free(e);
+            }
+        }
+    }
+
+    #[test]
+    fn media_rides_along_when_it_names_a_picture() {
+        let png = hxsession::ChatMedia {
+            id: vec![0xAB, 0xCD],
+            mime: b"image/png".to_vec(),
+            width: Some(800),
+            height: None,
+            bytes: Some(124_000),
+        };
+        let no_id = hxsession::ChatMedia {
+            id: vec![],
+            ..png.clone()
+        };
+        unsafe {
+            let e = chat_event_new(0, 0, "alice: look", Some(&png), b"", false);
+            let m = &*(*e).media;
+            assert_eq!(std::slice::from_raw_parts(m.id, m.id_len), [0xAB, 0xCD]);
+            assert_eq!(cstr(m.mime, m.mime_len), "image/png");
+            assert_eq!((m.width, m.width_present, m.height_present), (800, 1, 0));
+            assert_eq!((m.bytes, m.bytes_present), (124_000, 1));
+            hx_chat_event_free(e);
+
+            let e = chat_event_new(0, 0, "alice: look", Some(&no_id), b"", false);
+            assert!((*e).media.is_null());
+            hx_chat_event_free(e);
+        }
     }
 
     #[test]

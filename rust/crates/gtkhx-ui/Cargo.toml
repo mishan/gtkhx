@@ -18,6 +18,8 @@ rotulus-layout = { workspace = true }
 rotulus = { workspace = true }
 gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
+# The history bench's entries, as the session reads them.
+hxsession = { workspace = true }
 # The Files browser reads a finished transfer's size off its handle.
 hxnet = { path = "../hxnet" }
 hxmodel = { path = "../hxmodel" }

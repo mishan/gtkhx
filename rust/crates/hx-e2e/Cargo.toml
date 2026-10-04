@@ -22,4 +22,13 @@ rig = []
 hxnet = { path = "../hxnet" }
 hxproto = { workspace = true }
 hxrequest = { path = "../hxrequest" }
+hxsession = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+# What the view makes of a chat line, and how a line goes out to a server
+# that agreed to no text encoding.
+gtkhx-core = { path = "../gtkhx-core" }
+hxtext = { path = "../hxtext", default-features = false }
+# The GLib main loop the app's connection delivers its events on.
+glib = { workspace = true }

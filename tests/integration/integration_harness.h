@@ -320,7 +320,7 @@ extern int integration_open_login_tls_or_skip (const hx_test_server *srv,
 /*
  * Send HTLC_HDR_GET_CHAT_HISTORY (TRAN 700) for `channel_id`
  * with the same "0 means omit" cursor / limit semantics as
- * src/chat_history.c::hx_get_chat_history. Returns the trans
+ * production's hx_chat_history_fetch_*. Returns the trans
  * id assigned by hlpack (or 0 on send failure) — the caller
  * filters the TASK reply by matching trans against this value.
  *

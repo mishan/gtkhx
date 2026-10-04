@@ -12,7 +12,7 @@
  * the only fields it touches — the test sets those up via the
  * wire_fixture builder under tests/proto/.
  *
- * The original handlers (task_error, hx_rcv_chat, etc.) remain in
+ * The original handlers (task_error, etc.) remain in
  * their old translation units; they now call into these helpers and
  * keep doing the GUI side-effects (toast, sound, hx_output dispatch)
  * themselves. The shape of the change is the same as the Tier 1
@@ -90,8 +90,8 @@ extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame,
  * may equal &buf[0] or &buf[1] depending on the leading-LF strip.
  * Callers MUST NOT free `text`.
  *
- * Buffer size matches the historical 8 KiB stack buffer used by
- * hx_rcv_chat. Larger payloads are silently truncated.
+ * Buffer size matches the 8 KiB body cap the session reads chat
+ * with. Larger payloads are silently truncated.
  */
 struct hx_chat_msg {
     guint32 cid;
@@ -610,8 +610,7 @@ extern gboolean hx_highlight_match (const char *body, gsize body_len,
 /*
  * HxChatEvent — a parsed chat-message value object.
  *
- * The wire side hands us raw bytes from HTLS_HDR_CHAT (already
- * CR-to-LF'd and strip_ansi'd by hx_chat_extract). Several
+ * The session hands over a chat line decoded to UTF-8. Several
  * consumers downstream want the same set of derived facts about
  * that line:
  *
@@ -625,10 +624,9 @@ extern gboolean hx_highlight_match (const char *body, gsize body_len,
  *     notification preview, plus the is_info / is_self flags to
  *     decide whether to fire at all.
  *
- * Both used to do the parse work themselves on the raw bytes —
- * UTF-8 fix-up, hx_chat_split_nick_body, INFOPREFIX detect, own-
- * nick compare. Now hx_chat_event_new runs that work once at
- * emit time and packages the result. The GtkhxSession::chat
+ * gtkhx-core's chat_event_new does that work — the emoji
+ * shortcodes, hx_chat_split_nick_body, the own-nick compare — once
+ * at emit time and packages the result. The GtkhxSession::chat
  * signal carries an HxChatEvent * payload (boxed type — copy /
  * free hooks make multi-subscriber refcounting work).
  *
@@ -683,42 +681,21 @@ struct _HxChatEvent {
     gsize sender_off, sender_len;
     gsize body_off, body_len;
 
-    gboolean is_info; /* "[hx]" info-prefix line */
+    gboolean is_info; /* never set: a server's line is not ours */
     gboolean is_self; /* sender == own nick */
 
     /* Inline-media extension (Phase 9.D). NULL when the chat
      * carried no media chunks. The companion-fields-orphan case
      * (exactly one of ID / TYPE present) never reaches here —
-     * rcv.c drops those at the receive site per spec. */
+     * the session drops the line, per spec. */
     HxChatMedia *media;
 };
 
 #define HX_TYPE_CHAT_EVENT (hx_chat_event_get_type ())
 extern GType hx_chat_event_get_type (void) G_GNUC_CONST;
 
-/* Build an HxChatEvent from raw wire bytes. `raw` may carry any
- * encoding seen on the wire (Mac Roman, Latin-1, UTF-8); the
- * constructor runs it through gtkhx_text_to_utf8 once. `self_nick`
- * is NULL-safe — passing NULL means is_self always comes back
- * FALSE. Returns a freshly-allocated event the caller owns. */
-extern HxChatEvent *hx_chat_event_new (const char *raw, gsize raw_len,
-                                       guint32 cid, guint16 uid,
-                                       const char *self_nick);
-
 extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
 extern void hx_chat_event_free (HxChatEvent *e);
-
-/* Attach inline-media metadata to a chat event. Copies the id +
- * mime bytes into freshly-owned buffers; caller's pointers may
- * be released afterwards. Replaces any previously-attached
- * media. Idempotent on NULL `ev`. Setting `mime` to NULL or
- * `id_len`/`mime_len` to 0 detaches existing media. */
-extern void hx_chat_event_attach_media (HxChatEvent *ev, const guint8 *id,
-                                        gsize id_len, const char *mime,
-                                        gsize mime_len, guint32 width,
-                                        gboolean width_present, guint32 height,
-                                        gboolean height_present, guint32 bytes,
-                                        gboolean bytes_present);
 
 /* Format-friendly helper for the placeholder row. Returns a
  * newly-allocated UTF-8 string the caller must g_free. Example

@@ -38,6 +38,8 @@
 extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
                                gsize frame_len, guint32 type, guint32 trans,
                                guint32 flag, guint32 body_len);
+/* hxhandlers: the domains the session handles itself. */
+extern void hx_recv_session_event (struct htlc_conn *htlc, const void *ev);
 
 /* Forward declaration of the production teardown. Defined in
  * network.c; we trampoline to it from the shutdown bridge.
@@ -264,6 +266,9 @@ typedef void (*hxnet_event_cb_t) (hxnet_connection_opaque *conn,
                                   hxnet_frame_t *frame, void *user_data);
 typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
                                      void *user_data);
+/* `ev` is an hxsession::Event, for Rust to read; HxnetSessionCallback. */
+typedef void (*hxnet_session_cb_t) (hxnet_connection_opaque *conn,
+                                    const void *ev, void *user_data);
 /* Phase G state callback — fires once per ConnectionState
  * transition. Mirror of HxnetStateCallback in
  * rust/crates/hxnet/src/ffi.rs. `state` is a HXNET_BRIDGE_STATE_*
@@ -305,7 +310,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
-    hxnet_state_cb_t on_state, void *user_data);
+    hxnet_state_cb_t on_state, hxnet_session_cb_t on_session, void *user_data);
 
 /* HOPE: the session runs HOPE's two steps and the transport they agree.
  * Mirror of hxnet_connection_open_hope in rust/crates/hxnet/src/ffi.rs. */
@@ -317,7 +322,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_hope (
     const guint8 *compress_alg, gsize compress_alg_len, const guint8 *proxy_uri,
     gsize proxy_uri_len, hxnet_event_cb_t on_event,
     hxnet_shutdown_cb_t on_shutdown, hxnet_state_cb_t on_state,
-    void *user_data);
+    hxnet_session_cb_t on_session, void *user_data);
 extern guint32 hxnet_connection_login_trans (hxnet_connection_opaque *conn);
 
 /* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
@@ -330,8 +335,8 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
     guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
-    hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
-    void *user_data);
+    hxnet_state_cb_t on_state, hxnet_session_cb_t on_session,
+    hxnet_verify_cert_cb_t verify_cert, void *user_data);
 
 /* Retained HOPE AEAD material getter (rust/crates/hxnet/src/ffi.rs):
  * returns an opaque HxnetHopeAead handle for a HOPE-ChaCha20 control
@@ -468,6 +473,19 @@ bridge_on_event_cb (hxnet_connection_opaque *conn, hxnet_frame_t *frame,
      * matches the "process and free inside the callback"
      * pattern documented on HxnetEventCallback. */
     hxnet_frame_free (frame);
+}
+
+/* What the session made of what the server sent, behind the same gates a
+ * frame passes (bridge_on_event_cb, hx_bridge_dispatch_frame). */
+static void
+bridge_on_session_cb (hxnet_connection_opaque *conn, const void *ev,
+                      void *user_data)
+{
+    struct htlc_conn *htlc = conn_from_user_data (user_data);
+
+    if (htlc && conn == conn_handle (htlc) && hx_conn_fd (htlc) != 0) {
+        hx_recv_session_event (htlc, ev);
+    }
 }
 
 static void
@@ -716,7 +734,7 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
         (const guint8 *)name, strlen (name), icon, version, caps, trans,
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
-        conn_user_data (htlc, host, port));
+        bridge_on_session_cb, conn_user_data (htlc, host, port));
     if (!h) {
         /* open_plaintext logs its own g_critical on the failure
          * paths (NULL/empty host, non-UTF-8 host, trans==0, runtime
@@ -765,7 +783,7 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
         (const guint8 *)compress_alg, compress_alg ? strlen (compress_alg) : 0,
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
-        conn_user_data (htlc, host, port));
+        bridge_on_session_cb, conn_user_data (htlc, host, port));
     if (!h) {
         return FALSE;
     }
@@ -845,7 +863,8 @@ hx_bridge_install_orchestrated_plaintext_tls (
         (const guint8 *)name, strlen (name), icon, version, caps, trans,
         (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
-        bridge_on_verify_cert_cb, conn_user_data (htlc, host, port));
+        bridge_on_session_cb, bridge_on_verify_cert_cb,
+        conn_user_data (htlc, host, port));
     if (!h) {
         return FALSE;
     }
