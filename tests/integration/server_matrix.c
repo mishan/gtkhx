@@ -121,9 +121,9 @@ const hx_test_server hx_test_server_matrix[] = {
                         * but was retired alongside the RC4 removal. */
                 | HX_TEST_CAP_BLOWFISH | HX_TEST_CAP_NICK_COLORS
                 | HX_TEST_CAP_TLS
-                /* Phase 8.F voice tests. Janus is the only
-                        * matrix entry shipping the WebRTC voice
-                        * extension; mhxd has no voice support. The
+                /* The voice tests take the first VOICE row,
+                        * this one, though hxd-ng has voice too;
+                        * mhxd has no voice support. The
                         * Dockerfile EnableVoice: true + the bundled
                         * guest/admin account VoiceChat: true flip
                         * cover both the cap echo and the per-account

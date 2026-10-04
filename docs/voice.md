@@ -591,13 +591,13 @@ and `tools/voice-gui-repro-loop.sh` loops to catch the flake. The
 hooks in the voice panel drive the real join/unmute path for those
 scripts; both are no-ops unless set.
 
-### Janus never offers a participant whose audio arrived after others joined
+### Janus 2.0.13 and earlier never offers a participant whose audio arrived after others joined
 
 When two people join within the ICE/DTLS window of each other, Janus
-offers the later joiner to the earlier one but never the reverse, so the
-later joiner never hears the earlier. Server-side; the details are in
-[janus-bugs.md](janus-bugs.md). hxd-ng offers both ways, and the
-`simultaneous_join` integration test runs against it.
+2.0.13 and earlier offers the later joiner to the earlier one but never
+the reverse, so the later joiner never hears the earlier. Server-side, and
+leaving and rejoining recovers; the `simultaneous_join` integration test
+covers it.
 
 ### Server omits the per-user mid on renegotiation to existing participants
 

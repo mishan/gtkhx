@@ -102,8 +102,7 @@ fn mkdir_refuses_an_existing_name_and_a_missing_parent() {
 
 #[test]
 fn a_255_byte_name_round_trips() {
-    for s in servers_with(&[Cap::FileAdmin, Cap::LongNames]) {
-        let mut c = Client::admin(s, 0);
+    for mut c in admins() {
         let mut s = Scratch::new(&mut c, "long");
         let (dir, long) = (s.path().to_string(), "L".repeat(255));
         let path = s.join(&long);

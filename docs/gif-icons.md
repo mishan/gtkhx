@@ -110,9 +110,9 @@ allocation. Support is discovered by probing.
 
 **The probe must be timeout-based, not error-based.** An unsupported
 server does not return a task error for an unknown opcode — Janus
-*silently drops* it with no reply at all (verified with a bogus opcode:
-zero response). So the probe cannot rely on a non-zero error code; it
-uses a watchdog, the same shape the tracker-v3 probe already uses.
+2.0.13 and earlier *silently drops* it with no reply at all (verified
+with a bogus opcode: zero response). So the probe cannot rely on a
+non-zero error code; it uses a watchdog, the same shape the tracker-v3 probe already uses.
 
 As built (`src/gif_icons.c`):
 

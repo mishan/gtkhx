@@ -173,14 +173,6 @@ Which `MediaErrorCode` the server picks, from the integration suite:
   (both that and `Generic` are spec-conforming).
 - Download of a non-existent handle → `NotAuthorized` (4) or `Generic`.
 
-**Live server bug worth knowing.** Janus's Go YAML decoder treats a
-`0s` duration as *unset* and silently applies the default, so the
-rate-limit interval in a test container's config must be an explicit,
-non-zero value (the suite uses `1ms`) — writing `0s` to mean "no limit"
-leaves the spec-default 10 s per-account interval in force, and
-back-to-back uploads through a shared account then fail with a
-rate-limit task error.
-
 Integration coverage runs against Janus: capability echo, limits
 parsing, single-shot and chunked upload round-trips, chat-with-media
 relay, single-chunk and multi-chunk download, and each of the error

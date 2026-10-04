@@ -59,8 +59,8 @@ pub fn get_info(dir: &[u8], name: &[u8], utf8: bool) -> Option<Request> {
 /// its comment when `comment` is given (the Get Info dialog's Save).
 ///
 /// A `rename` that is the current name goes out as no rename at all: Janus
-/// answers a rename to the item's own name with an error, even though it
-/// saves the comment.
+/// 2.0.13 and earlier answers a rename to the item's own name with an error,
+/// even though it saves the comment.
 pub fn set_info(path: &[u8], rename: &[u8], comment: Option<&[u8]>, utf8: bool) -> Option<Request> {
     let (dir, name) = split(path);
     let rename = (rename != name).then(|| name_for_wire(rename, utf8));
