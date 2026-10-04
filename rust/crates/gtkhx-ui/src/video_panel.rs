@@ -16,7 +16,8 @@
 //! video until asked (Video Subscribe, 610), and asks are the complete
 //! set, so the panel is the one place that computes it: while its page is
 //! mapped, the publications whose tiles are in view or about to be; while
-//! hidden — another tab, a collapsed dock, the window withdrawn — nothing.
+//! hidden — another tab, a collapsed dock, the window withdrawn, minimized
+//! or otherwise out of sight — nothing; and on a metered connection, one.
 //! A collapsed panel or a tile scrolled away costs no bandwidth and no
 //! decoding, which is the spec's reason 610 takes a whole set. Changes are
 //! debounced so a burst of 611s costs one request, scrolling and resizes
@@ -150,6 +151,8 @@ struct Tile {
     picture: gtk::Picture,
     name: gtk::Label,
     paused: gtk::Label,
+    /// Why the tile is blank when the metered limit left it out.
+    metered: gtk::Label,
     focus: gtk::Button,
     mute: gtk::Button,
     /// The newest frame's size, to notice a stream changing shape.
@@ -239,6 +242,18 @@ impl Tile {
         paused.set_visible(false);
         root.add_overlay(&paused);
 
+        let metered = gtk::Label::new(Some(&tr("Paused on a metered connection · click to watch")));
+        metered.set_halign(gtk::Align::Center);
+        metered.set_valign(gtk::Align::Center);
+        metered.set_margin_start(6);
+        metered.set_margin_end(6);
+        metered.set_wrap(true);
+        metered.set_justify(gtk::Justification::Center);
+        metered.add_css_class("osd");
+        metered.add_css_class("caption");
+        metered.set_visible(false);
+        root.add_overlay(&metered);
+
         let focus = control("view-fullscreen-symbolic", &tr("Focus"));
         let mute = control("audio-volume-high-symbolic", &tr("Mute"));
         mute.set_visible(key.user_id != 0);
@@ -299,6 +314,7 @@ impl Tile {
             picture,
             name,
             paused,
+            metered,
             focus,
             mute,
             size: Cell::new((0, 0)),
@@ -394,6 +410,72 @@ struct PanelInner {
     /// The runtime this panel has an observer on, by id (0 for none).
     observing: Cell<u64>,
     subscribe_timer: RefCell<Option<glib::SourceId>>,
+    /// The stream the metered limit last kept.
+    metered_one: Cell<Option<StreamKey>>,
+    /// The window this page is in, and its state watch, while mapped.
+    toplevel: RefCell<Option<(gdk::Toplevel, glib::SignalHandlerId)>>,
+}
+
+/// `GDK_TOPLEVEL_STATE_SUSPENDED`, from GTK 4.12 on; the bindings are
+/// built for 4.10, and an older GTK never sets it.
+const SUSPENDED: gdk::ToplevelState = gdk::ToplevelState::from_bits_retain(1 << 16);
+
+/// Whether a window in `state` shows nothing. Not the backdrop state: a
+/// window without focus is often still in plain view. Suspended is the
+/// compositor saying none of it can be seen — minimized, on another
+/// workspace, or wholly covered where it tracks that — and is what Wayland
+/// reports, having no minimized state for a client to see; X11 reports
+/// minimized.
+fn window_hidden(state: gdk::ToplevelState) -> bool {
+    state.intersects(gdk::ToplevelState::MINIMIZED | SUSPENDED)
+}
+
+/// On a metered connection, the one stream to receive of `eligible` —
+/// the streams otherwise received, each with whether it is paused: the
+/// tile in focus, else the one received last while it stays eligible, so
+/// streams don't swap under the user, else the first unpaused in grid
+/// order, else the first.
+fn metered_pick(
+    eligible: &[(StreamKey, bool)],
+    focused: Option<StreamKey>,
+    last: Option<StreamKey>,
+) -> Option<StreamKey> {
+    let has = |k: &StreamKey| eligible.iter().any(|(e, _)| e == k);
+    let first = |unpaused: bool| {
+        eligible
+            .iter()
+            .filter(|(_, paused)| !(unpaused && *paused))
+            .map(|(k, _)| *k)
+            .min_by_key(crate::video_grid::order)
+    };
+    focused
+        .filter(has)
+        .or(last.filter(has))
+        .or_else(|| first(true))
+        .or_else(|| first(false))
+}
+
+/// Whether to receive only [`metered_pick`]'s stream.
+fn metered_limit() -> bool {
+    hxconfig::ffi::with_settings(|s| s.voice.metered_one_video).unwrap_or(true)
+        && gtk::gio::NetworkMonitor::default().is_network_metered()
+}
+
+/// Send every panel's receive set again: the metered preference or the
+/// network changed.
+pub(crate) fn resubscribe_all() {
+    for_each_panel(None, |p| p.schedule_subscribe());
+}
+
+/// Follow the system's metered flag, once for the process.
+fn watch_metered() {
+    thread_local! {
+        static WATCHING: Cell<bool> = const { Cell::new(false) };
+    }
+    if WATCHING.with(|w| w.replace(true)) {
+        return;
+    }
+    gtk::gio::NetworkMonitor::default().connect_network_metered_notify(|_| resubscribe_all());
 }
 
 thread_local! {
@@ -530,6 +612,7 @@ impl PanelInner {
     fn new_room(&self) {
         self.focus.set(Focus::Auto);
         self.unwatched.borrow_mut().clear();
+        self.metered_one.set(None);
     }
 
     /// Lay the tiles out again from the last refresh's streams, after a
@@ -806,8 +889,14 @@ impl PanelInner {
         } else {
             unsafe { hx_htlc_uid(htlc) }
         };
-        let visible = self.root.upgrade().is_some_and(|r| r.is_mapped());
-        let streams: Vec<Stream> = if visible {
+        let visible = self.root.upgrade().is_some_and(|r| r.is_mapped())
+            && !self
+                .toplevel
+                .borrow()
+                .as_ref()
+                .is_some_and(|(t, _)| window_hidden(t.state()));
+        let mut eligible = Vec::new();
+        let mut streams: Vec<Stream> = if visible {
             let receiving: Vec<StreamKey> = rt
                 .video_subscriptions()
                 .iter()
@@ -833,6 +922,13 @@ impl PanelInner {
                     // receive it rather than wait.
                     !unwatched.contains(&key) && (!tiled(&key) || reach.contains(&key))
                 })
+                .inspect(|p| {
+                    let key = StreamKey {
+                        user_id: p.user_id,
+                        kind: p.kind,
+                    };
+                    eligible.push((key, p.paused));
+                })
                 .map(|p| Stream {
                     user_id: p.user_id,
                     kind: p.kind,
@@ -841,6 +937,28 @@ impl PanelInner {
         } else {
             Vec::new()
         };
+        let limited = metered_limit();
+        let mut one = None;
+        if limited {
+            one = metered_pick(&eligible, self.focused_key(), self.metered_one.get());
+            if visible {
+                self.metered_one.set(one);
+            }
+            streams.retain(|s| {
+                one == Some(StreamKey {
+                    user_id: s.user_id,
+                    kind: s.kind,
+                })
+            });
+        }
+        // Out of reach a tile is blank for that reason, metered or not.
+        for (key, tile) in self.tiles.borrow().iter() {
+            tile.metered.set_visible(
+                limited
+                    && Some(*key) != one
+                    && eligible.iter().any(|(k, paused)| k == key && !paused),
+            );
+        }
         rt.video_subscribe(streams);
     }
 }
@@ -954,6 +1072,8 @@ fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
         premute: RefCell::new(HashMap::new()),
         observing: Cell::new(0),
         subscribe_timer: RefCell::new(None),
+        toplevel: RefCell::new(None),
+        metered_one: Cell::new(None),
     });
 
     // Visibility is the subscription policy: mapping and unmapping the
@@ -979,15 +1099,33 @@ fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
                 }
             });
         }
+        // So does the window it is in being minimized or hidden. Watched
+        // from map to unmap: undocking the panel moves it to another window.
         let weak = Rc::downgrade(&inner);
-        root.connect_map(move |_| {
+        root.connect_map(move |root| {
             if let Some(p) = weak.upgrade() {
+                let toplevel = root
+                    .native()
+                    .and_then(|n| n.surface())
+                    .and_then(|s| s.downcast::<gdk::Toplevel>().ok());
+                if let Some(toplevel) = toplevel {
+                    let weak = Rc::downgrade(&p);
+                    let id = toplevel.connect_state_notify(move |_| {
+                        if let Some(p) = weak.upgrade() {
+                            p.schedule_subscribe();
+                        }
+                    });
+                    p.toplevel.replace(Some((toplevel, id)));
+                }
                 p.schedule_subscribe();
             }
         });
         let weak = Rc::downgrade(&inner);
         root.connect_unmap(move |_| {
             if let Some(p) = weak.upgrade() {
+                if let Some((toplevel, id)) = p.toplevel.take() {
+                    toplevel.disconnect(id);
+                }
                 p.schedule_subscribe();
             }
         });
@@ -1009,6 +1147,7 @@ fn build_panel(conn: dock::ConnKey) -> (gtk::Box, Rc<PanelInner>) {
     }
 
     PANELS.with(|p| p.borrow_mut().push(Rc::downgrade(&inner)));
+    watch_metered();
     // The panel owns itself through the widget: dropping the last strong
     // ref with the widget is what unregisters its observer.
     unsafe { root.set_data("video-panel-state", inner.clone()) };
@@ -1320,6 +1459,43 @@ pub(crate) mod tests {
         assert_eq!(got, [cam(1), cam(2), cam(3), cam(4), cam(6)]);
         // No view yet: everything.
         assert_eq!(in_reach(&tiles, None, &[]).len(), tiles.len());
+    }
+
+    /// Metered, the one stream is the focus, else the one already
+    /// received while it stays eligible, else the first unpaused in grid
+    /// order, whatever order the server listed them in.
+    #[test]
+    fn metered_pick_takes_the_focus_keeps_the_last_else_the_first() {
+        let screen = StreamKey {
+            user_id: 2,
+            kind: VideoKind::Screen,
+        };
+        let cams = [(screen, false), (cam(3), false), (cam(2), false)];
+        let first_paused = [(cam(2), true), (cam(3), false)];
+        for (eligible, focused, last, want, why) in [
+            (&cams[..], None, None, Some(cam(2)), "grid order"),
+            (&cams[..], Some(screen), None, Some(screen), "focus"),
+            (&cams[..], None, Some(cam(3)), Some(cam(3)), "sticky"),
+            (&cams[..], None, Some(cam(9)), Some(cam(2)), "last is gone"),
+            (
+                &cams[..],
+                Some(cam(9)),
+                None,
+                Some(cam(2)),
+                "focus out of reach",
+            ),
+            (
+                &first_paused[..],
+                None,
+                None,
+                Some(cam(3)),
+                "unpaused first",
+            ),
+            (&first_paused[..1], None, None, Some(cam(2)), "only paused"),
+            (&[], None, Some(cam(3)), None, "nothing eligible"),
+        ] {
+            assert_eq!(metered_pick(eligible, focused, last), want, "{why}");
+        }
     }
 
     /// A laid-out panel reports its tiles where they are: with the view at

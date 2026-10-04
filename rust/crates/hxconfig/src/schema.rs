@@ -372,7 +372,7 @@ impl Default for Trackers {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Voice {
     /// A stable device name. Empty means "system default", which the runtime
     /// resolves through `autoaudiosrc` / `autoaudiosink`.
@@ -385,6 +385,23 @@ pub struct Voice {
     /// Canonical key name, e.g. `Pause`, `F8`, `<Control>F12`. Empty means the
     /// user turned push-to-talk on but hasn't picked a key yet.
     pub ptt_key: String,
+    /// While the system reports a metered connection, receive one video:
+    /// the one in focus, or the first. On by default, since on a metered
+    /// link every stream costs the user.
+    pub metered_one_video: bool,
+}
+
+impl Default for Voice {
+    fn default() -> Self {
+        Voice {
+            input_device: String::new(),
+            output_device: String::new(),
+            camera_device: String::new(),
+            ptt_enabled: false,
+            ptt_key: String::new(),
+            metered_one_video: true,
+        }
+    }
 }
 
 /// The toolbar window's outer size. Everything *inside* the window — the split

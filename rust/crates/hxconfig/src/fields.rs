@@ -312,6 +312,7 @@ field_table! {
     "voice.camera_device"           => text,     voice.camera_device;
     "voice.ptt_enabled"             => flag,     voice.ptt_enabled;
     "voice.ptt_key"                 => text,     voice.ptt_key;
+    "voice.metered_one_video"       => flag,     voice.metered_one_video;
 
     "window.toolbar_width"          => extent,   window.toolbar_width;
     "window.toolbar_height"         => extent,   window.toolbar_height;

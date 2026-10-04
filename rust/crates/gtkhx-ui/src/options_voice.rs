@@ -190,6 +190,22 @@ fn missing_camera(listed: &[(String, String)], saved: &str) -> Option<(String, S
         .then(|| (saved.to_owned(), tr1("%s (missing)", saved)))
 }
 
+fn incoming_video_group(page: &adw::PreferencesPage) {
+    let grp = group(&tr("Incoming Video"));
+    let row = switch_row(
+        cfg::VOICE_METERED_ONE_VIDEO,
+        &tr("Receive one video on metered connections"),
+        Some(&tr(
+            "While the system reports a metered connection, each server's Video \
+             panel receives one video: the one in focus, or the one already \
+             playing. Click a tile to watch it instead.",
+        )),
+    );
+    row.connect_active_notify(|_| crate::video_panel::resubscribe_all());
+    grp.add(&row);
+    page.add(&grp);
+}
+
 // ------------------------------------------------------------ push-to-talk --
 
 /// The row's subtitle: the current bind, or an invitation to set one.
@@ -348,6 +364,7 @@ fn ptt_group(page: &adw::PreferencesPage) {
 pub(crate) fn build(page: &adw::PreferencesPage) {
     device_group(page);
     video_group(page);
+    incoming_video_group(page);
     ptt_group(page);
 }
 
