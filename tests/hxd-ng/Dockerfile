@@ -10,7 +10,7 @@
 # by commit tag and digest, like the other servers are pinned: an
 # unpinned main has broken this rig before. Bump both deliberately, with
 # the tests run against the new one.
-FROM ghcr.io/mishan/hxd-ng:sha-cba901b@sha256:8b4b76a86b63d45285051e0efcf8293a97e28ac99b36ea98599cae1caf435a5b
+FROM ghcr.io/mishan/hxd-ng:sha-ee32585@sha256:198c8f0fd83765b31035027b79bd357e4c6ed362d7f84c398ccd7303c78af74a
 
 # The base image runs as the unprivileged hxd user (10001), which owns
 # /var/lib/hxd-ng and /run/hxd-ng; the accounts go in owned by it too.
