@@ -60,10 +60,18 @@ unsafe extern "C" fn on_session(_c: *mut HxnetConnection, ev: *const c_void, _u:
 /// Run the main loop until `done` finds what it wants in what was heard.
 fn until<T>(ctx: &glib::MainContext, what: &str, done: impl Fn(&Event) -> Option<T>) -> T {
     let deadline = Instant::now() + WAIT;
-    let tick = glib::timeout_add_local(Duration::from_millis(100), || glib::ControlFlow::Continue);
+    // On `ctx` itself, so the blocking iteration below wakes to check the
+    // deadline even when nothing arrives.
+    let tick = glib::timeout_source_new(
+        Duration::from_millis(100),
+        None,
+        glib::Priority::DEFAULT,
+        || glib::ControlFlow::Continue,
+    );
+    tick.attach(Some(ctx));
     loop {
         if let Some(t) = HEARD.with(|h| h.borrow().iter().find_map(&done)) {
-            tick.remove();
+            tick.destroy();
             return t;
         }
         assert!(Instant::now() < deadline, "no {what} within {WAIT:?}");
