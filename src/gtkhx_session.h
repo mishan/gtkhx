@@ -38,9 +38,6 @@ G_BEGIN_DECLS
  * Letting model-side callers include gtkhx_session.h without
  * dragging GTK in via session.h matters for unit tests. */
 typedef struct _session session;
-struct gnews_folder;
-struct gnews_catalog;
-struct news_post;
 struct htxf_conn;
 struct chat;
 struct cached_filelist;
@@ -150,22 +147,9 @@ void gtkhx_session_emit_logged_in (GtkhxSession *self, struct htlc_conn *htlc);
 void gtkhx_session_emit_self_updated (GtkhxSession *self,
                                       struct htlc_conn *htlc);
 
-/* Login + news notifications. agreement fires once after the
- * AGREEMENT chunks arrive post-login; the news-* variants fire
- * for the four 1.x / 1.5+ news flows. */
+/* agreement fires once after the AGREEMENT chunks arrive post-login. */
 void gtkhx_session_emit_agreement (GtkhxSession *self, session *sess,
                                    const char *agreement, guint16 len);
-void gtkhx_session_emit_news_file (GtkhxSession *self, struct htlc_conn *htlc,
-                                   const char *news, guint16 len);
-void gtkhx_session_emit_news_post (GtkhxSession *self, struct htlc_conn *htlc,
-                                   const char *news, guint16 len);
-void gtkhx_session_emit_news_folder (GtkhxSession *self, struct htlc_conn *htlc,
-                                     struct gnews_folder *gfnews);
-void gtkhx_session_emit_news_catalog (GtkhxSession *self,
-                                      struct htlc_conn *htlc,
-                                      struct gnews_catalog *gcnews);
-void gtkhx_session_emit_news_thread (GtkhxSession *self, struct htlc_conn *htlc,
-                                     struct news_post *post);
 
 /* Per-chat user-list mutations. user-changed carries the NEW values
  * so a view that wants to highlight a rename / icon change can diff

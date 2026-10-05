@@ -76,8 +76,14 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         } => msg::message(htlc, *uid, from, text),
         Event::Broadcast { uid, from, text } => msg::broadcast(htlc, *uid, from, text),
         Event::Disconnecting(text) => msg::parting(htlc, text),
+        Event::NewsPosted(text) => news::posted(htlc, text),
+        Event::NewsFile { text, .. } => news::file(htlc, text),
+        Event::NewsListing { trans, items } => news::listing(htlc, *trans, items),
+        Event::NewsCategory { trans, articles } => news::category(htlc, *trans, articles),
+        Event::NewsArticle { trans, text } => news::article(htlc, *trans, text),
         Event::Failed { trans, reason } => {
             user::failed(htlc, *trans);
+            news::failed(htlc, *trans);
             chat::failed(htlc, *trans, reason.as_deref());
         }
         _ => {}

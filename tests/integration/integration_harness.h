@@ -389,8 +389,8 @@ extern gboolean integration_create_chat_with_uid (int fd,
  * This is the generic primitive — most "drain until X arrives"
  * loops in Tier 3 tests collapse to a single call. Used directly
  * for one-shot drains where the caller doesn't need to inspect
- * chunks (test_news_post, test_chat_part consuming CHAT_USER_CHANGE
- * before the part broadcast).
+ * chunks (test_chat_part consuming CHAT_USER_CHANGE before the part
+ * broadcast).
  */
 extern gboolean integration_drain_until_type (int fd, struct htlc_conn *htlc,
                                               guint16 wanted_type,

@@ -23,6 +23,7 @@ gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }
 gio = { workspace = true }
 hxproto = { workspace = true }
+hxsession = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

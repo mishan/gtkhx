@@ -310,15 +310,6 @@ memory_copy (void *__dst, void *__src, unsigned int len)
  *   for-with-increment:   continue runs the increment, then re-
  *                         evaluates the condition → next chunk.
  *
- * The whole tree had three `continue` sites inside dh_start
- * (hx_rcv_news_post, hx_rcv_agreement_file, and rcv_task_news_file's
- * subroutine). They never hung in the wild because real wire
- * messages of those types only carried matching chunks — a server
- * that mixed e.g. an HTLS_DATA_UID into HTLS_HDR_NEWS_POST would
- * have hung us. Caught by the Tier 2 hx_news_post_walk test that
- * deliberately inserts a non-NEWS chunk in the middle of a NEWS_POST
- * fixture.
- *
  * The condition is a comma-expression that runs HN16 as a side
  * effect and ANDs the bounds checks. Reads dh->len, then bounds-
  * checks; reads dh->type only after we've confirmed the chunk fits.

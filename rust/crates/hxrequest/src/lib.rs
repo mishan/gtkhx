@@ -8,6 +8,7 @@
 //! they call reaches into C, which is what lets that suite link them.
 
 pub mod files;
+pub mod news;
 pub mod path;
 
 use hxproto::build::{HxChunk, PackChunk};

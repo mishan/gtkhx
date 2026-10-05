@@ -731,24 +731,27 @@ The order, each step its own branch and each checked against the rig:
    the task table's correlation (`hx_rcv_task`, `hxtask`) goes once the
    last of them has.
 
-   Chat, users and messages have moved. The session handles them
+   Chat, users, messages and news have moved. The session handles them
    (`Config::handled`, `Handled::CHAT`, `Handled::USERS`,
-   `Handled::MSG`), and `hxnet` hands what it makes of a chat line and
-   the picture it carries, an invitation, a subject, a page of history, a
-   user arriving, changing or leaving, a private message, a broadcast, and
-   the server's parting words to `hx_recv_session_event` on the main
-   thread, among the frames and in their order. `hxhandlers::recv::chat`,
-   `::user` and `::msg` keep the model — the ignore list, each chat's
-   subject, the history cursor, the rosters — and emit the signals they
-   always did, a broadcast and the parting words as `broadcast`; the chat
-   and message events themselves are built in `gtkhx-core`. A history
+   `Handled::MSG`, `Handled::NEWS`), and `hxnet` hands what it makes of a
+   chat line and the picture it carries, an invitation, a subject, a page
+   of history, a user arriving, changing or leaving, a private message, a
+   broadcast, the server's parting words, and a flat news post to
+   `hx_recv_session_event` on the main thread, among the frames and in
+   their order. `hxhandlers::recv::chat`, `::user`, `::msg` and `::news`
+   keep the model — the ignore list, each chat's subject, the history
+   cursor, the rosters, the news fetches in flight — and emit the signals
+   they always did, a broadcast and the parting words as `broadcast`; the
+   chat and message events themselves are built in `gtkhx-core`. A history
    request, an invitation, the user list, creating or joining a private
-   chat, and a private message have their reply expected by the session
+   chat, a private message, and every news request — flat news's file and
+   posts, threaded news's listings, articles, posts, deletions and new
+   bundles and categories — have their reply expected by the session
    (`Session::expect`), so none is a task any more, and a refusal comes
-   back as `Failed`. A private chat is made when its join is answered.
-   What arrives is traced from the session's tap. *In progress.* What
-   remains:
-   - the news and files domains;
+   back as `Failed`. A private chat is made when its join is answered; a
+   news reply reaches the browser node that asked, by its trans. What
+   arrives is traced from the session's tap. *In progress.* What remains:
+   - the files domain;
    - of messages, the admin broadcast's send, still a task
      (`gtkhx-ui`'s `broadcast.rs`), and the picture a private message
      carries, which the session reads and the view does not yet show;

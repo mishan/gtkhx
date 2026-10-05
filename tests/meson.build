@@ -679,22 +679,6 @@ test_xfer_queue = executable('test_xfer_queue',
 test('xfer_queue', test_xfer_queue,
      suite : 'proto')
 
-# news_post — hx_news_post_walk callback API. The previous handler
-# maintained a dead-code accumulator with cross-call leakage; this
-# test pins down the simpler "sanitise per chunk, emit per chunk"
-# semantics the cleanup committed to.
-test_news_post = executable('test_news_post',
-  'proto/test_news_post.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('news_post', test_news_post,
-     suite : 'proto')
-
 # agreement — HTLS_HDR_AGREEMENT handler. Three-way result:
 # OK / NONE / NOT_FOUND. The order-sensitive cases (NOAGREEMENT
 # before AGREEMENT wins) are the contract worth pinning down.
@@ -708,21 +692,6 @@ test_agreement = executable('test_agreement',
   link_depends        : rust_build,
 )
 test('agreement', test_agreement,
-     suite : 'proto')
-
-# news_file — one-shot HTLS_HDR_NEWS_FILE response (the news_file
-# fetched via HTLC_HDR_NEWS_GETFILE). First-NEWS-chunk-wins; same
-# truncation + sanitisation contract as the other text extractors.
-test_news_file = executable('test_news_file',
-  'proto/test_news_file.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('news_file', test_news_file,
      suite : 'proto')
 
 # (test_news_dirlist / test_newscat removed — the C parse shims they exercised
@@ -1341,20 +1310,6 @@ test('file_list', test_integration_file_list,
      suite   : 'integration',
      timeout : 30)
 
-# news_fetch — HTLC_HDR_NEWS_GETFILE round-trip. Verifies the
-# server returns the news body and uses hx_news_file_extract
-# (a Tier 2 helper) to parse the chunk.
-test_integration_news_fetch = executable('test_integration_news_fetch',
-  'integration/test_news_fetch.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('news_fetch', test_integration_news_fetch,
-     suite   : 'integration',
-     timeout : 30)
-
 # gif_icons — fogWraith GIF-icons extension (TRAN 1861-1864). No
 # capability bit, so it runs against the default matrix server; both
 # mhxd and Janus implement it. Set/get round-trip, getlist, the
@@ -1410,21 +1365,6 @@ test('user_account', test_integration_user_account,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 30)
-
-# news_post — post to news, fetch back, verify it's there. Plus
-# the unsolicited HTLS_HDR_NEWS_POST broadcast to other clients.
-# Mutates server state; uses a per-run random marker so reruns
-# in the same container don't false-positive on residue.
-test_integration_news_post = executable('test_integration_news_post',
-  'integration/test_news_post.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('news_post', test_integration_news_post,
-     suite   : 'integration',
-     timeout : 30)
 
 # nick_colors — Tier 3 coverage for the Colored-Nicknames extension.
 # Two subtests:

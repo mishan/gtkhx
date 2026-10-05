@@ -148,233 +148,34 @@ fn ffi_null_ptr_is_safe() {
     }
 }
 
-// ---- hx_news_build_category_tree ----------------------------------------
+// ---- hx_news_build_category_tree_from_articles -----------------------------
 
-fn post(postid: u32, parentid: u32, subject: &CStr, sender: &CStr, mime: &CStr) -> HxNewsPostData {
-    HxNewsPostData {
-        postid,
-        parentid,
-        subject: subject.as_ptr(),
-        sender: sender.as_ptr(),
-        mime_type: mime.as_ptr(),
-        date: HxNewsDate::default(),
+use hxsession::{Article, NewsItem};
+
+fn article(id: u32, parent: u32, subject: &str, poster: &str, mime: &str) -> Article {
+    Article {
+        id,
+        parent,
+        subject: subject.into(),
+        poster: poster.into(),
+        year: 0,
+        seconds: 0,
+        mime: mime.as_bytes().to_vec(),
     }
 }
 
 #[test]
-fn build_category_tree_threads_replies_under_parents() {
-    // Array (server) order: #10 top, #11 reply→#10, #12 top.
-    let (s0, s1, s2) = (cs("First"), cs("Re: First"), cs("Second"));
-    let (a, b, c) = (cs("alice"), cs("bob"), cs("carol"));
-    let mime = cs("text/plain");
-    let cat = cs("/news/general");
-    let posts = [
-        post(10, 0, &s0, &a, &mime),
-        post(11, 10, &s1, &b, &mime),
-        post(12, 0, &s2, &c, &mime),
+fn build_from_articles_threads_and_defaults() {
+    // #10 top, #11 reply→#10, #12 top with empty fields + no type → defaults.
+    let articles = [
+        article(10, 0, "First", "alice", "text/plain"),
+        article(11, 10, "Re: First", "bob", "text/html"),
+        article(12, 0, "", "", ""),
     ];
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    unsafe {
-        hx_news_build_category_tree(dest.as_ptr(), cat.as_ptr(), posts.as_ptr(), posts.len());
-    }
-
-    // Two top-level posts, in order.
-    assert_eq!(dest.n_items(), 2);
-    let n0 = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
-    let n1 = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
-    assert_eq!(n0.imp().postid.get(), 10);
-    assert_eq!(n0.imp().name.borrow().to_str().unwrap(), "First");
-    assert_eq!(
-        n0.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(),
-        "alice"
-    );
-    assert_eq!(
-        n0.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
-        "/news/general"
-    );
-    assert_eq!(n1.imp().postid.get(), 12);
-
-    // #10 has one reply (#11) in its children store; #12 is a leaf.
-    let kids = n0.imp().children.borrow();
-    let kids = kids.as_ref().expect("parent got a children store");
-    assert_eq!(kids.n_items(), 1);
-    let reply = kids.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
-    assert_eq!(reply.imp().postid.get(), 11);
-    assert_eq!(reply.imp().name.borrow().to_str().unwrap(), "Re: First");
-    // #12 never had ensure_children called → no store (renders as a leaf).
-    assert!(n1.imp().children.borrow().is_none());
-}
-
-#[test]
-fn build_category_tree_defaults_empty_fields() {
-    // NULL subject → "(no subject)"; NULL sender → ""; NULL mime → "text/plain".
-    let posts = [HxNewsPostData {
-        postid: 1,
-        parentid: 0,
-        subject: std::ptr::null(),
-        sender: std::ptr::null(),
-        mime_type: std::ptr::null(),
-        date: HxNewsDate::default(),
-    }];
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    unsafe {
-        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), posts.as_ptr(), 1);
-    }
-    assert_eq!(dest.n_items(), 1);
-    let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
-    assert_eq!(n.imp().name.borrow().to_str().unwrap(), "(no subject)");
-    assert_eq!(
-        n.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(),
-        ""
-    );
-    assert_eq!(
-        n.imp()
-            .mime_type
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        "text/plain"
-    );
-}
-
-#[test]
-fn build_category_tree_empty_or_null_is_no_op() {
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    // Bind the CStrings to locals so `post()`'s stored pointers stay valid for
-    // the call. A `&cs("x")` temporary dangles at the end of the statement —
-    // harmless only because count==0 returns before any deref, but fragile.
-    let (subj, sndr, mime) = (cs("x"), cs("y"), cs("text/plain"));
-    let posts = [post(1, 0, &subj, &sndr, &mime)];
-    unsafe {
-        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), posts.as_ptr(), 0); // count 0
-        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3);
-        // null posts
-    }
-    assert_eq!(dest.n_items(), 0);
-}
-
-// ---- hx_news_build_dirlist_into ----------------------------------------
-
-#[test]
-fn build_dirlist_appends_folder_and_category_nodes() {
-    // type==1 → folder (kind 1); anything else → category (kind 2).
-    let (n0, n1) = (cs("Docs"), cs("Announcements"));
-    let items = [
-        HxNewsDirItem {
-            item_type: 1,
-            name: n0.as_ptr(),
-        },
-        HxNewsDirItem {
-            item_type: 0,
-            name: n1.as_ptr(),
-        },
-    ];
-    let parent = cs("/news");
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    unsafe {
-        hx_news_build_dirlist_into(dest.as_ptr(), parent.as_ptr(), items.as_ptr(), items.len());
-    }
-    assert_eq!(dest.n_items(), 2);
-    let a = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
-    assert_eq!(a.imp().kind.get(), 1);
-    assert_eq!(a.imp().name.borrow().to_str().unwrap(), "Docs");
-    assert_eq!(
-        a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
-        "/news/Docs"
-    );
-    let b = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
-    assert_eq!(b.imp().kind.get(), 2);
-    assert_eq!(
-        b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
-        "/news/Announcements"
-    );
-}
-
-#[test]
-fn build_dirlist_null_parent_and_null_name() {
-    // NULL parent → root "/"; NULL name → empty label; root + "" → "/".
-    let items = [HxNewsDirItem {
-        item_type: 0,
-        name: std::ptr::null(),
-    }];
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    unsafe {
-        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), items.as_ptr(), 1);
-    }
-    assert_eq!(dest.n_items(), 1);
-    let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
-    assert_eq!(n.imp().name.borrow().to_str().unwrap(), "");
-    assert_eq!(
-        n.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
-        "/"
-    );
-}
-
-#[test]
-fn build_dirlist_empty_or_null_is_no_op() {
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    let name = cs("x");
-    let items = [HxNewsDirItem {
-        item_type: 1,
-        name: name.as_ptr(),
-    }];
-    unsafe {
-        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), items.as_ptr(), 0); // count 0
-        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3);
-        // null items
-    }
-    assert_eq!(dest.n_items(), 0);
-}
-
-// ---- hx_news_build_category_tree_from_catlist -----------------------------
-
-use hxproto::parse::{CatList, CatPart, CatPost};
-
-fn cat_post(postid: u32, parentid: u32, subject: &str, sender: &str, mime: &str) -> CatPost {
-    CatPost {
-        postid,
-        parentid,
-        date_base_year: 0,
-        date_pad: 0,
-        date_seconds: 0,
-        partcount: 1,
-        size_total: 0,
-        subject: subject.as_bytes().to_vec(),
-        sender: sender.as_bytes().to_vec(),
-        parts: vec![CatPart {
-            mime_type: mime.as_bytes().to_vec(),
-            size: 0,
-        }],
-    }
-}
-
-#[test]
-fn build_from_catlist_threads_and_defaults() {
-    // #10 top, #11 reply→#10, #12 top with empty fields + no parts → defaults.
-    let cl = CatList {
-        posts: vec![
-            cat_post(10, 0, "First", "alice", "text/plain"),
-            cat_post(11, 10, "Re: First", "bob", "text/html"),
-            CatPost {
-                postid: 12,
-                parentid: 0,
-                date_base_year: 0,
-                date_pad: 0,
-                date_seconds: 0,
-                partcount: 0,
-                size_total: 0,
-                subject: vec![],
-                sender: vec![],
-                parts: vec![],
-            },
-        ],
-    };
     let cat = cs("/news/general");
     let dest = gio::ListStore::with_type(HxNewsNode::static_type());
     unsafe {
-        hx_news_build_category_tree_from_catlist(dest.as_ptr(), cat.as_ptr(), &cl);
+        hx_news_build_category_tree_from_articles(dest.as_ptr(), cat.as_ptr(), &articles);
     }
 
     // #10 and #12 are top-level; #11 is a reply under #10.
@@ -417,7 +218,7 @@ fn build_from_catlist_threads_and_defaults() {
         "text/html"
     );
 
-    // #12: empty subject/sender + no parts → the array-path defaults.
+    // #12: empty subject/sender + no type → the defaults.
     let n2 = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(n2.imp().postid.get(), 12);
     assert_eq!(n2.imp().name.borrow().to_str().unwrap(), "(no subject)");
@@ -438,37 +239,27 @@ fn build_from_catlist_threads_and_defaults() {
     assert!(n2.imp().children.borrow().is_none());
 }
 
-#[test]
-fn build_from_catlist_null_is_no_op() {
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    unsafe {
-        hx_news_build_category_tree_from_catlist(dest.as_ptr(), std::ptr::null(), std::ptr::null());
-    }
-    assert_eq!(dest.n_items(), 0);
-}
-
-// ---- hx_news_build_dirlist_from_dirlist -----------------------------------
-
-use hxproto::parse::{DirList, NewsDirEntry, NewsDirKind};
+// ---- hx_news_build_dirlist_from_items -------------------------------------
 
 #[test]
-fn build_dirlist_from_dirlist_reads_handle() {
-    let dl = DirList {
-        entries: vec![
-            NewsDirEntry {
-                kind: NewsDirKind::Folder,
-                name: b"Docs".to_vec(),
-            },
-            NewsDirEntry {
-                kind: NewsDirKind::Category,
-                name: b"News".to_vec(),
-            },
-        ],
-    };
+fn build_dirlist_labels_by_name_and_paths_by_the_server_s_bytes() {
+    let items = [
+        NewsItem {
+            name: "Docs".into(),
+            name_bytes: b"Docs".to_vec(),
+            bundle: true,
+        },
+        // Mac Roman é: shown decoded, named back as sent.
+        NewsItem {
+            name: "René".into(),
+            name_bytes: b"Ren\x8E".to_vec(),
+            bundle: false,
+        },
+    ];
     let parent = cs("/news");
     let dest = gio::ListStore::with_type(HxNewsNode::static_type());
     unsafe {
-        hx_news_build_dirlist_from_dirlist(dest.as_ptr(), parent.as_ptr(), &dl);
+        hx_news_build_dirlist_from_items(dest.as_ptr(), parent.as_ptr(), &items);
     }
     assert_eq!(dest.n_items(), 2);
     let a = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
@@ -480,17 +271,9 @@ fn build_dirlist_from_dirlist_reads_handle() {
     );
     let b = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(b.imp().kind.get(), 2); // category
+    assert_eq!(b.imp().name.borrow().to_str().unwrap(), "René");
     assert_eq!(
-        b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
-        "/news/News"
+        b.imp().path.borrow().as_ref().unwrap().as_bytes(),
+        b"/news/Ren\x8E"
     );
-}
-
-#[test]
-fn build_dirlist_from_dirlist_null_is_no_op() {
-    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
-    unsafe {
-        hx_news_build_dirlist_from_dirlist(dest.as_ptr(), std::ptr::null(), std::ptr::null());
-    }
-    assert_eq!(dest.n_items(), 0);
 }

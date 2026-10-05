@@ -65,7 +65,9 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
     if category_path.is_null() {
         return;
     }
-    let category_path = crate::cstr(category_path);
+    // As the bytes the listing gave: a lossy decode names some other
+    // category, or none.
+    let category_path = std::ffi::CStr::from_ptr(category_path).to_owned();
     let prefill = crate::cstr(prefill_subject);
     let is_reply = !reply_to.is_null() && hx_news_node_kind(reply_to.cast()) == NB_KIND_POST;
     let parent_postid = if reply_to.is_null() {
@@ -158,19 +160,18 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
             let body = buf.text(&start, &end, false);
             // crate::cs drops interior NULs rather than failing, so a stray NUL
             // in the body can't silently swallow the whole post.
-            let p = crate::cs(&category_path);
             let s = crate::cs(subject.as_str());
             let b = crate::cs(body.as_str());
             hx_news15_post_thread(
                 gtkhx_active_htlc(),
-                p.as_ptr(),
+                category_path.as_ptr(),
                 s.as_ptr(),
                 parent_postid,
                 b.as_ptr(),
             );
             // Settle: refetch the affected category (or root if it's not
             // currently in the tree). The server pushes no notification.
-            gtkhx_news_refresh_category(p.as_ptr());
+            gtkhx_news_refresh_category(category_path.as_ptr());
             window.destroy();
         });
     }

@@ -47,6 +47,22 @@ before decompressing.
 forgets the reply it expected once enough newer requests wait. `hx-e2e`'s
 `a_message_to_no_one_is_refused_or_unanswered` pins it.
 
+## A listing of a category that is not there is never answered
+
+**Verified on 2.0.18.**
+
+- **Sends:** a threaded-news category listing (`NEWSCATLIST`, 371) for a
+  path that names no category.
+- **Gets:** nothing: no reply on its transaction, while what the client
+  sends after it is answered.
+- **Should get:** a refusal saying why, as mhxd and hlservd send.
+
+**GtkHx:** the category stays empty with nothing shown, and the session
+forgets the reply it expected once enough newer requests wait. A category
+the browser lists is there, so this takes a category deleted between the
+listing and the click. `hx-e2e`'s `a_refusal_comes_with_a_reason` skips
+Janus for it.
+
 ## Adding an entry
 
 Reproduce it against the rig first, ideally as an `hx-e2e` probe, and write it

@@ -292,26 +292,6 @@ extern gboolean hx_htxf_reply_extract (const guint8 *frame, gsize frame_len,
                                        struct hx_htxf_reply *out);
 
 /*
- * Walk every HTLS_DATA_NEWS chunk in an HTLS_HDR_NEWS_POST message,
- * sanitise each one (CR2LF + strip_ansi), and invoke `cb` with the
- * sanitised bytes. `bytes` is NUL-terminated for caller convenience;
- * `len` is the byte length excluding the NUL.
- *
- * `cb` may be NULL (the walker still iterates and counts chunks).
- * Returns the number of NEWS chunks seen.
- */
-typedef void (*hx_news_post_cb) (void *user, const char *bytes, gsize len);
-extern int hx_news_post_walk (const guint8 *frame, gsize frame_len,
-                              hx_news_post_cb cb, void *user);
-
-/* The 1.5 news dirlist / catlist C parse shims (hx_news_dirlist_parse_* +
- * hx_newscat_parse) and their result structs (hx_news_dirlist_entry /
- * hx_newscat*) are gone — the receive path parses to owned handles via
- * hxproto's gtkhx_proto_parse_dirlist / _catlist, read directly by
- * hxmodel::news. The per-chunk / whole-message parsers stay covered by
- * hxproto's native cargo tests. */
-
-/*
  * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.
  *
  * Three outcomes:
@@ -344,25 +324,6 @@ extern hx_agreement_result hx_agreement_extract (const guint8 *frame,
                                                  gsize frame_len, char *out,
                                                  gsize out_size,
                                                  gsize *out_len);
-
-/*
- * Extract the body of an HTLS_HDR_NEWS_FILE response (the one-shot
- * news file fetched by HTLC_HDR_NEWS_GETFILE).
- *
- * Same shape as task_error_extract. Returns TRUE iff an
- * HTLS_DATA_NEWS chunk was found and `out` was filled. NUL-
- * terminates on success. Truncates to (out_size - 1) if the
- * message body is larger than the caller's buffer.
- *
- * The original handler used the rcv.c news_buf/news_len scratch
- * globals; this version uses caller-owned storage. The handler at
- * rcv_task_news_file in rcv.c can keep using the scratch globals
- * (which other code paths still reach for) — this extractor exists
- * to make the parsing testable without sharing global state.
- */
-extern gboolean hx_news_file_extract (const guint8 *frame, gsize frame_len,
-                                      char *out, gsize out_size,
-                                      gsize *out_len);
 
 /*
  * Split a single chat line into a "name" portion and a "body"

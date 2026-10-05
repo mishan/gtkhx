@@ -3,8 +3,6 @@
 
 extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len);
-extern void hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame,
-                              gsize frame_len);
 extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame,
                          gsize frame_len);
 extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame,
@@ -67,17 +65,10 @@ extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
 
 extern void rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len, struct uesp_fn *uespfn);
-/* rcv_task_newscat_list moved to the hxhandlers::recv::news Rust crate as a 3-arg
- * rcv_task_fn (htlc, ptr, data). No C caller references them by name — the
- * hxhandlers::send::news cat_list / fldr_list / get_post senders register them via
- * task_new — so the old 2-arg prototypes are gone rather than left to drift
- * from the real ABI. */
 extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame,
                             gsize frame_len, char *pass);
 /* USER_GETLIST, whose reply the session reads (hxhandlers::send::user). */
 extern void hx_user_list_get (struct htlc_conn *htlc);
-extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len);
 
 /* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers, in the
  * hxhandlers Rust crate (recv/icon.rs); gif_icons.c registers them via
