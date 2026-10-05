@@ -57,13 +57,24 @@ unsafe extern "C" fn on_session(_c: *mut HxnetConnection, ev: *const c_void, _u:
     HEARD.with(|h| h.borrow_mut().push(ev));
 }
 
+/// Wake `ctx` every 100 ms, so a blocking iteration of it gets back to its
+/// deadline even when nothing arrives. On `ctx` itself: `timeout_add_local`
+/// would attach to the global default context, which never wakes this one.
+fn tick(ctx: &glib::MainContext) {
+    glib::timeout_source_new(
+        Duration::from_millis(100),
+        None,
+        glib::Priority::DEFAULT,
+        || glib::ControlFlow::Continue,
+    )
+    .attach(Some(ctx));
+}
+
 /// Run the main loop until `done` finds what it wants in what was heard.
 fn until<T>(ctx: &glib::MainContext, what: &str, done: impl Fn(&Event) -> Option<T>) -> T {
     let deadline = Instant::now() + WAIT;
-    let tick = glib::timeout_add_local(Duration::from_millis(100), || glib::ControlFlow::Continue);
     loop {
         if let Some(t) = HEARD.with(|h| h.borrow().iter().find_map(&done)) {
-            tick.remove();
             return t;
         }
         assert!(Instant::now() < deadline, "no {what} within {WAIT:?}");
@@ -94,6 +105,7 @@ fn request(opcode: u32, chunks: &[(u16, &[u8])]) -> Request {
 fn session_events_through_the_callback(s: &'static Server) {
     let ctx = glib::MainContext::new();
     ctx.with_thread_default(|| {
+        tick(&ctx);
         READY.with(|r| r.set(false));
         HEARD.with(|h| h.borrow_mut().clear());
         let nick = unique_name("cb");
