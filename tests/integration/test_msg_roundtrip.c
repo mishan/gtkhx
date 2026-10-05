@@ -6,10 +6,8 @@
  * HTLC_HDR_MSG addressed to Bob's uid, Bob's connection receives
  * HTLS_HDR_MSG carrying Alice's uid + name + the message body.
  *
- * Mirrors the chat_roundtrip test's two-client setup but exercises
- * the private-message wire path (HTLC_HDR_MSG / HTLS_HDR_MSG)
- * which is parsed by the Tier 2 hx_msg_extract helper rather than
- * hx_chat_extract.
+ * Exercises the private-message wire path (HTLC_HDR_MSG /
+ * HTLS_HDR_MSG), parsed by the Tier 2 hx_msg_extract helper.
  */
 
 #include "config.h"

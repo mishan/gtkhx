@@ -208,7 +208,7 @@ hxnet_connection_hope_aead_material (hxnet_connection *handle);
 /* Synthetic-fd space for orchestrated control connections. Picked far
  * above any real socket fd so orch_lookup can branch on the value
  * alone. ORCH_MAX bounds concurrent orchestrated connections — two is
- * the most any test needs today (test_two_client_chat), 8 is slack. */
+ * the most any test needs today, 8 is slack. */
 #define ORCH_FD_BASE 0x40000000
 #define ORCH_MAX 8
 
@@ -962,42 +962,9 @@ integration_drain_until_task_trans (int fd, struct htlc_conn *htlc,
 }
 
 gboolean
-integration_drain_until_chat (int fd, struct htlc_conn *htlc,
-                              guint16 wanted_uid, struct hx_chat_msg *out,
-                              int max_messages)
-{
-    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
-    int seen = 0;
-    while (seen < max_messages && g_get_monotonic_time () < deadline) {
-        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
-            return FALSE;
-        }
-        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
-            continue; /* unrelated broadcast — doesn't count */
-        }
-        if (!hx_chat_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
-                              out)) {
-            continue;
-        }
-        if (out->uid == wanted_uid) {
-            return TRUE;
-        }
-        seen++; /* a chat, just not from the uid we want */
-    }
-    return FALSE;
-}
-
-gboolean
 integration_drain_until_chat_marker (int fd, struct htlc_conn *htlc,
-                                     const char *marker,
-                                     struct hx_chat_msg *out, int max_messages)
+                                     const char *marker, int max_messages)
 {
-    /* Like integration_drain_until_chat, but matches on a unique
-     * substring in the chat body rather than the sender uid. Required
-     * for chats relayed by Janus: its HTLS_HDR_CHAT broadcasts carry
-     * uid 0 (it doesn't stamp the sender), so a uid filter can't scope
-     * to our own message. A high-entropy marker is the robust
-     * cross-talk discriminator (same approach test_chat_history uses). */
     gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
     int seen = 0;
     while (seen < max_messages && g_get_monotonic_time () < deadline) {
@@ -1007,11 +974,8 @@ integration_drain_until_chat_marker (int fd, struct htlc_conn *htlc,
         if (hdr_type (htlc) != HTLS_HDR_CHAT) {
             continue; /* unrelated broadcast — doesn't count */
         }
-        if (!hx_chat_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
-                              out)) {
-            continue;
-        }
-        if (out->text && marker && strstr (out->text, marker)) {
+        if (memmem (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos, marker,
+                    strlen (marker))) {
             return TRUE;
         }
         seen++; /* a chat, just not the one we sent */

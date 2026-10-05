@@ -308,10 +308,5 @@ come the roles `GtkhxTheme` fills (see `gtkhx_theme.h`'s matching
 `GTKHX_PAL_*` enum and `chat.c::gtkhx_apply_theme_palette`), then the
 per-nick colors. `rotulus.h` is the sole definition of that layout.
 
-**One dead remnant remains, flagged rather than removed.**
-`src/proto_helpers.c` still holds a copy of the old `[hx]` prefix and
-checks *incoming server chat* against it. Nothing produces the prefix, and
-the check only ever sees server-sent text, so it cannot fire. Removing it
-means retiring the proto-test cases that feed it the literal string, which
-is its own change. Every other `\003` in the tree is inside a comment
-explaining what used to be there.
+Every `\003` left in the tree is inside a comment explaining what used
+to be there.

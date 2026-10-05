@@ -610,17 +610,14 @@ test_selfinfo = executable('test_selfinfo',
 test('selfinfo', test_selfinfo,
      suite : 'proto')
 
-# chat — hx_chat_extract pulls body + chat-id + uid out of an
-# HTLS_HDR_CHAT message and runs the same CR2LF / strip_ansi /
-# leading-LF strip the original handler does, so the chat widget
-# never sees raw wire bytes.
+# chat — finding the speaker's nick in a received line, and matching
+# the user's highlight words against it.
 test_chat_proto = executable('test_chat_proto',
   'proto/test_chat.c',
   '../src/proto_helpers.c',
   '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
   link_depends        : rust_build,
 )
 test('chat', test_chat_proto,
@@ -684,36 +681,6 @@ test_hlwrite = executable('test_hlwrite',
   link_depends        : rust_build,
 )
 test('hlwrite', test_hlwrite,
-     suite : 'proto')
-
-# small_handlers — three small chunk-walkers (user_part, chat_subject,
-# chat_invite) batched into one binary. Same shape, no per-handler
-# complexity to justify separate test programs.
-test_small_handlers = executable('test_small_handlers',
-  'proto/test_small_handlers.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('small_handlers', test_small_handlers,
-     suite : 'proto')
-
-# user_change — five-chunk handler covering user joins / renames /
-# icon and colour changes in the chat user list. The optional
-# COLOUR chunk + got_color flag is the contract worth pinning down.
-test_user_change = executable('test_user_change',
-  'proto/test_user_change.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('user_change', test_user_change,
      suite : 'proto')
 
 # xfer_queue — REF + QUEUE chunks during file-transfer queueing.
@@ -1365,20 +1332,6 @@ test('login', test_integration_login,
      suite   : 'integration',
      timeout : 30)
 
-# chat_roundtrip — login, send chat, expect the broadcast back.
-# Single-user mhxd still broadcasts the message (to us), which is
-# how the chat widget shows our own typing.
-test_integration_chat = executable('test_integration_chat',
-  'integration/test_chat_roundtrip.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('chat_roundtrip', test_integration_chat,
-     suite   : 'integration',
-     timeout : 30)
-
 # user_list — login, send HTLC_HDR_USER_GETLIST, parse the
 # HTLS_DATA_USER_LIST chunks, find our own session in the list,
 # verify name + icon round-trip via the wire.
@@ -1433,21 +1386,6 @@ test_integration_news_fetch = executable('test_integration_news_fetch',
   link_depends        : rust_build,
 )
 test('news_fetch', test_integration_news_fetch,
-     suite   : 'integration',
-     timeout : 30)
-
-# two_client_chat — the cross-user broadcast path. Client A sends
-# chat, client B (a separate logged-in connection) receives it
-# tagged with A's uid + name. Proves the server actually fans out
-# to all members.
-test_integration_two_client_chat = executable('test_integration_two_client_chat',
-  'integration/test_two_client_chat.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('two_client_chat', test_integration_two_client_chat,
      suite   : 'integration',
      timeout : 30)
 
@@ -1521,21 +1459,6 @@ test('user_account', test_integration_user_account,
      is_parallel : false,
      timeout     : 30)
 
-# user_change_broadcast — Alice and Bob both connect; Alice
-# verifies she receives HTLS_HDR_USER_CHANGE when Bob joins and
-# HTLS_HDR_USER_PART when Bob disconnects. Exercises mhxd's
-# snd_user_join / snd_user_part broadcast paths.
-test_integration_user_change = executable('test_integration_user_change',
-  'integration/test_user_change_broadcast.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('user_change_broadcast', test_integration_user_change,
-     suite   : 'integration',
-     timeout : 30)
-
 # news_post — post to news, fetch back, verify it's there. Plus
 # the unsolicited HTLS_HDR_NEWS_POST broadcast to other clients.
 # Mutates server state; uses a per-run random marker so reruns
@@ -1548,36 +1471,6 @@ test_integration_news_post = executable('test_integration_news_post',
   link_depends        : rust_build,
 )
 test('news_post', test_integration_news_post,
-     suite   : 'integration',
-     timeout : 30)
-
-# chat_create — Alice creates a private chat naming Bob; Bob's
-# connection receives HTLS_HDR_CHAT_INVITE with Alice's uid +
-# name + the new chat_id. End-to-end exercise of mhxd's
-# rcv_chat_create + snd_chat_invite.
-test_integration_chat_create = executable('test_integration_chat_create',
-  'integration/test_chat_create.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('chat_create', test_integration_chat_create,
-     suite   : 'integration',
-     timeout : 30)
-
-# user_rename — Alice changes name + icon via HTLC_HDR_USER_CHANGE;
-# Bob's connection receives HTLS_HDR_USER_CHANGE with the new
-# values. Filter by uid AND name to walk past Alice's join
-# broadcast that landed earlier under her original name.
-test_integration_user_rename = executable('test_integration_user_rename',
-  'integration/test_user_rename.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('user_rename', test_integration_user_rename,
      suite   : 'integration',
      timeout : 30)
 
@@ -1743,22 +1636,6 @@ test('file_list_subdir', test_integration_file_list_subdir,
      suite   : 'integration',
      timeout : 30)
 
-# chat_join — Bob accepts Alice's private-chat invite via
-# HTLC_HDR_CHAT_JOIN. Verifies Bob's TASK reply carries USER_LIST
-# entries for the joined members AND that Alice's connection sees
-# HTLS_HDR_CHAT_USER_CHANGE tagged with Bob's uid. Pins down
-# mhxd's rcv_chat_join broadcast loop end-to-end.
-test_integration_chat_join = executable('test_integration_chat_join',
-  'integration/test_chat_join.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('chat_join', test_integration_chat_join,
-     suite   : 'integration',
-     timeout : 30)
-
 # chat_decline — Bob refuses Alice's private-chat invite via
 # HTLC_HDR_CHAT_DECLINE. mhxd's rcv_chat_decline is silent (no
 # reply, no broadcast); we round-trip a PING on each side after
@@ -1818,23 +1695,6 @@ test_integration_msg_self = executable('test_integration_msg_self',
   link_depends        : rust_build,
 )
 test('msg_self', test_integration_msg_self,
-     suite   : 'integration',
-     timeout : 30)
-
-# chat_in_pchat — chat message routed through a private chat
-# (HTLC_DATA_CHAT_ID != 0). Alice creates a pchat with Bob, Bob
-# joins, Alice sends a chat tagged with the chat_id; Bob receives
-# HTLS_HDR_CHAT carrying that same chat_id and the body. Pins the
-# multi-cid routing path that complements the public-chat broadcast
-# already covered by test_chat_roundtrip / test_two_client_chat.
-test_integration_chat_in_pchat = executable('test_integration_chat_in_pchat',
-  'integration/test_chat_in_pchat.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('chat_in_pchat', test_integration_chat_in_pchat,
      suite   : 'integration',
      timeout : 30)
 
@@ -1900,21 +1760,6 @@ test_integration_user_list_grows = executable('test_integration_user_list_grows'
   link_depends        : rust_build,
 )
 test('user_list_grows', test_integration_user_list_grows,
-     suite   : 'integration',
-     timeout : 30)
-
-# chat_long — 1500-byte chat message survives the broadcast wire
-# intact. Stresses the proto parser past any < 256 byte happy-path
-# and the qbuf growth in network.c. Catches signed-byte
-# truncation / off-by-one regressions that would clip the body.
-test_integration_chat_long = executable('test_integration_chat_long',
-  'integration/test_chat_long.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('chat_long', test_integration_chat_long,
      suite   : 'integration',
      timeout : 30)
 

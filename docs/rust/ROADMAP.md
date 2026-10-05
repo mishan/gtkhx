@@ -752,15 +752,10 @@ The order, each step its own branch and each checked against the rig:
      user editor's account read and a kick, still read through tasks
      (`rcv_task_user_info`, `rcv_task_user_open`, `rcv_task_kick`);
    - inline media's upload and download;
-   - the C extractor tests, which move to `hx-e2e`, retiring the
-     extractors they read through: for chat, `test_chat.c`,
-     `test_small_handlers.c`, and the integration tests that read chat,
-     invitations and history through `hx_chat_extract`,
-     `hx_chat_subject_extract`, `hx_chat_invite_extract` and
-     `hx_history_entry_parse`; for users, `test_user_change.c`,
-     `test_small_handlers.c`'s user part, and the integration tests that
-     read user changes and parts through `hx_user_change_extract`,
-     `hx_user_part_extract` and `hx_user_change_plan_resolve`.
+   - the C history tests, which move to `hx-e2e`, retiring the
+     `hx_history_entry_parse` they read history through: the proto and
+     integration `test_chat_history.c` and the HOPE chat-history
+     integration tests.
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
 

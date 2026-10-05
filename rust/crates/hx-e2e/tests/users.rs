@@ -101,12 +101,16 @@ fn users_arrive_change_and_leave_as_events_in_the_server_s_order() {
             |e| matches!(e, hxsession::Event::UserChanged { cid: 0, user } if user.uid == b_uid),
         );
 
-        // A line, a change of icon, a line.
+        // A line, a change of name and icon, a line.
         let (one, two) = (format!("{nb} one"), format!("{nb} two"));
+        let renamed = nb.replacen("ub", "ur", 1);
         b.send(&request(105, &[(tag::BODY, one.as_bytes())]));
         b.send(&request(
             304,
-            &[(tag::NAME, nb.as_bytes()), (tag::ICON, &7u16.to_be_bytes())],
+            &[
+                (tag::NAME, renamed.as_bytes()),
+                (tag::ICON, &7u16.to_be_bytes()),
+            ],
         ));
         b.send(&request(105, &[(tag::BODY, two.as_bytes())]));
         let order = heard(
@@ -116,7 +120,7 @@ fn users_arrive_change_and_leave_as_events_in_the_server_s_order() {
                     Some(text.rsplit(' ').next().unwrap_or_default().to_string())
                 }
                 hxsession::Event::UserChanged { cid: 0, user }
-                    if user.uid == b_uid && user.icon == 7 =>
+                    if user.uid == b_uid && user.icon == 7 && user.name == renamed =>
                 {
                     Some("change".to_string())
                 }
@@ -192,10 +196,20 @@ fn a_private_chat_s_create_and_join_come_back_as_events() {
             s.name
         );
 
-        // a is told of b coming in, and going.
+        // a is told of b coming in; a line a sends to the chat reaches b
+        // marked as the chat's; a is told of b going.
         until(
             &mut a,
             |e| matches!(e, hxsession::Event::UserChanged { cid: c, user } if *c == cid && user.uid == b_uid),
+        );
+        let line = format!("{na} in private");
+        a.send(&request(
+            105,
+            &[(tag::BODY, line.as_bytes()), (tag::CHAT_ID, &id)],
+        ));
+        until(
+            &mut b,
+            |e| matches!(e, hxsession::Event::Chat { cid: c, text, .. } if *c == cid && text.contains(&line)),
         );
         b.send(&request(116, &[(tag::CHAT_ID, &id)]));
         until(
