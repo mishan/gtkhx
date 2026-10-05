@@ -304,8 +304,9 @@ jobs:
         # mhxd crashes now and then here and never locally, and its restart
         # policy hides it. A core written inside the container, where /tmp is
         # writable, is what the crash step below reads; the runner's default
-        # pattern pipes it to apport instead.
-        run: sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        # pattern pipes it to apport instead. %P and %t, because hxd is PID 1
+        # in its container, so %p would name every crash's core the same.
+        run: sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%P.%t
 
       - name: start rig (compose)
         # One `compose up` starts every test container, each one on host
@@ -414,15 +415,18 @@ jobs:
           docker exec gtkhx-mhxd tail -n 400 /opt/mhxd/run/log || true
           mkdir -p mhxd-crash
           docker cp gtkhx-mhxd:/opt/mhxd/run/bin/hxd mhxd-crash/ || true
-          for core in $(docker exec gtkhx-mhxd sh -c 'ls /tmp/core.* 2>/dev/null'); do
-            docker cp "gtkhx-mhxd:$core" mhxd-crash/
+          cores=$(docker exec gtkhx-mhxd sh -c 'ls /tmp/core.* 2>/dev/null' || true)
+          for core in $cores; do
+            docker cp "gtkhx-mhxd:$core" mhxd-crash/ || true
           done
-          if ls mhxd-crash/core.* >/dev/null 2>&1; then
-            sudo apt-get install -y -qq gdb >/dev/null
-            for core in mhxd-crash/core.*; do
-              gdb -batch -ex bt -ex 'info registers rip' mhxd-crash/hxd "$core" || true
-            done
-          fi
+          [ -n "$cores" ] || exit 0
+          # In the container, so gdb reads the C library hxd ran against.
+          docker exec -u root gtkhx-mhxd sh -c \
+            'apt-get update -qq && apt-get install -y -qq gdb' >/dev/null || true
+          for core in $cores; do
+            docker exec gtkhx-mhxd gdb -batch -ex 'thread apply all bt' \
+              /opt/mhxd/run/bin/hxd "$core" || true
+          done
 
       - name: upload an mhxd crash
         if: always()
