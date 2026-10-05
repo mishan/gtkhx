@@ -30,8 +30,8 @@
     - <releases> wants at least one entry. Keep these in
       reverse-chronological order, and add one on each tagged
       release. The entry at the top of a -dev tree carries
-      type="development"; stamping the release drops that and sets
-      the real date.
+      type="development" until it is released. A Flatpak build of a
+      version with no entry (a beta) gets one added by CI.
 -->
 <component type="desktop-application">
   <id>com.nasledov.gtkhx</id>
