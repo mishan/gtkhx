@@ -12,9 +12,10 @@
 //! The tree factory + child-model (`news_tree`), post rendering + breadcrumb
 //! (`news_render`), compose window (`news_compose`), and create / delete dialogs
 //! (`news_dialogs`) live in their own sibling modules; this module stitches them
-//! together and drives the fetch / reply / refresh flow. The only C left in the
-//! news path is `rcv.c`'s generic reply dispatch, which hands the parsed
-//! carriers to the `gnews_browser_handle_*` entries below.
+//! together and drives the fetch / reply / refresh flow. The replies come back
+//! as the session's events, and `hxhandlers::recv::news` hands the carriers,
+//! holding what the session read, to the `gnews_browser_handle_*` entries
+//! below.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -56,14 +57,13 @@ const HL_ACCESS_DELETE_NEWS_BUNDLES: i32 = 37;
 
 use gtkhx_core::conn::hx_conn_access_permits;
 use gtkhx_core::session::gtkhx_session_get_default;
-use gtkhx_proto_ffi::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
 use hxhandlers::recv::news::carrier::{
-    gnews_catalog_free, gnews_catalog_new, gnews_catalog_parsed, gnews_folder_free,
-    gnews_folder_new, gnews_folder_parsed, news_post_body, news_post_free, news_post_target,
+    gnews_catalog_articles, gnews_catalog_free, gnews_catalog_new, gnews_folder_free,
+    gnews_folder_items, gnews_folder_new, news_post_body, news_post_free, news_post_target,
 };
 use hxhandlers::send::news::{hx_news15_cat_list, hx_news15_fldr_list, hx_news15_get_post};
 use hxmodel::news::node::{
-    hx_news_build_category_tree_from_catlist, hx_news_build_dirlist_from_dirlist,
+    hx_news_build_category_tree_from_articles, hx_news_build_dirlist_from_items,
     hx_news_node_body_fetching, hx_news_node_children, hx_news_node_get_type, hx_news_node_loaded,
     hx_news_node_name, hx_news_node_set_body_fetching, hx_news_node_set_loaded,
 };
@@ -346,7 +346,7 @@ unsafe fn threaded_news_available(htlc: *mut c_void) -> bool {
 ///
 /// Each of those guarded on `root_store.n_items() == 0`, which asks a different
 /// question. The store is still empty while a request is in flight, so both
-/// passed, both replies came back, and `hx_news_build_dirlist_from_dirlist`
+/// passed, both replies came back, and `hx_news_build_dirlist_from_items`
 /// appended each of them into the same store — the whole tree, twice. Guard on
 /// the request instead of on the result.
 ///
@@ -422,8 +422,8 @@ fn fetch_catlist(htlc: *mut c_void, target: *mut c_void) {
     }
 }
 
-/// Issue GETTHREAD for `target`. A transfer-full ref rides the reply task
-/// straight to `gnews_browser_handle_thread`.
+/// Issue GETTHREAD for `target`. A transfer-full ref waits for the reply
+/// and rides it straight to `gnews_browser_handle_thread`.
 fn fetch_thread(htlc: *mut c_void, target: *mut c_void) {
     unsafe {
         if target.is_null()
@@ -458,11 +458,12 @@ fn fetch_thread(htlc: *mut c_void, target: *mut c_void) {
 
 // ---------- Reply handlers (called from gtkhx.c signal adapters) ----------
 
-/// NEWSDIRLIST reply. Builds the folder / category children from the parse
-/// handle stashed on the carrier by the Rust receive path. Always frees the
-/// parse handle + carrier and returns TRUE — the browser is the only producer,
-/// so a missing pending entry is a should-never-happen we still clean up after
-/// rather than leak (the gtkhx.c adapter ignores the return value anyway).
+/// NEWSDIRLIST reply. Builds the folder / category children from what the
+/// session read, stashed on the carrier; a refused fetch comes with nothing.
+/// Always frees the carrier and returns TRUE — the browser is the only
+/// producer, so a missing pending entry is a should-never-happen we still
+/// clean up after rather than leak (the gtkhx.c adapter ignores the return
+/// value anyway).
 ///
 /// # Safety
 /// C-ABI entry on the GTK main thread; `gfnews_p` is a `gnews_folder *` carrier.
@@ -471,7 +472,7 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(
     gfnews_p: *mut c_void,
 ) -> glib::ffi::gboolean {
     let entry = PENDING_DIRLISTS.with(|t| t.borrow_mut().remove(&(gfnews_p as usize)));
-    let parsed = gnews_folder_parsed(gfnews_p);
+    let items = gnews_folder_items(gfnews_p);
 
     // Build only when the reply matches a pending fetch and the browser is
     // still alive; otherwise fall through to the free below so nothing leaks.
@@ -482,10 +483,10 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(
             {
                 match &target {
                     None => {
-                        hx_news_build_dirlist_from_dirlist(
+                        hx_news_build_dirlist_from_items(
                             br.root_store.as_ptr(),
                             c"/".as_ptr(),
-                            parsed.cast(),
+                            items,
                         );
                     }
                     Some(node) => {
@@ -494,10 +495,10 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(
                         if !dest.is_null() {
                             // Raw byte-oriented path pointer (NULL is fine — the
                             // builder falls back to the root "/").
-                            hx_news_build_dirlist_from_dirlist(
+                            hx_news_build_dirlist_from_items(
                                 dest,
                                 hx_news_node_path(np.cast()),
-                                parsed.cast(),
+                                items,
                             );
                         }
                     }
@@ -506,14 +507,13 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(
         });
     }
 
-    gtkhx_proto_dirlist_free(parsed.cast());
     gnews_folder_free(gfnews_p);
     glib::ffi::GTRUE
 }
 
 /// NEWSCATLIST reply. Threads the posts under the target category. Always frees
-/// the parse handle + carrier and returns TRUE (see the dirlist handler on the
-/// missing-entry cleanup).
+/// the carrier and returns TRUE (see the dirlist handler on the missing-entry
+/// cleanup).
 ///
 /// # Safety
 /// C-ABI entry on the GTK main thread; `gcnews_p` is a `gnews_catalog *`.
@@ -522,7 +522,7 @@ pub unsafe extern "C" fn gnews_browser_handle_catlist(
     gcnews_p: *mut c_void,
 ) -> glib::ffi::gboolean {
     let entry = PENDING_CATLISTS.with(|t| t.borrow_mut().remove(&(gcnews_p as usize)));
-    let parsed = gnews_catalog_parsed(gcnews_p);
+    let articles = gnews_catalog_articles(gcnews_p);
 
     // Build only when found (with a target node) and the browser is alive; free
     // below regardless.
@@ -532,16 +532,15 @@ pub unsafe extern "C" fn gnews_browser_handle_catlist(
         with_browser_on(conn, |_br| {
             if !ch.is_null() {
                 // Raw byte-oriented path pointer (no lossy cstr()/cs() round-trip).
-                hx_news_build_category_tree_from_catlist(
+                hx_news_build_category_tree_from_articles(
                     ch,
                     hx_news_node_path(np.cast()),
-                    parsed.cast(),
+                    articles,
                 );
             }
         });
     }
 
-    gtkhx_proto_catlist_free(parsed.cast());
     gnews_catalog_free(gcnews_p);
     glib::ffi::GTRUE
 }
@@ -611,14 +610,16 @@ fn refresh_node(br: &NewsBrowser, node: *mut c_void) {
 
 /// Find the category node owning `path`, walking the loaded tree only (no fetch
 /// on miss). Returns a reffed node or `None`.
-fn find_category_node(store: &gio::ListStore, path: &str) -> Option<glib::Object> {
+fn find_category_node(store: &gio::ListStore, path: &[u8]) -> Option<glib::Object> {
     let n = store.n_items();
     for i in 0..n {
         let node = store.item(i)?;
         let np = node.as_ptr() as *mut c_void;
         unsafe {
+            let node_path = hx_news_node_path(np.cast());
             if hx_news_node_kind(np.cast()) == NB_KIND_CATEGORY
-                && crate::cstr(hx_news_node_path(np.cast())) == path
+                && !node_path.is_null()
+                && std::ffi::CStr::from_ptr(node_path).to_bytes() == path
             {
                 return Some(node);
             }
@@ -886,8 +887,8 @@ pub unsafe extern "C" fn gtkhx_news_refresh_category(path: *const c_char) {
     if path.is_null() {
         return;
     }
-    let path = crate::cstr(path);
-    with_browser(|br| match find_category_node(&br.root_store, &path) {
+    let path = std::ffi::CStr::from_ptr(path).to_bytes();
+    with_browser(|br| match find_category_node(&br.root_store, path) {
         Some(cat) => refresh_node(br, cat.as_ptr() as *mut c_void),
         None => refresh_node(br, std::ptr::null_mut()),
     });

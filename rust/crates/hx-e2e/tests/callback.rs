@@ -1,6 +1,7 @@
 //! The connection the app opens: `hxnet`'s callback entry point, which runs
-//! the session with chat, users and messages handled and hands its events to
-//! `on_session` on the GLib main loop, as `hxnet_bridge.c` receives them.
+//! the session with chat, users, messages and news handled and hands its
+//! events to `on_session` on the GLib main loop, as `hxnet_bridge.c`
+//! receives them.
 //! What the bridge then does with an event is `hxhandlers`', tested on its
 //! own; this suite stops at the callback, which is as far as a binary
 //! without the app's link goes.
@@ -165,6 +166,19 @@ fn session_events_through_the_callback(s: &'static Server) {
             _ => None,
         });
 
+        let news = format!("{nick} in the news");
+        other.send(&request(103, &[(tag::BODY, news.as_bytes())]));
+        until(&ctx, "the news post", |e| match e {
+            Event::NewsPosted(text) if text.contains(&news) => Some(()),
+            _ => None,
+        });
+        let t = unsafe { send(h, &request(101, &[]), Some(Expect::NewsFile)) };
+        let file = until(&ctx, "the news file", |e| match e {
+            Event::NewsFile { trans, text } if *trans == t => Some(text.clone()),
+            _ => None,
+        });
+        assert!(file.contains(&news), "{}: {news:?} not in the file", s.name);
+
         // History, where the server keeps it; where it does not, the
         // server refuses the request, and with a reason the view can show.
         // Either way it comes back as the session's, not as a frame.
@@ -200,7 +214,7 @@ fn session_events_through_the_callback(s: &'static Server) {
 }
 
 #[test]
-fn the_app_s_connection_hands_chat_users_and_messages_to_on_session() {
+fn the_app_s_connection_hands_chat_users_messages_and_news_to_on_session() {
     for s in servers_with(&[]) {
         session_events_through_the_callback(s);
     }

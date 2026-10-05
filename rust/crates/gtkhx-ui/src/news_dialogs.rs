@@ -109,10 +109,17 @@ pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
             let text = entry.text();
             let text = text.as_str();
             if !text.is_empty() {
-                let parent_path = if parent.is_null() {
-                    "/".to_string()
+                // As the bytes the listing gave: a lossy decode names some
+                // other folder, or none.
+                let path = if parent.is_null() {
+                    std::ptr::null()
                 } else {
-                    crate::cstr(hx_news_node_path(parent.cast()))
+                    hx_news_node_path(parent.cast())
+                };
+                let parent_path = if path.is_null() {
+                    c"/".to_owned()
+                } else {
+                    std::ffi::CStr::from_ptr(path).to_owned()
                 };
                 let htlc = gtkhx_active_htlc();
                 // Both senders take (parent path, new name): the server
@@ -120,14 +127,11 @@ pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
                 // inside it. Folder creation used to join the two and send one
                 // path, which asked the server to resolve a folder that did not
                 // exist yet — ENOENT, every time.
-                if let (Ok(p), Ok(n)) = (
-                    std::ffi::CString::new(parent_path.clone()),
-                    std::ffi::CString::new(text),
-                ) {
+                if let Ok(n) = std::ffi::CString::new(text) {
                     if kind == NB_KIND_FOLDER {
-                        hx_news15_mkdir(htlc, p.as_ptr(), n.as_ptr());
+                        hx_news15_mkdir(htlc, parent_path.as_ptr(), n.as_ptr());
                     } else {
-                        hx_news15_mkcat(htlc, p.as_ptr(), n.as_ptr());
+                        hx_news15_mkcat(htlc, parent_path.as_ptr(), n.as_ptr());
                     }
                 }
                 // Settle: re-fetch the parent's listing so the new item shows.

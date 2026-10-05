@@ -206,68 +206,6 @@ hx_agreement_extract (const guint8 *frame, gsize frame_len, char *out,
     }
 }
 
-gboolean
-hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out,
-                      gsize out_size, gsize *out_len)
-{
-    if (!out || out_size == 0) {
-        return FALSE;
-    }
-
-    /* chunk walk + sanitise moved to
-     * gtkhx_proto_parse_news_file. The SIZE_MAX sentinel return
-     * preserves the "leave *out untouched when no NEWS chunk is
-     * present" contract tests/proto/test_news_file.c pins. */
-    size_t n = gtkhx_proto_parse_news_file (frame, frame_len, (uint8_t *)out,
-                                            out_size);
-    if (n == (size_t)-1) {
-        return FALSE;
-    }
-    if (out_len) {
-        *out_len = n;
-    }
-    return TRUE;
-}
-
-/* hx_news_dirlist_parse_folderitem / _categoryitem and hx_newscat_parse
- * (the C shims that marshalled the Rust parse results into struct
- * hx_news_dirlist_entry / struct hx_newscat) are gone — the 1.5 news
- * receive path now parses to owned handles (gtkhx_proto_parse_dirlist /
- * _catlist) read directly by hxmodel::news. The underlying parsers stay
- * covered by hxproto's native cargo tests. */
-
-/* Trampoline: gtkhx_proto_walk_news_post invokes a typedef'd C
- * callback with a uint8_t* buffer; the public hx_news_post_walk
- * promises a (char *bytes, gsize len) callback. Pack the user's
- * callback + state into a small struct, hand the trampoline to Rust,
- * and route the per-chunk emit through it. */
-struct hx_news_post_trampoline {
-    hx_news_post_cb cb;
-    void *user;
-};
-
-static void
-hx_news_post_emit (void *t, const uint8_t *bytes, size_t len)
-{
-    struct hx_news_post_trampoline *tr = t;
-    if (tr->cb) {
-        tr->cb (tr->user, (const char *)bytes, (gsize)len);
-    }
-}
-
-int
-hx_news_post_walk (const guint8 *frame, gsize frame_len, hx_news_post_cb cb,
-                   void *user)
-{
-    /* chunk walk + sanitise moved to
-     * gtkhx_proto_walk_news_post. Per-chunk buffer ownership is
-     * Rust's; the trampoline above adapts the FFI callback signature
-     * to the public hx_news_post_cb's (char *, gsize) shape. */
-    struct hx_news_post_trampoline tr = { cb, user };
-    return (int)gtkhx_proto_walk_news_post (frame, frame_len, hx_news_post_emit,
-                                            &tr);
-}
-
 guint8 *
 hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap,
         gsize *out_len)

@@ -1748,7 +1748,7 @@ on_news_file_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 {
     (void)emitter;
     (void)user_data;
-    output_news_file (htlc, (char *)news, (guint16)len);
+    output_news_file (htlc, (char *)news, len);
 }
 
 static void
@@ -1757,7 +1757,7 @@ on_news_post_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 {
     (void)emitter;
     (void)user_data;
-    output_news_post (htlc, (char *)news, (guint16)len);
+    output_news_post (htlc, (char *)news, len);
 
     /* News posts can be paragraphs long; pull just the first
      * line as the notification preview. */

@@ -19,7 +19,7 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use gio::prelude::*;
 use gio::subclass::prelude::*;
 use glib::translate::{from_glib_none, IntoGlib, IntoGlibPtr};
-use hxproto::parse::{CatList, DirList, NewsDirKind};
+use hxsession::{Article, NewsItem};
 
 /// The `NB_KIND_*` node kinds from `news_browser.c`. Named so the Rust and C
 /// meanings of `kind` can't silently drift.
@@ -356,40 +356,8 @@ pub unsafe extern "C" fn hx_news_node_ensure_children(
 // Category tree builder (was news_browser.c::catlist_thread_into).
 // -------------------------------------------------------------------------
 
-/// `#[repr(C)]` post record. The C `catlist_thread_into` shim fills an array of
-/// these from a `struct news_group`'s posts and hands it to
-/// [`hx_news_build_category_tree`]. Layout mirrors the C `struct
-/// hx_news_post_data` (news_browser.c); the borrowed `const char *`s are copied
-/// into the nodes during the call.
-#[repr(C)]
-pub struct HxNewsPostData {
-    pub postid: u32,
-    pub parentid: u32,
-    pub subject: *const c_char,
-    pub sender: *const c_char,
-    pub mime_type: *const c_char,
-    pub date: HxNewsDate,
-}
-
-/// A borrowed `const char *` → owned `CString`, substituting `default` when the
-/// pointer is NULL — and also when it points at `""` if `empty_is_default`.
-unsafe fn cstr_or(p: *const c_char, default: &str, empty_is_default: bool) -> CString {
-    if p.is_null() {
-        return CString::new(default).unwrap();
-    }
-    let c = CStr::from_ptr(p);
-    if empty_is_default && c.to_bytes().is_empty() {
-        CString::new(default).unwrap()
-    } else {
-        c.to_owned()
-    }
-}
-
 /// One post normalised for the tree builder — the fields a `NB_KIND_POST` node
 /// needs, with the "(no subject)" / "" / "text/plain" defaults already applied.
-/// Both builder entry points (the `#[repr(C)]` array from N2d and the native
-/// `CatList` from the receive port) fill this, so the threading + append logic
-/// lives in exactly one place ([`build_category_tree_core`]).
 struct CorePost {
     postid: u32,
     parentid: u32,
@@ -401,7 +369,6 @@ struct CorePost {
 
 /// `[u8]` → owned `CString`, truncating at the first NUL (C-string semantics)
 /// and substituting `default` when the result is empty and `empty_is_default`.
-/// The native-bytes analogue of [`cstr_or`].
 fn bytes_or(bytes: &[u8], default: &str, empty_is_default: bool) -> CString {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     let bytes = &bytes[..end];
@@ -457,30 +424,19 @@ fn build_category_tree_core(dest: &gio::ListStore, path: Option<&CString>, posts
     }
 }
 
-/// `void hx_news_build_category_tree(GListStore *dest, const char *category_path,
-/// const struct hx_news_post_data *posts, size_t count)` — build a category's
-/// reply-threaded `HxNewsNode` tree from the `#[repr(C)]` array a C caller
-/// marshals (N2d). Normalises each record and defers to
-/// [`build_category_tree_core`].
+/// Build a category's reply-threaded tree from the articles the session
+/// read out of its listing: subject empty → "(no subject)", and an article
+/// asked for as "text/plain" when its listing gave no type.
 ///
 /// # Safety
-/// `dest` is a valid `GListStore *`; `posts` points at `count` valid records
-/// whose `const char *` fields are NULL or NUL-terminated; main thread only.
-#[no_mangle]
-pub unsafe extern "C" fn hx_news_build_category_tree(
+/// `dest` is a valid `GListStore *`; `category_path` is NULL or
+/// NUL-terminated; main thread only.
+pub unsafe fn hx_news_build_category_tree_from_articles(
     dest: *mut gio::ffi::GListStore,
     category_path: *const c_char,
-    posts: *const HxNewsPostData,
-    count: usize,
+    articles: &[Article],
 ) {
-    if dest.is_null() || posts.is_null() || count == 0 {
-        return;
-    }
-    // Defensive slice-size ceiling: `slice::from_raw_parts` is UB if the total
-    // byte size exceeds `isize::MAX`. A corrupt/hostile `count` (e.g. a bogus
-    // `group->post_count`) must fail closed here, before the deref — matching
-    // the guard on `hx_news_thread_parent_indices`.
-    if count > isize::MAX as usize / std::mem::size_of::<HxNewsPostData>() {
+    if dest.is_null() {
         return;
     }
     let dest: gio::ListStore = from_glib_none(dest);
@@ -489,68 +445,18 @@ pub unsafe extern "C" fn hx_news_build_category_tree(
     } else {
         Some(CStr::from_ptr(category_path).to_owned())
     };
-    // subject: NULL/empty → "(no subject)"; sender: NULL → ""; mime: NULL →
-    // "text/plain" (the C original's defaults).
-    let posts: Vec<CorePost> = std::slice::from_raw_parts(posts, count)
+    let posts: Vec<CorePost> = articles
         .iter()
-        .map(|p| CorePost {
-            postid: p.postid,
-            parentid: p.parentid,
-            subject: cstr_or(p.subject, "(no subject)", true),
-            sender: cstr_or(p.sender, "", false),
-            mime_type: cstr_or(p.mime_type, "text/plain", false),
-            date: p.date,
-        })
-        .collect();
-    build_category_tree_core(&dest, path.as_ref(), posts);
-}
-
-/// `void hx_news_build_category_tree_from_catlist(GListStore *dest,
-/// const char *category_path, const CatList *cl)` — build the same tree straight
-/// from the `hxproto` owned parse handle, skipping the `#[repr(C)]` array
-/// marshal. The receive port (`gnews_browser_handle_catlist`) calls this with the
-/// handle carried on `gnews_catalog->parsed`; the handle is **borrowed** here
-/// (the caller frees it with `gtkhx_proto_catlist_free`).
-///
-/// Defaults match the array path: subject empty → "(no subject)", sender empty →
-/// "", mime taken from `parts[0]` or "text/plain" when the post has no parts.
-///
-/// # Safety
-/// `dest` is a valid `GListStore *`; `cl` is NULL or a live handle from
-/// `gtkhx_proto_parse_catlist`; `category_path` is NULL or NUL-terminated; main
-/// thread only.
-#[no_mangle]
-pub unsafe extern "C" fn hx_news_build_category_tree_from_catlist(
-    dest: *mut gio::ffi::GListStore,
-    category_path: *const c_char,
-    cl: *const CatList,
-) {
-    if dest.is_null() || cl.is_null() {
-        return;
-    }
-    let dest: gio::ListStore = from_glib_none(dest);
-    let path: Option<CString> = if category_path.is_null() {
-        None
-    } else {
-        Some(CStr::from_ptr(category_path).to_owned())
-    };
-    let posts: Vec<CorePost> = (*cl)
-        .posts
-        .iter()
-        .map(|p| CorePost {
-            postid: p.postid,
-            parentid: p.parentid,
-            subject: bytes_or(&p.subject, "(no subject)", true),
-            sender: bytes_or(&p.sender, "", false),
-            mime_type: if p.partcount > 0 && !p.parts.is_empty() {
-                bytes_or(&p.parts[0].mime_type, "text/plain", false)
-            } else {
-                CString::new("text/plain").unwrap()
-            },
+        .map(|a| CorePost {
+            postid: a.id,
+            parentid: a.parent,
+            subject: bytes_or(a.subject.as_bytes(), "(no subject)", true),
+            sender: bytes_or(a.poster.as_bytes(), "", false),
+            mime_type: bytes_or(&a.mime, "text/plain", true),
             date: HxNewsDate {
-                base_year: p.date_base_year,
-                pad: p.date_pad,
-                seconds: p.date_seconds,
+                base_year: a.year,
+                pad: 0,
+                seconds: a.seconds,
             },
         })
         .collect();
@@ -581,107 +487,48 @@ fn build_child_path(parent: &[u8], child: &[u8]) -> CString {
     CString::new(&joined[..end]).unwrap_or_else(|_| CString::new("/").unwrap())
 }
 
-/// One DIRLIST entry: a folder or category child. Mirrors the fields
-/// [`hx_news_build_dirlist_into`] reads out of C's `struct folder_item`.
-#[repr(C)]
-pub struct HxNewsDirItem {
-    /// The wire `folder_item.type` — 1 means folder, anything else category.
-    pub item_type: i32,
-    pub name: *const c_char,
-}
-
-/// `void hx_news_build_dirlist_into(GListStore *dest, const char *parent_path,
-/// const struct hx_news_dir_item *items, size_t count)` — append a folder's
-/// DIRLIST entries as folder / category child nodes of `dest`.
-///
-/// Replaces the inline node loop in `news_browser.c::gnews_browser_handle_dirlist`
-/// (the pending-request table + wire-struct frees stay C). Each entry becomes a
-/// `NB_KIND_FOLDER` / `NB_KIND_CATEGORY` node whose path is `parent_path` joined
-/// with the entry name; a NULL name becomes an empty label. Ownership stays in
-/// Rust — each node is created, appended (the store refs it), and the transient
-/// `Vec` ref drops.
+/// Append the bundles and categories the session read out of a listing as
+/// child nodes of `dest`: each labeled with its name, and named in its path
+/// by the bytes the server sent, which name it back exactly.
 ///
 /// # Safety
-/// `dest` is a valid `GListStore *`; `items` points at `count` valid records
-/// whose `name` is NULL or NUL-terminated; `parent_path` is NULL or
+/// `dest` is a valid `GListStore *`; `parent_path` is NULL or
 /// NUL-terminated; main thread only.
-#[no_mangle]
-pub unsafe extern "C" fn hx_news_build_dirlist_into(
+pub unsafe fn hx_news_build_dirlist_from_items(
     dest: *mut gio::ffi::GListStore,
     parent_path: *const c_char,
-    items: *const HxNewsDirItem,
-    count: usize,
+    items: &[NewsItem],
 ) {
-    if dest.is_null() || items.is_null() || count == 0 {
-        return;
-    }
-    // Defensive slice-size ceiling before from_raw_parts (see the category
-    // builder) — fail closed on a corrupt/hostile count.
-    if count > isize::MAX as usize / std::mem::size_of::<HxNewsDirItem>() {
+    if dest.is_null() {
         return;
     }
     let dest: gio::ListStore = from_glib_none(dest);
-    // Raw bytes throughout — no UTF-8 round-trip (see build_child_path).
     let parent: &[u8] = if parent_path.is_null() {
         b"/"
     } else {
         CStr::from_ptr(parent_path).to_bytes()
     };
-    let data = std::slice::from_raw_parts(items, count);
-    for it in data {
-        let name = if it.name.is_null() {
-            &[][..]
-        } else {
-            CStr::from_ptr(it.name).to_bytes()
-        };
-        let kind = if it.item_type == 1 {
+    for item in items {
+        let kind = if item.bundle {
             NB_KIND_FOLDER
         } else {
             NB_KIND_CATEGORY
         };
-        append_dir_node(&dest, parent, kind, name);
+        append_dir_node(&dest, parent, kind, item.name.as_bytes(), &item.name_bytes);
     }
 }
 
-/// `void hx_news_build_dirlist_from_dirlist(GListStore *dest,
-/// const char *parent_path, const DirList *dl)` — the same folder-tree build,
-/// read straight from the `hxproto` owned parse handle (the receive port,
-/// `gnews_browser_handle_dirlist`), skipping the `#[repr(C)]` array marshal. The
-/// handle is **borrowed** here — the caller frees it (`gtkhx_proto_dirlist_free`).
-///
-/// # Safety
-/// `dest` is a valid `GListStore *`; `dl` is NULL or a live handle from
-/// `gtkhx_proto_parse_dirlist`; `parent_path` is NULL or NUL-terminated; main
-/// thread only.
-#[no_mangle]
-pub unsafe extern "C" fn hx_news_build_dirlist_from_dirlist(
-    dest: *mut gio::ffi::GListStore,
-    parent_path: *const c_char,
-    dl: *const DirList,
+/// Append one DIRLIST child node to `dest`: a `kind` node labeled `label`
+/// with path `parent`/`name_bytes`, joined as raw bytes with no UTF-8
+/// round-trip.
+fn append_dir_node(
+    dest: &gio::ListStore,
+    parent: &[u8],
+    kind: i32,
+    label: &[u8],
+    name_bytes: &[u8],
 ) {
-    if dest.is_null() || dl.is_null() {
-        return;
-    }
-    let dest: gio::ListStore = from_glib_none(dest);
-    let parent: &[u8] = if parent_path.is_null() {
-        b"/"
-    } else {
-        CStr::from_ptr(parent_path).to_bytes()
-    };
-    for e in &(*dl).entries {
-        let kind = match e.kind {
-            NewsDirKind::Folder => NB_KIND_FOLDER,
-            NewsDirKind::Category => NB_KIND_CATEGORY,
-        };
-        append_dir_node(&dest, parent, kind, &e.name);
-    }
-}
-
-/// Append one DIRLIST child node to `dest`: a `kind` node labelled `name_bytes`
-/// with path `parent`/`name`. Shared by both dirlist builders so the label +
-/// path-join (raw bytes, no UTF-8 round-trip) live in one place.
-fn append_dir_node(dest: &gio::ListStore, parent: &[u8], kind: i32, name_bytes: &[u8]) {
-    let label = bytes_to_cstring(name_bytes);
+    let label = bytes_to_cstring(label);
     let child_path = build_child_path(parent, name_bytes);
     let node = HxNewsNode::new(kind, label, Some(child_path));
     dest.append(&node);

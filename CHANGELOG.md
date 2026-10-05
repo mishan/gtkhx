@@ -32,6 +32,11 @@
   - Dismissing a selection with a click no longer also opens the link under it
   - Chat settings now reach every connection, not just the one in focus
   - Settings → Chat can turn off opening links with a single click
+- News
+  - Accented characters in threaded news show correctly: folder and category names, subjects, authors and posts
+  - A news folder, category or article the server refuses no longer stays stuck loading; you can try again
+  - Posting into a category, or making one inside a folder, with an accented name works on more servers
+  - Loading and posting news no longer flashes by in the Tasks list
 - Hotline Protocol
   - A rejected login now shows the server's own message
   - Fixed HOPE-encrypted connections misreading a message split across frames

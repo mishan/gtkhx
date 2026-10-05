@@ -4,9 +4,9 @@
 //! through the send + receive paths and back:
 //!
 //! - `Carrier` (folder / catalog) — created by the browser with the request
-//!   `path`, carried on the reply task; the sender reads `path`, the receive
-//!   handler stashes the owned `parsed` handle, and the browser's reply handler
-//!   reads `parsed` and frees the carrier.
+//!   `path`, waiting with the request for its reply; the sender reads `path`,
+//!   the receive side stashes what the session read of the reply, and the
+//!   browser's reply handler reads that and frees the carrier.
 //! - `NewsPost` — built per GETTHREAD reply: the post body + the target
 //!   `HxNewsNode` (carrying a transfer-full ref); consumed + freed by the
 //!   browser's thread handler.
@@ -14,26 +14,27 @@
 //! They used to be C structs in `session.h` reached through `news_send_bridge.c`
 //! and `news_recv_bridge.c` shims. They're pure Rust-owned boxes now; the only
 //! thing that crosses the FFI is the opaque `*mut c_void` handle (C never
-//! dereferences it — `rcv.c` / `gtkhx.c` pass it straight through). The
+//! dereferences it — `gtkhx.c` passes it straight through). The
 //! `#[no_mangle]` accessors keep the exact symbol names the browser (gtkhx-ui)
 //! and the senders (hxhandlers::send::news) already link against.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 
 use hxmodel::news::node::hx_news_node_set_body_fetching;
+use hxsession::{Article, NewsItem};
 
 extern "C" {
-    // glib — release the transfer-full target ref a body-less reply won't carry
+    // glib — release the transfer-full target ref a refused fetch won't carry
     // onward.
     fn g_object_unref(obj: *mut c_void);
 }
 
-/// A NEWSDIRLIST / NEWSCATLIST request carrier: the path we asked for plus the
-/// owned parse handle the receive path stashes on it (`parsed`, a
-/// hxproto `DirList` / `CatList`, freed by the browser's reply handler).
+/// A NEWSDIRLIST / NEWSCATLIST request carrier: the path we asked for plus
+/// what the reply listed, a bundle's items or a category's articles.
 struct Carrier {
     path: CString,
-    parsed: *mut c_void,
+    items: Vec<NewsItem>,
+    articles: Vec<Article>,
 }
 
 unsafe fn carrier_new(path: *const c_char) -> *mut c_void {
@@ -44,7 +45,8 @@ unsafe fn carrier_new(path: *const c_char) -> *mut c_void {
     };
     Box::into_raw(Box::new(Carrier {
         path,
-        parsed: std::ptr::null_mut(),
+        items: Vec::new(),
+        articles: Vec::new(),
     })) as *mut c_void
 }
 
@@ -53,20 +55,6 @@ unsafe fn carrier_path(g: *mut c_void) -> *const c_char {
         std::ptr::null()
     } else {
         (*(g as *mut Carrier)).path.as_ptr()
-    }
-}
-
-unsafe fn carrier_parsed(g: *mut c_void) -> *mut c_void {
-    if g.is_null() {
-        std::ptr::null_mut()
-    } else {
-        (*(g as *mut Carrier)).parsed
-    }
-}
-
-unsafe fn carrier_set_parsed(g: *mut c_void, parsed: *mut c_void) {
-    if !g.is_null() {
-        (*(g as *mut Carrier)).parsed = parsed;
     }
 }
 
@@ -92,17 +80,17 @@ pub unsafe extern "C" fn gnews_folder_new(path: *const c_char) -> *mut c_void {
 pub unsafe extern "C" fn gnews_folder_path(g: *mut c_void) -> *const c_char {
     carrier_path(g)
 }
+/// What the bundle holds, once its reply has come; empty until then.
+///
 /// # Safety
-/// `g` is NULL or a `gnews_folder_new` handle.
-#[no_mangle]
-pub unsafe extern "C" fn gnews_folder_parsed(g: *mut c_void) -> *mut c_void {
-    carrier_parsed(g)
+/// `g` is a live `gnews_folder_new` handle, which outlives the slice.
+pub unsafe fn gnews_folder_items<'a>(g: *mut c_void) -> &'a [NewsItem] {
+    &(*(g as *mut Carrier)).items
 }
 /// # Safety
-/// `g` is NULL or a `gnews_folder_new` handle.
-#[no_mangle]
-pub unsafe extern "C" fn gnews_folder_set_parsed(g: *mut c_void, parsed: *mut c_void) {
-    carrier_set_parsed(g, parsed);
+/// `g` is a live `gnews_folder_new` handle.
+pub(crate) unsafe fn gnews_folder_set_items(g: *mut c_void, items: Vec<NewsItem>) {
+    (*(g as *mut Carrier)).items = items;
 }
 /// # Safety
 /// `g` is NULL or a `gnews_folder_new` handle; not used afterward.
@@ -124,17 +112,17 @@ pub unsafe extern "C" fn gnews_catalog_new(path: *const c_char) -> *mut c_void {
 pub unsafe extern "C" fn gnews_catalog_path(g: *mut c_void) -> *const c_char {
     carrier_path(g)
 }
+/// The category's articles, once its reply has come; empty until then.
+///
 /// # Safety
-/// `g` is NULL or a `gnews_catalog_new` handle.
-#[no_mangle]
-pub unsafe extern "C" fn gnews_catalog_parsed(g: *mut c_void) -> *mut c_void {
-    carrier_parsed(g)
+/// `g` is a live `gnews_catalog_new` handle, which outlives the slice.
+pub unsafe fn gnews_catalog_articles<'a>(g: *mut c_void) -> &'a [Article] {
+    &(*(g as *mut Carrier)).articles
 }
 /// # Safety
-/// `g` is NULL or a `gnews_catalog_new` handle.
-#[no_mangle]
-pub unsafe extern "C" fn gnews_catalog_set_parsed(g: *mut c_void, parsed: *mut c_void) {
-    carrier_set_parsed(g, parsed);
+/// `g` is a live `gnews_catalog_new` handle.
+pub(crate) unsafe fn gnews_catalog_set_articles(g: *mut c_void, articles: Vec<Article>) {
+    (*(g as *mut Carrier)).articles = articles;
 }
 /// # Safety
 /// `g` is NULL or a `gnews_catalog_new` handle; not used afterward.
@@ -203,9 +191,9 @@ pub unsafe extern "C" fn news_post_free(post: *mut c_void) {
     }
 }
 
-/// A GETTHREAD reply that carried no usable body (TASK_ERROR / missing
-/// NEWSDATA): release the transfer-full target ref + clear body_fetching so the
-/// user can retry. No `news_post` is built in this case.
+/// A GETTHREAD that was refused, or never answered: release the
+/// transfer-full target ref + clear body_fetching so the user can retry. No
+/// `news_post` is built in this case.
 ///
 /// # Safety
 /// `target` is NULL or the transfer-full `HxNewsNode *`.

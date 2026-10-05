@@ -495,7 +495,7 @@ unsafe fn news_reload(sess: *mut Session) {
 
 /// Return the news bytes as a UTF-8 `String` via the C Mac-Roman→UTF-8
 /// converter (the same sanitiser the C output path used). Empty on NULL.
-unsafe fn news_bytes_to_utf8(news: *const c_char, len: u16) -> String {
+unsafe fn news_bytes_to_utf8(news: *const c_char, len: u32) -> String {
     if news.is_null() || len == 0 {
         return String::new();
     }
@@ -513,7 +513,7 @@ unsafe fn news_bytes_to_utf8(news: *const c_char, len: u16) -> String {
 /// Append `text` to the news buffer (`at_start` = prepend, else append), re-tag
 /// URLs, and re-run any active Find query. Shared body of `output_news_post`
 /// (prepend) and `output_news_file` (append).
-unsafe fn news_output(htlc: *mut c_void, news: *const c_char, len: u16, at_start: bool) {
+unsafe fn news_output(htlc: *mut c_void, news: *const c_char, len: u32, at_start: bool) {
     let text = news_bytes_to_utf8(news, len);
     // No open-panel gate any more: having a view for this connection *is* the
     // gate, and it is the per-connection one. The old `gtkhx_news_is_open`
@@ -618,7 +618,7 @@ pub unsafe extern "C" fn reload_news(_widget: *mut gtk::ffi::GtkWidget, data: *m
 /// # Safety
 /// `news` is NULL or valid for `len` bytes; GTK main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn output_news_post(htlc: *mut c_void, news: *mut c_char, len: u16) {
+pub unsafe extern "C" fn output_news_post(htlc: *mut c_void, news: *mut c_char, len: u32) {
     news_output(htlc, news, len, /*at_start=*/ true);
 }
 
@@ -628,6 +628,6 @@ pub unsafe extern "C" fn output_news_post(htlc: *mut c_void, news: *mut c_char, 
 /// # Safety
 /// `news` is NULL or valid for `len` bytes; GTK main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn output_news_file(htlc: *mut c_void, news: *mut c_char, len: u16) {
+pub unsafe extern "C" fn output_news_file(htlc: *mut c_void, news: *mut c_char, len: u32) {
     news_output(htlc, news, len, /*at_start=*/ false);
 }

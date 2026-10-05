@@ -663,12 +663,12 @@ pub unsafe extern "C" fn gtkhx_session_emit_news_file(
     self_: *mut c_void,
     htlc: *mut c_void,
     news: *const c_char,
-    len: u16,
+    len: u32,
 ) {
     let v = [
         ptr_value(htlc),
         ptr_value(news as *const c_void),
-        glib::Value::from(len as u32),
+        glib::Value::from(len),
     ];
     emit(self_, "news-file", &v);
 }
@@ -680,12 +680,12 @@ pub unsafe extern "C" fn gtkhx_session_emit_news_post(
     self_: *mut c_void,
     htlc: *mut c_void,
     news: *const c_char,
-    len: u16,
+    len: u32,
 ) {
     let v = [
         ptr_value(htlc),
         ptr_value(news as *const c_void),
-        glib::Value::from(len as u32),
+        glib::Value::from(len),
     ];
     emit(self_, "news-post", &v);
 }

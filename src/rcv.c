@@ -40,7 +40,6 @@
 #include "files_remote_provider.h"
 #include "preview.h"
 #include "gtkutil.h"
-#include "news.h"
 #include "users.h"
 #include "usermod.h"
 #include "hxnet_bridge.h"
@@ -147,12 +146,6 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
                                       (guint16)body_len);
     }
 }
-
-/* hx_rcv_news_post (HTLS_HDR_NEWS_POST, the flat 1.0/1.2 news push) is a
- * #[no_mangle] fn in the hxhandlers::recv::news module (rust/crates/hxhandlers/src/recv/news.rs): it walks
- * the HTLS_DATA_NEWS chunks natively (hxproto::parse::news_post_chunks)
- * and emits one news-post line per chunk via hx_news_post_recv. The dispatch
- * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
 #ifdef HAVE_VOICE
 /* Whether `label` names a voice or video request whose refusal the voice
@@ -892,9 +885,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 {
     void (*handler) (struct htlc_conn *, const guint8 *, gsize) = NULL;
     switch (hx_recv_route (type)) {
-    case HX_RECV_NEWS_POST:
-        handler = hx_rcv_news_post;
-        break;
     case HX_RECV_TASK:
         handler = hx_rcv_task;
         break;
@@ -968,25 +958,6 @@ rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
     }
     g_free (uespfn);
 }
-
-/* rcv_task_newscat_list moved to the hxhandlers::recv::news Rust crate — it parses the
- * CATLIST chunk to an owned handle, stashes it on the gnews_catalog carrier, and
- * emits news-catalog, with no intermediate news_item / news_group. hxhandlers::send::news's
- * task_new still registers it; the symbol now resolves against hxhandlers::recv::news. */
-
-/* rcv_task_newsfolder_list moved to the hxhandlers::recv::news Rust crate — it parses the
- * NEWSDIRLIST chunks (the dh_start walk + per-chunk parsers) into an owned
- * DirList handle via gtkhx_proto_parse_dirlist, stashes it on the gnews_folder
- * carrier, and emits news-folder, with no intermediate folder_item / news_folder.
- * hxhandlers::send::news's task_new still registers it; the symbol now resolves against
- * hxhandlers::recv::news. */
-
-/* rcv_task_news_post moved to the hxhandlers::recv::news Rust crate — it parses the
- * GETTHREAD NEWSDATA body (gtkhx_proto_parse_news_thread_reply), bails on a
- * TASK_ERROR / body-less reply, then builds the news_post carrier via
- * news_post_new (news_recv_bridge.c) and emits news-thread. hxhandlers::send::news's
- * get_post sender still registers it; the symbol now resolves against
- * hxhandlers::recv::news. With this, no news code remains in rcv.c. */
 
 void
 rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
@@ -1197,13 +1168,6 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
     }
 }
-
-/* rcv_task_news_file (the flat NEWS_FILE task reply — the whole 1.0/1.2 news
- * document) is a #[no_mangle] fn in the hxhandlers::recv::news module: it parses the first
- * HTLS_DATA_NEWS chunk natively (hxproto::parse::parse_news_file) and
- * publishes it via hx_news_file_recv, emitting an empty document on a chunk-less
- * reply. hxhandlers::send::news registers it as the reply callback (declared in rcv.h); no
- * C body — and no news_buf/news_len scratch — remains here. */
 
 /* GIF-icons extension (fogWraith GIF-Icons.md). The ICON_GET / ICON_GETLIST
  * task-reply handlers (rcv_task_icon_get / rcv_task_icon_getlist) moved to the
