@@ -65,6 +65,12 @@
   - An empty server agreement no longer opens an empty window
   - Older servers that refuse GtkHx's once-a-minute check that the connection is alive no longer cause an error each time
   - Sending a message, loading the user list and fetching chat history no longer appear in the Tasks list
+  - Getting a user's info, kicking, broadcasting and opening, saving or deleting accounts no longer appear in the Tasks list
+  - The account editor shows accented logins and names correctly, and saving keeps an accented name you didn't change
+  - The account editor and the Broadcast window act on the server you opened them for, even after you switch to another connection, and send nothing once you've disconnected from it
+  - An accented name typed in the account editor is saved correctly on servers that don't use UTF-8
+  - New User now works on Janus servers
+  - New User won't replace an account that already exists
 - Updates
   - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
   - Windows, macOS and Flatpak test builds show their real version, such as 1.4.1b2, in About instead of 1.4.1-dev

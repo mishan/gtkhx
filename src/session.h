@@ -142,12 +142,6 @@ struct date_time {
 
 /* ---- User-list / chat membership ---------------------------------- */
 
-struct uesp_fn {
-    void *uesp;
-    void (*fn) (void *, const char *, const char *, const char *,
-                const hl_access_bits);
-};
-
 /* (struct hx_user retired — the user-create/change/delete signals now carry
  * uid + nick_color as scalar args, so no transient carrier is needed. Per-chat
  * membership is owned by the Rust HxMemberModel (hx_chat_member_model (chat));

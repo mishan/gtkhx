@@ -252,6 +252,7 @@ pub unsafe extern "C" fn hx_conn_reset(h: *mut HtlcConn) {
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_free(h: *mut HtlcConn) {
     if !h.is_null() {
+        generations().remove(&(*h).serial);
         drop(Box::from_raw(h));
     }
 }
@@ -705,6 +706,30 @@ pub unsafe extern "C" fn hx_conn_bridge_handle(h: *const HtlcConn) -> *mut c_voi
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_bridge_handle(h: *mut HtlcConn, p: *mut c_void) {
     (*h).bridge_handle = p;
+    if !p.is_null() {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+        let g = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        generations().insert((*h).serial, g);
+    }
+}
+
+/// Each connection's current connect, by serial: a new transport is a new
+/// connect. Kept beside the struct rather than in it, which C mirrors.
+fn generations() -> std::sync::MutexGuard<'static, std::collections::BTreeMap<u16, u32>> {
+    static G: std::sync::Mutex<std::collections::BTreeMap<u16, u32>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    G.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Which connect the connection is on, 0 before its first. A serial stays
+/// with the struct across a disconnect and the next connect in the same tab,
+/// so something that acts on a connection later — a dialog's Save — keeps
+/// this too, and acts only while it is unchanged.
+///
+/// # Safety
+/// `h` is a valid connection.
+pub unsafe fn generation(h: *const HtlcConn) -> u32 {
+    generations().get(&(*h).serial).copied().unwrap_or(0)
 }
 
 /// Field offsets, for the C side to compare against its mirror's `offsetof`.

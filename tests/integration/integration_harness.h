@@ -265,7 +265,7 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
  *
  * On return, `htlc` is in the state the harness left it: the last
  * received message (the SELFINFO) is in htlc->in and the htlc
- * fields hx_selfinfo_parse fills (uid, icon, name, access) are
+ * fields the SELFINFO carries (uid, icon, name, access) are
  * already populated.
  */
 extern int integration_open_login_or_skip (struct htlc_conn *htlc,

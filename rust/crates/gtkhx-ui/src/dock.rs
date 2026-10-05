@@ -89,6 +89,10 @@ extern "C" {
     /// `session_registry.c` — the session the user is looking at. NULL before
     /// the first one exists.
     fn hx_active_session() -> *mut c_void;
+    /// `session_registry.c` — the connection a key names, if it is still
+    /// open.
+    fn hx_conn_with_serial(serial: u16) -> *mut c_void;
+    fn hx_conn_fd(htlc: *const c_void) -> std::ffi::c_int;
 }
 
 /// Which connection a thing belongs to.
@@ -120,6 +124,36 @@ pub fn key_for_session(sess: *mut c_void) -> ConnKey {
 /// asked, which may not be the one on screen by the time it lands.
 pub fn active_key() -> ConnKey {
     key_for_session(unsafe { hx_active_session() })
+}
+
+/// A connection as it is now, for a window that outlives what it acts on:
+/// the connection can close, and its tab connect again to another server.
+#[derive(Debug, Clone, Copy)]
+pub struct Bound {
+    conn: ConnKey,
+    generation: u32,
+}
+
+/// `conn` as it is connected now.
+pub fn bind(conn: ConnKey) -> Bound {
+    let htlc = unsafe { hx_conn_with_serial(conn) };
+    let generation = if htlc.is_null() {
+        0
+    } else {
+        unsafe { gtkhx_core::conn::generation(htlc.cast()) }
+    };
+    Bound { conn, generation }
+}
+
+/// The connection `bound` named, while it is still that connect.
+pub fn live_htlc(bound: Bound) -> Option<*mut c_void> {
+    unsafe {
+        let htlc = hx_conn_with_serial(bound.conn);
+        (!htlc.is_null()
+            && hx_conn_fd(htlc) != 0
+            && gtkhx_core::conn::generation(htlc.cast()) == bound.generation)
+            .then_some(htlc)
+    }
 }
 
 /// The dock page name for a session's content: its connection's key.

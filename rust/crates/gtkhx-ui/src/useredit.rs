@@ -1,16 +1,18 @@
 //! User Editor + "Open User" dialog (ported from the UI half of
-//! `src/usermod.c`). The wire senders (`hx_useredit_create/delete/open`)
-//! and the access-bit table stay in C (protocol send-path + byte-order
-//! magic); this module drives the Adwaita UI and calls them via FFI.
+//! `src/usermod.c`). The access-bit table stays in C (byte-order magic);
+//! the account is read, made, saved and deleted through
+//! `hxhandlers::send::user`, on the connection the editor was opened for,
+//! and not once that connection has closed or its tab connected again.
 //!
-//! State lives in an `EDITORS` map keyed by a `u64` id. Handlers and the
-//! account-read reply trampoline capture the id (Copy) and look the state
-//! up, so there are no ref cycles and a reply arriving after the window
-//! closed is a safe no-op (the id is gone from the map).
+//! State lives in an `EDITORS` map keyed by a `usize` id. Handlers and the
+//! account-read reply capture the id (Copy) and look the state up, so there
+//! are no ref cycles and a reply arriving after the window closed is a safe
+//! no-op (the id is gone from the map).
 
+use crate::cstr;
+use crate::dock::{self, Bound};
 use crate::ffi as cffi;
-use crate::tr::tr;
-use crate::{cs, cstr};
+use crate::tr::{tr, tr1};
 use gtk4 as gtk;
 use libadwaita as adw;
 
@@ -19,31 +21,55 @@ use gtk::glib;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_char;
-use std::os::raw::{c_int, c_void};
+use std::os::raw::c_int;
 use std::rc::Rc;
 
-/// `void (*)(void *uesp, const char *name, const char *login, const char
-/// *pass, hl_access_bits access)` — the account-read reply callback.
-type UserOpenCb =
-    unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, u64);
+use hxsession::Account;
 
 extern "C" {
     // usermod.c — access-bit table accessors (byte-order magic stays in C).
     fn gtkhx_useredit_access_count() -> c_int;
     fn gtkhx_useredit_access_name(i: c_int) -> *const c_char;
     fn gtkhx_useredit_access_bitno(i: c_int) -> c_int;
-    // usermod.c — wire senders (protocol send-path).
-    fn hx_useredit_create(
-        htlc: *mut c_void,
-        login: *const c_char,
-        pass: *const c_char,
-        name: *const c_char,
-        access: u64,
-    );
-    fn hx_useredit_delete(htlc: *mut c_void, login: *const c_char);
-    fn hx_useredit_open(htlc: *mut c_void, login: *const c_char, cb: UserOpenCb, uesp: *mut c_void);
-    // gtkhx_ui_bridge.c — &hx_active_session()->htlc.
-    fn gtkhx_active_htlc() -> *mut c_void;
+}
+
+/// `HTLC_CAP_TEXT_ENCODING` (hotline.h): the server takes UTF-8 text.
+const CAP_TEXT_ENCODING: u64 = 0x0002;
+/// `HL_ACCESS_READ_USERS` (hl_access.h): we may read accounts.
+const HL_ACCESS_READ_USERS: c_int = 16;
+
+/// A field as the account read gave it: the server's bytes, sent back as
+/// they came unless the user changes what is shown.
+#[derive(Default)]
+struct Read {
+    bytes: Vec<u8>,
+    shown: String,
+}
+
+impl Read {
+    fn new(bytes: &[u8]) -> Self {
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        Read {
+            bytes: bytes.to_vec(),
+            shown: hxproto::text::to_utf8(&bytes[..end]),
+        }
+    }
+
+    /// What goes back to the server for a field that now shows `typed`:
+    /// its own bytes, or what was typed, encoded as a server that is not
+    /// `utf8` takes text, and clamped to the 32-byte protocol field once
+    /// encoded — an emoji can become a longer `:shortcode:`.
+    fn or_typed(&self, typed: &str, utf8: bool) -> Vec<u8> {
+        if typed == self.shown {
+            self.bytes.clone()
+        } else if utf8 {
+            clamp32(typed).into_bytes()
+        } else {
+            let mut wire = hxtext::for_wire(typed.as_bytes(), false, false);
+            wire.truncate(31);
+            wire
+        }
+    }
 }
 
 struct UserEdit {
@@ -53,15 +79,26 @@ struct UserEdit {
     pass_row: adw::PasswordEntryRow,
     access_buf: Cell<u64>,
     switches: Vec<(u8, adw::SwitchRow)>,
-    /// Clamped login (32-byte protocol field) used by Save / Delete.
-    login: RefCell<String>,
+    /// The connection the account is on.
+    conn: Bound,
+    /// The login Save and Delete name the account by: as typed, clamped to
+    /// the 32-byte protocol field, until the read gives the server's own.
+    login: RefCell<Vec<u8>>,
+    name: RefCell<Read>,
+    pass: RefCell<Read>,
     is_new: bool,
+    /// The login a New User window has made, once the server said so:
+    /// saved again, it is changed, not made a second time. A create the
+    /// server refused leaves the next Save a create too, so it can't
+    /// overwrite an account that was already there.
+    made: RefCell<Option<Vec<u8>>>,
+    /// A create, or its check, is out and not yet answered.
+    creating: Cell<bool>,
+    /// The key this editor has in `EDITORS`.
+    id: usize,
 }
 
 thread_local! {
-    // id/key is usize (pointer-width) so the `id as *mut c_void` → `uesp as
-    // usize` round-trip through hx_useredit_open is lossless on every target,
-    // including 32-bit (a u64 id would truncate going through void*).
     static EDITORS: RefCell<HashMap<usize, Rc<UserEdit>>> = RefCell::new(HashMap::new());
     static NEXT_ID: Cell<usize> = const { Cell::new(1) };
 }
@@ -80,27 +117,72 @@ fn clamp32(s: &str) -> String {
 
 impl UserEdit {
     fn save(&self) {
-        let name = clamp32(&self.name_row.text());
-        let pass = clamp32(&self.pass_row.text());
         if self.is_new {
-            *self.login.borrow_mut() = clamp32(&self.login_row.text());
+            *self.login.borrow_mut() = clamp32(&self.login_row.text()).into_bytes();
         }
-        let login = self.login.borrow().clone();
-        unsafe {
-            hx_useredit_create(
-                gtkhx_active_htlc(),
-                cs(&login).as_ptr(),
-                cs(&pass).as_ptr(),
-                cs(&name).as_ptr(),
-                self.access_buf.get(),
-            );
+        if let Some(htlc) = dock::live_htlc(self.conn) {
+            let utf8 = unsafe { gtkhx_core::conn::hx_conn_has_cap(htlc.cast(), CAP_TEXT_ENCODING) };
+            // The name in the server's encoding; the login and password as
+            // typed, as GtkHx's login sends them.
+            let name = self
+                .name
+                .borrow()
+                .or_typed(&self.name_row.text(), utf8 != 0);
+            let pass = self.pass.borrow().or_typed(&self.pass_row.text(), true);
+            let access = access_to_wire(self.access_buf.get());
+            let login = self.login.borrow();
+            if self.is_new && self.made.borrow().as_ref() != Some(&*login) {
+                // One create at a time: a second, sent before the first is
+                // answered, would make the account twice, or find it taken.
+                if self.creating.replace(true) {
+                    return;
+                }
+                let (id, made) = (self.id, login.clone());
+                let mark = move |ok: bool| {
+                    if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
+                        st.creating.set(false);
+                        if ok {
+                            *st.made.borrow_mut() = Some(made);
+                        }
+                    }
+                };
+                // Told it is there, nothing is made: a server may replace
+                // an account with a new one of the same login.
+                let (conn, shown) = (self.conn, Read::new(&login).shown);
+                let exists = move || {
+                    if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
+                        st.creating.set(false);
+                    }
+                    if let Some(htlc) = dock::live_htlc(conn) {
+                        let msg = crate::cs(&tr1("An account named %s already exists", &shown));
+                        unsafe {
+                            gtkhx_core::session::gtkhx_session_emit_request_failed(
+                                gtkhx_core::session::gtkhx_session_get_default(),
+                                htlc,
+                                msg.as_ptr(),
+                            )
+                        };
+                    }
+                };
+                let can_read = unsafe {
+                    gtkhx_core::conn::hx_conn_access_has(htlc.cast(), HL_ACCESS_READ_USERS)
+                } != 0;
+                unsafe {
+                    hxhandlers::send::user::account_create(
+                        htlc, &login, &pass, &name, access, can_read, exists, mark,
+                    )
+                };
+            } else {
+                unsafe { hxhandlers::send::user::account_save(htlc, &login, &pass, &name, access) };
+            }
         }
     }
 
     fn delete(&self) {
-        let login = self.login.borrow().clone();
-        unsafe { hx_useredit_delete(gtkhx_active_htlc(), cs(&login).as_ptr()) };
-        self.window.destroy();
+        if let Some(htlc) = dock::live_htlc(self.conn) {
+            unsafe { hxhandlers::send::user::account_delete(htlc, &self.login.borrow()) };
+        }
+        self.window.close();
     }
 
     fn generate(&self) {
@@ -143,29 +225,34 @@ fn gen_password(len: usize) -> Option<String> {
     Some(out)
 }
 
-/// Account-read reply → fill the dialog. `uesp` carries the editor id.
-///
-/// # Safety
-/// Called by the C rcv task with the (name, login, pass) C strings.
-unsafe extern "C" fn user_open_cb(
-    uesp: *mut c_void,
-    name: *const c_char,
-    login: *const c_char,
-    pass: *const c_char,
-    access: u64,
-) {
-    let id = uesp as usize;
+/// The editor's access bits, numbered as the C table numbers them, as the
+/// wire carries them: the table's numbering is of the bitmap's bytes in
+/// host order.
+fn access_to_wire(bits: u64) -> [u8; 8] {
+    bits.to_ne_bytes()
+}
+
+fn access_from_wire(wire: [u8; 8]) -> u64 {
+    u64::from_ne_bytes(wire)
+}
+
+/// The account read for editor `id`, into its fields.
+fn fill(id: usize, account: &Account) {
     let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) else {
         return; // editor already closed — safe no-op
     };
-    let login_s = cstr(login);
-    st.login_row.set_text(&login_s);
-    st.name_row.set_text(&cstr(name));
-    st.pass_row.set_text(&cstr(pass));
-    *st.login.borrow_mut() = clamp32(&login_s);
+    let login = Read::new(&account.login);
+    st.login_row.set_text(&login.shown);
+    *st.login.borrow_mut() = login.bytes;
+    let (name, pass) = (Read::new(&account.name), Read::new(&account.password));
+    st.name_row.set_text(&name.shown);
+    st.pass_row.set_text(&pass.shown);
+    *st.name.borrow_mut() = name;
+    *st.pass.borrow_mut() = pass;
     // Set the canonical buffer first (preserves any bits no switch shows),
     // then reflect it into the switches (their notify handlers re-confirm
     // the same bits — idempotent).
+    let access = access_from_wire(account.access.unwrap_or_default().to_be_bytes());
     st.access_buf.set(access);
     for (bitno, sw) in &st.switches {
         sw.set_active((access >> bitno) & 1 == 1);
@@ -178,9 +265,15 @@ unsafe extern "C" fn user_open_cb(
 /// `login` is NULL or a valid C string.
 #[no_mangle]
 pub unsafe extern "C" fn create_useredit_window(login: *const c_char, new: c_int) {
+    open_editor(dock::bind(dock::active_key()), &cstr(login), new != 0);
+}
+
+/// The editor for account `login` on `conn`, or for a new one.
+///
+/// # Safety
+/// Main thread.
+unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
     crate::ensure_gtk_init();
-    let login = cstr(login);
-    let is_new = new != 0;
 
     let window = gtk::Window::new();
     window.set_default_size(520, 680);
@@ -265,18 +358,21 @@ pub unsafe extern "C" fn create_useredit_window(login: *const c_char, new: c_int
         pass_row,
         access_buf: Cell::new(0),
         switches,
-        login: RefCell::new(clamp32(&login)),
+        conn,
+        login: RefCell::new(clamp32(login).into_bytes()),
+        name: RefCell::default(),
+        pass: RefCell::default(),
         is_new,
+        made: RefCell::default(),
+        creating: Cell::new(false),
+        id,
     });
     EDITORS.with_borrow_mut(|m| m.insert(id, state.clone()));
-    // try_with (not with_borrow_mut): on Ctrl-Q the C hx_quit calls exit(),
-    // whose TLS destructors drop EDITORS, disposing the window and firing
-    // "destroy" while EDITORS is mid-destruction — a plain access would
-    // panic (AccessError) and abort across the FFI.
-    window.connect_destroy(move |_| {
-        let _ = EDITORS.try_with(|m| {
-            m.borrow_mut().remove(&id);
-        });
+    // Out of the map when it closes: the map's Rc holds the window, so
+    // nothing else lets go of it.
+    window.connect_close_request(move |_| {
+        EDITORS.with_borrow_mut(|m| m.remove(&id));
+        glib::Propagation::Proceed
     });
 
     for (bitno, sw) in &state.switches {
@@ -304,11 +400,11 @@ pub unsafe extern "C" fn create_useredit_window(login: *const c_char, new: c_int
     });
     if let Some(db) = &delete_btn {
         db.connect_clicked(move |_| {
-            EDITORS.with_borrow(|m| {
-                if let Some(st) = m.get(&id) {
-                    st.delete();
-                }
-            });
+            // Not under the borrow: closing the window takes its entry out
+            // of EDITORS.
+            if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
+                st.delete();
+            }
         });
     }
     gen_btn.connect_clicked(move |_| {
@@ -319,14 +415,8 @@ pub unsafe extern "C" fn create_useredit_window(login: *const c_char, new: c_int
         });
     });
 
-    if !is_new {
-        let lc = cs(&login);
-        hx_useredit_open(
-            gtkhx_active_htlc(),
-            lc.as_ptr(),
-            user_open_cb,
-            id as *mut c_void,
-        );
+    if let Some(htlc) = dock::live_htlc(state.conn).filter(|_| !is_new) {
+        hxhandlers::send::user::account_read(htlc, login.as_bytes(), move |a| fill(id, a));
     }
 
     window.present();
@@ -337,6 +427,9 @@ pub unsafe extern "C" fn create_useredit_window(login: *const c_char, new: c_int
 pub extern "C" fn useredit_open_dialog() {
     crate::ensure_gtk_init();
 
+    // The server the user was on when they asked, whichever is in focus
+    // once they answer.
+    let conn = dock::bind(dock::active_key());
     let dialog = adw::AlertDialog::new(
         Some(&tr("Open User")),
         Some(&tr("Enter the login of the account to edit.")),
@@ -361,7 +454,7 @@ pub extern "C" fn useredit_open_dialog() {
             if resp == "open" {
                 let login = entry.text();
                 if !login.is_empty() {
-                    unsafe { create_useredit_window(cs(&login).as_ptr(), 0) };
+                    unsafe { open_editor(conn, &login, false) };
                 }
             }
         });
@@ -373,7 +466,7 @@ pub extern "C" fn useredit_open_dialog() {
         entry.connect_entry_activated(move |e| {
             let login = e.text();
             if !login.is_empty() {
-                unsafe { create_useredit_window(cs(&login).as_ptr(), 0) };
+                unsafe { open_editor(conn, &login, false) };
             }
             dlg.close();
         });
@@ -388,4 +481,55 @@ pub extern "C" fn useredit_open_dialog() {
     };
     dialog.present(parent.as_ref().map(|w| w.upcast_ref::<gtk::Widget>()));
     entry.grab_focus();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_table_bit_is_the_wire_bit_it_names() {
+        // usermod.c's ENTRY macro, for spec bit 32, Can Broadcast: the
+        // first bit of the bitmap's fifth byte.
+        let x = 32;
+        let host = if cfg!(target_endian = "big") {
+            x
+        } else {
+            x % 8 + 8 * (7 - x / 8)
+        };
+        let bitno = 63 - host;
+        let wire = [0, 0, 0, 0, 0x80, 0, 0, 0];
+        assert_eq!(access_to_wire(1 << bitno), wire);
+        assert_eq!(access_from_wire(wire), 1 << bitno);
+    }
+
+    #[test]
+    fn a_read_field_goes_back_as_the_server_s_bytes_unless_changed() {
+        // 0x8E is Mac Roman é, shown as such; 0xC3 0xA9 is é in UTF-8. A
+        // changed field goes in the server's encoding.
+        let cases: [(&[u8], &str, bool, &[u8]); 6] = [
+            (b"Ren\x8e", "René", false, b"Ren\x8e"),
+            (b"Ren\x8e", "René", true, b"Ren\x8e"),
+            ("René".as_bytes(), "René", false, "René".as_bytes()),
+            (b"Ren\x8e", "Renée", false, b"Ren\x8ee"),
+            (b"Ren\x8e", "Renée", true, "Renée".as_bytes()),
+            (b"", "", false, b""),
+        ];
+        // Clamped to the field once encoded: 40 é are 40 bytes of Mac
+        // Roman, or 80 of UTF-8 cut at a character.
+        let long = "é".repeat(40);
+        let mac = [0x8e; 31];
+        let utf = "é".repeat(15);
+        let clamped = [
+            (&b""[..], long.as_str(), false, &mac[..]),
+            (b"", long.as_str(), true, utf.as_bytes()),
+        ];
+        for (bytes, typed, utf8, want) in cases.into_iter().chain(clamped) {
+            assert_eq!(
+                Read::new(bytes).or_typed(typed, utf8),
+                want,
+                "{typed:?} {utf8}"
+            );
+        }
+    }
 }

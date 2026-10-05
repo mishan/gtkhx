@@ -1,7 +1,7 @@
 //! Users: what the session made of a user arriving, changing or leaving, a
-//! user list, and the replies to creating and joining a private chat, on
-//! their way to the view; and the self-info and user-info replies, which
-//! still arrive as frames.
+//! user list, what the server says about us, and the replies to creating
+//! and joining a private chat, to a user's info, a kick and an account
+//! read, on their way to the view.
 //!
 //! A live change and a list both end in the same roster-apply decision: a
 //! new member becomes a `user-create`, an existing one is either a live
@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::os::raw::{c_char, c_int, c_void};
 
-use hxsession::User;
+use hxsession::{Account, User};
 
 use super::chat::{c_text, hx_chat_subject_emit};
 
@@ -40,17 +40,13 @@ use hxmodel::conversation::{
     hx_chat_cid, hx_chat_member_model, hx_chat_set_subject, hx_chat_subject, hx_chat_view,
 };
 
-use hxproto::parse::parse_user_info;
-
 #[cfg(not(test))]
 extern "C" {
-    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
-    /// Deliberately ignores the server-supplied name — our local prefs nick is
-    /// authoritative. C helper in proto_helpers.c.
-    fn hx_selfinfo_parse(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> u32;
     /// Set our own "logged in" flag on the connection (gtkhx-core::conn). SELFINFO is the
     /// canonical login-complete signal; the agreement Agree button reads this.
     fn hx_conn_set_logged_in(htlc: *mut c_void, v: c_int);
+    /// Our access bits, from their 8 wire bytes (gtkhx-core::conn).
+    fn hx_conn_set_access(htlc: *mut c_void, bytes: *const u8);
     /// `struct chat *chat_with_cid (sess, cid)` — the chat with this id, or NULL.
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
     /// `struct chat *chat_new (sess, cid)` — create (and register) a chat.
@@ -60,8 +56,6 @@ extern "C" {
     /// `void reload_news (widget, data)` — kick off the post-login news fetch
     /// (news.c); `data` is the session, `widget` is unused (pass NULL).
     fn reload_news(widget: *mut c_void, data: *mut c_void);
-    /// GLib `g_free` — release the `guint16 *` uid task parameter.
-    fn g_free(p: *mut c_void);
     /// gtkhx-core::conn accessors for our own identity bookkeeping.
     fn hx_conn_uid(htlc: *mut c_void) -> u16;
     fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
@@ -81,6 +75,7 @@ const HX_NICK_COLOR_NONE: u32 = 0xffff_ffff;
 const HX_USER_NOTICE_JOIN: u32 = 0;
 const HX_USER_NOTICE_PART: u32 = 1;
 const HX_USER_NOTICE_RENAME: u32 = 2;
+const HX_USER_NOTICE_KICKED: u32 = 3;
 
 /// glib TRUE (`gboolean`).
 const TRUE: c_int = 1;
@@ -89,23 +84,6 @@ const TRUE: c_int = 1;
 #[inline]
 fn gbool(b: bool) -> c_int {
     b as c_int
-}
-
-/// Wire text as a `CString`, decoded to UTF-8: the user-info reply's name
-/// and text, which still arrive as a frame. (Names that reach the user list
-/// come decoded from the session.)
-///
-/// Truncated at the first interior NUL first, mirroring how the old C `char*`
-/// extractor buffer terminated, then transcoded. Infallible: the truncated
-/// slice has no interior NUL and `to_utf8` cannot fail.
-///
-/// Hotline text is Mac Roman, and undecoded bytes reaching
-/// `pango_layout_set_text` draw mojibake and log an invalid-UTF-8 warning on
-/// every repaint. `to_utf8` passes valid UTF-8 through untouched, so a server
-/// that speaks UTF-8 (the `CAP_TEXT_ENCODING` ones) is unaffected.
-unsafe fn cstring_wire_text(bytes: &[u8]) -> std::ffi::CString {
-    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    std::ffi::CString::new(hxproto::text::to_utf8(&bytes[..end])).unwrap_or_default()
 }
 
 /// Bytes of a NUL-terminated C string, or `None` for a NULL pointer.
@@ -413,65 +391,36 @@ pub(crate) unsafe fn left(htlc: *mut c_void, cid: u32, uid: u16) {
     }
 }
 
-/// `void hx_user_info_recv (htlc, uid, name, info, len)` — emit the `user-info`
-/// signal for a USER_INFO reply. The C handler keeps the parse (already Rust,
-/// via `gtkhx_proto_parse_user_info`) and the `name_len && info_len` gate that
-/// filters unanswered server frames; this publishes the parsed pair.
+/// What the server says about us: our uid and icon, our access bits and the
+/// color it has for our name, each where it said, folded into the
+/// connection. The name it has for us is not taken: the one we chose wins,
+/// and goes to the server with the agreement. The self-info is the server's
+/// word that we are logged in, which the agreement's Agree button reads,
+/// and the toolbar refreshes what the access bits allow.
 ///
 /// # Safety
-/// `name` / `info` are valid C strings (`info` valid for at least `len` bytes).
-#[no_mangle]
-pub unsafe extern "C" fn hx_user_info_recv(
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn selfinfo(
     htlc: *mut c_void,
-    uid: u16,
-    name: *const c_char,
-    info: *const c_char,
-    len: u16,
+    uid: Option<u16>,
+    icon: Option<u16>,
+    access: Option<u64>,
+    color: Option<u32>,
 ) {
-    gtkhx_session_emit_user_info(gtkhx_session_get_default(), htlc, uid, name, info, len);
-}
-
-/// `void hx_selfinfo_recv (htlc)` — emit the `self-updated` signal after a
-/// SELFINFO reply re-parsed our own access bits / uid. The C handler keeps the
-/// chunk parse and the `logged_in` flag; this is the view-notify hop.
-///
-/// # Safety
-/// `htlc` is only forwarded to the signal (never dereferenced here).
-#[no_mangle]
-pub unsafe extern "C" fn hx_selfinfo_recv(htlc: *mut c_void) {
-    gtkhx_session_emit_self_updated(gtkhx_session_get_default(), htlc);
-}
-
-/// `void hx_rcv_user_selfinfo (htlc, frame, frame_len)` — the SELFINFO
-/// (`HTLS_HDR_USER_SELFINFO`) receive handler.
-///
-/// SELFINFO carries our own access bitmap + uid + icon. The chunk parse stays in
-/// `hx_selfinfo_parse` (proto_helpers.c) so the Tier-2 unit tests can drive it
-/// headless; it folds the fields into `htlc` and deliberately ignores the
-/// server-supplied name (our local prefs nick is authoritative and we push it
-/// back at agreement time). SELFINFO is the canonical "login complete" signal,
-/// so we set the `logged_in` flag — the agreement Agree button reads it to
-/// decide whether to send AGREEMENTAGREE. The view then refreshes toolbar
-/// sensitivity (kick/ban gate on the access bits) off the `self-updated` emit.
-///
-/// This is NOT where post-login fetches fire: in the 1.5 flow SELFINFO arrives
-/// before the agreement, so USER_GETLIST / news wait for the session's
-/// `LoginReady`, after AGREEMENTAGREE is on the wire.
-///
-/// # Safety
-/// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
-#[no_mangle]
-pub unsafe extern "C" fn hx_rcv_user_selfinfo(
-    htlc: *mut c_void,
-    frame: *const u8,
-    frame_len: usize,
-) {
-    if frame.is_null() {
-        return;
+    if let Some(access) = access {
+        hx_conn_set_access(htlc, access.to_be_bytes().as_ptr());
     }
-    hx_selfinfo_parse(htlc, frame, frame_len);
+    if let Some(uid) = uid {
+        hx_conn_set_uid(htlc, uid);
+    }
+    if let Some(icon) = icon {
+        hx_conn_set_icon(htlc, icon);
+    }
+    if let Some(color) = color {
+        hx_conn_set_nick_color(htlc, color);
+    }
     hx_conn_set_logged_in(htlc, 1);
-    hx_selfinfo_recv(htlc);
+    gtkhx_session_emit_self_updated(gtkhx_session_get_default(), htlc);
 }
 
 /// `users` into `chat`'s roster, silently where a member is already there
@@ -611,15 +560,27 @@ pub(crate) unsafe fn joined(
     load(htlc, chat, users, subject);
 }
 
-/// A request the session said failed. A refused join drops its chat when
-/// nothing shows it: one that a new chat's reply made, with no window and
-/// no one in it. A chat already open stays.
+/// A request the session said failed: what asked is let go. A refused
+/// check for a new account means there is none, and the account is made;
+/// that refusal is no news, and the caller shows nothing of it (true). A
+/// refused join drops its chat when nothing shows it: one that a new chat's
+/// reply made, with no window and no one in it. A chat already open stays.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
+pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>) -> bool {
+    match answered(htlc, trans) {
+        // A refusal says it is not there, whether or not the server said
+        // why; a reply cut short says nothing either way.
+        Some(Asked::Check { create, made, .. }) if reason != Some(super::chat::CUT_SHORT) => {
+            crate::send::user::create(htlc, &create, made);
+            return true;
+        }
+        Some(Asked::Check { made, .. }) | Some(Asked::Made(made)) => made(false),
+        _ => {}
+    }
     let Some(join) = join_answered(htlc, trans) else {
-        return;
+        return false;
     };
     let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, join.cid);
@@ -629,54 +590,119 @@ pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
     {
         chat_delete(sess, chat);
     }
+    false
 }
 
-/// `void rcv_task_user_info (htlc, frame, frame_len, uid_ptr, text)` — the
-/// USER_GETINFO reply. Parses the (name, info) pair natively ([`parse_user_info`],
-/// 31 / 4096 caps, `strip_ansi` + CR2LF), then — when both are non-empty (the
-/// `nlen && ilen` gate that filters unanswered server frames) — publishes via
-/// [`hx_user_info_recv`]. `uid_ptr` is a `g_malloc`'d `guint16` (the request's
-/// uid, which the reply doesn't echo); it's freed here.
+/// What a request in flight is answered into.
+pub(crate) enum Asked {
+    /// A user's info, for the user it was asked of: the reply does not say.
+    Info(u16),
+    /// An account read, for the editor that asked.
+    Account(Box<dyn FnOnce(&Account)>),
+    /// An account made, for the editor that made it: told whether the
+    /// server made it.
+    Made(Box<dyn FnOnce(bool)>),
+    /// A read of a new account's login, to tell whether it is taken: read,
+    /// it is, and `exists` runs; refused, it isn't, and `create` goes.
+    Check {
+        create: hxrequest::Request,
+        exists: Box<dyn FnOnce()>,
+        made: Box<dyn FnOnce(bool)>,
+    },
+}
+
+thread_local! {
+    /// The requests in flight, by connection and trans.
+    static ASKED: RefCell<HashMap<(usize, u32), Asked>> = RefCell::new(HashMap::new());
+}
+
+/// A request goes out on `trans`, its reply to go into `what`.
+pub(crate) fn asked(htlc: *mut c_void, trans: u32, what: Asked) {
+    ASKED.with(|a| a.borrow_mut().insert((htlc as usize, trans), what));
+}
+
+fn answered(htlc: *mut c_void, trans: u32) -> Option<Asked> {
+    ASKED.with(|a| a.borrow_mut().remove(&(htlc as usize, trans)))
+}
+
+/// Let go of what `htlc` asked for before: a closed connection gets no more
+/// replies, and a new one numbers its requests afresh.
+pub(crate) fn forget(htlc: *mut c_void) {
+    // Dropped once ASKED is released: an editor's callback may be what goes.
+    let _gone: Vec<_> = ASKED.with(|a| {
+        let mut a = a.borrow_mut();
+        let keys: Vec<_> = a
+            .keys()
+            .filter(|(h, _)| *h == htlc as usize)
+            .copied()
+            .collect();
+        keys.into_iter().filter_map(|k| a.remove(&k)).collect()
+    });
+    joins_forget(htlc);
+}
+
+/// What the server says of a user, for the user it was asked of. A reply
+/// that leaves the name or the text out shows nothing.
 ///
 /// # Safety
-/// C-ABI reply callback. `frame` is valid for `frame_len` bytes; `uid_ptr` is a
-/// live `guint16 *` from the send wrapper (freed here).
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_user_info(
-    htlc: *mut c_void,
-    frame: *const u8,
-    frame_len: usize,
-    uid_ptr: *mut c_void,
-    _text: *mut c_void,
-) {
-    // uid is the request's `g_malloc`'d task parameter (the reply doesn't echo
-    // it). A NULL here would be a caller bug — return without emitting rather
-    // than publish a bogus uid=0 user-info event. Nothing to free on that path.
-    if uid_ptr.is_null() {
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn info(htlc: *mut c_void, trans: u32, name: &str, info: &str) {
+    let Some(Asked::Info(uid)) = answered(htlc, trans) else {
+        return;
+    };
+    let (name, info) = (c_text(name), c_text(info));
+    if name.is_empty() || info.is_empty() {
         return;
     }
-    let uid = *(uid_ptr as *const u16);
-    g_free(uid_ptr);
-    if frame.is_null() {
-        return;
+    let len = info.as_bytes().len() as u16;
+    gtkhx_session_emit_user_info(
+        gtkhx_session_get_default(),
+        htlc,
+        uid,
+        name.as_ptr(),
+        info.as_ptr(),
+        len,
+    );
+}
+
+/// A kick went through: said in the public chat.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn kicked(htlc: *mut c_void) {
+    gtkhx_session_emit_user_notice(
+        gtkhx_session_get_default(),
+        htlc,
+        0,
+        HX_USER_NOTICE_KICKED,
+        std::ptr::null(),
+        std::ptr::null(),
+    );
+}
+
+/// An account change went through: an account made tells the editor that
+/// made it.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn account_changed(htlc: *mut c_void, trans: u32) {
+    if let Some(Asked::Made(made)) = answered(htlc, trans) {
+        made(true);
     }
-    let buf = std::slice::from_raw_parts(frame, frame_len);
-    let ui = parse_user_info(buf, frame_len, 31, 4096);
-    if ui.name.is_empty() || ui.info.is_empty() {
-        return;
+}
+
+/// An account, for the editor that asked; one the server sent no access
+/// bits for fills nothing. For a new account's check, any answer means the
+/// login is taken.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn account(htlc: *mut c_void, trans: u32, account: &Account) {
+    match answered(htlc, trans) {
+        Some(Asked::Account(fill)) if account.access.is_some() => fill(account),
+        Some(Asked::Check { exists, .. }) => exists(),
+        _ => {}
     }
-    // Both are wire text, so both are Mac Roman. The Get Info dialog had the
-    // same undecoded-bytes problem as the user list, just somewhere less
-    // often looked at.
-    let name_c = cstring_wire_text(&ui.name);
-    let info_c = cstring_wire_text(&ui.info);
-    // Pass the *decoded* length, not `ui.info.len()`: the value is truncated at
-    // the first interior NUL and then transcoded, so the emitted len must match
-    // `info_c`'s buffer rather than the wire's. The wire length would be wrong
-    // in both directions now — short of the decoded bytes for a Mac Roman
-    // name, and past the allocation for a NUL-truncated one.
-    let info_len = info_c.as_bytes().len() as u16;
-    hx_user_info_recv(htlc, uid, name_c.as_ptr(), info_c.as_ptr(), info_len);
 }
 
 // ---- test doubles for the C environment ------------------------------------
@@ -732,8 +758,8 @@ pub(crate) mod test_env {
         pub static CONTAINS: Cell<bool> = const { Cell::new(true) };
         /// Records the last emitted roster signal, or None.
         pub static EMIT: RefCell<Option<Emit>> = const { RefCell::new(None) };
-        /// SELFINFO handler: did it call the chunk parse?
-        pub static SELFINFO_PARSED: Cell<bool> = const { Cell::new(false) };
+        /// Our access bits' wire bytes (hx_conn_set_access), or None.
+        pub static ACCESS: Cell<Option<[u8; 8]>> = const { Cell::new(None) };
         /// SELFINFO handler: value passed to hx_conn_set_logged_in (or -1).
         pub static LOGGED_IN: Cell<c_int> = const { Cell::new(-1) };
         /// get_info: the member snapshot to return (name + fields), or None
@@ -794,7 +820,7 @@ pub(crate) mod test_env {
     pub fn reset() {
         CONTAINS.with(|c| c.set(true));
         EMIT.with(|c| *c.borrow_mut() = None);
-        SELFINFO_PARSED.with(|c| c.set(false));
+        ACCESS.with(|c| c.set(None));
         LOGGED_IN.with(|c| c.set(-1));
         MEMBER.with(|c| *c.borrow_mut() = None);
         NOTICE.with(|c| *c.borrow_mut() = None);
@@ -922,9 +948,9 @@ unsafe fn gtkhx_session_emit_self_updated(_self_: *mut c_void, _htlc: *mut c_voi
 }
 
 #[cfg(test)]
-unsafe fn hx_selfinfo_parse(_htlc: *mut c_void, _frame: *const u8, _frame_len: usize) -> u32 {
-    test_env::SELFINFO_PARSED.with(|c| c.set(true));
-    0
+unsafe fn hx_conn_set_access(_htlc: *mut c_void, bytes: *const u8) {
+    let b = std::slice::from_raw_parts(bytes, 8).try_into().unwrap();
+    test_env::ACCESS.with(|c| c.set(Some(b)));
 }
 
 #[cfg(test)]
@@ -1120,9 +1146,6 @@ unsafe fn hx_chat_subject(_chat: *const c_void) -> *const c_char {
 unsafe fn reload_news(_widget: *mut c_void, _data: *mut c_void) {
     test_env::RELOAD_NEWS.with(|c| c.set(true));
 }
-
-#[cfg(test)]
-unsafe fn g_free(_p: *mut c_void) {}
 
 #[cfg(test)]
 mod tests;

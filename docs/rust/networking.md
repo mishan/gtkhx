@@ -32,8 +32,9 @@ into the bridge, everything below happens in Rust:
   itself (`Handled::CHAT`, `Handled::USERS`, `Handled::MSG`,
   `Handled::NEWS`, `Handled::FILES`): what it makes of a chat line, an
   invitation, a subject, a history reply, a user arriving, changing or
-  leaving, a private message, a broadcast, the server's parting words, a
-  flat news post, or a queued transfer moving up reaches the main thread
+  leaving, what the server says about us, a private message, a broadcast,
+  the server's parting words, a flat news post, or a queued transfer
+  moving up reaches the main thread
   as `Event::Session`, on the channel the frames take, so the two arrive
   in the order the server sent them. Every other transaction reaches C
   whole, and what C sends goes out as C built it. See "The session",
@@ -82,9 +83,10 @@ server that gave no version, which is a 1.5 server keeping that to itself.
 Every reply reaches C, the session's own included — a refused agree or
 login is dispatched and reported as any refused request is — but those C
 said to expect (`Session::expect`, through `connection_expect`): a
-chat-history request, a chat invitation, the user list, creating and
-joining a private chat, a private message, every news request — flat
-news's file and posts, and threaded news's listings, articles, posts,
+chat-history request, a chat invitation, the user list, a user's info,
+a kick, creating and joining a private chat, a private message, a
+broadcast, an account read, made, saved or deleted, every news request —
+flat news's file and posts, and threaded news's listings, articles, posts,
 deletions and new bundles and categories — and every files request: a
 listing, Get Info, a folder made, something deleted, moved or renamed, a
 comment set, and a download or upload of a file or a folder. Their
@@ -92,14 +94,15 @@ replies are the session's to read, and come back as its events, a
 refusal as `Failed`, which is shown and heard as any refused request is.
 None of them is a task, so none shows in the Tasks list; a transfer
 shows there as its own row. A joined private chat is made when its reply
-arrives, a news reply reaches the browser node that asked and a listing
-the files pane that asked, a transfer's reply the transfer, each matched
-by its trans; the rename of a move-and-rename goes once the move's reply
-says it went through. What arrives is traced from the session's
-tap (`Session::set_tap`, on under `GTKHX_DEBUG=proto`): each transaction
-as it came, before the session acts on it and in plaintext under HOPE,
-through `proto_trace.c` on the main thread, whatever handles it. The
-actor traces what the session sends itself.
+arrives, a user's info reaches the user it was asked of, an account the
+editor that asked, a news reply the browser node that asked, a listing
+the files pane that asked and a transfer's reply the transfer, each
+matched by its trans; the rename of a move-and-rename goes once the
+move's reply says it went through. What arrives is traced from the
+session's tap (`Session::set_tap`, on under `GTKHX_DEBUG=proto`): each
+transaction as it came, before the session acts on it and in plaintext
+under HOPE, through `proto_trace.c` on the main thread, whatever handles
+it. The actor traces what the session sends itself.
 
 Until the login is answered the actor leaves C's commands in the channel,
 so nothing goes out ahead of the login.

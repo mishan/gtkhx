@@ -199,11 +199,13 @@ As of this writing the C bodies group into:
   and routes the fetch
   decision. Plus `hx_post_login_fetches`, its fallback timer, and the
   reset hook.
-- **Server-initiated handlers still in C** — private message / broadcast
-  (the broadcast branch renders in C), agreement, banner, transfer queue,
-  the unknown-opcode dump, and a one-line icon-change forwarder.
-- **Task replies still in C** — the user-editor open, the message-send
-  acknowledgement, the kick acknowledgement.
+- **Server-initiated handlers still in C** — agreement, banner, the
+  unknown-opcode dump, and a one-line icon-change forwarder.
+- **Task replies C still registers** — inline media's upload and
+  download, handled in C, and the GIF icons' get, list and set
+  (`rcv_task_icon_get`, `rcv_task_icon_getlist`,
+  `rcv_task_icon_set_auto`), handled in Rust but registered as tasks by
+  `gif_icons.c`.
 - **Voice** — the three server-initiated voice handlers and the two voice
   task replies, all compiled out when voice is disabled.
 

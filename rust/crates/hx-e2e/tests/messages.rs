@@ -160,8 +160,12 @@ fn a_broadcast_arrives_as_an_event() {
         // As the app does once logged in: hlservd sends a client that has
         // not asked for the user list nothing of anyone else.
         uid_of(&mut b, &na);
-        let text = format!("{na} rebooting");
-        a.send(&request(355, &[(tag::BODY, text.as_bytes())]));
+        // As the app sends it, in the server's own encoding.
+        let text = format!("{na} rebooting, café");
+        a.send_expecting(
+            &hxrequest::user::broadcast(text.as_bytes(), a.utf8()).unwrap(),
+            Some(Expect::Message),
+        );
         let from = until(&mut b, |e| match e {
             hxsession::Event::Broadcast { from, text: t, .. } if *t == text => Some(from.clone()),
             _ => None,

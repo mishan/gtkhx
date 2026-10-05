@@ -42,26 +42,6 @@ extern bool gtkhx_proto_header_in_error (const uint8_t *buf, size_t len);
 extern bool gtkhx_proto_header_trans (const uint8_t *buf, size_t len,
                                       uint32_t *out_trans);
 
-/* C-ABI mirror of the Rust SelfInfo. cached_name_ptr borrows into the
- * caller's buffer and is valid only for the duration of the parse call;
- * use it immediately and do not retain it. */
-struct gtkhx_proto_selfinfo {
-    /* Raw 8 wire bytes (big-endian), memcpy'd straight into the
-     * guint64 htlc->access — matches the original
-     * memcpy(&htlc->access, dh->data, 8) byte-for-byte. */
-    uint8_t access[8];
-    uint32_t nick_color;
-    uint16_t uid;
-    uint16_t icon;
-    const uint8_t *cached_name_ptr;
-    size_t cached_name_len;
-};
-
-/* Parse HTLS_HDR_USER_SELFINFO. Fills *out and returns the `seen`
- * bitmask (HX_SELFINFO_* flags). Returns 0 on NULL out. */
-extern uint32_t gtkhx_proto_parse_selfinfo (const uint8_t *buf, size_t len,
-                                            struct gtkhx_proto_selfinfo *out);
-
 /* ---- LOGIN task-reply parser ----
  *
  * Every field of the LOGIN reply is independently optional on the wire (a
@@ -123,54 +103,6 @@ extern uint32_t gtkhx_proto_parse_login (const uint8_t *msg, size_t msglen,
                                          uint8_t *servername,
                                          size_t servername_cap,
                                          struct gtkhx_proto_login *out);
-
-/* ---- Account / user-info reply parsers (post-TASK payloads) ---- */
-
-struct gtkhx_proto_user_info {
-    /* Bytes written to name_buf / info_buf, excluding the trailing NUL. */
-    uint16_t name_len;
-    uint16_t info_len;
-};
-
-/* Parse the post-HTLC_HDR_USER_GETINFO TASK reply payload — the
- * server's response arrives inside an HTLS_HDR_TASK frame; this
- * parses the post-TASK body (the rcv_task_user_info body in C).
- * Writes strip_ansi'd NAME into name_buf
- * (NUL-terminated, capped at name_cap-1) and CR2LF + strip_ansi'd
- * USER_INFO body into info_buf (capped at info_cap-1). Returns false
- * on any NULL / zero-cap pointer; otherwise true. The caller's
- * `nlen && ilen` dispatch gate is preserved at the call site. */
-extern bool gtkhx_proto_parse_user_info (const uint8_t *msg, size_t msglen,
-                                         uint8_t *name_buf, size_t name_cap,
-                                         uint8_t *info_buf, size_t info_cap,
-                                         struct gtkhx_proto_user_info *out);
-
-struct gtkhx_proto_account_read {
-    /* Raw 8 bytes of the ACCESS chunk (memcpy'd verbatim). */
-    uint8_t access[8];
-    /* 0/1 — set iff the ACCESS chunk was present and at least 8 bytes.
-     * The call site uses this as the dispatch gate (matches the C
-     * extractor's accessbool). */
-    uint8_t got_access;
-    /* Bytes written to the three string buffers, excluding NUL. */
-    uint16_t name_len;
-    uint16_t login_len;
-    uint16_t pass_len;
-};
-
-/* Parse the post-HTLC_HDR_ACCOUNT_READ TASK reply payload (the
- * rcv_task_user_open body). Writes NAME (raw, no strip_ansi),
- * XOR-0xff-decoded LOGIN, and XOR-0xff-decoded PASSWORD into their
- * respective buffers (NUL-terminated, capped at the matching _cap-1).
- * PASSWORD no-password convention: a single zero byte (or empty)
- * yields an empty pass buffer — matches the C extractor's
- * `plen > 1 && dh->data[0]` gate. ACCESS lands in out->access (8
- * bytes); out->got_access is the dispatch gate. Returns false on any
- * NULL / zero-cap pointer; otherwise true. */
-extern bool gtkhx_proto_parse_account_read (
-    const uint8_t *msg, size_t msglen, uint8_t *name_buf, size_t name_cap,
-    uint8_t *login_buf, size_t login_cap, uint8_t *pass_buf, size_t pass_cap,
-    struct gtkhx_proto_account_read *out);
 
 /* ---- Xfer-reply parsers ---- */
 
@@ -309,13 +241,6 @@ gtkhx_proto_build_chat_chunks (uint32_t cid, uint16_t style,
                                struct hx_chunk *chunks, size_t chunks_cap,
                                uint8_t *scratch, size_t scratch_cap);
 
-/* HTLC_HDR_MSG_BROADCAST: just MSG body. No scratch needed. Requires
- * chunks_cap >= 1. Returns 1 on success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_broadcast_chunks (const uint8_t *body_ptr,
-                                                   size_t body_len,
-                                                   struct hx_chunk *chunks,
-                                                   size_t chunks_cap);
-
 /* HTLC_HDR_CHAT_CREATE: UID. chunks_cap >= 1, scratch_cap >= 2. */
 extern int32_t gtkhx_proto_build_chat_create_chunks (uint16_t uid,
                                                      struct hx_chunk *chunks,
@@ -382,47 +307,6 @@ extern int32_t gtkhx_proto_build_user_change_chunks (
     uint16_t icon, const uint8_t *name_ptr, size_t name_len,
     uint8_t has_nick_color, uint32_t nick_color, struct hx_chunk *chunks,
     size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
-
-/* HTLC_HDR_USER_KICK: optional BAN + UID. When ban != 0, emits BAN
- * first, then UID; when ban == 0, emits just UID. chunks_cap >= 2,
- * scratch_cap >= 4. Returns 1 (no ban) or 2 (with ban) on success,
- * or 0 on validation failure (NULL pointer or short buffer). */
-extern int32_t gtkhx_proto_build_user_kick_chunks (uint16_t uid, uint16_t ban,
-                                                   struct hx_chunk *chunks,
-                                                   size_t chunks_cap,
-                                                   uint8_t *scratch,
-                                                   size_t scratch_cap);
-
-/* HTLC_HDR_USER_GETINFO: single UID. chunks_cap >= 1,
- * scratch_cap >= 2. Returns 1 on success, or 0 on validation failure
- * (NULL pointer or short buffer). */
-extern int32_t gtkhx_proto_build_user_getinfo_chunks (uint16_t uid,
-                                                      struct hx_chunk *chunks,
-                                                      size_t chunks_cap,
-                                                      uint8_t *scratch,
-                                                      size_t scratch_cap);
-
-/* HTLC_HDR_ACCOUNT_READ: single LOGIN chunk. No scratch needed.
- * chunks_cap >= 1. Returns 1 on success. */
-extern int32_t gtkhx_proto_build_account_read_chunks (const uint8_t *login_ptr,
-                                                      size_t login_len,
-                                                      struct hx_chunk *chunks,
-                                                      size_t chunks_cap);
-
-/* HTLC_HDR_ACCOUNT_DELETE: single LOGIN chunk (same shape as READ). */
-extern int32_t gtkhx_proto_build_account_delete_chunks (
-    const uint8_t *login_ptr, size_t login_len, struct hx_chunk *chunks,
-    size_t chunks_cap);
-
-/* HTLC_HDR_ACCOUNT_MODIFY: LOGIN + PASSWORD + NAME + ACCESS (8 raw
- * bytes — the hl_access_bits bitmap). chunks_cap >= 4, scratch_cap >= 8.
- * access_ptr must point at exactly 8 bytes (NULL is rejected). Returns
- * 4 on success. */
-extern int32_t gtkhx_proto_build_account_modify_chunks (
-    const uint8_t *login_ptr, size_t login_len, const uint8_t *password_ptr,
-    size_t password_len, const uint8_t *name_ptr, size_t name_len,
-    const uint8_t *access_ptr, struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
 
 /* ---- HTRK (Hotline tracker, v1) reply parsers ---- */
 

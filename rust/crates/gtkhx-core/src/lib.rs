@@ -19,8 +19,8 @@
 //!
 //! `hxtask` has ten undefined C externs (`hx_session_tasks`,
 //! `hx_sess_from_htlc`, `gtask_delete_tsk`, …). Merging it here would make
-//! `test_selfinfo` and `test_msg_proto` — which want only a boxed `_copy` —
-//! drag in `task_new`'s unresolved references and fail to link. That is not
+//! a Tier 2 test that wants only a boxed `_copy` drag in `task_new`'s
+//! unresolved references and fail to link. That is not
 //! hypothetical: it is exactly how the first attempt at this crate failed.
 //!
 //! The three modules here are all extern-free, so the merged archive stays

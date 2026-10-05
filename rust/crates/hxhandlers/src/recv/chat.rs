@@ -51,7 +51,7 @@ const MAX_SUBJECT: usize = 255;
 
 /// How the session words a reply that was cut short: no refusal of the
 /// server's, so nothing to show.
-const CUT_SHORT: &str = "the server's reply was cut short";
+pub(crate) const CUT_SHORT: &str = "the server's reply was cut short";
 
 /// A history request in flight: its chat, and whether it asked for a page
 /// older than what the chat shows.

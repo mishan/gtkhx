@@ -1,8 +1,7 @@
 //! Wire-out senders for the domains whose send path has moved to Rust.
 //!
-//! Built over `hxproto`'s native builders. The remaining C senders
-//! (`hx_kick_user`, `hx_get_user_info`, …) are unaffected — these modules keep
-//! the exact C ABI their former crates exported.
+//! Built over `hxproto`'s native builders, or `hxrequest`'s. These modules
+//! keep the exact C ABI the C senders they replaced exported.
 
 use std::os::raw::c_void;
 

@@ -2046,8 +2046,8 @@ chat_subject_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
 }
 
 /* View-side handler for the "user-notice" signal — the roster notice lines
- * (join / parts / rename) the Rust user-roster receive handlers (hxhandlers::recv::user)
- * emit. The gettext + INFOPREFIX formatting and the showjoin-pref gate live
+ * (join / parts / rename, and a kick that worked) the Rust user-roster receive
+ * handlers (hxhandlers::recv::user) emit. The gettext + INFOPREFIX formatting and the showjoin-pref gate live
  * here on the view side, same as every other model→view notification; the model
  * just says "user X joined chat C". `old_name` is NULL except for a rename.
  * Connected in gtkhx_connect_signals at startup. */
@@ -2073,6 +2073,9 @@ user_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
         hx_printf_prefix (htlc, cid, INFOPREFIX,
                           _ ("%1$s is now known as %2$s\n"),
                           (const char *)old_name, (const char *)name);
+        break;
+    case HX_USER_NOTICE_KICKED:
+        hx_printf_prefix (htlc, cid, INFOPREFIX, "%s\n", _ ("kick successful"));
         break;
     default:
         break;

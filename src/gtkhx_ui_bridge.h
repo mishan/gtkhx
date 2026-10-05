@@ -31,8 +31,7 @@ extern void gtkhx_agreement_disagree (struct _session *sess);
 extern void gtkhx_session_set_agreementwin (struct _session *sess,
                                             GtkWidget *win);
 
-/* &hx_active_session()->htlc — the focused connection's htlc_conn, for
- * the User Editor's wire senders (hx_useredit_create/delete/open). */
+/* &hx_active_session()->htlc — the focused connection's htlc_conn. */
 struct htlc_conn;
 extern struct htlc_conn *gtkhx_active_htlc (void);
 
@@ -43,12 +42,6 @@ extern int hx_prefs_queuedl (void);
  * chat-invitation dialog's transient parent, scoped to the session that
  * received the invite (not the active session). */
 extern GtkWidget *gtkhx_htlc_chat_window (struct htlc_conn *htlc);
-
-/* Active-session predicates for the Rust Broadcast composer (broadcast.rs):
- * gtkhx_active_connected — htlc.fd != 0; gtkhx_active_text_encoding —
- * HTLC_CAP_TEXT_ENCODING negotiated. */
-extern gboolean gtkhx_active_connected (void);
-extern gboolean gtkhx_active_text_encoding (void);
 
 /* Connect dialog (connect.rs). Set the session's HOPE compress / cipher
  * algorithm names (NULL or "" clears them) and fire hx_connect. Keeps

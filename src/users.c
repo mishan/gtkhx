@@ -97,41 +97,6 @@ hx_change_name_icon (struct htlc_conn *htlc)
     g_free (name_wire);
 }
 
-void
-hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
-{
-    /* chunk layout moved to gtkhx_proto_build_user_kick_chunks.
-     * Build BEFORE task_new (task_new reserves the next request's trans for a pending entry;
-     * the send that follows uses it up). A builder failure must not
-     * leave a phantom task behind. */
-    struct hx_chunk chunks[2];
-    guint8 scratch[4];
-    int hc = (int)gtkhx_proto_build_user_kick_chunks (
-        uid, ban, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
-    if (hc > 0) {
-        task_new (htlc, RCV_TASK_FN (rcv_task_kick), 0, 0, "kick");
-        hlwrite_chunks (htlc, HTLC_HDR_USER_KICK, 0, chunks, hc);
-    }
-}
-
-void
-hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
-{
-    /* chunk layout moved to gtkhx_proto_build_user_getinfo
-     * _chunks. Same build-before-task ordering as hx_kick_user. */
-    struct hx_chunk chunks[1];
-    guint8 scratch[2];
-    int hc = (int)gtkhx_proto_build_user_getinfo_chunks (
-        uid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
-    if (hc > 0) {
-        guint16 *_uid = g_malloc (sizeof (guint16));
-        *_uid = uid;
-        task_new (htlc, RCV_TASK_FN (rcv_task_user_info), (void *)_uid, 0,
-                  "info");
-        hlwrite_chunks (htlc, HTLC_HDR_USER_GETINFO, 0, chunks, hc);
-    }
-}
-
 struct UserActionCtx {
     session *sess;
     guint32 cid;

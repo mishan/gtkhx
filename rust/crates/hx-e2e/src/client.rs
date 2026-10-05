@@ -38,6 +38,8 @@ pub struct Client {
     /// What numbers requests, as in production.
     session: hxnet::session::SharedSession,
     caps: u16,
+    /// What the session made of what came before the login settled.
+    login_events: Vec<hxsession::Event>,
 }
 
 /// A server's reply to one request: the whole frame, header included, which is
@@ -208,6 +210,7 @@ impl Client {
         }
         // Agree as a user would, and wait for the login to settle before
         // sending anything: hlservd hangs up on a request before then.
+        let mut login_events = Vec::new();
         rt.block_on(async {
             tokio::time::timeout(REPLY_TIMEOUT, async {
                 loop {
@@ -220,7 +223,8 @@ impl Client {
                             let _ = handle.send(agree).await;
                         }
                         Some(Event::State(hxnet::ConnectionState::LoginReady)) => return Ok(()),
-                        Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
+                        Some(Event::Session(e)) => login_events.push(e),
+                        Some(Event::Frame(_) | Event::State(_)) => continue,
                         Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
                         None => return Err("connection closed".to_string()),
                     }
@@ -240,6 +244,7 @@ impl Client {
             events,
             session,
             caps: agreed & caps,
+            login_events,
         })
     }
 
@@ -256,6 +261,12 @@ impl Client {
 
     pub fn server(&self) -> &'static Server {
         self.server
+    }
+
+    /// What the session made of what came after the login reply and
+    /// before the login settled.
+    pub fn login_events(&self) -> &[hxsession::Event] {
+        &self.login_events
     }
 
     /// The capability bits both sides agreed to.

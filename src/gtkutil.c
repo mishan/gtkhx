@@ -364,7 +364,7 @@ setbtns (session *sess, int stat)
      * construction-time refresh runs against caps=0 / access=0
      * and the toolbars stay hidden. setbtns() runs after
      * SELFINFO populates the access bitmap (see
-     * hx_rcv_user_selfinfo) — by then HTLC_CAP_VOICE has also
+     * hxhandlers::recv::user) — by then HTLC_CAP_VOICE has also
      * landed (HTLS_DATA_CAPABILITIES handler in rcv.c), so this
      * is the right place to flip the toolbars on. On disconnect
      * (stat==0), the refresh hides them again — htlc->caps will

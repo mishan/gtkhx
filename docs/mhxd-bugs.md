@@ -196,6 +196,40 @@ So every server falls out of the listing two or three intervals after it
 **first** registered, and comes back with its next heartbeat. The rig sets the
 interval to a day, which hides it.
 
+## Deleting an account in use can crash it
+
+**Verified; intermittent, under load.**
+
+- **Sends:** an account delete (`ACCOUNT_DELETE`, 351) as an admin, for an
+  account someone is logged in with.
+- **Gets:** with `kick_transients` on (the default, and the rig's),
+  `rcv_account_delete` (`accounts.c`) walks `htlc_list` and calls
+  `htlc_close` on each connection logged in with that account, then steps
+  on with `htlcp = htlcp->next`. `htlc_close` (`hlserver.c`) has freed
+  `htlcp` by then, so the walk reads freed memory. Usually what it reads
+  still works. When it doesn't, the server takes a SIGSEGV and the
+  container restarts:
+
+  ```
+  Thread 1 "hxd" received signal SIGSEGV, Segmentation fault.
+  #0  __strcmp_avx2 () at ../sysdeps/x86_64/multiarch/strcmp-avx2.S:287
+  #1  rcv_account_delete (htlc=0x562cbd167300) at accounts.c:685
+  #2  htlc_read (fd=<optimized out>) at hlserver.c:176
+  #3  loopZ () at hxd.c:600
+  #4  main (...) at hxd.c:881
+  ```
+
+  Line 685 is the walk's `strcmp(login, htlcp->login)`. It reproduced with
+  the hx-libs rig suite running in parallel against mhxd, an account deleted
+  just after its user disconnected. The same steps alone, repeated, did not
+  crash.
+- **Should get:** those users disconnected and the account deleted, with
+  the walk taking `next` before closing a connection.
+
+**GtkHx:** nothing to do on the client side. The test suites that delete
+accounts wait for the account's user to leave before deleting it, so they
+don't crash the shared rig.
+
 ## Adding an entry
 
 Reproduce it with an `hx-e2e` probe against the rig first, then record it here

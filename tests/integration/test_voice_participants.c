@@ -23,8 +23,8 @@
  *      is now visible to Alice.
  *
  * Why match on participant-count growth, not Bob's specific uid:
- * the harness's open_login_to_caps_or_skip uses
- * hx_selfinfo_parse to pull the local uid out of SELFINFO, but
+ * the harness's open_login_to_caps_or_skip pulls the local uid
+ * out of SELFINFO, but
  * Janus's SELFINFO doesn't include the USER_LIST chunk that
  * carries it — so htlc_b.uid stays 0, and filtering 605 broadcasts
  * by uid==0 never matches. The growth-based witness is equivalent

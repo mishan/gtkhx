@@ -84,7 +84,7 @@ looking for code in the wrong place.
 | **Files** | `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_ops.c` (the providers; the browser itself is `gtkhx-ui`'s `files` module) |
 | **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the dispatch switch for the frames the session hands over whole, the transaction correlator; chat, users, messages, news and files reach `hxhandlers` as the session's events instead), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
-| **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (user editor wire senders), `tasks.c` |
+| **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (the user editor's access-bit table), `tasks.c` |
 | **Sessions** | `session_registry.c` (the connection collection, the factory, and which connection has focus) |
 | **Tracker** | `tracker_event.c` (the `HxTrackerServer` signal payload). The wire codec is `hxproto::tracker` in hx-libs; the fetch is `hxnet`. |
 | **Media** | `inline_media*.c`, `gif_icons.c`, `cicn.c`, `pict_embed.c`, `pict_magick.c`, `preview.c` |
