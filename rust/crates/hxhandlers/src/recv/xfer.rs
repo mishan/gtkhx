@@ -313,7 +313,7 @@ pub(crate) unsafe fn upload_refused(htlc: *mut c_void, htxf: *mut c_void) {
 /// # Safety
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn queued(htlc: *mut c_void, reference: u32, queue: u32) {
-    let htxf = crate::xfer::htxf_with_ref(reference);
+    let htxf = crate::xfer::htxf_with_ref(htlc, reference);
     if htxf.is_null() {
         glib::g_warning!(
             "gtkhx",

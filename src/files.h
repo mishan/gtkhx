@@ -45,8 +45,9 @@ struct cached_filelist;
  * adapter links against. date_modify / date_create are the raw 8-byte Hotline
  * date stamps from the FILE_GETINFO reply (the model emits them raw); the dialog
  * decodes + locale-formats them for display. */
-extern void output_file_info (char *path, char *name, char *creator, char *type,
-                              char *comments, const guint8 *date_modify,
+extern void output_file_info (struct htlc_conn *htlc, char *path, char *name,
+                              char *creator, char *type, char *comments,
+                              const guint8 *date_modify,
                               const guint8 *date_create, guint64 size);
 
 /* A listing, as the file-list signal carries it (hxhandlers::recv::files):

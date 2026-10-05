@@ -62,6 +62,5 @@ extern void xfers_delete_on_conn (struct htlc_conn *htlc);
 /* Let go of the file requests a connection is waiting on the replies to
  * (hxhandlers::recv::files), which a closed one will never get. */
 extern void hx_files_forget (struct htlc_conn *htlc);
-extern struct htxf_conn *htxf_with_ref (guint32 ref);
 
 #endif

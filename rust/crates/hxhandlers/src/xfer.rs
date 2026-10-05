@@ -240,17 +240,16 @@ pub unsafe extern "C" fn xfer_num(htxf: *mut HtxfHandle) -> c_int {
     })
 }
 
-/// `struct htxf_conn *htxf_with_ref(guint32 ref)` — find a transfer by its
-/// server XFER ref (used by the unsolicited HTLS_HDR_QUEUE update), or NULL.
+/// The transfer `htlc` knows by the server's XFER ref, or NULL. A ref is the
+/// server's, so two connections can each have one with the same number.
 ///
 /// # Safety
 /// Main thread only; the list holds live handles.
-#[no_mangle]
-pub unsafe extern "C" fn htxf_with_ref(ref_: u32) -> *mut HtxfHandle {
+pub(crate) unsafe fn htxf_with_ref(htlc: *mut c_void, ref_: u32) -> *mut HtxfHandle {
     with_list(|xs| {
         xs.iter()
             .copied()
-            .find(|&e| (*e).ref_ == ref_)
+            .find(|&e| (*e).htlc == htlc && (*e).ref_ == ref_)
             .unwrap_or(std::ptr::null_mut())
     })
 }

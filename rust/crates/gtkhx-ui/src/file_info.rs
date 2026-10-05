@@ -12,7 +12,7 @@
 //! What stays on the C ABI is leaf glue: the active-connection accessor and
 //! `human_size`.
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr};
 
 use adw::prelude::*;
 use gtk::glib;
@@ -23,9 +23,10 @@ use crate::ffi as cffi;
 use crate::tr::tr;
 
 extern "C" {
-    // gtkhx_ui_bridge.c — the active connection + whether it's live.
-    fn gtkhx_active_htlc() -> *mut c_void;
-    fn gtkhx_active_connected() -> glib::ffi::gboolean;
+    // session_registry.c — the connection a key names, if it is still open.
+    fn hx_session_with_serial(serial: u16) -> *mut c_void;
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    fn hx_conn_fd(htlc: *const c_void) -> c_int;
     // human_readable.c — fileutils-vintage byte-count string into `sizstr`,
     // returning a pointer into it (may be right-justified).
     fn human_size(sizstr: *mut c_char, size: u64) -> *mut c_char;
@@ -73,21 +74,29 @@ fn info_row(title: &str, value: &str) -> adw::ActionRow {
 /// Send FILE_SETINFO for a rename + comment edit (was `set_name_comment`).
 /// `path` is the file's full path, as the server knows it; `rename` the name
 /// the user typed, when it changed; `comments` the dialog's comment.
-unsafe fn save_file_info(path: &[u8], rename: Option<&str>, comments: &str) {
-    // The dialog can outlive the connection (left open across a disconnect).
-    if gtkhx_active_connected() == glib::ffi::GFALSE {
+unsafe fn save_file_info(
+    conn: crate::dock::ConnKey,
+    path: &[u8],
+    rename: Option<&str>,
+    comments: &str,
+) {
+    // To the server the file is on, not the one in focus. The dialog can
+    // outlive that connection (left open across a disconnect or a closed tab).
+    let sess = hx_session_with_serial(conn);
+    if sess.is_null() {
         return;
     }
-    let htlc = gtkhx_active_htlc();
-    if htlc.is_null() {
+    let htlc = gtkhx_session_htlc(sess);
+    if htlc.is_null() || hx_conn_fd(htlc) == 0 {
         return;
     }
     hxhandlers::send::files::set_info(htlc, path, rename, comments);
 }
 
-/// `void output_file_info(char *path, char *name, char *creator, char *type,
-/// char *comments, const guint8 *date_modify, const guint8 *date_create,
-/// guint64 size)` — present the File Info window.
+/// `void output_file_info(struct htlc_conn *htlc, char *path, char *name,
+/// char *creator, char *type, char *comments, const guint8 *date_modify,
+/// const guint8 *date_create, guint64 size)` — present the File Info window
+/// for a file on `htlc`.
 ///
 /// # Safety
 /// C-ABI signal handler on the main thread. `path` is an owned (`g_malloc`'d)
@@ -95,6 +104,7 @@ unsafe fn save_file_info(path: &[u8], rename: Option<&str>, comments: &str) {
 /// duration of the call; `date_*` point at 8 wire bytes each (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn output_file_info(
+    htlc: *mut c_void,
     path: *mut c_char,
     name: *const c_char,
     creator: *const c_char,
@@ -105,6 +115,7 @@ pub unsafe extern "C" fn output_file_info(
     size: u64,
 ) {
     crate::ensure_gtk_init();
+    let conn = crate::dock::conn_key(htlc);
 
     // `path` ownership transfers here (the signal passes it as a raw pointer and
     // the receive handler doesn't free it on success). Copy it for the dialog's
@@ -186,7 +197,7 @@ pub unsafe extern "C" fn output_file_info(
         let buf = comments_for_save.buffer();
         let (start, end) = buf.bounds();
         let comments = buf.text(&start, &end, false).to_string();
-        unsafe { save_file_info(&path_bytes, rename, &comments) };
+        unsafe { save_file_info(conn, &path_bytes, rename, &comments) };
     });
 
     // Esc-close accelerator (same C helper user_info.rs uses); present keeps the

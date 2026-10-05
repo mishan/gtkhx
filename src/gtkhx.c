@@ -1923,12 +1923,12 @@ on_file_info_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 {
     (void)emitter;
     (void)user_data;
-    (void)htlc;
     /* date_modify / date_create are raw 8-byte Hotline date stamps; the view
      * (output_file_info) decodes + formats them. */
-    output_file_info ((char *)path, (char *)name, (char *)creator, (char *)type,
-                      (char *)comments, (const guint8 *)date_modify,
-                      (const guint8 *)date_create, size);
+    output_file_info (htlc, (char *)path, (char *)name, (char *)creator,
+                      (char *)type, (char *)comments,
+                      (const guint8 *)date_modify, (const guint8 *)date_create,
+                      size);
 }
 
 static void
