@@ -221,3 +221,89 @@ fn an_emoji_crosses_a_server_that_knows_only_mac_roman() {
         );
     }
 }
+
+/// A line far past a single-byte length arrives whole.
+#[test]
+fn a_long_line_arrives_whole() {
+    for s in servers_with(&[]) {
+        let (mut a, na) = chatter(s, "la");
+        let (mut b, _) = chatter(s, "lb");
+        let long: String = ('A'..='Z').chain('a'..='z').cycle().take(1500).collect();
+        let line = format!("{na} {long}");
+        a.send(&chat(line.as_bytes()));
+        let text = heard(
+            &mut b,
+            |e| match e {
+                Event::Session(hxsession::Event::Chat { text, .. }) if text.contains(&na) => {
+                    Some(text.clone())
+                }
+                _ => None,
+            },
+            |got| !got.is_empty(),
+        )
+        .remove(0);
+        assert!(text.contains(&line), "{}: {} bytes", s.name, text.len());
+    }
+}
+
+/// Accented text crosses as UTF-8 where the server agreed to the text
+/// encoding and as Mac Roman where it didn't, and reads back as typed.
+#[test]
+fn accented_text_crosses_in_the_server_s_encoding() {
+    for s in servers_with(&[]) {
+        let (mut a, na) = chatter(s, "ta");
+        let (mut b, _) = chatter(s, "tb");
+        let typed = if a.utf8() {
+            format!("{na} café ☃ 日本語")
+        } else {
+            format!("{na} café naïve")
+        };
+        a.send(&chat(&hxtext::for_wire(typed.as_bytes(), a.utf8(), true)));
+        let text = heard(
+            &mut b,
+            |e| match e {
+                Event::Session(hxsession::Event::Chat { text, .. }) if text.contains(&na) => {
+                    Some(text.clone())
+                }
+                _ => None,
+            },
+            |got| !got.is_empty(),
+        )
+        .remove(0);
+        assert!(text.contains(&typed), "{}: {text:?}", s.name);
+    }
+}
+
+/// The server relays a line as its sender's: the uid the ignore list is
+/// checked against, and the sender's name ahead of the text.
+#[test]
+fn a_line_arrives_as_its_sender_s() {
+    for s in servers_with(&[]) {
+        let (mut a, na) = chatter(s, "sa");
+        let (mut b, _) = chatter(s, "sb");
+        let a_uid = uid_of(&mut b, &na);
+        let body = unique_name("body");
+        a.send(&chat(body.as_bytes()));
+        let (uid, text) = heard(
+            &mut b,
+            |e| match e {
+                Event::Session(hxsession::Event::Chat { uid, text, .. })
+                    if text.contains(&body) =>
+                {
+                    Some((*uid, text.clone()))
+                }
+                _ => None,
+            },
+            |got| !got.is_empty(),
+        )
+        .remove(0);
+        // Janus and hlservd stamp a relayed line with uid 0, so a line
+        // from someone ignored there can only be told by its name.
+        let stamped = !matches!(s.name, "janus" | "hlservd");
+        assert_eq!(uid, if stamped { a_uid } else { 0 }, "{}", s.name);
+        // mhxd and hlservd cut the name to the classic 13 columns; Janus
+        // writes it whole.
+        let shown: String = na.chars().take(13).collect();
+        assert!(text.contains(&shown), "{}: {text:?}", s.name);
+    }
+}

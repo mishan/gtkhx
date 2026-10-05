@@ -435,8 +435,8 @@ send_download_media_part (int fd, struct htlc_conn *htlc, const guint8 *handle,
 }
 
 /* Drain helpers come from the harness:
- *   integration_drain_until_task_trans — TASK reply filter
- *   integration_drain_until_chat       — relayed-broadcast filter
+ *   integration_drain_until_task_trans  — TASK reply filter
+ *   integration_drain_until_chat_marker — relayed-broadcast filter
  * Both centralised in tests/integration/integration_harness.c. */
 
 /* ------------------------------------------------------------------ */
@@ -865,12 +865,8 @@ test_inline_media_chat_with_media_round_trip (void)
     /* Drain to our own relayed broadcast by matching the unique body
      * marker — Janus stamps HTLS_HDR_CHAT broadcasts with uid 0, so a
      * uid filter can't identify ours, and the marker also skips other
-     * concurrent test binaries' chat noise. The walker consumes the
-     * body fields, but hx_test_in(htlc)->buf is left intact for the media-meta
-     * walk below. */
-    struct hx_chat_msg msg;
-    g_assert_true (
-        integration_drain_until_chat_marker (fd, &htlc, marker, &msg, 16));
+     * concurrent test binaries' chat noise. */
+    g_assert_true (integration_drain_until_chat_marker (fd, &htlc, marker, 16));
 
     struct gtkhx_proto_chat_media_meta meta;
     int status = gtkhx_proto_extract_chat_media_meta (
@@ -938,9 +934,8 @@ test_inline_media_download_round_trip (void)
                                              handle_len, "image/png");
     g_free (dl_body);
     g_assert_true (dl_sent);
-    struct hx_chat_msg msg;
     g_assert_true (
-        integration_drain_until_chat_marker (fd, &htlc, dl_marker, &msg, 16));
+        integration_drain_until_chat_marker (fd, &htlc, dl_marker, 16));
 
     /* Now request the bytes. */
     guint32 dl_trans = send_download_media (fd, &htlc, handle, handle_len);
@@ -1042,9 +1037,8 @@ test_inline_media_chunked_download_round_trip (void)
                                               handle_len, "image/png");
     g_free (cdl_body);
     g_assert_true (cdl_sent);
-    struct hx_chat_msg msg;
     g_assert_true (
-        integration_drain_until_chat_marker (fd, &htlc, cdl_marker, &msg, 16));
+        integration_drain_until_chat_marker (fd, &htlc, cdl_marker, 16));
 
     /* Chunk 0: bare TranDownloadMedia (no PART_INDEX). */
     guint32 dl_trans = send_download_media (fd, &htlc, handle, handle_len);

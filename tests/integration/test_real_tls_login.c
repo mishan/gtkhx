@@ -65,8 +65,7 @@
 #include "server_matrix.h"
 #include "integration_harness.h"
 
-/* Drain budget for chat broadcasts. Same value the fd-based
- * test_chat_roundtrip uses — sub-second cross-talk from concurrent
+/* Drain budget for chat broadcasts. Sub-second cross-talk from concurrent
  * Tier 3 tests can fill the receive buffer with USER_CHANGEs, so 64
  * leaves headroom past the chat broadcast we're waiting for. */
 #define TLS_CHAT_DRAIN_BUDGET 64
@@ -158,31 +157,9 @@ test_chat_round_trip (void)
     /* Drain for any chat broadcast carrying our marker. Don't
      * filter on uid — Janus's SELFINFO doesn't populate htlc->uid
      * (see the file preamble for the why) and the marker is unique
-     * enough that no other concurrent test can race us. The drain
-     * loop also tolerates interleaved USER_CHANGE / banner / agreement
-     * frames the server may send between our send and the echo. */
-    struct hx_chat_msg cm;
-    gboolean found = FALSE;
-    for (int i = 0; i < TLS_CHAT_DRAIN_BUDGET; i++) {
-        if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc) != HTLS_HDR_CHAT) {
-            continue;
-        }
-        if (!hx_chat_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
-                              &cm)) {
-            continue;
-        }
-        if (g_strstr_len (cm.text, cm.text_len, marker) != NULL) {
-            found = TRUE;
-            break;
-        }
-    }
-    g_assert_true (found);
-
-    /* cid 0 = main public chat — the only chat we ever joined. */
-    g_assert_cmphex (cm.cid, ==, 0);
+     * enough that no other concurrent test can race us. */
+    g_assert_true (integration_drain_until_chat_marker (fd, &htlc, marker,
+                                                        TLS_CHAT_DRAIN_BUDGET));
 
     integration_release_htlc (&htlc);
     integration_close (fd);

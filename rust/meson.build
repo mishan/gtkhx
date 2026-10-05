@@ -62,7 +62,6 @@ rust_sources = files(
   'crates/gtkhx-proto-ffi/src/lib.rs',
   'crates/gtkhx-proto-ffi/src/dispatch.rs',
   'crates/gtkhx-proto-ffi/src/ffi.rs',
-  'crates/gtkhx-proto-ffi/src/user_change.rs',
   'crates/hxbridge/src/lib.rs',
   # Phase R3.1+ submodules, gated behind the `runtime` Cargo feature
   # that the rust_build custom_target turns on below.

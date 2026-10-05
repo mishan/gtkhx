@@ -16,8 +16,7 @@
  * filter the matrix on — both Docker targets implement it (verified
  * June 2026: mhxd and Janus both round-trip a GIF payload and discard
  * the legacy cicn field). The tests therefore run against the default
- * matrix server (GTKHX_TEST_HOST/PORT), the same pattern the non-cap
- * tests like test_chat_roundtrip / test_two_client_chat use.
+ * matrix server (GTKHX_TEST_HOST/PORT), as the other non-cap tests do.
  *
  * Coverage map (10.A wire foundation):
  *

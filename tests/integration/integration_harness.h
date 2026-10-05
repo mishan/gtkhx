@@ -337,18 +337,8 @@ extern guint32 integration_send_get_chat_history (int fd,
                                                   guint16 limit);
 
 /*
- * Send HTLC_HDR_CHAT with HTLC_DATA_STYLE=1 + HTLC_DATA_CHAT=text.
- * The 2-chunk shape every chat-using test exercises:
- *
- *   test_chat_roundtrip      one chat, expect the broadcast echo
- *   test_two_client_chat     A sends, B receives
- *   test_chat_in_pchat       same but with a HTLC_DATA_CHAT_ID chunk
- *                            in the same call site shape — that test
- *                            uses integration_send_message directly
- *                            (cid is per-chat). This primitive is
- *                            for the public-chat case.
- *
- * Returns TRUE on a full send.
+ * Send HTLC_HDR_CHAT with HTLC_DATA_STYLE=1 + HTLC_DATA_CHAT=text, to
+ * the public chat. Returns TRUE on a full send.
  */
 extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
                                        const char *text);
@@ -380,10 +370,6 @@ extern guint32 integration_send_ping (int fd, struct htlc_conn *htlc);
  * *chat_id_out holds the chat the caller can now invite, join, set
  * subject, send to, etc. against.
  *
- * The 6 Tier-3 tests that pre-refactor opened-coded this dance:
- *   test_chat_create, test_chat_decline, test_chat_in_pchat,
- *   test_chat_join, test_chat_part, test_chat_subject.
- *
  * `max_messages` bounds the drain. 64 is the value those tests
  * have settled on after parallel-test-suite tuning.
  */
@@ -413,11 +399,9 @@ extern gboolean integration_drain_until_type (int fd, struct htlc_conn *htlc,
 /*
  * Drain server messages on `fd` until HTLS_HDR_CHAT_INVITE arrives.
  * Used by the chat-invite-receiver side of CHAT_CREATE tests
- * (test_chat_create, _decline, _in_pchat, _join, _part). On success
- * htlc->in holds the invite frame; caller can run
- * hx_chat_invite_extract for chat_id / inviter uid+name. Thin
- * wrapper around integration_drain_until_type — exists for the
- * meaningful name at the call site.
+ * (test_chat_decline, test_chat_part). Thin wrapper around
+ * integration_drain_until_type — exists for the meaningful name at the
+ * call site.
  */
 extern gboolean integration_drain_until_chat_invite (int fd,
                                                      struct htlc_conn *htlc,
@@ -428,11 +412,7 @@ extern gboolean integration_drain_until_chat_invite (int fd,
  * HTLC_DATA_CHAT_ID = `chat_id`, then drain to the TASK reply that
  * correlates by trans. Returns TRUE iff the reply arrived AND its
  * flag&1 (error bit) was clear. On success htlc->in still holds the
- * TASK reply so the caller can run dh_start/dh_end to walk the
- * HTLS_DATA_USER_LIST chunks mhxd emits (test_chat_join.c relies on
- * that). Used by test_chat_join, test_chat_part, test_chat_in_pchat
- * — the latter two only care about the side effect (Bob is now in
- * the chat) and pre-refactor open-coded the same drain loop.
+ * TASK reply.
  */
 extern gboolean integration_join_chat (int fd, struct htlc_conn *htlc,
                                        guint32 chat_id, int max_messages);
@@ -444,8 +424,7 @@ extern gboolean integration_join_chat (int fd, struct htlc_conn *htlc,
  * part fan-out to other chat members:
  *
  *   - HTLS_HDR_CHAT_USER_CHANGE: emitted when a user joins (or
- *     changes nick/icon/color while in the chat). test_chat_join.c
- *     uses this to confirm Alice sees Bob's join.
+ *     changes nick/icon/color while in the chat).
  *   - HTLS_HDR_CHAT_USER_PART: emitted when a user parts.
  *     test_chat_part.c uses this to confirm Alice sees Bob's part.
  *
@@ -474,44 +453,17 @@ extern gboolean integration_drain_until_chat_user_event (
  */
 extern gsize integration_encode_hldir_one (guint8 *out, const char *name);
 
-struct hx_chat_msg;
-
 /*
- * Drain server messages on `fd` until we see an HTLS_HDR_CHAT
- * broadcast whose uid matches `wanted_uid`. On success returns
- * TRUE and fills `out` via hx_chat_extract; on timeout / overflow
- * of `max_messages` returns FALSE.
- *
- * The uid filter is load-bearing: meson runs Tier 3 binaries in
- * parallel, so chat broadcasts from concurrent test processes
- * (logged in under different names) hit our connection too and
- * would otherwise be the first HTLS_HDR_CHAT we see. Filtering
- * by uid scopes the drain to OUR own session.
- *
- * Pre-refactor each chat-using test had its own copy of this
- * function (drain_until_own_chat in test_chat_roundtrip,
- * drain_until_chat_from_uid in test_two_client_chat) — byte-
- * identical except for the function name. Centralised here so
- * future tweaks (e.g. timeout policy, broadcast filter rules)
- * land once.
- */
-extern gboolean integration_drain_until_chat (int fd, struct htlc_conn *htlc,
-                                              guint16 wanted_uid,
-                                              struct hx_chat_msg *out,
-                                              int max_messages);
-
-/*
- * Variant of integration_drain_until_chat that matches on a unique
- * substring in the chat body instead of the sender uid. Use this for
- * chats relayed by Janus, whose HTLS_HDR_CHAT broadcasts carry uid 0
- * (no sender stamp) so a uid filter can't scope to our own message.
- * `marker` should be high-entropy enough to be unique across the
- * parallel Tier 3 binaries (see make_marker in test_chat_history).
+ * Drain server messages on `fd` until an HTLS_HDR_CHAT whose bytes
+ * carry `marker` arrives; htlc->in then holds it. Matches on the
+ * marker rather than the sender's uid because Janus stamps its chat
+ * broadcasts with uid 0. `marker` should be high-entropy enough to be
+ * unique across the parallel Tier 3 binaries (see make_marker in
+ * test_chat_history).
  */
 extern gboolean integration_drain_until_chat_marker (int fd,
                                                      struct htlc_conn *htlc,
                                                      const char *marker,
-                                                     struct hx_chat_msg *out,
                                                      int max_messages);
 
 /*
@@ -521,11 +473,10 @@ extern gboolean integration_drain_until_chat_marker (int fd,
  * dh_start for any reply chunks. Returns TRUE on match, FALSE on
  * timeout / overflow of max_messages.
  *
- * This was the second-most-duplicated drain pattern across Tier 3
- * (after the chat broadcast filter — see integration_drain_until_chat).
- * 10+ tests open-coded the same "for (i ... max) recv; type? trans?"
- * loop. Centralised here so future tweaks (longer timeout, opcode
- * dispatch table) land once.
+ * This was the most duplicated drain pattern across Tier 3: many tests
+ * open-coded the same "for (i ... max) recv; type? trans?" loop.
+ * Centralised here so future tweaks (longer timeout, opcode dispatch
+ * table) land once.
  */
 extern gboolean integration_drain_until_task_trans (int fd,
                                                     struct htlc_conn *htlc,

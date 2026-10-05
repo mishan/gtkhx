@@ -110,8 +110,7 @@ make_marker (char *out, gsize cap)
     g_snprintf (out, cap, "HX-%016" G_GINT64_MODIFIER "x", r);
 }
 
-/* Send one chat line, mirroring tests/integration/test_chat_roundtrip
- * shape. Public chat (cid 0). */
+/* Send one chat line to the public chat (cid 0). */
 static gboolean
 send_chat_line (int fd, struct htlc_conn *htlc, const char *text)
 {
