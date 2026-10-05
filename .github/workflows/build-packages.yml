@@ -316,13 +316,24 @@ jobs:
 
       - name: stamp the version
         # flatpak-builder reads meson options only from the manifest, and
-        # this checkout is thrown away after the build.
+        # this checkout is thrown away after the build. Software centers and
+        # `flatpak info` show the newest <release> in the metainfo, so a
+        # build whose version has no entry yet (a beta) gets one.
         env:
           VER: ${{ inputs.version }}
         run: |
           sed -i "s|^      - -Dupdate_check=enabled\$|&\n      - -Dbuild_version=${VER#v}|" \
             com.nasledov.gtkhx.yml
           grep -qF -- "-Dbuild_version=${VER#v}" com.nasledov.gtkhx.yml
+          v=${VER#v}
+          meta=data/com.nasledov.gtkhx.metainfo.xml
+          if printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+((b|rc)[0-9]+)?$' &&
+             ! grep -qF "<release version=\"$v\"" "$meta"; then
+            type=
+            case "$v" in *b[0-9]*|*rc[0-9]*) type=' type="development"' ;; esac
+            sed -i "0,/^  <releases>\$/s||&\n    <release version=\"$v\" date=\"$(date -u +%F)\"$type/>|" "$meta"
+            grep -qF "<release version=\"$v\"" "$meta"
+          fi
 
       - name: build flatpak bundle
         run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak

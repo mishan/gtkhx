@@ -147,7 +147,7 @@
   </content_rating>
 
   <releases>
-    <release version="1.4.0" date="2026-09-25" type="development">
+    <release version="1.4.0" date="2026-09-25">
       <description>
         <p>Video chat and screen sharing, a slimmer main window, and a new file browser.</p>
         <ul>
