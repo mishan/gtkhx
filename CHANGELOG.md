@@ -39,6 +39,8 @@
   - Sending text is faster on servers without Unicode
   - GtkHx now tells servers it is GtkHx (client version 254) instead of the Hotline 1.8.5 client
   - HOPE secure logins now compress the connection with the Compression setting's choice (GZIP, LZ4 or ZSTD) when the server supports it
+- Updates
+  - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
 - Code Modernization
   - The file browser is now Rust
   - GtkHx now reads tracker listings with code shared with the hxd-ng server

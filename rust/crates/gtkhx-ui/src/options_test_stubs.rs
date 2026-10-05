@@ -249,6 +249,18 @@ pub unsafe extern "C" fn hx_session_with_serial(serial: u16) -> *mut c_void {
         .find(|(s, _)| *s == serial)
         .map_or(std::ptr::null_mut(), |(_, p)| *p as *mut c_void)
 }
+/// The update banner's restart path. No session is live, and quitting would
+/// end the test run.
+#[no_mangle]
+pub unsafe extern "C" fn hx_session_count() -> u32 {
+    0
+}
+#[no_mangle]
+pub unsafe extern "C" fn hx_session_at(_i: u32) -> *mut c_void {
+    std::ptr::null_mut()
+}
+#[no_mangle]
+pub unsafe extern "C" fn hx_quit() {}
 /// The focus-following chrome (status bar, titles, tray, banner) — all of it C
 /// or behind C state a test binary doesn't link. Inert.
 #[no_mangle]

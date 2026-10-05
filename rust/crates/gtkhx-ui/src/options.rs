@@ -486,18 +486,17 @@ pub(crate) fn page_general(page: &adw::PreferencesPage) {
     ));
     page.add(&system);
 
-    if crate::updates::BUILD_ENABLED && crate::updates::CHECKS_WIRED {
+    if crate::updates::BUILD_ENABLED && crate::updates::checks_wired() {
         let updates = group(&tr("Updates"));
         let how = if crate::updates::in_flatpak() {
             tr("Uses Flatpak to check for updates.")
         } else {
             tr("Asks dl.gtkhx.org once a day. Sends no information about you or your servers.")
         };
-        updates.add(&switch_row(
-            cfg::UPDATE_CHECK,
-            &tr("Check for updates"),
-            Some(&how),
-        ));
+        let check = switch_row(cfg::UPDATE_CHECK, &tr("Check for updates"), Some(&how));
+        // Connected after switch_row's own handler, so the value is stored by now.
+        check.connect_active_notify(|_| crate::updates::refresh());
+        updates.add(&check);
         page.add(&updates);
     }
 }
