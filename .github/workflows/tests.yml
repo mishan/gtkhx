@@ -300,6 +300,13 @@ jobs:
           cache-from: type=gha,scope=socks
           cache-to: type=gha,mode=max,scope=socks
 
+      - name: keep the servers' core dumps
+        # mhxd crashes now and then here and never locally, and its restart
+        # policy hides it. A core written inside the container, where /tmp is
+        # writable, is what the crash step below reads; the runner's default
+        # pattern pipes it to apport instead.
+        run: sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+
       - name: start rig (compose)
         # One `compose up` starts every test container, each one on host
         # networking. The images were just built (build-push-action above) with
@@ -394,6 +401,36 @@ jobs:
         if: failure()
         # Every test container's stdout/stderr in one stream.
         run: docker compose $COMPOSE_FILES logs --no-color || true
+
+      - name: report an mhxd crash
+        # Restarts are what a crash looks like here: restart: on-failure brings
+        # mhxd back, so the tests after it may pass. mhxd logs to a file, not
+        # stdout, and the lines before each "started" say what it was doing.
+        if: always()
+        run: |
+          restarts=$(docker inspect -f '{{.RestartCount}}' gtkhx-mhxd 2>/dev/null || echo 0)
+          echo "mhxd restarted $restarts time(s)"
+          [ "$restarts" -gt 0 ] || exit 0
+          docker exec gtkhx-mhxd tail -n 400 /opt/mhxd/run/log || true
+          mkdir -p mhxd-crash
+          docker cp gtkhx-mhxd:/opt/mhxd/run/bin/hxd mhxd-crash/ || true
+          for core in $(docker exec gtkhx-mhxd sh -c 'ls /tmp/core.* 2>/dev/null'); do
+            docker cp "gtkhx-mhxd:$core" mhxd-crash/
+          done
+          if ls mhxd-crash/core.* >/dev/null 2>&1; then
+            sudo apt-get install -y -qq gdb >/dev/null
+            for core in mhxd-crash/core.*; do
+              gdb -batch -ex bt -ex 'info registers rip' mhxd-crash/hxd "$core" || true
+            done
+          fi
+
+      - name: upload an mhxd crash
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mhxd-crash
+          path: mhxd-crash/
+          if-no-files-found: ignore
 
       - name: upload meson test logs
         if: always()

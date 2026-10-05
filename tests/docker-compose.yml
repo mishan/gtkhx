@@ -82,6 +82,9 @@ services:
     container_name: gtkhx-mhxd
     network_mode: host
     restart: on-failure
+    # So a crash leaves a core for CI to read (tests.yml).
+    ulimits:
+      core: -1
     depends_on: [argus, hxtrackd]
     environment:
       # hxd registers on the fixed HTRK port 5499, which on host loopback
