@@ -76,6 +76,8 @@ hxbookmarks = { path = "../hxbookmarks" }
 # live path instead of the insensitive early return a hardcoded "no such
 # key" would give — see options_test_stubs.rs.
 hxconfig = { path = "../hxconfig" }
+# What the Flatpak update monitor's reports mean for the banner (updates.rs).
+hxupdate = { path = "../hxupdate" }
 
 [features]
 # `voice` gates the user-list voice-indicator column (users_voice_col) and

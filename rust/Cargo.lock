@@ -1938,6 +1938,7 @@ dependencies = [
  "hxsession",
  "hxtext",
  "hxtls-trust",
+ "hxupdate",
  "hxvoice-model",
  "hxvoice-runtime",
  "hxvoice-send",

@@ -258,6 +258,7 @@ rust_sources = files(
   'crates/feature-unify/src/lib.rs',
   'crates/hxsound/src/lib.rs',
   'crates/hxupdate/src/lib.rs',
+  'crates/hxupdate/src/flatpak.rs',
   'Cargo.toml',
   'Cargo.lock',
   'crates/gtkhx-ffi/Cargo.toml',

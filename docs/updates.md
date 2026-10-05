@@ -25,18 +25,60 @@ Homebrew, MacPorts or MSYS2, pass `disabled`, since `auto` turns it on there.**
 
 Where the build allows it, the user still decides: Settings → General →
 Updates → "Check for updates" (`updates.check`, on by default). The group is
-absent from a build that can't check, and stays hidden in every build until a
-check is wired up, so there is never a switch that does nothing.
+absent from a build that can't check, and so far appears only in the Flatpak,
+the one place a check is wired up, so there is never a switch that does
+nothing. Turning it off stops the check and hides the banner at once.
 
 ## How a build checks
 
 - **Flatpak** asks Flatpak, through the portal, whether its own installation
   has an update. The repository behind it is `https://dl.gtkhx.org`. Nothing
-  else is contacted.
+  else is contacted. See below.
 - **Everything else** fetches `https://dl.gtkhx.org/updates.json` at most once
   a day. The request carries no information about the user or the servers
   they visit, and the comparison happens locally; the address it comes from
   and the User-Agent are visible to the site, as with any request.
+
+## Inside the Flatpak
+
+The sandbox has no version to compare, only commits, and Flatpak already
+knows which are which. GtkHx reads the `version` of the
+`org.freedesktop.portal.Flatpak` portal and, from 2 on, opens an update
+monitor with `CreateUpdateMonitor`; an older portal gets no notice at all.
+The monitor reports, now and then, the commit running, the one installed and
+the newest in the remote, and the banner says one of two things:
+
+- **A new version of GtkHx is available**, when the remote has a commit the
+  installation doesn't. "Update…" asks whether to update now, later, or first
+  to read what's new (the releases page). Updating calls the monitor's
+  `Update`, and the banner follows its progress across the whole
+  transaction. When Flatpak can't do it itself, as when the new version asks
+  for permissions this one lacks, the banner says to update with the software
+  center or `flatpak update`, and offers to try again, since the monitor
+  reports nothing more until a commit moves. That message, like a finished
+  update, stands until the monitor next reports the commits, which then
+  decide again, so an update made elsewhere shows as one. An update that goes
+  five minutes without a word is given up on, and the commits decide again.
+- **GtkHx was updated**, when what is installed isn't what is running: after
+  updating from the banner, or when the software center updated it in the
+  background. "Restart" asks first if any server is connected, then starts
+  the installed version through the portal's `Spawn` and quits. `Spawn`
+  starts it on the running instance's runtime, so an update that moves to a
+  new GNOME runtime branch needs a manual relaunch instead; Restart can't tell
+  the two apart.
+
+When both hold, the first wins: updating ends with a restart anyway. "Later"
+hides the notice until the remote has a newer commit still. There is no "Skip
+this version" here; commits don't say which version they are. The decision
+from what the portal said to which banner is `hxupdate::flatpak::notice`.
+
+`Update` is passed no parent window, so the portal's own permission dialog,
+when it shows one, isn't attached to GtkHx's window. A handle needs the
+gdk4-x11 and gdk4-wayland bindings, which aren't otherwise used.
+
+`tools/fake-flatpak-portal.py` stands in for the portal so the banner can be
+exercised without a Flatpak install; its header says how to run it under
+`tools/screenshot.py`, and which stories it can tell.
 
 ## The feed
 
@@ -95,8 +137,8 @@ version fields, which windres can't fill from `1.4.1b1`, and the macOS bundle's
 
 ## Open
 
-- The Flatpak portal query and the feed fetch are not wired up yet; the
-  banner is in place and stays hidden, and so does the Settings switch.
+- The feed fetch for Windows and macOS is not wired up yet; outside the
+  Flatpak the banner stays hidden, and so does the Settings switch.
 - Where the last check time is stored, and backing off after a failed fetch,
   arrive with the fetch.
 - `https://dl.gtkhx.org` is not live yet.

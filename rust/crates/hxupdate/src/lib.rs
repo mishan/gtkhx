@@ -1,9 +1,12 @@
 //! The pure half of the update check: what a GtkHx version string means and
 //! how two of them order, the `updates.json` feed the outside-Flatpak check
-//! reads, and the decision of when to ask and what to tell the user.
+//! reads, and the decision of when to ask and what to tell the user. The
+//! Flatpak's own decision, from what the portal reports, is in [`flatpak`].
 //!
 //! Fetching the feed and showing the banner belong to the caller. See
 //! docs/updates.md.
+
+pub mod flatpak;
 
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;

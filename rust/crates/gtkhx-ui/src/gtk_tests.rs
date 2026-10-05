@@ -35,6 +35,7 @@ fn display_backed() {
     crate::files::complete::tests::check_completes_and_survives_entry_destroy();
     crate::emoji::tests::check_chooser_is_built_on_first_open();
     crate::users_view::tests::check_rows_land_in_one_batch();
+    crate::updates::tests::check_banner_starts_hidden();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_tile_shows_a_frame();
     #[cfg(feature = "voice")]
