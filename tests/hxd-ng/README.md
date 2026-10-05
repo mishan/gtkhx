@@ -2,10 +2,10 @@
 
 [hxd-ng](https://github.com/mishan/hxd-ng) from the image its CI
 publishes to GHCR (`ghcr.io/mishan/hxd-ng`), configured for GtkHx's Tier
-3 rig. It is here for one reason: it is the only Hotline server that
-implements the video extension (`docs/capabilities-video.md` in its
-tree), so every video test runs against it. It also serves voice — ICE-lite, on str0m — which the video
-media tests use as a matter of course.
+3 rig. It is here for one reason: it implements the video extension
+(`docs/capabilities-video.md` in its tree), so every video test runs
+against it as well as Janus. It also serves voice — ICE-lite, on str0m —
+which the video media tests use as a matter of course.
 
 ## Build
 

@@ -137,11 +137,11 @@ const hx_test_server hx_test_server_matrix[] = {
                         * account template) so the cap-negotiation
                         * probe finds it echoed in the LOGIN reply.
                         * See docs/inline-media.md. */
-                | HX_TEST_CAP_INLINE_MEDIA,
+                | HX_TEST_CAP_INLINE_MEDIA | HX_TEST_CAP_VIDEO,
     },
     {
-        /* hxd-ng: the only server implementing the video extension
-         * (capabilities-video.md), and a voice SFU of its own —
+        /* hxd-ng: the video extension (capabilities-video.md), as on
+         * Janus, and a voice SFU of its own —
          * ICE-lite, str0m underneath. Its published image at a pinned
          * digest (tests/hxd-ng/Dockerfile), run on the host
          * network like the rest of the rig. Its entrypoint advertises
@@ -149,8 +149,8 @@ const hx_test_server hx_test_server_matrix[] = {
          * gathers a loopback candidate to pair with one.
          *
          * It sits after Janus on purpose: the voice tests take the
-         * first VOICE row, and stay on Janus; the video tests filter
-         * on VIDEO and land here. The caps list only what the rig's
+         * first VOICE row, and stay on Janus; the video tests run
+         * against every VIDEO row. The caps list only what the rig's
          * config turns on and a test here relies on. */
         .name = "hxd-ng",
         .host = "127.0.0.1",
@@ -241,6 +241,32 @@ hx_test_servers_with (guint32 required_caps)
         g_ptr_array_add (result, (gpointer)s);
     }
     return result;
+}
+
+static void
+no_server_has_the_caps (gconstpointer data)
+{
+    (void)data;
+    g_test_fail_printf ("no server in the matrix has the caps this test "
+                        "needs (did GTKHX_TEST_SERVERS exclude them?)");
+}
+
+void
+hx_test_add_per_server (guint32 required_caps, const char *prefix,
+                        const char *name, GTestDataFunc fn)
+{
+    g_autoptr (GPtrArray) servers = hx_test_servers_with (required_caps);
+    if (!servers || servers->len == 0) {
+        g_autofree char *path = g_strdup_printf ("%s/%s", prefix, name);
+        g_test_add_data_func (path, NULL, no_server_has_the_caps);
+        return;
+    }
+    for (guint i = 0; i < servers->len; i++) {
+        const hx_test_server *srv = g_ptr_array_index (servers, i);
+        g_autofree char *path
+            = g_strdup_printf ("%s/%s/%s", prefix, srv->name, name);
+        g_test_add_data_func (path, srv, fn);
+    }
 }
 
 const hx_test_server *

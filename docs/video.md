@@ -3,8 +3,8 @@
 GtkHx implements the video extension to the voice capability: camera
 video and screen sharing inside a voice room, forwarded by the server's
 SFU. The wire contract is hxd-ng's `docs/capabilities-video.md`, drafted
-in fogWraith's shape for upstream contribution. hxd-ng is the only
-server that implements it, so it is the integration target.
+in fogWraith's shape for upstream contribution. hxd-ng and Janus
+implement it, and the integration tests run against both.
 
 Video is layered on voice: the same peer connection, the same UDP port,
 the same 602 / 603 / 604 SDP and ICE transactions, the same room. What

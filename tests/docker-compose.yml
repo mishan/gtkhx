@@ -4,7 +4,8 @@
 # trackers (Argus, hxtrackd), and a SOCKS5 proxy — all on HOST networking
 # — with the servers registering against the trackers. Once up:
 #
-#   * Servers   : mhxd @ localhost:5500, Janus @ localhost:5510 (+TLS 5610),
+#   * Servers   : mhxd @ localhost:5500, Janus @ localhost:5510 (+TLS 5610,
+#                 voice + video on 5514/udp),
 #                 hxd-ng @ localhost:5520 (voice + video, media on 5524/udp),
 #                 hlservd @ localhost:5530 (the 1.9 server as a daemon)
 #   * Trackers  : hxtrackd @ localhost:5498, Argus @ localhost:5698 (+TLS 6498)
@@ -101,9 +102,9 @@ services:
       # hxtrackd on 5499 and Argus on 5699 (loopback).
       TRACKERS: "127.0.0.1:5499,127.0.0.1:5699"
 
-  # hxd-ng: the only server with the video extension, so the video tests'
-  # target. hxd-ng's published GHCR image at a pinned digest, plus the
-  # rig's config (tests/hxd-ng). Its entrypoint advertises the host's own
+  # hxd-ng: the video tests' other target, beside Janus. hxd-ng's
+  # published GHCR image at a pinned digest, plus the rig's config
+  # (tests/hxd-ng). Its entrypoint advertises the host's own
   # addresses as ICE candidates — see tests/hxd-ng/README.md for why
   # loopback won't do. No tracker
   # registration: nothing tests it here.

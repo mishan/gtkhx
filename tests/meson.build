@@ -2202,8 +2202,7 @@ test('folder_roundtrip', test_integration_folder_roundtrip,
 if voice_enabled
 # Video rides voice, so its tests live inside the voice gate too. The
 # control-channel set needs no WebRTC stack; the media test drives two
-# real runtimes. Both target hxd-ng (HX_TEST_CAP_VIDEO), the only server
-# with the extension.
+# real runtimes. Both run against every server with HX_TEST_CAP_VIDEO.
 test_integration_video_control = executable(
   'test_integration_video_control',
   'integration/test_video_control.c',

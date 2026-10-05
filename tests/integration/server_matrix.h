@@ -116,6 +116,15 @@ extern const gsize hx_test_server_matrix_count;
 extern GPtrArray *hx_test_servers_with (guint32 required_caps);
 
 /*
+ * Registers `fn` once for every server with `required_caps`, as
+ * `<prefix>/<server>/<name>`, with the server as its data. With no such
+ * server, `<prefix>/<name>` is registered as a failure: a test with
+ * nothing to run against has tested nothing, and must not pass.
+ */
+extern void hx_test_add_per_server (guint32 required_caps, const char *prefix,
+                                    const char *name, GTestDataFunc fn);
+
+/*
  * Convenience: open a TCP connection to the named server. Same
  * connect-with-timeout semantics as integration_connect(): returns
  * the fd, or -1 if unreachable inside 2 seconds.

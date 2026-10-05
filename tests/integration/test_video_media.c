@@ -10,7 +10,8 @@
 /*
  * tests/integration/test_video_media.c — Tier 3 MEDIA test for the video
  * extension: two real VoiceRuntimes (webrtcbin, ICE-lite, DTLS-SRTP)
- * against hxd-ng, with VP8 actually encoded, forwarded and decoded.
+ * against each video server, with VP8 actually encoded, forwarded and
+ * decoded.
  *
  * Scenario, in the order a user would do it:
  *
@@ -42,8 +43,9 @@
  * test_voice_rejoin_media.c, for the same reason — every runtime call on
  * the main thread while it owns the default context, as in production.
  *
- * Server gating: HX_TEST_CAP_VIDEO, which only hxd-ng has. Needs UDP
- * reachability to its voice port as well as the control channel.
+ * Server gating: HX_TEST_CAP_VIDEO (Janus and hxd-ng), each in turn.
+ * Needs UDP reachability to its voice port as well as the control
+ * channel.
  */
 
 #include "config.h"
@@ -347,18 +349,6 @@ dispatch_frame (video_client *c, guint16 peer_uid)
     }
 }
 
-static const hx_test_server *
-pick_video_server (void)
-{
-    GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_VIDEO);
-    const hx_test_server *srv
-        = (servers && servers->len > 0) ? g_ptr_array_index (servers, 0) : NULL;
-    if (servers) {
-        g_ptr_array_unref (servers);
-    }
-    return srv;
-}
-
 static void
 client_reset (video_client *c)
 {
@@ -511,7 +501,7 @@ driver_tick (gpointer data)
         } else if (now >= d->deadline) {
             driver_fail (d,
                          "A never reached CONNECTED (state=%d); is UDP "
-                         "to hxd-ng's voice port blocked?",
+                         "to the server's voice port blocked?",
                          (int)d->A->state);
         }
         break;
@@ -705,7 +695,7 @@ driver_tick (gpointer data)
 }
 
 static void
-test_video_media (void)
+test_video_media (gconstpointer data)
 {
     g_setenv ("GTKHX_VOICE_TEST_AUDIO_SRC", "1", TRUE);
     g_setenv ("GTKHX_VOICE_TEST_VIDEO_SRC", "ball", TRUE);
@@ -717,11 +707,7 @@ test_video_media (void)
         return;
     }
 
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        g_test_fail_printf ("no video-capable server in the matrix.");
-        return;
-    }
+    const hx_test_server *srv = data;
 
     video_client A, B;
     client_reset (&A);
@@ -930,16 +916,12 @@ dual_tick (gpointer data)
 }
 
 static void
-test_video_camera_and_screen (void)
+test_video_camera_and_screen (gconstpointer data)
 {
     g_setenv ("GTKHX_VOICE_TEST_AUDIO_SRC", "1", TRUE);
     g_setenv ("GTKHX_VOICE_TEST_VIDEO_SRC", "ball", TRUE);
     g_assert_cmpint (gtkhx_voice_init (), ==, 1);
-    const hx_test_server *srv = pick_video_server ();
-    if (!srv) {
-        g_test_fail_printf ("no video-capable server in the matrix.");
-        return;
-    }
+    const hx_test_server *srv = data;
     video_client A, B;
     client_reset (&A);
     client_reset (&B);
@@ -975,8 +957,9 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-    g_test_add_func ("/integration/video/media", test_video_media);
-    g_test_add_func ("/integration/video/camera_and_screen",
-                     test_video_camera_and_screen);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video", "media",
+                            test_video_media);
+    hx_test_add_per_server (HX_TEST_CAP_VIDEO, "/integration/video",
+                            "camera_and_screen", test_video_camera_and_screen);
     return g_test_run ();
 }
