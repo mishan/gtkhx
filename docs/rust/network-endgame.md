@@ -146,9 +146,9 @@ seam, which is what makes the rest tractable rather than a rewrite:
 `hxhandlers::recv` has a module per protocol domain (chat, user, msg,
 news, files, xfer, icon, agreement); it absorbed what were previously
 separate per-domain receive crates, so those crate names no longer exist.
-A domain the session handles itself (chat and users, so far) reaches its
-module as the session's events, through `hx_recv_session_event`, not as
-frames.
+A domain the session handles itself (chat, users and messages, so far)
+reaches its module as the session's events, through
+`hx_recv_session_event`, not as frames.
 
 # Part 2 — What remains, and in what order
 

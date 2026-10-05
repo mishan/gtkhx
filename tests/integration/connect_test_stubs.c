@@ -70,7 +70,6 @@
  * enough for what the connect path reads. */
 session the_session;
 struct gtkhx_prefs gtkhx_prefs;
-char last_msg_nick[32];
 char *g_user_colors[4];
 
 /* ---- identity resolution ------------------------------------- */

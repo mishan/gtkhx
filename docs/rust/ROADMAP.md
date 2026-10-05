@@ -731,22 +731,27 @@ The order, each step its own branch and each checked against the rig:
    the task table's correlation (`hx_rcv_task`, `hxtask`) goes once the
    last of them has.
 
-   Chat and users have moved. The session handles them
-   (`Config::handled`, `Handled::CHAT`, `Handled::USERS`), and `hxnet`
-   hands what it makes of a chat line and the picture it carries, an
-   invitation, a subject, a page of history, and a user arriving,
-   changing or leaving to `hx_recv_session_event` on the main thread,
-   among the frames and in their order. `hxhandlers::recv::chat` and
-   `hxhandlers::recv::user` keep the model — the ignore list, each chat's
+   Chat, users and messages have moved. The session handles them
+   (`Config::handled`, `Handled::CHAT`, `Handled::USERS`,
+   `Handled::MSG`), and `hxnet` hands what it makes of a chat line and
+   the picture it carries, an invitation, a subject, a page of history, a
+   user arriving, changing or leaving, a private message, a broadcast, and
+   the server's parting words to `hx_recv_session_event` on the main
+   thread, among the frames and in their order. `hxhandlers::recv::chat`,
+   `::user` and `::msg` keep the model — the ignore list, each chat's
    subject, the history cursor, the rosters — and emit the signals they
-   always did; the chat event itself is built in `gtkhx-core`. A history
-   request, an invitation, the user list, and creating or joining a
-   private chat have their reply expected by the session
+   always did, a broadcast and the parting words as `broadcast`; the chat
+   and message events themselves are built in `gtkhx-core`. A history
+   request, an invitation, the user list, creating or joining a private
+   chat, and a private message have their reply expected by the session
    (`Session::expect`), so none is a task any more, and a refusal comes
    back as `Failed`. A private chat is made when its join is answered.
    What arrives is traced from the session's tap. *In progress.* What
    remains:
-   - the messages, news and files domains;
+   - the news and files domains;
+   - of messages, the admin broadcast's send, still a task
+     (`gtkhx-ui`'s `broadcast.rs`), and the picture a private message
+     carries, which the session reads and the view does not yet show;
    - of users, the self-info (`hx_rcv_user_selfinfo`, which reads it
      through C's `hx_selfinfo_parse`), and the replies to user info, the
      user editor's account read and a kick, still read through tasks
@@ -760,7 +765,7 @@ The order, each step its own branch and each checked against the rig:
    upload — rewritten around bytes in and bytes out. The largest step, last.
 
 Of the extensions GtkHx negotiates, text encoding, chat history, the
-picture a chat line carries and the color a user's nickname arrives with
+picture a chat line or a private message carries and the color a user's nickname arrives with
 have their session-side handling; the rest (voice and video signaling,
 inline media's upload and download, GIF icons, Large Files) need theirs
 before the domains that use them move. hxproto has the codecs.

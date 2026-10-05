@@ -335,7 +335,7 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     hldir = path_to_hldir (hx_cfl_path (cfl), &hldirlen, 0);
 
     /* chunk layout moved to gtkhx_proto_build_file_list_chunks.
-     * Build BEFORE task_new — see hx_send_msg for the rationale. */
+     * Build BEFORE task_new — see hx_kick_user for the rationale. */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_file_list_chunks (hldir, hldirlen, chunks,
                                                       G_N_ELEMENTS (chunks));

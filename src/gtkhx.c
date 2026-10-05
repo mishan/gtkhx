@@ -78,7 +78,6 @@
 #include "commands.h"
 #include "gtkhx.h"
 
-char last_msg_nick[32];
 char *g_user_colors[4] = { WHITE_BOLD, WHITE, RED_BOLD, RED };
 
 struct ifn user_icon_files;
@@ -1637,6 +1636,20 @@ on_request_failed_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     play_sound (ERROR);
 }
 
+/* A broadcast, or the server's parting words, which say so first. */
+static void
+on_broadcast_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                     gpointer name, guint status, gpointer text,
+                     gboolean parting, gpointer user_data)
+{
+    (void)emitter;
+    (void)user_data;
+    if (parting) {
+        hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("polite quit\n"));
+    }
+    broadcastmsg (htlc, name, (guint16)status, text);
+}
+
 static void
 on_chat_invitation_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                            guint cid, gpointer name, gpointer user_data)
@@ -2159,6 +2172,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
     g_signal_connect (emitter, "request-failed",
                       G_CALLBACK (on_request_failed_signal), NULL);
     g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
+    g_signal_connect (emitter, "broadcast", G_CALLBACK (on_broadcast_signal),
+                      NULL);
     g_signal_connect (emitter, "logged-in", G_CALLBACK (on_logged_in_signal),
                       NULL);
     g_signal_connect (emitter, "self-updated",
@@ -2476,8 +2491,6 @@ hotline_client_init (int argc, char **argv)
     hx_identity_set_startup_default (user ? user : "GtkHx User");
 
     gen_command_hash ();
-
-    last_msg_nick[0] = 0;
 
     init (argc, argv);
 

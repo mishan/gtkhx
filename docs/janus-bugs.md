@@ -34,6 +34,19 @@ before decompressing.
 **GtkHx:** does not offer LZ4 with Blowfish; that login runs uncompressed
 (`HopeOpenRequest::session` in `hxnet`).
 
+## A message to no one is never answered
+
+**Verified on 2.0.18.**
+
+- **Sends:** a private message (`SEND_MSG`, 108) to a uid no one has.
+- **Gets:** nothing: no reply on its transaction within seconds, while what
+  the client sends after it is answered.
+- **Should get:** a refusal saying why, as mhxd and hlservd send.
+
+**GtkHx:** shows nothing, as for a message that went through; the session
+forgets the reply it expected once enough newer requests wait. `hx-e2e`'s
+`a_message_to_no_one_is_refused_or_unanswered` pins it.
+
 ## Adding an entry
 
 Reproduce it against the rig first, ideally as an `hx-e2e` probe, and write it

@@ -101,8 +101,7 @@ void
 hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
 {
     /* chunk layout moved to gtkhx_proto_build_user_kick_chunks.
-     * Build BEFORE task_new — see hx_send_msg for the rationale
-     * (task_new reserves the next request's trans for a pending entry;
+     * Build BEFORE task_new (task_new reserves the next request's trans for a pending entry;
      * the send that follows uses it up). A builder failure must not
      * leave a phantom task behind. */
     struct hx_chunk chunks[2];

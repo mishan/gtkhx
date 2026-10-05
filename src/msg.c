@@ -47,40 +47,6 @@
 #include "cicn.h"
 #include "msg.h"
 
-void
-hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
-             void *data)
-{
-    /* Phase E2/E3: body field — UTF-8 / Mac Roman conversion plus
-     * LF→CR for legacy servers. See [[gtkhx_text_for_wire]] in
-     * src/text_util.c. */
-    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
-    gsize wire_len = 0;
-    char *wire
-        = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
-
-    /* chunk layout moved to gtkhx_proto_build_msg_chunks.
-     * Build chunks BEFORE registering the task — task_new() reserves
-     * the next request's trans and keys a new task table entry on it
-     * (which then waits for the server's matching TASK reply); the
-     * send that follows goes out on it.
-     * If we registered the task first and the builder then failed
-     * (validation reject), hlwrite_chunks would be skipped — leaving a
-     * pending task with no on-wire request to reply to and hanging the
-     * tasks UI. Build, register, send is the safe order. */
-    struct hx_chunk chunks[2];
-    guint8 scratch[2];
-    int hc = (int)gtkhx_proto_build_msg_chunks (
-        uid, (const uint8_t *)wire, wire_len, chunks, G_N_ELEMENTS (chunks),
-        scratch, sizeof (scratch));
-    if (hc > 0) {
-        task_new (htlc, RCV_TASK_FN (rcv_task_msg), data, 0,
-                  data ? data : "msg");
-        hlwrite_chunks (htlc, HTLC_HDR_MSG, 0, chunks, hc);
-    }
-    g_free (wire);
-}
-
 /* hx_send_broadcast (the admin-broadcast wire sender) moved to Rust
  * (gtkhx-ui broadcast.rs) alongside the Broadcast composer, its only
  * caller. */
@@ -280,7 +246,7 @@ msg_input_activate (GtkWidget *widget, gpointer data)
         session *sess = mw && mw->sess ? mw->sess : hx_active_session ();
         msg_output (sess, hx_conn_name (sess->htlc), *uid, termed_buf);
         LF2CR (termed_buf, len);
-        hx_send_msg (sess->htlc, *uid, termed_buf, len, 0);
+        hx_send_msg (sess->htlc, *uid, termed_buf);
     }
     g_free (termed_buf);
 }
@@ -771,11 +737,10 @@ broadcast_name_color (guint16 color)
  * signal parameter now, so none of that is reachable — there is no
  * wrapper to escape from.
  *
- * Kept anyway, because the wire-parse helpers (hx_msg_extract →
- * strip_ansi) translate control bytes in the body but *not* in the
- * name, and a control byte rendered raw into a text layout is still
- * nobody's idea of a good time. Legitimate Hotline nicks are printable
- * ASCII / UTF-8. */
+ * Kept anyway, because the session's parse (strip_ansi) folds only some
+ * control bytes, in the name as in the body, and a control byte rendered
+ * raw into a text layout is still nobody's idea of a good time.
+ * Legitimate Hotline nicks are printable ASCII / UTF-8. */
 static char *
 broadcast_sanitise_name (const char *raw)
 {
@@ -798,7 +763,8 @@ broadcast_sanitise_name (const char *raw)
 }
 
 void
-broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
+broadcastmsg (struct htlc_conn *htlc, const char *sender_name,
+              guint16 sender_color, char *text)
 {
     AdwDialog *dialog;
     GtkWidget *textbox, *scroll;
@@ -813,9 +779,7 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 
     /* Broadcasts share the MSG chime with private messages. The "msg"
      * signal (which the sound_events subscriber keys on) fires only for
-     * the private-message branch of hx_rcv_msg, not for broadcasts, so
-     * play it here to preserve the chime that used to fire inline for
-     * both branches. */
+     * private messages, not for broadcasts, so play it here. */
     play_sound (MSG);
 
     /* Log the broadcast to chat output. When the wire carried a
@@ -831,12 +795,11 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
     if (text && *text) {
         if (sender_name && *sender_name) {
             char *safe_name = broadcast_sanitise_name (sender_name);
-            hx_printf_named (hx_active_session ()->htlc, 0, safe_name,
+            hx_printf_named (htlc, 0, safe_name,
                              broadcast_name_color (sender_color), "%s\n", text);
             g_free (safe_name);
         } else {
-            hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,
-                              _ ("broadcast: %s\n"), text);
+            hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("broadcast: %s\n"), text);
         }
     }
 

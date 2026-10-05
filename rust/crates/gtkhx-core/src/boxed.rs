@@ -14,8 +14,8 @@
 //!
 //! # The struct layout stays C-visible
 //!
-//! The C producers that remain (`hx_msg_event_new`, the tracker's) still
-//! `g_new0` and fill these structs, and C consumers (and the media
+//! The C producer that remains (the tracker's) still `g_new0`s and
+//! fills its structs, and C consumers (and the media
 //! placeholder formatters) still read their fields directly. So each
 //! type is a `#[repr(C)]` mirror of the C struct, byte layout pinned on
 //! both sides — `_Static_assert(sizeof(...) == N)` in C against the
@@ -32,11 +32,10 @@
 //!
 //! They are self-contained — glib only, no undefined externs into the
 //! rest of GtkHx — and that is load-bearing, not incidental. A C target
-//! that pulls a `_copy`/`_free` symbol (the `test_msg_event` /
-//! `test_chat_event` proto unit tests) links the `gtkhx-core` archive
-//! directly rather than the `gtkhx-ffi` façade, so an extern added here
-//! becomes an unresolved reference in those tests. See the crate-level
-//! note in `lib.rs`.
+//! that pulls a `_copy`/`_free` symbol (the `test_chat_event` proto
+//! unit test) links the `gtkhx-core` archive directly rather than the
+//! `gtkhx-ffi` façade, so an extern added here becomes an unresolved
+//! reference in those tests. See the crate-level note in `lib.rs`.
 
 use glib::ffi::GType;
 use glib::gobject_ffi::{g_boxed_type_register_static, GBoxedCopyFunc, GBoxedFreeFunc};

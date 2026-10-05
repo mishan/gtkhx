@@ -54,8 +54,8 @@ proto_test_deps = test_deps + [
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
   # proto_helpers.c / tracker_event.c into the self-contained
   # gtkhx-core::boxed module. Proto tests that link those
-  # producers and exercise the boxed copy/free (e.g. test_msg_event /
-  # test_chat_event call hx_*_event_copy/_free; the tracker tests'
+  # producers and exercise the boxed copy/free (e.g. test_chat_event
+  # calls hx_*_event_copy/_free; the tracker tests'
   # meta_new/_free call sites) resolve them against this archive. It's
   # self-contained, so pulling those symbols never drags gtkhx-core's
   # C externs in.
@@ -623,24 +623,6 @@ test_chat_proto = executable('test_chat_proto',
 test('chat', test_chat_proto,
      suite : 'proto')
 
-# msg — hx_msg_extract pulls uid + sender name + body out of an
-# HTLS_HDR_MSG (private message) frame. The handler treats name and
-# body asymmetrically: both go through strip_ansi but only the body
-# gets CR2LF (since names shouldn't have line endings). Pin that
-# down so a future "consistency" pass that adds CR2LF to names
-# trips the test.
-test_msg_proto = executable('test_msg_proto',
-  'proto/test_msg.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('msg', test_msg_proto,
-     suite : 'proto')
-
 # banner — hx_banner_extract pulls the 4-byte type code and optional
 # URL out of an HTLS_HDR_BANNER message. Type chunk is pinned to
 # exactly 4 bytes by the protocol; wrong sizes are refused so the
@@ -885,22 +867,6 @@ test_large_file = executable('test_large_file',
   link_depends        : rust_build,
 )
 test('large_file', test_large_file,
-     suite : 'proto')
-
-# msg_event — HxMsgEvent is the private-message counterpart to
-# HxChatEvent, payload of GtkhxSession::msg. The constructor's
-# contract: stash uid + set is_broadcast on uid==0, UTF-8-sanitise
-# name + body once, stamp is_self on byte-equal name vs. self_nick.
-# Pins each step so msg.c and notify.c stay in agreement.
-test_msg_event = executable('test_msg_event',
-  'proto/test_msg_event.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_depends        : rust_build,
-)
-test('msg_event', test_msg_event,
      suite : 'proto')
 
 
@@ -1404,20 +1370,6 @@ test('gif_icons', test_integration_gif_icons,
      suite   : 'integration',
      timeout : 30)
 
-# msg_roundtrip — A→B private message via HTLC_HDR_MSG. B parses
-# the broadcast through hx_msg_extract (a Tier 2 helper) and
-# verifies uid + name + body all round-trip.
-test_integration_msg = executable('test_integration_msg',
-  'integration/test_msg_roundtrip.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('msg_roundtrip', test_integration_msg,
-     suite   : 'integration',
-     timeout : 30)
-
 # user_info — HTLC_HDR_USER_GETINFO for our own session. Verifies
 # the TASK reply carries HTLS_DATA_USER_INFO + HTLS_DATA_NAME and
 # the info text mentions our login.
@@ -1679,22 +1631,6 @@ test_integration_login_bad = executable('test_integration_login_bad',
   link_depends        : rust_build,
 )
 test('login_bad', test_integration_login_bad,
-     suite   : 'integration',
-     timeout : 30)
-
-# msg_self — pin down what mhxd does when the client sends
-# HTLC_HDR_MSG addressed to its own uid. The actual handling
-# (echo / drop / task-error) is tolerant; the assertion is that
-# whatever happens, the stream stays clean enough that a follow-up
-# PING round-trips with matching trans.
-test_integration_msg_self = executable('test_integration_msg_self',
-  'integration/test_msg_self.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('msg_self', test_integration_msg_self,
      suite   : 'integration',
      timeout : 30)
 

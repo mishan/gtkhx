@@ -11,7 +11,7 @@
 
 use hxproto::build::{
     self, AccountModifyRequest, AgreementAgreeRequest, BroadcastRequest, ChatRequest,
-    ChatSubjectRequest, HxChunk, MsgRequest, NewsDeleteThreadRequest, NewsGetThreadRequest,
+    ChatSubjectRequest, HxChunk, NewsDeleteThreadRequest, NewsGetThreadRequest,
     NewsMakeCategoryRequest, NewsMakeDirRequest, NewsPostThreadRequest, UserChangeRequest,
     UserKickRequest,
 };
@@ -339,48 +339,6 @@ pub unsafe extern "C" fn gtkhx_proto_parse_task_error(
         Some(bytes) => write_cstr(out, cap, &bytes),
         None => usize::MAX,
     }
-}
-
-/// C-ABI result of [`parse::parse_msg`]. The name lands in `name_buf`,
-/// the sanitised body in `msg_buf`; lengths report bytes written
-/// (excluding the trailing NUL).
-#[repr(C)]
-pub struct MsgOut {
-    pub uid: u16,
-    pub name_len: u16,
-    pub msg_len: u16,
-}
-
-/// Parse `HTLS_HDR_MSG` (also `MSG_BROADCAST` / `POLITEQUIT`, which
-/// share the same shape). Writes the `strip_ansi`'d name into
-/// `name_buf` (cap `name_cap`) and the CR2LF + `strip_ansi`'d body into
-/// `msg_buf` (cap `msg_cap`). Returns false on any NULL / zero-cap
-/// pointer; otherwise true.
-///
-/// # Safety
-/// `msg` valid for `msglen` bytes (or NULL); `name_buf` and `msg_buf`
-/// valid for their capacities; `out` a valid writable `MsgOut`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_parse_msg(
-    msg: *const u8,
-    msglen: usize,
-    name_buf: *mut u8,
-    name_cap: usize,
-    msg_buf: *mut u8,
-    msg_cap: usize,
-    out: *mut MsgOut,
-) -> bool {
-    if out.is_null() || name_buf.is_null() || name_cap == 0 || msg_buf.is_null() || msg_cap == 0 {
-        return false;
-    }
-    let s = as_slice(msg, msglen);
-    let p = parse::parse_msg(s, s.len(), name_cap - 1, msg_cap - 1);
-    let nlen = write_cstr(name_buf, name_cap, &p.name);
-    let mlen = write_cstr(msg_buf, msg_cap, &p.msg);
-    (*out).uid = p.uid;
-    (*out).name_len = nlen as u16;
-    (*out).msg_len = mlen as u16;
-    true
 }
 
 /// C-ABI result of [`parse::parse_banner`]. `type_code` is the 4-byte
@@ -962,50 +920,6 @@ pub unsafe extern "C" fn hx_get_chat_history_build_chunks(
         limit,
     };
     build::build_get_chat_history_chunks(&req, chunks, scratch) as i32
-}
-
-/// Build `HTLC_HDR_MSG` chunks: UID + MSG body, exactly 2 chunks.
-/// Requires `chunks_cap >= 2` and `scratch_cap >= 2` (the BE-encoded
-/// uid at offset 0).
-///
-/// # Safety
-/// As [`gtkhx_proto_build_chat_chunks`].
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_build_msg_chunks(
-    uid: u16,
-    body_ptr: *const u8,
-    body_len: usize,
-    chunks: *mut HxChunk,
-    chunks_cap: usize,
-    scratch: *mut u8,
-    scratch_cap: usize,
-) -> i32 {
-    // Fixed maxima for this builder: 2 chunks (UID + BODY), 2 scratch
-    // bytes (the u16 uid). Slices are sized to the maxima; see
-    // gtkhx_proto_build_chat_chunks for the UB rationale.
-    const MAX_CHUNKS: usize = 2;
-    const MAX_SCRATCH: usize = 2;
-
-    if chunks.is_null() || scratch.is_null() {
-        return 0;
-    }
-    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
-        return 0;
-    }
-    // See gtkhx_proto_build_chat_chunks for the NULL-ptr-with-nonzero-
-    // len rationale: as_slice would silently treat this as an empty
-    // body and turn the intended MSG into an empty-body chunk.
-    if body_ptr.is_null() && body_len != 0 {
-        return 0;
-    }
-    if body_len > u16::MAX as usize {
-        return 0;
-    }
-    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
-    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
-    let body = as_slice(body_ptr, body_len);
-    let req = MsgRequest { uid, body };
-    build::build_msg_chunks(&req, chunks_slice, scratch_slice) as i32
 }
 
 /// Build `HTLC_HDR_MSG_BROADCAST` chunks: a single MSG-body chunk.
@@ -3747,29 +3661,6 @@ pub unsafe extern "C" fn gtkhx_proto_emoji_to_shortcodes(
         slice::from_raw_parts_mut(dst, cap)
     };
     hxproto::emoji::emoji_to_shortcodes_into(s, buf)
-}
-
-/// Replace known `:shortcode:` tokens in `src` with emoji, writing UTF-8
-/// into `dst`. Same snprintf-style return contract as
-/// [`gtkhx_proto_emoji_to_shortcodes`]. Unknown tokens and stray colons
-/// pass through unchanged; mIRC colour runs are preserved.
-///
-/// # Safety
-/// Same as [`gtkhx_proto_emoji_to_shortcodes`].
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_shortcodes_to_emoji(
-    src: *const u8,
-    len: usize,
-    dst: *mut u8,
-    cap: usize,
-) -> usize {
-    let s = as_slice(src, len);
-    let buf: &mut [u8] = if dst.is_null() || cap == 0 || cap > isize::MAX as usize {
-        &mut []
-    } else {
-        slice::from_raw_parts_mut(dst, cap)
-    };
-    hxproto::emoji::shortcodes_to_emoji_into(s, buf)
 }
 
 /// Prefix query for the emoji typeahead popup (phase E5). `prefix` is the

@@ -344,6 +344,19 @@ mod imp {
                     Signal::builder("request-failed")
                         .param_types([Type::POINTER, Type::POINTER])
                         .build(),
+                    // broadcast: (htlc*, name*, status, text*, parting) — a
+                    // broadcast, its sender's name (NULL when the server
+                    // names no one) and status; with `parting`, the
+                    // server's last words before it hangs up.
+                    Signal::builder("broadcast")
+                        .param_types([
+                            Type::POINTER,
+                            Type::POINTER,
+                            Type::U32,
+                            Type::POINTER,
+                            Type::BOOL,
+                        ])
+                        .build(),
                 ]
             })
         }
@@ -1008,6 +1021,28 @@ pub unsafe extern "C" fn gtkhx_session_emit_request_failed(
 ) {
     let v = [ptr_value(htlc), ptr_value(reason as *const c_void)];
     emit(self_, "request-failed", &v);
+}
+
+/// # Safety
+/// `self_`/`htlc` valid; `name` a valid C string or NULL; `text` a valid C
+/// string.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_broadcast(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    name: *const c_char,
+    status: u32,
+    text: *const c_char,
+    parting: bool,
+) {
+    let v = [
+        ptr_value(htlc),
+        ptr_value(name as *const c_void),
+        glib::Value::from(status),
+        ptr_value(text as *const c_void),
+        glib::Value::from(parting),
+    ];
+    emit(self_, "broadcast", &v);
 }
 
 /// # Safety

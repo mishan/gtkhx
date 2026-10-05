@@ -394,21 +394,6 @@ extern bool gtkhx_proto_parse_file_getinfo (
 extern size_t gtkhx_proto_parse_task_error (const uint8_t *msg, size_t msglen,
                                             uint8_t *out, size_t cap);
 
-struct gtkhx_proto_msg {
-    uint16_t uid;
-    uint16_t name_len;
-    uint16_t msg_len;
-};
-
-/* Parse HTLS_HDR_MSG (and MSG_BROADCAST / POLITEQUIT, which share the
- * same shape). Writes the strip_ansi'd name into name_buf and the CR2LF
- * + strip_ansi'd body into msg_buf (both NUL-terminated, capped at
- * cap-1). Returns false on any NULL / zero-cap pointer; otherwise true. */
-extern bool gtkhx_proto_parse_msg (const uint8_t *msg, size_t msglen,
-                                   uint8_t *name_buf, size_t name_cap,
-                                   uint8_t *msg_buf, size_t msg_cap,
-                                   struct gtkhx_proto_msg *out);
-
 struct gtkhx_proto_banner {
     uint8_t type_code[4];
     uint16_t url_len;
@@ -604,14 +589,6 @@ gtkhx_proto_build_chat_chunks (uint32_t cid, uint16_t style,
                                const uint8_t *body_ptr, size_t body_len,
                                struct hx_chunk *chunks, size_t chunks_cap,
                                uint8_t *scratch, size_t scratch_cap);
-
-/* HTLC_HDR_MSG: UID (u16) + MSG body. Requires chunks_cap >= 2 and
- * scratch_cap >= 2. Returns 2 on success, 0 on validation failure. */
-extern int32_t
-gtkhx_proto_build_msg_chunks (uint16_t uid, const uint8_t *body_ptr,
-                              size_t body_len, struct hx_chunk *chunks,
-                              size_t chunks_cap, uint8_t *scratch,
-                              size_t scratch_cap);
 
 /* HTLC_HDR_MSG_BROADCAST: just MSG body. No scratch needed. Requires
  * chunks_cap >= 1. Returns 1 on success, 0 on validation failure. */
@@ -1195,15 +1172,6 @@ extern size_t gtkhx_proto_text_to_utf8 (const uint8_t *src, size_t len,
  * `len > isize::MAX` is likewise treated as empty. No trailing NUL is
  * appended. */
 extern size_t gtkhx_proto_emoji_to_shortcodes (const uint8_t *src, size_t len,
-                                               uint8_t *dst, size_t cap);
-
-/* Inverse of gtkhx_proto_emoji_to_shortcodes: replace known `:shortcode:`
- * tokens in `src[0..len)` with their emoji, writing UTF-8 into `dst`. Used
- * at chat display time (phase E3) on every server. Unknown tokens and
- * stray colons pass through unchanged; mIRC colour-code runs are preserved.
- * Same snprintf-style return contract and NULL/cap handling as
- * gtkhx_proto_emoji_to_shortcodes. */
-extern size_t gtkhx_proto_shortcodes_to_emoji (const uint8_t *src, size_t len,
                                                uint8_t *dst, size_t cap);
 
 /* Prefix query for the emoji typeahead popup (phase E5). `prefix[0..len)`

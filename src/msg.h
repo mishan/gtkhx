@@ -25,20 +25,19 @@ extern void msg_output (session *sess, const char *name, guint16 uid,
                         char *buf);
 
 /* msg-signal renderer. Same as msg_output but reads from
- * a pre-parsed HxMsgEvent (uid + UTF-8-validated name/body +
- * is_self flag from hx_msg_event_new). */
+ * a pre-parsed HxMsgEvent (uid + UTF-8 name/body + is_self flag). */
 struct _HxMsgEvent;
 extern void msg_output_from_event (struct htlc_conn *htlc,
                                    struct _HxMsgEvent *event);
 
-/* Render a received HTLS_HDR_MSG_BROADCAST. sender_name + sender_color
+/* Render a broadcast received on htlc. sender_name + sender_color
  * are from the wire chunk (NULL/0 when the server didn't include
  * them — older Hotline servers and anonymous "rate-limit" notes).
  * When sender_name is non-NULL the chat log line uses "[name] body"
  * with sender_color picking the name's mIRC slot; otherwise it
  * falls back to the legacy "[hx] broadcast: ..." form. */
-extern void broadcastmsg (const char *sender_name, guint16 sender_color,
-                          char *text);
+extern void broadcastmsg (struct htlc_conn *htlc, const char *sender_name,
+                          guint16 sender_color, char *text);
 /* Re-render the recipient info pane from the recipient's current entry in the
  * public chat's HxMemberModel. Used at create_msgwin time when that entry
  * already reflects current state. */
@@ -51,8 +50,8 @@ extern void msgwin_refresh_user_info (struct msgwin *msg);
 extern void msgwin_apply_user_change (struct msgwin *msg, const char *nam,
                                       guint16 icon, guint16 color);
 
-extern void hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg,
-                         guint16 len, void *p);
+/* SEND_MSG, whose reply the session reads (hxhandlers::send::msg). */
+extern void hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg);
 
 /* hx_send_broadcast (the HTLC_HDR_MSG_BROADCAST wire sender) moved to Rust
  * (gtkhx-ui broadcast.rs) alongside the Broadcast composer. */

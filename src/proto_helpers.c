@@ -57,28 +57,6 @@ task_error_extract (const guint8 *frame, gsize frame_len, char *out,
 }
 
 gboolean
-hx_msg_extract (const guint8 *frame, gsize frame_len, struct hx_msg_msg *out)
-{
-    if (!out) {
-        return FALSE;
-    }
-
-    /* chunk walk moved to gtkhx_proto_parse_msg. */
-    struct gtkhx_proto_msg m;
-    if (!gtkhx_proto_parse_msg (frame, frame_len, (uint8_t *)out->name,
-                                sizeof (out->name), (uint8_t *)out->msg,
-                                sizeof (out->msg), &m)) {
-        return FALSE;
-    }
-
-    out->uid = m.uid;
-    out->name_len = m.name_len;
-    out->msg_len = m.msg_len;
-
-    return TRUE;
-}
-
-gboolean
 hx_banner_extract (const guint8 *frame, gsize frame_len,
                    struct hx_banner_msg *out)
 {
@@ -522,47 +500,6 @@ hx_highlight_match (const char *body, gsize body_len, const char *const *words)
 
 /* ---- HxChatEvent --------------------------------------------------- */
 
-/* Phase E3: render Slack/Discord-style :shortcodes: as emoji at display
- * time (the inverse of the legacy send-path rewrite in
- * gtkhx_text_for_wire). Returns a newly-allocated, NUL-terminated decoded
- * copy of src[0..len) with *out_len set, or NULL when nothing changed (so
- * the caller can keep the original buffer and skip a copy — the common
- * case for text with no shortcodes).
- *
- * Decode only ever shrinks or keeps length for normal shortcodes, but a
- * short alias mapping to a long ZWJ cluster could in principle grow, so we
- * use the shim's snprintf-style required-length return and a 2nd pass on
- * the rare overflow. */
-static char *
-hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
-{
-    /* Phase E6: honour the user's emoji-shortcode toggle (the same flag
-     * gates the send encode). Disabled → leave the text verbatim. The flag
-     * lives in text_util.c so this TU stays free of the gtkhx_prefs global
-     * for its unit tests. */
-    if (len == 0 || !gtkhx_text_emoji_shortcodes_enabled ()) {
-        return NULL;
-    }
-    gsize cap = len + 16;
-    char *dec = g_malloc (cap + 1);
-    gsize need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *)src, len,
-                                                  (uint8_t *)dec, cap);
-    if (need > cap) {
-        dec = g_realloc (dec, need + 1);
-        need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *)src, len,
-                                                (uint8_t *)dec, need);
-    }
-    if (need == len && memcmp (dec, src, len) == 0) {
-        g_free (dec); /* unchanged — let the caller keep the original */
-        return NULL;
-    }
-    dec[need] = '\0';
-    if (out_len) {
-        *out_len = need;
-    }
-    return dec;
-}
-
 /* HxChatEvent is built, copied and freed in Rust
  * (rust/crates/gtkhx-core/src/boxed/chat.rs). The struct stays C-visible
  * (consumers and the placeholder formatter read fields), so the Rust
@@ -694,47 +631,11 @@ hx_chat_media_placeholder_line (const HxChatMedia *m)
 
 /* ---- HxMsgEvent ---------------------------------------------------- */
 
-HxMsgEvent *
-hx_msg_event_new (guint16 uid, const char *name, gsize name_len,
-                  const char *body, gsize body_len, const char *self_nick)
-{
-    HxMsgEvent *e;
-    gsize nlen = 0, blen = 0;
-
-    e = g_new0 (HxMsgEvent, 1);
-    e->uid = uid;
-    e->is_broadcast = (uid == 0);
-    e->name = gtkhx_text_to_utf8 (name, name_len, &nlen);
-    e->name_len = nlen;
-    e->body = gtkhx_text_to_utf8 (body, body_len, &blen);
-    e->body_len = blen;
-
-    /* Phase E3: decode :shortcodes: to emoji in the PM body (the name
-     * stays literal). Standalone buffer, so no offset juggling. */
-    {
-        gsize dlen = 0;
-        char *dec = hx_decode_emoji_shortcodes (e->body, e->body_len, &dlen);
-        if (dec) {
-            g_free (e->body);
-            e->body = dec;
-            e->body_len = dlen;
-        }
-    }
-
-    if (self_nick && *self_nick && nlen > 0 && strlen (self_nick) == nlen
-        && memcmp (e->name, self_nick, nlen) == 0) {
-        e->is_self = TRUE;
-    }
-
-    return e;
-}
-
-/* Phase R4.2a: hx_msg_event_copy / hx_msg_event_free and the boxed-type
- * registration (hx_msg_event_get_type) moved to Rust —
- * rust/crates/gtkhx-core/src/boxed/msg.rs. The struct stays C-visible
- * (hx_msg_event_new above fills it; consumers read fields), so the Rust
- * mirror's #[repr(C)] layout is pinned against this assert; bump both
- * sides together if HxMsgEvent ever changes shape. */
+/* HxMsgEvent is built, copied and freed in Rust
+ * (rust/crates/gtkhx-core/src/boxed/msg.rs). The struct stays C-visible
+ * (consumers read fields), so the Rust mirror's #[repr(C)] layout is
+ * pinned against these asserts; bump both sides together if HxMsgEvent
+ * ever changes shape. */
 _Static_assert (sizeof (HxMsgEvent) == 48,
                 "HxMsgEvent layout must match the Rust #[repr(C)] mirror "
                 "in gtkhx-core::boxed::msg");
