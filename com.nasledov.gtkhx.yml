@@ -7,12 +7,9 @@
 # Run:
 #   flatpak run com.nasledov.gtkhx
 #
-# Distribution target is Flathub-ready. The app-id, license tags,
-# AppStream metainfo, and OARS content_rating in
-# data/com.nasledov.gtkhx.metainfo.xml all line up with what
-# Flathub's review bot looks for. To submit, swap the `dir` source
-# below for a `git` source pointing at github.com/mishan/gtkhx
-# at a tagged commit; the rest of the manifest stays put.
+# Distributed from GtkHx's own Flatpak repository, dl.gtkhx.org:
+# CI builds this manifest at a release tag, and the repository signs
+# and serves that bundle. See docs/flatpak-repo.md.
 #
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
@@ -86,8 +83,8 @@ build-options:
   # (tools/build-flatpak-bundle.sh fails the build if one shows up.)
   append-pkg-config-path: /app/lib64/pkgconfig
 
-# Sandbox permissions. Each line is justified — Flathub reviewers
-# expect a finish-args list that's the minimum for the app to work.
+# Sandbox permissions. Each line is justified: the list is the
+# minimum for the app to work.
 finish-args:
   # Connecting to Hotline servers (TCP 5500/5501 by default).
   - --share=network
@@ -126,7 +123,7 @@ finish-args:
   # Element, Signal, and OBS ship.
   #
   # We deliberately do NOT request --device=all (raw /dev/snd
-  # access — too broad for Flathub review). A dedicated Audio
+  # access — too broad). A dedicated Audio
   # portal that would let us drop the PipeWire socket exposure in
   # favour of a per-app permission prompt is under discussion
   # upstream (flatpak/xdg-desktop-portal #1129) but hasn't
@@ -323,9 +320,8 @@ modules:
       env:
         CARGO_HOME: /run/build/gtkhx/cargo
     sources:
-      # Local-source variant: builds from the working tree. Swap
-      # this for a `type: git` block when targeting a Flathub
-      # submission.
+      # The working tree: CI checks out the release tag, so the
+      # tree is the release.
       - type: dir
         path: .
       # Pre-downloaded Cargo dependencies (the Flatpak build sandbox

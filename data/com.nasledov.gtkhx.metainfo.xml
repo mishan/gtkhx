@@ -3,8 +3,8 @@
   AppStream metainfo for GtkHx.
 
   This file describes the app to software centers (GNOME Software,
-  KDE Discover, elementary's AppCenter), and to Flathub's review
-  pipeline. The schema is documented at:
+  KDE Discover, elementary's AppCenter), which find it in the
+  Flatpak repository's AppStream data. The schema is documented at:
     https://www.freedesktop.org/software/appstream/docs/
 
   Validate with:
@@ -13,22 +13,19 @@
   Field choices that aren't obvious:
 
     - <id> must match the Flatpak app-id and the
-      <launchable> desktop-id. Flathub's review tooling rejects
+      <launchable> desktop-id. Software centers drop
       mismatches.
 
     - <metadata_license> covers THIS XML file's license. CC0-1.0
-      is the Flathub default; <project_license> below is GtkHx's
+      is the usual choice; <project_license> below is GtkHx's
       own GPL-2.0-or-later.
 
     - <content_rating type="oars-1.1"> needs to be present even
-      if every category is "none" — Flathub uses it for the
-      "all-ages" badge and for parental-control filters. Skip it
-      and the review bot rejects the submission.
+      if every category is "none" — software centers use it for
+      the "all-ages" badge and for parental-control filters.
 
-    - <screenshots> is required for Flathub. We list URLs that
-      will resolve once the project's hosting is set up. For a
-      pre-publication local build the URLs don't have to fetch
-      yet, but they must be present and well-formed.
+    - <screenshots> are what a software center shows. The URLs
+      follow main, so they can be newer than the release.
 
     - <releases> wants at least one entry. Keep these in
       reverse-chronological order, and add one on each tagged
@@ -140,7 +137,7 @@
   <!--
     OARS content rating. GtkHx is a generic chat / file-transfer
     client; Hotline servers can host any content, but the app
-    itself doesn't ship objectionable content. Flathub treats
+    itself doesn't ship objectionable content. OARS treats
     user-generated network content as "intense" for chat-with-
     strangers, "none" for everything else.
   -->

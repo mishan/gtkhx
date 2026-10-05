@@ -1,0 +1,8 @@
+[Flatpak Repo]
+Title=GtkHx
+Url=https://dl.gtkhx.org/repo/
+Homepage=https://www.gtkhx.org/
+Comment=GtkHx, a Hotline client, from its author
+Description=Stable and beta builds of GtkHx, signed by its author. The GNOME runtime comes from Flathub.
+Icon=https://dl.gtkhx.org/gtkhx.png
+GPGKey=@GPGKEY@

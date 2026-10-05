@@ -370,13 +370,13 @@ if desktop_validate.found()
 endif
 
 # AppStream metainfo. Software centers (GNOME Software, KDE
-# Discover, elementary AppCenter) and Flathub's review pipeline
-# read this file to render the in-store listing — name, summary,
-# description, screenshots, releases, OARS content rating. The
-# id MUST match com.nasledov.gtkhx; the launchable's desktop-id
-# MUST match the installed .desktop filename above. Mismatches
-# get silently dropped from search results, which is hard to
-# diagnose after the fact.
+# Discover, elementary AppCenter) read this file to render the
+# in-store listing — name, summary, description, screenshots,
+# releases, OARS content rating. The id MUST match
+# com.nasledov.gtkhx; the launchable's desktop-id MUST match the
+# installed .desktop filename above. Mismatches get silently
+# dropped from search results, which is hard to diagnose after
+# the fact.
 metainfo_file = files('data/com.nasledov.gtkhx.metainfo.xml')
 
 install_data(

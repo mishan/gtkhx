@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GtkHx Flatpak repository</title>
+<style>
+  body { font-family: sans-serif; max-width: 42em; margin: 2em auto; padding: 0 1em; line-height: 1.5; }
+  pre { background: #eee; padding: 0.6em; overflow-x: auto; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #222; color: #ddd; }
+    a { color: #8ab4f8; }
+    pre { background: #333; }
+  }
+</style>
+</head>
+<body>
+<h1><img src="gtkhx.png" alt="" width="64" height="64"> GtkHx</h1>
+<p>The Flatpak repository for <a href="https://www.gtkhx.org/">GtkHx</a>,
+a Hotline client. Builds here are signed by its author, and update with
+the rest of your Flatpak apps.</p>
+
+<h2>Install</h2>
+<pre>flatpak install --user https://dl.gtkhx.org/gtkhx.flatpakref</pre>
+<p>Or open <a href="gtkhx.flatpakref">gtkhx.flatpakref</a> with your
+software center. The GNOME runtime comes from Flathub, which is added
+for you if it is missing.</p>
+
+<h2>Betas</h2>
+<pre>flatpak install --user https://dl.gtkhx.org/gtkhx-beta.flatpakref</pre>
+<p>The beta channel also gets every stable release newer than the beta,
+so it is never behind.</p>
+
+<h2>Already have a GtkHx bundle installed?</h2>
+<p>A bundle installed from a release before this repository existed
+doesn't update from it. Remove it first; your settings and bookmarks
+stay:</p>
+<pre>flatpak uninstall com.nasledov.gtkhx</pre>
+
+<h2>Single-file bundles</h2>
+<p>To install from a file instead:
+<a href="GtkHx-x86_64.flatpak">x86_64</a>,
+<a href="GtkHx-aarch64.flatpak">aarch64</a>; betas,
+<a href="GtkHx-beta-x86_64.flatpak">x86_64</a>,
+<a href="GtkHx-beta-aarch64.flatpak">aarch64</a>.
+Installed with <code>flatpak install --user GtkHx-x86_64.flatpak</code>,
+a bundle still updates from here.</p>
+
+<h2>Other files</h2>
+<ul>
+<li><a href="gtkhx.flatpakrepo">gtkhx.flatpakrepo</a>: the repository
+alone, for <code>flatpak remote-add --user gtkhx https://dl.gtkhx.org/gtkhx.flatpakrepo</code></li>
+<li><a href="gtkhx.gpg">gtkhx.gpg</a>: the signing key, fingerprint
+<code>52EA 6BE1 7DDA 3820 F9D2 7052 B2F3 E8C4 817C DACD</code></li>
+<li><a href="updates.json">updates.json</a>: the latest version on each
+channel</li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,56 @@
+# Ask the GtkHx Flatpak repository to publish a release.
+#
+# The repository is mishan/gtkhx-flatpak, served at https://dl.gtkhx.org. Its
+# publish workflow downloads the release's .flatpak bundles itself, signs them
+# and redeploys the site; nothing built here crosses over, and the signing key
+# never comes near this repository. See docs/flatpak-repo.md.
+#
+# Triggers:
+#   * a release or pre-release is published
+#   * a pre-release is made a full release
+#   * snapshot.yml, after it publishes a pre-release. A release made with
+#     GITHUB_TOKEN fires no release event, so that one has to call here.
+#
+# The channel comes from the tag, not the pre-release box, which is easy to
+# miss when publishing a draft: v1.4.1b1 and v1.4.1rc1 go to beta, v1.4.1 to
+# stable.
+#
+# The token can do one thing: start workflows in mishan/gtkhx-flatpak. It lives
+# in the flatpak-dispatch environment, which only main and v* tags can use.
+
+name: flatpak dispatch
+
+permissions: {}
+
+on:
+  release:
+    types: [published, released]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+jobs:
+  dispatch:
+    name: publish to dl.gtkhx.org
+    # Publishing a full release fires both events; `released` alone stands
+    # for it, so `published` only counts for a pre-release.
+    if: >-
+      github.event_name != 'release' ||
+      github.event.action == 'released' ||
+      github.event.release.prerelease
+    runs-on: ubuntu-latest
+    environment: flatpak-dispatch
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GTKHX_FLATPAK_DISPATCH_TOKEN }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          case "$TAG" in
+            *[0-9]b[0-9]*|*[0-9]rc[0-9]*) CHANNEL=beta ;;
+            *) CHANNEL=stable ;;
+          esac
+          gh workflow run publish.yml -R mishan/gtkhx-flatpak \
+            -f tag="$TAG" -f channel="$CHANNEL"
+          echo "asked mishan/gtkhx-flatpak to publish $TAG to $CHANNEL"
