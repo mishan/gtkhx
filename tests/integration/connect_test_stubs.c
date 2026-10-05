@@ -464,6 +464,14 @@ xfers_delete_on_conn (struct htlc_conn *htlc)
     (void)htlc;
 }
 
+/* Same for the file requests in flight, also hxhandlers'. */
+extern void hx_files_forget (struct htlc_conn *htlc);
+void
+hx_files_forget (struct htlc_conn *htlc)
+{
+    (void)htlc;
+}
+
 /* network.c logs the server it is connecting to, and the label comes from
  * gtkutil.c — which these binaries don't link, for the usual reason (it drags
  * the GTK widget tree). The connect tests don't read the log line. */

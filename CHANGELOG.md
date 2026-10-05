@@ -9,7 +9,10 @@
   - Local folders no longer show "(4096 items)" as their size
   - Very long folder names no longer break the path sent to the server
   - Downloading a folder that holds files of 4 GB or more no longer fails partway
-  - File names in non-Roman scripts, such as Japanese, no longer go missing from file listings
+  - File names in non-Roman scripts, such as Japanese, no longer go missing from file listings, and files and folders with accented names now open, download, rename and delete on servers that don't use UTF-8
+  - Get Info shows accented names, types and comments correctly
+  - A server can no longer make a folder download write outside the folder you download it to
+  - Listing folders and the other quick file actions no longer flash by in the Tasks list; transfers still show there
 - Docking
   - A new dock, built on mullion-gtk in place of libpanel; your layout carries over
   - A pane's tabs sit in its top corner as icons, in sight where the pane has room for them and otherwise while you are in the pane; Pane Titles puts tab strips with titles back

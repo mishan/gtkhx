@@ -19,8 +19,9 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use gio::prelude::*;
 use hxmodel::chat::{Conversation, Member};
 use hxmodel::chat_members::hx_nick_complete;
-use hxmodel::files_entry::{gtkhx_files_populate_from_reply, HxFileEntry};
+use hxmodel::files_entry::{populate, HxFileEntry};
 use hxmodel::member::HxMemberModel;
+use hxsession::FileEntry;
 use std::ffi::{c_void, CString};
 use std::hint::black_box;
 use std::os::raw::c_char;
@@ -156,51 +157,42 @@ fn bench_nick_complete(c: &mut Criterion) {
     g.finish();
 }
 
-/// One FILE_LIST entry as the wire carries it (`HTLS_DATA_FILE_LIST`).
-fn file_entry(ftype: &[u8; 4], fsize: u32, name: &[u8]) -> Vec<u8> {
-    let mut c = Vec::with_capacity(24 + name.len());
-    c.extend_from_slice(&0x00c8u16.to_be_bytes());
-    c.extend_from_slice(&((20 + name.len()) as u16).to_be_bytes());
-    c.extend_from_slice(ftype);
-    c.extend_from_slice(b"MACR");
-    c.extend_from_slice(&fsize.to_be_bytes());
-    c.extend_from_slice(&0u32.to_be_bytes());
-    c.extend_from_slice(&(name.len() as u32).to_be_bytes());
-    c.extend_from_slice(name);
-    c
-}
-
-/// A FILE_LIST reply of `n` entries: mostly files of a few types, one in
-/// ten a folder.
-fn file_list(n: usize) -> Vec<u8> {
+/// A listing of `n` entries: mostly files of a few types, one in ten a
+/// folder.
+fn file_list(n: usize) -> Vec<FileEntry> {
     let types: [&[u8; 4]; 4] = [b"TEXT", b"JPEG", b"SITD", b"MP3 "];
-    let mut data = Vec::new();
-    for i in 0..n {
-        // Mac Roman: 0x8e is é, so the name takes the decode path.
-        let mut name = format!("file {i:05} caf").into_bytes();
-        name.extend_from_slice(b"\x8e.dat");
-        let (ftype, size) = if i % 10 == 0 {
-            (b"fldr", (i % 50) as u32)
-        } else {
-            (types[i % types.len()], (i * 1013) as u32)
-        };
-        data.extend(file_entry(ftype, size, &name));
-    }
-    data
+    (0..n)
+        .map(|i| {
+            // Mac Roman: 0x8e is é.
+            let mut name_bytes = format!("file {i:05} caf").into_bytes();
+            name_bytes.extend_from_slice(b"\x8e.dat");
+            let (type_code, size) = if i % 10 == 0 {
+                (b"fldr", (i % 50) as u64)
+            } else {
+                (types[i % types.len()], (i * 1013) as u64)
+            };
+            FileEntry {
+                name: hxproto::text::to_utf8(&name_bytes),
+                name_bytes,
+                folder: i % 10 == 0,
+                size,
+                type_code: *type_code,
+                creator: *b"MACR",
+            }
+        })
+        .collect()
 }
 
 fn bench_files_populate(c: &mut Criterion) {
     let mut g = c.benchmark_group("files_populate");
     for n in FILES {
-        let data = file_list(n);
+        let files = file_list(n);
         let store = gio::ListStore::with_type(HxFileEntry::static_type());
-        unsafe { gtkhx_files_populate_from_reply(store.as_ptr(), data.as_ptr(), data.len()) };
-        assert_eq!(store.n_items() as usize, n, "every entry decodes");
+        unsafe { populate(store.as_ptr().cast(), &files) };
+        assert_eq!(store.n_items() as usize, n, "every entry lists");
         g.throughput(Throughput::Elements(n as u64));
-        g.bench_with_input(BenchmarkId::from_parameter(n), &data, |b, d| {
-            b.iter(|| unsafe {
-                gtkhx_files_populate_from_reply(store.as_ptr(), black_box(d.as_ptr()), d.len())
-            })
+        g.bench_with_input(BenchmarkId::from_parameter(n), &files, |b, f| {
+            b.iter(|| unsafe { populate(store.as_ptr().cast(), black_box(f)) })
         });
     }
     g.finish();

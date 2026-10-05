@@ -384,12 +384,8 @@ extern void hx_quit (void);
 
 /* ---- File browser cache ------------------------------------------- */
 
-/* struct cached_filelist is now owned by the Rust hxhandlers::recv::files module (the
- * hx_cfl_* accessor facade in files.h). C holds it opaquely — allocate via
- * hx_cfl_new, reach the path and fh buffer through the
- * accessors, free via hx_cfl_free. The fh buffer accumulation for a FILE_LIST
- * reply happens natively in Rust; the view (hxmodel::files_entry populate) still walks
- * the same byte layout via hx_cfl_fh / hx_cfl_fhlen. */
+/* A listing, owned by the Rust hxhandlers::recv::files module (the hx_cfl_*
+ * accessors in files.h). */
 struct cached_filelist;
 
 /* The hx_output vtable is gone (Phase 3.6). Every notification it

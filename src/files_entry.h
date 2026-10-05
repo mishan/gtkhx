@@ -42,6 +42,9 @@ extern HxFileEntry *hx_file_entry_new (const char *name, gboolean is_dir,
                                        const char *kind, guint16 icon_id);
 
 extern const char *hx_file_entry_get_name (HxFileEntry *e);
+/* What the provider knows the entry by: a remote one's name as the server
+ * sent it. */
+extern const char *hx_file_entry_get_wire_name (HxFileEntry *e);
 extern gboolean hx_file_entry_is_dir (HxFileEntry *e);
 extern guint64 hx_file_entry_get_size (HxFileEntry *e);
 extern gint64 hx_file_entry_get_modified (HxFileEntry *e);

@@ -1,69 +1,47 @@
-//! `hxhandlers::recv::files` — the FILE_LIST receive handler (`rcv_task_file_list`, ported
-//! from `rcv.c`) plus the Rust home of `struct cached_filelist` (`cfl`).
+//! Files, as the session reads them: the replies to the requests
+//! `send::files` and the transfers make, each matched by its trans to what
+//! asked for it. What a transfer's reply sets going is `recv::xfer`'s.
 //!
-//! `cfl` used to be a `protocol.h` struct that `rcv.c` filled and the files
-//! browser's remote provider consumed. It is now owned here (the gtkhx-core::conn
-//! playbook): an opaque handle behind the `hx_cfl_*` accessor facade, holding the
-//! path and the accumulated `fh` buffer (a `Vec<u8>`). Because the buffer lives in
-//! Rust, the FILE_LIST reply's
-//! chunk accumulation is native — [`CachedFileList::append_entry`] grows `fh` with
-//! the exact 4-byte-aligned, patched-length record layout the view's
-//! `hxmodel::files_entry` populate walks — and the handler emits the `file-list` signal
-//! directly (the old C `cfl_print` is gone).
+//! A listing reaches the files browser as it always did: the `file-list`
+//! signal carries a [`CachedFileList`], the folder it lists and what the
+//! session read of it, for the remote provider that asked, which fills its
+//! store through [`hx_cfl_populate`].
 
-use hxproto::wire::ChunkIter;
-use std::os::raw::{c_char, c_void};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ffi::{c_char, CString};
+use std::os::raw::c_void;
 
-/// `HTLS_DATA_FILE_LIST` (src/hotline.h).
-const HTLS_DATA_FILE_LIST: u16 = 0x00c8;
-/// The `hl_data_hdr` size (tag + len).
-const HL_DATA_HDR_LEN: usize = 4;
+use hxrequest::Request;
+use hxsession::{FileEntry, FileInfo, Transfer};
 
-/// Rust-owned `struct cached_filelist`. Opaque to C, reached through `hx_cfl_*`.
+use super::xfer;
+
+/// A listing, for the remote provider that asked: the folder it lists and
+/// what is in it. Opaque to C, reached through `hx_cfl_*`.
 pub struct CachedFileList {
-    /// Remote directory path (owned; the old `char *path`).
-    path: Option<std::ffi::CString>,
-    /// Accumulated FILE_LIST records — the old `struct hl_filelist_hdr *fh` raw
-    /// buffer, byte-for-byte, so `hxmodel::files_entry`'s `parse_file_list_entry` walk is
-    /// unchanged. Grown by [`Self::append_entry`].
-    fh: Vec<u8>,
+    path: CString,
+    files: Vec<FileEntry>,
 }
 
-impl CachedFileList {
-    /// Append one raw FILE_LIST record (`hl_data_hdr` + body) to `fh`, matching
-    /// the old C accumulation: round the total up to the next multiple of 4 (the
-    /// original bumps an already-aligned record by a full 4, so replicate that
-    /// exactly), zero-pad, and patch the record's length field to the padded body
-    /// length. `record` is the chunk *including* its 4-byte header.
-    fn append_entry(&mut self, record: &[u8]) {
-        let fhlen = record.len() - HL_DATA_HDR_LEN; // declared body length
-        let mut fh_len = HL_DATA_HDR_LEN + fhlen; // == record.len()
-        fh_len += 4 - (fh_len % 4);
-        let start = self.fh.len();
-        self.fh.extend_from_slice(record);
-        self.fh.resize(start + fh_len, 0); // zero-pad to the aligned stride
-        let patched = (fh_len - HL_DATA_HDR_LEN) as u16;
-        self.fh[start + 2..start + 4].copy_from_slice(&patched.to_be_bytes());
-    }
-}
-
-// ---- hx_cfl_* accessor facade (the C-visible opaque handle) -----------------
-
-/// `struct cached_filelist *hx_cfl_new (void)` — allocate a zeroed cfl (replaces
-/// the old `g_malloc0 (sizeof (struct cached_filelist))` / `cfl_lookup`).
+/// # Safety
+/// `cfl` is a live handle.
 #[no_mangle]
-pub extern "C" fn hx_cfl_new() -> *mut CachedFileList {
-    Box::into_raw(Box::new(CachedFileList {
-        path: None,
-        fh: Vec::new(),
-    }))
+pub unsafe extern "C" fn hx_cfl_path(cfl: *const CachedFileList) -> *const c_char {
+    (*cfl).path.as_ptr()
 }
 
-/// `void hx_cfl_free (struct cached_filelist *cfl)` — free the cfl (path + fh
-/// drop with the box).
+/// Replace `store`'s contents with what the listing holds.
 ///
 /// # Safety
-/// `cfl` is a live handle from [`hx_cfl_new`] or NULL.
+/// `cfl` is a live handle; `store` is a live `GListStore` of `HxFileEntry`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_cfl_populate(cfl: *const CachedFileList, store: *mut c_void) {
+    hxmodel::files_entry::populate(store, &(*cfl).files);
+}
+
+/// # Safety
+/// `cfl` is a live handle from a `file-list` emit, or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn hx_cfl_free(cfl: *mut CachedFileList) {
     if !cfl.is_null() {
@@ -71,126 +49,215 @@ pub unsafe extern "C" fn hx_cfl_free(cfl: *mut CachedFileList) {
     }
 }
 
-/// # Safety
-/// `cfl` is a live handle.
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_path(cfl: *const CachedFileList) -> *const c_char {
-    match &(*cfl).path {
-        Some(p) => p.as_ptr(),
-        None => std::ptr::null(),
+/// What a request in flight is answered into.
+pub(crate) enum Asked {
+    /// A folder's listing, for the remote provider that asked.
+    Listing { provider: Provider, path: CString },
+    /// Get Info on the file the label names, its folder and its name.
+    Info(CString),
+    /// A download of a file or a folder, into its transfer.
+    Download { htxf: Xfer, folder: bool },
+    /// An upload of a file or a folder, from its transfer.
+    Upload { htxf: Xfer, folder: bool },
+    /// The move half of a move and rename: the rename, sent once the move
+    /// has gone through.
+    Rename(Request),
+}
+
+/// A remote files provider, kept alive while its listing is in flight: a
+/// reply that comes after the browser closed, or after the provider gave
+/// up waiting, reaches a live object, which ignores it.
+pub(crate) struct Provider(*mut c_void);
+
+impl Provider {
+    /// # Safety
+    /// `p` is NULL or a live GObject.
+    pub(crate) unsafe fn new(p: *mut c_void) -> Self {
+        if !p.is_null() {
+            object_ref(p);
+        }
+        Provider(p)
     }
 }
 
-/// # Safety
-/// `cfl` is a live handle; `path` is a NUL-terminated C string or NULL.
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_set_path(cfl: *mut CachedFileList, path: *const c_char) {
-    (*cfl).path = if path.is_null() {
-        None
-    } else {
-        Some(std::ffi::CStr::from_ptr(path).to_owned())
-    };
+impl Drop for Provider {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { object_unref(self.0) };
+        }
+    }
 }
 
-/// Pointer to the accumulated `fh` buffer (NULL when empty, matching the old
-/// never-realloc'd `cfl->fh == NULL`).
+/// A transfer, kept alive while its reply is in flight: one cancelled and
+/// freed meanwhile cannot have its address taken by another, which the
+/// reply would then start.
+pub(crate) struct Xfer(*mut c_void);
+
+impl Xfer {
+    /// # Safety
+    /// `htxf` is a live transfer.
+    pub(crate) unsafe fn new(htxf: *mut c_void) -> Self {
+        htxf_ref(htxf);
+        Xfer(htxf)
+    }
+}
+
+impl Drop for Xfer {
+    fn drop(&mut self) {
+        unsafe { htxf_unref(self.0) };
+    }
+}
+
+#[cfg(not(test))]
+unsafe fn htxf_ref(p: *mut c_void) {
+    hxnet::xfer_handle::hx_htxf_ref(p.cast());
+}
+#[cfg(not(test))]
+unsafe fn htxf_unref(p: *mut c_void) {
+    hxnet::xfer_handle::hx_htxf_unref(p.cast());
+}
+
+#[cfg(not(test))]
+unsafe fn object_ref(p: *mut c_void) {
+    glib::gobject_ffi::g_object_ref(p.cast());
+}
+#[cfg(not(test))]
+unsafe fn object_unref(p: *mut c_void) {
+    glib::gobject_ffi::g_object_unref(p.cast());
+}
+
+thread_local! {
+    /// The requests in flight, by connection and trans.
+    static ASKED: RefCell<HashMap<(usize, u32), Asked>> = RefCell::new(HashMap::new());
+}
+
+/// A request goes out on `trans`, its reply to go into `what`. A
+/// provider's new listing replaces the one it asked for before, whose reply
+/// would otherwise show the folder the user has left.
+pub(crate) fn asked(htlc: *mut c_void, trans: u32, what: Asked) {
+    ASKED.with(|a| {
+        let mut a = a.borrow_mut();
+        if let Asked::Listing { provider, .. } = &what {
+            let p = provider.0;
+            a.retain(|_, w| !matches!(w, Asked::Listing { provider, .. } if provider.0 == p));
+        }
+        a.insert((htlc as usize, trans), what)
+    });
+}
+
+fn answered(htlc: *mut c_void, trans: u32) -> Option<Asked> {
+    ASKED.with(|a| a.borrow_mut().remove(&(htlc as usize, trans)))
+}
+
+/// Let go of what `htlc` asked for before: a closed connection gets no more
+/// replies, and a new one numbers its requests afresh.
+pub(crate) fn forget(htlc: *mut c_void) {
+    // Dropped once ASKED is released: letting go of a provider or transfer
+    // can run its teardown, which must be free to reach ASKED.
+    let _gone: HashMap<_, _> = ASKED.with(|a| {
+        let mut a = a.borrow_mut();
+        let (gone, kept) = std::mem::take(&mut *a)
+            .into_iter()
+            .partition(|((h, _), _)| *h == htlc as usize);
+        *a = kept;
+        gone
+    });
+}
+
+/// `void hx_files_forget (struct htlc_conn *htlc)` — [`forget`], for the
+/// connection closing.
 ///
 /// # Safety
-/// `cfl` is a live handle; the pointer is valid until `fh` next grows or the cfl
-/// is freed.
+/// Main thread.
 #[no_mangle]
-pub unsafe extern "C" fn hx_cfl_fh(cfl: *const CachedFileList) -> *const c_void {
-    if (*cfl).fh.is_empty() {
-        std::ptr::null()
-    } else {
-        (*cfl).fh.as_ptr() as *const c_void
-    }
+pub unsafe extern "C" fn hx_files_forget(htlc: *mut c_void) {
+    forget(htlc);
 }
-
-/// # Safety
-/// `cfl` is a live handle.
-#[no_mangle]
-pub unsafe extern "C" fn hx_cfl_fhlen(cfl: *const CachedFileList) -> u32 {
-    (*cfl).fh.len() as u32
-}
-
-// ---- the receive handler ----------------------------------------------------
 
 #[cfg(not(test))]
 use gtkhx_core::session::{gtkhx_session_emit_file_list, gtkhx_session_get_default};
 
 #[cfg(not(test))]
 extern "C" {
-    /// Give the remote provider a chance to show an empty-state hint before we
-    /// drop the cfl on a task-error listing (files_remote_provider.c). Returns a
-    /// `gboolean` (whether the reply had a recognised provider carrier); we don't
-    /// act on it, but the declaration must match the C ABI.
+    /// files_remote_provider.c — a refused listing, for the provider that
+    /// asked: it shows why there is nothing to show.
     fn hx_remote_files_provider_handle_file_list_error(
         cfl: *mut c_void,
         data: *mut c_void,
     ) -> std::os::raw::c_int;
 }
 
-/// True when the reply frame's task-error bit is set (native `hxproto`
-/// header parse; a too-short frame is not-in-error, matching the old C shim).
-unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
-    if frame.is_null() {
-        return false;
-    }
-    let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
-    hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
-}
-
-/// `void rcv_task_file_list (htlc, frame, frame_len, cfl, data)` — the HTLC_HDR_
-/// FILE_LIST reply (was `rcv.c`). Walks the FILE_LIST chunks natively
-/// (`ChunkIter`) and accumulates each raw record into the Rust-owned `cfl.fh`. On
-/// a task error it lets the provider render an empty-state hint, then frees the
-/// cfl. Finally it emits `file-list` so the browser repaints (only when `data`
-/// names a provider carrier).
+/// What a folder holds, for the provider that asked.
 ///
 /// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `ptr` is the `struct cached_filelist *` (a Rust
-/// [`CachedFileList`] handle); `data` is the provider carrier or NULL.
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_file_list(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    ptr: *mut c_void,
-    data: *mut c_void,
-) {
-    let cfl = ptr as *mut CachedFileList;
-
-    if task_in_error(frame, frame_len) {
-        hx_remote_files_provider_handle_file_list_error(ptr, data);
-        hx_cfl_free(cfl);
-        return;
-    }
-
-    let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
-    for chunk in ChunkIter::over_message(s, s.len()) {
-        if chunk.tag != HTLS_DATA_FILE_LIST {
-            continue;
-        }
-        let d = chunk.data;
-        // The raw record is the 4-byte header immediately before `d` plus `d`
-        // itself (ChunkIter positions data right after the header).
-        let record =
-            std::slice::from_raw_parts(d.as_ptr().sub(HL_DATA_HDR_LEN), HL_DATA_HDR_LEN + d.len());
-        (*cfl).append_entry(record);
-    }
-
-    // Emit only when a provider carrier is present (the old cfl_print gate). The
-    // provider reads hx_cfl_fh(cfl) itself, so the fh signal arg stays NULL.
-    if !data.is_null() {
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn listed(htlc: *mut c_void, trans: u32, files: &[FileEntry]) {
+    if let Some(Asked::Listing { provider, path }) = answered(htlc, trans) {
+        let cfl = Box::into_raw(Box::new(CachedFileList {
+            path,
+            files: files.to_vec(),
+        }));
         gtkhx_session_emit_file_list(
             gtkhx_session_get_default(),
             htlc,
-            ptr,
+            cfl.cast(),
             std::ptr::null_mut(),
-            data,
+            provider.0,
         );
+        hx_cfl_free(cfl);
+    }
+}
+
+/// Get Info's reply, for the file that was asked about.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn info(htlc: *mut c_void, trans: u32, info: &FileInfo) {
+    if let Some(Asked::Info(label)) = answered(htlc, trans) {
+        xfer::file_info(htlc, &label, info);
+    }
+}
+
+/// A transfer's reply, for the transfer that asked.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn transfer(htlc: *mut c_void, trans: u32, t: &Transfer) {
+    match answered(htlc, trans) {
+        Some(Asked::Download { htxf, folder }) => xfer::download_ready(htlc, htxf.0, folder, t),
+        Some(Asked::Upload { htxf, folder }) => xfer::upload_ready(htlc, htxf.0, folder, t),
+        _ => {}
+    }
+}
+
+/// A change went through; the rename of a move and rename follows it.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn changed(htlc: *mut c_void, trans: u32) {
+    if let Some(Asked::Rename(rename)) = answered(htlc, trans) {
+        crate::send::files::change(htlc, Some(rename));
+    }
+}
+
+/// A request on `trans` was refused, or its reply cut short. The reason, if
+/// any, is `request-failed`'s to show.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
+    match answered(htlc, trans) {
+        Some(Asked::Listing { provider, path }) => {
+            let cfl = Box::into_raw(Box::new(CachedFileList {
+                path,
+                files: Vec::new(),
+            }));
+            hx_remote_files_provider_handle_file_list_error(cfl.cast(), provider.0);
+            hx_cfl_free(cfl);
+        }
+        Some(Asked::Download { htxf, .. }) => xfer::download_refused(htlc, htxf.0),
+        Some(Asked::Upload { htxf, .. }) => xfer::upload_refused(htlc, htxf.0),
+        Some(Asked::Info(_)) | Some(Asked::Rename(_)) | None => {}
     }
 }
 

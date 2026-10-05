@@ -32,18 +32,13 @@ use hxproto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
 use hxproto::messages::ClientHdr;
 
 // Native collaborators for the xfer_go wire build (test build shadows them via the
-// doubles below). hx_conn_has_cap is already Rust (gtkhx-core); the reply-task
-// callbacks and the wire-encode helper are native intra-workspace calls.
-#[cfg(not(test))]
-use crate::recv::xfer::{rcv_task_file_get, rcv_task_file_put};
+// doubles below). hx_conn_has_cap is already Rust (gtkhx-core).
+use crate::recv::files::Asked;
+use crate::send::files::expect_transfer;
 #[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_has_cap;
 #[cfg(not(test))]
 use hxtask::send::hlwrite_chunks;
-#[cfg(not(test))]
-use hxtask::task_new;
-#[cfg(not(test))]
-use hxtext::gtkhx_text_for_wire;
 // Encode a "/a/b" path to the wire DIR bytes (g_malloc'd buffer + out length;
 // caller g_free's). is_file = 0 for a directory chunk.
 use hxrequest::path::path_to_hldir;
@@ -56,11 +51,10 @@ const XFER_GET: u8 = 0;
 /// truth is the `hxproto::messages::ClientHdr` enum).
 const HTLC_HDR_FILE_GET: u32 = ClientHdr::FileGet as u32;
 const HTLC_HDR_FILE_PUT: u32 = ClientHdr::FilePut as u32;
-/// The negotiated capability bits `xfer_go` reads — XFERSIZE64 emission
-/// (`LARGE_FILES`) and wire text encoding (`TEXT_ENCODING`). These LOGIN cap bits
-/// aren't modelled in hxproto; spelled here against the hotline.h reference.
+/// The negotiated capability bit `xfer_go` reads for XFERSIZE64 emission. The
+/// LOGIN cap bits aren't modelled in hxproto; spelled here against the
+/// hotline.h reference.
 const HTLC_CAP_LARGE_FILES: u64 = 0x0001;
-const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
 
 /// Build the 74-byte resume `RFLT` record `xfer_go` sends on a download resume: a
 /// fork-list header (RFLT magic, version 1, fork count 2, "DATA" + "MACR" fork
@@ -246,17 +240,16 @@ pub unsafe extern "C" fn xfer_num(htxf: *mut HtxfHandle) -> c_int {
     })
 }
 
-/// `struct htxf_conn *htxf_with_ref(guint32 ref)` — find a transfer by its
-/// server XFER ref (used by the unsolicited HTLS_HDR_QUEUE update), or NULL.
+/// The transfer `htlc` knows by the server's XFER ref, or NULL. A ref is the
+/// server's, so two connections can each have one with the same number.
 ///
 /// # Safety
 /// Main thread only; the list holds live handles.
-#[no_mangle]
-pub unsafe extern "C" fn htxf_with_ref(ref_: u32) -> *mut HtxfHandle {
+pub(crate) unsafe fn htxf_with_ref(htlc: *mut c_void, ref_: u32) -> *mut HtxfHandle {
     with_list(|xs| {
         xs.iter()
             .copied()
-            .find(|&e| (*e).ref_ == ref_)
+            .find(|&e| (*e).htlc == htlc && (*e).ref_ == ref_)
             .unwrap_or(std::ptr::null_mut())
     })
 }
@@ -917,32 +910,13 @@ unsafe fn uniquify_local_path(path: *mut c_char, cap: usize) {
     );
 }
 
-/// Encode `htxf`'s `remotename` (explicit length, single-line field) for the wire
-/// on this connection, run the bytes through `f`, then g_free the buffer. `f` must
-/// not retain the slice past its own return.
-unsafe fn with_name_wire<R>(
-    htxf: *const HtxfHandle,
-    utf8: glib::ffi::gboolean,
-    f: impl FnOnce(&[u8]) -> R,
-) -> R {
-    let mut wire_len: usize = 0;
-    let wire = gtkhx_text_for_wire(
-        (*htxf).remotename.as_ptr(),
+/// `htxf`'s `remotename` as it goes on the wire: a download's as the listing
+/// gave it, an upload's as `send::files` encoded it.
+unsafe fn remote_name<'a>(htxf: *const HtxfHandle) -> &'a [u8] {
+    std::slice::from_raw_parts(
+        (*htxf).remotename.as_ptr().cast::<u8>(),
         (*htxf).remotename_len as usize,
-        utf8,
-        glib::ffi::GFALSE, // is_body = FALSE: filenames are single-line
-        &mut wire_len,
-    );
-    let slice: &[u8] = if wire.is_null() || wire_len == 0 || wire_len > isize::MAX as usize {
-        &[]
-    } else {
-        std::slice::from_raw_parts(wire as *const u8, wire_len)
-    };
-    let r = f(slice);
-    if !wire.is_null() {
-        glib::ffi::g_free(wire as *mut c_void);
-    }
-    r
+    )
 }
 
 /// Is `htxf->remotedir` a real parent directory (non-empty and not just "/")?
@@ -1001,9 +975,9 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
     };
 
     let htlc = (*htxf).htlc;
-    let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING);
     let has_dir = remotedir_present(htxf);
-    with_name_wire(htxf, utf8, |nm_wire| {
+    {
+        let nm_wire = remote_name(htxf);
         let mut hldir: *mut u8 = std::ptr::null_mut();
         let mut hldirlen: u16 = 0;
         if has_dir {
@@ -1017,12 +991,12 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
         let mut chunks = [HxChunk::EMPTY; 3];
         let hc = build::build_file_get_chunks(&req, &mut chunks);
         if hc > 0 {
-            task_new(
+            expect_transfer(
                 htlc.cast(),
-                Some(rcv_task_file_get),
-                htxf as *mut c_void,
-                std::ptr::null_mut(),
-                c"xfer_go".as_ptr(),
+                Asked::Download {
+                    htxf: crate::recv::files::Xfer::new(htxf.cast()),
+                    folder: false,
+                },
             );
             hlwrite_chunks(
                 htlc.cast(),
@@ -1035,7 +1009,7 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
         if !hldir.is_null() {
             glib::ffi::g_free(hldir as *mut c_void);
         }
-    });
+    }
 }
 
 /// The upload half of [`xfer_go`]: FILE_NAME / DIR / FILE_PREVIEW / HTXF_SIZE /
@@ -1047,9 +1021,8 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
     let htlc = (*htxf).htlc;
     let large = hx_conn_has_cap(htlc.cast(), HTLC_CAP_LARGE_FILES) != glib::ffi::GFALSE;
     let has_dir = remotedir_present(htxf);
-    let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING);
-
-    with_name_wire(htxf, utf8, |nm_wire| {
+    {
+        let nm_wire = remote_name(htxf);
         let mut hldir: *mut u8 = std::ptr::null_mut();
         let mut hldirlen: u16 = 0;
         if has_dir {
@@ -1070,12 +1043,12 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
         let mut scratch = [0u8; 12];
         let hc = build::build_file_put_chunks(&req, &mut chunks, &mut scratch);
         if hc > 0 {
-            task_new(
+            expect_transfer(
                 htlc.cast(),
-                Some(rcv_task_file_put),
-                htxf as *mut c_void,
-                std::ptr::null_mut(),
-                c"xfer_go".as_ptr(),
+                Asked::Upload {
+                    htxf: crate::recv::files::Xfer::new(htxf.cast()),
+                    folder: false,
+                },
             );
             hlwrite_chunks(
                 htlc.cast(),
@@ -1088,7 +1061,7 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
         if !hldir.is_null() {
             glib::ffi::g_free(hldir as *mut c_void);
         }
-    });
+    }
 }
 
 /// `void xfer_go(struct htxf_conn *htxf)` — send the download/upload request that
@@ -1150,53 +1123,12 @@ unsafe fn resource_len(_path: *const c_char) -> usize {
     0
 }
 #[cfg(test)]
-unsafe fn gtkhx_text_for_wire(
-    _text: *const c_char,
-    _len: usize,
-    _utf8: glib::ffi::gboolean,
-    _is_body: glib::ffi::gboolean,
-    out_len: *mut usize,
-) -> *mut c_char {
-    if !out_len.is_null() {
-        *out_len = 0;
-    }
-    std::ptr::null_mut()
-}
-#[cfg(test)]
 unsafe fn hlwrite_chunks(
     _htlc: *mut c_void,
     _ty: u32,
     _flag: u32,
     _chunks: *const HxChunk,
     _hc: c_int,
-) {
-}
-#[cfg(test)]
-unsafe fn task_new(
-    _htlc: *mut c_void,
-    _rcv: Option<unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void)>,
-    _ptr: *mut c_void,
-    _data: *mut c_void,
-    _str_: *const c_char,
-) -> *mut c_void {
-    std::ptr::null_mut()
-}
-#[cfg(test)]
-unsafe extern "C" fn rcv_task_file_get(
-    _htlc: *mut c_void,
-    _frame: *const c_void,
-    _frame_len: usize,
-    _ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-}
-#[cfg(test)]
-unsafe extern "C" fn rcv_task_file_put(
-    _htlc: *mut c_void,
-    _frame: *const c_void,
-    _frame_len: usize,
-    _ptr: *mut c_void,
-    _data: *mut c_void,
 ) {
 }
 #[cfg(test)]

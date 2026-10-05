@@ -2,7 +2,7 @@
  * tests/proto/test_folder_xfer.c — wire-format lockdown for the
  * Hotline 1.5 folder-transfer opcodes (HTLC_HDR_FILE_GETFOLDER 0xd2
  * and HTLC_HDR_FILE_PUTFOLDER 0xd5) plus the HTLS task-reply parser
- * that rcv_task_folder_get / rcv_task_folder_put run.
+ * that a folder transfer's reply carries.
  *
  * Two halves:
  *
@@ -22,9 +22,9 @@
  *      use. Verifies HTXF_REF / HTXF_SIZE / QUEUE / FILE_NFILES all
  *      decode to the expected u32 values regardless of chunk order.
  *
- * The actual rcv_task_folder_get / rcv_task_folder_put in rcv.c
- * couple the parse to xfers[] bookkeeping + signal emission, which
- * isn't testable without dragging in the whole signal/UI stack.
+ * The reply handlers (hxhandlers::recv::xfer) couple what is read to
+ * the transfer's bookkeeping + signal emission, which isn't testable
+ * without dragging in the whole signal/UI stack.
  * This Tier 2 test exercises the *wire parse* — the part that
  * actually depends on the protocol catalogue.
  */
@@ -257,11 +257,11 @@ test_putfolder_request_with_dir (void)
     htlc_free (&htlc);
 }
 
-/* ---------- receive-side: rcv_task_folder_get reply parser ---------- */
+/* ---------- receive-side: folder download reply parser ---------- */
 
 /* Synthetic HTLS TASK reply carrying HTXF_SIZE + HTXF_REF +
- * FILE_NFILES — the chunks rcv_task_folder_get walks. The actual
- * function couples the walk to xfers[] / signal emission, which
+ * FILE_NFILES — the chunks a folder download's reply carries. The
+ * handler couples the walk to xfers[] / signal emission, which
  * isn't testable in isolation; this exercises the wire-parse half,
  * the part that depends on the protocol catalogue. */
 static void
@@ -310,7 +310,7 @@ test_folder_get_reply_parse (void)
 }
 
 /* HTLS TASK with a QUEUE chunk — the server is parking the
- * request behind other transfers. rcv_task_folder_get records
+ * request behind other transfers. The handler records
  * htxf->queue and waits for the unsolicited HTLS_HDR_XFER_QUEUE
  * "you're up" message; until then no HTXF subchannel opens. */
 static void
@@ -352,7 +352,7 @@ test_folder_get_reply_with_queue (void)
     wire_fixture_free (&htlc);
 }
 
-/* rcv_task_folder_put has a smaller chunk set than folder_get —
+/* The folder upload reply has a smaller chunk set than folder_get —
  * just HTXF_REF and (optionally) QUEUE. NFILES isn't sent on the
  * put reply (the client already knows the count, it told the
  * server). Pin that down — if a future server starts echoing back

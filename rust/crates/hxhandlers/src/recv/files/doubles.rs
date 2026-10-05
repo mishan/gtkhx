@@ -1,23 +1,31 @@
-//! Headless `#[cfg(test)]` doubles for the C environment `rcv_task_file_list`
-//! reaches — the file-list emit and the provider error hook. The `hx_cfl_*` accessors are the crate's own real functions, so tests
-//! drive a real Rust-owned cfl and inspect it directly.
+//! Headless `#[cfg(test)]` doubles for the C environment `recv::files`
+//! reaches — the file-list emit and the provider's error hook — recording
+//! what each was handed.
 
 use std::os::raw::c_void;
 
+use super::{hx_cfl_path, CachedFileList};
+
 pub(crate) mod test_env {
-    use std::cell::Cell;
+    use std::cell::RefCell;
+
+    /// What reached a provider: the provider, the folder, and the names
+    /// listed, or `None` for a refusal.
+    pub type Reached = (usize, Vec<u8>, Option<Vec<Vec<u8>>>);
 
     thread_local! {
-        /// True after the file-list signal was emitted.
-        pub static EMITTED: Cell<bool> = const { Cell::new(false) };
-        /// True after the provider error hook fired.
-        pub static PROVIDER_ERROR: Cell<bool> = const { Cell::new(false) };
+        pub static REACHED: RefCell<Vec<Reached>> = const { RefCell::new(Vec::new()) };
     }
 
-    pub fn reset() {
-        EMITTED.with(|c| c.set(false));
-        PROVIDER_ERROR.with(|c| c.set(false));
+    pub fn take() -> Vec<Reached> {
+        REACHED.with(|r| std::mem::take(&mut *r.borrow_mut()))
     }
+}
+
+unsafe fn path(cfl: *mut c_void) -> Vec<u8> {
+    std::ffi::CStr::from_ptr(hx_cfl_path(cfl as *const CachedFileList))
+        .to_bytes()
+        .to_vec()
 }
 
 pub(crate) unsafe fn gtkhx_session_get_default() -> *mut c_void {
@@ -27,17 +35,30 @@ pub(crate) unsafe fn gtkhx_session_get_default() -> *mut c_void {
 pub(crate) unsafe fn gtkhx_session_emit_file_list(
     _self_: *mut c_void,
     _htlc: *mut c_void,
-    _cfl: *mut c_void,
+    cfl: *mut c_void,
     _fh: *mut c_void,
-    _data: *mut c_void,
+    data: *mut c_void,
 ) {
-    test_env::EMITTED.with(|c| c.set(true));
+    let names = (*(cfl as *const CachedFileList))
+        .files
+        .iter()
+        .map(|f| f.name_bytes.clone())
+        .collect();
+    let reached = (data as usize, path(cfl), Some(names));
+    test_env::REACHED.with(|r| r.borrow_mut().push(reached));
 }
 
 pub(crate) unsafe fn hx_remote_files_provider_handle_file_list_error(
-    _cfl: *mut c_void,
-    _data: *mut c_void,
+    cfl: *mut c_void,
+    data: *mut c_void,
 ) -> std::os::raw::c_int {
-    test_env::PROVIDER_ERROR.with(|c| c.set(true));
-    1 // gboolean TRUE
+    let reached = (data as usize, path(cfl), None);
+    test_env::REACHED.with(|r| r.borrow_mut().push(reached));
+    1
 }
+
+/// The tests' providers are not objects.
+pub(crate) unsafe fn object_ref(_p: *mut c_void) {}
+pub(crate) unsafe fn object_unref(_p: *mut c_void) {}
+pub(crate) unsafe fn htxf_ref(_p: *mut c_void) {}
+pub(crate) unsafe fn htxf_unref(_p: *mut c_void) {}

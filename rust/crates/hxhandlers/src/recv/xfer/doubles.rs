@@ -27,6 +27,9 @@ pub(crate) mod test_env {
         pub start_stamped: bool,
     }
 
+    /// What the Get Info dialog was opened with: its label, name and size.
+    pub type Shown = (Vec<u8>, Vec<u8>, u64);
+
     thread_local! {
         pub static HTXF: RefCell<FakeHtxf> = RefCell::new(FakeHtxf::default());
 
@@ -48,13 +51,11 @@ pub(crate) mod test_env {
         pub static RETRY_TIMER: Cell<bool> = const { Cell::new(false) };
         pub static PREVIEW_BUILT: Cell<bool> = const { Cell::new(false) };
         pub static BANNER: Cell<Option<(u32, u32)>> = const { Cell::new(None) };
-        pub static FILE_INFO: RefCell<Option<(Vec<u8>, u64)>> = const { RefCell::new(None) };
-        /// The last pointer passed to g_free (the freed FILE_GETINFO label).
-        pub static FREED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
+        /// The label, name and size the file-info emit carried.
+        pub static FILE_INFO: RefCell<Option<Shown>> = const { RefCell::new(None) };
     }
 
     pub fn reset() {
-        FREED.with(|c| c.set(None));
         HTXF.with(|c| *c.borrow_mut() = FakeHtxf::default());
         IN_LIST.with(|c| c.set(1));
         OPT_RETRY.with(|c| c.set(0));
@@ -107,7 +108,7 @@ pub(crate) unsafe fn xfer_ready_write(_htxf: *mut c_void) {
 pub(crate) unsafe fn gtkhx_session_emit_file_info(
     _self_: *mut c_void,
     _htlc: *mut c_void,
-    _path: *const c_char,
+    path: *const c_char,
     name: *const c_char,
     _creator: *const c_char,
     _type_: *const c_char,
@@ -116,12 +117,11 @@ pub(crate) unsafe fn gtkhx_session_emit_file_info(
     _date_create: *const u8,
     size: u64,
 ) {
-    let name = if name.is_null() {
-        Vec::new()
-    } else {
-        std::ffi::CStr::from_ptr(name).to_bytes().to_vec()
-    };
-    test_env::FILE_INFO.with(|c| *c.borrow_mut() = Some((name, size)));
+    // The view takes the label over; here, that is to free it.
+    let label = std::ffi::CStr::from_ptr(path).to_bytes().to_vec();
+    glib::ffi::g_free(path as *mut c_void);
+    let name = std::ffi::CStr::from_ptr(name).to_bytes().to_vec();
+    test_env::FILE_INFO.with(|c| *c.borrow_mut() = Some((label, name, size)));
 }
 
 // ---- htxf accessor seam ----
@@ -231,7 +231,4 @@ pub(crate) unsafe fn hx_conn_serverport(_htlc: *const c_void) -> u16 {
 }
 pub(crate) unsafe fn banner_handle_htxf_reply(_htlc: *mut c_void, ref_: u32, size: u32) {
     test_env::BANNER.with(|c| c.set(Some((ref_, size))));
-}
-pub(crate) unsafe fn g_free(ptr: *mut c_void) {
-    test_env::FREED.with(|c| c.set(Some(ptr)));
 }

@@ -6,7 +6,7 @@
  * picks "Preview" instead of "Download". The viewer pipeline is a
  * tiny dispatcher built around a set of per-format viewer plugins:
  *
- *   - rcv.c::rcv_task_file_get constructs the preview window on the
+ *   - hxhandlers::recv::xfer::download_ready constructs the preview window on the
  *     main thread (window scaffolding only — placeholder body) via
  *     hx_preview_new() and stashes the handle on htxf->preview.
  *   - The worker thread (xfers.c::get_thread) reads the FILP

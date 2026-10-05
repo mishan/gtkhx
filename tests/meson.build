@@ -669,20 +669,6 @@ test_hlwrite = executable('test_hlwrite',
 test('hlwrite', test_hlwrite,
      suite : 'proto')
 
-# xfer_queue — REF + QUEUE chunks during file-transfer queueing.
-# queueid 0 is the "ready to start" signal.
-test_xfer_queue = executable('test_xfer_queue',
-  'proto/test_xfer_queue.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('xfer_queue', test_xfer_queue,
-     suite : 'proto')
-
 # agreement — HTLS_HDR_AGREEMENT handler. Three-way result:
 # OK / NONE / NOT_FOUND. The order-sensitive cases (NOAGREEMENT
 # before AGREEMENT wins) are the contract worth pinning down.
@@ -717,15 +703,10 @@ test_chat_event = executable('test_chat_event',
 test('chat_event', test_chat_event,
      suite : 'proto')
 
-# (filelist_walker retired — the FILE_LIST walk + per-entry decode moved
-# into the hxmodel::files_entry Rust crate's gtkhx_files_populate_from_reply,
-# tested headless there; the underlying wire parse is covered by
-# hxproto's parse_file_list_entry unit tests.)
-
 # folder_xfer — wire-format lockdown for the 1.5 folder-transfer
 # opcodes (HTLC_HDR_FILE_GETFOLDER 0xd2, HTLC_HDR_FILE_PUTFOLDER 0xd5)
 # plus the HTLS task-reply chunks (HTXF_REF / HTXF_SIZE / QUEUE /
-# FILE_NFILES) that rcv_task_folder_get / rcv_task_folder_put walk.
+# FILE_NFILES) that a folder transfer's reply carries.
 # Two halves in one binary: hlpack the request, dh_start the reply.
 # Pins the magic opcode + chunk IDs and the u32 dh_getint contract
 # for FILE_NFILES (the chunk we added with the folder-transfer
@@ -1300,20 +1281,6 @@ test('ping', test_integration_ping,
      suite   : 'integration',
      timeout : 30)
 
-# file_list — request the root file list and verify the round-trip
-# completes (whether with a real listing or a tolerant task-error
-# if files/ is empty on the server).
-test_integration_file_list = executable('test_integration_file_list',
-  'integration/test_file_list.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('file_list', test_integration_file_list,
-     suite   : 'integration',
-     timeout : 30)
-
 # gif_icons — fogWraith GIF-icons extension (TRAN 1861-1864). No
 # capability bit, so it runs against the default matrix server; both
 # mhxd and Janus implement it. Set/get round-trip, getlist, the
@@ -1500,35 +1467,6 @@ test_integration_file_put = executable('test_integration_file_put',
   link_depends        : rust_build,
 )
 test('file_put', test_integration_file_put,
-     suite   : 'integration',
-     timeout : 30)
-
-# file_info — HTLC_HDR_FILE_GETINFO on the seeded test.txt. Verifies
-# the TASK reply carries HTLS_DATA_FILE_NAME and a FILE_SIZE that
-# matches the 12-byte "hello world\n" payload.
-test_integration_file_info = executable('test_integration_file_info',
-  'integration/test_file_info.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('file_info', test_integration_file_info,
-     suite   : 'integration',
-     timeout : 30)
-
-# file_list_subdir — FILE_LIST with a hand-built HTLC_DATA_DIR
-# pointing at the seeded files/Uploads/ subdirectory. Covers the
-# DIR-chunked variant of file listing (the existing test_file_list
-# only exercises the no-DIR root path).
-test_integration_file_list_subdir = executable('test_integration_file_list_subdir',
-  'integration/test_file_list_subdir.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('file_list_subdir', test_integration_file_list_subdir,
      suite   : 'integration',
      timeout : 30)
 

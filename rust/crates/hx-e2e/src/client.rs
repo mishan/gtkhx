@@ -359,9 +359,8 @@ impl Client {
     /// of `hxrequest::files::moves`' requests only after the one before it
     /// succeeded. Returns the first refusal, or the last reply.
     pub fn move_to(&mut self, src: &str, dst: &str) -> Reply {
-        let utf8 = self.utf8();
         let mut last = None;
-        for req in hxrequest::files::moves(src.as_bytes(), dst.as_bytes(), utf8) {
+        for req in hxrequest::files::moves(src.as_bytes(), dst.as_bytes()) {
             let reply = self.request(&req);
             let failed = reply.is_error();
             last = Some(reply);

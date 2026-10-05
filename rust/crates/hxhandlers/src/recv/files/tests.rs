@@ -1,128 +1,103 @@
-//! Headless tests for the FILE_LIST receive handler + the Rust-owned cfl.
+//! What the session's file events become, through recording doubles of the
+//! file-list emit and the provider's error hook.
 
+use super::doubles::test_env;
 use super::*;
 
-use hxproto::parse::FTYPE_FLDR;
+const A: *mut c_void = 0xA0 as *mut c_void;
+const B: *mut c_void = 0xB0 as *mut c_void;
+const PROVIDER: *mut c_void = 0xDA7A as *mut c_void;
 
-const HTLS_DATA_FILE_LIST: u16 = 0x00c8;
-const OTHER_TAG: u16 = 0x0064;
-/// An arbitrary non-folder file type ('TEXT') for test entries.
-const FTYPE_TEXT: u32 = u32::from_be_bytes(*b"TEXT");
-
-/// One FILE_LIST entry body: ftype / fcreator / fsize / unknown / fnlen / name.
-fn entry_body(ftype: u32, fsize: u32, name: &[u8]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&ftype.to_be_bytes());
-    v.extend_from_slice(&0u32.to_be_bytes()); // fcreator
-    v.extend_from_slice(&fsize.to_be_bytes());
-    v.extend_from_slice(&0u32.to_be_bytes()); // unknown
-    v.extend_from_slice(&(name.len() as u32).to_be_bytes()); // fnlen
-    v.extend_from_slice(name);
-    v
-}
-
-/// Build a FILE_LIST reply: 22-byte header + the given chunks.
-fn frame(chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // type (TASK)
-    v.extend_from_slice(&1u32.to_be_bytes()); // trans
-    v.extend_from_slice(&0u32.to_be_bytes()); // flag (no error)
-    v.extend_from_slice(&0u32.to_be_bytes()); // len
-    v.extend_from_slice(&0u32.to_be_bytes()); // len2
-    v.extend_from_slice(&(chunks.len() as u16).to_be_bytes()); // hc
-    for (tag, data) in chunks {
-        v.extend_from_slice(&tag.to_be_bytes());
-        v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-        v.extend_from_slice(data);
+fn entry(name: &[u8]) -> FileEntry {
+    FileEntry {
+        name: hxproto::text::to_utf8(name),
+        name_bytes: name.to_vec(),
+        folder: false,
+        size: 1,
+        type_code: *b"TEXT",
+        creator: *b"ttxt",
     }
-    v
 }
 
-/// An error reply (flag & 1) with no chunks.
-fn error_frame() -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&0x0001_0000u32.to_be_bytes());
-    v.extend_from_slice(&1u32.to_be_bytes());
-    v.extend_from_slice(&1u32.to_be_bytes()); // flag = error
-    v.extend_from_slice(&0u32.to_be_bytes());
-    v.extend_from_slice(&0u32.to_be_bytes());
-    v.extend_from_slice(&0u16.to_be_bytes());
-    v
+fn listing(path: &[u8]) -> Asked {
+    listing_for(PROVIDER, path)
 }
 
-const PROVIDER: *mut std::os::raw::c_void = 0xDA7A_usize as *mut std::os::raw::c_void;
+fn listing_for(provider: *mut c_void, path: &[u8]) -> Asked {
+    Asked::Listing {
+        provider: unsafe { Provider::new(provider) },
+        path: CString::new(path).unwrap(),
+    }
+}
 
-unsafe fn run(cfl: *mut CachedFileList, f: &[u8], data: *mut std::os::raw::c_void) {
-    rcv_task_file_list(
-        std::ptr::null_mut(),
-        f.as_ptr() as *const std::os::raw::c_void,
-        f.len(),
-        cfl as *mut std::os::raw::c_void,
-        data,
+/// A listing reaches the provider that asked for it, with the folder it
+/// asked about, only on its own connection and trans, and only once.
+#[test]
+fn a_listing_reaches_only_what_asked_for_it() {
+    asked(A, 5, listing(b"/caf\x8e"));
+    unsafe {
+        listed(B, 5, &[entry(b"x")]);
+        listed(A, 6, &[entry(b"x")]);
+    }
+    assert!(test_env::take().is_empty());
+    unsafe { listed(A, 5, &[entry(b"a"), entry(b"b\x8e")]) };
+    assert_eq!(
+        test_env::take(),
+        [(
+            PROVIDER as usize,
+            b"/caf\x8e".to_vec(),
+            Some(vec![b"a".to_vec(), b"b\x8e".to_vec()])
+        )]
+    );
+    unsafe { listed(A, 5, &[]) };
+    assert!(test_env::take().is_empty());
+}
+
+#[test]
+fn a_refused_listing_tells_the_provider_which_folder() {
+    asked(A, 7, listing(b"/Drop Box"));
+    unsafe { failed(A, 7) };
+    assert_eq!(
+        test_env::take(),
+        [(PROVIDER as usize, b"/Drop Box".to_vec(), None)]
     );
 }
 
+/// A new login numbers its requests afresh: what the last one asked for on
+/// that connection is let go, and another connection's is kept.
 #[test]
-fn basic_listing_accumulates_and_emits() {
-    test_env::reset();
-    let cfl = hx_cfl_new();
-    let f = frame(&[
-        (HTLS_DATA_FILE_LIST, entry_body(FTYPE_TEXT, 10, b"a.txt")),
-        (OTHER_TAG, vec![0, 0, 0, 0]), // ignored non-FILE_LIST chunk
-        (HTLS_DATA_FILE_LIST, entry_body(FTYPE_FLDR, 0, b"sub")),
-    ]);
-    unsafe { run(cfl, &f, PROVIDER) };
-
-    // Two FILE_LIST records accumulated; the non-FILE_LIST chunk skipped.
-    // Each record: 4 (hdr) + 20 (fixed) + name, rounded up to the next mult of 4.
-    let rec1 = round4(4 + 20 + 5);
-    let rec2 = round4(4 + 20 + 3);
-    assert_eq!(unsafe { hx_cfl_fhlen(cfl) } as usize, rec1 + rec2);
-    assert!(test_env::EMITTED.with(|c| c.get()));
-    unsafe { hx_cfl_free(cfl) };
+fn forgetting_a_connection_lets_go_of_only_its_requests() {
+    asked(A, 9, listing(b"/a"));
+    asked(B, 9, listing(b"/b"));
+    forget(A);
+    unsafe {
+        listed(A, 9, &[]);
+        listed(B, 9, &[]);
+    }
+    assert_eq!(
+        test_env::take(),
+        [(PROVIDER as usize, b"/b".to_vec(), Some(vec![]))]
+    );
 }
 
-/// The C accumulation rounds each record up to the next multiple of 4 — and
-/// bumps an already-aligned record by a full 4.
-fn round4(n: usize) -> usize {
-    n + (4 - (n % 4))
-}
-
+/// A provider that asks again has left the folder it asked for first: that
+/// reply is not shown, on any connection.
 #[test]
-fn appended_record_length_is_patched_to_padded_body() {
-    test_env::reset();
-    let cfl = hx_cfl_new();
-    // name "hi" → body 20 + 2 = 22, record 4 + 22 = 26, padded to 28.
-    let f = frame(&[(HTLS_DATA_FILE_LIST, entry_body(FTYPE_TEXT, 7, b"hi"))]);
-    unsafe { run(cfl, &f, std::ptr::null_mut()) };
-
-    let len = unsafe { hx_cfl_fhlen(cfl) } as usize;
-    assert_eq!(len, 28);
-    let buf = unsafe { std::slice::from_raw_parts(hx_cfl_fh(cfl) as *const u8, len) };
-    // Patched length field (offset 2..4) = padded body = 28 - 4 = 24.
-    assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 24);
-    // data==NULL → no emit.
-    assert!(!test_env::EMITTED.with(|c| c.get()));
-    unsafe { hx_cfl_free(cfl) };
-}
-
-#[test]
-fn task_error_notifies_provider_and_frees() {
-    test_env::reset();
-    let cfl = hx_cfl_new();
-    unsafe { run(cfl, &error_frame(), PROVIDER) };
-    // Provider got the error hook; nothing emitted. (cfl was freed by the
-    // handler — do not touch it again.)
-    assert!(test_env::PROVIDER_ERROR.with(|c| c.get()));
-    assert!(!test_env::EMITTED.with(|c| c.get()));
-}
-
-#[test]
-fn set_path_round_trips() {
-    let cfl = hx_cfl_new();
-    let p = std::ffi::CString::new("/Files/sub").unwrap();
-    unsafe { hx_cfl_set_path(cfl, p.as_ptr()) };
-    let got = unsafe { std::ffi::CStr::from_ptr(hx_cfl_path(cfl)) };
-    assert_eq!(got.to_bytes(), b"/Files/sub");
-    unsafe { hx_cfl_free(cfl) };
+fn a_new_listing_replaces_the_provider_s_last() {
+    const OTHER: *mut c_void = 0x07E5 as *mut c_void;
+    asked(A, 1, listing(b"/old"));
+    asked(A, 2, listing_for(OTHER, b"/other"));
+    asked(B, 3, listing(b"/new"));
+    unsafe {
+        listed(A, 1, &[]);
+        listed(A, 2, &[]);
+        listed(B, 3, &[]);
+    }
+    assert_eq!(
+        test_env::take(),
+        [
+            (OTHER as usize, b"/other".to_vec(), Some(vec![])),
+            (PROVIDER as usize, b"/new".to_vec(), Some(vec![])),
+        ]
+    );
 }

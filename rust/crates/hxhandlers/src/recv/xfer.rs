@@ -1,11 +1,10 @@
 //! File-transfer receive handlers (ported from `rcv.c`).
 //!
-//! The five transfer task-replies (`rcv_task_file_get` / `_folder_get` /
-//! `_file_put` / `_folder_put` / `_banner_get`), the file-info reply
-//! (`rcv_task_file_getinfo`), and the unsolicited `hx_rcv_xfer_queue` live here.
-//! Each one parses its reply natively (`hxproto::parse::*` — no
-//! `gtkhx_proto_*` FFI round-trip), applies the pure dispatch gates and the
-//! stamping/error/upload-size *logic* in Rust, and reaches the still-C-owned
+//! What the session reads of a download's or upload's reply, of Get Info's,
+//! and of the server moving a queued transfer up (`recv::files` matches each
+//! reply to what asked), and the banner's reply, still a task. Each applies
+//! the dispatch gates and the stamping/error/upload-size *logic* in Rust,
+//! and reaches the still-C-owned
 //! transfer state only through the narrow `hx_htxf_*` accessor seam
 //! (`htxf_accessors.c`) plus genuine collaborators (`xfer_delete`,
 //! `gtask_delete_htxf`, the retry timer, `hx_preview_*`, the `resource_len` /
@@ -19,11 +18,15 @@
 //! so no date/locale code lives here. Once a transfer's `htxf` is ready to move,
 //! everything funnels through the shared [`hx_xfer_announce`] tail.
 
-use std::os::raw::{c_char, c_void};
-// c_int / c_long are only named in the production extern block; the test build
-// shadows every symbol in `doubles` and doesn't reference them here.
+use std::ffi::{CStr, CString};
+use std::os::raw::c_void;
+
+use glib::ffi::g_strdup;
+use hxsession::{FileInfo, Transfer};
+// c_char / c_int / c_long are only named in the production extern block; the
+// test build shadows every symbol in `doubles` and doesn't reference them here.
 #[cfg(not(test))]
-use std::os::raw::{c_int, c_long};
+use std::os::raw::{c_char, c_int, c_long};
 
 #[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_serverhost;
@@ -86,9 +89,6 @@ extern "C" {
     fn hx_conn_serverport(htlc: *const c_void) -> u16;
     /// The DOWNLOAD_BANNER reply spins up an HTXF subchannel worker (`banner.c`).
     fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, size: u32);
-    /// GLib `g_free` — release the FILE_GETINFO path task label on the error path
-    /// (it's `g_strdup`'d, with no task `ptr_free`).
-    fn g_free(ptr: *mut c_void);
 }
 
 #[cfg(not(test))]
@@ -149,7 +149,7 @@ pub unsafe extern "C" fn hx_xfer_announce(htlc: *mut c_void, htxf: *mut c_void, 
     }
 }
 
-// ---- receive handlers (rcv_task_* callbacks) -------------------------------
+// ---- receive handlers --------------------------------------------------------
 
 /// True when the reply frame's task-error bit is set — the native equivalent of
 /// the C `task_inerror()` (`hxproto` header parse + `flag & 1`). A frame
@@ -180,57 +180,31 @@ unsafe fn stamp_subchannel(htlc: *mut c_void, htxf: *mut c_void) {
     hx_htxf_set_serverport(htxf, hx_conn_serverport(htlc).wrapping_add(1));
 }
 
-/// Task-error policy for a *download* (file_get / folder_get): re-arm the 1 s
-/// retry timer when `htxf->opt.retry` is set, else drop the transfer.
-unsafe fn xfer_download_error(htlc: *mut c_void, htxf: *mut c_void) {
-    if hx_htxf_opt_retry(htxf) != 0 {
-        hx_htxf_set_gone(htxf, 0);
-        timer_add_secs(1, Some(xfer_go_timer), htxf);
-    } else {
-        gtask_delete_htxf(hx_sess_from_htlc(htlc), htxf);
-        xfer_delete(htxf);
-    }
-}
-
-/// `void rcv_task_file_get (htlc, frame, frame_len, htxf, data)` — HTLS reply to
-/// HTLC_HDR_FILE_GET (was `rcv.c`). Drops the reply if the transfer was already
-/// cancelled (`hx_htxf_in_list`); on a task error, retries or deletes; otherwise
-/// parses natively, applies the `(!size && !size64_seen) || !ref` malformed-frame
-/// gate, stamps the transfer, builds the preview window when `opt.preview` is
-/// set, and runs the announce tail.
+/// A download's reply, file or folder, for the transfer it asked for: stamp
+/// it, build the preview window when it is one, and let it go. A reply with
+/// no reference, or a file's with no size, starts nothing.
 ///
 /// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `ptr` is the transfer's `struct htxf_conn *`.
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_file_get(
+/// Main thread; `htlc` is a live connection; `htxf` was a transfer when the
+/// request went, and is read only if it still is.
+pub(crate) unsafe fn download_ready(
     htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    ptr: *mut c_void,
-    _data: *mut c_void,
+    htxf: *mut c_void,
+    folder: bool,
+    t: &Transfer,
 ) {
-    let htxf = ptr;
-    if hx_htxf_in_list(htxf) == 0 {
+    if hx_htxf_in_list(htxf) == 0 || t.reference == 0 || (!folder && t.size == 0) {
         return;
     }
-    if task_in_error(frame, frame_len) {
-        xfer_download_error(htlc, htxf);
-        return;
+    // A folder is legal at size 0; the progress bar reads better at 1.
+    hx_htxf_set_ref(htxf, t.reference);
+    hx_htxf_set_total_size(htxf, t.size.max(1));
+    hx_htxf_set_queue(htxf, t.queue);
+    if folder {
+        // How the download knows it's done without waiting on a server that
+        // closes late; see hxnet_htxf_set_folder_items.
+        crate::xfer::remember_folder_items(htxf, t.items);
     }
-    let s = frame_slice(frame, frame_len);
-    let r = hxproto::parse::parse_file_get_reply(s, s.len());
-    if (r.size == 0 && !r.size64_seen) || r.ref_ == 0 {
-        return;
-    }
-    let total = if r.size64_seen {
-        r.size64
-    } else {
-        r.size as u64
-    };
-    hx_htxf_set_ref(htxf, r.ref_);
-    hx_htxf_set_total_size(htxf, total);
-    hx_htxf_set_queue(htxf, r.queue);
     stamp_subchannel(htlc, htxf);
 
     // Build the preview window on the main thread (we are on it); the download
@@ -250,151 +224,105 @@ pub unsafe extern "C" fn rcv_task_file_get(
         hx_preview_set_cancel_cb(pv, Some(preview_cancel_xfer), htxf);
     }
 
-    hx_xfer_announce(htlc, htxf, r.queue);
+    hx_xfer_announce(htlc, htxf, t.queue);
 }
 
-/// `void rcv_task_folder_get (htlc, frame, frame_len, htxf, data)` — HTLS reply
-/// to HTLC_HDR_FILE_GETFOLDER (was `rcv.c`). Mirror of [`rcv_task_file_get`]:
-/// same cancellation + error handling, but no preview, the only gate is `!ref`
-/// (folders are legal at total_size 0), and the total is clamped to 1 for the
-/// progress UI when the server reports 0. The item count goes to the download,
-/// which uses it to tell when the tree has all arrived.
+/// A download the server refused: try again in a second when the transfer
+/// asks for retries, else drop it.
 ///
 /// # Safety
-/// See [`rcv_task_file_get`].
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_folder_get(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    let htxf = ptr;
+/// As [`download_ready`].
+pub(crate) unsafe fn download_refused(htlc: *mut c_void, htxf: *mut c_void) {
     if hx_htxf_in_list(htxf) == 0 {
         return;
     }
-    if task_in_error(frame, frame_len) {
-        xfer_download_error(htlc, htxf);
-        return;
-    }
-    let s = frame_slice(frame, frame_len);
-    let r = hxproto::parse::parse_folder_get_reply(s, s.len());
-    if r.ref_ == 0 {
-        return;
-    }
-    // Aggregate byte count for the whole tree; clamp a server-reported 0 to 1 so
-    // the progress UI reads sensibly. The 64-bit companion wins when present.
-    let total = if r.size64_seen {
-        r.size64
-    } else if r.size != 0 {
-        r.size as u64
+    if hx_htxf_opt_retry(htxf) != 0 {
+        hx_htxf_set_gone(htxf, 0);
+        timer_add_secs(1, Some(xfer_go_timer), htxf);
     } else {
-        1
-    };
-    hx_htxf_set_ref(htxf, r.ref_);
-    hx_htxf_set_total_size(htxf, total);
-    hx_htxf_set_queue(htxf, r.queue);
-    // How the download knows it's done without waiting on a server that
-    // closes late; see hxnet_htxf_set_folder_items.
-    crate::xfer::remember_folder_items(htxf, r.nfiles);
-    stamp_subchannel(htlc, htxf);
-    hx_xfer_announce(htlc, htxf, r.queue);
-}
-
-/// `void rcv_task_file_put (htlc, frame, frame_len, htxf, data)` — HTLS reply to
-/// HTLC_HDR_FILE_PUT (was `rcv.c`). A task error always deletes the transfer;
-/// otherwise parses natively (including the RFLT resume offsets), gates on
-/// `!ref`, then probes the local file (`hx_file_size` / `resource_len` /
-/// `comment_len` on the C-owned path pointer) to size the upload and stamps the
-/// transfer. The `133 + …` byte total is computed here.
-///
-/// # Safety
-/// See [`rcv_task_file_get`].
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_file_put(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    let htxf = ptr;
-    if task_in_error(frame, frame_len) {
         gtask_delete_htxf(hx_sess_from_htlc(htlc), htxf);
         xfer_delete(htxf);
+    }
+}
+
+/// An upload's reply, file or folder: size a file's upload from what is on
+/// disk and where the server says it resumes, stamp it, and let it go. A
+/// reply with no reference starts nothing.
+///
+/// # Safety
+/// As [`download_ready`].
+pub(crate) unsafe fn upload_ready(
+    htlc: *mut c_void,
+    htxf: *mut c_void,
+    folder: bool,
+    t: &Transfer,
+) {
+    if hx_htxf_in_list(htxf) == 0 || t.reference == 0 {
         return;
     }
-    let s = frame_slice(frame, frame_len);
-    let r = hxproto::parse::parse_file_put_reply(s, s.len());
-    if r.ref_ == 0 {
-        return;
-    }
-    let data_pos = r.data_pos as u64;
-    let rsrc_pos = r.rsrc_pos as u64;
-    hx_htxf_set_data_pos(htxf, data_pos);
-    hx_htxf_set_rsrc_pos(htxf, rsrc_pos);
-    hx_htxf_set_queue(htxf, r.queue);
+    hx_htxf_set_queue(htxf, t.queue);
+    if !folder {
+        let data_pos = u64::from(t.data_from);
+        let rsrc_pos = u64::from(t.rsrc_from);
+        hx_htxf_set_data_pos(htxf, data_pos);
+        hx_htxf_set_rsrc_pos(htxf, rsrc_pos);
 
-    // Probe the local file. The path stays a C string; we pass the pointer
-    // straight to the fs primitives rather than marshaling it into Rust.
-    let path = hx_htxf_path(htxf);
-    let mut data_size = hx_htxf_data_size(htxf);
-    let sz = hx_file_size(path);
-    if sz >= 0 {
-        data_size = sz as u64;
-        hx_htxf_set_data_size(htxf, data_size);
-    }
-    let rsrc_size = resource_len(path) as u64;
-    hx_htxf_set_rsrc_size(htxf, rsrc_size);
-
-    // Wrapping subtraction matches the C guint64 arithmetic (data_pos <=
-    // data_size in practice; wrapping avoids a Rust debug overflow panic).
-    let total = 133u64
-        + if rsrc_size.wrapping_sub(rsrc_pos) != 0 {
-            16
-        } else {
-            0
+        // The path stays a C string, passed straight to the fs primitives.
+        let path = hx_htxf_path(htxf);
+        let mut data_size = hx_htxf_data_size(htxf);
+        let sz = hx_file_size(path);
+        if sz >= 0 {
+            data_size = sz as u64;
+            hx_htxf_set_data_size(htxf, data_size);
         }
-        + comment_len(path) as u64
-        + data_size.wrapping_sub(data_pos)
-        + rsrc_size.wrapping_sub(rsrc_pos);
-    hx_htxf_set_total_size(htxf, total);
-    hx_htxf_set_ref(htxf, r.ref_);
+        let rsrc_size = resource_len(path) as u64;
+        hx_htxf_set_rsrc_size(htxf, rsrc_size);
+
+        // Wrapping, as the C guint64 arithmetic was: a resume past the end
+        // must not panic.
+        let total = 133u64
+            + if rsrc_size.wrapping_sub(rsrc_pos) != 0 {
+                16
+            } else {
+                0
+            }
+            + comment_len(path) as u64
+            + data_size.wrapping_sub(data_pos)
+            + rsrc_size.wrapping_sub(rsrc_pos);
+        hx_htxf_set_total_size(htxf, total);
+    }
+    hx_htxf_set_ref(htxf, t.reference);
     stamp_subchannel(htlc, htxf);
-    hx_xfer_announce(htlc, htxf, r.queue);
+    hx_xfer_announce(htlc, htxf, t.queue);
 }
 
-/// `void rcv_task_folder_put (htlc, frame, frame_len, htxf, data)` — HTLS reply
-/// to HTLC_HDR_FILE_PUTFOLDER (was `rcv.c`). Strict subset of
-/// [`rcv_task_file_put`] — no RFLT / fs probe (per-file resume happens inside the
-/// worker).
+/// An upload the server refused: drop it.
 ///
 /// # Safety
-/// See [`rcv_task_file_get`].
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_folder_put(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    let htxf = ptr;
-    if task_in_error(frame, frame_len) {
-        gtask_delete_htxf(hx_sess_from_htlc(htlc), htxf);
-        xfer_delete(htxf);
+/// As [`download_ready`].
+pub(crate) unsafe fn upload_refused(htlc: *mut c_void, htxf: *mut c_void) {
+    if hx_htxf_in_list(htxf) == 0 {
         return;
     }
-    let s = frame_slice(frame, frame_len);
-    let r = hxproto::parse::parse_folder_put_reply(s, s.len());
-    if r.ref_ == 0 {
+    gtask_delete_htxf(hx_sess_from_htlc(htlc), htxf);
+    xfer_delete(htxf);
+}
+
+/// A queued transfer moved up the server's queue; at 0 it goes.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn queued(htlc: *mut c_void, reference: u32, queue: u32) {
+    let htxf = crate::xfer::htxf_with_ref(htlc, reference);
+    if htxf.is_null() {
+        glib::g_warning!(
+            "gtkhx",
+            "queue position {queue} for transfer {reference}, which is not one of ours"
+        );
         return;
     }
-    hx_htxf_set_ref(htxf, r.ref_);
-    hx_htxf_set_queue(htxf, r.queue);
-    stamp_subchannel(htlc, htxf);
-    hx_xfer_announce(htlc, htxf, r.queue);
+    hx_htxf_set_queue(htxf.cast(), queue);
+    hx_xfer_announce(htlc, htxf.cast(), queue);
 }
 
 /// `void rcv_task_banner_get (htlc, frame, frame_len, ptr, data)` — HTLS reply
@@ -422,63 +350,33 @@ pub unsafe extern "C" fn rcv_task_banner_get(
     banner_handle_htxf_reply(htlc, r.ref_, r.size);
 }
 
-/// Copy a parsed wire string into a NUL-terminated `CString`, dropping any
-/// interior NULs (the sanitised wire strings shouldn't contain them, but the
-/// FFI contract requires a clean C string).
-fn cstr_lossy(bytes: &[u8]) -> std::ffi::CString {
-    let filtered: Vec<u8> = bytes.iter().copied().filter(|&b| b != 0).collect();
-    std::ffi::CString::new(filtered).unwrap_or_default()
-}
-
-/// `void rcv_task_file_getinfo (htlc, frame, frame_len, path, data)` — HTLS
-/// reply to HTLC_HDR_FILE_GETINFO (was `rcv.c`). Parses the reply natively (same
-/// caps + sanitisation as the C extractor: name 255 / type 31 / creator 31 /
-/// comment 255) and fires the `file-info` signal, passing the two Hotline date
-/// stamps **raw** — the view (`output_file_info`) decodes + locale-formats them,
-/// so no date logic lives here.
+/// Get Info's reply: open the dialog for the file `label` names (its folder
+/// and name, as the request named it). The two dates go as the server sent
+/// them; the dialog formats them.
 ///
 /// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `ptr` is the request's `char *path` task label.
-/// The signal emit is synchronous, so the parsed buffers outlive the view handler.
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_file_getinfo(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    if task_in_error(frame, frame_len) {
-        // `ptr` is the request's path label (`g_strdup`'d in hx_file_info, stored
-        // as the task ptr with no ptr_free). On success it transfers to the
-        // file-info window (freed in close_file_info); on a task error no window
-        // opens, so release it here rather than leak it per FILE_GETINFO failure.
-        g_free(ptr);
-        return;
-    }
-    let s = frame_slice(frame, frame_len);
-    let f = hxproto::parse::parse_file_getinfo(s, s.len(), 255, 31, 31, 255);
-    let size = if f.size64_seen {
-        f.size64
-    } else {
-        f.size as u64
-    };
-    let name = cstr_lossy(&f.name);
-    let type_ = cstr_lossy(&f.type_);
-    let creator = cstr_lossy(&f.creator);
-    let comment = cstr_lossy(&f.comment);
+/// Main thread; `htlc` is a live connection. The emit is synchronous, so
+/// the strings outlive the view handler.
+pub(crate) unsafe fn file_info(htlc: *mut c_void, label: &CStr, f: &FileInfo) {
+    let text = |s: &str| CString::new(s.replace('\0', "")).unwrap_or_default();
+    let (name, kind, creator, comment) = (
+        text(&f.name),
+        text(&f.kind),
+        text(&f.creator),
+        text(&f.comment),
+    );
     gtkhx_session_emit_file_info(
         gtkhx_session_get_default(),
         htlc,
-        ptr as *const c_char,
+        // The dialog takes the label over, and frees it.
+        g_strdup(label.as_ptr()),
         name.as_ptr(),
         creator.as_ptr(),
-        type_.as_ptr(),
+        kind.as_ptr(),
         comment.as_ptr(),
-        f.date_modify.as_ptr(),
-        f.date_create.as_ptr(),
-        size,
+        f.modified.as_ptr(),
+        f.created.as_ptr(),
+        f.size,
     );
 }
 

@@ -28,8 +28,8 @@ gtkhx_sources = files(
   # (cipher_vocab.rs); the bookmarks dialog became the Connections settings
   # page (options_connections.rs).
   'debug.c',
-  # filelist_walker.c retired — the FILE_LIST walk + per-entry decode moved
-  # into the hxmodel::files_entry Rust crate (gtkhx_files_populate_from_reply).
+  # filelist_walker.c retired — the listing's rows are built in the
+  # hxmodel::files_entry Rust crate.
   'files_local_provider.c',
   'files_ops.c',
   'files_provider.c',

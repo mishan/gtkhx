@@ -149,7 +149,7 @@ struct htxf_conn {
     } opt;
 
     /* when opt.preview is set, the preview window is created
-     * on the main thread (in rcv_task_file_get) and stashed here so
+     * on the main thread (in hxhandlers::recv::xfer::download_ready) and stashed here so
      * the download worker thread doesn't have to construct GTK widgets
      * itself. The worker only feeds bytes through preview->output()
      * (which g_idle_add's them onto the main thread's queue). NULL

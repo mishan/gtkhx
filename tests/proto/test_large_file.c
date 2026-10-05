@@ -106,7 +106,7 @@ test_send_xfersize64_alongside_legacy (void)
 
 /* ---------- recv side: DATA_XFERSIZE64 in file_get reply ---------- */
 
-/* Replicate the dh_start parse loop in rcv_task_file_get for the
+/* Replicate the parse of a file download's reply for the
  * XFERSIZE64 chunk. Confirm the 8-byte big-endian decoder produces
  * the right 64-bit value. */
 static void

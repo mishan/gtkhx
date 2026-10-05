@@ -8,45 +8,25 @@
 //!
 //! Everything the dialog needs is native Rust now: the two Hotline date stamps
 //! format through [`crate::hl_date::format_wire`] (no raw-bytes → C round-trip),
-//! and the Save button sends `hxrequest::files::set_info`'s FILE_SETINFO
-//! through the Rust send primitive. What stays on the C ABI is leaf glue: the
-//! active-connection accessor, the task table + `hlwrite_chunks`, and
+//! and the Save button sends FILE_SETINFO through `hxhandlers::send::files`.
+//! What stays on the C ABI is leaf glue: the active-connection accessor and
 //! `human_size`.
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr};
 
 use adw::prelude::*;
 use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use hxproto::build::HxChunk;
-
 use crate::ffi as cffi;
 use crate::tr::tr;
 
-// The text-encoding capability bit (hotline.h).
-const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
-
-/// `rcv_task_fn` — FILE_SETINFO registers a no-reply task (rcv fn NULL).
-type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
-
-// Native imports (real Rust crates, type-checked).
-use gtkhx_core::conn::hx_conn_has_cap;
-
 extern "C" {
-    // gtkhx_ui_bridge.c — the active connection + whether it's live.
-    fn gtkhx_active_htlc() -> *mut c_void;
-    fn gtkhx_active_connected() -> glib::ffi::gboolean;
-    // hxtask — register the (no-reply) task + send.
-    fn task_new(
-        htlc: *mut c_void,
-        rcv: Option<RcvTaskFn>,
-        ptr: *mut c_void,
-        data: *mut c_void,
-        str_: *const c_char,
-    ) -> *mut c_void;
-    fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: i32);
+    // session_registry.c — the connection a key names, if it is still open.
+    fn hx_session_with_serial(serial: u16) -> *mut c_void;
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    fn hx_conn_fd(htlc: *const c_void) -> c_int;
     // human_readable.c — fileutils-vintage byte-count string into `sizstr`,
     // returning a pointer into it (may be right-justified).
     fn human_size(sizstr: *mut c_char, size: u64) -> *mut c_char;
@@ -92,45 +72,31 @@ fn info_row(title: &str, value: &str) -> adw::ActionRow {
 }
 
 /// Send FILE_SETINFO for a rename + comment edit (was `set_name_comment`).
-/// `path` is the file's full path (used for the current basename + parent dir);
-/// `new_name` and `comments` are the dialog's editable fields.
-unsafe fn save_file_info(path: &str, new_name: &str, comments: &str) {
-    // The dialog can outlive the connection (left open across a disconnect).
-    // Bail before task_new — otherwise hlwrite_chunks no-ops on the dead fd but
-    // task_new still registers a phantom task. Matches the connected gate the
-    // other gtkhx-ui send paths (broadcast.rs) use.
-    if gtkhx_active_connected() == glib::ffi::GFALSE {
+/// `path` is the file's full path, as the server knows it; `rename` the name
+/// the user typed, when it changed; `comments` the dialog's comment.
+unsafe fn save_file_info(
+    conn: crate::dock::ConnKey,
+    path: &[u8],
+    rename: Option<&str>,
+    comments: &str,
+) {
+    // To the server the file is on, not the one in focus. The dialog can
+    // outlive that connection (left open across a disconnect or a closed tab).
+    let sess = hx_session_with_serial(conn);
+    if sess.is_null() {
         return;
     }
-    let htlc = gtkhx_active_htlc();
-    if htlc.is_null() {
+    let htlc = gtkhx_session_htlc(sess);
+    if htlc.is_null() || hx_conn_fd(htlc) == 0 {
         return;
     }
-    let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING) != glib::ffi::GFALSE;
-    let Some(req) = hxrequest::files::set_info(
-        path.as_bytes(),
-        new_name.as_bytes(),
-        Some(comments.as_bytes()),
-        utf8,
-    ) else {
-        return;
-    };
-    let label = crate::cs("set file info");
-    task_new(
-        htlc,
-        None,
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        label.as_ptr(),
-    );
-    req.with_hx_chunks(|chunks| {
-        hlwrite_chunks(htlc, req.opcode, 0, chunks.as_ptr(), chunks.len() as i32)
-    });
+    hxhandlers::send::files::set_info(htlc, path, rename, comments);
 }
 
-/// `void output_file_info(char *path, char *name, char *creator, char *type,
-/// char *comments, const guint8 *date_modify, const guint8 *date_create,
-/// guint64 size)` — present the File Info window.
+/// `void output_file_info(struct htlc_conn *htlc, char *path, char *name,
+/// char *creator, char *type, char *comments, const guint8 *date_modify,
+/// const guint8 *date_create, guint64 size)` — present the File Info window
+/// for a file on `htlc`.
 ///
 /// # Safety
 /// C-ABI signal handler on the main thread. `path` is an owned (`g_malloc`'d)
@@ -138,6 +104,7 @@ unsafe fn save_file_info(path: &str, new_name: &str, comments: &str) {
 /// duration of the call; `date_*` point at 8 wire bytes each (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn output_file_info(
+    htlc: *mut c_void,
     path: *mut c_char,
     name: *const c_char,
     creator: *const c_char,
@@ -148,14 +115,15 @@ pub unsafe extern "C" fn output_file_info(
     size: u64,
 ) {
     crate::ensure_gtk_init();
+    let conn = crate::dock::conn_key(htlc);
 
     // `path` ownership transfers here (the signal passes it as a raw pointer and
     // the receive handler doesn't free it on success). Copy it for the dialog's
     // lifetime and free the C buffer now.
-    let path_str = if path.is_null() {
-        String::new()
+    let path_bytes = if path.is_null() {
+        Vec::new()
     } else {
-        let s = CStr::from_ptr(path).to_string_lossy().into_owned();
+        let s = CStr::from_ptr(path).to_bytes().to_vec();
         glib::ffi::g_free(path as *mut c_void);
         s
     };
@@ -225,10 +193,11 @@ pub unsafe extern "C" fn output_file_info(
     let comments_for_save = comments_text.clone();
     savebtn.connect_clicked(move |_| {
         let new_name = name_for_save.text().to_string();
+        let rename = (new_name != name_str).then_some(new_name.as_str());
         let buf = comments_for_save.buffer();
         let (start, end) = buf.bounds();
         let comments = buf.text(&start, &end, false).to_string();
-        unsafe { save_file_info(&path_str, &new_name, &comments) };
+        unsafe { save_file_info(conn, &path_bytes, rename, &comments) };
     });
 
     // Esc-close accelerator (same C helper user_info.rs uses); present keeps the

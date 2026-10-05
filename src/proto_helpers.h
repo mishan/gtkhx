@@ -245,23 +245,6 @@ extern void hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len,
                               guint16 type, guint16 flags);
 
 /*
- * Result of parsing a HTLS_HDR_XFER_QUEUE message.
- *
- * Two chunks:
- *   HTLS_DATA_HTXF_REF — file-transfer reference (32-bit)
- *   HTLS_DATA_QUEUE    — queue position (32-bit; 0 means "ready,
- *                        you can start the transfer")
- *
- * Both default to 0 if the chunk is missing.
- */
-struct hx_xfer_queue_msg {
-    guint32 ref;
-    guint32 queueid;
-};
-extern gboolean hx_xfer_queue_extract (const guint8 *frame, gsize frame_len,
-                                       struct hx_xfer_queue_msg *out);
-
-/*
  * Result of parsing the HTLS_HDR_TASK reply that follows any
  * transfer-initiating client message: HTLC_HDR_FILE_GET,
  * HTLC_HDR_FILE_PUT, HTLC_HDR_FILE_GETFOLDER, HTLC_HDR_FILE

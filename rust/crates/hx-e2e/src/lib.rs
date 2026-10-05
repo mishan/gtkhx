@@ -73,8 +73,7 @@ impl<'c> Scratch<'c> {
 
 impl Drop for Scratch<'_> {
     fn drop(&mut self) {
-        let utf8 = self.client.utf8();
-        if let Some(req) = hxrequest::files::delete(self.path.as_bytes(), utf8) {
+        if let Some(req) = hxrequest::files::delete(self.path.as_bytes()) {
             // Best effort: a failed cleanup mustn't mask the test's own
             // failure, and a leftover folder is harmless to other tests.
             let _ = self.client.try_request(&req);

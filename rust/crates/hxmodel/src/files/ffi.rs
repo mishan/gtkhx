@@ -8,8 +8,7 @@ use core::ffi::c_char;
 // Opaque owned handle (same shape as hxproto's parse_dirlist /
 // parse_catlist). The C `HxRemoteFilesProvider` holds one and delegates all
 // path math + the sticky listing-error flag to it, keeping only the
-// GListStore, the FILE_LIST RPC send, the no-reply watchdog, and the
-// rcv-dispatch plumbing on the C side.
+// GListStore, the no-reply watchdog, and the reply plumbing on the C side.
 
 use crate::files::RemoteListing;
 
@@ -58,13 +57,11 @@ pub unsafe extern "C" fn gtkhx_files_listing_set_path(l: *mut RemoteListing, pat
         return;
     }
     let p = if path.is_null() {
-        String::new()
+        &[][..]
     } else {
-        core::ffi::CStr::from_ptr(path)
-            .to_string_lossy()
-            .into_owned()
+        core::ffi::CStr::from_ptr(path).to_bytes()
     };
-    (*l).set_path(&p);
+    (*l).set_path(p);
 }
 
 /// Return to the server root and clear the error flag.
@@ -121,16 +118,14 @@ pub unsafe extern "C" fn gtkhx_files_listing_child(
         return core::ptr::null_mut();
     }
     let n = if name.is_null() {
-        String::new()
+        &[][..]
     } else {
-        core::ffi::CStr::from_ptr(name)
-            .to_string_lossy()
-            .into_owned()
+        core::ffi::CStr::from_ptr(name).to_bytes()
     };
-    string_into_raw((*l).child(&n))
+    string_into_raw((*l).child(n))
 }
 
-/// TRUE iff the most recent FILE_LIST failed (task error or no-reply
+/// TRUE iff the most recent FILE_LIST failed (refused, or the no-reply
 /// watchdog).
 ///
 /// # Safety
@@ -167,7 +162,7 @@ pub unsafe extern "C" fn gtkhx_files_string_free(s: *mut c_char) {
 
 /// Allocate a C string from `s` for handoff to C. An interior NUL (not
 /// possible from path math, defensive) collapses to an empty string.
-fn string_into_raw(s: String) -> *mut c_char {
+fn string_into_raw(s: Vec<u8>) -> *mut c_char {
     std::ffi::CString::new(s)
         .unwrap_or_else(|_| std::ffi::CString::new("").unwrap())
         .into_raw()
