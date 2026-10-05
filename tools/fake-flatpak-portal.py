@@ -94,7 +94,8 @@ def serve():
             else:
                 later(4000, "Progress", progress(2, 100))
         elif name == "Spawn":
-            inv.return_value(GLib.Variant("(u)", (4242,)))
+            # Slow, as starting a new sandbox is, so repeated clicks overlap it.
+            GLib.timeout_add(1000, lambda: inv.return_value(GLib.Variant("(u)", (4242,))) or False)
         else:
             inv.return_value(None)
 

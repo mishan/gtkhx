@@ -74,6 +74,8 @@ struct Monitor {
     starting: bool,
     /// Counts what the monitor says, for [`watch_for_stall`].
     heard: u32,
+    /// Spawn has been asked for the new version and hasn't answered.
+    restarting: bool,
 }
 
 thread_local! {
@@ -91,7 +93,10 @@ pub(crate) fn banner() -> gtk::Widget {
     let banner = adw::Banner::new("");
     banner.set_revealed(false);
     banner.connect_button_clicked(on_button);
-    MONITOR.with_borrow_mut(|m| m.banner = Some(banner.clone()));
+    MONITOR.with_borrow_mut(|m| {
+        m.banner = Some(banner.clone());
+        m.state.dismissed = read_dismissed(&dismissed_path());
+    });
     refresh();
     banner.into()
 }
@@ -318,7 +323,11 @@ fn ask_to_update(banner: &adw::Banner) {
     dialog.connect_response(None, |_, response| match response {
         "update" => update_now(),
         _ => {
-            MONITOR.with_borrow_mut(|m| m.state.dismissed = m.state.remote.clone());
+            let remote = MONITOR.with_borrow_mut(|m| {
+                m.state.dismissed = m.state.remote.clone();
+                m.state.remote.clone()
+            });
+            write_dismissed(&dismissed_path(), &remote);
             render();
         }
     });
@@ -406,7 +415,13 @@ fn confirm_restart(banner: &adw::Banner) {
 /// waits for the portal to answer, so a start the portal refuses leaves
 /// GtkHx running.
 fn restart() {
-    let Some(conn) = MONITOR.with_borrow(|m| m.conn.clone()) else {
+    // GtkHx isn't a unique application, so a second click while the portal
+    // is still answering would start a second copy.
+    let Some(conn) = MONITOR.with_borrow_mut(|m| {
+        let conn = m.conn.clone().filter(|_| !m.restarting)?;
+        m.restarting = true;
+        Some(conn)
+    }) else {
         return;
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| "/".into());
@@ -446,6 +461,7 @@ fn restart() {
         match spawned {
             Ok(_) => unsafe { hx_quit() },
             Err(_) => {
+                MONITOR.with_borrow_mut(|m| m.restarting = false);
                 let msg = crate::cs(&tr("Couldn't restart GtkHx. Quit and start it again."));
                 unsafe { crate::ffi::toolbar_show_toast(msg.as_ptr()) };
             }
@@ -453,9 +469,39 @@ fn restart() {
     });
 }
 
+/// The remote commit the user answered "Later" to, kept across restarts.
+/// State rather than a setting, so it lives with the cache, not the config.
+fn dismissed_path() -> std::path::PathBuf {
+    glib::user_cache_dir().join("gtkhx").join("update-later")
+}
+
+fn read_dismissed(path: &std::path::Path) -> String {
+    std::fs::read_to_string(path)
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// Best effort: failing to remember means asking again next launch.
+fn write_dismissed(path: &std::path::Path, commit: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, commit);
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn later_survives_a_restart() {
+        let dir = std::env::temp_dir().join(format!("gtkhx-later-{}", std::process::id()));
+        let path = dir.join("gtkhx").join("update-later");
+        assert_eq!(read_dismissed(&path), "", "nothing dismissed yet");
+        write_dismissed(&path, "abc123");
+        assert_eq!(read_dismissed(&path), "abc123");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// Nothing has been heard from a portal, so there is nothing to show.
     pub(crate) fn check_banner_starts_hidden() {

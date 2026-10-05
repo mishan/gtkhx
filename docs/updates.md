@@ -68,7 +68,8 @@ the newest in the remote, and the banner says one of two things:
   the two apart.
 
 When both hold, the first wins: updating ends with a restart anyway. "Later"
-hides the notice until the remote has a newer commit still. There is no "Skip
+hides the notice until the remote has a newer commit still, across restarts:
+the commit is kept in `gtkhx/update-later` under the user cache directory. There is no "Skip
 this version" here; commits don't say which version they are. The decision
 from what the portal said to which banner is `hxupdate::flatpak::notice`.
 
