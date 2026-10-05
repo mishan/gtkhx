@@ -69,7 +69,7 @@ fn size_string(size: u64) -> String {
     if size == 0 {
         return String::new();
     }
-    let mut buf = [0i8; 64];
+    let mut buf = [0 as c_char; 64];
     let human = unsafe {
         let p = human_size(buf.as_mut_ptr(), size);
         CStr::from_ptr(p).to_string_lossy().into_owned()
