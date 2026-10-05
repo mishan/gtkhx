@@ -1,0 +1,12 @@
+[Flatpak Ref]
+Name=com.nasledov.gtkhx
+Branch=stable
+Title=GtkHx
+Url=https://dl.gtkhx.org/repo/
+SuggestRemoteName=gtkhx
+Homepage=https://www.gtkhx.org/
+Comment=Hotline client for chat and file sharing
+Icon=https://dl.gtkhx.org/gtkhx.png
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+IsRuntime=false
+GPGKey=@GPGKEY@

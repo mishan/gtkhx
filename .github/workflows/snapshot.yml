@@ -6,7 +6,8 @@
 # if you gave none.
 #
 # With "publish" ticked: the same files are also attached to a GitHub
-# pre-release tagged v<version>, created at this commit.
+# pre-release tagged v<version>, created at this commit, and its Flatpak goes
+# to the beta channel of dl.gtkhx.org (flatpak-dispatch.yml).
 #
 # The version is only required when publishing. An unpublished snapshot is a
 # throwaway build for one person to try, so making it name itself is friction
@@ -70,6 +71,13 @@ jobs:
         run: |
           v=$(printf '%s' "$INPUT_VERSION" | tr -d '[:space:]')
 
+          # The Flatpak dispatch only runs from main, and a pre-release it
+          # can't publish is better never made.
+          if [ "$PUBLISH" = "true" ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Publish from main; this run is on $GITHUB_REF."
+            exit 1
+          fi
+
           if [ "$PUBLISH" = "true" ] && [ -z "$v" ]; then
             echo "::error::Publishing needs a version — re-run and give one," \
                  "e.g. 1.3.3b1. (Leave publish unticked to just build.)"
@@ -89,11 +97,12 @@ jobs:
               v*) tag="$v" ;;
               *)  tag="v$v" ;;
             esac
-            # A published version must be one hxupdate can read; the same
-            # check as release.yml's, which a tag made here never triggers.
+            # A published version must be one hxupdate can read, and a beta
+            # or release candidate: its pre-release goes to the beta channel,
+            # which a plain version would send to stable.
             if [ "$PUBLISH" = "true" ] &&
-               ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+((b|rc)[0-9]+)?$'; then
-              echo "::error::a published version must look like 1.4.1, 1.4.1b1 or 1.4.1rc1 (got '$v')"
+               ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(b|rc)[0-9]+$'; then
+              echo "::error::a published version must look like 1.4.1b1 or 1.4.1rc1 (got '$v')"
               exit 1
             fi
           else
@@ -143,3 +152,12 @@ jobs:
           name: ${{ needs.version.outputs.version }}
           prerelease: true
           generate_release_notes: true
+
+  flatpak:
+    name: send to the Flatpak repository
+    if: inputs.publish && inputs.build_flatpak
+    needs: [version, publish]
+    permissions: {}
+    uses: ./.github/workflows/flatpak-dispatch.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}

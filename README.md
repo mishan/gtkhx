@@ -26,13 +26,15 @@ today.
 
 ## Get GtkHx
 
-Download the latest build for your platform from the
-[releases page](https://github.com/mishan/gtkhx/releases):
-
-- **Linux:** the `.flatpak` bundle. Install it with
-  `flatpak install --user GtkHx-*.flatpak`.
-- **macOS:** the `.zip` for Apple silicon (`arm64`) or Intel (`x86_64`).
-- **Windows:** the `win64` `.zip`.
+- **Linux:** install from GtkHx's Flatpak repository, which keeps it up to
+  date with the rest of your Flatpak apps:
+  `flatpak install --user https://dl.gtkhx.org/gtkhx.flatpakref`.
+  For betas, `gtkhx-beta.flatpakref`. If you installed a `.flatpak` bundle
+  from a release before, run `flatpak uninstall com.nasledov.gtkhx` first;
+  your settings stay.
+- **macOS:** the `.zip` for Apple silicon (`arm64`) or Intel (`x86_64`)
+  from the [releases page](https://github.com/mishan/gtkhx/releases).
+- **Windows:** the `win64` `.zip`, from the same page.
 
 Or build it yourself; see [Building](#building).
 

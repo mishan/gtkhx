@@ -32,8 +32,8 @@ nothing. Turning it off stops the check and hides the banner at once.
 ## How a build checks
 
 - **Flatpak** asks Flatpak, through the portal, whether its own installation
-  has an update. The repository behind it is `https://dl.gtkhx.org`. Nothing
-  else is contacted. See below.
+  has an update. The repository behind it is `https://dl.gtkhx.org`
+  ([flatpak-repo.md](flatpak-repo.md)). Nothing else is contacted. See below.
 - **Everything else** fetches `https://dl.gtkhx.org/updates.json` at most once
   a day. The request carries no information about the user or the servers
   they visit, and the comparison happens locally; the address it comes from
@@ -101,6 +101,10 @@ exercised without a Flatpak install; its header says how to run it under
 }
 ```
 
+Publishing a release rewrites it with `tools/update-feed.py`, which moves the
+release's channel and keeps the other. `downloads` names the release's Windows
+and macOS assets, and `flatpak` the channel's `.flatpakref`.
+
 Fields this version doesn't know are ignored, so the feed can grow without
 breaking builds already out there. A channel that doesn't parse reads as
 absent, so a mistake in one leaves the other working. A different `schema` is
@@ -145,4 +149,3 @@ version fields, which windres can't fill from `1.4.1b1`, and the macOS bundle's
   Flatpak the banner stays hidden, and so does the Settings switch.
 - Where the last check time is stored, and backing off after a failed fetch,
   arrive with the fetch.
-- `https://dl.gtkhx.org` is not live yet.

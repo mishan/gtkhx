@@ -2,7 +2,8 @@
 #
 #   * Windows   — portable ZIP (MSYS2 UCRT64, voice-enabled)
 #   * macOS     — .app bundle zipped, per arch (arm64 + x86_64, voice-enabled)
-#   * Linux     — Flatpak bundle (.flatpak) via the existing manifest
+#   * Linux     — Flatpak bundle (.flatpak) via the existing manifest, per arch
+#                 (x86_64 + aarch64); see docs/flatpak-repo.md for where it goes
 #
 # Reusable only — this has no trigger of its own. Two callers drive it:
 #
@@ -275,9 +276,17 @@ jobs:
   # Linux Flatpak bundle
   # ------------------------------------------------------------------
   linux-flatpak:
-    name: package (Linux Flatpak)
+    name: package (Linux Flatpak ${{ matrix.arch }})
     if: inputs.build_flatpak
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -322,10 +331,10 @@ jobs:
         env:
           VER: ${{ inputs.version }}
         run: |
-          mv gtkhx.flatpak "GtkHx-${VER}.flatpak"
+          mv gtkhx.flatpak "GtkHx-${VER}-${{ matrix.arch }}.flatpak"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gtkhx-flatpak
+          name: gtkhx-flatpak-${{ matrix.arch }}
           path: '*.flatpak'
           if-no-files-found: error

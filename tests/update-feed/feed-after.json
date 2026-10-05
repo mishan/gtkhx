@@ -1,0 +1,27 @@
+{
+  "channels": {
+    "beta": {
+      "date": "2026-10-20",
+      "downloads": {
+        "flatpak": "https://dl.gtkhx.org/gtkhx-beta.flatpakref",
+        "macos-arm64": "https://github.com/mishan/gtkhx/releases/download/v1.4.1/GtkHx-v1.4.1-macos-arm64.zip",
+        "macos-x86_64": "https://github.com/mishan/gtkhx/releases/download/v1.4.1/GtkHx-v1.4.1-macos-x86_64.zip",
+        "windows": "https://github.com/mishan/gtkhx/releases/download/v1.4.1/GtkHx-v1.4.1-win64.zip"
+      },
+      "notes_url": "https://github.com/mishan/gtkhx/releases/tag/v1.4.1",
+      "version": "1.4.1"
+    },
+    "stable": {
+      "date": "2026-10-20",
+      "downloads": {
+        "flatpak": "https://dl.gtkhx.org/gtkhx.flatpakref",
+        "macos-arm64": "https://github.com/mishan/gtkhx/releases/download/v1.4.1/GtkHx-v1.4.1-macos-arm64.zip",
+        "macos-x86_64": "https://github.com/mishan/gtkhx/releases/download/v1.4.1/GtkHx-v1.4.1-macos-x86_64.zip",
+        "windows": "https://github.com/mishan/gtkhx/releases/download/v1.4.1/GtkHx-v1.4.1-win64.zip"
+      },
+      "notes_url": "https://github.com/mishan/gtkhx/releases/tag/v1.4.1",
+      "version": "1.4.1"
+    }
+  },
+  "schema": 1
+}

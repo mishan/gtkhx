@@ -39,8 +39,11 @@ points GTK/GStreamer at the bundled Resources before exec'ing the real binary.
 
 ## Linux — Flatpak
 
-`tools/build-flatpak-bundle.sh` (unchanged) builds `gtkhx.flatpak` from
+`tools/build-flatpak-bundle.sh` builds `gtkhx.flatpak` from
 `com.nasledov.gtkhx.yml`. The runtime is pulled from Flathub on install.
+CI builds one per architecture (x86_64, aarch64), and a published release's
+bundles are what the repository at dl.gtkhx.org signs and serves; see
+[docs/flatpak-repo.md](../docs/flatpak-repo.md).
 
 ## Version and update notices
 

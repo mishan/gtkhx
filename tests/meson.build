@@ -110,6 +110,10 @@ test_byte_swap = executable('test_byte_swap',
 test('byte_swap', test_byte_swap,
      suite : 'unit')
 
+test('update_feed', find_program('python3'),
+     args  : files('unit/update_feed_test.py'),
+     suite : 'unit')
+
 # proto_names — proto_hdr_name / proto_data_name from proto_trace.c
 # map opcode integers to the symbolic names we print in [proto]
 # traces. Compile proto_trace.c and debug.c in directly (debug is

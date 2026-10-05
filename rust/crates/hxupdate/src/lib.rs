@@ -289,6 +289,14 @@ mod tests {
     }
 
     #[test]
+    fn feed_reads_what_the_publish_writes() {
+        let bytes = include_bytes!("../../../../tests/update-feed/feed-after.json");
+        let channels = parse_feed(bytes).expect("parse").channels;
+        assert_eq!(channels.stable.expect("stable").version, "1.4.1");
+        assert_eq!(channels.beta.expect("beta").version, "1.4.1");
+    }
+
+    #[test]
     fn feed_rejects_what_it_cannot_trust() {
         let big = vec![b' '; MAX_FEED_BYTES + 1];
         assert!(matches!(parse_feed(&big), Err(FeedError::TooLarge)));

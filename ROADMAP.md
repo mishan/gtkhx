@@ -40,7 +40,7 @@ extension is allowed to degrade the legacy path.
 | **Protocol** | 1.2 / 1.5 / 1.9 compatible. Connect, HOPE negotiation and the ciphers (Blowfish OFB-64, ChaCha20-Poly1305 AEAD) all run in Rust. RC4 retired. Compression (GZIP, LZ4, ZSTD) is negotiated when the user picks it. |
 | **Transport security** | TLS on a dedicated port, TOFU trust with fingerprint pinning. [docs/tls.md](docs/tls.md) |
 | **Extensions** | Voice chat, video chat and screen sharing, inline media, GIF icons, chat history, colored nicknames, emoji shortcodes, tracker v3. |
-| **Platforms** | Linux, macOS, Windows. Flatpak manifest + AppStream metadata are Flathub-ready. |
+| **Platforms** | Linux, macOS, Windows. The Flatpak, for x86_64 and aarch64, is signed and served from GtkHx's own repository at dl.gtkhx.org, with stable and beta channels; it updates like any other Flatpak app. [docs/flatpak-repo.md](docs/flatpak-repo.md) |
 | **Testing** | Three tiers — unit, wire-fixture, and end-to-end integration against a Docker rig. Static analysis and sanitizers run in CI. |
 
 The GTK climb (1.2 → 2 → 3 → 4), the build-system replacement, the crypto rewrite, the
@@ -112,12 +112,11 @@ There is no shortcuts window. At minimum the keyboard shortcuts need to be disco
 several are not guessable, and some function-key bindings in the file browser get stolen by
 the desktop compositor, which a shortcuts window could at least explain.
 
-### Publish to Flathub
+### Flatpak repository
 
-The manifest, AppStream metadata and desktop file are validated at test time, and the
-screenshots the metainfo names are generated reproducibly by `tools/screenshots.sh`
-(see [docs/screenshots.md](docs/screenshots.md)). What's left: swap the local `dir`
-source for a tagged git source.
+Releases publish themselves to dl.gtkhx.org. What's left: the metainfo's screenshot URLs
+follow `main`, so a software center shows today's screenshots beside an older release.
+Pin them to the release tag.
 
 Inside the sandbox, video can share a screen but finds no camera; see
 [BACKLOG.md](BACKLOG.md).
