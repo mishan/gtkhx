@@ -1,5 +1,5 @@
 //! The connection the app opens: `hxnet`'s callback entry point, which runs
-//! the session with chat and users handled and hands its events to
+//! the session with chat, users and messages handled and hands its events to
 //! `on_session` on the GLib main loop, as `hxnet_bridge.c` receives them.
 //! What the bridge then does with an event is `hxhandlers`', tested on its
 //! own; this suite stops at the callback, which is as far as a binary
@@ -28,12 +28,17 @@ const WAIT: Duration = Duration::from_secs(15);
 thread_local! {
     static READY: Cell<bool> = const { Cell::new(false) };
     static HEARD: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+    static NICK: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 unsafe extern "C" fn on_event(c: *mut HxnetConnection, f: *mut HxnetFrame, _u: *mut c_void) {
-    // An agreement is agreed to, as a user would.
+    // An agreement is agreed to, as a user would, under the name the
+    // login gave.
     if (*f).type_ == 0x6d {
-        hxnet_connection_agree(c, b"cb".as_ptr(), 2, 414);
+        NICK.with(|n| {
+            let n = n.borrow();
+            hxnet_connection_agree(c, n.as_ptr(), n.len(), 414);
+        });
     }
     hxnet_frame_free(f);
 }
@@ -91,6 +96,7 @@ fn session_events_through_the_callback(s: &'static Server) {
         READY.with(|r| r.set(false));
         HEARD.with(|h| h.borrow_mut().clear());
         let nick = unique_name("cb");
+        NICK.with(|n| *n.borrow_mut() = nick.clone());
         // SAFETY: every pointer handed over is valid for the call, and the
         // callbacks for the connection's life.
         let h = unsafe {
@@ -136,11 +142,26 @@ fn session_events_through_the_callback(s: &'static Server) {
         });
         assert!(!users.is_empty(), "{}: not even us in the list", s.name);
 
-        let mut other = Client::guest(s, CAP_TEXT_ENCODING);
+        // hlservd's guest may not send messages; its admin may.
+        let mut other = Client::admin(s, CAP_TEXT_ENCODING);
         let line = format!("{nick} through the callback");
         other.send(&request(105, &[(tag::BODY, line.as_bytes())]));
         until(&ctx, "the chat line", |e| match e {
             Event::Chat { text, .. } if text.contains(&line) => Some(()),
+            _ => None,
+        });
+
+        let me = users
+            .iter()
+            .find(|u| u.name == nick)
+            .unwrap_or_else(|| panic!("{}: {nick} not in {users:?}", s.name))
+            .uid;
+        other.send(&request(
+            108,
+            &[(tag::UID, &me.to_be_bytes()), (tag::BODY, line.as_bytes())],
+        ));
+        until(&ctx, "the message", |e| match e {
+            Event::Message { text, .. } if *text == line => Some(()),
             _ => None,
         });
 
@@ -179,7 +200,7 @@ fn session_events_through_the_callback(s: &'static Server) {
 }
 
 #[test]
-fn the_app_s_connection_hands_chat_and_users_to_on_session() {
+fn the_app_s_connection_hands_chat_users_and_messages_to_on_session() {
     for s in servers_with(&[]) {
         session_events_through_the_callback(s);
     }

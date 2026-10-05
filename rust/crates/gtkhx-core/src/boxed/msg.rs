@@ -72,6 +72,42 @@ pub unsafe extern "C" fn hx_msg_event_free(e: *mut HxMsgEvent) {
     g_free(e as *mut c_void);
 }
 
+/// A heap `HxMsgEvent` for a private message the session decoded, freed by
+/// [`hx_msg_event_free`]. With `shortcodes`, `:shortcode:`s in the body
+/// become their emoji; the name stays as sent. `self_nick` is the name this
+/// connection goes by, which marks the message as its own when the sender
+/// is exactly that. Each text ends at its first NUL, as C reads it.
+pub fn msg_event_new(
+    uid: u16,
+    name: &str,
+    body: &str,
+    self_nick: &[u8],
+    shortcodes: bool,
+) -> *mut HxMsgEvent {
+    let name = name.split('\0').next().unwrap_or_default();
+    let body = body.split('\0').next().unwrap_or_default();
+    let decoded;
+    let body = if shortcodes {
+        decoded = hxproto::emoji::shortcodes_to_emoji(body);
+        decoded.as_str()
+    } else {
+        body
+    };
+    // SAFETY: the allocation is zeroed and sized for the struct, and both
+    // strings stored in it are fresh glib copies.
+    unsafe {
+        let e = g_malloc0(size_of::<HxMsgEvent>()) as *mut HxMsgEvent;
+        (*e).uid = uid;
+        (*e).name = g_strndup(name.as_ptr().cast(), name.len());
+        (*e).name_len = name.len();
+        (*e).body = g_strndup(body.as_ptr().cast(), body.len());
+        (*e).body_len = body.len();
+        (*e).is_self = i32::from(!self_nick.is_empty() && name.as_bytes() == self_nick);
+        (*e).is_broadcast = i32::from(uid == 0);
+        e
+    }
+}
+
 /// `GBoxedCopyFunc`-shaped shim: matches `unsafe extern "C" fn(gpointer)
 /// -> gpointer` exactly and delegates to the typed [`hx_msg_event_copy`],
 /// so the boxed-type registration needs no `transmute` (which would
@@ -157,6 +193,76 @@ mod tests {
             hx_msg_event_free(a);
             assert_eq!(cstr((*b).name, (*b).name_len), "alice");
             hx_msg_event_free(b);
+        }
+    }
+
+    #[test]
+    fn a_new_event_marks_our_own_and_decodes_shortcodes_only_in_the_body() {
+        // (uid, name, body, our nick, shortcodes) → (name, body, is_self, is_broadcast)
+        let cases = [
+            (
+                (42, "alice", "hey", "", true),
+                ("alice", "hey", false, false),
+            ),
+            (
+                (7, "misha", "hi", "misha", true),
+                ("misha", "hi", true, false),
+            ),
+            (
+                (7, "misha", "hi", "mish", true),
+                ("misha", "hi", false, false),
+            ),
+            (
+                (7, "mish", "hi", "misha", true),
+                ("mish", "hi", false, false),
+            ),
+            (
+                (0, "Server", "back", "", true),
+                ("Server", "back", false, true),
+            ),
+            (
+                (7, ":tada:", ":tada:", "", true),
+                (":tada:", "🎉", false, false),
+            ),
+            (
+                (7, "bob", ":tada:", "", false),
+                ("bob", ":tada:", false, false),
+            ),
+            (
+                (7, "bob", "one\0two", "", true),
+                ("bob", "one", false, false),
+            ),
+        ];
+        for ((uid, name, body, own, shortcodes), want) in cases {
+            unsafe {
+                let e = msg_event_new(uid, name, body, own.as_bytes(), shortcodes);
+                let got = (
+                    cstr((*e).name, (*e).name_len),
+                    cstr((*e).body, (*e).body_len),
+                    (*e).is_self != 0,
+                    (*e).is_broadcast != 0,
+                );
+                assert_eq!((*e).uid, uid);
+                assert_eq!(
+                    got,
+                    (want.0.into(), want.1.into(), want.2, want.3),
+                    "{name:?} {body:?}"
+                );
+                hx_msg_event_free(e);
+            }
+        }
+    }
+
+    #[test]
+    fn a_mac_roman_name_is_ours_only_once_decoded() {
+        // Our nick is held as UTF-8; a classic server sends it as Mac Roman.
+        let wire = b"Ren\x8E";
+        assert_ne!(&wire[..], "René".as_bytes());
+        let name = hxproto::text::to_utf8(wire);
+        unsafe {
+            let e = msg_event_new(7, &name, "hi", "René".as_bytes(), false);
+            assert_eq!((*e).is_self, 1);
+            hx_msg_event_free(e);
         }
     }
 

@@ -133,8 +133,8 @@ The decode pass deliberately does **not** live in the general inbound
 sanitiser — that function also handles server names, file names, and
 news metadata, and a filename like `report:final:v2` must not get
 mangled. It is scoped to chat and private-message bodies, applied in the
-event constructors: `chat_event_new` in `gtkhx-core` (boxed/chat.rs) and
-`hx_msg_event_new` in `src/proto_helpers.c`.
+event constructors in `gtkhx-core`: `chat_event_new` (boxed/chat.rs) and
+`msg_event_new` (boxed/msg.rs).
 
 **The chat decode runs over the whole line**, before the nick split,
 with the split then run on the decoded text so

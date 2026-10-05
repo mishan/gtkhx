@@ -1,117 +1,246 @@
-//! Private-message receive path (ported from `rcv.c`).
+//! Messages: what the session made of a private message, a broadcast, or
+//! the server's parting words, on its way to the view.
 //!
-//! `hx_rcv_msg` handles both the private `MSG` and the server-wide
-//! `MSG_BROADCAST` opcode: it drops anything from an ignored sender, then either
-//! emits the boxed `msg` signal (a private message) or hands off to
-//! `broadcastmsg` (a broadcast). This crate owns the shared ignore-gate + the
-//! private-message emit — the testable decisions — while the C handler keeps the
-//! wire parse, the self-PM display-name resolution, the boxed `HxMsgEvent`
-//! lifetime, and the broadcast rendering (`broadcastmsg`, a view function).
-//!
-//! The C side classifies the frame (broadcast vs private) and, for a private
-//! message, builds the event before calling in; [`hx_msg_recv`] returns which
-//! branch to take so C can run `broadcastmsg` itself and preserve the
-//! ignored-message early-out.
+//! The session (hx-libs' `hxsession`, driven by `hxnet`) reads them off the
+//! wire and decodes their text; what is left here is whom the user ignores,
+//! what the roster knows of a sender the message leaves unnamed, and the
+//! `GtkhxSession` signal each one becomes.
 
-use std::os::raw::{c_int, c_void};
+use std::borrow::Cow;
+use std::ffi::CStr;
+use std::os::raw::c_void;
+
+use gtkhx_core::boxed::msg::msg_event_new;
+use hxmodel::chat_members::HxMemberInfo;
+
+use super::chat::{c_text, public_members};
 
 #[cfg(not(test))]
-use gtkhx_core::session::{gtkhx_session_emit_msg, gtkhx_session_get_default};
+use gtkhx_core::boxed::msg::hx_msg_event_free;
 #[cfg(not(test))]
-use hxmodel::chat_members::hx_member_model_get_ignore;
+use gtkhx_core::conn::{hx_conn_name, hx_conn_uid};
+#[cfg(not(test))]
+use gtkhx_core::session::{
+    gtkhx_session_emit_broadcast, gtkhx_session_emit_msg, gtkhx_session_get_default,
+};
+#[cfg(not(test))]
+use hxmodel::chat_members::{hx_member_model_get_ignore, hx_member_model_get_info};
+#[cfg(not(test))]
+use hxtext::gtkhx_text_emoji_shortcodes_enabled;
 
-/// Outcome of [`hx_msg_recv`], telling the C handler what happened / what to do.
-/// The sender was on the ignore list — nothing emitted, nothing broadcast, and
-/// the C side returns early (no `last_msg_nick` update).
-pub const HX_MSG_DROPPED: c_int = 0;
-/// A private message: the boxed `msg` signal was emitted.
-pub const HX_MSG_EMITTED: c_int = 1;
-/// A broadcast (or a bare server note): the C side runs `broadcastmsg`.
-pub const HX_MSG_BROADCAST: c_int = 2;
+/// Who `uid` is in the public chat, where everyone is, unless ignored:
+/// `None` drops what they sent. uid 0 is the server, whom no one ignores.
+unsafe fn heard(htlc: *mut c_void, uid: u16) -> Option<Option<HxMemberInfo>> {
+    let members = public_members(htlc);
+    if members.is_null() || hx_member_model_get_ignore(members, uid) != 0 {
+        return None;
+    }
+    let mut info = std::mem::zeroed::<HxMemberInfo>();
+    Some((hx_member_model_get_info(members, uid, &mut info) != 0).then_some(info))
+}
 
-/// `int hx_msg_recv (htlc, member_model, uid, is_pm, event)` — the MSG / MSG_BROADCAST
-/// ignore-gate + private-message emit. Drops the message when `uid` is ignored
-/// ([`HX_MSG_DROPPED`]); otherwise emits the boxed `msg` signal for a private
-/// message ([`HX_MSG_EMITTED`]) or reports [`HX_MSG_BROADCAST`] so the C side
-/// renders it via `broadcastmsg`.
-///
-/// `is_pm` is the C-side classification (`!is_broadcast && uid > 0`). `event` is
-/// the boxed `HxMsgEvent*` the C side built for the private-message branch (NULL
-/// on the broadcast branch); the C side keeps its lifetime and frees it after
-/// this returns.
+/// A private message: dropped when its sender is ignored, and otherwise the
+/// `msg` signal. A server can leave the sender's name out (mhxd, on a
+/// message to ourselves); it is ours for our own uid, else the roster's, so
+/// the window has a name and our own echo reads as ours.
 ///
 /// # Safety
-/// `htlc` is the connection the message arrived on — it is what makes the
-/// event's uid resolvable, since a uid is only unique within a connection.
-/// `member_model` is a valid `HxMemberModel *`; `event` is a valid boxed
-/// `HxMsgEvent *` when `is_pm` is set (else unused).
-#[no_mangle]
-pub unsafe extern "C" fn hx_msg_recv(
-    htlc: *mut c_void,
-    member_model: *mut c_void,
-    uid: u16,
-    is_pm: c_int,
-    event: *mut c_void,
-) -> c_int {
-    // The ignore list is keyed on uid; uid 0 (a server/system note) is never in
-    // it, so this also lets bare broadcasts through — same as the C original.
-    if hx_member_model_get_ignore(member_model, uid) != 0 {
-        return HX_MSG_DROPPED;
-    }
-    if is_pm != 0 {
-        // Contract: the C side always builds the boxed HxMsgEvent for the
-        // private-message branch. A NULL here is a caller bug — emitting it would
-        // set a NULL boxed value and crash a downstream `msg` handler — so flag
-        // it loudly in dev and drop it safely in release rather than propagate.
-        debug_assert!(!event.is_null(), "hx_msg_recv: is_pm set but event is NULL");
-        if event.is_null() {
-            return HX_MSG_DROPPED;
-        }
-        gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, event);
-        return HX_MSG_EMITTED;
-    }
-    HX_MSG_BROADCAST
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn message(htlc: *mut c_void, uid: u16, from: &str, text: &str) {
+    let Some(sender) = heard(htlc, uid) else {
+        return;
+    };
+    let own = hx_conn_name(htlc.cast());
+    let own = if own.is_null() {
+        &[][..]
+    } else {
+        CStr::from_ptr(own).to_bytes()
+    };
+    let from = match sender {
+        _ if !from.is_empty() => Cow::Borrowed(from),
+        _ if uid == hx_conn_uid(htlc.cast()) && !own.is_empty() => String::from_utf8_lossy(own),
+        Some(s) => Cow::Owned(
+            CStr::from_ptr(s.name.as_ptr())
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        None => Cow::Borrowed(""),
+    };
+    let shortcodes = gtkhx_text_emoji_shortcodes_enabled() != 0;
+    let ev = msg_event_new(uid, &from, text, own, shortcodes);
+    gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, ev.cast());
+    hx_msg_event_free(ev);
+}
+
+/// A broadcast: dropped when its sender is ignored, and otherwise the
+/// `broadcast` signal, with the sender's name when the server gave one and
+/// their status from the roster.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn broadcast(htlc: *mut c_void, uid: u16, from: &str, text: &str) {
+    let Some(sender) = heard(htlc, uid) else {
+        return;
+    };
+    let status = sender.map_or(0, |s| u32::from(s.status));
+    let name = (!from.is_empty()).then(|| c_text(from));
+    gtkhx_session_emit_broadcast(
+        gtkhx_session_get_default(),
+        htlc,
+        name.as_ref().map_or(std::ptr::null(), |n| n.as_ptr()),
+        status,
+        c_text(text).as_ptr(),
+        false,
+    );
+}
+
+/// The server's parting words before it hangs up: the `broadcast` signal,
+/// marked as parting.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn parting(htlc: *mut c_void, text: &str) {
+    gtkhx_session_emit_broadcast(
+        gtkhx_session_get_default(),
+        htlc,
+        std::ptr::null(),
+        0,
+        c_text(text).as_ptr(),
+        true,
+    );
 }
 
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
 pub(crate) mod test_env {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+
+    /// A signal as the doubles record it.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Emitted {
+        Msg {
+            htlc: usize,
+            uid: u16,
+            name: String,
+            body: String,
+            is_self: bool,
+        },
+        Broadcast {
+            name: Option<String>,
+            status: u32,
+            text: String,
+            parting: bool,
+        },
+    }
 
     thread_local! {
-        /// Configurable return for the stubbed ignore lookup.
         pub static IGNORE: Cell<bool> = const { Cell::new(false) };
-        /// Records the boxed-event pointer of the last emitted `msg`, or None.
-        pub static EMITTED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
-        /// The connection the last emit carried. Recorded because the uid in
-        /// the event is only unique within a connection, so the pairing is
-        /// the part worth asserting.
-        pub static EMITTED_HTLC: Cell<*mut std::os::raw::c_void> =
-            const { Cell::new(std::ptr::null_mut()) };
+        /// The roster's entry for any uid asked about: (name, status).
+        pub static MEMBER: RefCell<Option<(String, u16)>> = const { RefCell::new(None) };
+        pub static OWN_UID: Cell<u16> = const { Cell::new(0) };
+        pub static OWN_NAME: RefCell<String> = const { RefCell::new(String::new()) };
+        pub static EMITTED: RefCell<Vec<Emitted>> = const { RefCell::new(Vec::new()) };
     }
 
     pub fn reset() {
         IGNORE.with(|c| c.set(false));
-        EMITTED.with(|c| c.set(None));
-        EMITTED_HTLC.with(|c| c.set(std::ptr::null_mut()));
+        MEMBER.with(|c| c.borrow_mut().take());
+        OWN_UID.with(|c| c.set(0));
+        OWN_NAME.with(|c| c.borrow_mut().clear());
+        EMITTED.with(|c| c.borrow_mut().clear());
+    }
+
+    pub fn emitted() -> Vec<Emitted> {
+        EMITTED.with(|c| std::mem::take(&mut *c.borrow_mut()))
     }
 }
 
 #[cfg(test)]
-unsafe fn gtkhx_session_get_default() -> *mut c_void {
-    std::ptr::null_mut()
-}
+use doubles::*;
 
 #[cfg(test)]
-unsafe fn gtkhx_session_emit_msg(_self_: *mut c_void, htlc: *mut c_void, event: *mut c_void) {
-    test_env::EMITTED.with(|c| c.set(Some(event)));
-    test_env::EMITTED_HTLC.with(|c| c.set(htlc));
-}
+mod doubles {
+    use super::test_env::{self, Emitted};
+    use gtkhx_core::boxed::msg::HxMsgEvent;
+    use hxmodel::chat_members::HxMemberInfo;
+    use std::ffi::CStr;
+    use std::os::raw::{c_char, c_int, c_void};
 
-#[cfg(test)]
-unsafe fn hx_member_model_get_ignore(_model: *mut c_void, _uid: u16) -> c_int {
-    c_int::from(test_env::IGNORE.with(|c| c.get()))
+    unsafe fn text(p: *const c_char) -> String {
+        CStr::from_ptr(p).to_string_lossy().into_owned()
+    }
+
+    pub unsafe fn gtkhx_session_get_default() -> *mut c_void {
+        std::ptr::null_mut()
+    }
+    pub unsafe fn gtkhx_session_emit_msg(_s: *mut c_void, h: *mut c_void, ev: *mut c_void) {
+        let e = &*(ev as *const HxMsgEvent);
+        test_env::EMITTED.with(|c| {
+            c.borrow_mut().push(Emitted::Msg {
+                htlc: h as usize,
+                uid: e.uid,
+                name: text(e.name),
+                body: text(e.body),
+                is_self: e.is_self != 0,
+            })
+        });
+    }
+    pub unsafe fn gtkhx_session_emit_broadcast(
+        _s: *mut c_void,
+        _h: *mut c_void,
+        name: *const c_char,
+        status: u32,
+        body: *const c_char,
+        parting: bool,
+    ) {
+        test_env::EMITTED.with(|c| {
+            c.borrow_mut().push(Emitted::Broadcast {
+                name: (!name.is_null()).then(|| text(name)),
+                status,
+                text: text(body),
+                parting,
+            })
+        });
+    }
+    pub unsafe fn hx_msg_event_free(e: *mut HxMsgEvent) {
+        gtkhx_core::boxed::msg::hx_msg_event_free(e)
+    }
+    pub unsafe fn hx_member_model_get_ignore(_m: *mut c_void, _uid: u16) -> c_int {
+        c_int::from(test_env::IGNORE.with(|c| c.get()))
+    }
+    pub unsafe fn hx_member_model_get_info(
+        _m: *mut c_void,
+        uid: u16,
+        out: *mut HxMemberInfo,
+    ) -> c_int {
+        let Some((name, status)) = test_env::MEMBER.with(|c| c.borrow().clone()) else {
+            return 0;
+        };
+        (*out).uid = uid;
+        (*out).status = status;
+        for (i, b) in name.bytes().enumerate() {
+            (*out).name[i] = b as c_char;
+        }
+        (*out).name[name.len()] = 0;
+        1
+    }
+    pub unsafe fn hx_conn_uid(_h: *const c_void) -> u16 {
+        test_env::OWN_UID.with(|c| c.get())
+    }
+    pub unsafe fn hx_conn_name(_h: *const c_void) -> *const c_char {
+        thread_local! {
+            static HELD: std::cell::RefCell<std::ffi::CString> = std::cell::RefCell::default();
+        }
+        let s = test_env::OWN_NAME.with(|c| c.borrow().clone());
+        HELD.with(|h| {
+            *h.borrow_mut() = std::ffi::CString::new(s).unwrap();
+            h.borrow().as_ptr()
+        })
+    }
+    pub fn gtkhx_text_emoji_shortcodes_enabled() -> glib::ffi::gboolean {
+        glib::ffi::GTRUE
+    }
 }
 
 #[cfg(test)]

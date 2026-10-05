@@ -71,6 +71,11 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             users,
             subject,
         } => user::joined(htlc, *trans, *cid, users, subject.as_deref()),
+        Event::Message {
+            uid, from, text, ..
+        } => msg::message(htlc, *uid, from, text),
+        Event::Broadcast { uid, from, text } => msg::broadcast(htlc, *uid, from, text),
+        Event::Disconnecting(text) => msg::parting(htlc, text),
         Event::Failed { trans, reason } => {
             user::failed(htlc, *trans);
             chat::failed(htlc, *trans, reason.as_deref());

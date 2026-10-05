@@ -1,76 +1,97 @@
-//! Headless routing tests for the private-message receive handler, driven
-//! through the `test_env` recording doubles for the member-model / emit C ABIs.
+//! What a private message, a broadcast and the server's parting words become,
+//! driven through the `test_env` recording doubles.
 
+use super::test_env::{self, Emitted};
 use super::*;
 
-/// A sentinel boxed-event pointer (never dereferenced by the crate).
-fn fake_event() -> *mut std::os::raw::c_void {
-    0x5A5A_usize as *mut std::os::raw::c_void
+/// A sentinel connection pointer (never dereferenced).
+const HTLC: usize = 0xC0DE;
+
+fn htlc() -> *mut c_void {
+    HTLC as *mut c_void
 }
 
-/// A sentinel connection pointer (never dereferenced by the crate).
-fn fake_htlc() -> *mut std::os::raw::c_void {
-    0xC0DE_usize as *mut std::os::raw::c_void
-}
-
-fn recv(uid: u16, is_pm: bool, event: *mut std::os::raw::c_void) -> c_int {
-    unsafe {
-        hx_msg_recv(
-            fake_htlc(),
-            std::ptr::null_mut(),
-            uid,
-            c_int::from(is_pm),
-            event,
-        )
+fn msg(uid: u16, name: &str, body: &str, is_self: bool) -> Emitted {
+    Emitted::Msg {
+        htlc: HTLC,
+        uid,
+        name: name.into(),
+        body: body.into(),
+        is_self,
     }
 }
 
+/// The emit carries the connection: a uid is only unique within one, so a
+/// message without it lands in another server's window.
 #[test]
-fn private_message_emits() {
+fn a_message_is_the_msg_signal_on_its_connection() {
     test_env::reset();
-    test_env::IGNORE.with(|c| c.set(false));
-    assert_eq!(recv(42, /*is_pm=*/ true, fake_event()), HX_MSG_EMITTED);
-    assert_eq!(test_env::EMITTED.with(|c| c.take()), Some(fake_event()));
+    test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
+    unsafe {
+        message(htlc(), 42, "alice", "hi :tada:");
+        message(htlc(), 7, "misha", "echo");
+    }
+    assert_eq!(
+        test_env::emitted(),
+        [
+            msg(42, "alice", "hi 🎉", false),
+            msg(7, "misha", "echo", true)
+        ]
+    );
 }
 
 #[test]
-fn ignored_private_message_is_dropped() {
+fn a_message_the_server_left_unnamed_is_named_for_its_sender() {
+    test_env::reset();
+    test_env::OWN_UID.with(|c| c.set(7));
+    test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
+    test_env::MEMBER.with(|c| *c.borrow_mut() = Some(("bob".into(), 0)));
+    unsafe {
+        message(htlc(), 7, "", "to myself");
+        message(htlc(), 5, "", "from bob");
+    }
+    assert_eq!(
+        test_env::emitted(),
+        [
+            msg(7, "misha", "to myself", true),
+            msg(5, "bob", "from bob", false)
+        ]
+    );
+}
+
+#[test]
+fn a_broadcast_carries_its_sender_and_the_sender_s_status() {
+    test_env::reset();
+    test_env::MEMBER.with(|c| *c.borrow_mut() = Some(("admin".into(), 2)));
+    unsafe {
+        broadcast(htlc(), 5, "admin", "Rebooting");
+        test_env::MEMBER.with(|c| c.borrow_mut().take());
+        broadcast(htlc(), 0, "", "Rebooting");
+        parting(htlc(), "Bye.");
+    }
+    let b = |name: Option<&str>, status, text: &str, parting| Emitted::Broadcast {
+        name: name.map(Into::into),
+        status,
+        text: text.into(),
+        parting,
+    };
+    assert_eq!(
+        test_env::emitted(),
+        [
+            b(Some("admin"), 2, "Rebooting", false),
+            b(None, 0, "Rebooting", false),
+            b(None, 0, "Bye.", true),
+        ]
+    );
+}
+
+#[test]
+fn what_an_ignored_user_sends_is_dropped() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(true));
-    assert_eq!(recv(42, /*is_pm=*/ true, fake_event()), HX_MSG_DROPPED);
-    assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
-}
-
-#[test]
-fn broadcast_reports_broadcast_without_emitting() {
-    test_env::reset();
-    test_env::IGNORE.with(|c| c.set(false));
-    // Broadcast branch: no boxed event, C renders it via broadcastmsg.
-    assert_eq!(
-        recv(7, /*is_pm=*/ false, std::ptr::null_mut()),
-        HX_MSG_BROADCAST
-    );
-    assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
-}
-
-#[test]
-fn ignored_broadcast_is_dropped() {
-    test_env::reset();
-    test_env::IGNORE.with(|c| c.set(true));
-    assert_eq!(
-        recv(7, /*is_pm=*/ false, std::ptr::null_mut()),
-        HX_MSG_DROPPED
-    );
-    assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
-}
-
-/// The emit has to carry the connection, not just the event. A uid is only
-/// unique within a connection, so an event that arrives without one cannot be
-/// resolved to a conversation — server B's user 5 is indistinguishable from
-/// server A's, and the private message lands in the wrong window.
-#[test]
-fn the_emit_carries_the_connection() {
-    test_env::reset();
-    assert_eq!(recv(5, /*is_pm=*/ true, fake_event()), HX_MSG_EMITTED);
-    assert_eq!(test_env::EMITTED_HTLC.with(|c| c.get()), fake_htlc());
+    unsafe {
+        message(htlc(), 42, "alice", "hi");
+        broadcast(htlc(), 42, "alice", "hi");
+    }
+    assert_eq!(test_env::emitted(), []);
 }

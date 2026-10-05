@@ -291,9 +291,6 @@ COMMAND (msg)
             return;
         }
     }
-    strncpy (last_msg_nick, name, 31);
-    last_msg_nick[31] = 0;
-
     struct hx_member_info mi;
     if (hx_member_model_get_info (hx_chat_member_model (chat), uid, &mi)) {
         hx_printf (htlc, 0, "[%s(%u)]-> %s", mi.name, uid, msg);
@@ -301,7 +298,7 @@ COMMAND (msg)
         hx_printf (htlc, 0, "[(%u)]-> %s", uid, msg);
     }
 
-    hx_send_msg (htlc, uid, msg, strlen (msg), NULL);
+    hx_send_msg (htlc, uid, msg);
 }
 
 COMMAND (me)

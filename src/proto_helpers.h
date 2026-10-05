@@ -71,30 +71,6 @@ extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len);
 
 /*
- * Result of parsing a HTLS_HDR_MSG (private message) frame.
- *
- * The handler in rcv.c reads three chunks:
- *   HTLS_DATA_UID   — sender UID (0 = server broadcast)
- *   HTLS_DATA_NAME  — sender display name (max 128 bytes;
- *                     strip_ansi-sanitised)
- *   HTLS_DATA_MSG   — message body (max 8192 bytes; CR→LF +
- *                     strip_ansi-sanitised)
- *
- * Both `name` and `msg` are NUL-terminated. Lengths are bytes
- * (excluding the NUL).
- */
-struct hx_msg_msg {
-    guint16 uid;
-    char name[128 + 1];
-    guint16 name_len;
-    char msg[8192 + 1];
-    guint16 msg_len;
-};
-
-extern gboolean hx_msg_extract (const guint8 *frame, gsize frame_len,
-                                struct hx_msg_msg *out);
-
-/*
  * HTLS_HDR_BANNER — extract the banner type (4 bytes) and optional
  * URL from the message. Server protocol shape (per mhxd's
  * rcv_agreementagree):
@@ -582,10 +558,9 @@ extern const HxChatMedia *hx_media_table_lookup (void *table, guint token);
  * HxMsgEvent — a parsed private-message value object.
  *
  * Same architectural move as HxChatEvent, applied to HTLS_HDR_MSG.
- * The wire side gives us uid + name + body as three separate
- * chunks (no formatted-line parse needed); the constructor just
- * UTF-8-sanitises the strings and stamps the is_self / is_broadcast
- * flags so consumers don't redo the work.
+ * The session gives us uid + name + body already decoded; the Rust
+ * constructor (gtkhx-core boxed::msg) stamps the is_self /
+ * is_broadcast flags so consumers don't redo the work.
  *
  * Consumers:
  *
@@ -599,9 +574,8 @@ extern const HxChatMedia *hx_media_table_lookup (void *table, guint token);
  *     window for that uid is focused.
  *
  * `name` and `body` are NUL-terminated and owned by the event.
- * is_broadcast is true only when uid == 0; the rcv.c path
- * currently routes those to msg.c::broadcastmsg directly, not
- * through the msg signal, so consumers will see is_broadcast =
+ * is_broadcast is true only when uid == 0; broadcasts take the
+ * broadcast signal instead, so consumers will see is_broadcast =
  * FALSE in practice — the flag stays in the struct for future
  * uniformity. */
 typedef struct _HxMsgEvent HxMsgEvent;
@@ -618,12 +592,6 @@ struct _HxMsgEvent {
 #define HX_TYPE_MSG_EVENT (hx_msg_event_get_type ())
 extern GType hx_msg_event_get_type (void) G_GNUC_CONST;
 
-/* Build an HxMsgEvent. `name` / `body` may carry any encoding the
- * wire delivered (Mac Roman, Latin-1, UTF-8); they get run through
- * gtkhx_text_to_utf8 once. `self_nick` is NULL-safe. */
-extern HxMsgEvent *hx_msg_event_new (guint16 uid, const char *name,
-                                     gsize name_len, const char *body,
-                                     gsize body_len, const char *self_nick);
 extern HxMsgEvent *hx_msg_event_copy (HxMsgEvent *e);
 extern void hx_msg_event_free (HxMsgEvent *e);
 

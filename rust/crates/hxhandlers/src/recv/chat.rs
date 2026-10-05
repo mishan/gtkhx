@@ -110,7 +110,7 @@ unsafe fn debug_trace(cat: &std::ffi::CStr, line: String) {
 
 /// The public chat's member model, where everyone is, for the ignore list;
 /// NULL when the session has no public chat.
-unsafe fn public_members(htlc: *mut c_void) -> *mut c_void {
+pub(crate) unsafe fn public_members(htlc: *mut c_void) -> *mut c_void {
     let chat = chat_with_cid(hx_conn_sess(htlc.cast()), 0);
     if chat.is_null() {
         return std::ptr::null_mut();

@@ -74,7 +74,7 @@ unsafe fn cstr_bytes<'a>(s: *const c_char) -> &'a [u8] {
 /// when CAP_TEXT_ENCODING was negotiated, else Mac Roman (`?` fallback), LF→CR
 /// when `is_body`. Runs the encoded bytes through `f`, then g_free's the
 /// buffer. `f` must not retain the slice past its own return.
-unsafe fn with_wire<R>(
+pub(super) unsafe fn with_wire<R>(
     htlc: *mut c_void,
     text: *const c_char,
     is_body: glib::ffi::gboolean,

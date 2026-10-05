@@ -40,7 +40,6 @@
 #include "files_remote_provider.h"
 #include "preview.h"
 #include "gtkutil.h"
-#include "msg.h"
 #include "news.h"
 #include "users.h"
 #include "usermod.h"
@@ -128,110 +127,6 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
      * computation as the old g_ntohl(h->flag) & 1, with bounds
      * checking on a short buffer. */
     return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
-}
-
-/* Private-message ignore-gate + msg emit — Rust hxhandlers::recv::msg module. hx_msg_recv
- * returns HX_MSG_DROPPED (ignored), HX_MSG_EMITTED (private message, boxed msg
- * signal fired), or HX_MSG_BROADCAST (C renders it via broadcastmsg). */
-#define HX_MSG_DROPPED 0
-#define HX_MSG_EMITTED 1
-#define HX_MSG_BROADCAST 2
-extern int hx_msg_recv (struct htlc_conn *htlc, void *member_model, guint16 uid,
-                        int is_pm, void *event);
-
-void
-hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_msg_msg pm;
-    session *sess = sess_from_htlc (htlc);
-    struct chat *chat = chat_with_cid (sess, 0);
-    guint32 hdr_type = 0;
-    gboolean is_broadcast;
-
-    /* Chunk parse + name/body sanitisation lives in proto_helpers.c
-     * so the Tier 2 unit tests can drive it. */
-    if (!hx_msg_extract (frame, frame_len, &pm)) {
-        return;
-    }
-
-    /* Sender snapshot from the authoritative member model — used to fill
-     * a missing display name (self-PM path) and the broadcast colour. */
-    struct hx_member_info sender;
-    gboolean have_sender = hx_member_model_get_info (
-        hx_chat_member_model (chat), pm.uid, &sender);
-
-    /* Dispatch on the wire opcode, not on pm.uid. mhxd echoes
-     * broadcasts back with the sender's UID populated (so the
-     * client can render "broadcast from <name>" if it wants),
-     * which means a UID-only check would mis-route every broadcast
-     * on mhxd-family servers into the private-message handler.
-     * The header type is the authoritative signal. */
-    hl_hdr_decode (frame, &hdr_type, NULL, NULL, NULL, NULL, NULL);
-    is_broadcast = (hdr_type == HTLS_HDR_MSG_BROADCAST);
-    gboolean is_pm = !is_broadcast && pm.uid > 0;
-
-    /* For a private message, build the boxed HxMsgEvent here — it needs the
-     * self-PM display-name resolution + hx_conn_name (htlc). The broadcast branch has no
-     * boxed event. The Rust hxhandlers::recv::msg module owns the shared ignore-gate + the
-     * PM emit; it returns which branch so we run broadcastmsg + preserve the
-     * ignored-message early-out (no last_msg_nick update). */
-    HxMsgEvent *ev = NULL;
-    if (is_pm) {
-        /* Some servers (mhxd on a self-directed PM) deliver the message
-         * with the sender UID but an empty NAME chunk, which rendered as
-         * "<> body" and — because HxMsgEvent's is_self test is name-based —
-         * mis-coloured the self-echo as incoming. Resolve a display name
-         * from the uid when the wire omits it: our own nick for a self-PM,
-         * else the sender's user-list entry. With the name filled in, the
-         * is_self classification inside hx_msg_event_new also works. */
-        const char *disp_name = pm.name;
-        gsize disp_name_len = pm.name_len;
-        if (disp_name_len == 0) {
-            if (pm.uid == hx_conn_uid (htlc) && hx_conn_name (htlc)[0]) {
-                disp_name = hx_conn_name (htlc);
-                disp_name_len = strlen (hx_conn_name (htlc));
-            } else if (have_sender && sender.name[0]) {
-                disp_name = sender.name;
-                disp_name_len = strlen (sender.name);
-            }
-        }
-        /* msg signal payload is a boxed HxMsgEvent
-         * (parsed once; every subscriber sees the same
-         * UTF-8-sanitised, self-classified view). */
-        ev = hx_msg_event_new (
-            pm.uid, disp_name, disp_name_len, pm.msg, pm.msg_len,
-            hx_conn_name (htlc)[0] ? hx_conn_name (htlc) : NULL);
-    }
-
-    int r = hx_msg_recv (htlc, hx_chat_member_model (chat), pm.uid, is_pm, ev);
-    if (ev) {
-        hx_msg_event_free (ev);
-    }
-    if (r == HX_MSG_DROPPED) {
-        return;
-    }
-    if (r == HX_MSG_BROADCAST) {
-        /* Broadcasts on mhxd-family servers carry the sender's UID
-         * + NAME so the client can render "[name] body" with the
-         * sender's color. Pull the color from the cached user
-         * struct keyed on UID; pm.name is the wire-supplied name
-         * (UTF-8-sanitised by hx_msg_extract). When neither is
-         * present (older servers, server-generated rate-limit
-         * notes), broadcastmsg falls back to the legacy
-         * "[hx] broadcast: …" chat line. */
-        const char *sender_name = pm.name_len > 0 ? pm.name : NULL;
-        guint16 sender_color = have_sender ? sender.status : 0;
-        broadcastmsg (sender_name, sender_color, pm.msg);
-    }
-    /* MSG chime: the sound_events subscriber plays it off the "msg"
-     * signal (private-message branch). The broadcast branch has no "msg"
-     * signal, so broadcastmsg() plays MSG itself to preserve the chime
-     * that used to fire here for both branches. */
-
-    if (!*last_msg_nick) {
-        strncpy (last_msg_nick, pm.name, 31);
-        last_msg_nick[31] = 0;
-    }
 }
 
 /* An agreement with text is shown; the session has answered any other. */
@@ -997,9 +892,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 {
     void (*handler) (struct htlc_conn *, const guint8 *, gsize) = NULL;
     switch (hx_recv_route (type)) {
-    case HX_RECV_MSG:
-        handler = hx_rcv_msg;
-        break;
     case HX_RECV_NEWS_POST:
         handler = hx_rcv_news_post;
         break;
@@ -1014,10 +906,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         break;
     case HX_RECV_BANNER:
         handler = hx_rcv_banner;
-        break;
-    case HX_RECV_POLITEQUIT:
-        hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("polite quit\n"));
-        handler = hx_rcv_msg;
         break;
     case HX_RECV_XFER_QUEUE:
         handler = hx_rcv_xfer_queue;
@@ -1079,16 +967,6 @@ rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
         uespfn->fn (uespfn->uesp, name, login, pass, access);
     }
     g_free (uespfn);
-}
-
-void
-rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-              char *msg_buf)
-{
-    if (msg_buf) {
-        hx_printf (htlc, 0, "%s\n", msg_buf);
-        g_free (msg_buf);
-    }
 }
 
 /* rcv_task_newscat_list moved to the hxhandlers::recv::news Rust crate — it parses the

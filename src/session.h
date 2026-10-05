@@ -371,7 +371,6 @@ sess_from_htlc (struct htlc_conn *htlc)
  */
 extern session *hx_active_session (void);
 
-extern char last_msg_nick[32];
 /* INFOPREFIX's extern decl moved to gtkhx_log.h so non-widget
  * callers (Tier 2 test stubs) can resolve it without dragging in
  * this header's GTK surface. */
