@@ -338,10 +338,20 @@ mod tests {
     /// Run `ctx` until `done`, or fail after a generous wait.
     fn run_until(ctx: &glib::MainContext, done: impl Fn() -> bool) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        // Wakes the blocking iteration to check the deadline if the listing
+        // never comes.
+        let tick = glib::timeout_source_new(
+            std::time::Duration::from_millis(100),
+            None,
+            glib::Priority::DEFAULT,
+            || glib::ControlFlow::Continue,
+        );
+        tick.attach(Some(ctx));
         while !done() {
             assert!(std::time::Instant::now() < deadline, "listing never landed");
             ctx.iteration(true);
         }
+        tick.destroy();
     }
 
     #[test]
