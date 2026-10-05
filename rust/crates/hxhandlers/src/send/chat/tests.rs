@@ -1,9 +1,9 @@
 //! Send-path unit tests for the chat wire-out senders. The native
 //! `hxproto::build` chat builders run for real; the C send-path
-//! primitives — the text encoder, the chat-model/caps bridge, the task table,
-//! and the write primitive — are stubbed here (recording what the wrapper
-//! handed to `hlwrite_chunks` / `task_new`) so the cargo-test build needs no
-//! hxtext / chat_send_bridge / tasks.c / network.c / rcv.c.
+//! primitives — the text encoder, the chat-model/caps bridge, and the write
+//! primitive — are stubbed here (recording what the wrapper handed to
+//! `hlwrite_chunks`) so the cargo-test build needs no hxtext /
+//! chat_send_bridge / network.c.
 
 use super::*;
 use std::cell::{Cell, RefCell};
@@ -24,20 +24,11 @@ struct Sent {
     chunks: Vec<(u16, Vec<u8>)>,
 }
 
-/// One captured `task_new` call: whether an rcv handler was attached, the
-/// opaque ptr arg, and the label.
-struct Task {
-    has_rcv: bool,
-    ptr: usize,
-    label: String,
-}
-
 thread_local! {
     static CAP: Cell<bool> = const { Cell::new(false) };
     // Chat lookup: None → NULL (unknown); Some(p) → that opaque ptr.
     static LOOKUP: Cell<usize> = const { Cell::new(0) };
     static LAST_SEND: RefCell<Option<Sent>> = const { RefCell::new(None) };
-    static LAST_TASK: RefCell<Option<Task>> = const { RefCell::new(None) };
 }
 
 // ---- C send-path stubs (lib.rs imports these under cfg(test)) -------
@@ -78,16 +69,6 @@ pub(crate) unsafe extern "C" fn hx_chat_lookup(_htlc: *mut c_void, _cid: u32) ->
     LOOKUP.with(|c| c.get()) as *mut c_void
 }
 
-pub(crate) unsafe extern "C" fn hx_chat_lookup_or_create(
-    _htlc: *mut c_void,
-    _cid: u32,
-) -> *mut c_void {
-    // Emulate "seed if missing": non-NULL sentinel so JOIN always has a chat.
-    let v = LOOKUP.with(|c| c.get());
-    let v = if v == 0 { 0xC4A7 } else { v };
-    v as *mut c_void
-}
-
 pub(crate) unsafe extern "C" fn hlwrite_chunks(
     _htlc: *mut c_void,
     ty: u32,
@@ -108,59 +89,16 @@ pub(crate) unsafe extern "C" fn hlwrite_chunks(
     LAST_SEND.with(|s| *s.borrow_mut() = Some(Sent { ty, chunks: v }));
 }
 
-pub(crate) unsafe extern "C" fn task_new(
-    _htlc: *mut c_void,
-    rcv: Option<RcvTaskFn>,
-    ptr: *mut c_void,
-    _data: *mut c_void,
-    str_: *const c_char,
-) -> *mut c_void {
-    let label = std::ffi::CStr::from_ptr(str_)
-        .to_string_lossy()
-        .into_owned();
-    LAST_TASK.with(|t| {
-        *t.borrow_mut() = Some(Task {
-            has_rcv: rcv.is_some(),
-            ptr: ptr as usize,
-            label,
-        })
-    });
-    std::ptr::null_mut()
-}
-
-pub(crate) unsafe extern "C" fn hx_rcv_user_change(
-    _h: *mut c_void,
-    _frame: *const c_void,
-    _frame_len: usize,
-    _p: *mut c_void,
-    _d: *mut c_void,
-) {
-}
-
-pub(crate) unsafe extern "C" fn rcv_task_user_list_switch(
-    _h: *mut c_void,
-    _frame: *const c_void,
-    _frame_len: usize,
-    _p: *mut c_void,
-    _d: *mut c_void,
-) {
-}
-
 // ---- helpers --------------------------------------------------------
 
 fn reset(cap: bool, lookup: usize) {
     CAP.with(|c| c.set(cap));
     LOOKUP.with(|c| c.set(lookup));
     LAST_SEND.with(|s| *s.borrow_mut() = None);
-    LAST_TASK.with(|t| *t.borrow_mut() = None);
 }
 
 fn last() -> Option<Sent> {
     LAST_SEND.with(|s| s.borrow_mut().take())
-}
-
-fn last_task() -> Option<Task> {
-    LAST_TASK.with(|t| t.borrow_mut().take())
 }
 
 /// A non-NULL opaque htlc token (the stubs ignore its contents).
@@ -188,7 +126,6 @@ fn send_chat_public_omits_chat_id() {
     assert_eq!(s.chunks[1].0, TAG_BODY);
     assert_eq!(s.chunks[1].1, b"hello");
     // No reply task for a chat line.
-    assert!(last_task().is_none());
 }
 
 #[test]
@@ -206,17 +143,30 @@ fn send_chat_private_appends_chat_id_and_style() {
 }
 
 #[test]
-fn chat_user_creates_and_registers_task() {
+fn create_and_join_say_their_replies_are_expected() {
     reset(true, 0);
+    crate::send::expected::take();
     unsafe { hx_chat_user(htlc(), 0x0102) };
     let s = last().unwrap();
     assert_eq!(s.ty, HTLC_HDR_CHAT_CREATE);
-    assert_eq!(s.chunks.len(), 1);
-    assert_eq!(s.chunks[0].0, TAG_UID);
-    assert_eq!(s.chunks[0].1, vec![0x01, 0x02]); // uid BE
-    let t = last_task().expect("CHAT_CREATE registers a task");
-    assert!(t.has_rcv); // hx_rcv_user_change
-    assert_eq!(t.label, "chat");
+    assert_eq!(s.chunks, [(TAG_UID, vec![0x01, 0x02])]);
+
+    // Whether or not the chat is known: a join makes none before its reply.
+    for lookup in [0, 0xBEEF] {
+        reset(true, lookup);
+        unsafe { hx_chat_join(htlc(), 5) };
+        let s = last().unwrap();
+        assert_eq!(s.ty, HTLC_HDR_CHAT_JOIN);
+        assert_eq!(s.chunks, [(TAG_CHAT_ID, vec![0, 0, 0, 5])]);
+    }
+    assert_eq!(
+        crate::send::expected::take(),
+        [
+            (1, hxsession::Expect::ChatCreate),
+            (2, hxsession::Expect::ChatJoin { cid: 5 }),
+            (3, hxsession::Expect::ChatJoin { cid: 5 }),
+        ]
+    );
 }
 
 #[test]
@@ -235,7 +185,6 @@ fn invite_says_its_reply_is_expected_before_it_goes() {
         crate::send::expected::take(),
         [(1, hxsession::Expect::ChatInvite)]
     );
-    assert!(last_task().is_none());
 }
 
 #[test]
@@ -254,35 +203,6 @@ fn null_htlc_is_no_op() {
         hx_change_subject(std::ptr::null_mut(), 1, subj.as_ptr());
     }
     assert!(last().is_none());
-    assert!(last_task().is_none());
-}
-
-#[test]
-fn join_passes_chat_ptr_to_task() {
-    // Pre-registered chat: the lookup returns this ptr, JOIN carries it.
-    reset(true, 0xBEEF);
-    unsafe { hx_chat_join(htlc(), 5) };
-    let s = last().unwrap();
-    assert_eq!(s.ty, HTLC_HDR_CHAT_JOIN);
-    assert_eq!(s.chunks.len(), 1);
-    assert_eq!(s.chunks[0].0, TAG_CHAT_ID);
-    assert_eq!(s.chunks[0].1, vec![0, 0, 0, 5]);
-    let t = last_task().expect("CHAT_JOIN registers a user-list-switch task");
-    assert!(t.has_rcv); // rcv_task_user_list_switch
-    assert_eq!(t.ptr, 0xBEEF); // the chat pointer
-    assert_eq!(t.label, "join");
-}
-
-#[test]
-fn join_seeds_chat_when_unknown() {
-    // Unknown cid: lookup_or_create seeds one (non-NULL) and JOIN still fires.
-    reset(true, 0);
-    unsafe { hx_chat_join(htlc(), 5) };
-    let s = last().unwrap();
-    assert_eq!(s.ty, HTLC_HDR_CHAT_JOIN);
-    let t = last_task().unwrap();
-    assert!(t.has_rcv);
-    assert_ne!(t.ptr, 0); // seeded, not NULL
 }
 
 #[test]
@@ -301,7 +221,6 @@ fn part_sends_chat_id_when_known() {
     assert_eq!(s.chunks.len(), 1);
     assert_eq!(s.chunks[0].0, TAG_CHAT_ID);
     assert_eq!(s.chunks[0].1, vec![0, 0, 0, 0x33]);
-    assert!(last_task().is_none()); // PART has no task
 }
 
 #[test]
@@ -313,7 +232,6 @@ fn reject_sends_chat_id_no_task_no_lookup() {
     assert_eq!(s.chunks.len(), 1);
     assert_eq!(s.chunks[0].0, TAG_CHAT_ID);
     assert_eq!(s.chunks[0].1, vec![0, 0, 0, 0x44]);
-    assert!(last_task().is_none()); // DECLINE has no task
 }
 
 #[test]
@@ -335,7 +253,6 @@ fn change_subject_emits_chat_id_and_subject() {
     assert_eq!(s.chunks[0].1, vec![0, 0, 0, 1]);
     assert_eq!(s.chunks[1].0, TAG_CHAT_SUBJECT);
     assert_eq!(s.chunks[1].1, b"Lobby");
-    assert!(last_task().is_none());
 }
 
 #[test]

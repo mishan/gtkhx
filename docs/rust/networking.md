@@ -28,10 +28,11 @@ into the bridge, everything below happens in Rust:
   the agreement and the two-second wait for one, a 1.2 server's user
   change — and the actor in `session.rs` is its I/O. It runs the session
   in raw mode, because GtkHx still has receive handlers of its own, with
-  the session handling chat itself (`Handled::CHAT`): what it makes of a
-  chat line, an invitation, a subject, or a history reply reaches the
-  main thread as `Event::Session`, on the channel the frames take, so the
-  two arrive in the order the server sent them. Every other transaction
+  the session handling chat and users itself (`Handled::CHAT`,
+  `Handled::USERS`): what it makes of a chat line, an invitation, a
+  subject, a history reply, or a user arriving, changing or leaving
+  reaches the main thread as `Event::Session`, on the channel the frames
+  take, so the two arrive in the order the server sent them. Every other transaction
   reaches C whole, and what C sends goes out as C built it. See "The
   session", below.
 - **HOPE**, the secure login, is the session's too
@@ -78,9 +79,11 @@ server that gave no version, which is a 1.5 server keeping that to itself.
 Every reply reaches C, the session's own included — a refused agree or
 login is dispatched and reported as any refused request is — but those C
 said to expect (`Session::expect`, through `connection_expect`): a
-chat-history request and a chat invitation. Their replies are the
-session's to read, and come back as its events, a refusal as `Failed`,
-which is shown and heard as any refused request is. What arrives is
+chat-history request, a chat invitation, the user list, and creating and
+joining a private chat. Their replies are the session's to read, and come
+back as its events, a refusal as `Failed`, which is shown and heard as
+any refused request is. None of them is a task, so none shows in the
+Tasks list; a joined private chat is made when its reply arrives. What arrives is
 traced from the session's tap (`Session::set_tap`, on under
 `GTKHX_DEBUG=proto`): each transaction as it came, before the session
 acts on it and in plaintext under HOPE, through `proto_trace.c` on the

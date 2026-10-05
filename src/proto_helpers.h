@@ -392,7 +392,7 @@ extern gboolean hx_user_change_extract (const guint8 *frame, gsize frame_len,
                                         struct hx_user_change_msg *out);
 
 /*
- * Pure decision layer for hx_rcv_user_change: given a parsed USER_CHANGE and
+ * Pure decision layer for a user change: given a parsed USER_CHANGE and
  * the *existing* member state (from the per-chat HxMemberModel), decide what
  * the handler should do, with no side effects. The handler applies the plan
  * (emit create/change, adopt self uid, print the rename notice, mirror onto

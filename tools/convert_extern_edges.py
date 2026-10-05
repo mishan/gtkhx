@@ -30,12 +30,7 @@ CYCLIC: set = set()
 # typed #[repr(C)] mirror (ROADMAP R5.1), so the two crates describe the same
 # memory with different Rust types on purpose. The C boundary is what lets both
 # views coexist; importing would just move the cast to every call site.
-#
-# hx_rcv_user_change is one of those rcv_task_* callbacks: hxhandlers::send::chat hands it
-# to task_new already cast to the 3-arg shape, so importing its real (wider)
-# signature just moves the cast.
-SKIP_SYMS = {'task_new', 'hx_rcv_user_change',
-             'hx_tracker_v3_meta_copy', 'hx_tracker_v3_meta_free'}
+SKIP_SYMS = {'task_new', 'hx_tracker_v3_meta_copy', 'hx_tracker_v3_meta_free'}
 
 # One level of paren nesting, so `#[cfg(not(test))]` is captured whole.
 BLOCK = re.compile(r'((?:#\[cfg\((?:[^()]|\([^()]*\))*\)\]\n)?)extern\s+"C"\s*\{([\s\S]*?)\n\}')

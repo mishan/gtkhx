@@ -36,8 +36,8 @@ pub struct HxUserChangePlan {
 /// `void hx_user_change_plan_resolve (const struct hx_user_change_msg *uc,
 /// gboolean old_exists, guint16 old_status, guint32 old_nick_color,
 /// const char *old_name, guint16 self_uid, const char *self_name,
-/// struct hx_user_change_plan *out)` — the C ABI `hx_rcv_user_change` +
-/// `test_user_change.c` call. Marshals the `#[repr(C)]` structs into
+/// struct hx_user_change_plan *out)` — the C ABI `test_user_change.c`
+/// calls. Marshals the `#[repr(C)]` structs into
 /// `hxproto::user_change::resolve`.
 ///
 /// A NULL `out` is a no-op; a NULL `uc` leaves `*out` fully zeroed (a safe

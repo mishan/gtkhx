@@ -12,6 +12,7 @@ pub mod chat;
 pub mod chat_history;
 pub mod files;
 pub mod news;
+pub mod user;
 
 #[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_bridge_handle;

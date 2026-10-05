@@ -213,11 +213,9 @@ test_remove_runs_destroy_notify (void)
 
 /* ---- 5. Empty user list: destroy notify still works ---------------- */
 
-/* The error-recovery path in rcv.c::rcv_task_user_list_switch
- * calls chat_delete on a chat that was just created and has no
- * users yet (user_list == user_tail == &__user_list, __user_list.next
- * is NULL). The destroy notify must handle that without
- * dereferencing past the end. */
+/* A chat deleted before any user is in it (user_list == user_tail ==
+ * &__user_list, __user_list.next is NULL): the destroy notify must
+ * handle that without dereferencing past the end. */
 static void
 test_destroy_empty_chat (void)
 {

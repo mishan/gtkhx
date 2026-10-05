@@ -19,9 +19,8 @@
 //!
 //! What stays C behind the FFI seam is the send-path *infrastructure*, not the
 //! protocol: the text encoder (`gtkhx_text_for_wire`, hxtext), the per-htlc
-//! cap + chat-model lookups (`chat_send_bridge.c`), the task table (`task_new`
-//! and the `hx_rcv_user_change` / `rcv_task_user_list_switch` reply handlers,
-//! rcv.c), and the write primitive (`hlwrite_chunks`, network.c).
+//! cap + chat-model lookups (`chat_send_bridge.c`), and the write primitive
+//! (`hlwrite_chunks`, network.c).
 
 use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
@@ -39,14 +38,6 @@ const HTLC_HDR_CHAT_PART: u32 = ClientHdr::ChatPart as u32;
 const HTLC_HDR_CHAT_SUBJECT: u32 = ClientHdr::ChatSubject as u32;
 const HTLC_HDR_CHAT_DECLINE: u32 = ClientHdr::ChatDecline as u32;
 
-/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores —
-/// `(htlc, frame, frame_len, ptr, data)`. `hx_rcv_task` hands the registered
-/// callback the received frame as a `(frame, frame_len)` slice ahead of the
-/// task `ptr` / `data`. `hx_rcv_user_change` is a primary handler
-/// `(htlc, frame, frame_len)` reused here as a reply handler — it reads the
-/// first three args in both calling conventions and ignores `ptr` / `data`.
-type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void);
-
 // Real build: these resolve at the final C link. Test build: the `use
 // tests::{…}` below shadows them with recording stubs, so the extern
 // declarations are gated off to avoid a name clash.
@@ -58,45 +49,17 @@ extern "C" {
     // chat_send_bridge.c — per-htlc cap + chat-model lookups.
     fn hx_htlc_text_encoding_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
     fn hx_chat_lookup(htlc: *mut c_void, cid: u32) -> *mut c_void;
-    fn hx_chat_lookup_or_create(htlc: *mut c_void, cid: u32) -> *mut c_void;
 
-    // tasks.c / network.c — the send-path primitives. hlwrite_chunks takes the
-    // native HxChunk (repr(C), layout-pinned identical to C's struct hx_chunk).
-    fn task_new(
-        htlc: *mut c_void,
-        rcv: Option<RcvTaskFn>,
-        ptr: *mut c_void,
-        data: *mut c_void,
-        str_: *const c_char,
-    ) -> *mut c_void;
+    // network.c — the send primitive. hlwrite_chunks takes the native HxChunk
+    // (repr(C), layout-pinned identical to C's struct hx_chunk).
     fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
-
-    // rcv.c — reply-task handlers. Declared with the 3-arg RcvTaskFn shape (see
-    // the typedef note); the linker resolves the real symbols.
-    fn hx_rcv_user_change(
-        htlc: *mut c_void,
-        frame: *const c_void,
-        frame_len: usize,
-        ptr: *mut c_void,
-        data: *mut c_void,
-    );
-    fn rcv_task_user_list_switch(
-        htlc: *mut c_void,
-        frame: *const c_void,
-        frame_len: usize,
-        ptr: *mut c_void,
-        data: *mut c_void,
-    );
 }
 
 // The C send-path primitives are stubbed under cfg(test) (see tests.rs), so the
-// cargo-test build resolves without linking hxtext / chat_send_bridge / tasks /
-// network / rcv.
+// cargo-test build resolves without linking hxtext / chat_send_bridge /
+// network.
 #[cfg(test)]
-use tests::{
-    gtkhx_text_for_wire, hlwrite_chunks, hx_chat_lookup, hx_chat_lookup_or_create,
-    hx_htlc_text_encoding_cap, hx_rcv_user_change, rcv_task_user_list_switch, task_new,
-};
+use tests::{gtkhx_text_for_wire, hlwrite_chunks, hx_chat_lookup, hx_htlc_text_encoding_cap};
 
 /// A NUL-terminated C string's bytes (without the NUL), or empty for NULL.
 unsafe fn cstr_bytes<'a>(s: *const c_char) -> &'a [u8] {
@@ -149,8 +112,8 @@ pub unsafe extern "C" fn hx_send_chat(
     cid: u32,
     style: u16,
 ) {
-    // task_new / hlwrite_chunks dereference htlc on the C side (htlc->trans,
-    // htlc->fd); a NULL would crash there. Guard here — every sender does.
+    // hlwrite_chunks dereferences htlc (htlc->trans, htlc->fd); a NULL would
+    // crash there. Guard here — every sender does.
     if htlc.is_null() {
         return;
     }
@@ -170,7 +133,8 @@ pub unsafe extern "C" fn hx_send_chat(
 }
 
 /// `void hx_chat_user(struct htlc_conn *htlc, guint16 uid)` — open a private
-/// chat with `uid` (CHAT_CREATE; reply drives `hx_rcv_user_change`).
+/// chat with `uid` (CHAT_CREATE). Its reply comes back as the session's
+/// `ChatCreated`.
 ///
 /// # Safety
 /// `htlc` is NULL or a valid `htlc_conn *`; main thread only.
@@ -183,15 +147,7 @@ pub unsafe extern "C" fn hx_chat_user(htlc: *mut c_void, uid: u16) {
     let mut scratch = [0u8; 2];
     let hc = build::build_chat_create_chunks(uid, &mut chunks, &mut scratch);
     if hc > 0 {
-        // Build BEFORE task_new: a builder reject must not leave a phantom
-        // task with no on-wire request (see the C original's comment).
-        task_new(
-            htlc,
-            Some(hx_rcv_user_change),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            c"chat".as_ptr(),
-        );
+        super::expect_next(htlc, hxsession::Expect::ChatCreate);
         hlwrite_chunks(htlc, HTLC_HDR_CHAT_CREATE, 0, chunks.as_ptr(), hc as c_int);
     }
 }
@@ -217,7 +173,9 @@ pub unsafe extern "C" fn hx_invite_user(htlc: *mut c_void, uid: u16, cid: u32) {
 }
 
 /// `void hx_chat_join(struct htlc_conn *htlc, guint32 cid)` — join chat `cid`
-/// (CHAT_JOIN; reply drives `rcv_task_user_list_switch` with the chat ptr).
+/// (CHAT_JOIN). Its reply comes back as the session's `ChatJoined`, which
+/// makes the chat; a refused join leaves none behind. Sent even for a chat
+/// we already have: creating one with ourselves invites us to it.
 ///
 /// # Safety
 /// See `hx_chat_user`.
@@ -226,23 +184,12 @@ pub unsafe extern "C" fn hx_chat_join(htlc: *mut c_void, cid: u32) {
     if htlc.is_null() {
         return;
     }
-    // Look up (or seed) the chat before sending — the JOIN reply's
-    // user-list-switch task carries the chat pointer. Always send the JOIN,
-    // even when the chat was pre-registered by a self-invite CHAT_CREATE
-    // reply (see the C original's self-invite comment).
-    let chat = hx_chat_lookup_or_create(htlc, cid);
-
     let mut chunks = [HxChunk::EMPTY; 1];
     let mut scratch = [0u8; 4];
     let hc = build::build_chat_join_chunks(cid, &mut chunks, &mut scratch);
     if hc > 0 {
-        task_new(
-            htlc,
-            Some(rcv_task_user_list_switch),
-            chat,
-            std::ptr::null_mut(),
-            c"join".as_ptr(),
-        );
+        let trans = super::expect_next(htlc, hxsession::Expect::ChatJoin { cid });
+        crate::recv::user::join_requested(htlc, trans, cid);
         hlwrite_chunks(htlc, HTLC_HDR_CHAT_JOIN, 0, chunks.as_ptr(), hc as c_int);
     }
 }
@@ -258,6 +205,7 @@ pub unsafe extern "C" fn hx_part_chat(htlc: *mut c_void, cid: u32) {
     if htlc.is_null() {
         return;
     }
+    crate::recv::user::join_parted(htlc, cid);
     if hx_chat_lookup(htlc, cid).is_null() {
         return;
     }

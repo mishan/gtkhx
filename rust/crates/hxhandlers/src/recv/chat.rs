@@ -88,7 +88,7 @@ fn history_answered(htlc: *mut c_void, trans: u32) -> Option<HistoryAsked> {
 }
 
 /// Text as a C string: up to its first NUL, as the C side reads it.
-fn c_text(s: &str) -> CString {
+pub(crate) fn c_text(s: &str) -> CString {
     CString::new(s.split('\0').next().unwrap_or_default()).unwrap_or_default()
 }
 
@@ -198,16 +198,14 @@ pub(crate) unsafe fn subject(htlc: *mut c_void, cid: u32, subject: &str) {
     gtkhx_session_emit_chat_subject_notice(sess, htlc, cid, hx_chat_subject(chat.cast()));
 }
 
-/// `void hx_chat_subject_emit (htlc, cid, subject)` — the initial-subject-
-/// discovery emit (the `rcv_task_user_list` room-load path). Unlike
+/// The initial-subject-discovery emit (a roster load's subject). Unlike
 /// [`subject`], this has no change-gate: the room just came into view and
 /// the caller has already set the model, so the subject is always published
 /// to refresh the widget (with no "Subject Changed to" log line).
 ///
 /// # Safety
 /// `subject` is a NUL-terminated C string; `htlc` is opaque and only forwarded.
-#[no_mangle]
-pub unsafe extern "C" fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: *const c_char) {
+pub(crate) unsafe fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: *const c_char) {
     gtkhx_session_emit_chat_subject(gtkhx_session_get_default(), htlc, cid, subject);
 }
 

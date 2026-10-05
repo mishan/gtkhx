@@ -1,13 +1,15 @@
 //! The Users scenario: a large login, a burst of status changes, and a
 //! GIF icon for everyone at once, in the main window's real Users panel.
 //!
-//! It feeds synthetic server frames through the same receive handlers a
-//! connection's frames go through — `rcv_task_user_list` for the login's
-//! USER_LIST reply, `hx_rcv_user_change` for each USER_CHANGE — against
-//! the running session's own connection and public chat, so the member
-//! model, the session signals, `users.c` and the list view all do their
-//! real work. The GIF icons go in where an ICON_GET reply lands,
-//! `gtkhx_avatar_update`, and decode on the real decoder.
+//! It feeds synthetic users through the same receive handlers the session's
+//! events go through — `load` for the login's user list, `changed` for each
+//! user change — against the running session's own connection and public
+//! chat, so the member model, the session signals, `users.c` and the list
+//! view all do their real work. The GIF icons go in where an ICON_GET reply
+//! lands, `gtkhx_avatar_update`, and decode on the real decoder.
+//!
+//! Reading the frames is the session's now, outside what is timed, so the
+//! login and burst numbers are not comparable with runs from before it was.
 //!
 //! The session is not connected. The handlers don't need it to be, and it
 //! keeps the run from touching any server. The scenario clears the list
@@ -25,8 +27,8 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 use gtkhx_core::session::{gtkhx_session_emit_users_clear, gtkhx_session_get_default};
-use hxhandlers::recv::user::{hx_rcv_user_change, rcv_task_user_list};
-use hxproto::messages::tag;
+use hxhandlers::recv::user::{changed, load};
+use hxsession::User;
 
 use crate::user_row::HxUserRow;
 
@@ -52,54 +54,15 @@ fn uid_of(i: u32) -> u16 {
     FIRST_UID + i as u16
 }
 
-/// A Hotline frame: the 22-byte header (type, then zeroed id, error, sizes
-/// and object count — the handlers read none of them) and TLV chunks.
-fn frame(msg_type: u32, chunks: &[(u16, &[u8])]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&msg_type.to_be_bytes());
-    v.extend_from_slice(&[0u8; 18]);
-    for (t, data) in chunks {
-        v.extend_from_slice(&t.to_be_bytes());
-        v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-        v.extend_from_slice(data);
+/// User `i`, with status `status`.
+fn user(i: u32, status: u16) -> User {
+    User {
+        uid: uid_of(i),
+        icon: 128 + (i % 64) as u16,
+        status: Some(status),
+        name: format!("bench user {i:05}"),
+        color: None,
     }
-    v
-}
-
-/// A USER_LIST reply for `n` users: uid, icon, status and a name each.
-fn user_list_reply(n: u32) -> Vec<u8> {
-    let records: Vec<Vec<u8>> = (0..n)
-        .map(|i| {
-            let name = format!("bench user {i:05}");
-            let mut r = Vec::with_capacity(8 + name.len());
-            r.extend_from_slice(&uid_of(i).to_be_bytes());
-            r.extend_from_slice(&(128 + (i % 64) as u16).to_be_bytes());
-            r.extend_from_slice(&0u16.to_be_bytes());
-            r.extend_from_slice(&(name.len() as u16).to_be_bytes());
-            r.extend_from_slice(name.as_bytes());
-            r
-        })
-        .collect();
-    let chunks: Vec<(u16, &[u8])> = records
-        .iter()
-        .map(|r| (tag::USER_LIST, r.as_slice()))
-        .collect();
-    frame(0, &chunks)
-}
-
-/// A USER_CHANGE for user `i`: same name and icon, status `status`.
-fn user_change(i: u32, status: u16) -> Vec<u8> {
-    let name = format!("bench user {i:05}");
-    frame(
-        0x0000_012d,
-        &[
-            (tag::UID, &uid_of(i).to_be_bytes()),
-            (tag::ICON, &(128 + (i % 64) as u16).to_be_bytes()),
-            (tag::COLOUR, &status.to_be_bytes()),
-            (tag::CHAT_ID, &0u32.to_be_bytes()),
-            (tag::NAME, name.as_bytes()),
-        ],
-    )
 }
 
 /// A 32×16 GIF of two frames, 100 ms each, looping forever — a typical
@@ -203,17 +166,9 @@ async fn measure(
     r.line("users", &format!("{n:9}"), "");
 
     // ---- login ----------------------------------------------------------
-    let reply = user_list_reply(n);
+    let users: Vec<User> = (0..n).map(|i| user(i, 0)).collect();
     let t = glib::monotonic_time();
-    unsafe {
-        rcv_task_user_list(
-            htlc,
-            reply.as_ptr(),
-            reply.len(),
-            chat,
-            std::ptr::null_mut(),
-        )
-    };
+    unsafe { load(htlc, chat, &users, None) };
     // The rows land in the store from an idle ahead of the next frame;
     // run it now, so the frozen time is the whole of the work.
     crate::users_view::flush_public(sess.cast());
@@ -234,10 +189,10 @@ async fn measure(
 
     // ---- USER_CHANGE burst -----------------------------------------------
     // Everyone goes idle at once, as when a server sweeps its idle timer.
-    let frames: Vec<Vec<u8>> = (0..n).map(|i| user_change(i, STATUS_IDLE)).collect();
+    let changes: Vec<User> = (0..n).map(|i| user(i, STATUS_IDLE)).collect();
     let t = glib::monotonic_time();
-    for f in &frames {
-        unsafe { hx_rcv_user_change(htlc, f.as_ptr(), f.len()) };
+    for u in &changes {
+        unsafe { changed(htlc, 0, u) };
     }
     let call = glib::monotonic_time() - t;
     let t = glib::monotonic_time();
@@ -368,28 +323,6 @@ async fn measure(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn synthetic_user_list_parses_back_to_every_user() {
-        let buf = user_list_reply(300);
-        let recs: Vec<_> = hxproto::wire::ChunkIter::over_message(&buf, buf.len())
-            .filter(|c| c.tag == tag::USER_LIST)
-            .filter_map(|c| hxproto::parse::parse_user_list_record(c.data, 31))
-            .collect();
-        assert_eq!(recs.len(), 300);
-        assert_eq!(recs[0].uid, FIRST_UID);
-        assert_eq!(recs[299].name, b"bench user 00299");
-    }
-
-    #[test]
-    fn synthetic_user_change_parses_back() {
-        let f = user_change(7, STATUS_IDLE);
-        let c = hxproto::parse::parse_user_change(&f, f.len(), 31);
-        assert_eq!(c.uid, uid_of(7));
-        assert_eq!(c.color, STATUS_IDLE);
-        assert!(c.got_color);
-        assert_eq!(c.name, b"bench user 00007");
-    }
 
     #[test]
     fn the_icon_is_an_animated_gif() {

@@ -3,6 +3,7 @@
 
 use super::test_env::Emit;
 use super::*;
+use crate::recv::chat::test_env::Emitted;
 use std::ffi::CString;
 
 /// A live `USER_CHANGE` apply (incremental=1).
@@ -157,37 +158,14 @@ fn part(uid: u16) -> c_int {
     }
 }
 
-fn push_chunk(v: &mut Vec<u8>, tag: u16, data: &[u8]) {
-    v.extend_from_slice(&tag.to_be_bytes());
-    v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-    v.extend_from_slice(data);
-}
-
-/// Build a wire frame: 22-byte header (type + zeroed trans/flag/len/len2/hc)
-/// followed by TLV chunks — the shape the recv handlers receive.
-fn frame(msg_type: u32, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&msg_type.to_be_bytes());
-    v.extend_from_slice(&[0u8; 18]);
-    for (tag, data) in chunks {
-        push_chunk(&mut v, *tag, data);
+fn user(uid: u16, icon: u16, status: Option<u16>, name: &str, color: Option<u32>) -> User {
+    User {
+        uid,
+        icon,
+        status,
+        name: name.into(),
+        color,
     }
-    v
-}
-
-fn part_frame(uid: u16, cid: u32) -> Vec<u8> {
-    use hxproto::messages::tag;
-    frame(
-        0x0000_0077, // HTLS_HDR_USER_PART (value irrelevant to parse; walks chunks)
-        &[
-            (tag::UID, uid.to_be_bytes().to_vec()),
-            (tag::CHAT_ID, cid.to_be_bytes().to_vec()),
-        ],
-    )
-}
-
-fn rcv_part(f: &[u8]) {
-    unsafe { hx_rcv_user_part(std::ptr::null_mut(), f.as_ptr(), f.len()) };
 }
 
 fn set_member(name: &str) {
@@ -210,7 +188,7 @@ fn rcv_part_of_member_deletes_and_emits_notice() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(true));
     set_member("Bob");
-    rcv_part(&part_frame(42, 3));
+    unsafe { left(std::ptr::null_mut(), 3, 42) };
     assert_eq!(
         test_env::take(),
         Some(Emit::Delete {
@@ -234,26 +212,21 @@ fn rcv_part_of_non_member_no_delete_no_notice() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(false));
     // MEMBER stays None → get_info returns FALSE.
-    rcv_part(&part_frame(42, 3));
+    unsafe { left(std::ptr::null_mut(), 3, 42) };
     assert_eq!(test_env::take(), None);
     assert_eq!(take_notice(), None);
 }
 
-fn change_frame(uid: u16, cid: u32, name: &str, icon: u16) -> Vec<u8> {
-    use hxproto::messages::tag;
-    frame(
-        0x0000_0076, // HTLS_HDR_USER_CHANGE (value irrelevant to parse)
-        &[
-            (tag::UID, uid.to_be_bytes().to_vec()),
-            (tag::ICON, icon.to_be_bytes().to_vec()),
-            (tag::CHAT_ID, cid.to_be_bytes().to_vec()),
-            (tag::NAME, name.as_bytes().to_vec()),
-        ],
-    )
-}
-
-fn rcv_change(f: &[u8]) {
-    unsafe { hx_rcv_user_change(std::ptr::null_mut(), f.as_ptr(), f.len()) };
+/// A user change on chat `cid`, as the session reads one: no status or
+/// colour, so the member's are kept.
+fn rcv_change(cid: u32, uid: u16, name: &str, icon: u16) {
+    unsafe {
+        changed(
+            std::ptr::null_mut(),
+            cid,
+            &user(uid, icon, None, name, None),
+        )
+    };
 }
 
 #[test]
@@ -261,7 +234,7 @@ fn rcv_change_new_member_creates_and_emits_join() {
     test_env::reset();
     // No existing member → create; not us (self uid differs).
     test_env::SELF_UID.with(|c| c.set(99));
-    rcv_change(&change_frame(7, 0, "Alice", 128));
+    rcv_change(0, 7, "Alice", 128);
     assert_eq!(
         test_env::take(),
         Some(Emit::Create {
@@ -289,7 +262,7 @@ fn rcv_change_existing_rename_emits_rename() {
     test_env::reset();
     test_env::SELF_UID.with(|c| c.set(99));
     set_member("Bob"); // old name
-    rcv_change(&change_frame(7, 0, "Bobby", 128));
+    rcv_change(0, 7, "Bobby", 128);
     assert_eq!(
         test_env::take(),
         Some(Emit::Change {
@@ -317,7 +290,7 @@ fn rcv_change_ignored_user_emits_change_but_no_notice() {
     test_env::SELF_UID.with(|c| c.set(99));
     test_env::IGNORE.with(|c| c.set(true));
     set_member("Bob");
-    rcv_change(&change_frame(7, 0, "Bobby", 128));
+    rcv_change(0, 7, "Bobby", 128);
     // The view still gets the row update, but no rename notice line.
     assert!(matches!(
         test_env::take(),
@@ -327,11 +300,27 @@ fn rcv_change_ignored_user_emits_change_but_no_notice() {
 }
 
 #[test]
-fn rcv_change_task_error_bails() {
+fn a_change_that_keeps_a_non_ascii_name_is_no_rename() {
+    // The model holds names decoded, and the session decodes them too: a
+    // Mac Roman name compares equal to itself.
     test_env::reset();
-    test_env::TASK_ERROR.with(|c| c.set(true));
-    rcv_change(&change_frame(7, 0, "Alice", 128));
-    assert_eq!(test_env::take(), None);
+    test_env::SELF_UID.with(|c| c.set(99));
+    set_member("René");
+    unsafe {
+        changed(
+            std::ptr::null_mut(),
+            0,
+            &user(7, 128, Some(1), "René", None),
+        )
+    };
+    assert!(matches!(
+        test_env::take(),
+        Some(Emit::Change {
+            uid: 7,
+            color: 1,
+            ..
+        })
+    ));
     assert_eq!(take_notice(), None);
 }
 
@@ -343,7 +332,7 @@ fn rcv_change_adopts_self_uid_when_selfinfo_omitted_it() {
     // creating our own row.
     test_env::SELF_UID.with(|c| c.set(0));
     test_env::set_self_name("Me");
-    rcv_change(&change_frame(5, 0, "Me", 128));
+    rcv_change(0, 5, "Me", 128);
     assert_eq!(test_env::SELF_UID.with(|c| c.get()), 5); // adopted
     assert_eq!(test_env::take(), None); // skip-self-create, no emit
     assert_eq!(take_notice(), None);
@@ -355,7 +344,7 @@ fn rcv_change_self_updates_bookkeeping() {
     // We are uid 7 and already a member (existing) → CHANGED, self bookkeeping.
     test_env::SELF_UID.with(|c| c.set(7));
     set_member("Me");
-    rcv_change(&change_frame(7, 0, "Me", 200));
+    rcv_change(0, 7, "Me", 200);
     // icon mirrored into htlc.
     assert_eq!(test_env::SELF_ICON.with(|c| c.get()), 200);
     // self rename notice is never emitted for our own change.
@@ -419,45 +408,20 @@ fn rcv_selfinfo_parses_marks_logged_in_then_emits() {
     assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
 }
 
-// ---- rcv_task_user_list / _switch / news_users / user_info -----------------
+// ---- user lists, joins, a new chat, user info ------------------------------
 
 /// A sentinel chat pointer (the doubles ignore its value).
 const FAKE_CHAT_PTR: *mut c_void = 0x2 as *mut c_void;
 
-/// Pack one HTLS_DATA_USER_LIST record body: u16 uid, icon, color, nlen, name,
-/// [optional u32 nick_color trailer].
-fn ul_record(uid: u16, icon: u16, color: u16, name: &[u8], nick_color: Option<u32>) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&uid.to_be_bytes());
-    v.extend_from_slice(&icon.to_be_bytes());
-    v.extend_from_slice(&color.to_be_bytes());
-    v.extend_from_slice(&(name.len() as u16).to_be_bytes());
-    v.extend_from_slice(name);
-    if let Some(nc) = nick_color {
-        v.extend_from_slice(&nc.to_be_bytes());
-    }
-    v
-}
-
-unsafe fn call_user_list(f: &[u8]) {
-    rcv_task_user_list(
-        std::ptr::null_mut(),
-        f.as_ptr(),
-        f.len(),
-        FAKE_CHAT_PTR,
-        std::ptr::null_mut(),
-    );
+unsafe fn load_users(users: &[User]) {
+    load(std::ptr::null_mut(), FAKE_CHAT_PTR, users, None);
 }
 
 #[test]
 fn user_list_new_user_creates_without_join_chime() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(false)); // not a member yet → is_new
-    let f = frame(
-        0,
-        &[(HTLS_DATA_USER_LIST, ul_record(7, 128, 4, b"Alice", None))],
-    );
-    unsafe { call_user_list(&f) };
+    unsafe { load_users(&[user(7, 128, Some(4), "Alice", None)]) };
     assert_eq!(
         test_env::take(),
         Some(Emit::Create {
@@ -475,11 +439,7 @@ fn user_list_new_user_creates_without_join_chime() {
 fn user_list_existing_user_upserts_silently() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(true)); // already a member → silent upsert
-    let f = frame(
-        0,
-        &[(HTLS_DATA_USER_LIST, ul_record(9, 130, 2, b"Bob", None))],
-    );
-    unsafe { call_user_list(&f) };
+    unsafe { load_users(&[user(9, 130, Some(2), "Bob", None)]) };
     assert_eq!(
         test_env::take(),
         Some(Emit::Upsert {
@@ -497,14 +457,7 @@ fn user_list_colored_nick_mirrors_onto_self() {
     test_env::reset();
     test_env::SELF_UID.with(|c| c.set(5));
     test_env::CONTAINS.with(|c| c.set(true));
-    let f = frame(
-        0,
-        &[(
-            HTLS_DATA_USER_LIST,
-            ul_record(5, 100, 1, b"Me", Some(0x0011_2233)),
-        )],
-    );
-    unsafe { call_user_list(&f) };
+    unsafe { load_users(&[user(5, 100, Some(1), "Me", Some(0x0011_2233))]) };
     assert_eq!(test_env::SELF_NICK_COLOR.with(|c| c.get()), 0x0011_2233);
     assert_eq!(
         test_env::take(),
@@ -525,38 +478,19 @@ fn user_list_adopts_self_uid_when_unset() {
     test_env::SELF_ICON.with(|c| c.set(100));
     test_env::set_self_name("Me");
     test_env::CONTAINS.with(|c| c.set(false));
-    let f = frame(
-        0,
-        &[(HTLS_DATA_USER_LIST, ul_record(42, 100, 1, b"Me", None))],
-    );
-    unsafe { call_user_list(&f) };
+    unsafe { load_users(&[user(42, 100, Some(1), "Me", None)]) };
     assert_eq!(test_env::SELF_UID.with(|c| c.get()), 42);
 }
 
 #[test]
-fn user_list_chat_subject_seeds_and_emits_it_decoded() {
-    test_env::reset();
-    test_env::CHAT_CID.with(|c| c.set(0));
-    let f = frame(0, &[(HTLS_DATA_CHAT_SUBJECT, b"Caf\x8e".to_vec())]);
-    unsafe { call_user_list(&f) };
-    assert_eq!(
-        test_env::SUBJECT_EMITTED.with(|c| c.borrow().clone()),
-        Some((0, "Café".as_bytes().to_vec()))
-    );
-}
-
-#[test]
-fn news_users_loads_users_then_reloads_news() {
+fn the_login_s_user_list_loads_users_then_reloads_news() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(false));
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(1, 1, 1, b"X", None))]);
     unsafe {
-        rcv_task_news_users(
+        listed(
             std::ptr::null_mut(),
-            f.as_ptr(),
-            f.len(),
-            FAKE_CHAT_PTR,
-            std::ptr::null_mut(),
+            &[user(1, 1, Some(1), "X", None)],
+            None,
         )
     };
     assert!(test_env::RELOAD_NEWS.with(|c| c.get()));
@@ -567,43 +501,82 @@ fn news_users_loads_users_then_reloads_news() {
 }
 
 #[test]
-fn user_list_switch_error_deletes_chat() {
-    test_env::reset();
-    test_env::TASK_ERROR.with(|c| c.set(true));
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(1, 1, 1, b"X", None))]);
-    unsafe {
-        rcv_task_user_list_switch(
-            std::ptr::null_mut(),
-            f.as_ptr(),
-            f.len(),
-            FAKE_CHAT_PTR,
-            std::ptr::null_mut(),
-        )
-    };
-    assert!(test_env::CHAT_DELETED.with(|c| c.get()));
-    assert_eq!(test_env::take(), None); // no apply on the error path
+fn a_join_makes_its_chat_only_once_answered() {
+    for exists in [false, true] {
+        test_env::reset();
+        test_env::CHAT_EXISTS.with(|c| c.set(exists));
+        test_env::CONTAINS.with(|c| c.set(false));
+        test_env::CHAT_CID.with(|c| c.set(9));
+        let users = [user(3, 1, Some(1), "Y", None)];
+        unsafe { joined(std::ptr::null_mut(), 8, 9, &users, Some("Café")) };
+        let made: &[u32] = if exists { &[] } else { &[9] };
+        assert_eq!(test_env::CHATS_MADE.with(|c| c.take()), made);
+        assert!(matches!(
+            test_env::take(),
+            Some(Emit::Create { uid: 3, .. })
+        ));
+        assert_eq!(
+            crate::recv::chat::test_env::emitted(),
+            [Emitted::Subject(9, "Café".into())]
+        );
+    }
 }
 
 #[test]
-fn user_list_switch_ok_loads_users() {
+fn a_join_answered_after_the_user_left_the_chat_is_ignored() {
     test_env::reset();
-    test_env::TASK_ERROR.with(|c| c.set(false));
-    test_env::CONTAINS.with(|c| c.set(false));
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(3, 1, 1, b"Y", None))]);
-    unsafe {
-        rcv_task_user_list_switch(
-            std::ptr::null_mut(),
-            f.as_ptr(),
-            f.len(),
-            FAKE_CHAT_PTR,
-            std::ptr::null_mut(),
-        )
-    };
-    assert!(!test_env::CHAT_DELETED.with(|c| c.get()));
-    assert!(matches!(
-        test_env::take(),
-        Some(Emit::Create { uid: 3, .. })
-    ));
+    test_env::CHAT_EXISTS.with(|c| c.set(false));
+    let h = std::ptr::dangling_mut();
+    join_requested(h, 8, 9);
+    join_parted(h, 9);
+    unsafe { joined(h, 8, 9, &[user(3, 1, Some(1), "Y", None)], None) };
+    assert_eq!(test_env::CHATS_MADE.with(|c| c.take()), [] as [u32; 0]);
+    assert_eq!(test_env::take(), None);
+}
+
+#[test]
+fn a_refused_join_drops_only_a_chat_nothing_shows() {
+    // (window, members, dropped)
+    for (view, members, dropped) in [(false, 0, true), (true, 0, false), (false, 2, false)] {
+        test_env::reset();
+        test_env::VIEW.with(|c| c.set(view));
+        test_env::MEMBERS.with(|c| c.set(members));
+        let h = std::ptr::dangling_mut();
+        join_requested(h, 8, 9);
+        unsafe { failed(h, 7) }; // not the join's
+        assert!(!test_env::CHAT_DELETED.with(|c| c.get()));
+        unsafe { failed(h, 8) };
+        assert_eq!(test_env::CHAT_DELETED.with(|c| c.get()), dropped);
+    }
+}
+
+#[test]
+fn us_in_a_new_chat_makes_the_chat_but_not_our_row() {
+    test_env::reset();
+    test_env::CHAT_EXISTS.with(|c| c.set(false));
+    test_env::SELF_UID.with(|c| c.set(5));
+    unsafe { changed(std::ptr::null_mut(), 9, &user(5, 128, Some(0), "Me", None)) };
+    assert_eq!(test_env::CHATS_MADE.with(|c| c.take()), [9]);
+    // Our own row waits for a list, as for any change that is new to us.
+    assert_eq!(test_env::take(), None);
+}
+
+fn push_chunk(v: &mut Vec<u8>, tag: u16, data: &[u8]) {
+    v.extend_from_slice(&tag.to_be_bytes());
+    v.extend_from_slice(&(data.len() as u16).to_be_bytes());
+    v.extend_from_slice(data);
+}
+
+/// A wire frame: 22-byte header (type + zeroed trans/flag/len/len2/hc)
+/// followed by TLV chunks — the shape the reply handlers receive.
+fn frame(msg_type: u32, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&msg_type.to_be_bytes());
+    v.extend_from_slice(&[0u8; 18]);
+    for (tag, data) in chunks {
+        push_chunk(&mut v, *tag, data);
+    }
+    v
 }
 
 #[test]
@@ -691,24 +664,22 @@ fn user_info_dropped_when_info_empty() {
     assert_eq!(test_env::take(), None);
 }
 
-// ---- Mac Roman nicknames ---------------------------------------------------
+// ---- Mac Roman user-info text ---------------------------------------------
 
 #[test]
-fn a_nickname_is_decoded_from_mac_roman() {
-    // Hotline nicknames are Mac Roman on the wire. The roster path used to
-    // carry the raw bytes all the way to pango_layout_set_text, which drew
-    // mojibake and logged an invalid-UTF-8 warning on every repaint.
+fn user_info_text_is_decoded_from_mac_roman() {
+    // Hotline text is Mac Roman on the wire; undecoded, it draws mojibake.
     //
     // 0xD5 is a right single quote in Mac Roman and is not valid UTF-8 alone,
     // so it stands in for the whole class.
     let wire = b"Jo\xd5s";
     let got = unsafe { super::cstring_wire_text(wire) };
-    let text = got.to_str().expect("decoded names must be valid UTF-8");
+    let text = got.to_str().expect("decoded text must be valid UTF-8");
     assert_eq!(text, "Jo\u{2019}s");
 }
 
 #[test]
-fn a_utf8_nickname_passes_through_untouched() {
+fn user_info_text_in_utf8_passes_through_untouched() {
     // Servers that advertise CAP_TEXT_ENCODING send UTF-8, and double-decoding
     // one would be its own mojibake bug.
     let wire = "Jo\u{2019}s".as_bytes();
@@ -717,7 +688,7 @@ fn a_utf8_nickname_passes_through_untouched() {
 }
 
 #[test]
-fn a_nickname_still_truncates_at_an_interior_nul() {
+fn user_info_text_still_truncates_at_an_interior_nul() {
     // The old extractor terminated there, and a server that pads a fixed-width
     // field with NULs would otherwise show them as trailing characters.
     let got = unsafe { super::cstring_wire_text(b"bob\0\0\0") };
@@ -725,7 +696,7 @@ fn a_nickname_still_truncates_at_an_interior_nul() {
 }
 
 #[test]
-fn an_empty_name_is_empty_rather_than_a_failure() {
+fn empty_user_info_text_is_empty_rather_than_a_failure() {
     let got = unsafe { super::cstring_wire_text(b"") };
     assert_eq!(got.to_str().unwrap(), "");
 }

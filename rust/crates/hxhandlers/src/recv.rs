@@ -61,7 +61,20 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             entries,
             has_more,
         } => chat::history(htlc, *trans, *cid, entries, *has_more),
-        Event::Failed { trans, reason } => chat::failed(htlc, *trans, reason.as_deref()),
+        Event::UserChanged { cid, user } => user::changed(htlc, *cid, user),
+        Event::UserLeft { cid, uid } => user::left(htlc, *cid, *uid),
+        Event::UserList { users, subject, .. } => user::listed(htlc, users, subject.as_deref()),
+        Event::ChatCreated { cid, user, .. } => user::changed(htlc, *cid, user),
+        Event::ChatJoined {
+            trans,
+            cid,
+            users,
+            subject,
+        } => user::joined(htlc, *trans, *cid, users, subject.as_deref()),
+        Event::Failed { trans, reason } => {
+            user::failed(htlc, *trans);
+            chat::failed(htlc, *trans, reason.as_deref());
+        }
         _ => {}
     }
 }
