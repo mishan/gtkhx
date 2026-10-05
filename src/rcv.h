@@ -9,10 +9,6 @@ extern void hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame,
                               gsize frame_len);
 extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame,
                          gsize frame_len);
-extern void hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len);
-extern void hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame,
-                              gsize frame_len);
 extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame,
                                   gsize frame_len);
 extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame,
@@ -82,11 +78,8 @@ extern void rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame,
  * from the real ABI. */
 extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame,
                             gsize frame_len, char *pass);
-/* rcv_task_news_users (post-login USER_GETLIST reply) moved to the hxhandlers
- * Rust crate (recv/user.rs); the prototype stays for the RCV_TASK_FN(task_new)
- * registration in the post-login fetch path. */
-extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame,
-                                 gsize frame_len, struct chat *chat, int text);
+/* USER_GETLIST, whose reply the session reads (hxhandlers::send::user). */
+extern void hx_user_list_get (struct htlc_conn *htlc);
 extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len);
 
@@ -108,17 +101,8 @@ extern void rcv_task_icon_set_auto (struct htlc_conn *htlc, const guint8 *frame,
 extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len);
 
-/* rcv_task_user_list / _user_list_switch / _user_info moved to the hxhandlers
- * Rust crate (recv/user.rs): they walk the reply chunks natively
- * (parse_user_list_record / parse_user_info) and fold into the roster through the
- * shared, already-Rust hx_user_apply_recv. The prototypes stay for the
- * RCV_TASK_FN(task_new) registrations in users.c / chat.c. rcv_task_kick stays C
- * (it logs via the variadic hx_printf_prefix). */
-extern void rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len, struct chat *chat, int text);
-extern void rcv_task_user_list_switch (struct htlc_conn *htlc,
-                                       const guint8 *frame, gsize frame_len,
-                                       struct chat *chat);
+/* rcv_task_user_info is in the hxhandlers Rust crate (recv/user.rs).
+ * rcv_task_kick stays C (it logs via the variadic hx_printf_prefix). */
 extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame,
                            gsize frame_len);
 extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame,

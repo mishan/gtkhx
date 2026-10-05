@@ -1,8 +1,9 @@
 //! The connection the app opens: `hxnet`'s callback entry point, which runs
-//! the session with chat handled and hands its events to `on_session` on the
-//! GLib main loop, as `hxnet_bridge.c` receives them. What the bridge then
-//! does with an event is `hxhandlers`', tested on its own; this suite stops
-//! at the callback, which is as far as a binary without the app's link goes.
+//! the session with chat and users handled and hands its events to
+//! `on_session` on the GLib main loop, as `hxnet_bridge.c` receives them.
+//! What the bridge then does with an event is `hxhandlers`', tested on its
+//! own; this suite stops at the callback, which is as far as a binary
+//! without the app's link goes.
 #![cfg(feature = "rig")]
 
 use std::cell::{Cell, RefCell};
@@ -128,7 +129,12 @@ fn session_events_through_the_callback(s: &'static Server) {
         }
         // The user list, as the app asks for it: hlservd sends no chat
         // before.
-        unsafe { send(h, &request(300, &[]), None) };
+        let t = unsafe { send(h, &request(300, &[]), Some(Expect::UserList)) };
+        let users = until(&ctx, "the user list", |e| match e {
+            Event::UserList { trans, users, .. } if *trans == t => Some(users.clone()),
+            _ => None,
+        });
+        assert!(!users.is_empty(), "{}: not even us in the list", s.name);
 
         let mut other = Client::guest(s, CAP_TEXT_ENCODING);
         let line = format!("{nick} through the callback");
@@ -173,7 +179,7 @@ fn session_events_through_the_callback(s: &'static Server) {
 }
 
 #[test]
-fn the_app_s_connection_hands_chat_to_on_session() {
+fn the_app_s_connection_hands_chat_and_users_to_on_session() {
     for s in servers_with(&[]) {
         session_events_through_the_callback(s);
     }

@@ -37,18 +37,3 @@ hx_chat_lookup (struct htlc_conn *htlc, guint32 cid)
     }
     return chat_with_cid (sess_from_htlc (htlc), cid);
 }
-
-void *
-hx_chat_lookup_or_create (struct htlc_conn *htlc, guint32 cid)
-{
-    struct chat *chat;
-
-    if (!htlc) {
-        return NULL;
-    }
-    chat = chat_with_cid (sess_from_htlc (htlc), cid);
-    if (!chat) {
-        chat = chat_new (sess_from_htlc (htlc), cid);
-    }
-    return chat;
-}

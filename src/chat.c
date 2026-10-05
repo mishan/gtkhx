@@ -2009,9 +2009,10 @@ pchat_close (struct htlc_conn *htlc, guint32 cid)
 /* pure view function — just paints the
  * new subject into the chat-window subject entry. A subject change
  * (hxhandlers::recv::chat) also logs the 'Subject Changed to X' chat
- * line; the initial-subject discovery path in rcv_task_user_list
- * paints without the announce, since "joined a chat that already had a
- * subject" isn't a subject change from the user's perspective.
+ * line; the subject a joined chat's user list carries
+ * (hxhandlers::recv::user) paints without the announce, since "joined
+ * a chat that already had a subject" isn't a subject change from the
+ * user's perspective.
  *
  * htlc is unused here — only kept for vtable signature uniformity
  * with the other output_functions members. */

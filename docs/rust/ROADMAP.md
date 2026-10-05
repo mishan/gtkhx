@@ -731,35 +731,44 @@ The order, each step its own branch and each checked against the rig:
    the task table's correlation (`hx_rcv_task`, `hxtask`) goes once the
    last of them has.
 
-   Chat has moved. The session handles it (`Config::handled`,
-   `Handled::CHAT`), and `hxnet` hands what it makes of a chat line and the
-   picture it carries, an invitation, a subject and a page of history to
-   `hx_recv_session_event` on the main thread, among the frames and in
-   their order. `hxhandlers::recv::chat` keeps the model — the ignore list,
-   each chat's subject, the history cursor — and emits the signals it
+   Chat and users have moved. The session handles them
+   (`Config::handled`, `Handled::CHAT`, `Handled::USERS`), and `hxnet`
+   hands what it makes of a chat line and the picture it carries, an
+   invitation, a subject, a page of history, and a user arriving,
+   changing or leaving to `hx_recv_session_event` on the main thread,
+   among the frames and in their order. `hxhandlers::recv::chat` and
+   `hxhandlers::recv::user` keep the model — the ignore list, each chat's
+   subject, the history cursor, the rosters — and emit the signals they
    always did; the chat event itself is built in `gtkhx-core`. A history
-   request or an invitation has its reply expected by the session
-   (`Session::expect`), so neither is a task any more, and a refusal comes
-   back as `Failed`. What arrives is traced from the session's tap.
-   *In progress.* What remains:
-   - the users, messages, news and files domains;
-   - the replies to creating and joining a private chat and to a user
-     change, still read through tasks (`hx_rcv_user_change`,
-     `rcv_task_user_list_switch`);
+   request, an invitation, the user list, and creating or joining a
+   private chat have their reply expected by the session
+   (`Session::expect`), so none is a task any more, and a refusal comes
+   back as `Failed`. A private chat is made when its join is answered.
+   What arrives is traced from the session's tap. *In progress.* What
+   remains:
+   - the messages, news and files domains;
+   - of users, the self-info (`hx_rcv_user_selfinfo`, which reads it
+     through C's `hx_selfinfo_parse`), and the replies to user info, the
+     user editor's account read and a kick, still read through tasks
+     (`rcv_task_user_info`, `rcv_task_user_open`, `rcv_task_kick`);
    - inline media's upload and download;
-   - the C chat extractor tests (`test_chat.c`, `test_small_handlers.c`,
-     and the integration tests that read chat, invitations and history
-     through `hx_chat_extract`, `hx_chat_subject_extract`,
-     `hx_chat_invite_extract` and `hx_history_entry_parse`), which move to
-     `hx-e2e`, retiring those extractors.
+   - the C extractor tests, which move to `hx-e2e`, retiring the
+     extractors they read through: for chat, `test_chat.c`,
+     `test_small_handlers.c`, and the integration tests that read chat,
+     invitations and history through `hx_chat_extract`,
+     `hx_chat_subject_extract`, `hx_chat_invite_extract` and
+     `hx_history_entry_parse`; for users, `test_user_change.c`,
+     `test_small_handlers.c`'s user part, and the integration tests that
+     read user changes and parts through `hx_user_change_extract`,
+     `hx_user_part_extract` and `hx_user_change_plan_resolve`.
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
 
-Of the extensions GtkHx negotiates, text encoding, chat history and the
-picture a chat line carries have their session-side handling; the rest
-(voice and video signaling, inline media's upload and download, GIF
-icons, colored nicknames, Large Files) need theirs before the domains
-that use them move. hxproto has the codecs.
+Of the extensions GtkHx negotiates, text encoding, chat history, the
+picture a chat line carries and the color a user's nickname arrives with
+have their session-side handling; the rest (voice and video signaling,
+inline media's upload and download, GIF icons, Large Files) need theirs
+before the domains that use them move. hxproto has the codecs.
 
 ---
 
