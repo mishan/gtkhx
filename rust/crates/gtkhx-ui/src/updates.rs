@@ -101,6 +101,16 @@ pub(crate) fn banner() -> gtk::Widget {
     banner.into()
 }
 
+/// Close the monitor, or abandon one still opening.
+fn close_monitor(m: &mut Monitor) {
+    m.generation += 1;
+    m.starting = false;
+    m.subscriptions.clear();
+    if let (Some(conn), Some(handle)) = (&m.conn, m.handle.take()) {
+        close(conn, &handle);
+    }
+}
+
 /// Start or stop watching to match the build and the user's setting.
 pub(crate) fn refresh() {
     let on = enabled();
@@ -110,12 +120,7 @@ pub(crate) fn refresh() {
             m.starting |= start;
             return start;
         }
-        m.generation += 1;
-        m.starting = false;
-        m.subscriptions.clear();
-        if let (Some(conn), Some(handle)) = (&m.conn, m.handle.take()) {
-            close(conn, &handle);
-        }
+        close_monitor(m);
         // "Later" was the user's answer, not something the portal said.
         m.state = PortalState {
             dismissed: std::mem::take(&mut m.state.dismissed),
@@ -376,12 +381,20 @@ fn watch_for_stall() {
         m.heard
     });
     glib::timeout_add_seconds_local_once(STALL, move || {
-        MONITOR.with_borrow_mut(|m| {
-            if m.heard == serial && matches!(m.state.progress, Some((PROGRESS_RUNNING, _))) {
+        let stalled = MONITOR.with_borrow_mut(|m| {
+            let stalled =
+                m.heard == serial && matches!(m.state.progress, Some((PROGRESS_RUNNING, _)));
+            if stalled {
+                // The portal refuses another Update on this monitor while
+                // the first is installing; closing it cancels that.
+                close_monitor(m);
                 m.state.progress = None;
             }
+            stalled
         });
-        render();
+        if stalled {
+            refresh();
+        }
     });
 }
 

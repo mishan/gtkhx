@@ -58,7 +58,10 @@ the newest in the remote, and the banner says one of two things:
   reports nothing more until a commit moves. That message, like a finished
   update, stands until the monitor next reports the commits, which then
   decide again, so an update made elsewhere shows as one. An update that goes
-  five minutes without a word is given up on, and the commits decide again.
+  five minutes without a word is given up on: the monitor is closed, which
+  cancels the installation (the portal refuses a second `Update` on a monitor
+  while the first is installing), a new one is opened, and the commits
+  decide again.
 - **GtkHx was updated**, when what is installed isn't what is running: after
   updating from the banner, or when the software center updated it in the
   background. "Restart" asks first if any server is connected, then starts

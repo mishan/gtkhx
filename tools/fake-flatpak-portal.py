@@ -17,6 +17,7 @@ FAKE_PORTAL_MODE picks the story:
   installed  a newer commit is installed but not running
   fail       Update fails, then the "software center" installs it anyway
   fail-transient  every Update fails and no commit moves, as on a network error
+  stall      Update reports once and then nothing, until Close cancels it
 FAKE_PORTAL_VERSION sets the portal's version property (default 2).
 """
 
@@ -52,15 +53,22 @@ XML = """<node>
 def serve():
     node = Gio.DBusNodeInfo.new_for_xml(XML)
     log = open(LOG, "a", buffering=1)
-    monitor = {}
+    # Per monitor object path: its caller, pending signals and whether an
+    # Update is under way. Close cancels both, as the real portal does.
+    monitors = {}
 
-    def later(ms, member, values):
+    def later(path, ms, member, values):
+        m = monitors[path]
+
         def fire():
-            monitor["conn"].emit_signal(
-                monitor["dest"], monitor["path"], MONITOR_IFACE, member,
-                GLib.Variant("(a{sv})", (values,)))
+            m["timers"].remove(source)
+            if member == "Progress" and values["status"].unpack() >= 2:
+                m["installing"] = False
+            m["conn"].emit_signal(m["dest"], path, MONITOR_IFACE, member,
+                                  GLib.Variant("(a{sv})", (values,)))
             return False
-        GLib.timeout_add(ms, fire)
+        source = GLib.timeout_add(ms, fire)
+        m["timers"].append(source)
 
     def commits(running, local, remote):
         return {"running-commit": GLib.Variant("s", running),
@@ -74,25 +82,41 @@ def serve():
         return d
 
     def method(conn, sender, path, iface, name, params, inv):
-        log.write(f"{iface}.{name} {params}\n")
+        log.write(f"{path} {iface}.{name} {params}\n")
         if name == "CreateUpdateMonitor":
             token = params.unpack()[0].get("handle_token", "t")
-            monitor.update(conn=conn, dest=sender, path="/org/freedesktop/portal/Flatpak/"
-                           f"update_monitor/{sender[1:].replace('.', '_')}/{token}")
-            conn.register_object(monitor["path"], node.interfaces[1], method, None, None)
-            inv.return_value(GLib.Variant("(o)", (monitor["path"],)))
-            later(1000, "UpdateAvailable",
+            path = ("/org/freedesktop/portal/Flatpak/update_monitor/"
+                    f"{sender[1:].replace('.', '_')}/{token}")
+            reg = conn.register_object(path, node.interfaces[1], method, None, None)
+            monitors[path] = {"conn": conn, "dest": sender, "timers": [],
+                              "installing": False, "reg": reg}
+            inv.return_value(GLib.Variant("(o)", (path,)))
+            later(path, 1000, "UpdateAvailable",
                   commits("a", "b", "b") if MODE == "installed" else commits("a", "a", "b"))
-        elif name == "Update":
+        elif name == "Close":
+            m = monitors.pop(path)
+            for source in m["timers"]:
+                GLib.source_remove(source)
+            conn.unregister_object(m["reg"])
             inv.return_value(None)
-            later(500, "Progress", progress(0, 42))
+        elif name == "Update":
+            m = monitors[path]
+            if m["installing"]:
+                inv.return_dbus_error("org.freedesktop.DBus.Error.Failed", "Already installing")
+                return
+            m["installing"] = True
+            inv.return_value(None)
+            later(path, 500, "Progress", progress(0, 42))
+            if MODE == "stall":
+                return
             if MODE.startswith("fail"):
-                later(2000, "Progress", progress(3, 0, error="org.freedesktop.portal.Error.NotAllowed",
-                                                 error_message="needs new permissions"))
+                later(path, 2000, "Progress",
+                      progress(3, 0, error="org.freedesktop.portal.Error.NotAllowed",
+                               error_message="needs new permissions"))
                 if MODE == "fail":
-                    later(5000, "UpdateAvailable", commits("a", "b", "b"))
+                    later(path, 5000, "UpdateAvailable", commits("a", "b", "b"))
             else:
-                later(4000, "Progress", progress(2, 100))
+                later(path, 4000, "Progress", progress(2, 100))
         elif name == "Spawn":
             # Slow, as starting a new sandbox is, so repeated clicks overlap it.
             GLib.timeout_add(1000, lambda: inv.return_value(GLib.Variant("(u)", (4242,))) or False)
@@ -107,8 +131,11 @@ def serve():
         conn.register_object("/org/freedesktop/portal/Flatpak", node.interfaces[0],
                              method, prop, None)
 
-    Gio.bus_own_name(Gio.BusType.SESSION, BUS, 0, acquired, None, None)
-    GLib.MainLoop().run()
+    loop = GLib.MainLoop()
+    # Losing the name includes losing the bus, when the session around the
+    # run ends: then there is no one left to serve.
+    Gio.bus_own_name(Gio.BusType.SESSION, BUS, 0, acquired, None, lambda *_: loop.quit())
+    loop.run()
 
 
 def main():
