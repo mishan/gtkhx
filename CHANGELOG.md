@@ -8,6 +8,8 @@
   - The right-click menu's last items are no longer cut off
   - Local folders no longer show "(4096 items)" as their size
   - Very long folder names no longer break the path sent to the server
+  - Downloading a folder that holds files of 4 GB or more no longer fails partway
+  - File names in non-Roman scripts, such as Japanese, no longer go missing from file listings
 - Docking
   - A new dock, built on mullion-gtk in place of libpanel; your layout carries over
   - A pane's tabs sit in its top corner as icons, in sight where the pane has room for them and otherwise while you are in the pane; Pane Titles puts tab strips with titles back
@@ -23,6 +25,14 @@
   - Click a tile to bring it into focus at the top of the panel; click it again to show everyone alike
   - Each tile has controls to focus, mute, or stop watching someone, and you can watch them again from the bar below
   - The users list shows who has a camera or screen share on, even when GtkHx can't play video
+  - Cameras you plug in or unplug show up right away, in Settings and on the camera button
+  - A chosen camera that isn't plugged in stays chosen in Settings, marked as missing
+  - Chat says when someone in your voice room turns their camera on or starts sharing their screen
+  - No video is downloaded while the window is minimized
+  - On a metered connection you receive one video at a time, and click another to switch; Settings → Voice can turn this off
+  - Video no longer sometimes stays blank, or fails to start, after someone turns their camera on
+  - Screen readers can now name the camera and screen-share buttons and the users list's video icon
+  - Join and leave sounds are right again after switching voice rooms
 - Chat
   - Chat history shows line breaks and accented characters correctly
   - Very long scrollbacks stay fast as new messages arrive and while scrolling
@@ -32,6 +42,10 @@
   - Dismissing a selection with a click no longer also opens the link under it
   - Chat settings now reach every connection, not just the one in focus
   - Settings → Chat can turn off opening links with a single click
+  - Load Older no longer gets stuck on "Loading…" when the server turns it down
+  - A private chat you closed no longer reopens when the server answers late
+  - Names with accented characters no longer show "is now known as" at every status change
+  - Server broadcasts show accented characters correctly
 - News
   - Accented characters in threaded news show correctly: folder and category names, subjects, authors and posts
   - A news folder, category or article the server refuses no longer stays stuck loading; you can try again
@@ -44,8 +58,13 @@
   - Sending text is faster on servers without Unicode
   - GtkHx now tells servers it is GtkHx (client version 254) instead of the Hotline 1.8.5 client
   - HOPE secure logins now compress the connection with the Compression setting's choice (GZIP, LZ4 or ZSTD) when the server supports it
+  - Closing a server's agreement window now declines it, like the Disagree button
+  - An empty server agreement no longer opens an empty window
+  - Older servers that refuse GtkHx's once-a-minute check that the connection is alive no longer cause an error each time
+  - Sending a message, loading the user list and fetching chat history no longer appear in the Tasks list
 - Updates
   - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
+  - Windows, macOS and Flatpak test builds show their real version, such as 1.4.1b2, in About instead of 1.4.1-dev
 - Code Modernization
   - The file browser is now Rust
   - GtkHx now reads tracker listings with code shared with the hxd-ng server
@@ -59,6 +78,7 @@
   - A reference guide to the Hotline protocol and its extensions
 - Translations
   - The Local / Remote selector in the file browser is now translated
+  - The Flatpak download now includes the translations
 
 ## 1.4.0
 
