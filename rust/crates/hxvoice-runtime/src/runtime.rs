@@ -5117,6 +5117,7 @@ fn answer_once_senders_have_caps(
         }
     };
     let answer = Arc::new(answer);
+    let mut releases = Vec::new();
     for pad in waiting {
         let counted = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let arrive = {
@@ -5131,29 +5132,49 @@ fn answer_once_senders_have_caps(
                 }
             }
         };
-        let on_probe = arrive.clone();
-        pad.add_probe(
-            gstreamer::PadProbeType::EVENT_DOWNSTREAM,
-            move |_pad, info| {
-                if let Some(gstreamer::PadProbeData::Event(ev)) = &info.data {
-                    if ev.type_() == gstreamer::EventType::Caps {
-                        crate::debug::log!("voice-pipe", "sender caps arrived: {ev:?}");
-                        on_probe();
-                        return gstreamer::PadProbeReturn::Remove;
-                    }
+        // Not a pad probe, which sees the caps event too early:
+        // create-answer takes the SSRC from what webrtcbin's sink event
+        // function records, and the pad's caps notify comes after
+        // webrtcbin's sink event function has recorded them.
+        let handler = Arc::new(std::sync::Mutex::new(None));
+        let release = {
+            let handler = Arc::clone(&handler);
+            let pad = pad.downgrade();
+            move || {
+                if let (Some(id), Some(pad)) = (handler.lock().unwrap().take(), pad.upgrade()) {
+                    pad.disconnect(id);
                 }
-                gstreamer::PadProbeReturn::Ok
-            },
-        );
+            }
+        };
+        let id = pad.connect_notify(Some("caps"), {
+            let arrive = arrive.clone();
+            let release = release.clone();
+            move |pad, _| {
+                crate::debug::log!(
+                    "voice-pipe",
+                    "sender caps arrived: {:?}",
+                    pad.current_caps()
+                );
+                arrive();
+                release();
+            }
+        });
+        *handler.lock().unwrap() = Some(id);
         // The caps may have landed between the filter above and the
-        // probe going in.
+        // handler going in.
         if pad.current_caps().is_some() {
             arrive();
+            release();
         }
+        releases.push(release);
     }
+    // A sender that never shows caps must not keep its handler.
     gstreamer::glib::timeout_add_local_once(
         std::time::Duration::from_millis(SENDER_CAPS_WAIT_MS),
-        move || answer(),
+        move || {
+            releases.iter().for_each(|release| release());
+            answer();
+        },
     );
 }
 
