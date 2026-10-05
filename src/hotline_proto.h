@@ -172,73 +172,7 @@ extern bool gtkhx_proto_parse_account_read (
     uint8_t *login_buf, size_t login_cap, uint8_t *pass_buf, size_t pass_cap,
     struct gtkhx_proto_account_read *out);
 
-/* ---- Xfer-reply parsers (post-TASK payloads on FILE_GET / FOLDER_GET /
- * FILE_GETINFO replies) ---- */
-
-struct gtkhx_proto_file_get_reply {
-    uint32_t ref_;
-    uint32_t size;
-    uint64_t size64;
-    uint32_t queue;
-    /* 0/1 — set iff the XFERSIZE64 companion chunk was present and
-     * carried at least 8 bytes (the parser reads the first 8 BE
-     * bytes; trailing bytes are ignored, matching the C `_len >= 8`
-     * gate). Callers prefer size64 when set. */
-    uint8_t size64_seen;
-};
-
-/* Parse the FILE_GET reply scalars (HTXF_REF + HTXF_SIZE + optional
- * XFERSIZE64 + optional QUEUE). Missing chunks default to zero; the
- * caller applies the C extractor's `(!size && !size64_seen) || !ref`
- * dispatch gate. Returns false on NULL out; otherwise true. */
-extern bool
-gtkhx_proto_parse_file_get_reply (const uint8_t *msg, size_t msglen,
-                                  struct gtkhx_proto_file_get_reply *out);
-
-struct gtkhx_proto_folder_get_reply {
-    uint32_t ref_;
-    uint32_t size;
-    uint64_t size64;
-    uint32_t queue;
-    uint32_t nfiles;
-    uint8_t size64_seen;
-};
-
-/* Parse the FOLDER_GET reply scalars. Same contract as
- * gtkhx_proto_parse_file_get_reply with the addition of FILE_NFILES. */
-extern bool
-gtkhx_proto_parse_folder_get_reply (const uint8_t *msg, size_t msglen,
-                                    struct gtkhx_proto_folder_get_reply *out);
-
-struct gtkhx_proto_file_put_reply {
-    uint32_t ref_;
-    uint32_t queue;
-    /* Fork resume offsets parsed from the optional RFLT payload.
-     * Zero when no RFLT was sent or it was shorter than 66 bytes
-     * (the C extractor's gate; RFLT carries data_pos at +46 and
-     * rsrc_pos at +62, both BE u32). */
-    uint32_t data_pos;
-    uint32_t rsrc_pos;
-};
-
-/* Parse the FILE_PUT reply scalars. Returns false on NULL out;
- * otherwise true (missing chunks default to zero — caller applies
- * the `!ref` dispatch gate). */
-extern bool
-gtkhx_proto_parse_file_put_reply (const uint8_t *msg, size_t msglen,
-                                  struct gtkhx_proto_file_put_reply *out);
-
-struct gtkhx_proto_folder_put_reply {
-    uint32_t ref_;
-    uint32_t queue;
-};
-
-/* Parse the FOLDER_PUT reply scalars (strict subset of
- * gtkhx_proto_parse_file_put_reply — no RFLT; per-file resume
- * happens inside folder_put_thread, not at the task boundary). */
-extern bool
-gtkhx_proto_parse_folder_put_reply (const uint8_t *msg, size_t msglen,
-                                    struct gtkhx_proto_folder_put_reply *out);
+/* ---- Xfer-reply parsers ---- */
 
 struct gtkhx_proto_banner_get_reply {
     uint32_t ref_;
@@ -298,68 +232,6 @@ extern bool
 gtkhx_proto_parse_history_entry (const uint8_t *data, size_t len,
                                  struct gtkhx_proto_history_entry *out);
 
-/* ---- HTLS_DATA_FILE_LIST entry walker ---- */
-
-struct gtkhx_proto_file_list_entry {
-    uint32_t ftype;    /* FourCC, e.g. "fldr" / "TEXT" / "JPEG" */
-    uint32_t fcreator; /* FourCC */
-    uint32_t fsize;    /* bytes (or item count for folders) */
-    uint32_t fnlen;
-    /* Offset of filename bytes within the caller's `data` buffer
-     * (relative to `data`, not relative to the chunk start). */
-    size_t name_off;
-    size_t name_len;
-    /* Where the next chunk begins; pass back as the next call's
-     * `off`. Only meaningful when the parse returns true — a false
-     * return means either end-of-buffer OR a malformed chunk, and
-     * the caller can't tell which from next_off alone (it isn't
-     * written on the failure path). Iteration just stops at the
-     * first false return; callers that need to distinguish a
-     * clean end-of-buffer from a corrupt entry must inspect the
-     * remaining `len - off` bytes themselves. */
-    size_t next_off;
-};
-
-/* Parse one packed HTLS_DATA_FILE_LIST entry starting at
- * data[off]. Caller iterates: off = 0; while
- * (gtkhx_proto_parse_file_list_entry (data, len, off, &out)) {
- *     use out; off = out.next_off; }
- *
- * Returns true on success with *out filled; false at end-of-buffer
- * or on a malformed chunk (< 24 bytes remaining, declared chunk
- * length runs past the buffer, fnlen runs past the chunk). */
-extern bool
-gtkhx_proto_parse_file_list_entry (const uint8_t *data, size_t len, size_t off,
-                                   struct gtkhx_proto_file_list_entry *out);
-
-struct gtkhx_proto_file_getinfo {
-    uint8_t icon[4];
-    uint8_t date_create[8];
-    uint8_t date_modify[8];
-    uint32_t size;
-    uint64_t size64;
-    uint8_t size64_seen;
-    uint8_t got_icon;
-    /* Bytes written to the four string buffers (excluding trailing NUL). */
-    uint16_t name_len;
-    uint16_t type_len;
-    uint16_t creator_len;
-    uint16_t comment_len;
-};
-
-/* Parse the FILE_GETINFO reply (the file-info dialog payload).
- * Writes strip_ansi'd FILE_NAME into name_buf, FILE_TYPE / FILE_CREATOR
- * (4-byte HFS codes, typically) into their buffers, and CR2LF +
- * strip_ansi'd FILE_COMMENT into comment_buf — all NUL-terminated and
- * capped at the matching _cap-1. FILE_ICON / FILE_DATE_CREATE /
- * FILE_DATE_MODIFY land in fixed-size byte arrays in *out. Returns
- * false on any NULL / zero-cap pointer; otherwise true. */
-extern bool gtkhx_proto_parse_file_getinfo (
-    const uint8_t *msg, size_t msglen, uint8_t *name_buf, size_t name_cap,
-    uint8_t *type_buf, size_t type_cap, uint8_t *creator_buf,
-    size_t creator_cap, uint8_t *comment_buf, size_t comment_cap,
-    struct gtkhx_proto_file_getinfo *out);
-
 /* ---- Misc smaller parsers ---- */
 
 /* Extract a HTLS_DATA_TASKERROR chunk's CR2LF + strip_ansi sanitised
@@ -383,17 +255,6 @@ struct gtkhx_proto_banner {
 extern bool gtkhx_proto_parse_banner (const uint8_t *msg, size_t msglen,
                                       uint8_t *url_buf, size_t url_cap,
                                       struct gtkhx_proto_banner *out);
-
-struct gtkhx_proto_xfer_queue {
-    uint32_t htxf_ref;
-    uint32_t queueid;
-};
-
-/* Parse HTLS_HDR_QUEUE. Both fields default to 0; queueid == 0 means
- * "ready, you can start the transfer". Returns false on NULL out;
- * otherwise true. */
-extern bool gtkhx_proto_parse_xfer_queue (const uint8_t *msg, size_t msglen,
-                                          struct gtkhx_proto_xfer_queue *out);
 
 /* HTLS_HDR_AGREEMENT result codes matching hx_agreement_result. */
 #define GTKHX_PROTO_AGREEMENT_OK 0u
@@ -562,105 +423,6 @@ extern int32_t gtkhx_proto_build_account_modify_chunks (
     size_t password_len, const uint8_t *name_ptr, size_t name_len,
     const uint8_t *access_ptr, struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
-
-/* HTLC_HDR_FILE_MKDIR: single HTLC_DATA_DIR chunk. chunks_cap >= 1.
- * No scratch needed. Returns 1 on success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_file_mkdir_chunks (const uint8_t *dir_ptr,
-                                                    size_t dir_len,
-                                                    struct hx_chunk *chunks,
-                                                    size_t chunks_cap);
-
-/* HTLC_HDR_FILE_LIST: single HTLC_DATA_DIR chunk. Wire-identical to
- * FILE_MKDIR. chunks_cap >= 1. Returns 1 on success, 0 on validation
- * failure. */
-extern int32_t gtkhx_proto_build_file_list_chunks (const uint8_t *dir_ptr,
-                                                   size_t dir_len,
-                                                   struct hx_chunk *chunks,
-                                                   size_t chunks_cap);
-
-/* HTLC_HDR_FILE_DELETE: FILE_NAME + optional DIR. has_dir is a 0/1
- * flag — when non-zero, emit DIR with the given bytes; when zero,
- * omit (dir_ptr / dir_len are ignored). chunks_cap >= 2.
- * Returns 1 (no dir) or 2 (with dir) on success, 0 on validation
- * failure (NULL pointer, short buffer, oversize field). */
-extern int32_t
-gtkhx_proto_build_file_delete_chunks (const uint8_t *name_ptr, size_t name_len,
-                                      uint8_t has_dir, const uint8_t *dir_ptr,
-                                      size_t dir_len, struct hx_chunk *chunks,
-                                      size_t chunks_cap);
-
-/* HTLC_HDR_FILE_GETINFO: same shape as FILE_DELETE. */
-extern int32_t
-gtkhx_proto_build_file_getinfo_chunks (const uint8_t *name_ptr, size_t name_len,
-                                       uint8_t has_dir, const uint8_t *dir_ptr,
-                                       size_t dir_len, struct hx_chunk *chunks,
-                                       size_t chunks_cap);
-
-/* HTLC_HDR_FILE_GETFOLDER: same shape as FILE_DELETE. */
-extern int32_t gtkhx_proto_build_file_getfolder_chunks (
-    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
-    const uint8_t *dir_ptr, size_t dir_len, struct hx_chunk *chunks,
-    size_t chunks_cap);
-
-/* HTLC_HDR_FILE_SETINFO: FILE_NAME + FILE_RENAME + optional
- * FILE_COMMENT + optional DIR. has_comment / has_dir are 0/1 flags;
- * when zero the corresponding payload pointer/len are ignored.
- * chunks_cap >= 4 (the shim always slices to the full setinfo size).
- * Returns 2..=4 on success, 0 on validation failure (NULL pointer,
- * short buffer, oversize field). */
-extern int32_t gtkhx_proto_build_file_setinfo_chunks (
-    const uint8_t *name_ptr, size_t name_len, const uint8_t *rename_ptr,
-    size_t rename_len, uint8_t has_comment, const uint8_t *comment_ptr,
-    size_t comment_len, uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
-    struct hx_chunk *chunks, size_t chunks_cap);
-
-/* HTLC_HDR_FILE_MOVE: FILE_NAME + DIR + DIR_RENAME. chunks_cap >= 3.
- * Returns 3 on success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_file_move_chunks (
-    const uint8_t *name_ptr, size_t name_len, const uint8_t *dir_ptr,
-    size_t dir_len, const uint8_t *dir_rename_ptr, size_t dir_rename_len,
-    struct hx_chunk *chunks, size_t chunks_cap);
-
-/* HTLC_HDR_FILE_SYMLINK: FILE_NAME + DIR + DIR_RENAME + FILE_RENAME.
- * chunks_cap >= 4. Returns 4 on success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_file_symlink_chunks (
-    const uint8_t *name_ptr, size_t name_len, const uint8_t *dir_ptr,
-    size_t dir_len, const uint8_t *dir_rename_ptr, size_t dir_rename_len,
-    const uint8_t *rename_ptr, size_t rename_len, struct hx_chunk *chunks,
-    size_t chunks_cap);
-
-/* HTLC_HDR_FILE_PUTFOLDER: FILE_NAME + optional DIR + HTXF_SIZE (u32
- * BE, host order in) + FILE_NFILES (u32 BE, host order in).
- * chunks_cap >= 4, scratch_cap >= 8. Returns 3 (no dir) or 4 (with
- * dir) on success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_file_putfolder_chunks (
-    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
-    const uint8_t *dir_ptr, size_t dir_len, uint32_t size, uint32_t nfiles,
-    struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
-    size_t scratch_cap);
-
-/* HTLC_HDR_FILE_GET: FILE_NAME + optional DIR + optional RFLT (74
- * bytes — fixed-size resume payload built by the C caller).
- * has_dir / has_rflt are 0/1 flags; rflt_ptr must point to exactly
- * 74 bytes when has_rflt is set. chunks_cap >= 3. Returns 1..=3 on
- * success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_file_get_chunks (
-    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
-    const uint8_t *dir_ptr, size_t dir_len, uint8_t has_rflt,
-    const uint8_t *rflt_ptr, struct hx_chunk *chunks, size_t chunks_cap);
-
-/* HTLC_HDR_FILE_PUT: FILE_NAME + optional DIR + optional FILE_PREVIEW
- * (2 bytes "\0\1", set when overwriting an existing remote file) +
- * HTXF_SIZE (u32 BE, host order in) + optional XFERSIZE64 (u64 BE,
- * host order in; large-files mode). has_dir / has_preview /
- * has_size64 are 0/1 flags. chunks_cap >= 5, scratch_cap >= 12 (u32
- * at +0, u64 at +4). Returns 2..=5 on success, 0 on validation
- * failure. */
-extern int32_t gtkhx_proto_build_file_put_chunks (
-    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
-    const uint8_t *dir_ptr, size_t dir_len, uint8_t has_preview, uint32_t size,
-    uint8_t has_size64, uint64_t size64, struct hx_chunk *chunks,
-    size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
 
 /* ---- HTRK (Hotline tracker, v1) reply parsers ---- */
 

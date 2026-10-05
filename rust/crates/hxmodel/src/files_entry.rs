@@ -18,7 +18,7 @@
 
 mod populate;
 
-pub use populate::gtkhx_files_populate_from_reply;
+pub use populate::populate;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::ffi::{c_char, CStr, CString};
@@ -62,6 +62,10 @@ mod imp {
 
     pub struct HxFileEntry {
         pub name: RefCell<CString>,
+        /// What the provider knows the entry by: a remote one's name as
+        /// the server sent it, which a decoded name does not always encode
+        /// back to.
+        pub wire: RefCell<CString>,
         pub kind: RefCell<CString>,
         pub is_dir: Cell<bool>,
         pub size: Cell<u64>,
@@ -75,6 +79,7 @@ mod imp {
         fn default() -> Self {
             HxFileEntry {
                 name: RefCell::new(CString::new("").unwrap()),
+                wire: RefCell::new(CString::new("").unwrap()),
                 kind: RefCell::new(CString::new("").unwrap()),
                 is_dir: Cell::new(false),
                 size: Cell::new(0),
@@ -120,6 +125,7 @@ impl HxFileEntry {
         let obj: Self = glib::Object::new();
         let imp = obj.imp();
         imp.name.replace(cstring_of(name));
+        imp.wire.replace(cstring_of(name));
         imp.kind.replace(cstring_of(kind));
         imp.is_dir.set(is_dir);
         imp.size.set(size);
@@ -137,6 +143,19 @@ impl HxFileEntry {
     /// The display name (UTF-8).
     pub fn name(&self) -> String {
         self.imp().name.borrow().to_string_lossy().into_owned()
+    }
+
+    /// The entry, known to its provider by `wire` rather than by its
+    /// display name. Cut at a NUL, which no name holds.
+    pub fn named_by(self, wire: &[u8]) -> Self {
+        let end = wire.iter().position(|&b| b == 0).unwrap_or(wire.len());
+        self.imp().wire.replace(CString::new(&wire[..end]).unwrap());
+        self
+    }
+
+    /// What the provider knows the entry by; see [`HxFileEntry::named_by`].
+    pub fn wire_name(&self) -> Vec<u8> {
+        self.imp().wire.borrow().to_bytes().to_vec()
     }
 
     /// The name's collation key, for sorting: comparing two keys bytewise
@@ -262,6 +281,19 @@ pub unsafe extern "C" fn hx_file_entry_new(
 pub unsafe extern "C" fn hx_file_entry_get_name(e: *mut c_void) -> *const c_char {
     match borrow(e) {
         Some(o) => o.imp().name.borrow().as_ptr(),
+        None => EMPTY.as_ptr(),
+    }
+}
+
+/// What the provider knows the entry by, borrowed for the object's lifetime.
+/// `""` on NULL.
+///
+/// # Safety
+/// `e` must be NULL or a live `HxFileEntry`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_file_entry_get_wire_name(e: *mut c_void) -> *const c_char {
+    match borrow(e) {
+        Some(o) => o.imp().wire.borrow().as_ptr(),
         None => EMPTY.as_ptr(),
     }
 }

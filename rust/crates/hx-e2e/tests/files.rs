@@ -119,8 +119,7 @@ fn delete_removes_a_folder_and_everything_in_it() {
         mkdir(s.client(), &doomed);
         mkdir(s.client(), &format!("{doomed}/inner"));
         let c = s.client();
-        let utf8 = c.utf8();
-        let r = c.request(&files::delete(doomed.as_bytes(), utf8).unwrap());
+        let r = c.request(&files::delete(doomed.as_bytes()).unwrap());
         ok(c, &r, "delete");
         assert!(c.names(&dir).is_empty());
     }
@@ -132,9 +131,8 @@ fn replies_come_back_on_their_own_transaction() {
         let mut s = Scratch::new(&mut c, "trans");
         let (missing, fresh) = (s.join("missing"), s.join("fresh"));
         let c = s.client();
-        let utf8 = c.utf8();
         // Two requests in flight at once: the failure belongs to the first.
-        let t1 = c.send(&files::delete(missing.as_bytes(), utf8).unwrap());
+        let t1 = c.send(&files::delete(missing.as_bytes()).unwrap());
         let t2 = c.send(&files::mkdir(fresh.as_bytes()).unwrap());
         let r1 = c.reply_to(t1).unwrap();
         let r2 = c.reply_to(t2).unwrap();
@@ -211,27 +209,48 @@ fn a_move_onto_a_non_empty_folder_is_refused_and_both_stay() {
 
 // ---- names -----------------------------------------------------------------
 
+/// A folder named in Mac Roman on a server that never agreed to UTF-8 is
+/// named back by the bytes its listing gave, everywhere the browser names
+/// it: opened, made in, asked about, fetched, renamed and deleted.
 #[test]
-fn a_mac_roman_name_round_trips_through_its_display_form() {
+fn a_mac_roman_folder_is_named_back_by_its_bytes() {
     for mut c in admins() {
         assert!(!c.utf8());
         let mut s = Scratch::new(&mut c, "macroman");
         let dir = s.path().to_string();
-        // "café" in Mac Roman, made with the raw bytes.
-        let mut raw = s.join("caf").into_bytes();
-        raw.push(0x8e);
-        let r = s.client().request(&files::mkdir(&raw).unwrap());
-        ok(s.client(), &r, "mkdir");
-
-        // The browser shows the listed name decoded, and sends it back encoded.
-        let listed = s.client().names(&dir);
-        assert_eq!(listed, [b"caf\x8e".to_vec()]);
-        let shown = hxproto::text::to_utf8(&listed[0]);
-        assert_eq!(shown, "caf\u{e9}");
         let c = s.client();
-        let r = c.request(&files::get_info(dir.as_bytes(), shown.as_bytes(), false).unwrap());
-        ok(c, &r, "get info by the shown name");
+        // "café" in Mac Roman, made with the raw bytes.
+        let r = c.request(&files::mkdir(&[dir.as_bytes(), b"/caf\x8e"].concat()).unwrap());
+        ok(c, &r, "mkdir");
+        let listed = c.names(&dir);
+        assert_eq!(listed, [b"caf\x8e".to_vec()]);
+        assert_eq!(hxproto::text::to_utf8(&listed[0]), "caf\u{e9}");
+        let path = [dir.as_bytes(), b"/", &listed[0]].concat();
+
+        let r = c.request(&files::mkdir(&[&path[..], b"/inner"].concat()).unwrap());
+        ok(c, &r, "mkdir inside");
+        let r = c.request(&files::list(&path).unwrap());
+        ok(c, &r, "list inside");
+        let inside: Vec<Vec<u8>> = r.file_list().into_iter().map(|e| e.name).collect();
+        assert_eq!(inside, [b"inner".to_vec()]);
+
+        let r = c.request(&files::get_info(dir.as_bytes(), &listed[0]).unwrap());
+        ok(c, &r, "get info");
         assert_eq!(r.file_info().name, b"caf\x8e");
+
+        let r = c.request(&files::get_folder(dir.as_bytes(), &listed[0]).unwrap());
+        ok(c, &r, "folder download");
+        c.cancel_transfer(hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len()).ref_);
+
+        // A new name, typed, goes as the connection sends text.
+        let typed = hxproto::text::from_utf8("na\u{ef}ve");
+        let r = c.request(&files::moves(&path, &[dir.as_bytes(), b"/", &typed].concat())[0]);
+        ok(c, &r, "rename");
+        assert_eq!(c.names(&dir), [b"na\x95ve".to_vec()]);
+
+        let r = c.request(&files::delete(&[dir.as_bytes(), b"/na\x95ve"].concat()).unwrap());
+        ok(c, &r, "delete");
+        assert!(c.names(&dir).is_empty());
     }
 }
 
@@ -245,9 +264,9 @@ fn get_info_describes_a_folder_and_reads_back_its_comment() {
         mkdir(s.client(), &f);
         let c = s.client();
         let utf8 = c.utf8();
-        let r = c.request(&files::set_info(f.as_bytes(), b"f", Some(b"two\nlines"), utf8).unwrap());
+        let r = c.request(&files::set_info(f.as_bytes(), None, Some(b"two\nlines"), utf8).unwrap());
         ok(c, &r, "set comment");
-        let r = c.request(&files::get_info(dir.as_bytes(), b"f", utf8).unwrap());
+        let r = c.request(&files::get_info(dir.as_bytes(), b"f").unwrap());
         ok(c, &r, "get info");
         let info = r.file_info();
         assert_eq!(info.name, b"f");
@@ -274,15 +293,14 @@ fn folder_transfers_are_granted_a_reference() {
         mkdir(s.client(), &tree);
         mkdir(s.client(), &format!("{tree}/leaf"));
         let c = s.client();
-        let utf8 = c.utf8();
 
-        let r = c.request(&files::get_folder(dir.as_bytes(), b"tree", utf8).unwrap());
+        let r = c.request(&files::get_folder(dir.as_bytes(), b"tree").unwrap());
         ok(c, &r, "folder download");
         let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
         assert_ne!(get.ref_, 0);
         c.cancel_transfer(get.ref_);
 
-        let r = c.request(&files::put_folder(dir.as_bytes(), b"up", 15, 2, utf8).unwrap());
+        let r = c.request(&files::put_folder(dir.as_bytes(), b"up", 15, 2).unwrap());
         ok(c, &r, "folder upload");
         let put = hxproto::parse::parse_folder_put_reply(&r.raw, r.raw.len());
         assert_ne!(put.ref_, 0);
@@ -307,8 +325,7 @@ fn download_folder(
 
     unsafe extern "C" fn no_progress(_u: *mut c_void, _d: u64) {}
 
-    let utf8 = c.utf8();
-    let r = c.request(&files::get_folder(dir.as_bytes(), name, utf8).unwrap());
+    let r = c.request(&files::get_folder(dir.as_bytes(), name).unwrap());
     ok(c, &r, "folder download");
     let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
     let mut pre = [0u8; 24];
@@ -409,14 +426,16 @@ fn a_guest_can_list_the_root_and_get_info_on_what_is_there() {
     for s in servers_with(&[]) {
         for caps in [0, CAP_TEXT_ENCODING] {
             let mut c = Client::guest(s, caps);
-            let utf8 = c.utf8();
             let entries = c.list("/");
             assert!(!entries.is_empty(), "{}: empty root", s.name);
             for e in entries.iter().filter(|e| !e.is_folder()).take(3) {
-                // By the name as the browser shows it.
-                let shown = hxproto::text::to_utf8(&e.name);
-                let r = c.request(&files::get_info(b"/", shown.as_bytes(), utf8).unwrap());
-                ok(&c, &r, &format!("get info {shown:?}"));
+                // By the name as the server sent it, as the browser names it.
+                let r = c.request(&files::get_info(b"/", &e.name).unwrap());
+                ok(
+                    &c,
+                    &r,
+                    &format!("get info {:?}", hxproto::text::to_utf8(&e.name)),
+                );
                 assert_eq!(r.file_info().name, e.name);
             }
         }

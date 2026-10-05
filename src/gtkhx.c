@@ -1946,7 +1946,7 @@ on_file_list_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
      * response to its remote-files-provider. The legacy
      * output_file_list fallback is gone with the rest of the
      * legacy gfile_list UI. Responses without a recognised
-     * provider carrier (e.g. stale FILE_LIST tasks from a
+     * provider carrier (e.g. stale listings from a
      * closed window) get harmlessly dropped inside the handler. */
     (void)hx_remote_files_provider_handle_file_list (cfl, fh, data);
 }
@@ -1980,8 +1980,13 @@ on_file_update_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
      * remotename sidesteps the timing entirely. */
     if (x && x->total_size > 0 && hx_htxf_total_pos (x) >= x->total_size) {
         const char *display = NULL;
+        /* The server's bytes, which a Mac Roman server's name is not
+         * UTF-8 in. */
+        g_autofree char *folder = NULL;
         if (x->opt.folder && x->remotename_len > 0) {
-            display = (const char *)x->remotename;
+            folder
+                = gtkhx_text_to_utf8 (x->remotename, x->remotename_len, NULL);
+            display = folder;
         } else {
             const char *path = x->path;
             const char *base = path ? strrchr (path, '/') : NULL;

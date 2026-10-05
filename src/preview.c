@@ -151,7 +151,7 @@ struct hx_preview {
     gint stream_finished;
 
     /* User-close-window cancel hook. Registered by the caller of
-     * hx_preview_new (rcv.c::rcv_task_file_get hands in xfer_delete
+     * hx_preview_new (hxhandlers::recv::xfer::download_ready hands in xfer_delete
      * + the matching htxf pointer). Fired at most once, on the
      * main thread, from preview_close_request when !done. NULL =
      * no cancel hook installed (legitimate for callers that don't

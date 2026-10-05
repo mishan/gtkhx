@@ -11,12 +11,6 @@ fn fake_htxf() -> *mut std::os::raw::c_void {
 // Wire chunk tags (src/hotline.h / messages.rs::tag).
 const HTXF_REF: u16 = 0x006b;
 const HTXF_SIZE: u16 = 0x006c;
-const QUEUE: u16 = 0x0074;
-const FILE_NAME: u16 = 0x00c9;
-const RFLT: u16 = 0x00cb;
-const FILE_SIZE: u16 = 0x00cf;
-const FILE_NFILES: u16 = 0x00dc;
-const XFERSIZE64: u16 = 0x01f3;
 
 /// Build a 22-byte transaction header (`flag & 1` = task-error) followed by the
 /// concatenated TLV chunks — the shape `ChunkIter::over_message` expects.
@@ -81,20 +75,28 @@ fn queued_transfer_announces_only() {
     assert!(!test_env::STARTED.with(|c| c.get()));
 }
 
-// ---- file_get --------------------------------------------------------------
+// ---- downloads and uploads ------------------------------------------------
+
+fn transfer(reference: u32, size: u64, queue: u32) -> Transfer {
+    Transfer {
+        reference,
+        size,
+        queue,
+        ..Transfer::default()
+    }
+}
 
 #[test]
-fn file_get_ready_stamps_and_announces() {
+fn a_download_stamps_and_starts() {
     test_env::reset();
-    let f = reply(
-        false,
-        &[
-            (HTXF_REF, u32b(7)),
-            (HTXF_SIZE, u32b(4096)),
-            (QUEUE, u32b(0)),
-        ],
-    );
-    unsafe { call(rcv_task_file_get, &f) };
+    unsafe {
+        download_ready(
+            std::ptr::null_mut(),
+            fake_htxf(),
+            false,
+            &transfer(7, 4096, 0),
+        )
+    };
     let h = htxf();
     assert_eq!(h.ref_, 7);
     assert_eq!(h.total_size, 4096);
@@ -106,97 +108,88 @@ fn file_get_ready_stamps_and_announces() {
     assert!(test_env::STARTED.with(|c| c.get()));
 }
 
+/// What starts nothing: a cancelled transfer, no reference, and a file
+/// download with no size. A folder may be empty.
 #[test]
-fn file_get_prefers_size64() {
-    test_env::reset();
-    let big: u64 = 0x1_0000_0000; // 4 GiB — doesn't fit the legacy u32
-    let f = reply(
-        false,
-        &[
-            (HTXF_REF, u32b(9)),
-            (HTXF_SIZE, u32b(1)),
-            (XFERSIZE64, big.to_be_bytes().to_vec()),
-        ],
-    );
-    unsafe { call(rcv_task_file_get, &f) };
-    assert_eq!(htxf().total_size, big);
+fn a_download_reply_that_cannot_start_is_dropped() {
+    for (in_list, folder, t) in [
+        (0, false, transfer(7, 4096, 0)),
+        (1, false, transfer(0, 4096, 0)),
+        (1, false, transfer(7, 0, 0)),
+        (1, true, transfer(0, 9, 0)),
+    ] {
+        test_env::reset();
+        test_env::IN_LIST.with(|c| c.set(in_list));
+        unsafe { download_ready(std::ptr::null_mut(), fake_htxf(), folder, &t) };
+        assert_eq!(htxf().ref_, 0);
+        assert!(!test_env::ANNOUNCED.with(|c| c.get()));
+    }
 }
 
 #[test]
-fn file_get_cancelled_transfer_dropped() {
+fn an_empty_folder_download_counts_one_byte() {
     test_env::reset();
-    test_env::IN_LIST.with(|c| c.set(0));
-    let f = reply(false, &[(HTXF_REF, u32b(7)), (HTXF_SIZE, u32b(4096))]);
-    unsafe { call(rcv_task_file_get, &f) };
-    assert_eq!(htxf().ref_, 0);
-    assert!(!test_env::ANNOUNCED.with(|c| c.get()));
+    unsafe { download_ready(std::ptr::null_mut(), fake_htxf(), true, &transfer(5, 0, 0)) };
+    let h = htxf();
+    assert_eq!(h.ref_, 5);
+    assert_eq!(h.total_size, 1);
 }
 
 #[test]
-fn file_get_task_error_retries_when_opted() {
+fn a_refused_download_retries_when_asked() {
     test_env::reset();
     test_env::OPT_RETRY.with(|c| c.set(1));
-    unsafe { call(rcv_task_file_get, &reply(true, &[])) };
+    unsafe { download_refused(std::ptr::null_mut(), fake_htxf()) };
     assert!(test_env::RETRY_TIMER.with(|c| c.get()));
     assert_eq!(htxf().gone, Some(0));
     assert!(!test_env::XFER_DELETED.with(|c| c.get()));
 }
 
 #[test]
-fn file_get_task_error_deletes_without_retry() {
-    test_env::reset();
-    unsafe { call(rcv_task_file_get, &reply(true, &[])) };
-    assert!(test_env::GTASK_DELETED.with(|c| c.get()));
-    assert!(test_env::XFER_DELETED.with(|c| c.get()));
-    assert!(!test_env::RETRY_TIMER.with(|c| c.get()));
+fn a_refused_transfer_is_deleted() {
+    for upload in [false, true] {
+        test_env::reset();
+        unsafe {
+            if upload {
+                upload_refused(std::ptr::null_mut(), fake_htxf())
+            } else {
+                download_refused(std::ptr::null_mut(), fake_htxf())
+            }
+        };
+        assert!(test_env::GTASK_DELETED.with(|c| c.get()));
+        assert!(test_env::XFER_DELETED.with(|c| c.get()));
+        assert!(!test_env::RETRY_TIMER.with(|c| c.get()));
+    }
 }
 
 #[test]
-fn file_get_malformed_no_ref_gated() {
-    test_env::reset();
-    unsafe { call(rcv_task_file_get, &reply(false, &[(HTXF_SIZE, u32b(4096))])) };
-    assert_eq!(htxf().ref_, 0);
-    assert!(!test_env::ANNOUNCED.with(|c| c.get()));
-}
-
-#[test]
-fn file_get_builds_preview_when_opted() {
+fn a_download_builds_its_preview_when_asked() {
     test_env::reset();
     test_env::OPT_PREVIEW.with(|c| c.set(1)); // preview requested, none yet
-    let f = reply(false, &[(HTXF_REF, u32b(7)), (HTXF_SIZE, u32b(10))]);
-    unsafe { call(rcv_task_file_get, &f) };
+    unsafe {
+        download_ready(
+            std::ptr::null_mut(),
+            fake_htxf(),
+            false,
+            &transfer(7, 10, 0),
+        )
+    };
     assert!(test_env::PREVIEW_BUILT.with(|c| c.get()));
     assert_eq!(htxf().preview, 0xB0);
 }
 
-// ---- folder_get ------------------------------------------------------------
-
 #[test]
-fn folder_get_zero_size_clamps_to_one() {
-    test_env::reset();
-    let f = reply(false, &[(HTXF_REF, u32b(5)), (FILE_NFILES, u32b(3))]);
-    unsafe { call(rcv_task_folder_get, &f) };
-    let h = htxf();
-    assert_eq!(h.ref_, 5);
-    assert_eq!(h.total_size, 1);
-}
-
-// ---- file_put --------------------------------------------------------------
-
-#[test]
-fn file_put_sizes_upload_from_fs_probes() {
+fn a_file_upload_is_sized_from_the_disk_and_where_it_resumes() {
     test_env::reset();
     test_env::STAT_SIZE.with(|c| c.set(1000)); // data-fork size
     test_env::RSRC_LEN.with(|c| c.set(50));
     test_env::COMMENT_LEN.with(|c| c.set(10));
-    let mut rflt = vec![0u8; 66];
-    rflt[46..50].copy_from_slice(&100u32.to_be_bytes()); // data_pos
-    rflt[62..66].copy_from_slice(&20u32.to_be_bytes()); // rsrc_pos
-    let f = reply(
-        false,
-        &[(HTXF_REF, u32b(11)), (QUEUE, u32b(2)), (RFLT, rflt)],
-    );
-    unsafe { call(rcv_task_file_put, &f) };
+    let t = Transfer {
+        data_from: 100,
+        rsrc_from: 20,
+        ..transfer(11, 0, 2)
+    };
+    unsafe { upload_ready(std::ptr::null_mut(), fake_htxf(), false, &t) };
     let h = htxf();
     assert_eq!(h.ref_, 11);
     assert_eq!(h.queue, 2);
@@ -206,27 +199,18 @@ fn file_put_sizes_upload_from_fs_probes() {
     assert_eq!(h.rsrc_size, 50);
     // 133 + 16 (rsrc remaining) + 10 (comment) + 900 (data remaining) + 30 (rsrc remaining)
     assert_eq!(h.total_size, 133 + 16 + 10 + 900 + 30);
+    assert!(!test_env::STARTED.with(|c| c.get()));
 }
 
 #[test]
-fn file_put_task_error_deletes() {
+fn a_folder_upload_stamps_ref_and_queue() {
     test_env::reset();
-    unsafe { call(rcv_task_file_put, &reply(true, &[])) };
-    assert!(test_env::GTASK_DELETED.with(|c| c.get()));
-    assert!(test_env::XFER_DELETED.with(|c| c.get()));
-}
-
-// ---- folder_put ------------------------------------------------------------
-
-#[test]
-fn folder_put_stamps_ref_and_queue() {
-    test_env::reset();
-    let f = reply(false, &[(HTXF_REF, u32b(21)), (QUEUE, u32b(0))]);
-    unsafe { call(rcv_task_folder_put, &f) };
+    unsafe { upload_ready(std::ptr::null_mut(), fake_htxf(), true, &transfer(21, 0, 0)) };
     let h = htxf();
     assert_eq!(h.ref_, 21);
     assert_eq!(h.queue, 0);
-    assert!(test_env::ANNOUNCED.with(|c| c.get()));
+    assert_eq!(h.total_size, 0);
+    assert!(test_env::STARTED.with(|c| c.get()));
 }
 
 // ---- banner_get ------------------------------------------------------------
@@ -246,49 +230,27 @@ fn banner_get_task_error_dropped() {
     assert_eq!(test_env::BANNER.with(|c| c.get()), None);
 }
 
-// ---- file_getinfo ----------------------------------------------------------
+// ---- file_info -------------------------------------------------------------
 
 #[test]
-fn file_getinfo_emits_name_and_size() {
+fn file_info_opens_the_dialog_for_the_label() {
     test_env::reset();
-    let f = reply(
-        false,
-        &[(FILE_NAME, b"report.txt".to_vec()), (FILE_SIZE, u32b(4096))],
-    );
-    unsafe {
-        rcv_task_file_getinfo(
-            std::ptr::null_mut(),
-            f.as_ptr() as *const std::os::raw::c_void,
-            f.len(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
+    let info = FileInfo {
+        name: "caf\u{e9}".into(),
+        kind: "TEXT".into(),
+        creator: "ttxt".into(),
+        comment: String::new(),
+        size: 4096,
+        created: [0; 8],
+        modified: [0; 8],
     };
+    unsafe { file_info(std::ptr::null_mut(), c"/pub/caf\x8e", &info) };
     assert_eq!(
         test_env::FILE_INFO.with(|c| c.borrow_mut().take()),
-        Some((b"report.txt".to_vec(), 4096))
+        Some((
+            b"/pub/caf\x8e".to_vec(),
+            "caf\u{e9}".as_bytes().to_vec(),
+            4096
+        ))
     );
-    // Success: the label transfers to the file-info window — the handler must
-    // NOT free it (that would double-free with close_file_info).
-    assert_eq!(test_env::FREED.with(|c| c.get()), None);
-}
-
-#[test]
-fn file_getinfo_task_error_frees_label() {
-    test_env::reset();
-    // A sentinel standing in for the g_strdup'd path label held as the task ptr.
-    let label = 0x1_abe1_usize as *mut std::os::raw::c_void;
-    let f = reply(true, &[]);
-    unsafe {
-        rcv_task_file_getinfo(
-            std::ptr::null_mut(),
-            f.as_ptr() as *const std::os::raw::c_void,
-            f.len(),
-            label,
-            std::ptr::null_mut(),
-        )
-    };
-    // No dialog opens on a task error, so the handler frees the label itself.
-    assert_eq!(test_env::FREED.with(|c| c.get()), Some(label));
-    assert!(test_env::FILE_INFO.with(|c| c.borrow().is_none()));
 }

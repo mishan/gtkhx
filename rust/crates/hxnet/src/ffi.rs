@@ -1045,11 +1045,11 @@ pub(crate) unsafe fn parse_proxy_arg(
 /// side can drive the toolbar throbber off the same `on_state`
 /// callback wiring it already uses.
 ///
-/// The session handles chat, users, messages and news itself
-/// (`Handled::CHAT`, `Handled::USERS`, `Handled::MSG`, `Handled::NEWS`):
-/// what it makes of them, and of the replies the consumer expects
-/// ([`connection_expect`]), reaches `on_session` rather than `on_event`,
-/// in the order the server sent it. The same holds for
+/// The session handles chat, users, messages, news and the transfer
+/// queue itself (`Handled::CHAT`, `Handled::USERS`, `Handled::MSG`,
+/// `Handled::NEWS`, `Handled::FILES`): what it makes of them, and of the
+/// replies the consumer expects ([`connection_expect`]), reaches
+/// `on_session` rather than `on_event`, in the order the server sent it. The same holds for
 /// `hxnet_connection_open_plaintext_tls` and `hxnet_connection_open_hope`.
 ///
 /// All input slices are non-NUL-terminated:
@@ -1230,7 +1230,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         proxy,
     };
 
-    let session = req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS);
+    let session =
+        req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS | Handled::FILES);
     traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
@@ -1580,7 +1581,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         boxed
     });
 
-    let session = req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS);
+    let session =
+        req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS | Handled::FILES);
     traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
@@ -1992,7 +1994,8 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         proxy,
     };
 
-    let session = req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS);
+    let session =
+        req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS | Handled::FILES);
     traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {

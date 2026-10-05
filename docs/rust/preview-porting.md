@@ -30,7 +30,7 @@ whole port. Sequence it whenever; it's independent of the docked windows.
 
 ### Lifecycle + threading
 
-`rcv.c::rcv_task_file_get` creates the window (`hx_preview_new`), wires a
+`hxhandlers::recv::xfer::download_ready` creates the window (`hx_preview_new`), wires a
 cancel hook (`hx_preview_set_cancel_cb` = `xfer_delete` + the htxf), and the
 HTXF worker then streams the data fork through three entry points **called on
 the worker thread**:

@@ -140,26 +140,6 @@ hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 }
 
 gboolean
-hx_xfer_queue_extract (const guint8 *frame, gsize frame_len,
-                       struct hx_xfer_queue_msg *out)
-{
-    if (!out) {
-        return FALSE;
-    }
-
-    /* chunk walk moved to gtkhx_proto_parse_xfer_queue. */
-    struct gtkhx_proto_xfer_queue q;
-    if (!gtkhx_proto_parse_xfer_queue (frame, frame_len, &q)) {
-        return FALSE;
-    }
-
-    out->ref = q.htxf_ref;
-    out->queueid = q.queueid;
-
-    return TRUE;
-}
-
-gboolean
 hx_htxf_reply_extract (const guint8 *frame, gsize frame_len,
                        struct hx_htxf_reply *out)
 {

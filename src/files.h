@@ -49,17 +49,16 @@ extern void output_file_info (char *path, char *name, char *creator, char *type,
                               char *comments, const guint8 *date_modify,
                               const guint8 *date_create, guint64 size);
 
-/* Rust-owned struct cached_filelist (hxhandlers::recv::files module) — the opaque handle +
- * accessor facade. Allocate with hx_cfl_new, reach the fields through these, free
- * with hx_cfl_free. The FILE_LIST reply's fh accumulation + the file-list emit
- * live in the Rust rcv_task_file_list; C touches cfl only to start a listing
- * (files_remote_provider.c). */
-extern struct cached_filelist *hx_cfl_new (void);
-extern void hx_cfl_free (struct cached_filelist *cfl);
+/* A listing, as the file-list signal carries it (hxhandlers::recv::files):
+ * the folder it lists, and its entries into a GListStore of HxFileEntry. */
 extern const char *hx_cfl_path (const struct cached_filelist *cfl);
-extern void hx_cfl_set_path (struct cached_filelist *cfl, const char *path);
-extern const void *hx_cfl_fh (const struct cached_filelist *cfl);
-extern guint32 hx_cfl_fhlen (const struct cached_filelist *cfl);
+extern void hx_cfl_populate (const struct cached_filelist *cfl,
+                             GListStore *store);
+
+/* FILE_LIST for `path`; the reply comes back on the file-list signal with
+ * `provider` as its data. */
+extern void hx_list_dir (struct htlc_conn *htlc, const char *path,
+                         gpointer provider);
 
 /* path_to_hldir, re-exported so files callers don't have to chase a
  * second header. */
@@ -76,22 +75,17 @@ extern void hx_make_dir (struct htlc_conn *htlc, char *path);
  * path_to_hldir. */
 extern void hx_file_info (struct htlc_conn *htlc, const char *dir_path,
                           const char *file_name, gsize file_name_len);
-extern void hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath);
-/* Download a remote folder tree to lpath_root. The server replies
- * with HTLS_DATA_HTXF_SIZE / HTLS_DATA_HTXF_REF and the worker
- * spun up via xfer_ready_write drives the FILE_NEXT/FILE_SEND
- * state machine in folder_get_thread. lpath_root is the *parent*
- * directory locally; the folder named `name` will be created
- * under it as the local root for the tree. */
-extern void hx_get_folder (struct htlc_conn *htlc, const char *lpath_root,
+/* Uploads land in the remote folder rdir under the local file's or
+ * folder's own name. */
+extern void hx_put_file (struct htlc_conn *htlc, const char *lpath,
+                         const char *rdir);
+/* Download the remote folder `name` in rdir into the local folder lpath.
+ * The worker spun up via xfer_ready_write drives the FILE_NEXT/FILE_SEND
+ * state machine in folder_get_thread. */
+extern void hx_get_folder (struct htlc_conn *htlc, const char *lpath,
                            const char *rdir, const char *name, gsize name_len);
-/* Upload a local folder tree to the server. lpath is the local
- * source folder; rdir is the remote parent directory; name is
- * the folder's basename as it should appear remotely. The server
- * creates the destination folder root and we stream the contents
- * over the HTXF subchannel via folder_put_thread. */
 extern void hx_put_folder (struct htlc_conn *htlc, const char *lpath,
-                           const char *rdir, const char *name, gsize name_len);
+                           const char *rdir);
 extern void hx_file_move (struct htlc_conn *htlc, char *src_path,
                           char *dst_path);
 

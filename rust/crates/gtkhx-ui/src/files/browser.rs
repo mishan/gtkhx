@@ -18,8 +18,8 @@ use gtk4 as gtk;
 use hxmodel::files_entry::HxFileEntry;
 use libadwaita as adw;
 
-use super::panel::{join, Panel};
-use super::provider::Provider;
+use super::panel::Panel;
+use super::provider::{bytes_c, join_bytes, Provider};
 use super::{dialogs, dnd};
 use crate::tr::{tr, trc, trn_argv};
 
@@ -169,8 +169,8 @@ impl Browser {
             self.toast(&tr("Select a single file."));
             return;
         };
-        let dir = crate::cs(&prov.current_path());
-        let name = e.name();
+        let dir = bytes_c(&prov.path());
+        let name = e.wire_name();
         unsafe {
             hxhandlers::send::files::hx_file_info(
                 conn.ptr(),
@@ -213,7 +213,7 @@ impl Browser {
             ));
             return;
         }
-        dialogs::move_to(self, side, &entries, &dp.current_path());
+        dialogs::move_to(self, side, &entries, &dp);
     }
 
     fn mkdir(self: &Rc<Self>) {
@@ -304,10 +304,14 @@ impl Browser {
             ));
             return;
         }
-        let (src_dir, dst_dir) = (sp.current_path(), dp.current_path());
+        let (src_dir, dst_dir) = (sp.path(), dp.path());
         for e in entries {
-            let name = e.name();
-            send_move(conn.ptr(), &join(&src_dir, &name), &join(&dst_dir, &name));
+            let name = e.wire_name();
+            send_move(
+                conn.ptr(),
+                &join_bytes(&src_dir, &name),
+                &join_bytes(&dst_dir, &name),
+            );
         }
         sp.reload();
         dp.reload();
@@ -541,8 +545,8 @@ impl Browser {
 }
 
 /// FILE_MOVE (and a rename where the name changes) from `src` to `dst`.
-pub(super) fn send_move(htlc: *mut c_void, src: &str, dst: &str) {
-    let (s, d) = (crate::cs(src), crate::cs(dst));
+pub(super) fn send_move(htlc: *mut c_void, src: &[u8], dst: &[u8]) {
+    let (s, d) = (bytes_c(src), bytes_c(dst));
     unsafe {
         hxhandlers::send::files::hx_file_move(htlc, s.as_ptr().cast_mut(), d.as_ptr().cast_mut())
     };

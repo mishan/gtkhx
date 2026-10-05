@@ -23,6 +23,7 @@ pub unsafe extern "C" fn hx_user_list_get(htlc: *mut c_void) {
     }
     crate::recv::user::joins_forget(htlc);
     crate::recv::news::forget(htlc);
+    crate::recv::files::forget(htlc);
     super::expect_next(htlc, Expect::UserList);
     hlwrite_chunks(
         htlc.cast(),

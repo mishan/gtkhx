@@ -60,18 +60,18 @@ fn item_of(w: &impl IsA<glib::Object>) -> Option<gtk::ListItem> {
     }
 }
 
-/// The name a row shows, which a rename renames from; `None` while the row
-/// is bound to nothing.
-fn set_old_name(label: &gtk::Label, name: Option<String>) {
-    // SAFETY: this key only ever holds an Option<String>.
+/// The name a row shows, and the name its provider knows it by, which a
+/// rename renames from; `None` while the row is bound to nothing.
+fn set_old_name(label: &gtk::Label, name: Option<(String, Vec<u8>)>) {
+    // SAFETY: this key only ever holds an Option<(String, Vec<u8>)>.
     unsafe { label.set_data(OLD_NAME_KEY, name) };
 }
 
-fn old_name(label: &gtk::Label) -> Option<String> {
+fn old_name(label: &gtk::Label) -> Option<(String, Vec<u8>)> {
     // SAFETY: as set_old_name.
     unsafe {
         label
-            .data::<Option<String>>(OLD_NAME_KEY)
+            .data::<Option<(String, Vec<u8>)>>(OLD_NAME_KEY)
             .and_then(|p| p.as_ref().clone())
     }
 }
@@ -400,7 +400,7 @@ impl Panel {
             }
             let name = e.name();
             label.set_text(&name);
-            set_old_name(&label, Some(name));
+            set_old_name(&label, Some((name, e.wire_name())));
         });
         factory
     }
@@ -523,9 +523,9 @@ impl Panel {
         }
 
         let weak = Rc::downgrade(self);
-        let navigated = provider.connect_navigated(move |path| {
+        let navigated = provider.connect_navigated(move || {
             if let Some(p) = weak.upgrade() {
-                p.on_navigated(path);
+                p.on_navigated();
             }
         });
         let weak = Rc::downgrade(self);
@@ -575,8 +575,10 @@ impl Panel {
 
     // ---- Navigation and status ----
 
-    fn on_navigated(&self, path: &str) {
-        self.path_entry.set_text(path);
+    fn on_navigated(&self) {
+        if let Some(prov) = self.provider() {
+            self.path_entry.set_text(&prov.current_path());
+        }
         self.update_status();
         // Only after a navigation the user made here; a reload on connecting
         // mustn't pull focus from wherever the user is working.
@@ -601,7 +603,7 @@ impl Panel {
         };
         if e.is_dir() {
             self.wants_focus.set(true);
-            prov.navigate(&join(&prov.current_path(), &e.name()));
+            prov.navigate_to(&prov.child(&e));
         } else {
             prov.activate(&e);
         }
@@ -731,7 +733,7 @@ impl Panel {
             return;
         };
         // The row may have been reused for another entry since.
-        if old_name(&label).as_deref() != Some(name) || name_editor(row).is_some() {
+        if old_name(&label).is_none_or(|(old, _)| old != name) || name_editor(row).is_some() {
             return;
         }
         let editor = gtk::EditableLabel::new(name);
@@ -804,7 +806,7 @@ impl Panel {
         }
         label.set_visible(true);
 
-        let Some(old) = old_name(&label) else {
+        let Some((old, wire)) = old_name(&label) else {
             return;
         };
         if new.is_empty() || new == old {
@@ -813,10 +815,10 @@ impl Panel {
         let Some(prov) = self.provider() else {
             return;
         };
-        match prov.rename(&old, &new) {
+        match prov.rename(&wire, &new) {
             Ok(()) => {
                 label.set_text(&new);
-                set_old_name(&label, Some(new.into()));
+                set_old_name(&label, Some((new.to_string(), prov.encode(&new))));
             }
             Err(e) => {
                 glib::g_warning!("gtkhx", "files: inline rename {old} -> {new} failed: {e}");

@@ -16,6 +16,7 @@ use libadwaita::prelude::*;
 use super::browser::{send_move, Browser, Side, HL_ACCESS_MOVE_FILES};
 use super::complete::PathComplete;
 use super::panel::join;
+use super::provider::{join_bytes, Provider};
 use crate::tr::{tr, tr1, trn_argv};
 
 /// An alert with Cancel and one other response, closing on Cancel.
@@ -62,7 +63,7 @@ fn present_with(br: &Browser, dialog: &adw::AlertDialog, entry: &gtk::Entry, sel
 /// Rename the entry from a dialog: F2 and the header bar. Clicking a selected
 /// name renames in place instead (`Panel`).
 pub fn rename(br: &Rc<Browser>, side: Side, e: &HxFileEntry) {
-    let old = e.name();
+    let (old, wire) = (e.name(), e.wire_name());
     let dialog = alert(
         &tr("Rename"),
         &tr1("Rename “%s” to:", &old),
@@ -85,7 +86,7 @@ pub fn rename(br: &Rc<Browser>, side: Side, e: &HxFileEntry) {
         let Some(prov) = br.panel(side).provider() else {
             return;
         };
-        if let Err(err) = prov.rename(&old, &new) {
+        if let Err(err) = prov.rename(&wire, &new) {
             let msg = err.message();
             br.toast(&if msg.is_empty() {
                 tr("Rename failed.")
@@ -97,12 +98,13 @@ pub fn rename(br: &Rc<Browser>, side: Side, e: &HxFileEntry) {
     present_with(br, &dialog, &entry, true);
 }
 
-/// Move the entries to another folder on the same side, defaulting to the
-/// other panel's. A remote move answers later — a refusal arrives as a task
+/// Move the entries to another folder on the same side, defaulting to
+/// `dest`'s, the other panel's. A remote move answers later — a refusal arrives as a task
 /// error — so its toast says the move was requested; a local one is done by
 /// the time the toast shows.
-pub fn move_to(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry], default_dest: &str) {
+pub fn move_to(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry], dest: &Provider) {
     let names: Vec<String> = entries.iter().map(HxFileEntry::name).collect();
+    let wires: Vec<Vec<u8>> = entries.iter().map(HxFileEntry::wire_name).collect();
     let body = match names.as_slice() {
         [one] => tr1("Move “%s” to:", one),
         _ => {
@@ -116,7 +118,8 @@ pub fn move_to(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry], default_de
         }
     };
     let dialog = alert(&tr("Move"), &body, "move", &tr("_Move"), false);
-    let entry = text_entry(default_dest);
+    let entry = text_entry(&dest.current_path());
+    let dest_prov = dest.clone();
     dialog.set_extra_child(Some(&entry));
 
     let Some(prov) = br.panel(side).provider() else {
@@ -137,11 +140,11 @@ pub fn move_to(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry], default_de
         if dest.is_empty() {
             return;
         }
-        let src_dir = prov.current_path();
+        let (src_dir, dest_dir) = (prov.path(), dest_prov.encode_path(&dest));
         let (mut moved, mut last_err) = (0u64, None::<String>);
-        for name in &names {
-            let (from, to) = (join(&src_dir, name), join(&dest, name));
+        for (name, wire) in names.iter().zip(&wires) {
             let result = if prov.is_local() {
+                let (from, to) = (join(&prov.current_path(), name), join(&dest, name));
                 gio::File::for_path(&from)
                     .move_(
                         &gio::File::for_path(&to),
@@ -158,7 +161,11 @@ pub fn move_to(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry], default_de
                         Err(tr("You don't have permission to move files on the server."))
                     }
                     Some(c) => {
-                        send_move(c.ptr(), &from, &to);
+                        send_move(
+                            c.ptr(),
+                            &join_bytes(&src_dir, wire),
+                            &join_bytes(&dest_dir, wire),
+                        );
                         Ok(())
                     }
                 }
@@ -234,6 +241,7 @@ pub fn delete(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry]) {
         }
     };
     let dialog = alert(&tr("Delete"), &body, "delete", &tr("_Delete"), true);
+    let entries = entries.to_vec();
     let weak = Rc::downgrade(br);
     dialog.connect_response(None, move |_, response| {
         let Some(br) = weak.upgrade().filter(|_| response == "delete") else {
@@ -242,9 +250,9 @@ pub fn delete(br: &Rc<Browser>, side: Side, entries: &[HxFileEntry]) {
         let Some(prov) = br.panel(side).provider() else {
             return;
         };
-        for name in &names {
-            if let Err(e) = prov.delete(name) {
-                glib::g_warning!("gtkhx", "delete {name}: {e}");
+        for e in &entries {
+            if let Err(err) = prov.delete(e) {
+                glib::g_warning!("gtkhx", "delete {}: {err}", e.name());
             }
         }
     });

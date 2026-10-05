@@ -44,7 +44,7 @@ fn mkdir_names_the_whole_path() {
 #[test]
 fn delete_sends_the_name_and_its_directory() {
     assert_eq!(
-        delete(b"/a/b/file", true).unwrap(),
+        delete(b"/a/b/file").unwrap(),
         req(
             ClientHdr::FileDelete,
             &[(TAG_FILE_NAME, b"file"), (TAG_DIR, &dir("/a/b"))]
@@ -52,7 +52,7 @@ fn delete_sends_the_name_and_its_directory() {
     );
     // At the root there is still a (componentless) directory.
     assert_eq!(
-        delete(b"/file", true).unwrap(),
+        delete(b"/file").unwrap(),
         req(
             ClientHdr::FileDelete,
             &[(TAG_FILE_NAME, b"file"), (TAG_DIR, &[0, 0])]
@@ -60,26 +60,26 @@ fn delete_sends_the_name_and_its_directory() {
     );
     // A bare name has no directory at all.
     assert_eq!(
-        delete(b"file", true).unwrap(),
+        delete(b"file").unwrap(),
         req(ClientHdr::FileDelete, &[(TAG_FILE_NAME, b"file")])
     );
 }
 
+/// A name goes as the bytes it is given: a listing's, which a decode and an
+/// encode would not give back.
 #[test]
-fn names_are_mac_roman_unless_utf8_was_negotiated() {
-    let name = "caf\u{e9}".as_bytes();
-    let r = get_info(b"/", name, false).unwrap();
-    assert_eq!(r.chunk(TAG_FILE_NAME).unwrap(), b"caf\x8e");
-    let r = get_info(b"/", name, true).unwrap();
-    assert_eq!(r.chunk(TAG_FILE_NAME).unwrap(), name);
-    // Outside Mac Roman: a question mark.
-    let r = get_info(b"/", "\u{4e2d}".as_bytes(), false).unwrap();
-    assert_eq!(r.chunk(TAG_FILE_NAME).unwrap(), b"?");
+fn names_go_as_their_bytes() {
+    for name in [&b"caf\x8e"[..], "caf\u{e9}".as_bytes()] {
+        let r = get_info(b"/", name).unwrap();
+        assert_eq!(r.chunk(TAG_FILE_NAME).unwrap(), name);
+        let r = delete(&[b"/a/", name].concat()).unwrap();
+        assert_eq!(r.chunk(TAG_FILE_NAME).unwrap(), name);
+    }
 }
 
 #[test]
 fn get_info_keeps_a_slash_inside_the_name() {
-    let r = get_info(b"/pub", b"AC/DC", true).unwrap();
+    let r = get_info(b"/pub", b"AC/DC").unwrap();
     assert_eq!(
         r,
         req(
@@ -88,14 +88,14 @@ fn get_info_keeps_a_slash_inside_the_name() {
         )
     );
     assert_eq!(
-        get_info(b"/", b"x", true).unwrap(),
+        get_info(b"/", b"x").unwrap(),
         req(ClientHdr::FileGetInfo, &[(TAG_FILE_NAME, b"x")])
     );
 }
 
 #[test]
 fn set_info_carries_a_body_encoded_comment() {
-    let r = set_info(b"/pub/old", b"new", Some(b"line1\nline2"), false).unwrap();
+    let r = set_info(b"/pub/old", Some(b"new"), Some(b"line1\nline2"), false).unwrap();
     assert_eq!(
         r,
         req(
@@ -112,7 +112,7 @@ fn set_info_carries_a_body_encoded_comment() {
 
 #[test]
 fn set_info_keeping_the_name_sends_no_rename() {
-    let r = set_info(b"/pub/same", b"same", Some(b"note"), false).unwrap();
+    let r = set_info(b"/pub/same", Some(b"same"), Some(b"note"), false).unwrap();
     assert_eq!(
         r,
         req(
@@ -129,7 +129,7 @@ fn set_info_keeping_the_name_sends_no_rename() {
 #[test]
 fn a_move_across_directories_is_one_move() {
     assert_eq!(
-        moves(b"/a/f", b"/b/f", true),
+        moves(b"/a/f", b"/b/f"),
         vec![req(
             ClientHdr::FileMove,
             &[
@@ -144,7 +144,7 @@ fn a_move_across_directories_is_one_move() {
 #[test]
 fn a_rename_in_place_is_one_setinfo() {
     assert_eq!(
-        moves(b"/a/old", b"/a/new", true),
+        moves(b"/a/old", b"/a/new"),
         vec![req(
             ClientHdr::FileSetInfo,
             &[
@@ -158,7 +158,7 @@ fn a_rename_in_place_is_one_setinfo() {
 
 #[test]
 fn a_move_and_rename_is_a_move_then_a_rename_where_it_landed() {
-    let r = moves(b"/a/old", b"/bb/new", true);
+    let r = moves(b"/a/old", b"/bb/new");
     assert_eq!(r.len(), 2);
     assert_eq!(r[0].opcode, ClientHdr::FileMove as u32);
     assert_eq!(r[0].chunk(TAG_FILE_NAME).unwrap(), b"old");
@@ -177,13 +177,13 @@ fn a_move_and_rename_is_a_move_then_a_rename_where_it_landed() {
 
 #[test]
 fn moving_onto_itself_or_to_a_bare_name_sends_what_it_can() {
-    assert!(moves(b"/a/f", b"/a/f", true).is_empty());
+    assert!(moves(b"/a/f", b"/a/f").is_empty());
     // A destination with no directory can only rename.
-    let r = moves(b"/a/f", b"g", true);
+    let r = moves(b"/a/f", b"g");
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].opcode, ClientHdr::FileSetInfo as u32);
     // A destination with no name can only move.
-    let r = moves(b"/a/f", b"/b/", true);
+    let r = moves(b"/a/f", b"/b/");
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].opcode, ClientHdr::FileMove as u32);
 }
@@ -191,14 +191,14 @@ fn moving_onto_itself_or_to_a_bare_name_sends_what_it_can() {
 #[test]
 fn folder_get_names_the_parent() {
     assert_eq!(
-        get_folder(b"/pub", b"Album", true).unwrap(),
+        get_folder(b"/pub", b"Album").unwrap(),
         req(
             ClientHdr::FileGetFolder,
             &[(TAG_FILE_NAME, b"Album"), (TAG_DIR, &dir("/pub"))]
         )
     );
     assert_eq!(
-        get_folder(b"/", b"Album", true).unwrap(),
+        get_folder(b"/", b"Album").unwrap(),
         req(ClientHdr::FileGetFolder, &[(TAG_FILE_NAME, b"Album")])
     );
 }
@@ -206,7 +206,7 @@ fn folder_get_names_the_parent() {
 #[test]
 fn folder_put_carries_the_totals_and_clamps_the_size() {
     assert_eq!(
-        put_folder(b"/up", b"Tree", 15, 2, true).unwrap(),
+        put_folder(b"/up", b"Tree", 15, 2).unwrap(),
         req(
             ClientHdr::FilePutFolder,
             &[
@@ -217,15 +217,15 @@ fn folder_put_carries_the_totals_and_clamps_the_size() {
             ]
         )
     );
-    let r = put_folder(b"/", b"Big", 5 << 32, 1, true).unwrap();
+    let r = put_folder(b"/", b"Big", 5 << 32, 1).unwrap();
     assert_eq!(r.chunk(TAG_HTXF_SIZE).unwrap(), u32::MAX.to_be_bytes());
 }
 
 #[test]
 fn a_name_too_long_for_its_chunk_is_refused() {
     let huge = vec![b'n'; 70_000];
-    assert!(get_info(b"/", &huge, true).is_none());
-    assert!(delete(&huge, true).is_none());
+    assert!(get_info(b"/", &huge).is_none());
+    assert!(delete(&huge).is_none());
 }
 
 #[test]

@@ -81,9 +81,15 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         Event::NewsListing { trans, items } => news::listing(htlc, *trans, items),
         Event::NewsCategory { trans, articles } => news::category(htlc, *trans, articles),
         Event::NewsArticle { trans, text } => news::article(htlc, *trans, text),
+        Event::FileList { trans, files } => files::listed(htlc, *trans, files),
+        Event::FileInfo { trans, info } => files::info(htlc, *trans, info),
+        Event::FileChanged { trans } => files::changed(htlc, *trans),
+        Event::Transfer { trans, transfer } => files::transfer(htlc, *trans, transfer),
+        Event::TransferQueued { reference, queue } => xfer::queued(htlc, *reference, *queue),
         Event::Failed { trans, reason } => {
             user::failed(htlc, *trans);
             news::failed(htlc, *trans);
+            files::failed(htlc, *trans);
             chat::failed(htlc, *trans, reason.as_deref());
         }
         _ => {}

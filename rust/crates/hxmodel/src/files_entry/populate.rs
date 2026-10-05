@@ -1,26 +1,19 @@
-//! Populate a files-browser `GListStore` from a Hotline `HTLS_DATA_FILE_LIST`
-//! reply — the full wire→model binding, in Rust.
+//! Populate a files-browser `GListStore` from a folder's listing, as the
+//! session read it: each entry's display name, its name as the server sent
+//! it (what the browser names it back by), the dir flag, the icon id and the
+//! kind label, built into an [`HxFileEntry`]. The store's contents are
+//! replaced, so one call fully refreshes the listing.
 //!
-//! This replaces the C `files_remote_provider.c::populate_from_chunks` +
-//! `populate_from_chunks_cb` (and the `filelist_walker.c` shim they drove).
-//! Given the accumulated FILE_LIST reply bytes, it walks each entry via the
-//! `hxproto` parser, decodes the display name (Mac Roman → UTF-8), the
-//! dir flag, the icon id, and the kind label, builds an [`HxFileEntry`], and
-//! appends it to the provider's `gio::ListStore`. The store is cleared first,
-//! so one call fully refreshes the listing.
-//!
-//! Everything here is pure Rust over `gio` (no GTK, no display), so the whole
-//! decode is unit-tested headless against hand-built wire buffers — coverage
-//! the C callback path never had on its own.
+//! Everything here is pure Rust over `gio` (no GTK, no display), so it is
+//! unit-tested headless.
 
 use std::ffi::{c_char, CStr, CString};
-use std::slice;
 
 use gio::prelude::ListModelExt;
 use glib::translate::from_glib_none;
 
 use crate::files_entry::HxFileEntry;
-use hxproto::parse::FTYPE_FLDR;
+use hxsession::FileEntry;
 
 // ---- gettext shim (mirrors gtkhx-ui::tr, the `gtkhx` text domain) ---------
 //
@@ -80,65 +73,33 @@ fn kind_for(ftype_be: [u8; 4]) -> String {
     }
 }
 
-/// Replace `store`'s contents with the entries parsed from `data`, in one
-/// `splice`. Split out from the FFI shell so the unit tests can drive it
-/// with a real `gio::ListStore` and no raw pointers.
+/// Replace `store`'s contents with the listing's entries, in one `splice`.
 ///
 /// One splice, not an append per entry: every change to the store emits
 /// `items-changed`, and the Files panel answers each one with a sort-model
 /// insert and a status-footer update. Row by row, a 10,000-entry folder
 /// froze the UI for over a second (docs/performance.md).
-fn fill(store: &gio::ListStore, data: &[u8]) {
-    let mut rows: Vec<HxFileEntry> = Vec::new();
-    let mut off = 0usize;
-    while let Some((entry, next)) = hxproto::parse::parse_file_list_entry(data, off) {
-        let ftype_be = entry.ftype.to_be_bytes();
-        let is_dir = entry.ftype == FTYPE_FLDR;
-        // Display name: Mac Roman (or already-UTF-8) wire bytes → UTF-8.
-        let name = hxproto::text::to_utf8(entry.name);
-        // Icon + kind both key off the raw big-endian FourCC; the icon also
-        // consults the raw (pre-UTF-8) name bytes for "DROP BOX" / "UPLOAD".
-        let icon = crate::files::icon_id_for(Some(&ftype_be), Some(entry.name));
-        let kind = kind_for(ftype_be);
-        // Folders carry a child count in fsize (rendered "(N items)"); files
-        // carry a byte count. No mtime on the wire (0).
-        let obj = HxFileEntry::build(&name, is_dir, entry.fsize as u64, 0, &kind, icon);
-        rows.push(obj);
-        off = next;
-    }
+fn fill(store: &gio::ListStore, files: &[FileEntry]) {
+    let rows: Vec<HxFileEntry> = files
+        .iter()
+        .map(|f| {
+            // The icon also reads the name as sent, for "DROP BOX" / "UPLOAD".
+            let icon = crate::files::icon_id_for(Some(&f.type_code), Some(&f.name_bytes));
+            let kind = kind_for(f.type_code);
+            // No mtime on the wire (0).
+            HxFileEntry::build(&f.name, f.folder, f.size, 0, &kind, icon).named_by(&f.name_bytes)
+        })
+        .collect();
     store.splice(0, store.n_items(), &rows);
 }
 
-/// Replace `store`'s contents with the entries in the FILE_LIST reply bytes
-/// `fh` (`fhlen` bytes), as one change. NULL / empty `fh` just clears. NULL
-/// `store` is a no-op.
+/// Replace `store`'s contents with a listing's entries, as one change.
 ///
 /// # Safety
-/// `store`, when non-null, must be a live `GListStore` whose item type is
-/// `HxFileEntry` (as `g_list_store_new (HX_TYPE_FILE_ENTRY)` produces).
-/// `fh`, when non-null, must point to `fhlen` readable bytes.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_files_populate_from_reply(
-    store: *mut gio::ffi::GListStore,
-    fh: *const u8,
-    fhlen: usize,
-) {
-    if store.is_null() {
-        return;
-    }
-    let store: gio::ListStore = from_glib_none(store);
-    if fh.is_null() || fhlen == 0 {
-        store.remove_all();
-        return;
-    }
-    // Guard the documented `from_raw_parts` ceiling (a length past isize::MAX
-    // is instant UB); real replies are tiny.
-    if fhlen > isize::MAX as usize {
-        store.remove_all();
-        return;
-    }
-    let data = slice::from_raw_parts(fh, fhlen);
-    fill(&store, data);
+/// `store` is a live `GListStore` of `HxFileEntry`.
+pub unsafe fn populate(store: *mut std::ffi::c_void, files: &[FileEntry]) {
+    let store: gio::ListStore = from_glib_none(store as *mut gio::ffi::GListStore);
+    fill(&store, files);
 }
 
 #[cfg(test)]
@@ -147,67 +108,61 @@ mod tests {
     // gio::prelude re-exports the glib prelude (StaticType / Cast), so it
     // covers the downcast + static_type used below.
     use gio::prelude::*;
-    use glib::subclass::prelude::*;
 
-    /// Build one FILE_LIST chunk: 2-byte type (0xc8), 2-byte rest-len,
-    /// then ftype/fcreator/fsize/unknown/fnlen (u32 BE each) + name bytes.
-    fn chunk(ftype: &[u8; 4], fsize: u32, name: &[u8]) -> Vec<u8> {
-        let mut c = Vec::new();
-        c.extend_from_slice(&0x00c8u16.to_be_bytes()); // HTLS_DATA_FILE_LIST
-        let rest_len = (20 + name.len()) as u16;
-        c.extend_from_slice(&rest_len.to_be_bytes());
-        c.extend_from_slice(ftype);
-        c.extend_from_slice(b"MACR"); // fcreator (ignored)
-        c.extend_from_slice(&fsize.to_be_bytes());
-        c.extend_from_slice(&0u32.to_be_bytes()); // unknown
-        c.extend_from_slice(&(name.len() as u32).to_be_bytes());
-        c.extend_from_slice(name);
-        c
+    fn entry(type_code: &[u8; 4], size: u64, name: &[u8]) -> FileEntry {
+        FileEntry {
+            name: hxproto::text::to_utf8(name),
+            name_bytes: name.to_vec(),
+            folder: type_code == b"fldr",
+            size,
+            type_code: *type_code,
+            creator: *b"MACR",
+        }
     }
 
     fn make_store() -> gio::ListStore {
         gio::ListStore::with_type(HxFileEntry::static_type())
     }
 
-    #[test]
-    fn populates_folder_and_file() {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&chunk(b"fldr", 3, b"Uploads"));
-        buf.extend_from_slice(&chunk(b"TEXT", 12, b"readme.txt"));
-
-        let store = make_store();
-        fill(&store, &buf);
-
-        assert_eq!(store.n_items(), 2);
-
-        let a = store.item(0).unwrap().downcast::<HxFileEntry>().unwrap();
-        assert_eq!(a.imp().name.borrow().to_str().unwrap(), "Uploads");
-        assert!(a.imp().is_dir.get());
-        assert_eq!(a.imp().size.get(), 3);
-        // 'fldr' whose name contains "UPLOAD" → the drop-box icon (421),
-        // not the plain folder icon — the icon table's name heuristic.
-        assert_eq!(a.imp().icon_id.get(), 421);
-
-        let b = store.item(1).unwrap().downcast::<HxFileEntry>().unwrap();
-        assert_eq!(b.imp().name.borrow().to_str().unwrap(), "readme.txt");
-        assert!(!b.imp().is_dir.get());
-        assert_eq!(b.imp().size.get(), 12);
+    fn row(store: &gio::ListStore, i: u32) -> HxFileEntry {
+        store.item(i).unwrap().downcast::<HxFileEntry>().unwrap()
     }
 
     #[test]
-    fn clears_before_repopulating() {
+    fn populates_folder_and_file() {
         let store = make_store();
-        fill(&store, &chunk(b"TEXT", 1, b"a.txt"));
-        assert_eq!(store.n_items(), 1);
+        fill(
+            &store,
+            &[
+                entry(b"fldr", 3, b"Uploads"),
+                entry(b"TEXT", 12, b"readme.txt"),
+            ],
+        );
 
-        // A second populate must replace, not append.
-        let buf = chunk(b"fldr", 0, b"Docs");
-        unsafe {
-            gtkhx_files_populate_from_reply(store.as_ptr(), buf.as_ptr(), buf.len());
-        }
-        assert_eq!(store.n_items(), 1);
-        let only = store.item(0).unwrap().downcast::<HxFileEntry>().unwrap();
-        assert_eq!(only.imp().name.borrow().to_str().unwrap(), "Docs");
+        assert_eq!(store.n_items(), 2);
+
+        let a = row(&store, 0);
+        assert_eq!(a.name(), "Uploads");
+        assert!(a.is_dir());
+        assert_eq!(a.size(), 3);
+        // 'fldr' whose name contains "UPLOAD" → the drop-box icon (421),
+        // not the plain folder icon — the icon table's name heuristic.
+        assert_eq!(a.icon_id(), 421);
+
+        let b = row(&store, 1);
+        assert_eq!(b.name(), "readme.txt");
+        assert!(!b.is_dir());
+        assert_eq!(b.size(), 12);
+    }
+
+    /// A Mac Roman name shows decoded, and is named back by its bytes.
+    #[test]
+    fn a_mac_roman_name_keeps_its_bytes() {
+        let store = make_store();
+        fill(&store, &[entry(b"TEXT", 1, b"caf\x8e")]);
+        let e = row(&store, 0);
+        assert_eq!(e.name(), "caf\u{e9}");
+        assert_eq!(e.wire_name(), b"caf\x8e");
     }
 
     /// A whole listing lands as one `items-changed` that replaces the old
@@ -216,36 +171,18 @@ mod tests {
     #[test]
     fn a_listing_is_one_change() {
         let store = make_store();
-        fill(&store, &chunk(b"TEXT", 1, b"old.txt"));
+        fill(&store, &[entry(b"TEXT", 1, b"old.txt")]);
         let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let seen = changes.clone();
         store.connect_items_changed(move |_, pos, removed, added| {
             seen.borrow_mut().push((pos, removed, added));
         });
-        let mut buf = Vec::new();
-        for i in 0..500 {
-            buf.extend(chunk(b"TEXT", i, format!("f{i}").as_bytes()));
-        }
-        unsafe {
-            gtkhx_files_populate_from_reply(store.as_ptr(), buf.as_ptr(), buf.len());
-        }
+        let files: Vec<FileEntry> = (0..500)
+            .map(|i| entry(b"TEXT", i, format!("f{i}").as_bytes()))
+            .collect();
+        unsafe { populate(store.as_ptr().cast(), &files) };
         assert_eq!(*changes.borrow(), vec![(0, 1, 500)]);
         assert_eq!(store.n_items(), 500);
-    }
-
-    #[test]
-    fn null_and_empty_just_clear() {
-        let store = make_store();
-        fill(&store, &chunk(b"TEXT", 1, b"a.txt"));
-        assert_eq!(store.n_items(), 1);
-        unsafe {
-            gtkhx_files_populate_from_reply(store.as_ptr(), core::ptr::null(), 0);
-        }
-        assert_eq!(store.n_items(), 0);
-        // NULL store is a no-op (must not crash).
-        unsafe {
-            gtkhx_files_populate_from_reply(core::ptr::null_mut(), core::ptr::null(), 0);
-        }
     }
 
     #[test]

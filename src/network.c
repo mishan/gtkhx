@@ -189,6 +189,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * live. Per connection, so disconnecting one server leaves another's
      * downloads running. */
     xfers_delete_on_conn (htlc);
+    hx_files_forget (htlc);
     /* And this connection's rows in the shared queue. The transfers above are
      * cancelled, but the queue is one list for the whole app now, so nothing
      * else takes their rows away — a disconnected server would leave dead

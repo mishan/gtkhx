@@ -3,11 +3,10 @@
  * orthodox files browser.
  *
  * implements HxFilesProvider against the wire senders in
- * hxhandlers::send::files (hx_make_dir, hx_file_delete,
- * hx_file_move), and sends its own FILE_LIST. Listings come in via the GtkhxSession::file-list
- * signal; the gtkhx.c handler routes replies matching our pending
- * fetches to this module before falling through to the legacy
- * single-pane UI.
+ * hxhandlers::send::files (hx_list_dir, hx_make_dir, hx_file_delete,
+ * hx_file_move). Listings come in via the GtkhxSession::file-list
+ * signal, which the gtkhx.c handler routes to this module. Paths and
+ * names are the server's bytes.
  */
 
 #ifndef HX_FILES_REMOTE_PROVIDER_H
@@ -44,17 +43,16 @@ extern HxRemoteFilesProvider *hx_remote_files_provider_new (session *sess);
  * *pair* of panes finds the connection: whichever side is remote knows it. */
 extern session *hx_remote_files_provider_session (gpointer provider);
 
-/* Reply-routing hook. Called from gtkhx.c::on_file_list_signal
- * before the legacy output_file_list path. Returns TRUE if the
- * `data` carrier matches an in-flight remote-provider request —
- * the provider has parsed the chunks into HxFileEntry rows and
- * emitted "navigated". FALSE leaves it for the legacy handler. */
+/* Reply-routing hook. Called from gtkhx.c::on_file_list_signal.
+ * Returns TRUE if the `data` carrier is a remote provider — when its
+ * request is still in flight, it has filled its rows and emitted
+ * "navigated". */
 extern gboolean hx_remote_files_provider_handle_file_list (gpointer cfl,
                                                            gpointer fh,
                                                            gpointer data);
 
-/* Error counterpart. Called from rcv.c::rcv_task_file_list's
- * task_inerror short-circuit so the provider can clear its
+/* Error counterpart. Called from hxhandlers::recv::files when the
+ * server refuses a listing, so the provider can clear its
  * listing, flip listing_error TRUE, and emit "navigated" — the
  * panel then picks up the new state via its existing handler and
  * updates the empty-state messaging. Returns TRUE when claimed,

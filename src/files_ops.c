@@ -137,8 +137,8 @@ static HxOpsResult
 copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)
 {
-    const char *src_dir, *dst_dir;
-    char *lpath, *rpath;
+    const char *dst_dir;
+    char *lpath;
 
     if (!ops_connected (ops_conn (src, dst))) {
         return HX_OPS_ERR_NOT_CONNECTED;
@@ -146,35 +146,20 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     if (!has_access (ops_conn (src, dst), HL_ACCESS_UPLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
-
-    src_dir = hx_files_provider_get_current_path (src);
-    dst_dir = hx_files_provider_get_current_path (dst);
-
-    if (hx_file_entry_is_dir (e)) {
-        /* Folder uploads use HTLC_HDR_FILE_PUTFOLDER (0xd5) and
-         * stream the whole tree over a single HTXF subchannel
-         * via folder_put_thread (driving the FILE_NEXT state
-         * machine from the client side). */
-        const char *nm = hx_file_entry_get_name (e);
-        gsize nm_len = nm ? strlen (nm) : 0;
-        char *src_full;
-        if (!has_access (ops_conn (src, dst), HL_ACCESS_UPLOAD_FOLDERS)) {
-            return HX_OPS_ERR_NO_PERMISSION;
-        }
-        src_full = join_path (src_dir, nm);
-        hx_put_folder (ops_conn (src, dst), src_full, dst_dir ? dst_dir : "",
-                       nm, nm_len);
-        g_free (src_full);
-        return HX_OPS_OK;
+    if (hx_file_entry_is_dir (e)
+        && !has_access (ops_conn (src, dst), HL_ACCESS_UPLOAD_FOLDERS)) {
+        return HX_OPS_ERR_NO_PERMISSION;
     }
 
-    lpath = join_path (src_dir, hx_file_entry_get_name (e));
-    rpath = join_path (dst_dir, hx_file_entry_get_name (e));
-
-    hx_put_file (ops_conn (src, dst), lpath, rpath);
-
+    dst_dir = hx_files_provider_get_current_path (dst);
+    lpath = join_path (hx_files_provider_get_current_path (src),
+                       hx_file_entry_get_name (e));
+    if (hx_file_entry_is_dir (e)) {
+        hx_put_folder (ops_conn (src, dst), lpath, dst_dir ? dst_dir : "");
+    } else {
+        hx_put_file (ops_conn (src, dst), lpath, dst_dir ? dst_dir : "");
+    }
     g_free (lpath);
-    g_free (rpath);
     return HX_OPS_OK;
 }
 
@@ -188,10 +173,10 @@ static HxOpsResult
 copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)
 {
-    const char *src_dir, *dst_dir;
-    char *lpath;
+    const char *src_dir, *nm;
+    char *lpath, *safe;
+    gsize nm_len;
     struct htxf_conn *htxf;
-    guint64 size;
 
     if (!ops_connected (ops_conn (src, dst))) {
         return HX_OPS_ERR_NOT_CONNECTED;
@@ -199,47 +184,34 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     if (!has_access (ops_conn (src, dst), HL_ACCESS_DOWNLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
+    if (hx_file_entry_is_dir (e)
+        && !has_access (ops_conn (src, dst), HL_ACCESS_DOWNLOAD_FOLDERS)) {
+        return HX_OPS_ERR_NO_PERMISSION;
+    }
     src_dir = hx_files_provider_get_current_path (src);
-    dst_dir = hx_files_provider_get_current_path (dst);
+
+    /* Named locally by the name shown, made safe: a hostile server could
+     * ship a name like "../../etc/passwd" that would let join_path escape
+     * the destination. The server is asked by the name's own bytes, which
+     * may include '/', as a separate (name, name_len). */
+    safe = hx_files_provider_safe_local_basename (hx_file_entry_get_name (e));
+    lpath = join_path (hx_files_provider_get_current_path (dst), safe);
+    g_free (safe);
+    nm = hx_file_entry_get_wire_name (e);
+    nm_len = strlen (nm);
 
     if (hx_file_entry_is_dir (e)) {
-        /* Folder downloads use HTLC_HDR_FILE_GETFOLDER (0xd2),
-         * which streams the whole tree over an HTXF subchannel
-         * with HTXF_TYPE_FOLDER framing. The folder_get_thread
-         * in xfers.c drives the FILE_NEXT state machine. */
-        const char *nm = hx_file_entry_get_name (e);
-        gsize nm_len = nm ? strlen (nm) : 0;
-        if (!has_access (ops_conn (src, dst), HL_ACCESS_DOWNLOAD_FOLDERS)) {
-            return HX_OPS_ERR_NO_PERMISSION;
-        }
-        hx_get_folder (ops_conn (src, dst), dst_dir ? dst_dir : "",
-                       src_dir ? src_dir : "", nm, nm_len);
+        hx_get_folder (ops_conn (src, dst), lpath, src_dir ? src_dir : "", nm,
+                       nm_len);
+        g_free (lpath);
         return HX_OPS_OK;
     }
 
-    /* Sanitize the remote name into a safe local basename before
-     * joining onto the local download dir — a hostile server could
-     * ship a name like "../../etc/passwd" that would let
-     * join_path escape dst_dir. The wire-side request below still
-     * passes the raw name to xfer_new as a separate (name,
-     * name_len) tuple so the FILE_NAME chunk is unchanged. */
-    {
-        char *safe = hx_files_provider_safe_local_basename (
-            hx_file_entry_get_name (e));
-        lpath = join_path (dst_dir, safe);
-        g_free (safe);
-    }
-
-    size = hx_file_entry_get_size (e);
-    /* xfer_new takes the remote location as (dir, name, name_len)
-     * so the name's bytes (possibly including '/') ride through to
-     * the wire FILE_NAME chunk untouched. */
-    {
-        const char *nm = hx_file_entry_get_name (e);
-        gsize nm_len = nm ? strlen (nm) : 0;
-        htxf = xfer_new (ops_conn (src, dst), lpath, src_dir ? src_dir : "", nm,
-                         nm_len, XFER_GET, 0, (guint32)size);
-    }
+    /* The resume decision is 32-bit, as the RFLT offsets are: past 4 GiB the
+     * size reads as the most a classic listing could say. */
+    htxf = xfer_new (ops_conn (src, dst), lpath, src_dir ? src_dir : "", nm,
+                     nm_len, XFER_GET, 0,
+                     MIN (hx_file_entry_get_size (e), G_MAXUINT32));
     if (htxf) {
         htxf->filter_argv = 0;
         htxf->opt.retry = 0;

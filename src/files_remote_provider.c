@@ -39,8 +39,8 @@
 /* Path-navigation model — the current path + sticky listing-error flag,
  * plus the parent/child path math. Implemented in the hxmodel::files Rust
  * crate (rust/crates/hxmodel/src/files/remote_listing.rs); this provider
- * holds one opaque handle and keeps only the GListStore, the FILE_LIST
- * RPC send, the no-reply watchdog, and the rcv-dispatch plumbing.
+ * holds one opaque handle and keeps only the GListStore, the no-reply
+ * watchdog, and the reply plumbing. Paths are the server's bytes.
  *
  * `bool` (not `gboolean`) mirrors the Rust `extern "C"` 1-byte bool ABI.
  * `parent` / `child` return freshly-allocated strings the caller releases
@@ -58,14 +58,6 @@ extern char *gtkhx_files_listing_child (const HxFilesListing *l,
 extern bool gtkhx_files_listing_has_error (const HxFilesListing *l);
 extern void gtkhx_files_listing_set_error (HxFilesListing *l, bool v);
 extern void gtkhx_files_string_free (char *s);
-
-/* Clear `store` and repopulate it from a FILE_LIST reply (`fh` = the
- * accumulated chunk bytes, `fhlen` long) — the whole walk + per-entry
- * decode + HxFileEntry construction, in the hxmodel::files_entry Rust crate.
- * `fh` is gconstpointer so the caller's struct hl_filelist_hdr* passes
- * without a cast; the Rust side reads it as raw bytes. NULL/empty clears. */
-extern void gtkhx_files_populate_from_reply (GListStore *store,
-                                             gconstpointer fh, gsize fhlen);
 
 struct _HxRemoteFilesProvider {
     GObject parent_instance;
@@ -93,11 +85,6 @@ struct _HxRemoteFilesProvider {
      * pre-check it; instead a timer resolves the pending listing to an
      * error state rather than spinning the panel forever. 0 = disarmed. */
     guint list_timeout_id;
-    /* Trans of the in-flight FILE_LIST's task (task_new keys on
-     * htlc->trans). Kept so the watchdog can delete the orphaned "ls"
-     * task — otherwise its Tasks-window row lingers forever when the
-     * server never replies. 0 = none in flight. */
-    guint32 list_task_trans;
 };
 
 /* Seconds to wait for a FILE_LIST reply before giving up. Generous
@@ -114,15 +101,8 @@ G_DEFINE_FINAL_TYPE_WITH_CODE (
     G_IMPLEMENT_INTERFACE (HX_TYPE_FILES_PROVIDER,
                            hx_remote_files_provider_iface_init))
 
-/* Pending fetches keyed on the cached_filelist* we hand to
- * hx_list_dir's underlying task. The signal carrier (`data` slot
- * in the file-list signal payload) is a HxRemoteFilesProvider* —
- * we look it up here to confirm it's still alive and the fetch
- * was ours.
- *
- * Keying on the provider pointer (not the cfl) is enough because
- * a provider can only have one fetch in flight at a time —
- * reload during a fetch just supersedes the previous request. */
+/* The providers with a listing in flight. A provider has one at a time:
+ * a reload during a fetch supersedes the previous request. */
 static GHashTable *pending_listings = NULL; /* provider* → reffed provider* */
 
 static void
@@ -251,25 +231,9 @@ remote_get_unavailable_reason (HxFilesProvider *self)
     return NULL;
 }
 
-/* Delete the orphaned "ls" task whose reply is never coming, so its
- * Tasks-window row doesn't linger. NOT for the normal reply path — there
- * hx_rcv_task deletes the task itself after dispatching. */
-static void
-remote_list_drop_task (HxRemoteFilesProvider *self)
-{
-    if (self->list_task_trans) {
-        struct task *tsk
-            = task_with_trans (hx_sess_of (self), self->list_task_trans);
-        if (tsk) {
-            task_delete (hx_sess_of (self), tsk);
-        }
-        self->list_task_trans = 0;
-    }
-}
-
-/* Watchdog: no FILE_LIST reply arrived in time. Delete the orphaned task
- * and resolve the pending listing to an error state (mirrors the
- * task-error path) so the panel stops spinning and the task row clears.
+/* Watchdog: no FILE_LIST reply arrived in time. Resolve the pending
+ * listing to an error state (mirrors the refusal path) so the panel stops
+ * spinning.
  * See the list_timeout_id field comment for why a server can drop the
  * request without any reply. */
 static gboolean
@@ -288,7 +252,6 @@ remote_list_timeout (gpointer data)
     HxRemoteFilesProvider *keep = g_object_ref (self);
     g_hash_table_remove (pending_listings, self);
 
-    remote_list_drop_task (keep);
     g_list_store_remove_all (keep->listing);
     gtkhx_files_listing_set_error (keep->model, true);
     g_signal_emit_by_name (keep, "navigated",
@@ -300,75 +263,39 @@ remote_list_timeout (gpointer data)
 
 /* ---- Wire send ----
  *
- * Fires HTLC_HDR_FILE_LIST without going through the legacy
- * hx_list_dir, which is tightly coupled to the gfile_list bookkeeping.
- * We allocate our own cached_filelist (via hx_cfl_new) and pass the
- * HxRemoteFilesProvider* as the signal data carrier. */
+ * FILE_LIST goes through hxhandlers::send::files, which hands the reply back
+ * on the file-list signal with this provider as its data carrier. */
 static void
 remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
 {
-    struct cached_filelist *cfl;
-    guint16 hldirlen;
-    guint8 *hldir;
-
     if (!hx_conn_fd (hx_conn_of (self))) {
         return;
     }
 
     ensure_pending_table ();
 
-    /* A superseding request cancels the previous watchdog and drops its
-     * now-orphaned task; a fresh one is armed below once we've sent. */
+    /* A superseding request cancels the previous watchdog; a fresh one is
+     * armed below once we've sent. */
     if (self->list_timeout_id) {
         g_source_remove (self->list_timeout_id);
         self->list_timeout_id = 0;
     }
-    remote_list_drop_task (self);
-
-    cfl = hx_cfl_new ();
-    hx_cfl_set_path (cfl, path && *path ? path : "/");
 
     /* Reffed entry — keeps the provider alive while the RPC is
      * in flight even if the browser closes. Drops on remove. */
     g_hash_table_insert (pending_listings, self, g_object_ref (self));
 
-    hldir = path_to_hldir (hx_cfl_path (cfl), &hldirlen, 0);
-
-    /* chunk layout moved to gtkhx_proto_build_file_list_chunks.
-     * Build BEFORE task_new — see hx_kick_user for the rationale. */
-    struct hx_chunk chunks[1];
-    int hc = (int)gtkhx_proto_build_file_list_chunks (hldir, hldirlen, chunks,
-                                                      G_N_ELEMENTS (chunks));
-    if (hc > 0) {
-        struct task *tsk
-            = task_new (hx_conn_of (self), RCV_TASK_FN (rcv_task_file_list),
-                        cfl, self, "ls");
-        /* Remember the trans so the watchdog can delete this task if the
-         * server never replies (task_new keyed it on htlc->trans). */
-        self->list_task_trans = tsk->trans;
-        hlwrite_chunks (hx_conn_of (self), HTLC_HDR_FILE_LIST, 0, chunks, hc);
-        /* Arm the no-reply watchdog (see remote_list_timeout). */
-        self->list_timeout_id = g_timeout_add_seconds (
-            REMOTE_FILE_LIST_TIMEOUT_S, remote_list_timeout, self);
-    }
-    g_free (hldir);
+    hx_list_dir (hx_conn_of (self), path && *path ? path : "/", self);
+    /* Arm the no-reply watchdog (see remote_list_timeout). */
+    self->list_timeout_id = g_timeout_add_seconds (REMOTE_FILE_LIST_TIMEOUT_S,
+                                                   remote_list_timeout, self);
 }
 
-/* ---- Reply: parse the FILE_LIST chunks into HxFileEntry rows ----
+/* ---- Reply: the listing, into HxFileEntry rows ----
  *
- * The whole wire→model binding — walk each chunk, decode the name
- * (Mac Roman → UTF-8), dir flag, icon id, and kind label into HxFileEntry
- * rows — lives in hxmodel::files_entry (gtkhx_files_populate_from_reply).
- * It replaces the store's contents in one splice, so one call fully
- * refreshes the listing. NULL/empty fh just clears. */
-static void
-populate_from_chunks (HxRemoteFilesProvider *self, struct cached_filelist *cfl)
-{
-    gtkhx_files_populate_from_reply (self->listing,
-                                     cfl ? hx_cfl_fh (cfl) : NULL,
-                                     cfl ? hx_cfl_fhlen (cfl) : 0);
-}
-
+ * hx_cfl_populate builds the rows (hxmodel::files_entry) and replaces the
+ * store's contents in one splice. The listing is the sender's, which frees
+ * it once the signal returns. */
 gboolean
 hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
                                            gpointer data)
@@ -377,29 +304,13 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
     struct cached_filelist *cfl = cfl_p;
     (void)fh;
 
-    /* The dispatcher in gtkhx.c::on_file_list_signal falls through
-     * to the legacy output_file_list (which casts `data` to
-     * struct gfile_list *) when we return FALSE. That's only safe
-     * if data ISN'T a HxRemoteFilesProvider — otherwise the cast
-     * misreads a GObject as a gfile_list and crashes inside
-     * gtk_window_set_title on a bogus window pointer.
-     *
-     * Identify by type first. GObject's type check is safe on any
-     * pointer that could be either flavour. When this provider DOES
-     * own the response, claim it whether or not it's still in
-     * pending_listings — a second response for the same provider
-     * (e.g. when the panel fired multiple FILE_LIST requests in
-     * quick succession) used to fall through to the legacy path,
-     * which was the source of the crash. Now we just drop the
-     * duplicate harmlessly. */
+    /* hxhandlers::recv::files holds a ref on `data` while the listing is
+     * in flight, so it is live here. A reply the provider has stopped
+     * waiting for (the watchdog fired) is dropped. */
     if (!data || !G_IS_OBJECT (data) || !HX_IS_REMOTE_FILES_PROVIDER (data)) {
         return FALSE;
     }
     if (!pending_listings || !g_hash_table_contains (pending_listings, data)) {
-        /* Stale response for one of our providers (most recent
-         * request already handled, or this fired before any
-         * pending entry existed). Swallow it so the legacy
-         * output_file_list isn't called on a GObject pointer. */
         return TRUE;
     }
 
@@ -411,11 +322,7 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
         g_source_remove (self->list_timeout_id);
         self->list_timeout_id = 0;
     }
-    /* The reply arrived — hx_rcv_task deletes the task after this
-     * dispatch returns, so just forget the trans (don't drop it here). */
-    self->list_task_trans = 0;
-
-    populate_from_chunks (self, cfl);
+    hx_cfl_populate (cfl, self->listing);
 
     /* A successful response clears any sticky listing-error state
      * from a previous failed navigation. */
@@ -425,25 +332,17 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
      * with this path in cfl_path — if a second fetch superseded
      * the first, the more-recent one wins via pending_listings's
      * single-entry-per-provider invariant). */
-    if (cfl && hx_cfl_path (cfl)) {
-        gtkhx_files_listing_set_path (self->model, hx_cfl_path (cfl));
-    }
+    gtkhx_files_listing_set_path (self->model, hx_cfl_path (cfl));
 
     g_signal_emit_by_name (self, "navigated",
                            gtkhx_files_listing_current_path (self->model));
-
-    /* The cached_filelist was allocated by us in remote_send_file_list and the
-     * success arm owns it now — free it (the fh buffer drops with it). */
-    if (cfl) {
-        hx_cfl_free (cfl);
-    }
 
     g_object_unref (self);
     return TRUE;
 }
 
 /* Error counterpart to handle_file_list. Called from
- * rcv.c::rcv_task_file_list's task_inerror short-circuit so the
+ * hxhandlers::recv::files when the server refuses a listing, so the
  * provider knows its in-flight listing was denied — without this
  * the panel sat showing nothing with no idea why.
  *
@@ -474,25 +373,16 @@ hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
         g_source_remove (self->list_timeout_id);
         self->list_timeout_id = 0;
     }
-    /* Task error: hx_rcv_task deletes the task itself; just forget it. */
-    self->list_task_trans = 0;
-
     g_list_store_remove_all (self->listing);
     gtkhx_files_listing_set_error (self->model, true);
 
-    /* The cfl we allocated in remote_send_file_list carries the
-     * path the user navigated to. Adopt it as the current path
-     * even though the listing failed — otherwise the next
+    /* The listing carries the path the user navigated to. Adopt it as the
+     * current path even though the listing failed — otherwise the next
      * navigate_up has nothing to walk back from. */
-    if (cfl && hx_cfl_path (cfl)) {
-        gtkhx_files_listing_set_path (self->model, hx_cfl_path (cfl));
-    }
+    gtkhx_files_listing_set_path (self->model, hx_cfl_path (cfl));
 
     g_signal_emit_by_name (self, "navigated",
                            gtkhx_files_listing_current_path (self->model));
-
-    /* cfl is owned by the caller (rcv_task_file_list's error arm frees it via
-     * hx_cfl_free right after this returns); we don't free it here. */
 
     g_object_unref (self);
     return TRUE;
@@ -710,10 +600,9 @@ remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
     /* xfer_new takes the remote location as a (dir, name, name_len)
      * triple — keeping the name's bytes (which may legally include
      * `/`) out of the joined path so they survive the wire trip
-     * verbatim. The cached entry's name is already byte-for-byte
-     * what came off the wire. */
+     * verbatim: the bytes the listing sent. */
     {
-        const char *name = hx_file_entry_get_name (e);
+        const char *name = hx_file_entry_get_wire_name (e);
         gsize name_len = name ? strlen (name) : 0;
         htxf = xfer_new (hx_conn_of (self), lpath, dir ? dir : "", name,
                          name_len, XFER_GET, preview, 0);

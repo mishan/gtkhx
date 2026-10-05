@@ -28,11 +28,12 @@ into the bridge, everything below happens in Rust:
   the agreement and the two-second wait for one, a 1.2 server's user
   change — and the actor in `session.rs` is its I/O. It runs the session
   in raw mode, because GtkHx still has receive handlers of its own, with
-  the session handling chat, users, messages and news itself
-  (`Handled::CHAT`, `Handled::USERS`, `Handled::MSG`, `Handled::NEWS`):
-  what it makes of a chat line, an invitation, a subject, a history reply,
-  a user arriving, changing or leaving, a private message, a broadcast,
-  the server's parting words, or a flat news post reaches the main thread
+  the session handling chat, users, messages, news and the transfer queue
+  itself (`Handled::CHAT`, `Handled::USERS`, `Handled::MSG`,
+  `Handled::NEWS`, `Handled::FILES`): what it makes of a chat line, an
+  invitation, a subject, a history reply, a user arriving, changing or
+  leaving, a private message, a broadcast, the server's parting words, a
+  flat news post, or a queued transfer moving up reaches the main thread
   as `Event::Session`, on the channel the frames take, so the two arrive
   in the order the server sent them. Every other transaction reaches C
   whole, and what C sends goes out as C built it. See "The session",
@@ -82,14 +83,19 @@ Every reply reaches C, the session's own included — a refused agree or
 login is dispatched and reported as any refused request is — but those C
 said to expect (`Session::expect`, through `connection_expect`): a
 chat-history request, a chat invitation, the user list, creating and
-joining a private chat, a private message, and every news request: flat
+joining a private chat, a private message, every news request — flat
 news's file and posts, and threaded news's listings, articles, posts,
-deletions and new bundles and categories. Their replies are the
-session's to read, and come back as its events, a refusal as `Failed`,
-which is shown and heard as any refused request is. None of them is a
-task, so none shows in the Tasks list; a joined private chat is made
-when its reply arrives, and a news reply reaches the browser node that
-asked, matched by its trans. What arrives is traced from the session's
+deletions and new bundles and categories — and every files request: a
+listing, Get Info, a folder made, something deleted, moved or renamed, a
+comment set, and a download or upload of a file or a folder. Their
+replies are the session's to read, and come back as its events, a
+refusal as `Failed`, which is shown and heard as any refused request is.
+None of them is a task, so none shows in the Tasks list; a transfer
+shows there as its own row. A joined private chat is made when its reply
+arrives, a news reply reaches the browser node that asked and a listing
+the files pane that asked, a transfer's reply the transfer, each matched
+by its trans; the rename of a move-and-rename goes once the move's reply
+says it went through. What arrives is traced from the session's
 tap (`Session::set_tap`, on under `GTKHX_DEBUG=proto`): each transaction
 as it came, before the session acts on it and in plaintext under HOPE,
 through `proto_trace.c` on the main thread, whatever handles it. The

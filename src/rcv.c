@@ -296,35 +296,22 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 #endif /* HAVE_VOICE */
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
-        /* HTXF transfer tasks own an htxf_conn that needs to be
-         * reclaimed when the request errors — otherwise the
-         * orphaned transfer hangs in the Tasks UI forever with
-         * no progress and no way to dismiss it. The two labels
-         * are 'xfer_go' (single-file FILE_GET / FILE_PUT, fired
-         * from xfers.c) and 'xfer_go_folder' (folder transfers,
-         * fired from hxhandlers::send::files). Their rcv functions
-         * (rcv_task_file_get / rcv_task_file_put) already check
-         * task_inerror internally and free the htxf on that
-         * path, so we run them on error too.
+        /* Inline-media tasks ('upload-media', 'download-media') own
+         * per-request state their handler must reclaim on an error:
+         * rcv_task_upload_media owns the per-upload context (callback
+         * + user_data + heap state), checks task_inerror at its entry
+         * and routes to the failure-delivery path which invokes the
+         * caller's on_done with the spec MediaErrorCode + DATA_ERROR
+         * text. Without the dispatch, the ctx leaks and the caller's UI
+         * sits forever waiting for a callback that never fires.
          *
-         * Phase 9.C inline-media upload tasks ('upload-media')
-         * follow the same shape: rcv_task_upload_media owns the
-         * per-upload context (callback + user_data + heap state),
-         * checks task_inerror at its entry and routes to the
-         * failure-delivery path which invokes the caller's on_done
-         * with the spec MediaErrorCode + DATA_ERROR text. Without
-         * the dispatch, the ctx leaks and the caller's UI sits
-         * forever waiting for a callback that never fires.
-         *
-         * Non-transfer handlers (login, user-info, news, …) don't
+         * Other handlers (login, user-info, news, …) don't
          * have per-task state to free; the error toast above is
          * enough and we skip them as before. */
         gboolean dispatch_on_error
             = silent_probe
               || (tsk->str
-                  && (!strcmp (tsk->str, "xfer_go")
-                      || !strcmp (tsk->str, "xfer_go_folder")
-                      || !strcmp (tsk->str, "upload-media")
+                  && (!strcmp (tsk->str, "upload-media")
                       || !strcmp (tsk->str, "download-media")));
         if (tsk->rcv && (!error || dispatch_on_error)) {
             tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data);
@@ -401,35 +388,6 @@ hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
     hx_fsync (fd);
     close (fd);
-}
-
-/* Shared file-transfer reply tail — Rust hxhandlers::recv::xfer module. Emits the transfer's
- * queue position to the tasks view, then (when queue == 0) starts the byte
- * stream via xfer_ready_write. Called by all five xfer reply handlers once
- * they've stamped ref/size/queue onto htxf. */
-extern void hx_xfer_announce (struct htlc_conn *htlc, struct htxf_conn *htxf,
-                              guint32 queue);
-
-void
-hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_xfer_queue_msg xq;
-    struct htxf_conn *htxf;
-
-    if (!hx_xfer_queue_extract (frame, frame_len, &xq)) {
-        return;
-    }
-
-    htxf = htxf_with_ref (xq.ref);
-
-    if (!htxf) {
-        g_warning (_ ("Received queue id (%1$d) for xfer ref %2$d\n"
-                      "No such xfer.\n"),
-                   xq.queueid, xq.ref);
-        return;
-    }
-    htxf->queue = xq.queueid;
-    hx_xfer_announce (htlc, htxf, htxf->queue);
 }
 
 #ifdef HAVE_VOICE
@@ -896,9 +854,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         break;
     case HX_RECV_BANNER:
         handler = hx_rcv_banner;
-        break;
-    case HX_RECV_XFER_QUEUE:
-        handler = hx_rcv_xfer_queue;
         break;
 #ifdef HAVE_VOICE
     case HX_RECV_VOICE_SDP_OFFER:

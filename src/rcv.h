@@ -9,8 +9,6 @@ extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame,
                                   gsize frame_len);
 extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame,
                          gsize frame_len);
-extern void hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame,
-                               gsize frame_len);
 extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame,
                            gsize frame_len);
 extern void hx_rcv_magic (struct htlc_conn *htlc, const guint8 *frame,
@@ -94,33 +92,6 @@ extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame,
                            gsize frame_len);
 extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len, guint16 *_uid, int text);
-/* rcv_task_file_list moved to the hxhandlers::recv::files Rust crate, which also owns struct
- * cached_filelist (the hx_cfl_* accessor facade in files.h). It walks the
- * FILE_LIST chunks natively and accumulates them into the Rust-owned cfl. */
-extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len, struct cached_filelist *cfl,
-                                void *data);
-/* rcv_task_file_getinfo / _file_get / _file_put / _folder_get / _folder_put (and
- * rcv_task_banner_get in banner.h) moved to the hxhandlers::recv::xfer Rust crate: each
- * parses its reply natively (hxproto::parse::*) and reaches the C-owned
- * htxf state through the hx_htxf_* accessor seam (htxf_accessors.c). The
- * prototypes stay for the C code that still names them; the symbols resolve
- * against the Rust crate at link. */
-extern void rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame,
-                                   gsize frame_len, char *path);
-extern void rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame,
-                               gsize frame_len, struct htxf_conn *htxf);
-extern void rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame,
-                               gsize frame_len, struct htxf_conn *htxf);
-/* Folder transfer task replies. Mirror rcv_task_file_get /
- * rcv_task_file_put but also parse HTLS_DATA_FILE_NFILES so the
- * tasks-window can show the leaf count. The actual stream is
- * handled by folder_get_thread / folder_put_thread in xfers.c. */
-extern void rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame,
-                                 gsize frame_len, struct htxf_conn *htxf);
-extern void rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame,
-                                 gsize frame_len, struct htxf_conn *htxf);
-
 /* Send what follows the login, on the bridge's LOGIN_READY. Idempotent. */
 extern void hx_post_login_fetches (struct htlc_conn *htlc);
 

@@ -6,9 +6,9 @@
 //!
 //! Two populate paths, because they are different code:
 //!
-//! - **Remote**: a synthetic FILE_LIST reply decoded by
-//!   `gtkhx_files_populate_from_reply` — the decode and store fill a
-//!   server's reply goes through — into the store the panel is showing.
+//! - **Remote**: a synthetic listing, as the session reads a server's reply,
+//!   filled by `hxmodel::files_entry::populate` — the store fill a listing
+//!   goes through — into the store the panel is showing.
 //!   That store belongs to a local provider, so the rest of the panel's
 //!   wiring is the local side's; the remote provider itself needs a live
 //!   connection to fill anything.
@@ -32,7 +32,8 @@ use std::rc::Rc;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
-use hxmodel::files_entry::{gtkhx_files_populate_from_reply, HxFileEntry};
+use hxmodel::files_entry::{populate, HxFileEntry};
+use hxsession::FileEntry;
 
 use crate::files::panel::Panel;
 use crate::files::provider::Provider;
@@ -56,27 +57,25 @@ fn size_of(i: u32) -> u32 {
     i.wrapping_mul(2_654_435_761) % 50_000_000
 }
 
-/// FILE_LIST reply bytes for `n` entries, in the wire layout
-/// `hxproto::parse::parse_file_list_entry` reads.
-fn file_list_reply(n: u32) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(n as usize * 40);
-    for i in 0..n {
-        let (ftype, name): (&[u8; 4], String) = if i % 10 == 0 {
-            (b"fldr", format!("Folder {i:05}"))
-        } else {
-            (TYPES[i as usize % TYPES.len()], format!("file-{i:05}.dat"))
-        };
-        let name = name.as_bytes();
-        buf.extend_from_slice(&0x00c8u16.to_be_bytes()); // HTLS_DATA_FILE_LIST
-        buf.extend_from_slice(&((20 + name.len()) as u16).to_be_bytes());
-        buf.extend_from_slice(ftype);
-        buf.extend_from_slice(b"MACR");
-        buf.extend_from_slice(&size_of(i).to_be_bytes());
-        buf.extend_from_slice(&0u32.to_be_bytes());
-        buf.extend_from_slice(&(name.len() as u32).to_be_bytes());
-        buf.extend_from_slice(name);
-    }
-    buf
+/// A listing of `n` entries, as the session reads one.
+fn file_list(n: u32) -> Vec<FileEntry> {
+    (0..n)
+        .map(|i| {
+            let (type_code, name) = if i % 10 == 0 {
+                (b"fldr", format!("Folder {i:05}"))
+            } else {
+                (TYPES[i as usize % TYPES.len()], format!("file-{i:05}.dat"))
+            };
+            FileEntry {
+                name_bytes: name.clone().into_bytes(),
+                name,
+                folder: i % 10 == 0,
+                size: u64::from(size_of(i)),
+                type_code: *type_code,
+                creator: *b"MACR",
+            }
+        })
+        .collect()
 }
 
 /// A fresh empty directory under the temp dir.
@@ -165,7 +164,7 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
     let listed = Rc::new(Cell::new(0u32));
     let nav = provider.connect_navigated({
         let listed = listed.clone();
-        move |_| listed.set(listed.get() + 1)
+        move || listed.set(listed.get() + 1)
     });
     let panel = Panel::new(&provider, false);
     let cv = panel.column_view().clone();
@@ -209,19 +208,16 @@ async fn measure(n: u32, empty: &Path, full: &Path) {
     }
 
     // ---- remote-shaped populate -----------------------------------------
-    let reply = file_list_reply(n);
+    let files = file_list(n);
     let listing = provider.listing();
     let t = glib::monotonic_time();
-    unsafe {
-        let store = listing.as_ptr() as *mut gtk::gio::ffi::GListStore;
-        gtkhx_files_populate_from_reply(store, reply.as_ptr(), reply.len());
-    }
+    unsafe { populate(listing.as_ptr().cast(), &files) };
     let populate = glib::monotonic_time() - t;
     let t = glib::monotonic_time();
     let first_paint = after_paint(&cv).await - t;
     bail_if_closed!();
     let rows = listing.n_items();
-    r.ms("remote populate", populate, "decode + append, UI frozen");
+    r.ms("remote populate", populate, "store fill, UI frozen");
     r.ms("  first paint", first_paint, "");
     r.ms(
         "  populate + paint",
@@ -343,23 +339,4 @@ async fn wait_listed(cv: &gtk::ColumnView, listed: &Cell<u32>, target: u32) -> O
         last = now;
     }
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn synthetic_reply_parses_back_to_every_entry() {
-        let buf = file_list_reply(250);
-        let mut off = 0;
-        let mut seen = 0;
-        while let Some((e, next)) = hxproto::parse::parse_file_list_entry(&buf, off) {
-            assert_eq!(e.fsize, size_of(seen));
-            seen += 1;
-            off = next;
-        }
-        assert_eq!(seen, 250);
-        assert_eq!(off, buf.len());
-    }
 }
