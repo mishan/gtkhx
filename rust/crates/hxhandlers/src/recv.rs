@@ -7,16 +7,17 @@
 //! matching `GtkhxSession` signal, and return a discriminant telling the C
 //! caller which branch was taken.
 //!
-//! The domains the session handles itself arrive as its events instead,
-//! through [`hx_recv_session_event`].
+//! The login's reply, and the domains the session handles itself, arrive
+//! as its events instead, through [`hx_recv_session_event`].
 
 use std::os::raw::c_void;
 
-use hxsession::Event;
+use hxsession::{Closed, Event};
 
 pub mod chat;
 pub mod files;
 pub mod icon;
+pub mod login;
 pub mod msg;
 pub mod news;
 pub mod user;
@@ -47,6 +48,8 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
                 proto_trace_recv_chunks(fields.as_ptr(), fields.len());
             }
         }
+        Event::LoggedIn(info) => login::logged_in(htlc, info),
+        Event::Closed(Closed::LoginRefused(Some(reason))) => login::refused(htlc, reason),
         Event::Chat {
             cid,
             uid,

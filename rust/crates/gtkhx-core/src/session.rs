@@ -174,11 +174,13 @@ mod imp {
                     Signal::builder("msg")
                         .param_types([Type::POINTER, msg_event_type()])
                         .build(),
-                    // logged-in: (htlc*) — login task reply came back
-                    // successful; the login chime and any future
+                    // logged-in: (htlc*, name*) — the server accepted the
+                    // login, and what its reply said is on the connection;
+                    // name is what the server calls itself, UTF-8, or NULL
+                    // where it said nothing. The login chime and any future
                     // login-reaction consumer subscribe here.
                     Signal::builder("logged-in")
-                        .param_types([Type::POINTER])
+                        .param_types([Type::POINTER, Type::POINTER])
                         .build(),
                     // self-updated: (htlc*) — our own access bits / uid were
                     // (re)parsed from a SELFINFO reply. Toolbar-button
@@ -624,10 +626,13 @@ pub unsafe extern "C" fn gtkhx_session_emit_msg(
 }
 
 /// # Safety
-/// `self_`/`htlc` valid pointers.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_logged_in(self_: *mut c_void, htlc: *mut c_void) {
-    let v = [ptr_value(htlc)];
+/// `self_`/`htlc` valid pointers; `name` NULL or NUL-terminated.
+pub unsafe fn gtkhx_session_emit_logged_in(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    name: *const c_char,
+) {
+    let v = [ptr_value(htlc), ptr_value(name.cast())];
     emit(self_, "logged-in", &v);
 }
 

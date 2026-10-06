@@ -399,45 +399,6 @@ test_parse_video_status (void)
     g_assert_false (gtkhx_proto_parse_video_reply (buf, off, NULL));
 }
 
-/* The LOGIN reply's repeated DATA_VIDEO_LIMITS land per kind, each with
- * its own seen bit. */
-static void
-test_parse_login_video_limits (void)
-{
-    guint8 buf[128];
-    memset (buf, 0, sizeof (buf));
-    gsize off = SIZEOF_HL_HDR;
-    const guint8 cam[16] = { 0,    1,    0x05, 0x00, 0x02, 0xd0, 0, 30,
-                             0x00, 0x16, 0xe3, 0x60, 0,    8,    0, 0 };
-    pack_chunk (buf, &off, HTLS_DATA_VIDEO_LIMITS, cam, sizeof (cam));
-
-    struct gtkhx_proto_login li;
-    unsigned seen = gtkhx_proto_parse_login (buf, off, NULL, 0, &li);
-    g_assert_cmphex (seen, ==, HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS);
-    g_assert_cmpuint (li.video_limits[0].max_width, ==, 1280);
-    g_assert_cmpuint (li.video_limits[0].max_height, ==, 720);
-    g_assert_cmpuint (li.video_limits[0].max_fps, ==, 30);
-    g_assert_cmpuint (li.video_limits[0].max_bitrate, ==, 1500000);
-    g_assert_cmpuint (li.video_limits[0].max_per_room, ==, 8);
-
-    /* Repeated, one per kind: the screen's lands in its own slot with its
-     * own seen bit, and a longer field from a later revision still parses. */
-    const guint8 scr[20]
-        = { 0,    2,    0x07, 0x80, 0x04, 0x38, 0, 15, 0x00, 0x26,
-            0x25, 0xa0, 0,    1,    0,    0,    9, 9,  9,    9 };
-    pack_chunk (buf, &off, HTLS_DATA_VIDEO_LIMITS, scr, sizeof (scr));
-    seen = gtkhx_proto_parse_login (buf, off, NULL, 0, &li);
-    g_assert_cmphex (seen, ==,
-                     HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS
-                         | HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS);
-    g_assert_cmpuint (li.video_limits[0].max_width, ==, 1280);
-    g_assert_cmpuint (li.video_limits[1].max_width, ==, 1920);
-    g_assert_cmpuint (li.video_limits[1].max_height, ==, 1080);
-    g_assert_cmpuint (li.video_limits[1].max_fps, ==, 15);
-    g_assert_cmpuint (li.video_limits[1].max_bitrate, ==, 2500000);
-    g_assert_cmpuint (li.video_limits[1].max_per_room, ==, 1);
-}
-
 /* ---------- main ---------- */
 
 int
@@ -470,8 +431,6 @@ main (int argc, char **argv)
     g_test_add_func ("/proto/video/parse/mid-labels",
                      test_parse_video_mid_labels);
     g_test_add_func ("/proto/video/parse/status", test_parse_video_status);
-    g_test_add_func ("/proto/video/parse/login-limits",
-                     test_parse_login_video_limits);
 
     return g_test_run ();
 }

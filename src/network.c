@@ -122,7 +122,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * defence-in-depth for any future path that reads the raw
      * fields directly (and matches the pattern history_max_*
      * uses one line up). */
-    inline_media_reset_advisory_limits (htlc);
+    hx_conn_reset_media_limits (htlc);
     hx_conn_reset_video_limits (htlc);
 
     /* GIF-icons probe state — drop the watchdog timer (if still armed)
@@ -340,45 +340,9 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
                                hx_conn_serverport (htlc), fingerprint);
 }
 
-/* Phase G: pinned LOGIN transaction id. LOGIN is always the first
- * transaction on a fresh connection, so the C side and the Rust
- * orchestrator agree on a fixed value up front — the orchestrator
- * stamps the LOGIN frame with this trans, the server echoes it in
- * the TASK reply, and the synthetic-frame replay dispatches to the
- * login task we register under the same value. See
- * docs/rust/networking.md. */
+/* LOGIN is always the first transaction on a fresh connection; the session
+ * stamps it with this trans. */
 #define HX_LOGIN_TRANS 1u
-
-/* Register the orchestrator's "login" protocol task. Called from the
- * bridge's LOGIN_SENDING state callback — i.e. after magic completes
- * and just before the credentials reply comes back, matching the
- * legacy send_login timing so the Tasks window shows the login task
- * only once the connection is up (not concurrently with the coarse
- * "Connecting" task the way an up-front registration did).
- *
- * The replayed reply dispatches here via hx_rcv_hdr -> task_with_trans,
- * so the task must be keyed on the trans the session sent the login on
- * (HOPE's step 2 under HOPE). The NULL ptr arg selects rcv_task_login's
- * post-login (else) branch. task_new keys on htlc->trans, the trans
- * reserved for our next request; set it to the login's for the task_new
- * key, then restore it. */
-void
-hx_orchestrator_register_login_task (struct htlc_conn *htlc)
-{
-    if (!htlc) {
-        return;
-    }
-    /* Idempotent: never double-register (LOGIN_SENDING fires once, but
-     * guard anyway so a stray repeat can't strand a duplicate row). */
-    guint32 login_trans = hx_bridge_login_trans (htlc);
-    if (task_with_trans (sess_from_htlc (htlc), login_trans)) {
-        return;
-    }
-    guint32 saved = hx_conn_trans (htlc);
-    hx_conn_set_trans (htlc, login_trans);
-    task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-    hx_conn_set_trans (htlc, saved);
-}
 
 /* Phase G (hxnet-owns-the-whole-lifecycle). The sole control-channel
  * connect path — hx_connect dispatches here unconditionally now that
@@ -387,8 +351,7 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
  * whole handshake itself
  * (magic + LOGIN for plaintext; magic + HOPE step1/step2 + cipher
  * transition for secure; TLS handshake then plaintext LOGIN for tls),
- * and replays the final reply to us as a synthetic frame so
- * rcv_task_login (and its post-login side effects) run unchanged.
+ * and hands us what the login's reply said as the session's event.
  * `secure` selects the HOPE path (htlc->cipheralg must be set); `tls`
  * selects TLS-from-byte-zero (separate-port model). The two are never
  * both set when this is called — hx_connect rejects secure+tls
@@ -442,7 +405,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     hx_identity_apply (htlc);
 
     /* Seed htlc->ip_addr from the server string so the post-login
-     * "<addr>: login successful" line in rcv_task_login isn't "?".
+     * "<addr>: login successful" line isn't "?".
      * The legacy path fills this with the resolved numeric IP via
      * populate_htlc_remote_ip; the orchestrator owns the socket and
      * doesn't surface the peer addr yet, so the connect target is
@@ -459,30 +422,15 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                          GTKHX_CONNECTION_CONNECTING);
 
-    /* 2. Pin the LOGIN trans. The replayed reply dispatches to
-     * rcv_task_login only if a task is registered under the trans the
-     * orchestrator's LOGIN carries (hx_rcv_task -> task_with_trans; a
-     * miss is a silent fallthrough). The orchestrator owns the send,
-     * so pin the trans to a shared constant.
-     *
-     * Unlike the earlier draft, the login task is NOT registered here.
-     * Registering it up front made it appear in the Tasks window
-     * concurrently with the coarse "Connecting" task for the whole
-     * connect — different from the legacy path, where the login task
-     * only appears once the connection is up and credentials are going
-     * out. Instead we register the task lazily from the bridge's
-     * LOGIN_SENDING state callback (hx_orchestrator_register_login_task),
-     * which fires after magic and before the replayed reply — matching
-     * legacy's send_login timing — under the trans the session gives the
-     * login. No trans is reserved yet: the session numbers our requests
-     * from its own counter, and one left from the last connection is not
-     * this session's. */
+    /* 2. No trans is reserved yet: the session numbers our requests from
+     * its own counter, and one left from the last connection is not this
+     * session's. */
     hx_conn_set_trans (htlc, 0);
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
      * treats fd==0 as "connection closed, drop the frame", so 0 here
-     * would silently drop the replayed LOGIN reply. -1 keeps the
+     * would silently drop what the server sends. -1 keeps the
      * `if (htlc->fd) hx_htlc_close()` close-time guards firing.
      * hx_htlc_close tears the connection down via the hxnet handle /
      * current_conn, not close(htlc->fd), so the sentinel value is
@@ -494,8 +442,8 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * shutdown / state callbacks and stores the returned handle on
      * this connection synchronously, BEFORE returning. That ordering
      * is load-bearing: hx_bridge_dispatch_frame gates on the
-     * connection being installed, and the orchestrator emits the
-     * replayed LOGIN-reply frame before HandshakeDone. The forwarder
+     * connection being installed, and the orchestrator hands on what
+     * the login's reply said before HandshakeDone. The forwarder
      * delivers events on the GLib main loop, which we don't re-enter
      * until this function returns — so installing synchronously here
      * closes the window. */
@@ -539,9 +487,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     if (!ok) {
         /* Spawn refused. Roll back the sentinel and surface a
          * disconnect so the UI doesn't sit on the CONNECTING throbber
-         * forever. No login task to roll back — it isn't registered
-         * until the LOGIN_SENDING state, which a refused spawn never
-         * reaches. */
+         * forever. */
         hx_conn_set_fd (htlc, 0);
         gtkhx_session_emit_connection_state (gtkhx_session_get_default (), htlc,
                                              GTKHX_CONNECTION_DISCONNECTED);

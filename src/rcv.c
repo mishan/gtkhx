@@ -42,8 +42,6 @@
 #include "gtkutil.h"
 #include "users.h"
 #include "usermod.h"
-#include "hxnet_bridge.h"
-#include "hxnet_htxf.h" /* hxnet_hope_aead_free (HOPE AEAD handle) */
 #include "rcv.h"
 #include "hxconn.h"
 #include "hfs.h"
@@ -52,7 +50,6 @@
 #include "connect.h"
 #include "banner.h"
 #include "chat_history.h"
-#include "inline_media.h"
 #include "sound.h"
 #include "text_util.h"
 #include "gif_icons.h"
@@ -293,8 +290,7 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
             tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore
-         * down the connection (rcv_task_login does this on a
-         * malformed HOPE Step 1 reply, for example). hx_htlc_close
+         * down the connection. hx_htlc_close
          * clears htlc->fd to 0, so a non-zero fd here means the
          * connection is still live and task_delete (hash remove +
          * gtask UI row removal) is safe to run.
@@ -846,216 +842,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 
     if (handler && hx_conn_fd (htlc) != 0) {
         handler (htlc, frame, frame_len);
-    }
-}
-
-void
-rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                char *pass)
-{
-    char buf[HOSTLEN];
-    char servername[8192 + 1];
-
-    g_strlcpy (buf, hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
-               sizeof (buf));
-
-    if (!pass) {
-        hx_printf_prefix (htlc, 0, INFOPREFIX, "%s:%u: %s %s\n", buf,
-                          hx_conn_serverport (htlc), _ ("login"),
-
-                          task_inerror (htlc, frame, frame_len)
-                              ? _ ("failed?")
-                              : _ ("successful"));
-    }
-
-    /* The HOPE step-1→step-2 handshake the legacy connect path drove
-     * here is gone — the orchestrator (hxnet) owns the whole HOPE
-     * handshake in Rust and replays only the final reply, so this task
-     * always runs the post-login completion below (pass is always
-     * NULL). */
-    if (!task_inerror (htlc, frame, frame_len)) {
-        /* Login task reply came back successful. The connected-state UI
-         * (window titles / toolbar buttons / status bar) and the LOGIN
-         * chime are driven off the "logged-in" signal, emitted below once
-         * the LOGIN reply has been fully walked — see the emit site after
-         * dh_end(). */
-        /* On the connection, not a global. `connected` named whichever
-         * connection had most recently logged in — the same thing at one and a
-         * race at two, with the toolbar's Disconnect button reading it. */
-        hx_conn_set_logged_in (htlc, 1);
-
-        /* Seed the opaque HOPE AEAD material handle (if the orchestrated
-         * control channel negotiated ChaCha20-Poly1305). The handshake
-         * is complete by now, so the retained material is populated;
-         * HTXF subchannels (banner.c / xfers.c) read htlc->hope_aead to
-         * derive their per-transfer keys in-process. NULL for plaintext
-         * / Blowfish / no-cipher. Freed on connection teardown. */
-        if (hx_conn_hope_aead (htlc)) {
-            hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
-        }
-        hx_conn_set_hope_aead (htlc, hx_bridge_orchestrated_hope_aead (htlc));
-
-        /* Phase 9.A: clear inline-media advisory limits BEFORE
-         * walking the LOGIN reply. Each MAX_* field is
-         * independently optional on the wire (spec: "Clients
-         * MUST tolerate any individual field being absent"),
-         * so the chunk walker below only writes the ones the
-         * server advertised — any field omitted from this
-         * particular LOGIN would otherwise inherit a stale
-         * value from a prior session on the same htlc_conn
-         * struct (network.c::hx_htlc_close also zeroes them
-         * on disconnect, but a server reconfiguration mid-
-         * lifetime that re-LOGINs without going through
-         * close would otherwise still carry stale fields).
-         * htlc->caps is overwritten outright by the chunk
-         * walker; these can't piggyback on that. */
-        inline_media_reset_advisory_limits (htlc);
-        hx_conn_reset_video_limits (htlc);
-
-        /* The LOGIN reply chunk-walk moved to the Rust hxproto crate
-         * (gtkhx_proto_parse_login). It enforces the same per-field width
-         * gates the C code did (UID/VERSION as u16; each media / history
-         * limit requires the spec's 4 bytes or it's skipped), sanitises
-         * the server name (CR2LF + strip_ansi), and reports which fields
-         * were present via the returned HX_LOGIN_SEEN_* bitmask. Every
-         * field is independently optional on the wire — a 1.0/1.2 server
-         * sends almost none of them — so each htlc assignment below is
-         * gated on its seen bit. The advisory media limits were already
-         * reset above; caps is overwritten only when the server echoed a
-         * DATA_CAPABILITIES chunk. */
-        struct gtkhx_proto_login li;
-        unsigned login_seen = gtkhx_proto_parse_login (
-            frame, frame_len, (uint8_t *)servername, sizeof (servername), &li);
-
-        if (login_seen & HX_LOGIN_SEEN_UID) {
-            hx_conn_set_uid (htlc, li.uid);
-        }
-        if (login_seen & HX_LOGIN_SEEN_VERSION) { /* Hotline 1.5+ only */
-            hx_conn_set_version (htlc, li.version);
-        }
-        if (login_seen & HX_LOGIN_SEEN_SERVERNAME) { /* Hotline 1.5+ only */
-            /* On the session this reply arrived for, not a global — the name
-             * belongs to one server, and a second connection logging in used
-             * to overwrite the first's.
-             *
-             * Server names from old Hotline servers are 8-bit Mac Roman text,
-             * not UTF-8 — and gtk_window_set_title et al. assert UTF-8.
-             * gtkhx_text_to_utf8 handles the already-UTF-8 / Mac-Roman /
-             * fall-back-to-substitute cascade. The window title picks it up
-             * when the "logged-in" signal is emitted after this walk. */
-            {
-                session *ss = sess_from_htlc (htlc);
-                if (ss) {
-                    g_free (ss->server_name);
-                    ss->server_name = gtkhx_text_to_utf8 (
-                        servername, strlen (servername), NULL);
-                }
-            }
-        }
-        if (login_seen & HX_LOGIN_SEEN_CAPS) {
-            /* DATA_CAPABILITIES echo — the bits the server agreed to
-             * enable for this session. Bits we don't recognise are
-             * preserved per the spec's "ignore unknown bits" rule. */
-            hx_conn_set_caps (htlc, li.caps);
-            if (li.caps & HTLC_CAP_LARGE_FILES) {
-                hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                  _ ("server confirmed large-file (64-bit) "
-                                     "mode for this session\n"));
-            }
-            if (li.caps & HTLC_CAP_TEXT_ENCODING) {
-                hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                  _ ("server confirmed UTF-8 text encoding "
-                                     "for this session\n"));
-            }
-            if (li.caps & HTLC_CAP_CHAT_HISTORY) {
-                hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                  _ ("server confirmed chat-history extension "
-                                     "for this session\n"));
-            }
-            if (li.caps & HTLC_CAP_INLINE_MEDIA) {
-                hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                  _ ("server confirmed inline-media extension "
-                                     "for this session\n"));
-            }
-        }
-        /* Video ceilings, one field per kind the server supports. Kept
-         * on the connection and handed to the voice runtime when it is
-         * built (or now, if it already exists), so the encoder starts
-         * inside them rather than learning them by rejection. */
-        {
-            static const struct {
-                unsigned seen;
-                guint16 kind;
-            } video_kinds[] = {
-                { HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS, HX_VIDEO_KIND_CAMERA },
-                { HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS, HX_VIDEO_KIND_SCREEN },
-            };
-            for (gsize i = 0; i < G_N_ELEMENTS (video_kinds); i++) {
-                if (!(login_seen & video_kinds[i].seen)) {
-                    continue;
-                }
-                const struct gtkhx_proto_login_video_limits *vl
-                    = &li.video_limits[video_kinds[i].kind - 1];
-                hx_conn_set_video_limits (htlc, video_kinds[i].kind,
-                                          vl->max_width, vl->max_height,
-                                          vl->max_fps, vl->max_bitrate);
-#ifdef HAVE_VOICE
-                session *vs = sess_from_htlc (htlc);
-                if (vs && vs->voice_runtime) {
-                    gtkhx_voice_runtime_set_video_limits (
-                        vs->voice_runtime, video_kinds[i].kind, vl->max_width,
-                        vl->max_height, vl->max_fps, vl->max_bitrate);
-                }
-#endif
-            }
-        }
-        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_BYTES) {
-            hx_conn_set_media_max_bytes (htlc, li.media_max_bytes);
-        }
-        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_DIMENSION) {
-            hx_conn_set_media_max_dimension (htlc, li.media_max_dimension);
-        }
-        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_PIXELS) {
-            hx_conn_set_media_max_pixels (htlc, li.media_max_pixels);
-        }
-        if (login_seen & HX_LOGIN_SEEN_MEDIA_CHUNK_SIZE) {
-            hx_conn_set_media_chunk_size (htlc, li.media_chunk_size);
-        }
-        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_FRAMES) {
-            hx_conn_set_media_max_frames (htlc, li.media_max_frames);
-        }
-        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_DURATION_MS) {
-            hx_conn_set_media_max_duration_ms (htlc, li.media_max_duration_ms);
-        }
-        /* Chat-history retention hints — max message count / age. 0 means
-         * unlimited; these are hints only, the authoritative end-of-history
-         * signal is DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
-        if (login_seen & HX_LOGIN_SEEN_HISTORY_MAX_MSGS) {
-            hx_conn_set_history_max_msgs (htlc, li.history_max_msgs);
-        }
-        if (login_seen & HX_LOGIN_SEEN_HISTORY_MAX_DAYS) {
-            hx_conn_set_history_max_days (htlc, li.history_max_days);
-        }
-
-        /* Phase 9.A: log the server's advertised inline-media
-         * limits at debug-category "media". Routed through a
-         * stable helper so future logging adjustments don't
-         * spider out across rcv.c. */
-        if (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) {
-            inline_media_log_advertised_limits (htlc);
-        }
-
-        /* Login processing is complete: uid, version, server name, and
-         * caps have all been parsed out of this LOGIN reply. Emit the
-         * "logged-in" signal now so the view-side handler in gtkhx.c
-         * settles the connected UI in one shot — window titles (needs
-         * the parsed SERVERNAME → server_addr) and toolbar buttons (the
-         * news15 button gate is version >= 150, so it needs the parsed
-         * HTLS_DATA_VERSION) and the status bar — and sound_events plays
-         * the LOGIN chime. Emitting after the walk rather than before it
-         * is what lets this be a single settle instead of the old
-         * set-then-re-run dance. */
-        gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
     }
 }
 

@@ -15,11 +15,8 @@
  * assert the OPTIONS chunk landed with the expected u16-big-endian
  * payload.
  *
- * Recv-side: hand-build a LOGIN TASK reply via wire_fixture with a
- * DATA_CAPABILITIES chunk, walk it the same way the parser in
- * rcv.c::rcv_task_login does, and verify the decoded caps mask.
- * Cover both 2-byte (typical) and 8-byte (variable-width-extension)
- * encodings the spec allows.
+ * The recv side is the session's: hx-libs' hxsession reads the echo
+ * into Event::LoggedIn.
  *
  * Also pin the numeric constants — the bit values are protocol-
  * facing, renumbering them silently turns into wire-incompat.
@@ -119,131 +116,6 @@ test_send_multiple_caps_bits (void)
     htlc_free (&htlc);
 }
 
-/* ---------- recv side: drive the real production decoder ----------
- *
- * Pre-refactor this test had its own copy of the variable-width
- * big-endian decoder that rcv.c::rcv_task_login uses. The whole
- * point of this test is to PIN the production behaviour, so calling
- * the production helper (hl_capabilities_decode in proto_helpers)
- * is strictly better than mimicking it — a future change to the
- * decoder shows up here as either a test pass with the new
- * semantics or a test-vector-and-decoder simultaneous drift, but
- * never a silent divergence where the test mimics out-of-date
- * behaviour. */
-static guint64
-decode_caps_from_reply (struct htlc_conn *htlc)
-{
-    guint64 caps = 0;
-    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
-    {
-        if (_type != HTLS_DATA_CAPABILITIES) {
-            continue;
-        }
-        caps = hl_capabilities_decode (dh->data, _len);
-    }
-    dh_end ();
-    return caps;
-}
-
-/* Server echoes back the typical 2-byte cap mask with bit 1 set. */
-static void
-test_recv_caps_2byte_text_encoding (void)
-{
-    struct htlc_conn htlc;
-    memset (&htlc, 0, sizeof htlc);
-    wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
-
-    guint16 caps_be = g_htons (HTLC_CAP_TEXT_ENCODING);
-    wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 2, &caps_be);
-
-    guint64 caps = decode_caps_from_reply (&htlc);
-    g_assert_cmphex (caps, ==, HTLC_CAP_TEXT_ENCODING);
-    g_assert_true (caps & HTLC_CAP_TEXT_ENCODING);
-    g_assert_false (caps & HTLC_CAP_LARGE_FILES);
-
-    wire_fixture_free (&htlc);
-}
-
-/* Server echoes multiple bits — proves bits 0 and 1 round-trip
- * together. */
-static void
-test_recv_caps_multiple_bits (void)
-{
-    struct htlc_conn htlc;
-    memset (&htlc, 0, sizeof htlc);
-    wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
-
-    guint16 caps_be = g_htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
-    wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 2, &caps_be);
-
-    guint64 caps = decode_caps_from_reply (&htlc);
-    g_assert_true (caps & HTLC_CAP_LARGE_FILES);
-    g_assert_true (caps & HTLC_CAP_TEXT_ENCODING);
-}
-
-/* The spec permits a variable-width body up to 8 bytes (64 bits).
- * A server that opts for the long form should still decode
- * correctly. Pin the wide-decode path. */
-static void
-test_recv_caps_8byte_wide_form (void)
-{
-    struct htlc_conn htlc;
-    memset (&htlc, 0, sizeof htlc);
-    wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
-
-    /* High word = some hypothetical future bit; low word = our
-     * familiar TEXT_ENCODING. The shift-and-OR loop must walk
-     * the whole 8 bytes to preserve the high bits. */
-    guint8 body[8]
-        = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, HTLC_CAP_TEXT_ENCODING };
-    wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 8, body);
-
-    guint64 caps = decode_caps_from_reply (&htlc);
-    g_assert_cmphex (caps, ==, 0x8000000000000000ull | HTLC_CAP_TEXT_ENCODING);
-    g_assert_true (caps & HTLC_CAP_TEXT_ENCODING);
-
-    wire_fixture_free (&htlc);
-}
-
-/* The LOGIN reply may omit DATA_CAPABILITIES entirely (server
- * doesn't support the extension, or supports it but didn't agree
- * to any of our advertised bits). In that case the decoded caps
- * mask is 0 — session falls back to standard mode. */
-static void
-test_recv_caps_absent_field_means_zero (void)
-{
-    struct htlc_conn htlc;
-    memset (&htlc, 0, sizeof htlc);
-    wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
-
-    /* Some other unrelated chunk, no CAPABILITIES. */
-    guint16 version_be = g_htons (190);
-    wire_fixture_add_chunk (&htlc, HTLS_DATA_VERSION, 2, &version_be);
-
-    guint64 caps = decode_caps_from_reply (&htlc);
-    g_assert_cmphex (caps, ==, 0);
-
-    wire_fixture_free (&htlc);
-}
-
-/* A 1-byte cap body — unusual but legal under the spec's variable-
- * width clause. The decoder must promote it correctly. */
-static void
-test_recv_caps_1byte_form (void)
-{
-    struct htlc_conn htlc;
-    memset (&htlc, 0, sizeof htlc);
-    wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
-
-    guint8 body[1] = { HTLC_CAP_TEXT_ENCODING };
-    wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 1, body);
-
-    guint64 caps = decode_caps_from_reply (&htlc);
-    g_assert_cmphex (caps, ==, HTLC_CAP_TEXT_ENCODING);
-
-    wire_fixture_free (&htlc);
-}
-
 int
 main (int argc, char **argv)
 {
@@ -253,17 +125,6 @@ main (int argc, char **argv)
                      test_send_capabilities_chunk_layout);
     g_test_add_func ("/capabilities/send/multiple_bits",
                      test_send_multiple_caps_bits);
-
-    g_test_add_func ("/capabilities/recv/2byte_text_encoding",
-                     test_recv_caps_2byte_text_encoding);
-    g_test_add_func ("/capabilities/recv/multiple_bits",
-                     test_recv_caps_multiple_bits);
-    g_test_add_func ("/capabilities/recv/8byte_wide_form",
-                     test_recv_caps_8byte_wide_form);
-    g_test_add_func ("/capabilities/recv/absent_field_means_zero",
-                     test_recv_caps_absent_field_means_zero);
-    g_test_add_func ("/capabilities/recv/1byte_form",
-                     test_recv_caps_1byte_form);
 
     return g_test_run ();
 }

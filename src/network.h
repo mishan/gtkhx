@@ -23,12 +23,6 @@ extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
 extern gboolean hx_tls_verify_subchannel_cert (const char *host, guint16 port,
                                                const char *fingerprint);
 
-/* Phase G: register the orchestrator's "login" protocol task. Called
- * from the hxnet bridge's LOGIN_SENDING state callback so the login
- * task appears at the same point the legacy connect path registers it
- * (magic done, credentials going out) rather than up front. */
-extern void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
-
 /* `secure` is the legacy hxd "secure server" password flag (not
  * transport security — it just selects an alternate password
  * encoding). `tls` is the transport-security flag: non-zero

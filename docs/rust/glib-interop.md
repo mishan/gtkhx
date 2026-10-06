@@ -286,8 +286,7 @@ too:
   project realising it; safety-critical invariants must use
   `g_error` (always fatal) or `g_critical` + graceful skip. The
   convention applies to any C-side check on a path that calls into
-  Rust. See `src/rcv.c::rcv_task_login` for the original convention
-  example and `src/proto_helpers.c::hl_htxf_hdr_pack` for a later one.
+  Rust. See `src/proto_helpers.c::hl_htxf_hdr_pack` for an example.
 - **C-side hand-declared `extern` blocks** for FFI symbols, not
   cbindgen-generated headers. Drift surfaces as link-time undefined
   symbols. `src/hxnet_bridge.c`'s `extern` declarations of the

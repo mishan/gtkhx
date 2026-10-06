@@ -19,11 +19,13 @@
  *     → hx_bridge_install_orchestrated_plaintext
  *       → hxnet_connection_open_plaintext  (production Rust orchestrator)
  *         → DNS + TCP + magic + LOGIN + LOGIN-reply against real mhxd
- *         → replay LOGIN reply as a synthetic Event::Frame
- *           → bridge_on_event_cb → hx_bridge_dispatch_frame
- *             → body-handler dispatch (recorded by the connect_test_stubs.c
- *                          recording hx_rcv_hdr)
+ *         → what the LOGIN reply said, as the session's event
+ *           → bridge_on_session_cb → hx_recv_session_event (recorded by
+ *             connect_test_stubs.c)
  *         → Event::State(HandshakeDone)
+ *         → what the server sends next, as frames
+ *           → bridge_on_event_cb → hx_bridge_dispatch_frame
+ *             → hx_dispatch_frame (recorded by connect_test_stubs.c)
  *
  * What this proves against a real server:
  *
@@ -33,31 +35,17 @@
  *       framing is wire-compatible with a real server, not just the
  *       fake_server / duplex unit fixtures).
  *     - The coarse GtkhxConnectionState sequence the toolbar listens
- *       to fires in order: CONNECTING → TCP_CONNECTED → HANDSHAKE_DONE
- *       (same sequence the legacy GIOStream connect path emits). As of
- *       the "match legacy" task-timing change, HANDSHAKE_DONE fires at
- *       the orchestrator's LOGIN_SENDING state — magic done, credentials
- *       going out — i.e. BEFORE the replayed reply frame, exactly like
- *       legacy's send_login. So the tests drive until the replayed
- *       frame is recorded (drive_until_rcv) rather than waiting on a
- *       post-frame state; the idx_handshake > idx_tcp ordering assert
- *       then doubles as proof HANDSHAKE_DONE preceded the frame.
+ *       to fires in order: CONNECTING → TCP_CONNECTED → HANDSHAKE_DONE.
+ *       HANDSHAKE_DONE fires at the orchestrator's LOGIN_SENDING state,
+ *       magic done and credentials going out.
  *     - The orchestrator installs the bridge (hx_bridge_is_installed).
- *     - The LOGIN reply was REPLAYED to the C dispatch carrying the
- *       pinned trans (HX_LOGIN_TRANS == 1), the HTLS_HDR_TASK opcode,
- *       and a clear error bit — i.e. mhxd accepted the guest login AND
- *       the Option-B replay + trans-pinning round-trips correctly.
- *       This is the regression guard for the two silent-failure axes
- *       called out in docs/rust/networking.md (trans mismatch and
- *       install ordering): either one would leave the replayed frame
- *       undispatched, so connect_test_rcv_count would stay 0.
+ *     - What the login's reply said reached the session-event path
+ *       before any frame, and frames followed: the server accepted the
+ *       login, and the install was in place in time for both.
  *
- * The downstream rcv_task_login side effects (version extraction,
- * USER_CHANGE, SELFINFO timer) are NOT asserted here — the real
- * rcv_task_login lives in rcv.c and drags the whole GTK/UI stack,
- * which a headless test binary can't link, so connect_test_stubs.c
- * supplies a recording hx_rcv_hdr instead. The header-level assertion
- * is the strongest production-path proof achievable headless.
+ * What the login reply sets on the connection is hxhandlers' (its own
+ * tests, and hx-e2e against the rig); this headless binary does not link
+ * it.
  *
  * Hard-fail contract (same as the rest of Tier 3): if mhxd is
  * unreachable the orchestrator never reaches HandshakeDone, the
@@ -94,12 +82,10 @@
 
 /* From connect_test_stubs.c. */
 extern void connect_test_reset_rcv_record (void);
-extern guint32 connect_test_first_rcv_type;
-extern guint32 connect_test_first_rcv_trans;
-extern guint32 connect_test_first_rcv_flag;
 extern guint connect_test_rcv_count;
-extern gboolean connect_test_first_rcv_caps_present;
-extern guint16 connect_test_first_rcv_caps_value;
+extern gboolean connect_test_session_before_rcv;
+/* The capabilities the session agreed (rust/crates/hxnet/src/ffi.rs). */
+extern guint16 hxnet_connection_agreed_caps (void *handle);
 
 /* server_matrix.c references hx_integration_connect_to (via the
  * unused-here hx_test_server_connect). This test never calls it, but
@@ -116,10 +102,6 @@ hx_integration_connect_to (const char *host, int port, int timeout_ms)
     (void)timeout_ms;
     return -1;
 }
-
-/* Mirror of HX_LOGIN_TRANS in src/network.c — the pinned LOGIN
- * transaction id the orchestrator stamps and the server echoes. */
-#define REAL_CONNECT_LOGIN_TRANS 1u
 
 typedef struct {
     GMainLoop *loop;
@@ -169,13 +151,11 @@ drive_until (test_observer *obs, guint timeout_ms)
     obs->loop = NULL;
 }
 
-/* Quit the loop once the recording hx_rcv_hdr has captured at least one
- * dispatched frame. Used by the tests that assert on the replayed
- * LOGIN / step-2 reply: as of the "match legacy" task-timing change the
- * coarse HANDSHAKE_DONE fires at LOGIN_SENDING — BEFORE the replayed
- * frame — and the headless stub never runs rcv_task_login (so no
- * LOGIN_READY follows). So there's no post-frame state event to wait
- * on; poll the record instead. */
+/* Quit the loop once the recording stub has captured at least one
+ * dispatched frame, which only an accepted login is followed by. The
+ * coarse HANDSHAKE_DONE fires at LOGIN_SENDING, before the reply, and an
+ * agreement with text holds LOGIN_READY back until someone agrees, so
+ * there's no state event to wait on; poll the record instead. */
 static gboolean
 on_rcv_poll (gpointer u)
 {
@@ -301,9 +281,8 @@ test_orchestrator_login (void)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     /* wait_for is set to LOGIN_READY (never emitted in this headless
-     * binary — rcv_task_login is stubbed) so the observer doesn't quit
-     * early on the now-earlier HANDSHAKE_DONE; drive_until_rcv quits on
-     * the replayed frame instead. */
+     * binary) so the observer doesn't quit early on HANDSHAKE_DONE;
+     * drive_until_rcv quits on the first frame instead. */
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
 
     /* Sanity: bridge starts uninstalled. */
@@ -314,8 +293,8 @@ test_orchestrator_login (void)
 
     drive_until_rcv (obs, 10000);
 
-    /* The replayed LOGIN reply was dispatched — the orchestrator
-     * completed the full handshake against the real server. If mhxd is
+    /* A frame was dispatched — the orchestrator completed the full
+     * handshake against the real server. If mhxd is
      * unreachable this is where the test fails loudly (no silent
      * skip). */
     g_assert_true (obs->wait_arrived);
@@ -332,24 +311,9 @@ test_orchestrator_login (void)
     /* The orchestrator installed the bridge. */
     g_assert_true (hx_bridge_is_installed (&test_htlc));
 
-    /* The LOGIN reply was replayed to the C dispatch (Option B). The
-     * recording hx_rcv_hdr in connect_test_stubs.c captured it. We
-     * assert on the FIRST dispatched frame: the orchestrator replays
-     * the LOGIN reply before HandshakeDone, so it's guaranteed first;
-     * the server's post-login pushes (SELFINFO / user-list) dispatch
-     * afterwards. A count of 0 would mean the replayed frame never
-     * dispatched — the trans-mismatch / install-ordering silent
-     * failures from docs/rust/networking.md. */
+    /* What the login's reply said came first, then what followed it. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    /* mhxd sends the plain 0x00010000 TASK opcode for every TASK
-     * reply (the high-16-bit opcode-echo variant is a Heidrun-family
-     * quirk, not mhxd). */
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
-    /* Pinned trans round-tripped through the real server. */
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
-                      REAL_CONNECT_LOGIN_TRANS);
-    /* mhxd accepted the guest login — error bit clear. */
-    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+    g_assert_true (connect_test_session_before_rcv);
 
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
@@ -359,16 +323,13 @@ test_orchestrator_login (void)
     g_assert_false (hx_bridge_is_installed (&test_htlc));
 }
 
-/* Increment 1: prove the orchestrator advertises capabilities
- * end-to-end through production code. The plain orchestrator_login
- * test runs against the default server (mhxd), which is cap-UNAWARE
- * and ignores the chunk per spec — so it can't prove negotiation.
- * Here we drive the production hx_connect orchestrator against a
- * capability-aware matrix server (Janus, which ships the fogWraith
- * chat-history extension) and assert the server echoed our
- * HTLC_DATA_CAPABILITIES back in the LOGIN reply. Had the
- * orchestrator's LOGIN omitted the caps chunk (the bug this guards),
- * a cap-aware server would echo nothing and caps_present stays FALSE.
+/* Prove the orchestrator advertises capabilities end-to-end through
+ * production code. orchestrator_login runs against mhxd, which agrees to
+ * none, so it can't prove negotiation. Here we drive the production
+ * hx_connect against a capability-aware matrix server (Janus, which ships
+ * the fogWraith chat-history extension) and assert the session agreed
+ * chat history with it. Had the orchestrator's LOGIN omitted the caps
+ * chunk (the bug this guards), the server would agree to nothing.
  *
  * Fails loudly (not g_test_skip) if no cap-aware server is in the
  * matrix — per the "no silent skips" rule. */
@@ -402,17 +363,11 @@ test_orchestrator_capabilities_negotiated (void)
     drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
-
-    /* The first dispatched frame is the replayed LOGIN reply. A
-     * cap-aware server echoes the capability bits it accepted; the
-     * orchestrator must therefore have advertised them. */
-    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
-    g_assert_true (connect_test_first_rcv_caps_present);
-    /* The server echoes the subset it accepted; chat-history (bit 4)
-     * is the one we picked this server for, so it must be lit. */
-    g_assert_cmphex (connect_test_first_rcv_caps_value & HTLC_CAP_CHAT_HISTORY,
-                     ==, HTLC_CAP_CHAT_HISTORY);
+    g_assert_true (connect_test_session_before_rcv);
+    g_assert_cmphex (
+        hxnet_connection_agreed_caps (hx_conn_bridge_handle (&test_htlc))
+            & HTLC_CAP_CHAT_HISTORY,
+        ==, HTLC_CAP_CHAT_HISTORY);
 
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
@@ -425,9 +380,7 @@ test_orchestrator_capabilities_negotiated (void)
  * orchestrator (secure=1) against a matrix
  * server advertising `required_cap`, with `cipheralg` configured on
  * the htlc. Asserts the full handshake reaches HANDSHAKE_DONE, the
- * bridge installs, and the replayed step-2 reply dispatched to the C
- * side with the right trans (HX_LOGIN_TRANS+1 — HOPE replays step 2,
- * not the LOGIN) + success flag.
+ * bridge installs, and the server accepted the step-2 login.
  *
  * This exercises the production Rust run_hope_lifecycle end-to-end:
  * magic + step1 + key derivation + step2 + cipher transition + the
@@ -471,13 +424,9 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
     g_assert_true (obs->wait_arrived);
     g_assert_true (hx_bridge_is_installed (&test_htlc));
 
-    /* HOPE replays the step-2 reply, which carries HX_LOGIN_TRANS+1
-     * (step 1 = HX_LOGIN_TRANS, step 2 = +1). */
+    /* What the login's reply said came first, then what followed it. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
-                      REAL_CONNECT_LOGIN_TRANS + 1);
-    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+    g_assert_true (connect_test_session_before_rcv);
 
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
@@ -549,13 +498,9 @@ test_orchestrator_hope_no_cipher (void)
     g_assert_true (obs->wait_arrived);
     g_assert_true (hx_bridge_is_installed (&test_htlc));
 
-    /* HOPE replays the step-2 reply (HX_LOGIN_TRANS+1); mhxd accepted
-     * the no-cipher secure login (error bit clear). */
+    /* What the login's reply said came first, then what followed it. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
-                      REAL_CONNECT_LOGIN_TRANS + 1);
-    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+    g_assert_true (connect_test_session_before_rcv);
 
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
@@ -570,8 +515,7 @@ test_orchestrator_hope_no_cipher (void)
  * the Mobius/Janus separate-port model: TLS handshake from byte zero,
  * then a plaintext LOGIN over the encrypted stream. Asserts the full
  * sequence reaches HANDSHAKE_DONE through the orchestrator's rustls
- * path and the LOGIN reply was replayed (decrypted over TLS) to the C
- * dispatch with the right trans + success flag.
+ * path and the server accepted the LOGIN over TLS.
  *
  * NOTE: the orchestrator TLS layer is WebPKI-first — a cert that
  * chains to a native trust root is accepted silently, and only a cert
@@ -631,14 +575,9 @@ test_orchestrator_tls_login (void)
     g_assert_true (obs->wait_arrived);
     g_assert_true (hx_bridge_is_installed (&test_htlc));
 
-    /* TLS carries a plaintext LOGIN, so the replayed reply is the
-     * LOGIN reply (trans HX_LOGIN_TRANS), like the non-TLS plaintext
-     * path. */
+    /* What the login's reply said came first, then what followed it. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
-                      REAL_CONNECT_LOGIN_TRANS);
-    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+    g_assert_true (connect_test_session_before_rcv);
 
     /* The pin now runs synchronously inside the verify callback (the
      * hxtls-trust decide), so it has already landed by LOGIN_READY; the

@@ -28,13 +28,6 @@
  * server is configured (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd),
  * the test fails (g_test_fail_printf) — fix the matrix filter or
  * add Janus to the configured server set.
- *
- * Pre-refactor this test was infeasible: the harness had no HOPE
- * primitives and the production HOPE flow was wedged inside
- * rcv_task_login (GTK / Adwaita / GtkhxSession). The src/hope.c
- * extraction + harness AEAD wrappers
- * landed in earlier commits on this branch specifically to unblock
- * this test.
  */
 
 #include "config.h"

@@ -302,8 +302,9 @@ unsafe fn ensure_voice_runtime(sess: *mut c_void) -> *mut c_void {
         rt = gtkhx_voice_runtime_new_v2(htlc, send_wire_frame_cb, &signals);
         hx_session_set_voice_runtime(sess, rt);
         // The login reply's video ceilings arrived before any runtime
-        // existed; hand them over now so the first capture starts inside
-        // them. rcv.c updates a live runtime directly.
+        // existed: a runtime is built on joining voice, and freed at
+        // disconnect. Hand them over now so the first capture starts
+        // inside them.
         if !rt.is_null() {
             watch_video(sess);
             for kind in [1u16, 2] {

@@ -133,14 +133,6 @@ void gtkhx_session_emit_gif_icon_data (GtkhxSession *self,
 void gtkhx_session_emit_msg (GtkhxSession *self, struct htlc_conn *htlc,
                              HxMsgEvent *event);
 
-/* "logged-in" (htlc *) — the login task reply came back successful
- * (rcv_task_login, non-error branch). This is the exact point the login
- * chime used to play inline; sound (and any future login-reaction
- * consumer) subscribes here instead. Distinct from the connection-state
- * LOGIN_READY milestone, which is agreement-gated and can fire much later
- * (or, on a server with an unaccepted agreement, not at all). */
-void gtkhx_session_emit_logged_in (GtkhxSession *self, struct htlc_conn *htlc);
-
 /* "self-updated" (htlc *) — our own access bits / uid were (re)parsed
  * from a SELFINFO reply. Toolbar-button sensitivity depends on the
  * access bitmap, so the view refreshes it off this signal. */

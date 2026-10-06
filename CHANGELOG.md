@@ -57,7 +57,7 @@
   - Posting into a category, or making one inside a folder, with an accented name works on more servers
   - Loading and posting news no longer flashes by in the Tasks list
 - Hotline Protocol
-  - A rejected login now shows the server's own message
+  - A rejected login now shows the server's own message, a secure (HOPE) login the server doesn't support included
   - Fixed HOPE-encrypted connections misreading a message split across frames
   - No more error at every login on servers that refuse your saved GIF icon
   - Sending text is faster on servers without Unicode
@@ -74,6 +74,7 @@
   - New User now works on Janus servers
   - New User won't replace an account that already exists
   - The server banner, GIF icons, and sending or loading pictures in chat no longer flash by in the Tasks list
+  - Logging in no longer adds a row to the Tasks list
 - Updates
   - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
   - Windows, macOS and Flatpak test builds show their real version, such as 1.4.1b2, in About instead of 1.4.1-dev

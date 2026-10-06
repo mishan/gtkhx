@@ -159,107 +159,21 @@ banner_clear (struct htlc_conn *htlc)
     (void)htlc;
 }
 
-/* hx_rcv_hdr is the production receive callback. In the Phase G
- * orchestrator path, hx_bridge_dispatch_frame hands the replayed
- * LOGIN reply to the body-handler dispatch (== this stub) as an
- * explicit (frame, frame_len) slice — so we record the dispatched
- * frame's header fields here. The
- * real
- * production hx_rcv_hdr lives in rcv.c and drags the whole UI
- * stack; the orchestrator test only needs to prove the reply was
- * replayed to the C dispatch with the pinned trans / TASK opcode /
- * success flag, which the header alone carries. */
-/* "first_*" captures the FIRST dispatched frame, "last_*" the most
- * recent. The Phase G test asserts on first_*: the orchestrator
- * replays the LOGIN reply as a synthetic frame before HandshakeDone,
- * so it's guaranteed to be the first frame dispatched. After
- * HandshakeDone the actor starts reading real server pushes (mhxd
- * sends SELFINFO / user-list / etc.), which also dispatch through
- * here — so "last" would be one of those, not the login reply. */
-guint32 connect_test_first_rcv_type = 0;
-guint32 connect_test_first_rcv_trans = 0;
-guint32 connect_test_first_rcv_flag = 0;
-guint32 connect_test_last_rcv_type = 0;
-guint32 connect_test_last_rcv_trans = 0;
-guint32 connect_test_last_rcv_flag = 0;
+/* What the production receive dispatch (rcv.c, which drags the whole UI
+ * stack) was handed: how many frames, and whether a session event — what
+ * the login's reply said, for hxhandlers, which these tests do not link —
+ * came before the first of them. Frames follow only an accepted login. */
 guint connect_test_rcv_count = 0;
-/* Capabilities echo from the FIRST dispatched frame's body (the
- * replayed LOGIN reply). A capability-aware server (Janus) echoes
- * the HTLC_DATA_CAPABILITIES bits we advertised back in the LOGIN
- * reply; a cap-unaware server (mhxd) omits the chunk per spec. Lets
- * the Phase G Tier 3 test prove the orchestrator advertised caps
- * end-to-end against a real cap-aware server. */
-gboolean connect_test_first_rcv_caps_present = FALSE;
-guint16 connect_test_first_rcv_caps_value = 0;
+guint connect_test_session_count = 0;
+gboolean connect_test_session_before_rcv = FALSE;
 
 void connect_test_reset_rcv_record (void);
 void
 connect_test_reset_rcv_record (void)
 {
-    connect_test_first_rcv_type = 0;
-    connect_test_first_rcv_trans = 0;
-    connect_test_first_rcv_flag = 0;
-    connect_test_last_rcv_type = 0;
-    connect_test_last_rcv_trans = 0;
-    connect_test_last_rcv_flag = 0;
     connect_test_rcv_count = 0;
-    connect_test_first_rcv_caps_present = FALSE;
-    connect_test_first_rcv_caps_value = 0;
-}
-
-/* HTLS_DATA_CAPABILITIES wire tag (mirror of HTLC_DATA_CAPABILITIES
- * 0x01f0 — same tag is reused server→client for the echo). */
-#define CONNECT_TEST_TAG_CAPABILITIES 0x01f0
-
-/* Body handler for the FIRST dispatched frame. hx_bridge_dispatch_frame
- * hands us the whole frame (22-byte header + body) as an explicit
- * (frame, frame_len) slice; walk the chunk list for the capabilities echo. */
-static void
-connect_test_rcv_body (const guint8 *frame, gsize frame_len)
-{
-    if (frame_len < SIZEOF_HL_HDR) {
-        return;
-    }
-    guint16 hc_be;
-    guint32 len_be;
-    memcpy (&hc_be, frame + 20, 2);  /* hl_hdr.hc  @ offset 20 */
-    memcpy (&len_be, frame + 12, 4); /* hl_hdr.len @ offset 12 */
-    guint16 hc = GUINT16_FROM_BE (hc_be);
-    guint32 wire_len = GUINT32_FROM_BE (len_be);
-    gsize body_len = wire_len >= 2 ? (gsize)(wire_len - 2) : 0;
-    gsize off = SIZEOF_HL_HDR;
-    gsize end = SIZEOF_HL_HDR + body_len;
-    if (end > frame_len) {
-        end = frame_len;
-    }
-
-    for (guint16 i = 0; i < hc && off + 4 <= end; i++) {
-        guint16 tag_be, dlen_be;
-        memcpy (&tag_be, frame + off, 2);
-        memcpy (&dlen_be, frame + off + 2, 2);
-        guint16 tag = GUINT16_FROM_BE (tag_be);
-        guint16 dlen = GUINT16_FROM_BE (dlen_be);
-        off += 4;
-        if (off + dlen > end) {
-            break;
-        }
-        if (tag == CONNECT_TEST_TAG_CAPABILITIES) {
-            connect_test_first_rcv_caps_present = TRUE;
-            /* HTLS_DATA_CAPABILITIES is a variable-width big-endian
-             * integer (1..8 bytes on the wire); a server may echo our
-             * advertised bits in as few bytes as fit (e.g. 0x1F in a
-             * single byte). Accumulate all dlen bytes big-endian
-             * rather than assuming a fixed 2-byte width — the old
-             * `dlen >= 2` path left the value at 0 for a 1-byte echo
-             * and made the negotiation assertion spuriously fail. */
-            guint64 caps = 0;
-            for (guint16 b = 0; b < dlen; b++) {
-                caps = (caps << 8) | frame[off + b];
-            }
-            connect_test_first_rcv_caps_value = (guint16)caps;
-        }
-        off += dlen;
-    }
+    connect_test_session_count = 0;
+    connect_test_session_before_rcv = FALSE;
 }
 
 void
@@ -267,22 +181,14 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                    guint32 type, guint32 trans, guint32 flag, guint32 body_len)
 {
     (void)htlc;
+    (void)frame;
+    (void)frame_len;
+    (void)type;
+    (void)trans;
+    (void)flag;
     (void)body_len;
-    gboolean is_first = (connect_test_rcv_count == 0);
-    if (is_first) {
-        connect_test_first_rcv_type = type;
-        connect_test_first_rcv_trans = trans;
-        connect_test_first_rcv_flag = flag;
-    }
-    connect_test_last_rcv_type = type;
-    connect_test_last_rcv_trans = trans;
-    connect_test_last_rcv_flag = flag;
-    connect_test_rcv_count++;
-
-    /* Inspect the first frame (the replayed LOGIN reply) directly for
-     * the capabilities echo. */
-    if (is_first && frame) {
-        connect_test_rcv_body (frame, frame_len);
+    if (connect_test_rcv_count++ == 0) {
+        connect_test_session_before_rcv = connect_test_session_count > 0;
     }
 }
 
@@ -292,14 +198,13 @@ hx_post_login_fetches (struct htlc_conn *htlc)
     (void)htlc;
 }
 
-/* What the session handles itself goes to hxhandlers, which these tests
- * do not link; none of them reads it. */
 void hx_recv_session_event (struct htlc_conn *htlc, const void *ev);
 void
 hx_recv_session_event (struct htlc_conn *htlc, const void *ev)
 {
     (void)htlc;
     (void)ev;
+    connect_test_session_count++;
 }
 
 /* tasks.c stubs — production task_new allocates a struct task,
@@ -416,20 +321,6 @@ void
 hx_change_name_icon (struct htlc_conn *htlc)
 {
     (void)htlc;
-}
-
-/* rcv_task_login is referenced by network.c via the RCV_TASK_FN
- * macro inside task_new()'s argument list — task_new takes the
- * function pointer but doesn't call it (the test's task_new is a
- * no-op anyway). Provide a definition so the symbol resolves. */
-void
-rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                char *pass)
-{
-    (void)htlc;
-    (void)frame;
-    (void)frame_len;
-    (void)pass;
 }
 
 /* Phase 8.D runtime-wire stub. network.c::hx_htlc_close calls

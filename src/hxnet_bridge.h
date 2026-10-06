@@ -95,10 +95,8 @@ extern void hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason);
  *
  * hxnet owns the socket from byte zero (it calls
  * hxnet_connection_open_plaintext), so the C side never has a real
- * fd. The
- * orchestrator replays the LOGIN reply back as a synthetic frame
- * (Option B in docs/rust/networking.md) so the C-side rcv
- * dispatch (rcv_task_login) runs unchanged.
+ * fd. What the login's reply said reaches hxhandlers as the session's
+ * event.
  *
  * The bridge's own event / shutdown / state callbacks are wired
  * in; state transitions are mapped onto GtkhxConnectionState and
@@ -108,9 +106,7 @@ extern void hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason);
  *
  * `host` is a NUL-terminated server name / IP; `login` / `pass` /
  * `name` are NUL-terminated (NULL treated as empty). `trans` is the
- * transaction id the orchestrator stamps on the LOGIN frame — the
- * caller pins it and registers a matching login task so the
- * replayed reply dispatches correctly.
+ * transaction id the orchestrator stamps on the LOGIN frame.
  *
  * Returns TRUE on a successful spawn (the handle is now the live
  * bridge), FALSE on failure (open_plaintext logged its own
@@ -136,16 +132,11 @@ extern gboolean hx_bridge_install_orchestrated_hope (
     const char *pass, const char *name, guint16 icon, guint16 version,
     guint16 caps, const char *cipher_alg, const char *compress_alg);
 
-/* The trans the login reply carries, which the login task is keyed on:
- * HOPE's step 2 under HOPE. 0 with no transport installed. */
-extern guint32 hx_bridge_login_trans (const struct htlc_conn *htlc);
-
 /*
  * TLS sibling of hx_bridge_install_orchestrated_plaintext: plaintext
  * Hotline over TLS-from-byte-zero (Mobius / Janus separate-port
  * model). hxnet does the TLS handshake then the plaintext lifecycle
- * over the encrypted stream. The replayed reply is the LOGIN reply
- * (trans = `trans`), same as the non-TLS plaintext path.
+ * over the encrypted stream, the login as on the plaintext path.
  *
  * Cert trust is WebPKI-first: rustls validates the server cert against
  * the native trust roots, and a CA-valid cert is accepted silently.
@@ -168,17 +159,6 @@ extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
  * connection was the same question and at two would not be.
  */
 extern gboolean hx_bridge_is_installed (const struct htlc_conn *htlc);
-
-/*
- * Opaque HOPE AEAD material handle for the installed orchestrated
- * connection `htlc`, or NULL (no transport installed on it, or no
- * ChaCha20-Poly1305 negotiated). Caller owns it and frees with hxnet_hope_aead_free.
- * HxnetHopeAead is declared in htxf_io.h. See the definition in
- * hxnet_bridge.c for the lifecycle contract (call after login).
- */
-struct HxnetHopeAead;
-extern struct HxnetHopeAead *
-hx_bridge_orchestrated_hope_aead (const struct htlc_conn *htlc);
 
 /*
  * Ask GProxyResolver whether (host, port) is reached through a SOCKS

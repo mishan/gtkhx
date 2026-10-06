@@ -408,9 +408,8 @@ mod tests {
         let mut seen: Vec<ConnectionState> = Vec::new();
         let mut saw_handshake_done = false;
         let mut saw_shutdown = false;
-        // Phase G: the LOGIN reply is replayed as Event::Frame before
-        // HandshakeDone. Capture it + its ordering relative to the
-        // HandshakeDone state event.
+        // The LOGIN reply, whole (the session handles no domain), and
+        // whether it came before HandshakeDone.
         let mut login_frame_type: Option<u32> = None;
         let mut login_frame_flag: Option<u32> = None;
         let mut saw_login_frame_before_handshake = false;
@@ -437,6 +436,7 @@ mod tests {
                     saw_shutdown = true;
                     break;
                 }
+                Event::Session(hxsession::Event::LoggedIn(_)) => {}
                 Event::Session(e) => panic!("{e:?}"),
             }
         }
@@ -461,10 +461,9 @@ mod tests {
         assert!(saw_handshake_done, "expected HandshakeDone, saw {seen:?}");
         assert!(saw_shutdown, "expected actor Shutdown after server drop");
 
-        // Phase G replay assertions: the LOGIN reply came back as an
-        // Event::Frame, it carried the TASK opcode + success flag,
-        // and it arrived before HandshakeDone (so the C side's
-        // rcv_task_login runs before the connection is declared up).
+        // A session handling no domain hands the LOGIN reply over whole
+        // too: as an Event::Frame, with the TASK opcode and success
+        // flag, before HandshakeDone.
         assert!(
             saw_login_frame_before_handshake,
             "expected LOGIN reply replayed as Event::Frame before HandshakeDone"
@@ -675,6 +674,7 @@ mod tests {
                         Event::Frame(f) => frames.push((f.header.type_, f.header.trans)),
                         Event::Shutdown(why) => panic!("{what}: {why:?}"),
                         Event::State(_) => {}
+                        Event::Session(hxsession::Event::LoggedIn(_)) => {}
                         Event::Session(e) => panic!("{what}: {e:?}"),
                     }
                 }

@@ -118,8 +118,7 @@ live connection's events from a dead actor's.
 
 The handle now lives on `htlc_conn` (`hx_conn_bridge_handle` /
 `hx_conn_set_bridge_handle`), and `hx_bridge_send_frame`,
-`hx_bridge_is_installed`, `hx_bridge_uninstall` and
-`hx_bridge_orchestrated_hope_aead` all take the connection they act on. The
+`hx_bridge_is_installed` and `hx_bridge_uninstall` all take the connection they act on. The
 install refusal narrowed to what is still a real error — installing twice over
 the *same* connection, which would orphan the first actor. Two connections can
 now hold transports at once, which is what unblocks everything else here.

@@ -194,12 +194,10 @@ As of this writing the C bodies group into:
   `hx_recv_route` calling the selected body handler with the frame slice),
   `hx_rcv_task` (the transaction correlator), and `task_inerror`, a thin
   wrapper over the Rust header check.
-- **Login and post-login sequencing** — `rcv_task_login`, which walks the
-  LOGIN reply through the Rust parser and then does everything after:
-  seeds the HOPE AEAD handle, applies the parsed fields, emits logged-in,
-  and routes the fetch
-  decision. Plus `hx_post_login_fetches`, its fallback timer, and the
-  reset hook.
+- **Post-login sequencing** — `hx_post_login_fetches`, which
+  `LoginReady` fires. The login's reply itself is the session's
+  `LoggedIn`, which `hxhandlers::recv::login` applies (see
+  `networking.md`, "The LOGIN reply").
 - **Server-initiated handlers still in C** — agreement, banner, the
   unknown-opcode dump, and a one-line icon-change forwarder.
 - **Voice** — the three server-initiated voice handlers and the two voice
@@ -292,12 +290,12 @@ The dispatch → signal → view path has **no headless integration
 coverage**, and can't get any from the integration suite as built. The
 suite's wire round-trips go through the harness's own receive helpers,
 not the production dispatch. The production-connect tests do drive the
-real connect path, but they stub the dispatch entry point — recording the
-replayed frame rather than handling it — because linking the real
-handlers would drag in the GTK widget tree, which a headless test binary
-can't link. That stubbing is *why* those tests validate the
-bridge→dispatch handoff and the LOGIN-reply capability echo but not the
-handlers' signal emission.
+real connect path, but they stub the dispatch entry points — recording
+that a session event and frames arrived rather than handling them —
+because linking the real handlers would drag in the GTK widget tree,
+which a headless test binary can't link. That stubbing is *why* those
+tests validate the bridge→dispatch handoff but not the handlers' signal
+emission; what the login reply says is checked by `hx-e2e`'s `login.rs`.
 
 So per-handler signal coverage comes from extracting each handler into a
 crate, where its parse→emit logic is unit-testable in isolation. That is

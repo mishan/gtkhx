@@ -39,7 +39,7 @@ typedef struct HtxfConn HtxfConn;
 /* Opaque handle to a HOPE control-channel's retained AEAD material
  * (Rust `HxnetHopeAead`). Obtained from
  * hxnet_connection_hope_aead_material (the control connection's retained
- * material, via hx_bridge_orchestrated_hope_aead) and passed to
+ * material, which hxhandlers' recv::login keeps on it) and passed to
  * hxnet_htxf_connect so the subchannel derives its per-transfer keys
  * in-process. The session key never crosses the FFI as bytes — only this
  * opaque token does. Free with hxnet_hope_aead_free. */

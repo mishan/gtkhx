@@ -42,68 +42,6 @@ extern bool gtkhx_proto_header_in_error (const uint8_t *buf, size_t len);
 extern bool gtkhx_proto_header_trans (const uint8_t *buf, size_t len,
                                       uint32_t *out_trans);
 
-/* ---- LOGIN task-reply parser ----
- *
- * Every field of the LOGIN reply is independently optional on the wire (a
- * 1.0/1.2 server sends almost none of them). gtkhx_proto_parse_login walks
- * the chunks, fills *out with whatever scalars were present, writes the
- * sanitised server name into a caller buffer, and returns a bitmask of the
- * fields it saw. Read each *out field only when its HX_LOGIN_SEEN_* bit is
- * set. */
-
-enum {
-    HX_LOGIN_SEEN_UID = 1u << 0,
-    HX_LOGIN_SEEN_VERSION = 1u << 1,
-    HX_LOGIN_SEEN_SERVERNAME = 1u << 2,
-    HX_LOGIN_SEEN_CAPS = 1u << 3,
-    HX_LOGIN_SEEN_MEDIA_MAX_BYTES = 1u << 4,
-    HX_LOGIN_SEEN_MEDIA_MAX_DIMENSION = 1u << 5,
-    HX_LOGIN_SEEN_MEDIA_MAX_PIXELS = 1u << 6,
-    HX_LOGIN_SEEN_MEDIA_CHUNK_SIZE = 1u << 7,
-    HX_LOGIN_SEEN_MEDIA_MAX_FRAMES = 1u << 8,
-    HX_LOGIN_SEEN_MEDIA_MAX_DURATION_MS = 1u << 9,
-    HX_LOGIN_SEEN_HISTORY_MAX_MSGS = 1u << 10,
-    HX_LOGIN_SEEN_HISTORY_MAX_DAYS = 1u << 11,
-    HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS = 1u << 12,
-    HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS = 1u << 13,
-};
-
-/* One kind's DATA_VIDEO_LIMITS (mirror of LoginVideoLimits). */
-struct gtkhx_proto_login_video_limits {
-    uint16_t max_width;
-    uint16_t max_height;
-    uint16_t max_fps;
-    uint16_t max_per_room;
-    uint32_t max_bitrate;
-};
-
-struct gtkhx_proto_login {
-    uint64_t caps; /* decoded capabilities bitmap */
-    uint32_t media_max_bytes;
-    uint32_t media_max_dimension;
-    uint32_t media_max_pixels;
-    uint32_t media_chunk_size;
-    uint32_t media_max_frames;
-    uint32_t media_max_duration_ms;
-    uint32_t history_max_msgs;
-    uint32_t history_max_days;
-    uint16_t uid;
-    uint16_t version;
-    /* Camera then screen; each valid when its
-     * HX_LOGIN_SEEN_VIDEO_*_LIMITS bit is set. */
-    struct gtkhx_proto_login_video_limits video_limits[2];
-};
-
-/* Parse the LOGIN task reply. Fills *out and writes the CR2LF'd +
- * strip_ansi'd server name into servername (capacity servername_cap,
- * NUL-terminated, capped at servername_cap-1). Returns the HX_LOGIN_SEEN_*
- * bitmask; each *out field is valid only when its bit is set. Returns 0 on
- * NULL out. A NULL / zero-capacity servername is tolerated (name skipped). */
-extern uint32_t gtkhx_proto_parse_login (const uint8_t *msg, size_t msglen,
-                                         uint8_t *servername,
-                                         size_t servername_cap,
-                                         struct gtkhx_proto_login *out);
-
 /* ---- Chat-history extension (HTLS_DATA_HISTORY_ENTRY) ---- */
 
 struct gtkhx_proto_history_entry {

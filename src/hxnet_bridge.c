@@ -27,10 +27,9 @@
 #include "proto_helpers.h"
 #include "hotline_proto.h" /* gtkhx_proto_pack_header (wire header encode) */
 #include "gtkhx_session.h" /* GtkhxConnectionState + emit (Phase G state cb) */
-#include "network.h" /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
-#include "rcv.h"     /* hx_post_login_fetches (LOGIN_READY) */
-#include "hxnet_htxf.h" /* HxnetHopeAead (orchestrated HOPE AEAD material) */
-#include "host_port.h"  /* gtkhx_join_host_port (proxy lookup URI) */
+#include "network.h"       /* hx_tls_orchestrator_verify_cert */
+#include "rcv.h"           /* hx_post_login_fetches (LOGIN_READY) */
+#include "host_port.h"     /* gtkhx_join_host_port (proxy lookup URI) */
 
 /* The production receive dispatch (rcv.c). We hand it the assembled frame
  * as an explicit (frame, frame_len) slice plus the parsed header fields; it
@@ -300,9 +299,9 @@ extern int hxnet_connection_agree (hxnet_connection_opaque *handle,
                                    guint16 icon);
 extern void hxnet_frame_free (hxnet_frame_t *f);
 
-/* Phase G: hxnet drives the whole plaintext lifecycle (DNS + TCP +
- * magic + LOGIN + LOGIN-reply) and replays the reply as a synthetic
- * frame. Mirror of hxnet_connection_open_plaintext in
+/* hxnet drives the whole plaintext lifecycle (DNS + TCP + magic + LOGIN +
+ * LOGIN-reply) and hands on what the reply said as the session's event.
+ * Mirror of hxnet_connection_open_plaintext in
  * rust/crates/hxnet/src/ffi.rs. */
 extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
@@ -323,7 +322,6 @@ extern hxnet_connection_opaque *hxnet_connection_open_hope (
     gsize proxy_uri_len, hxnet_event_cb_t on_event,
     hxnet_shutdown_cb_t on_shutdown, hxnet_state_cb_t on_state,
     hxnet_session_cb_t on_session, void *user_data);
-extern guint32 hxnet_connection_login_trans (hxnet_connection_opaque *conn);
 
 /* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
  * Janus separate-port model). Mirror of
@@ -338,16 +336,8 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     hxnet_state_cb_t on_state, hxnet_session_cb_t on_session,
     hxnet_verify_cert_cb_t verify_cert, void *user_data);
 
-/* Retained HOPE AEAD material getter (rust/crates/hxnet/src/ffi.rs):
- * returns an opaque HxnetHopeAead handle for a HOPE-ChaCha20 control
- * connection, or NULL otherwise. HxnetHopeAead is declared in
- * htxf_io.h (included above). */
-extern HxnetHopeAead *
-hxnet_connection_hope_aead_material (hxnet_connection_opaque *conn);
-
 /* hx_tls_orchestrator_verify_cert (production TOFU verify, defined in
- * network.c) and hx_orchestrator_register_login_task are both declared
- * in network.h, included above. */
+ * network.c) is declared in network.h, included above. */
 
 /*
  * There is no module-level connection state in this file.
@@ -573,18 +563,10 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
                                              GTKHX_CONNECTION_TCP_CONNECTED);
         break;
     case HXNET_BRIDGE_STATE_LOGIN_SENDING:
-        /* Magic done, credentials about to go out — the orchestrator's
-         * equivalent of the legacy path's send_login moment. Drive the
-         * same two UI effects, in the same order, so the Tasks window
-         * looks identical to legacy: emit HANDSHAKE_DONE (which deletes
-         * the coarse "Connecting" task), then register the "login"
-         * protocol task. The login task must exist before the replayed
-         * LOGIN/step-2 reply frame arrives to dispatch to it; that
-         * frame is emitted strictly after this state on the same
-         * ordered event channel, so registering here is in time. */
+        /* Magic done, credentials about to go out: HANDSHAKE_DONE deletes
+         * the coarse "Connecting" task. */
         gtkhx_session_emit_connection_state (sess, htlc,
                                              GTKHX_CONNECTION_HANDSHAKE_DONE);
-        hx_orchestrator_register_login_task (htlc);
         break;
     case HXNET_BRIDGE_STATE_LOGIN_READY:
         hx_post_login_fetches (htlc);
@@ -721,8 +703,8 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
     /* open_plaintext spawns the lifecycle task and wires the
      * forwarder synchronously; events don't fire until we return to
      * the GLib main loop. Storing the handle on the connection before
-     * that return is what makes the orchestrator's replayed LOGIN-reply
-     * frame pass hx_bridge_dispatch_frame's installed gate.
+     * that return is what makes the login's event pass
+     * bridge_on_session_cb's installed gate.
      * user_data is the connection's serial for all three callbacks — see
      * conn_from_user_data for why it is not the connection itself. */
     /* open_plaintext parses proxy_uri synchronously (before spawning the
@@ -773,7 +755,7 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
 
     /* Same synchronous-install-before-return discipline as the
      * plaintext variant: the bridge handle must be live before the
-     * forwarder can deliver the replayed step-2 reply. */
+     * forwarder can deliver the login's event. */
     g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_hope (
         (const guint8 *)host, strlen (host), port, (const guint8 *)login,
@@ -789,31 +771,6 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
     }
     set_conn_handle (htlc, h);
     return TRUE;
-}
-
-/* Return an opaque HOPE AEAD material handle for the currently installed
- * connection, or NULL when it has no transport installed or the control
- * channel did not negotiate ChaCha20-Poly1305 (plaintext / Blowfish /
- * no-cipher leave the retained slot empty). The caller owns the handle
- * and must free it with hxnet_hope_aead_free. Called at login completion
- * (rcv_task_login) to seed htlc->hope_aead so HTXF subchannels can derive
- * their per-transfer keys in-process — by which point the handshake is
- * done and the material slot is populated. */
-HxnetHopeAead *
-hx_bridge_orchestrated_hope_aead (const struct htlc_conn *htlc)
-{
-    hxnet_connection_opaque *h = conn_handle (htlc);
-    if (!h) {
-        return NULL;
-    }
-    return hxnet_connection_hope_aead_material (h);
-}
-
-guint32
-hx_bridge_login_trans (const struct htlc_conn *htlc)
-{
-    hxnet_connection_opaque *h = conn_handle (htlc);
-    return h ? hxnet_connection_login_trans (h) : 0;
 }
 
 /* TLS TOFU trampoline: hxnet calls this on the lifecycle task with the

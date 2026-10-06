@@ -6,7 +6,7 @@
 
 use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
-use hxproto::inline_media::{extract_limits_from_message, LimitsAdvertisement, MediaErrorCode};
+use hxproto::inline_media::{LimitsAdvertisement, MediaErrorCode};
 use hxproto::messages::tag;
 use hxrequest::{media, Request};
 use hxsession::{ChatMedia, Expect, Handled};
@@ -38,8 +38,7 @@ fn member(server: &'static Server, who: &str) -> Client {
 }
 
 fn limits(c: &Client) -> LimitsAdvertisement {
-    let r = c.login_reply();
-    extract_limits_from_message(&r.raw, r.raw.len())
+    c.server_info().media
 }
 
 /// The size production sends a picture's parts in.

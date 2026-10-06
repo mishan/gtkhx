@@ -224,8 +224,7 @@ extern gboolean integration_login_guest (int fd, struct htlc_conn *htlc,
  * login reply via HTLS_DATA_CAPABILITIES;
  * integration_drain_until_selfinfo_or_error stashes that echo
  * into htlc->caps so the caller can gate behaviour on the
- * negotiated bits the same way production gtkhx does in
- * src/rcv.c::rcv_task_login.
+ * negotiated bits the same way production gtkhx does.
  *
  * Cap-unaware servers (mhxd) silently ignore the chunk per spec.
  */

@@ -34,3 +34,5 @@ hxtext = { path = "../hxtext", default-features = false }
 glib = { workspace = true }
 # Pictures to send as inline media.
 png = "0.18.1"
+# The ciphers a HOPE login offers.
+hxhope = { workspace = true }

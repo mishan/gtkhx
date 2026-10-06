@@ -78,7 +78,6 @@ void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
 void hx_htlc_close (struct htlc_conn *htlc, int expected);
 void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
 void debug_log (const char *cat, const char *fmt, ...);
-void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 void hx_post_login_fetches (struct htlc_conn *htlc);
 
 /* Recording, not fatal: the stale-actor guard tests below are precisely
@@ -114,16 +113,6 @@ hx_recv_session_event (struct htlc_conn *htlc, const void *ev)
     (void)ev;
     session_event_calls++;
     last_session_event_htlc = htlc;
-}
-
-/* Stub: bridge_on_state_cb calls this on LOGIN_SENDING, but these
- * unit tests drive the header-pack / dispatch paths directly and
- * never feed a LOGIN_SENDING state, so it should never fire. */
-void
-hx_orchestrator_register_login_task (struct htlc_conn *htlc)
-{
-    (void)htlc;
-    g_assert_not_reached ();
 }
 
 /* Stub: fired on LOGIN_READY, which these tests never feed either. */
@@ -256,31 +245,6 @@ hxnet_frame_free (struct hxnet_frame_t *f)
      * the drop path — a stub that only counted would make those assertions
      * pass while leaking every frame they allocate. */
     g_free (f);
-}
-
-/* Phase G HTXF-AEAD: hx_bridge_orchestrated_hope_aead() calls the Rust
- * material getter to seed htlc->hope_aead. Tier 1 never installs a
- * connection, so a g_assert_not_reached stub satisfies the link without
- * dragging in the staticlib. */
-struct HxnetHopeAead;
-struct HxnetHopeAead *
-hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn);
-struct HxnetHopeAead *
-hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn)
-{
-    (void)conn;
-    g_assert_not_reached ();
-    return NULL;
-}
-
-/* hx_bridge_login_trans asks the session; Tier 1 never installs one. */
-guint32 hxnet_connection_login_trans (struct hxnet_connection_opaque *conn);
-guint32
-hxnet_connection_login_trans (struct hxnet_connection_opaque *conn)
-{
-    (void)conn;
-    g_assert_not_reached ();
-    return 0;
 }
 
 /* Phase G adds hx_bridge_install_orchestrated_plaintext, which

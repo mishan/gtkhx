@@ -1678,17 +1678,28 @@ on_msg_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
     gtkhx_notify_msg (htlc, event);
 }
 
-/* "logged-in" — the LOGIN task reply came back successful and the reply
- * has been fully walked (so hx_conn_version (htlc), server_addr, and caps are all
- * settled). Settle the connected-state UI in one shot: window titles
- * (server_addr-dependent), toolbar buttons (news15 gate is version >=
- * 150), and the status bar. The LOGIN chime rides the same signal in
- * sound_events.c. This used to be an inline changetitlesconnected +
- * setbtns + set_status_bar (twice) in rcv_task_login. */
+/* "logged-in" — the server accepted the login, and its version, caps and
+ * name are settled. Say so, then settle the connected-state UI in one shot:
+ * window titles (named for the server), toolbar buttons (news15 gate is
+ * version >= 150), and the status bar. The LOGIN chime rides the same
+ * signal in sound_events.c. */
 static void
 on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
-                     gpointer user_data)
+                     gpointer name, gpointer user_data)
 {
+    const struct {
+        guint64 cap;
+        const char *what;
+    } confirmed[] = {
+        { HTLC_CAP_LARGE_FILES,
+          _ ("server confirmed large-file (64-bit) mode for this session\n") },
+        { HTLC_CAP_TEXT_ENCODING,
+          _ ("server confirmed UTF-8 text encoding for this session\n") },
+        { HTLC_CAP_CHAT_HISTORY,
+          _ ("server confirmed chat-history extension for this session\n") },
+        { HTLC_CAP_INLINE_MEDIA,
+          _ ("server confirmed inline-media extension for this session\n") },
+    };
     /* Route by the connection that logged in, not by the one the user is
      * looking at. Identical while there is one connection; at two, the
      * active session is simply the wrong answer — a background server
@@ -1698,6 +1709,18 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)user_data;
     if (!sess) {
         return;
+    }
+    hx_printf_prefix (htlc, 0, INFOPREFIX, "%s:%u: %s %s\n",
+                      hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
+                      hx_conn_serverport (htlc), _ ("login"), _ ("successful"));
+    for (gsize i = 0; i < G_N_ELEMENTS (confirmed); i++) {
+        if (hx_conn_has_cap (htlc, confirmed[i].cap)) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX, "%s", confirmed[i].what);
+        }
+    }
+    if (name) {
+        g_free (sess->server_name);
+        sess->server_name = g_strdup (name);
     }
     changetitlesconnected (sess);
     /* Retitle the tab now that the server has said what it is called.

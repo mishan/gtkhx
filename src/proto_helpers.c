@@ -175,8 +175,7 @@ hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
      * builds — g_assert compiles out under G_DISABLE_ASSERT, which
      * downstream packagers can set without the project realising it,
      * and silently producing uninitialised wire bytes is precisely the
-     * failure mode the Copilot review flagged. Same convention as
-     * the LOGIN handshake check in rcv.c::rcv_task_login. g_error logs
+     * failure mode the Copilot review flagged. g_error logs
      * the failure (under G_LOG_LEVEL_ERROR which is always fatal) and
      * aborts; it is unaffected by G_DISABLE_ASSERT. */
     if (buf == NULL) {
@@ -190,16 +189,6 @@ hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
                  "programmer error",
                  (size_t)SIZEOF_HTXF_HDR, (unsigned)SIZEOF_HTXF_HDR);
     }
-}
-
-guint64
-hl_capabilities_decode (const guint8 *bytes, guint16 len)
-{
-    /* delegate to the Rust hxproto crate. The decode
-     * rule (1..8 bytes big-endian, MSB-first, truncate beyond 8, empty
-     * is 0) is identical; this wrapper just bridges the GLib u16-len
-     * signature to the FFI's size_t. */
-    return gtkhx_proto_capabilities_decode (bytes, len);
 }
 
 gboolean

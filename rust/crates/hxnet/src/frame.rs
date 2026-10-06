@@ -61,16 +61,9 @@ impl Frame {
     /// chunk data. Returns `None` if the header doesn't decode or
     /// the buffer is shorter than `HL_HDR_LEN + body_len`.
     ///
-    /// This is the Phase G login-reply replay path
-    /// (`docs/rust/networking.md`, "Option B"). The orchestrator
-    /// reads + parses the LOGIN reply once to decide
-    /// success/failure, then re-emits the verbatim wire bytes as an
-    /// `Event::Frame` so the C-side `rcv.c` dispatch (`rcv_task_login`)
-    /// runs unchanged and produces the post-login side effects. The
-    /// slicing here is deliberately identical to the actor's
-    /// frame reader (`HL_HDR_LEN` header + `body_len` body), so a
-    /// replayed frame and an actor-read frame are byte-for-byte the
-    /// same shape by the time they reach the FFI.
+    /// The session hands transactions over whole as bytes; this cuts
+    /// them as the actor's frame reader did (`HL_HDR_LEN` header +
+    /// `body_len` body).
     pub fn from_raw(raw: &[u8]) -> Option<Frame> {
         // Decode WITHOUT clamping (u32::MAX) so body_len reflects the
         // real on-wire length, then reject oversized frames by the raw
