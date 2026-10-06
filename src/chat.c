@@ -39,10 +39,7 @@
 #include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "chat_history.h"
 #include "inline_media_attach.h"
-#include "inline_media_decode.h"
 #include "inline_media_dialog.h"
-#include "inline_media_download.h"
-#include "inline_media.h"
 #include "gtkutil.h"
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "chat_members.h"
@@ -230,8 +227,6 @@ GdkRGBA colors[] = {
 G_STATIC_ASSERT (G_N_ELEMENTS (colors) == ROTULUS_PAL_COLS);
 G_STATIC_ASSERT (HX_CHAT_LOG_INFO_COLOR == HX_CHAT_INFO_COLOR);
 G_STATIC_ASSERT (ROTULUS_PAL_NICK_COLORS == GTKHX_NICK_COLORS_MAX);
-/* The decoder's frames are handed to the view as its own frame type. */
-G_STATIC_ASSERT (sizeof (HxInlineMediaFrame) == sizeof (RotulusFrame));
 
 /* Whether the active theme has any nick_colors. The slot a nick hashes to
  * never depends on how many (see hx_chat_nick_color), only on this. */
@@ -839,154 +834,6 @@ xprintline_render_tagged (RotulusView *text, const char *tag, gsize tag_len,
                                               .n_body = 1 });
 }
 
-/* Phase 9.E (inline media): auto-fetch a media handle on arrival
- * and swap the styled placeholder row to a true inline-rendered
- * texture once decoding finishes. The ctx is the smallest thing
- * that can survive an entry being auto-trimmed mid-fetch — we
- * carry the chat cid + the per-chat token, then look the entry
- * up at callback time. Stale entry lookups are a quiet no-op:
- * the placeholder stays, the user can still click to view in
- * the dialog. */
-struct hx_media_autofetch_ctx {
-    guint32 cid;
-    guint token;
-    /* Glycin migration G.2: the async decode token returned by
-     * inline_media_decode_async. NULL until the download
-     * succeeds; the decode-done callback cancels (== frees)
-     * it. Worth noting: a download success → decode kick-off
-     * lands the ctx in the decoder's hands; cancellation from
-     * a closed window goes through the decoder's cancel rather
-     * than touching ctx directly. */
-    gpointer decode_token;
-};
-
-/* Forward decl so on_inline_media_autofetch_done can reference
- * the decode-done callback before its definition further down. */
-static void on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
-                                               gpointer user_data);
-
-static void
-on_inline_media_autofetch_done (struct htlc_conn *htlc,
-                                const HxInlineMediaDownloadResult *result,
-                                gpointer user_data)
-{
-    struct hx_media_autofetch_ctx *ctx = user_data;
-    (void)htlc;
-
-    if (!ctx) {
-        return;
-    }
-    if (!result || !result->bytes) {
-        /* Download failed — leave the styled placeholder up.
-         * Click-to-view in the dialog will surface the same
-         * spec error message via the Phase 9.D path. */
-        debug_log ("media",
-                   "inline-media auto-fetch failed cid=%u token=%u code=%u",
-                   ctx->cid, ctx->token, result ? result->error_code : 0);
-        g_free (ctx);
-        return;
-    }
-
-    /* Glycin migration G.2: kick off the async decode. The
-     * dialog (on_download_done in inline_media_dialog.c) uses
-     * the same {0} caps and relies on the decoder's
-     * fall-through to HX_MEDIA_DEFAULT_*; matching that
-     * keeps the two paths consistent. The ctx is preserved
-     * across the async hop — the decode-done callback frees
-     * it.
-     *
-     * Synchronous-reject path: when the decoder bails before
-     * scheduling async work (empty payload / cap exceeded /
-     * sniff reject) it fires the callback synchronously AND
-     * returns NULL. The callback frees `ctx`, so writing
-     * ctx->decode_token after the call would be a UAF.
-     * Capture into a local first and only thread it into ctx
-     * when the call returned a real token. */
-    HxInlineMediaCaps caps = { 0 };
-    gpointer token = inline_media_decode_async (
-        result->bytes->data, result->bytes->len, &caps,
-        on_inline_media_autofetch_decoded, ctx);
-    if (token) {
-        ctx->decode_token = token;
-    }
-    /* The download result + ctx ownership cross to the decode
-     * callback. Do NOT free `ctx` here. */
-}
-
-/* Glycin decode callback for the auto-fetch path (G.2). The
- * download already succeeded; this fires after the glycin
- * sandboxed loader either resolves a texture or returns an
- * error. The ctx is the same one the download callback
- * forwarded; we own it here and must free. */
-static void
-on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
-                                   gpointer user_data)
-{
-    struct hx_media_autofetch_ctx *ctx = user_data;
-    if (!ctx) {
-        return;
-    }
-    /* Release the cancel token if we still hold one — needed
-     * even on the success path because cancel-after-completion
-     * is also the canonical free function. */
-    if (ctx->decode_token) {
-        inline_media_decode_cancel (ctx->decode_token);
-        ctx->decode_token = NULL;
-    }
-
-    if (!decoded->texture) {
-        debug_log ("media",
-                   "inline-media auto-fetch decode rejected (cid=%u "
-                   "token=%u): %s",
-                   ctx->cid, ctx->token,
-                   decoded->error_message ? decoded->error_message : "unknown");
-        inline_media_decoded_free (decoded);
-        g_free (ctx);
-        return;
-    }
-
-    /* gchat may have been freed (disconnect / chat-close) and
-     * a fresh one with the same cid may even exist — in which
-     * case rotulus_view_media_mark returns NULL (the token
-     * lives in the gchat's media table, which was rebuilt
-     * fresh). The texture quietly drops. */
-    struct gtkhx_chat *gchat = gchat_with_cid (hx_active_session (), ctx->cid);
-    if (gchat && gchat->output) {
-        RotulusMark *mark = rotulus_view_media_mark (
-            ROTULUS_VIEW (gchat->output), ctx->token);
-        if (mark) {
-            if (decoded->frames && decoded->frames->len > 1) {
-                /* Animation (G.3). Install the frames on the
-                 * row; the view drives the per-frame tick from
-                 * each frame's delay_ms. */
-                debug_log ("media",
-                           "inline-media auto-fetch swap-in animation cid=%u "
-                           "token=%u %dx%d frames=%u",
-                           ctx->cid, ctx->token,
-                           gdk_texture_get_width (decoded->texture),
-                           gdk_texture_get_height (decoded->texture),
-                           decoded->frames->len);
-                rotulus_view_media_set_frames (
-                    ROTULUS_VIEW (gchat->output), mark,
-                    (const RotulusFrame *)decoded->frames->data,
-                    decoded->frames->len);
-            } else {
-                debug_log ("media",
-                           "inline-media auto-fetch swap-in cid=%u token=%u "
-                           "%dx%d",
-                           ctx->cid, ctx->token,
-                           gdk_texture_get_width (decoded->texture),
-                           gdk_texture_get_height (decoded->texture));
-                rotulus_view_media_set_texture (ROTULUS_VIEW (gchat->output),
-                                                mark, decoded->texture);
-            }
-        }
-    }
-
-    inline_media_decoded_free (decoded);
-    g_free (ctx);
-}
-
 /* Render an HxChatEvent (pre-parsed chat message) into a chat
  * window's xtext buffer. Bypasses the legacy hx_printf →
  * chat-log-line → xoutput_chat round-trip — the rcv.c emitter
@@ -1001,7 +848,6 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     const char *body;
     gsize first_body_len;
     gchar *joined;
-    (void)htlc;
 
     if (!e) {
         return;
@@ -1072,60 +918,11 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     g_free (joined);
     joined = NULL;
 
-    /* Phase 9.D + 9.E — inline-media row. When the chat carried
-     * companion CHAT_MEDIA_ID + CHAT_MEDIA_TYPE fields (rcv.c
-     * attached them to the event), allocate a per-chat token,
-     * deep-copy the metadata into the gchat's media table, and emit
-     * a media-typed row. The row's alt-text is the same NBSP-
-     * placeholder Phase 9.D shipped; a click on the row reports
-     * the token (media-activated), and inline_media_chat_activated
-     * pops the dialog.
-     *
-     * Phase 9.E layers auto-fetch on top: when the server
-     * advertises HTLC_CAP_INLINE_MEDIA, kick off
-     * inline_media_download_start immediately so the texture
-     * arrives without the user clicking. On decode success the
-     * callback finds the entry via its token and swaps the
-     * placeholder for the rendered image in place. On failure
-     * the placeholder stays — click-to-view in the dialog
-     * surfaces the same error message.
-     *
-     * mIRC colour 14 ("dark grey") still styles the placeholder
-     * (visible until the texture lands) so it reads as a
-     * subdued caption rather than chat text. */
+    /* The picture the line carries, registered in the conversation's
+     * media table so a click on the row opens it in the dialog. */
     if (e->media) {
-        guint token
-            = hx_media_table_register (hx_chat_media_table (conv), e->media);
-        char *placeholder = hx_chat_media_placeholder_line (e->media);
-        if (placeholder) {
-            rotulus_view_append_media (ROTULUS_VIEW (gchat->output),
-                                       NULL /* texture */, placeholder, token,
-                                       0 /* stamp */);
-            g_free (placeholder);
-
-            /* Auto-fetch. Cap-gated: on a server that didn't
-             * negotiate the extension the placeholder never
-             * gets bytes back (the upload-half of the
-             * conversation isn't possible there either, so a
-             * cap-less server emitting a media-bearing
-             * relay row is itself a contract violation —
-             * but defend just in case). The event owns its own
-             * copy of the id, valid for the synchronous send
-             * call. */
-            if (inline_media_cap_ok (htlc) && e->media->id_len > 0
-                && e->media->id_len <= 65535) {
-                struct hx_media_autofetch_ctx *ctx
-                    = g_new0 (struct hx_media_autofetch_ctx, 1);
-                ctx->cid = gchat->cid;
-                ctx->token = token;
-                hx_inline_media_download *dl = inline_media_download_start (
-                    htlc, e->media->id, e->media->id_len,
-                    on_inline_media_autofetch_done, ctx);
-                if (!dl) {
-                    g_free (ctx);
-                }
-            }
-        }
+        hx_inline_media_row_append (gchat->output, hx_chat_media_table (conv),
+                                    e->media, htlc);
     }
 
     /* incoming pchat lines mark the tab + Chat

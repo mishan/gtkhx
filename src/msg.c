@@ -683,8 +683,17 @@ msg_output_from_event (struct htlc_conn *htlc, HxMsgEvent *event)
      * into the conversation you have open with server A's user of the same
      * id, rendered with A's identity. That is the one place in this file
      * where the connection is load-bearing rather than tidy. */
-    msg_output_render (sess_from_htlc (htlc), event->name, event->uid,
-                       event->body, event->is_self, FALSE);
+    session *sess = sess_from_htlc (htlc);
+    /* A bare "[image]" is the caption an attachment sends without one; the
+     * picture below says it better, as in chat. */
+    gboolean bare = event->media && g_strcmp0 (event->body, "[image]") == 0;
+    msg_output_render (sess, event->name, event->uid, bare ? "" : event->body,
+                       event->is_self, FALSE);
+    if (event->media) {
+        struct msgwin *msg = msgwin_with_uid (sess, event->uid);
+        hx_inline_media_row_append (msg ? msg->outputbuf : NULL, NULL,
+                                    event->media, htlc);
+    }
 }
 
 /* short broadcasts go through toolbar_show_toast, long ones

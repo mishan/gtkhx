@@ -10,6 +10,7 @@ use hxsession::Expect;
 pub mod chat;
 pub mod chat_history;
 pub mod files;
+pub mod icon;
 pub mod msg;
 pub mod news;
 pub mod user;

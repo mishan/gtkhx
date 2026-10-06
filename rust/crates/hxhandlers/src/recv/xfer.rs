@@ -1,8 +1,8 @@
 //! File-transfer receive handlers (ported from `rcv.c`).
 //!
 //! What the session reads of a download's or upload's reply, of Get Info's,
-//! and of the server moving a queued transfer up (`recv::files` matches each
-//! reply to what asked), and the banner's reply, still a task. Each applies
+//! of the server moving a queued transfer up, and of the banner's request
+//! (`recv::files` matches each reply to what asked). Each applies
 //! the dispatch gates and the stamping/error/upload-size *logic* in Rust,
 //! and reaches the still-C-owned
 //! transfer state only through the narrow `hx_htxf_*` accessor seam
@@ -150,26 +150,6 @@ pub unsafe extern "C" fn hx_xfer_announce(htlc: *mut c_void, htxf: *mut c_void, 
 }
 
 // ---- receive handlers --------------------------------------------------------
-
-/// True when the reply frame's task-error bit is set — the native equivalent of
-/// the C `task_inerror()` (`hxproto` header parse + `flag & 1`). A frame
-/// too short to hold a header is treated as not-in-error, matching the C shim.
-unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
-    if frame.is_null() {
-        return false;
-    }
-    let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
-    hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
-}
-
-/// Borrow the reply frame as a byte slice (empty on a NULL frame).
-unsafe fn frame_slice<'a>(frame: *const c_void, frame_len: usize) -> &'a [u8] {
-    if frame.is_null() {
-        &[]
-    } else {
-        std::slice::from_raw_parts(frame as *const u8, frame_len)
-    }
-}
 
 /// Stamp the HTXF subchannel target onto `htxf`: the worker hands (host, port+1)
 /// straight to the connect without re-resolving. Also stamps the transfer start
@@ -325,29 +305,14 @@ pub(crate) unsafe fn queued(htlc: *mut c_void, reference: u32, queue: u32) {
     hx_xfer_announce(htlc, htxf.cast(), queue);
 }
 
-/// `void rcv_task_banner_get (htlc, frame, frame_len, ptr, data)` — HTLS reply
-/// to HTLC_HDR_DOWNLOAD_BANNER (was `rcv.c`). Parses the (ref, size) scalars
-/// natively and hands them to `banner_handle_htxf_reply`, which spins up the HTXF
-/// subchannel worker. A task error is dropped silently (the proto trace still
-/// shows the frame).
+/// The banner's reply: the transfer that fetches it. A size past what 32
+/// bits say is too large for a banner, and is refused as one.
 ///
 /// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `ptr` / `data` are unused (NULL at register time).
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_banner_get(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    _ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    if task_in_error(frame, frame_len) {
-        return;
-    }
-    let s = frame_slice(frame, frame_len);
-    let r = hxproto::parse::parse_banner_get_reply(s, s.len());
-    banner_handle_htxf_reply(htlc, r.ref_, r.size);
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn banner(htlc: *mut c_void, t: &Transfer) {
+    let size = u32::try_from(t.size).unwrap_or(u32::MAX);
+    banner_handle_htxf_reply(htlc, t.reference, size);
 }
 
 /// Get Info's reply: open the dialog for the file `label` names (its folder

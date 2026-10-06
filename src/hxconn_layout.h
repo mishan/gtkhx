@@ -188,11 +188,6 @@ struct htlc_conn {
      * g_timeout source id (0 when inactive). */
     int gif_icons_state;
     guint gif_icons_probe_timer;
-    /* trans id of the post-login ICON_GETLIST probe, so the watchdog
-     * can dismiss its Tasks-window row if no reply ever arrives (a
-     * legacy server silently drops the unknown opcode, so the task
-     * would otherwise linger forever). */
-    guint32 gif_icons_probe_trans;
     guint16 serial;
     /* Video extension: DATA_VIDEO_LIMITS from the LOGIN reply, camera
      * then screen. Read through hx_conn_video_limits. */

@@ -67,165 +67,101 @@ fn non_gif_payload_coerced_to_cleared() {
     );
 }
 
-// ---- ICON_GET / ICON_GETLIST reply handlers --------------------------------
-
-use hxproto::messages::{tag, ServerHdr};
-use std::os::raw::c_void;
+// ---- the replies ---------------------------------------------------------
 
 const GIF87: &[u8] = b"GIF87a\x00\x00";
+const HTLC: *mut std::os::raw::c_void = 0x10 as *mut _;
 
-/// Build a 22-byte transaction header (`flag & 1` = task-error) followed by the
-/// concatenated TLV chunks — the shape `ChunkIter::over_message` expects.
-fn reply(error: bool, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&(ServerHdr::Task as u32).to_be_bytes()); // type
-    v.extend_from_slice(&1u32.to_be_bytes()); // trans
-    v.extend_from_slice(&(error as u32).to_be_bytes()); // flag
-    v.extend_from_slice(&0u32.to_be_bytes()); // len
-    v.extend_from_slice(&0u32.to_be_bytes()); // len2
-    v.extend_from_slice(&(chunks.len() as u16).to_be_bytes()); // hc
-    for (tag, data) in chunks {
-        v.extend_from_slice(&tag.to_be_bytes());
-        v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-        v.extend_from_slice(data);
+fn icon_of(uid: u16, gif: &[u8]) -> Icon {
+    Icon {
+        uid,
+        gif: gif.to_vec(),
     }
-    v
 }
 
-/// Pack one `ICON_LIST` entry body: u16 uid + u16 gif_len + gif bytes.
-fn list_entry(uid: u16, gif: &[u8]) -> Vec<u8> {
-    let mut v = uid.to_be_bytes().to_vec();
-    v.extend_from_slice(&(gif.len() as u16).to_be_bytes());
-    v.extend_from_slice(gif);
-    v
-}
-
-unsafe fn call_frame(
-    f: unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void),
-    frame: &[u8],
-) {
-    f(
-        std::ptr::null_mut(),
-        frame.as_ptr() as *const c_void,
-        frame.len(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-    );
-}
-
-/// A well-formed ICON_GET reply flips state to SUPPORTED and publishes the avatar.
+/// A user's icon says the server has GIF icons, and is published.
 #[test]
-fn icon_get_flips_supported_and_emits() {
+fn an_icon_marks_the_server_capable_and_is_published() {
     test_env::reset();
-    let frame = reply(
-        false,
-        &[
-            (tag::UID, 7u16.to_be_bytes().to_vec()),
-            (tag::ICON_GIF, GIF87.to_vec()),
-        ],
-    );
-    unsafe { call_frame(rcv_task_icon_get, &frame) };
-    assert_eq!(test_env::STATE.with(|c| c.get()), 1 /* SUPPORTED */);
+    unsafe { icon(HTLC, &icon_of(7, GIF87)) };
+    assert_eq!(test_env::STATE.with(|c| c.get()), GIF_ICONS_SUPPORTED);
     assert_eq!(
         test_env::DATA_EMITTED.with(|c| c.take()),
         Some((7, /*ptr_is_null=*/ false, GIF87.len() as u32))
     );
 }
 
-/// An ICON_GET reply with no UID is dropped — no state change, no emit.
+/// The listing settles the probe: capable, watchdog disarmed, our saved
+/// avatar sent, every listed icon published, an empty one as cleared.
 #[test]
-fn icon_get_missing_uid_drops() {
-    test_env::reset();
-    let frame = reply(false, &[(tag::ICON_GIF, GIF87.to_vec())]);
-    unsafe { call_frame(rcv_task_icon_get, &frame) };
-    assert_eq!(test_env::STATE.with(|c| c.get()), 0 /* untouched */);
-    assert_eq!(test_env::DATA_EMITTED.with(|c| c.take()), None);
-}
-
-/// A task-error ICON_GETLIST is the "unsupported" verdict: state UNSUPPORTED,
-/// watchdog disarmed, no saved-avatar push, no emits.
-#[test]
-fn icon_getlist_error_marks_unsupported() {
-    test_env::reset();
-    test_env::PROBE_TIMER.with(|c| c.set(42));
-    let frame = reply(true, &[]);
-    unsafe { call_frame(rcv_task_icon_getlist, &frame) };
-    assert_eq!(test_env::STATE.with(|c| c.get()), 2 /* UNSUPPORTED */);
-    assert_eq!(test_env::SOURCE_REMOVED.with(|c| c.get()), Some(42));
-    assert_eq!(test_env::PROBE_TIMER.with(|c| c.get()), 0);
-    assert!(!test_env::SEND_SAVED.with(|c| c.get()));
-    assert_eq!(test_env::DATA_COUNT.with(|c| c.get()), 0);
-}
-
-/// A successful ICON_GETLIST flips SUPPORTED, disarms the watchdog, pushes the
-/// saved avatar, and publishes every listed entry.
-#[test]
-fn icon_getlist_success_publishes_entries() {
+fn the_icon_list_settles_the_probe_and_publishes_each_icon() {
     test_env::reset();
     test_env::PROBE_TIMER.with(|c| c.set(99));
-    let frame = reply(
-        false,
-        &[
-            (tag::ICON_LIST, list_entry(1, GIF87)),
-            (tag::ICON_LIST, list_entry(2, GIF87)),
-            (tag::ICON_LIST, list_entry(3, &[])), // cleared avatar
-        ],
-    );
-    unsafe { call_frame(rcv_task_icon_getlist, &frame) };
-    assert_eq!(test_env::STATE.with(|c| c.get()), 1 /* SUPPORTED */);
+    asked(HTLC, 4, Asked::Probe);
+    unsafe {
+        listed(
+            HTLC,
+            4,
+            &[icon_of(1, GIF87), icon_of(2, GIF87), icon_of(3, b"")],
+        )
+    };
+    assert_eq!(test_env::STATE.with(|c| c.get()), GIF_ICONS_SUPPORTED);
     assert_eq!(test_env::SOURCE_REMOVED.with(|c| c.get()), Some(99));
     assert_eq!(test_env::PROBE_TIMER.with(|c| c.get()), 0);
     assert!(test_env::SEND_SAVED.with(|c| c.get()));
     assert_eq!(test_env::DATA_COUNT.with(|c| c.get()), 3);
-}
-
-/// A refused automatic ICON_SET is logged under `icon` with the server's text
-/// — decoded from Mac Roman — and touches nothing else: no state change, no
-/// re-send.
-#[test]
-fn icon_set_auto_refusal_is_logged_quietly() {
-    test_env::reset();
-    test_env::STATE.with(|c| c.set(1 /* SUPPORTED */));
-    let text = b"You are not allowed to set an icon \xd1 guests can't.".to_vec();
-    let frame = reply(true, &[(tag::TASK_ERROR, text)]);
-    unsafe { call_frame(rcv_task_icon_set_auto, &frame) };
-    let lines = test_env::DEBUG_LINES.with(|c| c.take());
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(lines[0].0, "icon");
-    assert!(
-        lines[0]
-            .1
-            .contains("You are not allowed to set an icon \u{2014} guests can't."),
-        "{lines:?}"
-    );
-    assert!(lines[0].1.contains("not re-sending"), "{lines:?}");
     assert_eq!(
-        test_env::STATE.with(|c| c.get()),
-        1,
-        "negotiation untouched"
+        test_env::DATA_EMITTED.with(|c| c.get()),
+        Some((3, /*ptr_is_null=*/ true, 0))
     );
-    assert!(!test_env::SEND_SAVED.with(|c| c.get()));
-    assert_eq!(test_env::DATA_COUNT.with(|c| c.get()), 0);
+    // Answered: a later failure on the trans is no longer the probe's.
+    assert!(!unsafe { failed(HTLC, 4, None) });
 }
 
-/// A refusal with no text still logs a line rather than nothing.
+/// Which refusals the user hears of: not the probe's, which marks the
+/// server as without GIF icons, nor the saved avatar's, which is logged;
+/// anything else, yes. Each only on the connection and trans it went out on.
 #[test]
-fn icon_set_auto_refusal_without_text_still_logs() {
-    test_env::reset();
-    let frame = reply(true, &[]);
-    unsafe { call_frame(rcv_task_icon_set_auto, &frame) };
-    let lines = test_env::DEBUG_LINES.with(|c| c.take());
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].1.contains("refused the saved avatar"), "{lines:?}");
+fn only_the_requests_the_user_made_are_refused_aloud() {
+    for (what, reason, quiet, state, logged) in [
+        (Some(Asked::Probe), Some("Unknown transaction"), true, GIF_ICONS_UNSUPPORTED, None),
+        (
+            Some(Asked::Saved),
+            Some("guests can't \u{2014} sorry"),
+            true,
+            0,
+            Some("server refused the saved avatar: guests can't \u{2014} sorry; not re-sending on this connection"),
+        ),
+        (
+            Some(Asked::Saved),
+            None,
+            true,
+            0,
+            Some("server refused the saved avatar; not re-sending on this connection"),
+        ),
+        (None, Some("Not allowed."), false, 0, None),
+    ] {
+        test_env::reset();
+        test_env::PROBE_TIMER.with(|c| c.set(42));
+        if let Some(what) = what {
+            asked(HTLC, 9, what);
+        }
+        let other = 0x20 as *mut std::os::raw::c_void;
+        assert!(!unsafe { failed(other, 9, reason) }, "{what:?}");
+        assert_eq!(unsafe { failed(HTLC, 9, reason) }, quiet, "{what:?}");
+        assert_eq!(test_env::STATE.with(|c| c.get()), state, "{what:?}");
+        let lines = test_env::DEBUG_LINES.with(|c| c.take());
+        let lines: Vec<_> = lines.iter().map(|(c, l)| (c.as_str(), l.as_str())).collect();
+        assert_eq!(lines, logged.map(|l| ("icon", l)).into_iter().collect::<Vec<_>>());
+        assert!(!test_env::SEND_SAVED.with(|c| c.get()));
+    }
 }
 
-/// An accepted automatic ICON_SET is a bare completion: one debug line.
+/// What a closed connection asked for is let go of.
 #[test]
-fn icon_set_auto_success_logs_acceptance() {
+fn a_forgotten_probe_is_no_longer_quiet() {
     test_env::reset();
-    let frame = reply(false, &[]);
-    unsafe { call_frame(rcv_task_icon_set_auto, &frame) };
-    let lines = test_env::DEBUG_LINES.with(|c| c.take());
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].1.contains("accepted"), "{lines:?}");
+    asked(HTLC, 5, Asked::Probe);
+    forget(HTLC);
+    assert!(!unsafe { failed(HTLC, 5, None) });
 }

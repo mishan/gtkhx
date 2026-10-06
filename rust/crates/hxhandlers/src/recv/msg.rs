@@ -46,7 +46,13 @@ unsafe fn heard(htlc: *mut c_void, uid: u16) -> Option<Option<HxMemberInfo>> {
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn message(htlc: *mut c_void, uid: u16, from: &str, text: &str) {
+pub(crate) unsafe fn message(
+    htlc: *mut c_void,
+    uid: u16,
+    from: &str,
+    text: &str,
+    media: Option<&hxsession::ChatMedia>,
+) {
     let Some(sender) = heard(htlc, uid) else {
         return;
     };
@@ -67,7 +73,7 @@ pub(crate) unsafe fn message(htlc: *mut c_void, uid: u16, from: &str, text: &str
         None => Cow::Borrowed(""),
     };
     let shortcodes = gtkhx_text_emoji_shortcodes_enabled() != 0;
-    let ev = msg_event_new(uid, &from, text, own, shortcodes);
+    let ev = msg_event_new(uid, &from, text, media, own, shortcodes);
     gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, ev.cast());
     hx_msg_event_free(ev);
 }
@@ -125,6 +131,8 @@ pub(crate) mod test_env {
             name: String,
             body: String,
             is_self: bool,
+            /// The id of the picture the message carries.
+            media: Option<Vec<u8>>,
         },
         Broadcast {
             name: Option<String>,
@@ -183,6 +191,10 @@ mod doubles {
                 name: text(e.name),
                 body: text(e.body),
                 is_self: e.is_self != 0,
+                media: e
+                    .media
+                    .as_ref()
+                    .map(|m| std::slice::from_raw_parts(m.id, m.id_len).to_vec()),
             })
         });
     }

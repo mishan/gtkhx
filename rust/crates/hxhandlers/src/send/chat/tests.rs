@@ -26,6 +26,8 @@ struct Sent {
 
 thread_local! {
     static CAP: Cell<bool> = const { Cell::new(false) };
+    /// Whether the server agreed to inline media.
+    static MEDIA: Cell<bool> = const { Cell::new(true) };
     // Chat lookup: None → NULL (unknown); Some(p) → that opaque ptr.
     static LOOKUP: Cell<usize> = const { Cell::new(0) };
     static LAST_SEND: RefCell<Option<Sent>> = const { RefCell::new(None) };
@@ -63,6 +65,11 @@ pub(crate) unsafe extern "C" fn hx_htlc_text_encoding_cap(
     } else {
         glib::ffi::GFALSE
     }
+}
+
+pub(crate) unsafe fn hx_conn_has_cap(_htlc: *const c_void, cap: u64) -> glib::ffi::gboolean {
+    assert_eq!(cap, HTLC_CAP_INLINE_MEDIA);
+    MEDIA.with(|m| m.get()).into()
 }
 
 pub(crate) unsafe extern "C" fn hx_chat_lookup(_htlc: *mut c_void, _cid: u32) -> *mut c_void {
@@ -264,4 +271,40 @@ fn empty_chat_body_still_emits_style_and_body() {
     assert_eq!(s.chunks.len(), 2);
     assert_eq!(s.chunks[1].0, TAG_BODY);
     assert_eq!(s.chunks[1].1.len(), 0);
+}
+
+/// A picture rides the line as its handle and type, after the line's own
+/// fields; only both, and only where the server agreed to inline media.
+#[test]
+fn a_line_carries_a_picture_only_whole_and_only_where_agreed() {
+    let body = cstr("[image]");
+    let (id, mime) = (b"h1", b"image/png");
+    for (agreed, id_len, mime_len, carried) in [
+        (true, 2, 9, true),
+        (false, 2, 9, false),
+        (true, 0, 9, false),
+        (true, 2, 0, false),
+    ] {
+        reset(true, 0);
+        MEDIA.with(|m| m.set(agreed));
+        unsafe {
+            hx_send_chat_with_media(
+                htlc(),
+                body.as_ptr(),
+                0,
+                0,
+                id.as_ptr(),
+                id_len,
+                mime.as_ptr().cast(),
+                mime_len,
+            )
+        };
+        let s = last().unwrap();
+        let mut want = vec![(TAG_STYLE, vec![0, 0]), (TAG_BODY, b"[image]".to_vec())];
+        if carried {
+            want.push((0x0202, id.to_vec()));
+            want.push((0x0201, mime.to_vec()));
+        }
+        assert_eq!(s.chunks, want, "{agreed} {id_len} {mime_len}");
+    }
 }

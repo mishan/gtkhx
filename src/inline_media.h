@@ -19,16 +19,8 @@
  * when the cap is confirmed; the parser in
  * rcv.c::rcv_task_login stashes them on htlc->media_max_*.
  *
- * Send-side helpers (Phase 9.C will add the actual upload state
- * machine and chat-with-attachment send) and receive-side
- * dispatch (Phase 9.D will add the placeholder-textentry hook and
- * the bytes-fetch path) build on the C wrappers below.
- *
- * Phase 9.A: just the cap gate + a per-session post-LOGIN logging
- * helper for the server's advertised limits. The Rust crate
- * (hxproto::inline_media) does the chunk shaping; src/
- * inline_media.c provides the thin C wrappers C dispatch sites
- * can call.
+ * The upload and download are hxhandlers' media.rs; what is here is the
+ * cap gate and the limits the attach flow checks a picture against.
  */
 
 #ifndef HX_INLINE_MEDIA_H
@@ -109,31 +101,6 @@ inline_media_max_pixels (const struct htlc_conn *htlc)
     }
     guint32 v = hx_conn_media_max_pixels (htlc);
     return v ? v : HX_MEDIA_DEFAULT_MAX_PIXELS;
-}
-
-static inline guint32
-inline_media_chunk_size (const struct htlc_conn *htlc)
-{
-    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
-        return HX_MEDIA_DEFAULT_CHUNK_SIZE;
-    }
-    guint32 v = hx_conn_media_chunk_size (htlc);
-    if (v == 0) {
-        return HX_MEDIA_DEFAULT_CHUNK_SIZE;
-    }
-    /* Clamp the server-advertised chunk size to a sane ceiling so
-     * a hostile server can't ask us to allocate absurdly large
-     * per-chunk buffers. 60000 leaves room for the chunk header
-     * (4 bytes) plus a few wrapper chunks (PART_INDEX / PART_FINAL
-     * / UPLOAD_TOKEN) inside the 65535-byte wire frame.
-     *
-     * The spec doesn't bound CHAT_MEDIA_CHUNK_SIZE explicitly;
-     * this clamp is documented in docs/inline-media.md
-     * "Open questions". */
-    if (v > HX_MEDIA_DEFAULT_CHUNK_SIZE) {
-        v = HX_MEDIA_DEFAULT_CHUNK_SIZE;
-    }
-    return v;
 }
 
 static inline guint32

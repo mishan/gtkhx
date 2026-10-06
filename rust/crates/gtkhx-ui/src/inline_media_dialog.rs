@@ -7,9 +7,9 @@
 //! `inline_media_decode_async` (glycin) and swaps to the rendered image — or an
 //! error page — when it lands.
 //!
-//! The protocol download machinery (`inline_media_download.c`) and the bounded
-//! glycin decoder (`inline_media_decode.c` / the `hx-image-decode` crate) stay
-//! C behind the FFI seam below — this module only owns the dialog UI + the
+//! The download (`hxhandlers::media`) and the bounded glycin decoder
+//! (`inline_media_decode.c` / the `hx-image-decode` crate) sit behind the FFI
+//! seam below — this module only owns the dialog UI + the
 //! Save-As / Open-Externally handlers.
 //!
 //! ## Lifetime
@@ -45,16 +45,16 @@ use crate::tr::{tr, tr1, tr_argv};
 /// `#[repr(C)]` mirror of GLib's `GByteArray` — only the two fields the
 /// download result carries (`data` + `len`).
 #[repr(C)]
-struct GByteArray {
-    data: *const u8,
-    len: u32,
+pub(crate) struct GByteArray {
+    pub(crate) data: *const u8,
+    pub(crate) len: u32,
 }
 
 /// `#[repr(C)]` mirror of `HxInlineMediaDownloadResult`
-/// (`inline_media_download.h`). Only read inside `on_download_done`.
+/// (`hxhandlers::media`), which inline_media_row also reads.
 #[repr(C)]
-struct DownloadResult {
-    bytes: *const GByteArray,
+pub(crate) struct DownloadResult {
+    pub(crate) bytes: *const GByteArray,
     canonical_mime: *const c_char,
     error_code: u16,
     error_message: *const c_char,
@@ -70,7 +70,7 @@ struct DownloadResult {
 // HxInlineMediaCaps also comes from hx-image-decode now (all-zero still means
 // "fall back to HX_MEDIA_DEFAULT_* per field", as the C dialog passed).
 
-type DownloadCb = unsafe extern "C" fn(*mut c_void, *const DownloadResult, *mut c_void);
+pub(crate) type DownloadCb = unsafe extern "C" fn(*mut c_void, *const DownloadResult, *mut c_void);
 
 use hx_image_decode::ffi::{
     inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free,
@@ -78,7 +78,7 @@ use hx_image_decode::ffi::{
 use hx_image_decode::ffi::{HxInlineMediaCaps, HxInlineMediaDecoded};
 
 extern "C" {
-    fn inline_media_download_start(
+    pub(crate) fn inline_media_download_start(
         htlc: *mut c_void,
         handle: *const u8,
         handle_len: usize,

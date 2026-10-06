@@ -25,13 +25,20 @@ use std::ffi::{c_int, c_void};
 /// again, and that is the one that counts.
 const AVATAR_MAX_BYTES: u64 = 32 * 1024;
 
+// The wire send. A test build leaves it out: it would link the whole send
+// path, which reaches into C.
+#[cfg(not(test))]
+use hxhandlers::send::icon::{hx_icon_clear, hx_icon_set};
+#[cfg(test)]
+unsafe fn hx_icon_set(_htlc: *mut c_void, _gif: *const u8, _len: usize) {}
+#[cfg(test)]
+unsafe fn hx_icon_clear(_htlc: *mut c_void) {}
+
 extern "C" {
-    // gif_icons.c — avatar persistence and the wire send.
+    // gif_icons.c — avatar persistence.
     fn hx_icon_save(gif: *const u8, len: usize) -> glib::ffi::gboolean;
     fn hx_icon_forget() -> glib::ffi::gboolean;
     fn hx_icon_load_saved() -> *mut glib::ffi::GBytes;
-    fn hx_icon_set(htlc: *mut c_void, gif: *const u8, len: usize);
-    fn hx_icon_clear(htlc: *mut c_void);
 
     // gtkhx_ui_bridge.c / gtkhx-core — the live connection, and whether the
     // server on it speaks the GIF-icons extension.

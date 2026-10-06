@@ -126,10 +126,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     hx_conn_reset_video_limits (htlc);
 
     /* GIF-icons probe state — drop the watchdog timer (if still armed)
-     * and reset to UNKNOWN so a reconnect re-probes cleanly. Inlined
-     * (rather than calling into gif_icons.c) to avoid pulling the
-     * task_new / rcv_task_icon_* dependency chain into every test
-     * harness that links network.c. */
+     * and reset to UNKNOWN so a reconnect re-probes cleanly. */
     if (hx_conn_gif_icons_probe_timer (htlc)) {
         g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
         hx_conn_set_gif_icons_probe_timer (htlc, 0);

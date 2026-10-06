@@ -750,36 +750,45 @@ The order, each step its own branch and each checked against the rig:
    chat, a private message, a broadcast, the user editor's account read,
    creation, save and delete, and every news request — flat news's file and
    posts, threaded news's listings, articles, posts, deletions and new
-   bundles and categories — and every files request — a listing, Get Info,
+   bundles and categories — every files request — a listing, Get Info,
    a folder made, something deleted, moved or renamed, a comment set, and a
-   download or upload of a file or a folder — have their reply expected by
-   the session (`Session::expect`), so none is a task any more, and a
-   refusal comes back as `Failed`. A private chat is made when its join is
-   answered; a user's info reaches the user it was asked of, an account
-   the editor that asked, a news reply the browser node that asked, a
-   listing the files pane and a transfer's reply the transfer, by its
-   trans. The files browser names what a listing gave back, and the user
-   editor an account, by the bytes the server sent. What arrives is traced
+   download or upload of a file or a folder — the banner's, the GIF icons'
+   (the login's probe of everyone's, a user's, and ours set) and each part
+   of a picture going up or coming down have their reply expected by the
+   session (`Session::expect`), so none is a task any more, and a refusal
+   comes back as `Failed`, or a picture's as `MediaFailed`. A private chat
+   is made when its join is answered; a user's info reaches the user it
+   was asked of, an account the editor that asked, a news reply the
+   browser node that asked, a listing the files pane, a transfer's reply
+   the transfer, the banner's its fetch and a picture's part its upload or
+   download (`hxhandlers::media`), by its trans. A private message shows
+   the picture it carries as a chat line does. The files browser names
+   what a listing gave back, and the user editor an account, by the bytes
+   the server sent. What arrives is traced
    from the session's tap. *In progress.*
    What remains:
-   - the banner's download (`banner.rs`, `rcv_task_banner_get`), still a
-     task;
-   - of messages, the picture a private message carries, which the
-     session reads and the view does not yet show;
-   - inline media's upload and download;
+   - the login's reply, still a task (`rcv_task_login`) whose fields C
+     reads; the session's `Event::LoggedIn` has only the common ones;
+   - voice and video's requests, still tasks (`hxvoice-send`,
+     `rcv_task_voice_join`, `rcv_task_voice_simple_ack`), and the refusal
+     handling `hx_rcv_task` does for them;
    - the C history tests, which move to `hx-e2e`, retiring the
      `hx_history_entry_parse` they read history through: the proto and
      integration `test_chat_history.c` and the HOPE chat-history
      integration tests.
+
+   With those gone, nothing registers a task but a file transfer's Tasks
+   row, and `hx_rcv_task` and `hxtask`'s table go.
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
 
-Of the extensions GtkHx negotiates, text encoding, chat history, the
-picture a chat line or a private message carries, the color a user's
-nickname arrives with and Large Files' exact sizes have their
-session-side handling; the rest (voice and video signaling, inline
-media's upload and download, GIF icons) need theirs before the domains
-that use them move. hxproto has the codecs.
+Of the extensions GtkHx negotiates, text encoding, chat history, inline
+media (the picture a chat line or a private message carries, and its
+upload and download), GIF icons' requests, the color a user's nickname
+arrives with and Large Files' exact sizes have their session-side
+handling. Voice and video signaling need theirs before the domains that
+use them move, and the GIF-icon change a server announces still reaches
+GtkHx whole. hxproto has the codecs.
 
 ---
 

@@ -38,6 +38,7 @@ pub struct Client {
     /// What numbers requests, as in production.
     session: hxnet::session::SharedSession,
     caps: u16,
+    login_reply: Reply,
     /// What the session made of what came before the login settled.
     login_events: Vec<hxsession::Event>,
 }
@@ -244,6 +245,7 @@ impl Client {
             events,
             session,
             caps: agreed & caps,
+            login_reply: reply,
             login_events,
         })
     }
@@ -267,6 +269,11 @@ impl Client {
     /// before the login settled.
     pub fn login_events(&self) -> &[hxsession::Event] {
         &self.login_events
+    }
+
+    /// The server's reply to the LOGIN: what else it said of itself.
+    pub fn login_reply(&self) -> &Reply {
+        &self.login_reply
     }
 
     /// The capability bits both sides agreed to.

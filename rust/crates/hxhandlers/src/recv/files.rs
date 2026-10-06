@@ -62,6 +62,8 @@ pub(crate) enum Asked {
     /// The move half of a move and rename: the rename, sent once the move
     /// has gone through.
     Rename(Request),
+    /// The server's banner, for its fetch.
+    Banner,
 }
 
 /// A remote files provider, kept alive while its listing is in flight: a
@@ -150,15 +152,18 @@ fn answered(htlc: *mut c_void, trans: u32) -> Option<Asked> {
 }
 
 /// Let go of what `htlc` asked for before: a closed connection gets no more
-/// replies, and a new one numbers its requests afresh.
-pub(crate) fn forget(htlc: *mut c_void) {
+/// replies, and a new one numbers its requests afresh. With `keep_banner`,
+/// the banner's request stays.
+pub(crate) fn forget(htlc: *mut c_void, keep_banner: bool) {
     // Dropped once ASKED is released: letting go of a provider or transfer
     // can run its teardown, which must be free to reach ASKED.
     let _gone: HashMap<_, _> = ASKED.with(|a| {
         let mut a = a.borrow_mut();
         let (gone, kept) = std::mem::take(&mut *a)
             .into_iter()
-            .partition(|((h, _), _)| *h == htlc as usize);
+            .partition(|((h, _), w)| {
+                *h == htlc as usize && !(keep_banner && matches!(w, Asked::Banner))
+            });
         *a = kept;
         gone
     });
@@ -216,6 +221,7 @@ pub(crate) unsafe fn transfer(htlc: *mut c_void, trans: u32, t: &Transfer) {
     match answered(htlc, trans) {
         Some(Asked::Download { htxf, folder }) => xfer::download_ready(htlc, htxf.0, folder, t),
         Some(Asked::Upload { htxf, folder }) => xfer::upload_ready(htlc, htxf.0, folder, t),
+        Some(Asked::Banner) => xfer::banner(htlc, t),
         _ => {}
     }
 }
@@ -247,7 +253,7 @@ pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
         }
         Some(Asked::Download { htxf, .. }) => xfer::download_refused(htlc, htxf.0),
         Some(Asked::Upload { htxf, .. }) => xfer::upload_refused(htlc, htxf.0),
-        Some(Asked::Info(_)) | Some(Asked::Rename(_)) | None => {}
+        Some(Asked::Info(_) | Asked::Rename(_) | Asked::Banner) | None => {}
     }
 }
 

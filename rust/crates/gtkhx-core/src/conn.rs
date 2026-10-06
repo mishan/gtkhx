@@ -78,7 +78,6 @@ pub struct HtlcConn {
     chat_history_last_msgid: u64,
     gif_icons_state: c_int,
     gif_icons_probe_timer: c_uint,
-    gif_icons_probe_trans: u32,
     /// A small per-connection identity, unique within this process run and
     /// assigned once at allocation.
     ///
@@ -356,12 +355,6 @@ scalar!(
     hx_conn_set_gif_icons_probe_timer,
     gif_icons_probe_timer,
     c_uint
-);
-scalar!(
-    hx_conn_gif_icons_probe_trans,
-    hx_conn_set_gif_icons_probe_trans,
-    gif_icons_probe_trans,
-    u32
 );
 
 /// `guint32 hx_conn_trans_post_inc` — return the current trans, then increment:

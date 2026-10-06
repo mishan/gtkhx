@@ -1,6 +1,7 @@
 //! `HxMsgEvent` — private-message value object (`src/proto_helpers.h`).
 //! R4.2a. See the crate docs for the cross-language layout-pin contract.
 
+use crate::boxed::chat::{media_copy, media_free, media_new, HxChatMedia};
 use crate::boxed::register_once;
 use glib::ffi::{g_free, g_malloc0, g_strndup, GType};
 use std::ffi::c_char;
@@ -21,10 +22,11 @@ pub struct HxMsgEvent {
     pub body_len: usize,
     pub is_self: i32,      // gboolean
     pub is_broadcast: i32, // gboolean
+    pub media: *mut HxChatMedia,
 }
 
 const _: () = {
-    assert!(size_of::<HxMsgEvent>() == 48);
+    assert!(size_of::<HxMsgEvent>() == 56);
     assert!(offset_of!(HxMsgEvent, uid) == 0);
     assert!(offset_of!(HxMsgEvent, name) == 8);
     assert!(offset_of!(HxMsgEvent, name_len) == 16);
@@ -32,13 +34,14 @@ const _: () = {
     assert!(offset_of!(HxMsgEvent, body_len) == 32);
     assert!(offset_of!(HxMsgEvent, is_self) == 40);
     assert!(offset_of!(HxMsgEvent, is_broadcast) == 44);
+    assert!(offset_of!(HxMsgEvent, media) == 48);
 };
 
-/// Boxed copy func. Deep-copies the two owned strings; mirrors the
-/// deleted C `hx_msg_event_copy` (`*c = *e` then `g_strndup` name/body).
+/// Boxed copy func. Deep-copies the two owned strings and the media.
 ///
 /// # Safety
-/// `e` is NULL or a valid `HxMsgEvent*` with `g_malloc`-owned `name`/`body`.
+/// `e` is NULL or a valid `HxMsgEvent*` with `g_malloc`-owned
+/// `name`/`body`/`media`.
 #[no_mangle]
 pub unsafe extern "C" fn hx_msg_event_copy(e: *mut HxMsgEvent) -> *mut HxMsgEvent {
     if e.is_null() {
@@ -54,14 +57,15 @@ pub unsafe extern "C" fn hx_msg_event_copy(e: *mut HxMsgEvent) -> *mut HxMsgEven
     // (not-expected) NULL-string case.
     (*c).name = g_strndup((*e).name, (*e).name_len);
     (*c).body = g_strndup((*e).body, (*e).body_len);
+    (*c).media = media_copy((*e).media);
     c
 }
 
-/// Boxed free func. Mirrors the deleted C `hx_msg_event_free`.
+/// Boxed free func.
 ///
 /// # Safety
-/// `e` is NULL or a valid `HxMsgEvent*` whose `name`/`body`/self are
-/// `g_malloc`-owned.
+/// `e` is NULL or a valid `HxMsgEvent*` whose `name`/`body`/`media`/self
+/// are `g_malloc`-owned.
 #[no_mangle]
 pub unsafe extern "C" fn hx_msg_event_free(e: *mut HxMsgEvent) {
     if e.is_null() {
@@ -69,6 +73,7 @@ pub unsafe extern "C" fn hx_msg_event_free(e: *mut HxMsgEvent) {
     }
     g_free((*e).name as *mut c_void);
     g_free((*e).body as *mut c_void);
+    media_free((*e).media);
     g_free(e as *mut c_void);
 }
 
@@ -76,11 +81,13 @@ pub unsafe extern "C" fn hx_msg_event_free(e: *mut HxMsgEvent) {
 /// [`hx_msg_event_free`]. With `shortcodes`, `:shortcode:`s in the body
 /// become their emoji; the name stays as sent. `self_nick` is the name this
 /// connection goes by, which marks the message as its own when the sender
-/// is exactly that. Each text ends at its first NUL, as C reads it.
+/// is exactly that. Each text ends at its first NUL, as C reads it. The
+/// picture the message carries rides along as chat's does.
 pub fn msg_event_new(
     uid: u16,
     name: &str,
     body: &str,
+    media: Option<&hxsession::ChatMedia>,
     self_nick: &[u8],
     shortcodes: bool,
 ) -> *mut HxMsgEvent {
@@ -104,6 +111,7 @@ pub fn msg_event_new(
         (*e).body_len = body.len();
         (*e).is_self = i32::from(!self_nick.is_empty() && name.as_bytes() == self_nick);
         (*e).is_broadcast = i32::from(uid == 0);
+        (*e).media = media_new(media);
         e
     }
 }
@@ -235,7 +243,7 @@ mod tests {
         ];
         for ((uid, name, body, own, shortcodes), want) in cases {
             unsafe {
-                let e = msg_event_new(uid, name, body, own.as_bytes(), shortcodes);
+                let e = msg_event_new(uid, name, body, None, own.as_bytes(), shortcodes);
                 let got = (
                     cstr((*e).name, (*e).name_len),
                     cstr((*e).body, (*e).body_len),
@@ -260,9 +268,31 @@ mod tests {
         assert_ne!(&wire[..], "René".as_bytes());
         let name = hxproto::text::to_utf8(wire);
         unsafe {
-            let e = msg_event_new(7, &name, "hi", "René".as_bytes(), false);
+            let e = msg_event_new(7, &name, "hi", None, "René".as_bytes(), false);
             assert_eq!((*e).is_self, 1);
             hx_msg_event_free(e);
+        }
+    }
+
+    #[test]
+    fn a_picture_survives_the_copy_and_the_original_freed() {
+        let png = hxsession::ChatMedia {
+            id: vec![0xAB, 0xCD],
+            mime: b"image/png".to_vec(),
+            width: Some(800),
+            height: Some(600),
+            bytes: None,
+        };
+        unsafe {
+            let a = msg_event_new(7, "bob", "[image]", Some(&png), b"", false);
+            let b = hx_msg_event_copy(a);
+            assert_ne!((*a).media, (*b).media);
+            hx_msg_event_free(a);
+            let m = &*(*b).media;
+            assert_eq!(std::slice::from_raw_parts(m.id, m.id_len), [0xAB, 0xCD]);
+            assert_eq!(cstr(m.mime, m.mime_len), "image/png");
+            assert_eq!((m.width, m.height, m.bytes_present), (800, 600, 0));
+            hx_msg_event_free(b);
         }
     }
 

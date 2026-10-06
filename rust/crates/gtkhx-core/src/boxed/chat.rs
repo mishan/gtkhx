@@ -153,8 +153,8 @@ pub fn chat_event_new(
         text.as_bytes()
     };
     let split = split_nick_body(line);
-    // SAFETY: the allocations are zeroed and sized for their structs, and
-    // every pointer stored in them is a fresh glib allocation.
+    // SAFETY: the allocation is zeroed and sized for the struct, and every
+    // pointer stored in it is a fresh glib allocation.
     unsafe {
         let e = g_malloc0(size_of::<HxChatEvent>()) as *mut HxChatEvent;
         (*e).cid = cid;
@@ -168,23 +168,35 @@ pub fn chat_event_new(
             (*e).body_len = bl;
             (*e).is_self = i32::from(!self_nick.is_empty() && &line[so..so + sl] == self_nick);
         }
-        if let Some(m) = media.filter(|m| !m.id.is_empty() && !m.mime.is_empty()) {
-            let c = g_malloc0(size_of::<HxChatMedia>()) as *mut HxChatMedia;
-            (*c).id_len = m.id.len();
-            let id = g_malloc(m.id.len()) as *mut u8;
-            ptr::copy_nonoverlapping(m.id.as_ptr(), id, m.id.len());
-            (*c).id = id;
-            (*c).mime_len = m.mime.len();
-            (*c).mime = g_strndup(m.mime.as_ptr() as *const c_char, m.mime.len());
-            (*c).width = m.width.unwrap_or(0);
-            (*c).width_present = i32::from(m.width.is_some());
-            (*c).height = m.height.unwrap_or(0);
-            (*c).height_present = i32::from(m.height.is_some());
-            (*c).bytes = m.bytes.unwrap_or(0);
-            (*c).bytes_present = i32::from(m.bytes.is_some());
-            (*e).media = c;
-        }
+        (*e).media = media_new(media);
         e
+    }
+}
+
+/// A heap `HxChatMedia` for the picture the session read off a line, or
+/// NULL when there is none or it names no picture (no id or no type).
+/// Freed by [`media_free`].
+pub(crate) fn media_new(media: Option<&hxsession::ChatMedia>) -> *mut HxChatMedia {
+    let Some(m) = media.filter(|m| !m.id.is_empty() && !m.mime.is_empty()) else {
+        return ptr::null_mut();
+    };
+    // SAFETY: the allocation is zeroed and sized for the struct, and the
+    // id and mime stored in it are fresh glib copies.
+    unsafe {
+        let c = g_malloc0(size_of::<HxChatMedia>()) as *mut HxChatMedia;
+        (*c).id_len = m.id.len();
+        let id = g_malloc(m.id.len()) as *mut u8;
+        ptr::copy_nonoverlapping(m.id.as_ptr(), id, m.id.len());
+        (*c).id = id;
+        (*c).mime_len = m.mime.len();
+        (*c).mime = g_strndup(m.mime.as_ptr() as *const c_char, m.mime.len());
+        (*c).width = m.width.unwrap_or(0);
+        (*c).width_present = i32::from(m.width.is_some());
+        (*c).height = m.height.unwrap_or(0);
+        (*c).height_present = i32::from(m.height.is_some());
+        (*c).bytes = m.bytes.unwrap_or(0);
+        (*c).bytes_present = i32::from(m.bytes.is_some());
+        c
     }
 }
 

@@ -18,10 +18,9 @@
 //! subchannel TOFU verify ([`hxtls_trust::ffi::verify_cert`]). What stays on the
 //! C ABI: the hxnet fetch / HTXF transport + the tokio worker-spawn bridge
 //! (hxnet/hxbridge are deliberately reached over the C ABI — see the crate
-//! notes), the send primitive + task table (`hlwrite_chunks` / `task_new`, the
-//! latter kept `extern` for its type-erased `rcv_task_*` shape), the SOCKS
-//! lookup, and `rcv_task_banner_get` (a gtkhx-ui↔hxhandlers Cargo cycle blocks
-//! importing it).
+//! notes), the SOCKS lookup, and the request, `hx_banner_get` (a
+//! gtkhx-ui↔hxhandlers Cargo cycle blocks importing it), whose reply comes
+//! back through `banner_handle_htxf_reply`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -39,7 +38,6 @@ use gtk4 as gtk;
 use gtkhx_core::conn::{hx_conn_hope_aead, hx_conn_serverhost, hx_conn_serverport, hx_conn_tls};
 use hx_image_decode::ffi::HxInlineMediaCaps;
 use hx_image_decode::{decode_first_frame_async, ImageDecodeHandle, ImageDecodeOutcome};
-use hxproto::build::HxChunk;
 
 use crate::ensure_gtk_init;
 use crate::tr::tr;
@@ -66,8 +64,6 @@ const HTXF_TYPE_BANNER: u16 = 2;
 /// `HX_HTXF_PREAMBLE_MAX_BYTES` (hotline.h) — 16-byte header + the 8-byte size64
 /// tail; banner transfers only ever use the 16-byte form.
 const HX_HTXF_PREAMBLE_MAX_BYTES: usize = 24;
-/// `HTLC_HDR_DOWNLOAD_BANNER` (hotline.h) — the zero-chunk file-mode request.
-const HTLC_HDR_DOWNLOAD_BANNER: u32 = 0x0000_00d4;
 /// Left mouse button.
 const GDK_BUTTON_PRIMARY: u32 = 1;
 
@@ -107,10 +103,6 @@ const HXNET_BANNER_DONE: c_int = 1;
 type HtxfVerifyCb = unsafe extern "C" fn(*const u8, usize, *mut c_void) -> c_int;
 /// The tokio blocking-pool worker / completion pair shape.
 type BlockingFn = unsafe extern "C" fn(*mut c_void);
-/// `rcv_task_fn` — `void (*)(struct htlc_conn *, void *, void *)`. The real
-/// `rcv_task_banner_get` has a wider arg list cast to this canonical shape at
-/// `task_new` time (the deliberate type erasure the task table relies on).
-type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 
 extern "C" {
     // hxnet URL fetch (banner_http.rs).
@@ -158,25 +150,9 @@ extern "C" {
     // hxnet_bridge.c — SOCKS proxy lookup for the subchannel endpoint.
     fn hx_bridge_lookup_socks_proxy(host: *const c_char, port: u16) -> *mut c_char;
 
-    // hxtask — register the reply task + send the request (Branch 1's Rust send).
-    fn task_new(
-        htlc: *mut c_void,
-        rcv: Option<RcvTaskFn>,
-        ptr: *mut c_void,
-        data: *mut c_void,
-        str_: *const c_char,
-    ) -> *mut c_void;
-    fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
-
-    // hxhandlers — the file-mode reply parser (parses ref/size, calls back into
-    // banner_handle_htxf_reply below).
-    fn rcv_task_banner_get(
-        htlc: *mut c_void,
-        frame: *const u8,
-        frame_len: usize,
-        ptr: *mut c_void,
-        data: *mut c_void,
-    );
+    // hxhandlers — the file-mode request, its reply answered through
+    // banner_handle_htxf_reply below.
+    fn hx_banner_get(htlc: *mut c_void);
 }
 
 // ------------------------------------------------------------------- //
@@ -530,9 +506,9 @@ pub unsafe extern "C" fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, 
         return;
     }
 
-    // The reply has to belong to the attempt that is actually running. The
-    // task was registered per connection so this is always the right `htlc`,
-    // but between the request and the reply another connection may have taken
+    // The reply has to belong to the attempt that is actually running. It
+    // is matched to its connection, so this is always the right `htlc`, but
+    // between the request and the reply another connection may have taken
     // the fetch machine — and starting a second HTXF worker here would break
     // the one-at-a-time invariant the whole routing rests on, landing this
     // connection's image on the other one's tab.
@@ -916,32 +892,8 @@ fn banner_url_drain() -> glib::ControlFlow {
 // File (HTXF) mode ------------------------------------------------- //
 
 fn send_download_request(htlc: *mut c_void) {
-    if htlc.is_null() {
-        return;
-    }
-    unsafe {
-        // Register the reply task (rcv_task_banner_get, type-erased to the
-        // canonical 3-arg rcv_task_fn shape — the same cast the C RCV_TASK_FN
-        // macro performs), then send the zero-chunk DOWNLOAD_BANNER opcode.
-        let rcv: RcvTaskFn = std::mem::transmute(
-            rcv_task_banner_get
-                as unsafe extern "C" fn(*mut c_void, *const u8, usize, *mut c_void, *mut c_void),
-        );
-        let label = crate::cs("banner_get");
-        task_new(
-            htlc,
-            Some(rcv),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            label.as_ptr(),
-        );
-        hlwrite_chunks(
-            htlc,
-            HTLC_HDR_DOWNLOAD_BANNER,
-            0,
-            std::ptr::null::<HxChunk>(),
-            0,
-        );
+    if !htlc.is_null() {
+        unsafe { hx_banner_get(htlc) };
     }
 }
 

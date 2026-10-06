@@ -82,8 +82,11 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             subject,
         } => user::joined(htlc, *trans, *cid, users, subject.as_deref()),
         Event::Message {
-            uid, from, text, ..
-        } => msg::message(htlc, *uid, from, text),
+            uid,
+            from,
+            text,
+            media,
+        } => msg::message(htlc, *uid, from, text, media.as_ref()),
         Event::Broadcast { uid, from, text } => msg::broadcast(htlc, *uid, from, text),
         Event::Disconnecting(text) => msg::parting(htlc, text),
         Event::NewsPosted(text) => news::posted(htlc, text),
@@ -96,8 +99,21 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         Event::FileChanged { trans } => files::changed(htlc, *trans),
         Event::Transfer { trans, transfer } => files::transfer(htlc, *trans, transfer),
         Event::TransferQueued { reference, queue } => xfer::queued(htlc, *reference, *queue),
+        Event::IconList { trans, icons } => icon::listed(htlc, *trans, icons),
+        Event::Icon { icon: i, .. } => icon::icon(htlc, i),
+        Event::MediaUploading { trans, token } => {
+            crate::media::uploading(htlc, *trans, token.as_deref())
+        }
+        Event::MediaUploaded { trans, media } => crate::media::uploaded(htlc, *trans, media),
+        Event::MediaPart { trans, part } => crate::media::part(htlc, *trans, part),
+        Event::MediaFailed {
+            trans,
+            code,
+            reason,
+        } => crate::media::failed(htlc, *trans, *code, reason.as_deref()),
         Event::Failed { trans, reason } => {
             let quiet = user::failed(htlc, *trans, reason.as_deref());
+            let quiet = icon::failed(htlc, *trans, reason.as_deref()) || quiet;
             news::failed(htlc, *trans);
             files::failed(htlc, *trans);
             chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
@@ -107,14 +123,18 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
 }
 
 /// Let go of every request `htlc` has in flight: a closed connection gets
-/// no more replies, and a new login numbers its requests afresh.
+/// no more replies, and a new login numbers its requests afresh. At the
+/// login (`login`), the banner's request stays: a server may send its
+/// banner, and be asked for it, before the login settles.
 ///
 /// # Safety
 /// Main thread.
-pub(crate) unsafe fn forget(htlc: *mut c_void) {
+pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
     user::forget(htlc);
     news::forget(htlc);
-    files::forget(htlc);
+    files::forget(htlc, login);
+    icon::forget(htlc);
+    crate::media::forget(htlc);
 }
 
 /// `void hx_recv_forget (struct htlc_conn *htlc)` — [`forget`], for the
@@ -124,7 +144,7 @@ pub(crate) unsafe fn forget(htlc: *mut c_void) {
 /// Main thread.
 #[no_mangle]
 pub unsafe extern "C" fn hx_recv_forget(htlc: *mut c_void) {
-    forget(htlc);
+    forget(htlc, false);
 }
 
 #[cfg(test)]

@@ -146,8 +146,9 @@ seam, which is what makes the rest tractable rather than a rewrite:
 `hxhandlers::recv` has a module per protocol domain (chat, user, msg,
 news, files, xfer, icon, agreement); it absorbed what were previously
 separate per-domain receive crates, so those crate names no longer exist.
-A domain the session handles itself (chat, users, messages and news, so far)
-reaches its module as the session's events, through
+A domain the session handles itself (chat, users, messages, news and
+files), and the replies to what GtkHx asks of the banner, GIF icons and
+inline media, reach their module as the session's events, through
 `hx_recv_session_event`, not as frames.
 
 # Part 2 — What remains, and in what order
@@ -201,11 +202,6 @@ As of this writing the C bodies group into:
   reset hook.
 - **Server-initiated handlers still in C** — agreement, banner, the
   unknown-opcode dump, and a one-line icon-change forwarder.
-- **Task replies C still registers** — inline media's upload and
-  download, handled in C, and the GIF icons' get, list and set
-  (`rcv_task_icon_get`, `rcv_task_icon_getlist`,
-  `rcv_task_icon_set_auto`), handled in Rust but registered as tasks by
-  `gif_icons.c`.
 - **Voice** — the three server-initiated voice handlers and the two voice
   task replies, all compiled out when voice is disabled.
 
@@ -218,17 +214,16 @@ following is a cleanup opportunity.
 the error sound — deliberately *not* a modal dialog, because the common
 case is the server rejecting one of our auto-fired bootstrap requests, and
 a dialog blocks the user before they can do anything. Speculative
-bootstrap probes whose rejection is expected and non-actionable (the
+bootstrap requests whose rejection is expected and non-actionable (the
 GIF-icons capability probe: no capability bit, no version tie, so an error
-just means "unsupported") are suppressed entirely — their own handler
-records the verdict on the error path. Separately, an errored reply is
-still dispatched to its handler for tasks that own per-transfer state —
-single-file and folder transfers, inline-media upload and download —
-because that handler is what frees it; skipping it strands an orphaned
-transfer in the Tasks window forever. Non-transfer handlers have nothing
-to free and are skipped. Voice error replies get their own inspection so
-the voice state machine can choose between tearing the session down and
-just toasting.
+just means "unsupported"; and the saved avatar sent once the probe
+succeeds) are suppressed entirely — `hxhandlers::recv::icon` records the
+verdict, or logs the refusal. Separately, a refusal still reaches what
+owns per-request state — a transfer, an inline-media upload or download
+— because that is what frees it; skipping it strands an orphaned transfer
+in the Tasks window forever, or leaves the picture's caller waiting.
+Voice error replies get their own inspection so the voice state machine
+can choose between tearing the session down and just toasting.
 
 **Transaction ID zero is a real key, not a sentinel.** A short or
 malformed header leaves the extracted trans at 0, and the table treats 0

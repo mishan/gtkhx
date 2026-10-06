@@ -14,6 +14,11 @@ pub enum Cap {
     LargeFiles,
     /// Keeps public chat and answers for it (`HTLC_CAP_CHAT_HISTORY`).
     ChatHistory,
+    /// Keeps a GIF icon for each user (the fogWraith extension, which no
+    /// capability bit announces).
+    GifIcons,
+    /// Takes pictures for chat lines (`HTLC_CAP_INLINE_MEDIA`).
+    InlineMedia,
 }
 
 #[derive(Debug)]
@@ -42,7 +47,7 @@ pub const SERVERS: &[Server] = &[
         xfer_port: 5501,
         // mhxd ships `admin` with no password and every access bit.
         admin: "admin",
-        caps: &[Cap::FileAdmin],
+        caps: &[Cap::FileAdmin, Cap::GifIcons],
     },
     Server {
         name: "janus",
@@ -56,6 +61,8 @@ pub const SERVERS: &[Server] = &[
             Cap::TextEncoding,
             Cap::LargeFiles,
             Cap::ChatHistory,
+            Cap::GifIcons,
+            Cap::InlineMedia,
         ],
     },
     Server {

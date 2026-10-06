@@ -8,51 +8,6 @@ fn fake_htxf() -> *mut std::os::raw::c_void {
     0xF11E_usize as *mut std::os::raw::c_void
 }
 
-// Wire chunk tags (src/hotline.h / messages.rs::tag).
-const HTXF_REF: u16 = 0x006b;
-const HTXF_SIZE: u16 = 0x006c;
-
-/// Build a 22-byte transaction header (`flag & 1` = task-error) followed by the
-/// concatenated TLV chunks — the shape `ChunkIter::over_message` expects.
-fn reply(error: bool, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // type (TASK)
-    v.extend_from_slice(&1u32.to_be_bytes()); // trans
-    v.extend_from_slice(&(error as u32).to_be_bytes()); // flag
-    v.extend_from_slice(&0u32.to_be_bytes()); // len
-    v.extend_from_slice(&0u32.to_be_bytes()); // len2
-    v.extend_from_slice(&(chunks.len() as u16).to_be_bytes()); // hc
-    for (tag, data) in chunks {
-        v.extend_from_slice(&tag.to_be_bytes());
-        v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-        v.extend_from_slice(data);
-    }
-    v
-}
-
-fn u32b(v: u32) -> Vec<u8> {
-    v.to_be_bytes().to_vec()
-}
-
-type Handler = unsafe extern "C" fn(
-    *mut std::os::raw::c_void,
-    *const std::os::raw::c_void,
-    usize,
-    *mut std::os::raw::c_void,
-    *mut std::os::raw::c_void,
-);
-
-/// Invoke a handler with a frame + the sentinel htxf as `ptr`.
-unsafe fn call(f: Handler, frame: &[u8]) {
-    f(
-        std::ptr::null_mut(),
-        frame.as_ptr() as *const std::os::raw::c_void,
-        frame.len(),
-        fake_htxf(),
-        std::ptr::null_mut(),
-    );
-}
-
 fn htxf() -> test_env::FakeHtxf {
     test_env::HTXF.with(|c| c.borrow().clone())
 }
@@ -213,21 +168,20 @@ fn a_folder_upload_stamps_ref_and_queue() {
     assert!(test_env::STARTED.with(|c| c.get()));
 }
 
-// ---- banner_get ------------------------------------------------------------
+// ---- banner ----------------------------------------------------------------
 
 #[test]
-fn banner_get_forwards_ref_and_size() {
-    test_env::reset();
-    let f = reply(false, &[(HTXF_REF, u32b(3)), (HTXF_SIZE, u32b(8192))]);
-    unsafe { call(rcv_task_banner_get, &f) };
-    assert_eq!(test_env::BANNER.with(|c| c.get()), Some((3, 8192)));
-}
-
-#[test]
-fn banner_get_task_error_dropped() {
-    test_env::reset();
-    unsafe { call(rcv_task_banner_get, &reply(true, &[])) };
-    assert_eq!(test_env::BANNER.with(|c| c.get()), None);
+fn the_banner_goes_to_its_fetch_with_its_size_clamped_to_32_bits() {
+    for (size, want) in [(8192, 8192), (u64::from(u32::MAX) + 1, u32::MAX)] {
+        test_env::reset();
+        let t = Transfer {
+            reference: 3,
+            size,
+            ..Transfer::default()
+        };
+        unsafe { banner(std::ptr::null_mut(), &t) };
+        assert_eq!(test_env::BANNER.with(|c| c.get()), Some((3, want)));
+    }
 }
 
 // ---- file_info -------------------------------------------------------------
