@@ -1714,10 +1714,9 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     set_status_bar (sess, 2);
 }
 
-/* "self-updated" — our own access bits / uid were (re)parsed from a
- * SELFINFO reply. Refresh toolbar-button sensitivity, which gates on the
- * access bitmap (kick/ban, etc.). Was an inline setbtns in
- * hx_rcv_user_selfinfo. */
+/* "self-updated" — the server said what our access bits / uid are
+ * (hxhandlers::recv::user). Refresh toolbar-button sensitivity, which gates
+ * on the access bitmap (kick/ban, etc.). */
 static void
 on_self_updated_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                         gpointer user_data)

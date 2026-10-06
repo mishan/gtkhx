@@ -164,16 +164,6 @@ pub(crate) fn forget(htlc: *mut c_void) {
     });
 }
 
-/// `void hx_files_forget (struct htlc_conn *htlc)` — [`forget`], for the
-/// connection closing.
-///
-/// # Safety
-/// Main thread.
-#[no_mangle]
-pub unsafe extern "C" fn hx_files_forget(htlc: *mut c_void) {
-    forget(htlc);
-}
-
 #[cfg(not(test))]
 use gtkhx_core::session::{gtkhx_session_emit_file_list, gtkhx_session_get_default};
 

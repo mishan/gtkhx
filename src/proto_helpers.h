@@ -41,36 +41,6 @@ extern gboolean task_error_extract (const guint8 *frame, gsize frame_len,
                                     char *out, gsize out_size, gsize *out_len);
 
 /*
- * Parse a HTLS_HDR_USER_SELFINFO message from htlc->in into the
- * htlc fields the GUI then reads:
- *
- *   - htlc->access  — 8-byte access bitmap (HTLS_DATA_ACCESS chunk)
- *   - htlc->uid     — our session UID (read from the user-list
- *                     chunk's `uid` field, host-order)
- *   - htlc->icon    — our chat-list icon
- *   - htlc->name    — our display name (NUL-terminated, max 31)
- *
- * Returns the bitwise OR of every chunk type that was actually
- * recognised (e.g. (HX_SELFINFO_ACCESS | HX_SELFINFO_USER_LIST)).
- * Useful for tests asserting "we saw access but not the user-list
- * chunk" against truncated fixtures.
- */
-enum {
-    HX_SELFINFO_ACCESS = 1u << 0,
-    HX_SELFINFO_USER_LIST = 1u << 1,
-    /* Colored-Nicknames extension. The optional HTLS_DATA
-     * _COLOR (0x0500) chunk on SELFINFO carries the server's record
-     * of our own RGB nick color — either the per-account override
-     * from server config, or the default the server assigned us at
-     * login. Caller mirrors it onto htlc->nick_color so subsequent
-     * USER_CHANGE pushes can preserve / override it. */
-    HX_SELFINFO_NICK_COLOR = 1u << 2,
-};
-
-extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame,
-                                   gsize frame_len);
-
-/*
  * HTLS_HDR_BANNER — extract the banner type (4 bytes) and optional
  * URL from the message. Server protocol shape (per mhxd's
  * rcv_agreementagree):

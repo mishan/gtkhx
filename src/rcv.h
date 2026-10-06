@@ -5,8 +5,6 @@ extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len);
 extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame,
                          gsize frame_len);
-extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame,
-                                  gsize frame_len);
 extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame,
                          gsize frame_len);
 extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame,
@@ -61,8 +59,6 @@ extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
                                        const guint8 *frame, gsize frame_len,
                                        void *opcode_ptr, void *cid_ptr);
 
-extern void rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len, struct uesp_fn *uespfn);
 extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame,
                             gsize frame_len, char *pass);
 /* USER_GETLIST, whose reply the session reads (hxhandlers::send::user). */
@@ -86,12 +82,6 @@ extern void rcv_task_icon_set_auto (struct htlc_conn *htlc, const guint8 *frame,
 extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len);
 
-/* rcv_task_user_info is in the hxhandlers Rust crate (recv/user.rs).
- * rcv_task_kick stays C (it logs via the variadic hx_printf_prefix). */
-extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame,
-                           gsize frame_len);
-extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame,
-                                gsize frame_len, guint16 *_uid, int text);
 /* Send what follows the login, on the bridge's LOGIN_READY. Idempotent. */
 extern void hx_post_login_fetches (struct htlc_conn *htlc);
 

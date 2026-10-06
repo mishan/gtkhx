@@ -219,6 +219,7 @@ rust_sources = files(
   'crates/hxrequest/src/lib.rs',
   'crates/hxrequest/src/news.rs',
   'crates/hxrequest/src/path.rs',
+  'crates/hxrequest/src/user.rs',
   'crates/hxhandlers/Cargo.toml',
   'crates/hxmodel/src/lib.rs',
   'crates/hxmodel/src/chat.rs',

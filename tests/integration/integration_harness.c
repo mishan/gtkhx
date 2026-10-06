@@ -127,7 +127,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  *
  * A few low-level helpers still hand-roll connect + magic + LOGIN over a
  * raw blocking socket — integration_open_or_skip / integration_login_guest
- * (test_handshake, test_login, test_user_account) and the C HOPE
+ * (test_handshake, test_login) and the C HOPE
  * step-1/step-2 senders (test_hope_hmac). Those tests call them directly
  * rather than through the orchestrated entry points; retiring that last
  * raw-socket + C-crypto surface is the follow-up that unblocks deleting
@@ -1327,6 +1327,26 @@ integration_open_or_skip (void)
  * integration_harness.h so every Tier 3 test sees them without a
  * link symbol. The harness uses them via the header too. */
 
+/* Our access bits, uid, icon and nick color from the SELFINFO in htlc->in,
+ * each where the server sent it, as the app reads them. The name it has for
+ * us is not taken. */
+static void
+read_selfinfo (struct htlc_conn *htlc)
+{
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
+    {
+        if (_type == HTLS_DATA_ACCESS && _len == 8) {
+            memcpy (&htlc->access, dh->data, 8);
+        } else if (_type == HTLS_DATA_USER_LIST && _len >= 8) {
+            HN16 (&htlc->uid, dh->data);
+            HN16 (&htlc->icon, dh->data + 2);
+        } else if (_type == HTLS_DATA_COLOR && _len == 4) {
+            HN32 (&htlc->nick_color, dh->data);
+        }
+    }
+    dh_end ();
+}
+
 guint32
 integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                                            int max_messages)
@@ -1376,7 +1396,7 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                            && type == HTLS_HDR_TASK && htlc->uid == 0) {
                     /* 1.9-style servers (Janus) carry our own uid in
                      * the TASK login reply (HTLS_DATA_UID), not in the
-                     * SELFINFO that follows — so hx_selfinfo_parse can't
+                     * SELFINFO that follows — so read_selfinfo can't
                      * recover it. Stash it here; the open helpers prefer
                      * the SELFINFO uid (mhxd) and fall back to this. */
                     guint16 v;
@@ -1510,14 +1530,14 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
      * can read its session state directly. */
     /* On Janus the SELFINFO carries no uid (it arrived in the TASK
      * login reply and was stashed during the drain above); preserve
-     * that stashed value when hx_selfinfo_parse can't supply one. */
+     * that stashed value when read_selfinfo can't supply one. */
     guint16 stashed_uid = htlc->uid;
-    hx_selfinfo_parse (htlc, hx_test_in (htlc)->buf, hx_test_in (htlc)->pos);
+    read_selfinfo (htlc);
     if (htlc->uid == 0) {
         htlc->uid = stashed_uid;
     }
 
-    /* hx_selfinfo_parse intentionally does NOT write htlc->name
+    /* read_selfinfo intentionally does NOT write htlc->name
      * (Phase 5 policy: server-supplied nick is display-only and
      * never persisted into the client's name field, to avoid
      * corrupt-bytes-from-cached-server feedback loops). For test
@@ -1621,11 +1641,11 @@ integration_open_login_account_caps_or_skip (
 
     /* On Janus the SELFINFO carries no uid (it arrived in the TASK
      * login reply and was stashed into htlc->uid during the drain);
-     * preserve it across hx_selfinfo_parse, same as the non-caps open
+     * preserve it across read_selfinfo, same as the non-caps open
      * helper. Without this the uid is lost here and any uid-filtered
      * drain (e.g. inline_media's chat_with_media) never matches. */
     guint16 stashed_uid = htlc->uid;
-    hx_selfinfo_parse (htlc, hx_test_in (htlc)->buf, hx_test_in (htlc)->pos);
+    read_selfinfo (htlc);
     if (htlc->uid == 0) {
         htlc->uid = stashed_uid;
     }
@@ -1713,7 +1733,7 @@ integration_open_login_tls_or_skip (const hx_test_server *srv,
         integration_close (fd);
         return -1;
     }
-    hx_selfinfo_parse (htlc, hx_test_in (htlc)->buf, hx_test_in (htlc)->pos);
+    read_selfinfo (htlc);
     if (htlc->name[0] == 0 && display_name && *display_name) {
         g_strlcpy ((char *)htlc->name, display_name, sizeof (htlc->name));
     }
@@ -1848,8 +1868,7 @@ integration_open_login_hope_or_skip (const hx_test_server *srv,
         dh_end ();
 
         if (type == HTLS_HDR_USER_SELFINFO) {
-            hx_selfinfo_parse (htlc, hx_test_in (htlc)->buf,
-                               hx_test_in (htlc)->pos);
+            read_selfinfo (htlc);
             if (htlc->name[0] == 0 && display_name && *display_name) {
                 g_strlcpy ((char *)htlc->name, display_name,
                            sizeof (htlc->name));

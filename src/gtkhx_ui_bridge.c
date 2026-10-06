@@ -27,7 +27,6 @@
 #include "session.h" /* session, hx_htlc_close */
 #include "hxconn.h"
 #include "network.h"   /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
-#include "hotline.h"   /* HTLC_CAP_TEXT_ENCODING */
 #include "gtkhx.h"     /* gtkhx_prefs */
 #include "hl_access.h" /* hl_access_permits, HL_ACCESS_READ_NEWS */
 #include "debug.h"     /* debug_log */
@@ -72,23 +71,6 @@ GtkWidget *
 gtkhx_htlc_chat_window (struct htlc_conn *htlc)
 {
     return sess_from_htlc (htlc)->chat_window;
-}
-
-/* TRUE if the active session has a live connection (fd set). Used by the
- * Rust Broadcast composer to no-op when disconnected. */
-gboolean
-gtkhx_active_connected (void)
-{
-    return hx_conn_fd (hx_active_session ()->htlc) != 0;
-}
-
-/* TRUE if the active session negotiated HTLC_CAP_TEXT_ENCODING (UTF-8 on the
- * wire vs. legacy Mac Roman). The Rust Broadcast sender passes this to
- * gtkhx_text_for_wire. */
-gboolean
-gtkhx_active_text_encoding (void)
-{
-    return hx_conn_has_cap (hx_active_session ()->htlc, HTLC_CAP_TEXT_ENCODING);
 }
 
 /* The queue-downloads pref (gtkhx_prefs.queuedl). The Rust xfers shell's

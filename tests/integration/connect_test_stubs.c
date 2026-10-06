@@ -464,10 +464,10 @@ xfers_delete_on_conn (struct htlc_conn *htlc)
     (void)htlc;
 }
 
-/* Same for the file requests in flight, also hxhandlers'. */
-extern void hx_files_forget (struct htlc_conn *htlc);
+/* Same for the requests in flight, also hxhandlers'. */
+extern void hx_recv_forget (struct htlc_conn *htlc);
 void
-hx_files_forget (struct htlc_conn *htlc)
+hx_recv_forget (struct htlc_conn *htlc)
 {
     (void)htlc;
 }

@@ -40,7 +40,7 @@
  *
  * Body-text matching uses a random marker rather than filtering on
  * htlc->uid because Janus's SELFINFO doesn't ship the USER_LIST
- * chunk that hx_selfinfo_parse reads uid from — Janus's 1.9-style
+ * chunk the harness reads uid from — Janus's 1.9-style
  * flow puts session metadata in the TASK login reply instead. The
  * marker-based filter sidesteps the "where does my uid come from"
  * question entirely; if the marker bytes survive the round-trip

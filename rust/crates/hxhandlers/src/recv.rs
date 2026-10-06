@@ -63,6 +63,16 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         } => chat::history(htlc, *trans, *cid, entries, *has_more),
         Event::UserChanged { cid, user } => user::changed(htlc, *cid, user),
         Event::UserLeft { cid, uid } => user::left(htlc, *cid, *uid),
+        Event::SelfInfo {
+            uid,
+            icon,
+            access,
+            color,
+        } => user::selfinfo(htlc, *uid, *icon, *access, *color),
+        Event::UserInfo { trans, name, info } => user::info(htlc, *trans, name, info),
+        Event::Kicked { .. } => user::kicked(htlc),
+        Event::Account { trans, account } => user::account(htlc, *trans, account),
+        Event::AccountChanged { trans } => user::account_changed(htlc, *trans),
         Event::UserList { users, subject, .. } => user::listed(htlc, users, subject.as_deref()),
         Event::ChatCreated { cid, user, .. } => user::changed(htlc, *cid, user),
         Event::ChatJoined {
@@ -87,13 +97,34 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         Event::Transfer { trans, transfer } => files::transfer(htlc, *trans, transfer),
         Event::TransferQueued { reference, queue } => xfer::queued(htlc, *reference, *queue),
         Event::Failed { trans, reason } => {
-            user::failed(htlc, *trans);
+            let quiet = user::failed(htlc, *trans, reason.as_deref());
             news::failed(htlc, *trans);
             files::failed(htlc, *trans);
-            chat::failed(htlc, *trans, reason.as_deref());
+            chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
         }
         _ => {}
     }
+}
+
+/// Let go of every request `htlc` has in flight: a closed connection gets
+/// no more replies, and a new login numbers its requests afresh.
+///
+/// # Safety
+/// Main thread.
+pub(crate) unsafe fn forget(htlc: *mut c_void) {
+    user::forget(htlc);
+    news::forget(htlc);
+    files::forget(htlc);
+}
+
+/// `void hx_recv_forget (struct htlc_conn *htlc)` — [`forget`], for the
+/// connection closing.
+///
+/// # Safety
+/// Main thread.
+#[no_mangle]
+pub unsafe extern "C" fn hx_recv_forget(htlc: *mut c_void) {
+    forget(htlc);
 }
 
 #[cfg(test)]

@@ -17,102 +17,15 @@
  */
 
 /*
- * usermod.c — protocol send-path for account create / delete / read, plus
- * the access-bit name table. The User Editor UI itself is ported to Rust
- * (gtkhx-ui crate, useredit.rs); it calls the wire senders below and reads
- * the access table via the gtkhx_useredit_access_* accessors. The
- * byte-order-dependent bit numbering (the ENTRY macro) deliberately stays
- * in C.
+ * usermod.c — the access-bit name table. The User Editor is Rust
+ * (gtkhx-ui crate, useredit.rs), and reads the table through the
+ * gtkhx_useredit_access_* accessors. The byte-order-dependent bit
+ * numbering (the ENTRY macro) deliberately stays in C.
  */
 
 #include "config.h"
-#include <string.h>
 #include <glib.h>
-#include "hx.h"
-#include "hotline_proto.h"
-#include "network.h"
-#include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
-#include "tasks.h"
-#include "rcv.h"
 #include "usermod.h"
-
-void
-hx_useredit_create (struct htlc_conn *htlc, const char *login, const char *pass,
-                    const char *name, hl_access_bits access)
-{
-    char elogin[32], epass[32];
-    guint16 llen, plen;
-
-    llen = strlen (login);
-    hl_encode (elogin, login, llen);
-    /* Empty-password convention: a single 0x00 byte (NOT a zero-length
-     * field). The Rust builder accepts the byte buffer as-is. */
-    if (!*pass) {
-        plen = 1;
-        epass[0] = 0;
-    } else {
-        plen = strlen (pass);
-        hl_encode (epass, pass, plen);
-    }
-
-    /* chunk layout moved to gtkhx_proto_build_account_modify
-     * _chunks. Build BEFORE task_new — task_new reserves a trans for
-     * a pending entry; a builder failure must not leave a phantom
-     * "user create" task in the task table. */
-    struct hx_chunk chunks[4];
-    guint8 scratch[8];
-    int hc = (int)gtkhx_proto_build_account_modify_chunks (
-        (const uint8_t *)elogin, llen, (const uint8_t *)epass, plen,
-        (const uint8_t *)name, strlen (name), (const uint8_t *)&access, chunks,
-        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
-    if (hc > 0) {
-        task_new (htlc, 0, 0, 0, "user create");
-        hlwrite_chunks (htlc, HTLC_HDR_ACCOUNT_MODIFY, 0, chunks, hc);
-    }
-}
-
-void
-hx_useredit_delete (struct htlc_conn *htlc, const char *login)
-{
-    char elogin[32];
-    guint16 llen;
-
-    llen = strlen (login);
-    hl_encode (elogin, login, llen);
-
-    /* chunk layout moved to gtkhx_proto_build_account_delete
-     * _chunks. Same build-before-task ordering as hx_useredit_create. */
-    struct hx_chunk chunks[1];
-    int hc = (int)gtkhx_proto_build_account_delete_chunks (
-        (const uint8_t *)elogin, llen, chunks, G_N_ELEMENTS (chunks));
-    if (hc > 0) {
-        task_new (htlc, 0, 0, 0, "user delete");
-        hlwrite_chunks (htlc, HTLC_HDR_ACCOUNT_DELETE, 0, chunks, hc);
-    }
-}
-
-void
-hx_useredit_open (struct htlc_conn *htlc, const char *login,
-                  void (*fn) (void *, const char *, const char *, const char *,
-                              const hl_access_bits),
-                  void *uesp)
-{
-    /* chunk layout moved to gtkhx_proto_build_account_read
-     * _chunks. Note the C call site passes login UNENCODED (a
-     * deliberate mhxd convention — READ takes a raw login, MODIFY /
-     * DELETE take an hl_encoded one). */
-    struct hx_chunk chunks[1];
-    int hc = (int)gtkhx_proto_build_account_read_chunks (
-        (const uint8_t *)login, strlen (login), chunks, G_N_ELEMENTS (chunks));
-    if (hc > 0) {
-        struct uesp_fn *uespfn = g_malloc (sizeof (struct uesp_fn));
-        uespfn->uesp = uesp;
-        uespfn->fn = fn;
-        task_new (htlc, RCV_TASK_FN (rcv_task_user_open), uespfn, 0,
-                  "user open");
-        hlwrite_chunks (htlc, HTLC_HDR_ACCOUNT_READ, 0, chunks, hc);
-    }
-}
 
 /* Access-bit name table. Sentinels (bitno == -1) are section headers.
  * The ENTRY macro maps a spec bit index to its position in the 64-bit

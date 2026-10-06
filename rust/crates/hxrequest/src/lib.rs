@@ -10,6 +10,7 @@
 pub mod files;
 pub mod news;
 pub mod path;
+pub mod user;
 
 use hxproto::build::{HxChunk, PackChunk};
 

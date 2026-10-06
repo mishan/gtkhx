@@ -359,16 +359,6 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
                            bm.has_url ? bm.url : NULL);
 }
 
-/* hx_rcv_user_selfinfo (HTLS_HDR_USER_SELFINFO) is a #[no_mangle] fn in the
- * hxhandlers::recv::user module (rust/crates/hxhandlers/src/recv/user.rs): it calls hx_selfinfo_parse
- * (proto_helpers.c chunk walker → htlc access/uid/icon), flips the logged-in
- * flag (SELFINFO is the canonical login-complete signal the agreement Agree
- * button reads), and emits self-updated via hx_selfinfo_recv so the view
- * refreshes toolbar sensitivity. Post-login fetches are deliberately NOT fired
- * here — in the 1.5 flow SELFINFO precedes the agreement, so USER_GETLIST / news
- * wait for the session's LOGIN_READY, after AGREEMENTAGREE. The dispatch switch
- * below calls it by name (declared in rcv.h); no C body remains here. */
-
 void
 hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
@@ -846,9 +836,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     case HX_RECV_TASK:
         handler = hx_rcv_task;
         break;
-    case HX_RECV_USER_SELFINFO:
-        handler = hx_rcv_user_selfinfo;
-        break;
     case HX_RECV_AGREEMENT:
         handler = hx_rcv_agreement_file;
         break;
@@ -884,34 +871,6 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     if (handler && hx_conn_fd (htlc) != 0) {
         handler (htlc, frame, frame_len);
     }
-}
-
-void
-rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
-                    gsize frame_len, struct uesp_fn *uespfn)
-{
-    char name[32], login[32], pass[32];
-    hl_access_bits access;
-
-    /* chunk-walk + hl_decode (XOR-0xff) of LOGIN /
-     * PASSWORD moved to the Rust hxproto crate's
-     * parse_account_read. The PASSWORD no-password sentinel
-     * (single 0x00 byte, or empty) is preserved by the Rust
-     * parser — pass_len = 0 in that case, and the C buffer stays
-     * NUL-terminated at offset 0. */
-    struct gtkhx_proto_account_read ar;
-    bool ok = gtkhx_proto_parse_account_read (
-        frame, frame_len, (uint8_t *)name, sizeof (name), (uint8_t *)login,
-        sizeof (login), (uint8_t *)pass, sizeof (pass), &ar);
-    if (ok && ar.got_access) {
-        /* ACCESS lands in ar.access as raw 8 wire bytes; copy into
-         * the typed hl_access_bits exactly as the C extractor did
-         * (memcpy preserves byte order on this struct, which the
-         * server's access bitmap is). */
-        memcpy (&access, ar.access, sizeof (access));
-        uespfn->fn (uespfn->uesp, name, login, pass, access);
-    }
-    g_free (uespfn);
 }
 
 void
@@ -1142,14 +1101,4 @@ hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame,
                     gsize frame_len)
 {
     hx_icon_change_recv (htlc, frame, frame_len);
-}
-
-void
-rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    if (task_inerror (htlc, frame, frame_len)) {
-        return;
-    }
-
-    hx_printf_prefix (htlc, 0, INFOPREFIX, "%s\n", _ ("kick successful"));
 }

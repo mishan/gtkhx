@@ -36,7 +36,7 @@
  *
  * Match-by-name (not UID): the harness doesn't extract our session
  * UID from Janus's LOGIN TASK reply (Janus's SELFINFO omits the
- * USER_LIST chunk hx_selfinfo_parse normally reads UID from). The
+ * USER_LIST chunk the harness normally reads UID from). The
  * name is something we know up-front and the server preserves
  * round-trip, so matching by name is robust without a uid-discovery
  * dance.

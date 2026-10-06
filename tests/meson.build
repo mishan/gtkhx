@@ -30,9 +30,8 @@ test_deps = [
 # compress.h pull in any C cipher library. No nettle dependency here.
 proto_test_deps = test_deps + [
   # Phase R2: src/proto_helpers.c (compiled into most proto tests)
-  # now calls into the Rust hxproto crate for the SELFINFO
-  # parse, so every test that links proto_helpers.c needs the
-  # staticlib. Harmless for the few proto tests that don't reference
+  # calls into the Rust hxproto crate's gtkhx_proto_* parsers, so
+  # every test that links proto_helpers.c needs the staticlib. Harmless for the few proto tests that don't reference
   # the symbol — the linker drops the unused archive members.
   rust_hxproto_dep,
   # Phase R3.0: src/gtkhx_session.c::gtkhx_session_emit_task_update
@@ -595,23 +594,6 @@ test_task_error = executable('test_task_error',
   link_depends        : rust_build,
 )
 test('task_error', test_task_error,
-     suite : 'proto')
-
-# selfinfo — hx_selfinfo_parse extracts the access bitmap, UID, icon,
-# and display name from a HTLS_HDR_USER_SELFINFO payload. The Phase
-# 5 post-login state machine fires off USER_GETLIST + news on this
-# message, so getting the parse wrong means downstream gating
-# (READ_NEWS, DISCONNECT_USERS) compares against the wrong values.
-test_selfinfo = executable('test_selfinfo',
-  'proto/test_selfinfo.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('selfinfo', test_selfinfo,
      suite : 'proto')
 
 # chat — finding the speaker's nick in a received line, and matching
@@ -1295,47 +1277,6 @@ test_integration_gif_icons = executable('test_integration_gif_icons',
 test('gif_icons', test_integration_gif_icons,
      suite   : 'integration',
      timeout : 30)
-
-# user_info — HTLC_HDR_USER_GETINFO for our own session. Verifies
-# the TASK reply carries HTLS_DATA_USER_INFO + HTLS_DATA_NAME and
-# the info text mentions our login.
-test_integration_user_info = executable('test_integration_user_info',
-  'integration/test_user_info.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('user_info', test_integration_user_info,
-     suite   : 'integration',
-     timeout : 30)
-
-# user_account — full ACCOUNT_MODIFY / ACCOUNT_READ / ACCOUNT_DELETE
-# lifecycle exercising the wire format src/usermod.c's New User /
-# Edit User / Delete dialog flows produce. Logs in as `admin` (the
-# upstream mhxd default with no password and full access bits) and
-# round-trips a synthesised account through create → read → modify →
-# read → delete → read-fails. A fourth subtest pins down the access-
-# bit serialisation specifically — the regression net for the
-# useredit_chk_activate signature bug that left every newly-created
-# account with an all-zero access mask.
-#
-# Not parallelised against other Tier 3 tests because it logs in as
-# `admin` and mutates the server's accounts directory; concurrent
-# tests against the same login or against the same synthesized
-# account names would race. Each subtest's account name has a
-# per-process random suffix so concurrent meson runs don't collide.
-test_integration_user_account = executable('test_integration_user_account',
-  'integration/test_user_account.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('user_account', test_integration_user_account,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 30)
 
 # nick_colors — Tier 3 coverage for the Colored-Nicknames extension.
 # Two subtests:

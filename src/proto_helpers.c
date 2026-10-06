@@ -32,7 +32,6 @@
 #include "proto_helpers.h"
 #include "hotline_proto.h"
 #include "text_util.h"
-#include "debug.h"
 
 gboolean
 task_error_extract (const guint8 *frame, gsize frame_len, char *out,
@@ -80,63 +79,6 @@ hx_banner_extract (const guint8 *frame, gsize frame_len,
     out->url_len = b.url_len;
 
     return got_type ? TRUE : FALSE;
-}
-
-unsigned
-hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* the chunk walk moved to the Rust hxproto crate
-     * (gtkhx_proto_parse_selfinfo). The crate enforces the same
-     * field-length gates the C code did (ACCESS exactly 8, USER_LIST
-     * >= 8 fixed bytes, COLOR exactly 4) and clamps the cached name to
-     * 31 bytes. The behavioural nuances this handler grew in Phase 5
-     * are preserved on the C side here:
-     *
-     *   - htlc->uid / icon come from the USER_LIST chunk. This is the
-     *     fix for the old self-aliasing HN16(&htlc->uid, &htlc->uid)
-     *     bug; the crate reads the wire uid out of the record
-     *     explicitly (see gtkhx_selfinfo_uid_bug.md in memory).
-     *   - hx_conn_name (htlc) is deliberately NOT overwritten with the server's
-     *     cached nick. Local prefs win, to avoid the corrupt-nick
-     *     feedback loop documented in hx_rcv_user_selfinfo (server
-     *     caches our nick by IP and echoes back whatever a previous
-     *     broken client left). We only log the cached bytes under
-     *     category 'name' for forensics.
-     *   - htlc->nick_color mirrors the server's view; network.c
-     *     re-seeds it from prefs and pushes a USER_CHANGE after
-     *     AGREEMENTAGREE, so the local value still wins.
-     *     HX_NICK_COLOR_NONE passes through verbatim. */
-    struct gtkhx_proto_selfinfo si;
-    unsigned seen = gtkhx_proto_parse_selfinfo (frame, frame_len, &si);
-
-    if (seen & HX_SELFINFO_ACCESS) {
-        hx_conn_set_access (htlc, si.access);
-    }
-    if (seen & HX_SELFINFO_USER_LIST) {
-        hx_conn_set_uid (htlc, si.uid);
-        hx_conn_set_icon (htlc, si.icon);
-        if (si.cached_name_len) {
-            GString *hex = g_string_new (NULL);
-            for (gsize i = 0; i < si.cached_name_len; i++) {
-                if (i) {
-                    g_string_append_c (hex, ' ');
-                }
-                g_string_append_printf (hex, "%02x",
-                                        (unsigned)si.cached_name_ptr[i]);
-            }
-            debug_log ("name",
-                       "SELFINFO USER_LIST cached name ignored "
-                       "(nlen=%u hex=[%s]) — local prefs nick wins; "
-                       "will push via USER_CHANGE",
-                       (unsigned)si.cached_name_len, hex->str);
-            g_string_free (hex, TRUE);
-        }
-    }
-    if (seen & HX_SELFINFO_NICK_COLOR) {
-        hx_conn_set_nick_color (htlc, si.nick_color);
-    }
-
-    return seen;
 }
 
 gboolean

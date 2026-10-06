@@ -273,3 +273,26 @@ fn connect_state_is_cleared_by_a_reset() {
         hx_conn_free(h);
     }
 }
+
+/// A new transport is a new connect; losing one is not, and neither is
+/// another connection's.
+#[test]
+fn each_connect_is_a_new_generation() {
+    unsafe {
+        let (a, b) = (hx_conn_new(), hx_conn_new());
+        let handle = std::ptr::dangling_mut::<c_void>();
+        assert_eq!(generation(a), 0);
+        hx_conn_set_bridge_handle(a, handle);
+        let first = generation(a);
+        assert_ne!(first, 0);
+        hx_conn_set_bridge_handle(a, std::ptr::null_mut());
+        hx_conn_set_bridge_handle(b, handle);
+        assert_eq!(generation(a), first);
+        hx_conn_set_bridge_handle(a, handle);
+        assert_ne!(generation(a), first);
+        hx_conn_set_bridge_handle(a, std::ptr::null_mut());
+        hx_conn_set_bridge_handle(b, std::ptr::null_mut());
+        hx_conn_free(a);
+        hx_conn_free(b);
+    }
+}

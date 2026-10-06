@@ -373,42 +373,7 @@ fn part_of_non_member_is_ignored() {
     assert_eq!(test_env::take(), None);
 }
 
-#[test]
-fn user_info_publishes_the_pair() {
-    test_env::reset();
-    let name = CString::new("Bob").unwrap();
-    let info = CString::new("hello there").unwrap();
-    unsafe { hx_user_info_recv(std::ptr::null_mut(), 11, name.as_ptr(), info.as_ptr(), 11) };
-    assert_eq!(
-        test_env::take(),
-        Some(Emit::Info {
-            uid: 11,
-            name: b"Bob".to_vec(),
-            info: b"hello there".to_vec(),
-            len: 11,
-        })
-    );
-}
-
-#[test]
-fn selfinfo_emits_self_updated() {
-    test_env::reset();
-    unsafe { hx_selfinfo_recv(std::ptr::null_mut()) };
-    assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
-}
-
-#[test]
-fn rcv_selfinfo_parses_marks_logged_in_then_emits() {
-    // The full SELFINFO handler: parse the frame, flip logged-in, emit.
-    test_env::reset();
-    let frame = [0u8; 8];
-    unsafe { hx_rcv_user_selfinfo(std::ptr::null_mut(), frame.as_ptr(), frame.len()) };
-    assert!(test_env::SELFINFO_PARSED.with(|c| c.get()));
-    assert_eq!(test_env::LOGGED_IN.with(|c| c.get()), 1);
-    assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
-}
-
-// ---- user lists, joins, a new chat, user info ------------------------------
+// ---- user lists, joins, a new chat -----------------------------------------
 
 /// A sentinel chat pointer (the doubles ignore its value).
 const FAKE_CHAT_PTR: *mut c_void = 0x2 as *mut c_void;
@@ -543,9 +508,9 @@ fn a_refused_join_drops_only_a_chat_nothing_shows() {
         test_env::MEMBERS.with(|c| c.set(members));
         let h = std::ptr::dangling_mut();
         join_requested(h, 8, 9);
-        unsafe { failed(h, 7) }; // not the join's
+        unsafe { failed(h, 7, None) }; // not the join's
         assert!(!test_env::CHAT_DELETED.with(|c| c.get()));
-        unsafe { failed(h, 8) };
+        unsafe { failed(h, 8, None) };
         assert_eq!(test_env::CHAT_DELETED.with(|c| c.get()), dropped);
     }
 }
@@ -561,142 +526,154 @@ fn us_in_a_new_chat_makes_the_chat_but_not_our_row() {
     assert_eq!(test_env::take(), None);
 }
 
-fn push_chunk(v: &mut Vec<u8>, tag: u16, data: &[u8]) {
-    v.extend_from_slice(&tag.to_be_bytes());
-    v.extend_from_slice(&(data.len() as u16).to_be_bytes());
-    v.extend_from_slice(data);
-}
+// ---- what the server says about us, a user's info, a kick, an account -----
 
-/// A wire frame: 22-byte header (type + zeroed trans/flag/len/len2/hc)
-/// followed by TLV chunks — the shape the reply handlers receive.
-fn frame(msg_type: u32, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.extend_from_slice(&msg_type.to_be_bytes());
-    v.extend_from_slice(&[0u8; 18]);
-    for (tag, data) in chunks {
-        push_chunk(&mut v, *tag, data);
+#[test]
+fn self_info_folds_in_only_what_the_server_said() {
+    let cases = [
+        (None, None, Some(0x0102), None, (9, 8, 7)),
+        (Some(1), Some(2), None, Some(0x112233), (1, 2, 0x112233)),
+    ];
+    for (uid, icon, access, color, (want_uid, want_icon, want_color)) in cases {
+        test_env::reset();
+        test_env::SELF_UID.with(|c| c.set(9));
+        test_env::SELF_ICON.with(|c| c.set(8));
+        test_env::SELF_NICK_COLOR.with(|c| c.set(7));
+        unsafe { selfinfo(std::ptr::null_mut(), uid, icon, access, color) };
+        assert_eq!(
+            test_env::ACCESS.with(|c| c.get()),
+            access.map(u64::to_be_bytes)
+        );
+        assert_eq!(test_env::SELF_UID.with(|c| c.get()), want_uid);
+        assert_eq!(test_env::SELF_ICON.with(|c| c.get()), want_icon);
+        assert_eq!(test_env::SELF_NICK_COLOR.with(|c| c.get()), want_color);
+        // It says we are logged in, and the toolbar hears of it.
+        assert_eq!(test_env::LOGGED_IN.with(|c| c.get()), 1);
+        assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
     }
-    v
 }
 
+const CONN_A: *mut c_void = 0x10 as *mut c_void;
+const CONN_B: *mut c_void = 0x20 as *mut c_void;
+
 #[test]
-fn user_info_publishes_when_both_present() {
-    use hxproto::messages::tag;
+fn user_info_goes_to_the_user_asked_of_once_on_its_connection() {
     test_env::reset();
-    let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
-    let f = frame(
-        0,
-        &[
-            (tag::NAME, b"Alice".to_vec()),
-            (tag::BODY, b"info text".to_vec()),
-        ],
-    );
+    asked(CONN_A, 7, Asked::Info(11));
     unsafe {
-        rcv_task_user_info(
-            std::ptr::null_mut(),
-            f.as_ptr(),
-            f.len(),
-            uid_box,
-            std::ptr::null_mut(),
-        )
-    };
+        info(CONN_B, 7, "Alice", "idle");
+        info(CONN_A, 8, "Alice", "idle");
+    }
+    assert_eq!(test_env::take(), None);
+    // The text ends at its first NUL, and so does the length it goes with.
+    unsafe { info(CONN_A, 7, "Alice", "ab\0cd") };
     assert_eq!(
         test_env::take(),
         Some(Emit::Info {
             uid: 11,
             name: b"Alice".to_vec(),
-            info: b"info text".to_vec(),
-            len: 9,
+            info: b"ab".to_vec(),
+            len: 2,
         })
     );
-}
-
-/// A BODY carrying an interior NUL is truncated at the NUL (C-string
-/// semantics), and the emitted len must match the truncated buffer — not the
-/// full wire length — so a downstream length-aware reader can't run past it.
-#[test]
-fn user_info_body_interior_nul_truncates_len() {
-    use hxproto::messages::tag;
-    test_env::reset();
-    let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
-    let f = frame(
-        0,
-        &[
-            (tag::NAME, b"Alice".to_vec()),
-            (tag::BODY, b"ab\0cd".to_vec()),
-        ],
-    );
-    unsafe {
-        rcv_task_user_info(
-            std::ptr::null_mut(),
-            f.as_ptr(),
-            f.len(),
-            uid_box,
-            std::ptr::null_mut(),
-        )
-    };
-    assert_eq!(
-        test_env::take(),
-        Some(Emit::Info {
-            uid: 11,
-            name: b"Alice".to_vec(),
-            info: b"ab".to_vec(), // truncated at the interior NUL
-            len: 2,               // matches info_c, not the full wire length (5)
-        })
-    );
-}
-
-#[test]
-fn user_info_dropped_when_info_empty() {
-    use hxproto::messages::tag;
-    test_env::reset();
-    let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
-    let f = frame(0, &[(tag::NAME, b"Alice".to_vec())]); // no BODY → gate fails
-    unsafe {
-        rcv_task_user_info(
-            std::ptr::null_mut(),
-            f.as_ptr(),
-            f.len(),
-            uid_box,
-            std::ptr::null_mut(),
-        )
-    };
+    unsafe { info(CONN_A, 7, "Alice", "idle") };
     assert_eq!(test_env::take(), None);
 }
 
-// ---- Mac Roman user-info text ---------------------------------------------
-
 #[test]
-fn user_info_text_is_decoded_from_mac_roman() {
-    // Hotline text is Mac Roman on the wire; undecoded, it draws mojibake.
-    //
-    // 0xD5 is a right single quote in Mac Roman and is not valid UTF-8 alone,
-    // so it stands in for the whole class.
-    let wire = b"Jo\xd5s";
-    let got = unsafe { super::cstring_wire_text(wire) };
-    let text = got.to_str().expect("decoded text must be valid UTF-8");
-    assert_eq!(text, "Jo\u{2019}s");
+fn user_info_without_a_name_or_text_shows_nothing() {
+    for (name, text) in [("", "idle"), ("Alice", ""), ("\0Alice", "idle")] {
+        test_env::reset();
+        asked(CONN_A, 1, Asked::Info(11));
+        unsafe { info(CONN_A, 1, name, text) };
+        assert_eq!(test_env::take(), None, "{name:?} {text:?}");
+    }
 }
 
 #[test]
-fn user_info_text_in_utf8_passes_through_untouched() {
-    // Servers that advertise CAP_TEXT_ENCODING send UTF-8, and double-decoding
-    // one would be its own mojibake bug.
-    let wire = "Jo\u{2019}s".as_bytes();
-    let got = unsafe { super::cstring_wire_text(wire) };
-    assert_eq!(got.to_str().unwrap(), "Jo\u{2019}s");
+fn what_a_connection_asked_goes_when_it_is_forgotten_or_refused() {
+    test_env::reset();
+    asked(CONN_A, 1, Asked::Info(11));
+    asked(CONN_A, 2, Asked::Info(12));
+    asked(CONN_B, 1, Asked::Info(13));
+    forget(CONN_A);
+    unsafe {
+        failed(CONN_B, 1, Some("no"));
+        info(CONN_A, 1, "Alice", "idle");
+        info(CONN_A, 2, "Alice", "idle");
+        info(CONN_B, 1, "Alice", "idle");
+    }
+    assert_eq!(test_env::take(), None);
 }
 
 #[test]
-fn user_info_text_still_truncates_at_an_interior_nul() {
-    // The old extractor terminated there, and a server that pads a fixed-width
-    // field with NULs would otherwise show them as trailing characters.
-    let got = unsafe { super::cstring_wire_text(b"bob\0\0\0") };
-    assert_eq!(got.to_str().unwrap(), "bob");
+fn an_account_fills_the_editor_that_asked_when_it_has_access_bits() {
+    let account = |access| Account {
+        login: b"ren\x8e".to_vec(),
+        name: b"Ren\x8e".to_vec(),
+        password: Vec::new(),
+        access,
+    };
+    for access in [None, Some(0x8000_0000_0000_0001)] {
+        let filled = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let into = filled.clone();
+        asked(
+            CONN_A,
+            3,
+            Asked::Account(Box::new(move |a: &Account| {
+                *into.borrow_mut() = Some(a.clone())
+            })),
+        );
+        unsafe { super::account(CONN_A, 3, &account(access)) };
+        assert_eq!(*filled.borrow(), access.map(|_| account(access)));
+        // Answered once.
+        unsafe { super::account(CONN_A, 3, &account(Some(0))) };
+        assert_eq!(*filled.borrow(), access.map(|_| account(access)));
+    }
 }
 
 #[test]
-fn empty_user_info_text_is_empty_rather_than_a_failure() {
-    let got = unsafe { super::cstring_wire_text(b"") };
-    assert_eq!(got.to_str().unwrap(), "");
+fn a_kick_that_worked_is_said_in_the_public_chat() {
+    test_env::reset();
+    unsafe { kicked(CONN_A) };
+    assert_eq!(
+        take_notice(),
+        Some(test_env::Notice {
+            cid: 0,
+            kind: HX_USER_NOTICE_KICKED,
+            name: Vec::new(),
+            old_name: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn an_account_counts_as_made_only_once_the_server_says_so() {
+    let made = std::rc::Rc::new(std::cell::Cell::new(0));
+    let ask = |trans| {
+        let made = made.clone();
+        asked(
+            CONN_A,
+            trans,
+            Asked::Made(Box::new(move |ok| {
+                if ok {
+                    made.set(made.get() + 1)
+                }
+            })),
+        );
+    };
+    ask(1);
+    ask(2);
+    unsafe {
+        // Refused: the window makes it again on its next Save.
+        failed(CONN_A, 1, Some("no"));
+        account_changed(CONN_A, 1);
+        account_changed(CONN_B, 2);
+    }
+    assert_eq!(made.get(), 0);
+    unsafe {
+        account_changed(CONN_A, 2);
+        account_changed(CONN_A, 2);
+    }
+    assert_eq!(made.get(), 1);
 }
