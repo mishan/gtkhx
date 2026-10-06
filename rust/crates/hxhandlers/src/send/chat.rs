@@ -6,8 +6,8 @@
 //! room-management opcodes. Each one: encodes any text body for the wire
 //! (via `gtkhx_text_for_wire`, the hxtext crate), builds the chunks with the
 //! **native** `hxproto::build` builders (not the C-ABI
-//! `gtkhx_proto_build_*` shims — the whole build flow is Rust), registers a
-//! reply task where the C original did, and hands the chunks to
+//! `gtkhx_proto_build_*` shims — the whole build flow is Rust), expects the
+//! reply (`expect_next`) where one comes, and hands the chunks to
 //! `hlwrite_chunks`. Exports the exact `hx_send_chat` / `hx_chat_*` /
 //! `hx_invite_user` / `hx_part_chat` / `hx_reject_chat` / `hx_change_subject`
 //! C ABI so every caller (toolbar.c, users.c, the chat input handler, the
@@ -105,7 +105,7 @@ pub(super) unsafe fn with_wire<R>(
 }
 
 /// `void hx_send_chat(struct htlc_conn *htlc, char *str, guint32 cid,
-/// guint16 style)` — public (cid 0) or private chat line. No reply task.
+/// guint16 style)` — public (cid 0) or private chat line. No reply expected.
 ///
 /// # Safety
 /// `htlc` is NULL or a valid `htlc_conn *`; `str` is a NUL-terminated C string
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn hx_chat_join(htlc: *mut c_void, cid: u32) {
 }
 
 /// `void hx_part_chat(struct htlc_conn *htlc, guint32 cid)` — leave chat `cid`
-/// (CHAT_PART; no task). Bails if the cid isn't known (UI-close / server
+/// (CHAT_PART; no reply expected). Bails if the cid isn't known (UI-close / server
 /// chat-delete race).
 ///
 /// # Safety
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn hx_part_chat(htlc: *mut c_void, cid: u32) {
 }
 
 /// `void hx_reject_chat(struct htlc_conn *htlc, guint32 cid)` — decline a
-/// pending chat invitation for `cid` (CHAT_DECLINE; no task). No membership
+/// pending chat invitation for `cid` (CHAT_DECLINE; no reply expected). No membership
 /// lookup: declining an invite is valid for a cid we never joined, so unlike
 /// `hx_part_chat` there's nothing to find in the chat registry.
 ///
@@ -299,7 +299,7 @@ pub unsafe extern "C" fn hx_reject_chat(htlc: *mut c_void, cid: u32) {
 }
 
 /// `void hx_change_subject(struct htlc_conn *htlc, guint32 cid, char *subject)`
-/// — set chat `cid`'s subject (CHAT_SUBJECT; no task). Single-line field, so
+/// — set chat `cid`'s subject (CHAT_SUBJECT; no reply expected). Single-line field, so
 /// `is_body = FALSE` (no LF→CR).
 ///
 /// # Safety

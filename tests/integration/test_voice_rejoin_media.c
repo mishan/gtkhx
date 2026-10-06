@@ -328,10 +328,10 @@ dispatch_frame (voice_client *c)
 
     if (type == HTLS_HDR_TASK && c->join_trans != 0 && trans == c->join_trans) {
         /* JOIN reply — carries the server's initial SDP offer AND the
-         * participants blob. Mirror rcv.c's hx_rcv_task join-reply path
-         * exactly: feed room_status (ParticipantsUpdated) BEFORE the
-         * offer, so the mid_to_user cache is populated before the answer
-         * walk, same ordering as production. */
+         * participants blob. Mirror the join-reply path in
+         * hxhandlers::voice exactly: feed room_status (ParticipantsUpdated)
+         * BEFORE the offer, so the mid_to_user cache is populated before
+         * the answer walk, same ordering as production. */
         c->join_trans = 0;
         feed_room_status (c);
         feed_sdp_offer (c);

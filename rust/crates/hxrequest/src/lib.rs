@@ -3,10 +3,11 @@
 //! Each builder takes what the user asked for (a path, a name, whether the
 //! connection negotiated UTF-8) and returns the [`Request`] the client puts on
 //! the wire: its opcode and its chunks, byte for byte. The production senders
-//! wrap them with the task registration and the send; the end-to-end suite
+//! wrap them with the reply's expectation and the send; the end-to-end suite
 //! sends the same values to real servers. Neither the builders nor anything
 //! they call reaches into C, which is what lets that suite link them.
 
+pub mod chat;
 pub mod files;
 pub mod icon;
 pub mod media;

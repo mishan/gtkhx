@@ -24,7 +24,7 @@ use super::{dialogs, dnd};
 use crate::tr::{tr, trc, trn_argv};
 
 extern "C" {
-    /// `tasks_bridge.c` — the session a connection belongs to.
+    /// gtkhx-core — the session a connection belongs to.
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     fn hx_htxf_total_pos(p: *const c_void) -> u64;
 }

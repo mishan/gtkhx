@@ -132,7 +132,7 @@ fn send_chat_public_omits_chat_id() {
     assert_eq!(s.chunks[0].1, vec![0, 0]); // style 0, u16 BE
     assert_eq!(s.chunks[1].0, TAG_BODY);
     assert_eq!(s.chunks[1].1, b"hello");
-    // No reply task for a chat line.
+    // No reply expected for a chat line.
 }
 
 #[test]
@@ -196,8 +196,8 @@ fn invite_says_its_reply_is_expected_before_it_goes() {
 
 #[test]
 fn null_htlc_is_no_op() {
-    // A NULL htlc must short-circuit every sender before task_new/hlwrite_chunks
-    // (which dereference it on the C side).
+    // A NULL htlc must short-circuit every sender before hlwrite_chunks (which
+    // dereferences it on the C side).
     reset(true, 0xABC);
     let body = cstr("hi");
     let subj = cstr("s");

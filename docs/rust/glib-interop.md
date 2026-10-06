@@ -72,7 +72,7 @@ or Rust code.
 
 ```rust
 let handle = unsafe { hxbridge::session_from_ptr_full(ptr) };
-handle.emit_by_name_with_values("task-update", &[v0, v1]);
+handle.emit_by_name_with_values("xfer-destroyed", &[v0, v1]);
 // `handle` drops here; the ref it took is released.
 ```
 

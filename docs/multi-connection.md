@@ -210,7 +210,7 @@ tables are keyed on those with no connection dimension:
   different servers, so matching mentions against the focused connection's
   nickname both missed real ones and invented others.
 
-By contrast `sess->chats`, `sess->tasks`, `sess->msg_windows` and the voice
+By contrast `sess->chats`, `sess->msg_windows` and the voice
 model are already per-session and need nothing. It is only the flat indexes.
 
 **What supplies the connection dimension.** `hx_conn_serial()` — a small

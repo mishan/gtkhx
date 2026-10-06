@@ -23,6 +23,8 @@ hxnet = { path = "../hxnet" }
 hxproto = { workspace = true }
 hxrequest = { path = "../hxrequest" }
 hxsession = { workspace = true }
+# The ciphers a HOPE login offers.
+hxhope = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
@@ -34,5 +36,3 @@ hxtext = { path = "../hxtext", default-features = false }
 glib = { workspace = true }
 # Pictures to send as inline media.
 png = "0.18.1"
-# The ciphers a HOPE login offers.
-hxhope = { workspace = true }

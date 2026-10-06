@@ -23,6 +23,8 @@ pub enum Cap {
     Voice,
     /// Video, over voice (`HTLC_CAP_VIDEO`), open to the guest.
     Video,
+    /// Logs the guest in over HOPE with this cipher.
+    Hope(hxhope::Cipher),
 }
 
 #[derive(Debug)]
@@ -54,7 +56,11 @@ pub const SERVERS: &[Server] = &[
         xfer_port: 5501,
         // mhxd ships `admin` with no password and every access bit.
         admin: "admin",
-        caps: &[Cap::FileAdmin, Cap::GifIcons],
+        caps: &[
+            Cap::FileAdmin,
+            Cap::GifIcons,
+            Cap::Hope(hxhope::Cipher::Blowfish),
+        ],
         every: true,
     },
     Server {
@@ -73,6 +79,8 @@ pub const SERVERS: &[Server] = &[
             Cap::InlineMedia,
             Cap::Voice,
             Cap::Video,
+            Cap::Hope(hxhope::Cipher::ChaCha20Poly1305),
+            Cap::Hope(hxhope::Cipher::Blowfish),
         ],
         every: true,
     },

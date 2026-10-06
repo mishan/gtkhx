@@ -98,7 +98,7 @@ use gtkhx_core::session::{
 
 #[cfg(not(test))]
 extern "C" {
-    /// The session owning this htlc (tasks_bridge.c).
+    /// The session owning this htlc (gtkhx-core).
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     /// gtkhx_ui_bridge.c — the queue-downloads pref (xfer_new's inline-vs-queue).
     fn hx_prefs_queuedl() -> c_int;

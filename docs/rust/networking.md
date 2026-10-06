@@ -60,9 +60,9 @@ LoginSending → LoginReplyWait → HandshakeDone → LoginReady.
 The session numbers every transaction on the connection, C's included,
 from one counter. Its own are the login (HOPE's two steps, on 1 and 2),
 the agreement, a 1.2 server's user change and the keep-alive. A C
-request takes its trans from the session when its task is keyed
-(`task_new`, through `hxnet_connection_take_trans`), and the send that
-follows goes out on it; the connection holds that one trans reserved in
+request takes its trans from the session when its reply is expected,
+or else at its send (`hxnet_connection_take_trans`), and the send goes
+out on it; the connection holds that one trans reserved in
 between (`htlc->trans`, 0 when none). The connection handle and the actor
 share the session (`SharedSession`), which is made when the connection
 opens so a request can be numbered before the login is answered.
@@ -97,9 +97,11 @@ the saved avatar's, which the user never asked for, and voice and
 video's, which the voice panel shows where the connection's session has
 a voice runtime. A picture's refusal is `MediaFailed`, with the
 extension's code, and goes to whatever started the upload or download.
-None of them is a task, so none shows in the Tasks list; a transfer
-shows there as its own row. A joined private chat is made when its reply
-arrives, a user's info reaches the user it was asked of, an account the
+A reply to anything else reaches `hx_dispatch_frame` whole, and nothing
+waits on it: a refusal is shown and heard as any refused request is
+(`task_error`), and the rest go no further. Nothing GtkHx asks is a row
+in the Tasks list; a transfer shows there as its own row. A joined
+private chat is made when its reply arrives, a user's info reaches the user it was asked of, an account the
 editor that asked, a news reply the browser node that asked, a listing
 the files pane that asked, a transfer's reply the transfer, the banner's
 its fetch, a picture's part the upload or download it belongs to, and

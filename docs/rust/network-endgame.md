@@ -120,10 +120,10 @@ gone, none via accessors.
   transient buffer and passes it to `hx_dispatch_frame` as an explicit
   `(frame, frame_len)` pair, freeing it once dispatch returns. Every
   consumer that used to read the buffer off the struct — body handlers,
-  the correlator, the task-reply callbacks, the parser wrappers, the
-  inline-media paths, the task-error extractor, the protocol trace — reads
-  its threaded slice argument instead. This was kept deliberately separate
-  from moving handler *bodies* into Rust: it did not require that, and
+  the parser wrappers, the inline-media paths, the task-error extractor,
+  the protocol trace — reads its threaded slice argument instead. This
+  was kept deliberately separate from moving handler *bodies* into Rust:
+  it did not require that, and
   conflating the two would have blocked the struct move behind a much
   larger project.
 
@@ -135,7 +135,7 @@ seam, which is what makes the rest tractable rather than a rewrite:
 | Concern | Where it lives |
 |---|---|
 | Wire parse / build | `hxproto` |
-| Transaction table | `hxtask` |
+| Matching a reply to its request | `hxsession` (`Session::expect`) |
 | Opcode → handler routing | `hxproto::dispatch::route` (`hx_recv_route`) |
 | Receive handler bodies + signal emit | `hxhandlers::recv` (one module per domain) |
 | View boundary (signals) | `GtkhxSession` (`gtkhx-core::session`) |
@@ -159,8 +159,8 @@ shutdown / state callbacks, maps connection states onto `GtkhxSession`
 signals, hosts the SOCKS proxy lookup and the TLS-verify trampoline, and
 turns each `Event::Frame` into a `hx_dispatch_frame` call and each
 `Event::Session` into an `hx_recv_session_event` call. **`src/rcv.c`**
-holds the frame-dispatch switch, the transaction correlator, the
-post-login sequencing, and the receive handlers that still have C bodies.
+holds the frame-dispatch switch, the post-login sequencing, and the
+receive handlers that still have C bodies.
 
 ## The ordering dependency
 
@@ -179,10 +179,8 @@ Rust.
 
 ## What is actually left in `rcv.c`
 
-Most former handlers are now `#[no_mangle]` functions in
-`hxhandlers::recv` that C sees only as externs — the prototypes stay in
-`src/rcv.h` because the C senders register them through `task_new`, and
-the symbols resolve against the Rust crate at link. Derive the current
+Most former handlers are now `hxhandlers::recv`'s, reached through the
+session's events rather than from `rcv.c`. Derive the current
 list from `src/rcv.c` and `src/rcv.h` when you need it; do not trust a
 checked-in table. An earlier hand-maintained per-handler inventory rotted
 for exactly this reason — if a table is wanted, regenerate it from the
@@ -190,10 +188,10 @@ headers.
 
 As of this writing the C bodies group into:
 
-- **The dispatch spine** — `hx_dispatch_frame` (a `switch` over
-  `hx_recv_route` calling the selected body handler with the frame slice),
-  `hx_rcv_task` (the transaction correlator), and `task_inerror`, a thin
-  wrapper over the Rust header check.
+- **The dispatch spine** — `hx_dispatch_frame`, a `switch` over
+  `hx_recv_route` calling the selected body handler with the frame slice.
+  A reply arrives here only when nothing expected it, and goes to
+  `task_error`, which shows it if it is a refusal.
 - **Post-login sequencing** — `hx_post_login_fetches`, which
   `LoginReady` fires. The login's reply itself is the session's
   `LoggedIn`, which `hxhandlers::recv::login` applies (see
@@ -228,12 +226,6 @@ between tearing the session down and just showing it on the voice panel; a
 video start or pause carries back the kind and generation it was sent with
 (`hxhandlers::voice`).
 
-**Transaction ID zero is a real key, not a sentinel.** A short or
-malformed header leaves the extracted trans at 0, and the table treats 0
-as "no such task" — a safe fallthrough only because nothing else relies
-on 0 being reserved. It is a legitimate key for the first frame on a
-fresh connection. The table keys on the raw integer; keep it that way.
-
 **Post-login ordering.** The fetch fan-out (user list, gated news,
 GIF-icons probe, chat-history batch) is idempotent behind a single-fire
 flag on the connection, and fires at the spec-correct "fully joined"
@@ -263,9 +255,9 @@ The receive side used not to come apart one thread at a time, for four
 reasons. Three are resolved:
 
 - **The transaction table shared by send and receive** was the true
-  centre. It is Rust now (`hxtask`), and still stores a C-ABI function
-  pointer per entry — but that pointer points into either language
-  indifferently, which is what let the handlers migrate one at a time.
+  center. It is gone: the session expects each reply itself
+  (`Session::expect`) and hands it on as an event, so nothing on GtkHx's
+  side matches a reply to its request.
 - **The two-phase receive state machine** (a function pointer on the
   connection, aimed at a body handler by a header handler and reset
   afterwards) is gone; dispatch routes the parsed opcode straight to the
@@ -274,10 +266,9 @@ reasons. Three are resolved:
   `hxproto`'s now, and both send entry points go through it.
 
 The fourth — **handlers braiding wire parse, task correlation, and view
-emission** — is what's left, and it is mostly unbraided by construction:
-the parse half went to `hxproto` and the emit half to
-`hxhandlers::recv` before the bodies moved. What remains braided is
-concentrated in the login and post-login path.
+emission** — is mostly unbraided: the parse half went to `hxproto`, the
+emit half to `hxhandlers::recv`, and correlation and the login's reply
+to the session. What remains braided is the post-login fetches.
 
 ## A latent bug the dispatch move caught
 

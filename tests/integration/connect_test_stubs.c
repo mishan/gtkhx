@@ -23,14 +23,13 @@
  * The stubs are deliberately dumb:
  *
  *   - the_session is a single zero-initialised session struct.
- *     network.c only touches a couple of fields (htlc, tasks)
+ *     network.c only touches a couple of fields (htlc)
  *     during the connect path; the rest stays untouched.
  *   - gtkhx_prefs is a zero-initialised prefs struct so the
  *     hx_htlc_close nick_color re-seed doesn't read uninitialised
  *     memory if a future test exercises the reconnect path.
  *   - hx_clear_chat, close_connected_windows, error_dialog,
- *     banner_clear, hx_rcv_hdr, hx_post_login
- *     _fetches, task_new, task_update, task_delete — no-ops.
+ *     banner_clear, hx_rcv_hdr, hx_post_login_fetches — no-ops.
  *
  * The cumulative effect: the test exercises the REAL hx_connect
  * code path through TCP connect + magic write + magic read +
@@ -207,63 +206,12 @@ hx_recv_session_event (struct htlc_conn *htlc, const void *ev)
     connect_test_session_count++;
 }
 
-/* tasks.c stubs — production task_new allocates a struct task,
- * registers it in the_session.tasks hashtable, fires a
- * GtkhxSession::task-update signal. The test doesn't read tasks
- * back, so a NULL return is fine. */
-struct task;
-struct task *
-task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
-          const char *str)
-{
-    (void)htlc;
-    (void)rcv;
-    (void)ptr;
-    (void)data;
-    (void)str;
-    return NULL;
-}
-
-void
-task_update (session *sess, struct task *tsk)
-{
-    (void)sess;
-    (void)tsk;
-}
-void
-task_delete (session *sess, struct task *tsk)
-{
-    (void)sess;
-    (void)tsk;
-}
-
-/* network.c::update_task looks up a task by trans on incoming
- * HTLS_HDR_TASK frames. The real test path doesn't trigger any
- * task responses (the fake server never replies after LOGIN), but
- * the symbol still needs to resolve. */
-struct task *
-task_with_trans (session *sess, guint32 trans)
-{
-    (void)sess;
-    (void)trans;
-    return NULL;
-}
-
-void
-gtask_delete_tsk (session *sess, guint32 trans)
-{
-    (void)sess;
-    (void)trans;
-}
-
-/* hlwrite_chunks — the production send primitive is now Rust (hxtask::send),
- * which we can't link here: its task_new / task_with_trans / task_delete /
- * gtask_delete_tsk are exactly the no-op stubs above, so linking hxtask would
- * double-define them. Provide a minimal in-test equivalent — pack the frame via
- * hlpack_chunks (still C, proto_helpers.c) and hand the bytes to the hxnet send
- * bridge — for whatever the connect path sends after the login. No proto_trace / close-on-fail: the connect-state
- * and tracker-signal tests don't need them (tracker_signals never calls this;
- * it only has to link). Forward-declared inline to avoid the proto_helpers.h /
+/* hlwrite_chunks — the production send primitive is Rust (hxtask::send),
+ * which these tests don't link. Provide a minimal in-test equivalent — pack
+ * the frame via hlpack_chunks (still C, proto_helpers.c) and hand the bytes to
+ * the hxnet send bridge — for whatever the connect path sends after the login.
+ * No proto_trace / close-on-fail: the connect-state and tracker-signal tests
+ * don't need them (tracker_signals never calls this; it only has to link). Forward-declared inline to avoid the proto_helpers.h /
  * hxnet_bridge.h header piles, same pattern as the stubs above. */
 struct hx_chunk;
 extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type,

@@ -28,8 +28,8 @@ hxrequest = { path = "../hxrequest", features = ["c-abi"] }
 # C-ABI accessor bounce. hxnet does not depend on hxhandlers (acyclic).
 hxnet = { path = "../hxnet" }
 # xfer_go writes its FILE_GET/PUT request through hxtask's native send
-# primitive (hlwrite_chunks). hxtask deps only gtkhx-core/hxproto/glib,
-# so hxhandlers -> hxtask is acyclic.
+# primitive (hlwrite_chunks). hxtask depends only on hxproto,
+# gtkhx-proto-ffi and glib, so hxhandlers -> hxtask is acyclic.
 hxtask = { path = "../hxtask" }
 # The session's events, for the domains it handles itself.
 hxsession = { workspace = true }

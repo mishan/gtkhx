@@ -186,7 +186,7 @@ extern "C" {
     fn hx_htlc_uid(htlc: *mut c_void) -> u16;
 
     // existing app symbols.
-    /// tasks_bridge.c — the session that owns this connection. NULL in,
+    /// gtkhx-core — the session that owns this connection. NULL in,
     /// NULL out.
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     fn toolbar_show_toast(text: *const c_char);

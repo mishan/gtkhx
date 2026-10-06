@@ -16,10 +16,10 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 glib = { workspace = true }
-# hxproto is pure Rust (no undefined C externs), so the boxed::history
-# parser can call parse_history_entry without breaking this crate's
-# "self-contained, glib-only linkage" invariant (see [lib] above).
+# hxproto is pure Rust (no undefined C externs), so the boxed types can
+# decode text with it without breaking this crate's "self-contained,
+# glib-only linkage" invariant (see [lib] above).
 hxproto = { workspace = true }
-# Pure Rust too: a chat-history entry is read once, there, for the C
-# readers of HxHistoryEntry as for the session's own events.
+# Pure Rust too: the session's chat media and history entries, which the
+# boxed types copy out for C.
 hxsession = { workspace = true }

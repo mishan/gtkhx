@@ -655,6 +655,17 @@ pub unsafe extern "C" fn hx_conn_set_compressalg(h: *mut HtlcConn, v: *const c_c
 pub unsafe extern "C" fn hx_conn_sess(h: *const HtlcConn) -> *mut c_void {
     (*h).sess
 }
+/// `session.h`'s `sess_from_htlc`, which Rust can't call: a static inline.
+///
+/// # Safety
+/// `h` is NULL or a live connection.
+#[no_mangle]
+pub unsafe extern "C" fn hx_sess_from_htlc(h: *const HtlcConn) -> *mut c_void {
+    if h.is_null() {
+        return std::ptr::null_mut();
+    }
+    (*h).sess
+}
 /// # Safety
 /// See the module note above the opaque-pointer accessors.
 #[no_mangle]

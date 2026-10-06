@@ -305,10 +305,6 @@ mod imp {
                     Signal::builder("tracker-batch-begin")
                         .param_types([Type::STRING, Type::U8, Type::U32])
                         .build(),
-                    // task-update: (session*, task*)
-                    Signal::builder("task-update")
-                        .param_types([Type::POINTER, Type::POINTER])
-                        .build(),
                     // chat-log-line: (htlc*, cid, name*, color, body*)
                     //
                     // `name` is the bracketed tag shown in the gutter
@@ -959,18 +955,6 @@ pub unsafe extern "C" fn gtkhx_session_emit_tracker_batch_begin(
 }
 
 /// # Safety
-/// `self_`/`sess`/`tsk` valid pointers.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_task_update(
-    self_: *mut c_void,
-    sess: *mut c_void,
-    tsk: *mut c_void,
-) {
-    let v = [ptr_value(sess), ptr_value(tsk)];
-    emit(self_, "task-update", &v);
-}
-
-/// # Safety
 /// `self_`/`htlc` valid; `body` a valid C string (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_chat_log_line(
@@ -1182,13 +1166,13 @@ mod tests {
         let got: Rc<Cell<(usize, usize)>> = Rc::new(Cell::new((0, 0)));
         let got2 = got.clone();
         // connect_local hands the raw &[Value] (args[0] is the instance).
-        s.connect_local("task-update", false, move |args| {
+        s.connect_local("xfer-destroyed", false, move |args| {
             got2.set((pval(&args[1]), pval(&args[2])));
             None
         });
         let raw = s.as_ptr() as *mut c_void;
         unsafe {
-            gtkhx_session_emit_task_update(raw, 0x1111 as *mut c_void, 0x2222 as *mut c_void);
+            gtkhx_session_emit_xfer_destroyed(raw, 0x1111 as *mut c_void, 0x2222 as *mut c_void);
         }
         assert_eq!(got.get(), (0x1111, 0x2222));
     }

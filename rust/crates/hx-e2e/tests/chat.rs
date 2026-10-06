@@ -8,23 +8,29 @@ use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
 use hxproto::messages::tag;
 use hxrequest::Request;
-use hxsession::{Expect, Handled};
+use hxsession::{Expect, Handled, HistoryEntry};
 
 /// `HTLC_CAP_CHAT_HISTORY`.
 const CAP_CHAT_HISTORY: u16 = 0x0010;
 
 /// A guest whose session handles chat, going by a name no other test uses.
 fn chatter(server: &'static Server, who: &str) -> (Client, String) {
+    chatter_over(server, who, None)
+}
+
+/// As [`chatter`], logged in over HOPE with `cipher` when there is one.
+fn chatter_over(
+    server: &'static Server,
+    who: &str,
+    cipher: Option<hxhope::Cipher>,
+) -> (Client, String) {
     // Inside every server's 31-byte cap.
     let nick: String = unique_name(who).chars().take(31).collect();
-    let mut c = Client::login_handling(
-        server,
-        "",
-        None,
-        CAP_TEXT_ENCODING | CAP_CHAT_HISTORY,
-        Handled::CHAT,
-        &nick,
-    )
+    let caps = CAP_TEXT_ENCODING | CAP_CHAT_HISTORY;
+    let mut c = match cipher {
+        None => Client::login_handling(server, "", None, caps, Handled::CHAT, &nick),
+        Some(cipher) => Client::hope_guest(server, cipher, caps, Handled::CHAT, &nick),
+    }
     .unwrap_or_else(|e| panic!("{e}"));
     // The user list, as GtkHx asks for it once logged in: hlservd sends a
     // client no chat before then.
@@ -135,49 +141,109 @@ fn chat_arrives_as_events_in_the_order_the_server_sent_it() {
     }
 }
 
+/// Public chat's history as GtkHx asks for it, read as the session hands it
+/// on: the entries, and whether there is more before them.
+fn history(c: &mut Client, before: u64, after: u64, limit: u16) -> (Vec<HistoryEntry>, bool) {
+    let name = c.server().name;
+    let ask = hxrequest::chat::history(0, before, after, limit);
+    let t = c.send_expecting(&ask, Some(Expect::ChatHistory { cid: 0 }));
+    heard(
+        c,
+        |e| match e {
+            Event::Session(hxsession::Event::ChatHistory {
+                trans,
+                entries,
+                has_more,
+                ..
+            }) if *trans == t => Some((entries.clone(), *has_more)),
+            Event::Session(hxsession::Event::Failed { trans, .. }) if *trans == t => {
+                panic!("{name}: history refused: {e:?}")
+            }
+            Event::Frame(f) if f.header.trans == t => {
+                panic!("{name}: the expected reply came whole")
+            }
+            _ => None,
+        },
+        |got| !got.is_empty(),
+    )
+    .remove(0)
+}
+
+/// The page of history `before` / `after` / `limit` asks for, once it holds
+/// `line`: asked for again for a while, in case the server has not stored
+/// the line yet when the first page is made.
+fn page_with(c: &mut Client, line: &str, before: u64, after: u64, limit: u16) -> Vec<HistoryEntry> {
+    for _ in 0..50 {
+        let (entries, _) = history(c, before, after, limit);
+        if entries.iter().any(|e| e.text.contains(line)) {
+            return entries;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("{}: {line:?} never reached the history", c.server().name)
+}
+
+/// A line comes back in the history as its sender's, over plaintext and
+/// over HOPE with each cipher, which seals the request, the line and the
+/// reply alike.
 #[test]
-fn history_comes_back_as_an_event() {
+fn history_holds_what_was_said_over_every_transport() {
+    for cipher in [
+        None,
+        Some(hxhope::Cipher::ChaCha20Poly1305),
+        Some(hxhope::Cipher::Blowfish),
+    ] {
+        let mut caps = vec![Cap::ChatHistory];
+        caps.extend(cipher.map(Cap::Hope));
+        for s in servers_with(&caps) {
+            let (mut a, na) = chatter_over(s, "ch", cipher);
+            assert_ne!(a.caps() & CAP_CHAT_HISTORY, 0, "{} {cipher:?}", s.name);
+            let line = format!("{na} for the record");
+            a.send(&chat(line.as_bytes()));
+            let entries = page_with(&mut a, &line, 0, 0, 50);
+            let mine = entries.iter().find(|e| e.text.contains(&line)).unwrap();
+            assert_eq!(mine.nick, na, "{} {cipher:?}", s.name);
+            assert!(mine.message_id > 0, "{} {cipher:?}: {mine:?}", s.name);
+        }
+    }
+}
+
+/// A page holds no more than its limit and says when there is more; the
+/// page before it holds only older lines, and a catch-up after it only
+/// newer ones, a line said since among them.
+#[test]
+fn history_pages_by_limit_and_cursor() {
     for s in servers_with(&[Cap::ChatHistory]) {
-        let (mut a, na) = chatter(s, "ch");
-        let line = format!("{na} for the record");
-        a.send(&chat(line.as_bytes()));
-        // The server's echo of the line: it is stored by then.
-        heard(
-            &mut a,
-            |e| {
-                matches!(e, Event::Session(hxsession::Event::Chat { text, .. }) if text.contains(&line))
-                .then_some(())
-            },
-            |got| !got.is_empty(),
-        );
-        let limit = 50u16.to_be_bytes();
-        let ask = request(
-            700,
-            &[
-                (tag::CHANNEL_ID, &[0, 0, 0, 0]),
-                (tag::HISTORY_LIMIT, &limit),
-            ],
-        );
-        let t = a.send_expecting(&ask, Some(Expect::ChatHistory { cid: 0 }));
-        let entries = heard(
-            &mut a,
-            |e| match e {
-                Event::Session(hxsession::Event::ChatHistory { trans, entries, .. })
-                    if *trans == t =>
-                {
-                    Some(entries.clone())
-                }
-                Event::Frame(f) if f.header.trans == t => {
-                    panic!("{}: the expected reply came whole", s.name)
-                }
-                _ => None,
-            },
-            |got| !got.is_empty(),
-        )
-        .remove(0);
+        let (mut a, na) = chatter(s, "hp");
+        for i in 0..6 {
+            a.send(&chat(format!("{na} pad {i}").as_bytes()));
+        }
+        page_with(&mut a, &format!("{na} pad 5"), 0, 0, 50);
+
+        let (page, has_more) = history(&mut a, 0, 0, 2);
+        assert!(!page.is_empty() && page.len() <= 2, "{}: {page:?}", s.name);
+        assert!(has_more, "{}", s.name);
+        let oldest = page.iter().map(|e| e.message_id).min().unwrap();
+        let newest = page.iter().map(|e| e.message_id).max().unwrap();
+
+        let (before, _) = history(&mut a, oldest, 0, 10);
         assert!(
-            entries.iter().any(|e| e.text.contains(&line)),
-            "{}: {line:?} not in {entries:?}",
+            !before.is_empty(),
+            "{}: has_more, but nothing before",
+            s.name
+        );
+        assert!(
+            before.iter().all(|e| e.message_id < oldest),
+            "{}: before {oldest}: {before:?}",
+            s.name
+        );
+
+        let line = format!("{na} since");
+        a.send(&chat(line.as_bytes()));
+        let after = page_with(&mut a, &line, 0, newest, 50);
+        assert!(
+            after.iter().all(|e| e.message_id > newest),
+            "{}: after {newest}: {after:?}",
             s.name
         );
     }

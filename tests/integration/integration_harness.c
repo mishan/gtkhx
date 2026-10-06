@@ -31,7 +31,6 @@
 #include "hxconn.h" /* hx_conn_trans_post_inc for the LOGIN frame's trans */
 #include "hl_code.h"
 #include "hotline_proto.h"
-#include "chat_history.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
 
@@ -58,7 +57,7 @@
  * binaries (no network.c) fall back to this stub.
  *
  * The harness's own send path uses hlpack_chunks + integration_send
- * directly (see integration_send_get_chat_history); production-only
+ * directly; production-only
  * code paths that go through hlwrite_chunks shouldn't be reachable
  * here. If a test ever hits this stub, we want a loud failure rather
  * than a silent empty send.
@@ -1151,76 +1150,6 @@ integration_send_chat (int fd, struct htlc_conn *htlc, const char *text)
         (guint8 *)text);
 }
 
-guint32
-integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
-                                   guint32 channel_id, guint64 before,
-                                   guint64 after, guint16 limit)
-{
-    /* Drive the same chunk builder production uses (src/chat_history.c
-     * via hx_get_chat_history_build_chunks). The harness skips the
-     * cap-gate (so tests can deliberately exercise a server's task-
-     * error response when the extension isn't negotiated) and uses
-     * hlpack_chunks + integration_send instead of hlwrite_chunks
-     * — the former packs + sends inline, the latter is production's
-     * queue-via-FDW path. */
-    guint32 trans = htlc->trans;
-
-    struct hx_chunk chunks[4];
-    struct hx_get_chat_history_scratch scratch;
-    int hc = hx_get_chat_history_build_chunks (channel_id, before, after, limit,
-                                               chunks, 4, &scratch);
-    if (hc <= 0) {
-        return 0;
-    }
-    gsize len = 0;
-    guint8 *buf
-        = hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc, &len);
-
-    if (!buf) {
-        return 0;
-    }
-    gboolean ok = integration_send (fd, buf, len);
-    g_free (buf);
-    return ok ? trans : 0;
-}
-
-guint32
-integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
-                                        integration_hope_session *hope,
-                                        guint32 channel_id, guint64 before,
-                                        guint64 after, guint16 limit)
-{
-    /* HOPE-aware send. Same chunk-building path as the plain variant
-     * (hx_get_chat_history_build_chunks → hlpack_chunks), then a plain
-     * send: the orchestrator owns the control-channel crypto, so the
-     * harness just writes the framed bytes through the synthetic fd. */
-    guint32 trans = htlc->trans;
-
-    /* Pack via hlpack_chunks then plain-send. Snapshot trans before
-     * the pack (hlpack_chunks bumps it after writing the header) so the
-     * trans-id accounting stays identical to production. */
-    struct hx_chunk chunks[4];
-    struct hx_get_chat_history_scratch scratch;
-    int hc = hx_get_chat_history_build_chunks (channel_id, before, after, limit,
-                                               chunks, 4, &scratch);
-    if (hc <= 0) {
-        return 0;
-    }
-
-    /* hlpack_chunks bumps htlc->trans after writing the header, so
-     * snapshot before. */
-    gsize len = 0;
-    guint8 *buf
-        = hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc, &len);
-
-    if (!buf) {
-        return 0;
-    }
-    gboolean ok = integration_send (fd, buf, len);
-    g_free (buf);
-    return ok ? trans : 0;
-}
-
 /* ---- HTXF subchannel helpers ----------------------------------- */
 
 int
@@ -1924,8 +1853,8 @@ integration_send_agreementagree_hope (int fd, struct htlc_conn *htlc,
      * it the post-login push sequence never starts, and any test
      * that drains for the banner times out into a skip.
      *
-     * Framing path mirrors integration_send_get_chat_history_hope:
-     * hlpack_chunks → plain send (the orchestrator owns the crypto).
+     * Framing path: hlpack_chunks → plain send (the orchestrator owns
+     * the crypto).
      * The harness
      * passes display_name verbatim (typically ASCII for tests);
      * production calls gtkhx_text_for_wire at the caller for UTF-8

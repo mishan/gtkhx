@@ -273,13 +273,6 @@ typedef struct _session {
 
     struct gnews_catalog *gcnews_list;
 
-    /* tasks keyed on the 32-bit trans id. Replaces the
-     * intrusive __task_list / task_list / task_tail trio. Lookup
-     * by trans is O(1); iteration is via GHashTableIter. The
-     * hashtable owns each task; values get freed via task_free
-     * (tasks.c) when removed. */
-    GHashTable *tasks;
-
     /* No session-level user_list / user_tail / __user_list — the
      * canonical "global user list" lookup is the public chat at cid=0
      * (use chat_with_cid(sess, 0)->user_list). Do not reintroduce

@@ -82,9 +82,6 @@ gtkhx_sources = files(
   'sound.c',
   'sound_events.c',
   'tasks.c',
-  # tasks_table.c + the struct task model in tasks.c ported to the Rust hxtask
-  # crate (via the gtkhx-ffi façade); tasks_bridge.c is its C field-accessor shim.
-  'tasks_bridge.c',
   # text_util.c ported to Rust (hxtext crate, Phase R5); text_util.h keeps the
   # C ABI decls the ~16 callers include. Links via rust_hxtext_dep below.
   # tls_trust.c + tls_trust_dialog.c ported to Rust: the trust brain is the

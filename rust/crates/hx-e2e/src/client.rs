@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use hxnet::lifecycle::{run_plaintext_lifecycle, PlaintextOpenRequest};
+use hxnet::lifecycle::{
+    run_hope_lifecycle, run_plaintext_lifecycle, HopeOpenRequest, PlaintextOpenRequest,
+};
 use hxnet::{Command, Connection, ConnectionHandle, Event, Frame};
 use hxproto::parse::HeaderDecoded;
 use hxproto::wire::ChunkIter;
@@ -150,12 +152,7 @@ impl Client {
         handled: Handled,
         nick: &str,
     ) -> Result<Client, String> {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-        let (handle, mut events, cmd_rx, evt_tx) = Connection::make_channels();
+        let (rt, handle, events, cmd_rx, evt_tx) = channels()?;
         let req = PlaintextOpenRequest {
             host: server.host.to_string(),
             port: server.port,
@@ -175,7 +172,63 @@ impl Client {
             cmd_rx,
             evt_tx,
         ));
+        Client::settle(server, nick, rt, handle, events, session)
+    }
 
+    /// As [`Client::login_handling`] for the server's guest, logging in
+    /// over HOPE with `cipher`, as production does when the bookmark asks
+    /// for a secure login.
+    pub fn hope_guest(
+        server: &'static Server,
+        cipher: hxhope::Cipher,
+        caps: u16,
+        handled: Handled,
+        nick: &str,
+    ) -> Result<Client, String> {
+        let (rt, handle, events, cmd_rx, evt_tx) = channels()?;
+        let req = HopeOpenRequest {
+            host: server.host.to_string(),
+            port: server.port,
+            login: Vec::new(),
+            password: Vec::new(),
+            name: nick.as_bytes().to_vec(),
+            icon: 414,
+            version: hxnet::login::CLIENT_VERSION,
+            caps,
+            cipher: Some(cipher),
+            compression: None,
+            proxy: None,
+        };
+        let session = req.session(handled | Handled::LOGIN);
+        rt.spawn(run_hope_lifecycle(req, session.clone(), cmd_rx, evt_tx));
+        let client = Client::settle(server, nick, rt, handle, events, session)?;
+        // A server may answer HOPE with no cipher at all, and the login
+        // would go through unsealed.
+        let agreed = client
+            .session
+            .lock()
+            .expect("the session lock is never held across a panic")
+            .negotiated()
+            .and_then(|n| n.cipher);
+        if agreed != Some(cipher) {
+            return Err(format!(
+                "{}: HOPE agreed {agreed:?}, not {cipher:?}",
+                server.name
+            ));
+        }
+        Ok(client)
+    }
+
+    /// Wait out the login a lifecycle just started: its reply, then the
+    /// agreement, until it has settled.
+    fn settle(
+        server: &'static Server,
+        nick: &str,
+        rt: Runtime,
+        handle: ConnectionHandle,
+        mut events: mpsc::Receiver<Event>,
+        session: hxnet::session::SharedSession,
+    ) -> Result<Client, String> {
         // What the LOGIN reply said. Not necessarily the first event: a
         // server can broadcast another user's arrival ahead of it.
         let login = rt
@@ -427,6 +480,25 @@ impl Client {
     pub fn names(&mut self, dir: &str) -> Vec<Vec<u8>> {
         self.list(dir).into_iter().map(|e| e.name).collect()
     }
+}
+
+/// A connection's runtime and channels, as each login starts from.
+type Channels = (
+    Runtime,
+    ConnectionHandle,
+    mpsc::Receiver<Event>,
+    mpsc::Receiver<Command>,
+    mpsc::Sender<Event>,
+);
+
+fn channels() -> Result<Channels, String> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let (handle, events, cmd_rx, evt_tx) = Connection::make_channels();
+    Ok((rt, handle, events, cmd_rx, evt_tx))
 }
 
 impl Drop for Client {

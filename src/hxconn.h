@@ -259,10 +259,10 @@ extern guint16 hx_conn_serial (const struct htlc_conn *h);
 
 /* ---- The next request's trans ---------------------------------------------
  *
- * The session numbers every transaction. task_new reserves the next request's
- * trans from it and keys the task on it; hlwrite_chunks sends on it and clears
- * it, 0 meaning none is reserved (the session never hands out 0).
- * hx_conn_set_trans covers the login-task save/restore in network.c.
+ * The session numbers every transaction. A request whose reply the session
+ * expects reserves the next trans from it and expects on it; hlwrite_chunks
+ * sends on it and clears it, 0 meaning none is reserved (the session never
+ * hands out 0). network.c clears it for a new connection.
  * The integration harness, which builds its frames with hlpack_chunks and has
  * no session to number them, counts with it instead, through
  * hx_conn_trans_post_inc. */

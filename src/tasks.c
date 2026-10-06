@@ -35,6 +35,7 @@
 #include "gtkhx_icon.h"
 #include "xfers.h"
 #include "htxf_accessors.h"
+#include "hotline_proto.h"
 #include "sound.h"
 #include "toolbar.h" /* disconnect_clicked, toolbar_show_toast */
 #include "tasks.h"
@@ -57,7 +58,7 @@
  * trailing path shifted right by one glyph each tick.
  *
  * The struct now holds pointers to all three independently-
- * updatable widgets so file_update / task_update can refresh
+ * updatable widgets so file_update can refresh
  * them in place without rebuilding the row. */
 struct gtask {
     struct gtask *next, *prev;
@@ -69,11 +70,11 @@ struct gtask {
      * outlive the tab that made it by the length of one main-loop turn, and
      * closing a tab frees the session.
      *
-     * It is also what makes lookups correct. Transaction ids are only unique
-     * within a connection, and the progress rows below use fixed pseudo-ids
-     * (-127 / -128 / -129), so two connections would otherwise collide on
-     * every one of them — a second server connecting would drive the first
-     * server's connect row. Every search keys on the pair. */
+     * It is also what makes lookups correct. The progress rows below use
+     * fixed pseudo-ids (-127 / -128 / -129), so two connections would
+     * otherwise collide on every one of them — a second server connecting
+     * would drive the first server's connect row. Every search keys on the
+     * pair. */
     guint16 conn;
     guint32 trans;
     struct htxf_conn *htxf;
@@ -345,8 +346,7 @@ create_tasks (void)
     g_object_ref_sink (gtask_scroll);
 }
 
-/* Keyed on the pair: a transaction id means nothing without the connection
- * that issued it. */
+/* Keyed on the pair: every connection's connect row has the same id. */
 static void gtask_delete (struct gtask *gtsk);
 
 static struct gtask *
@@ -765,27 +765,8 @@ gtask_clear_htxf (session *sess, struct htxf_conn *htxf)
     gtsk->htxf = NULL;
 }
 
-void
-gtask_delete_tsk (session *sess, guint32 trans)
-{
-    struct gtask *gtsk;
-
-    /* A NULL session would key the lookup on CONN_NONE, which is where the
-     * tracker's rows live — so a pseudo-id colliding with one of theirs would
-     * delete a tracker row, and any other id would silently find nothing. */
-    g_return_if_fail (sess != NULL);
-
-    gtsk = gtask_with_trans (sess_conn (sess), trans);
-    if (!gtsk) {
-        return;
-    }
-    gtask_delete (gtsk);
-}
-
 /* Set the progress bar fraction to num/total, guarded against zero
- * total and clamped to [0.0, 1.0]. Earlier task_update / progress
- * call sites used num / (num + total) which never reaches 1.0
- * (tops out at 0.5 when num == total). Caller semantics here are
+ * total and clamped to [0.0, 1.0]. Caller semantics here are
  * the natural "X of Y" — num is current count, total is the
  * denominator. */
 static void
@@ -903,56 +884,6 @@ conn_task_update (session *sess, int stat)
     }
 }
 
-void
-task_update (session *sess, struct task *tsk)
-{
-    g_return_if_fail (sess != NULL);
-
-    struct gtask *gtsk;
-    /* tsk->pos / tsk->len are byte counts on the inbound TASK
-     * reply: pos is bytes received so far, len is bytes still
-     * to read, so pos + len is the announced total. */
-    guint32 pos = tsk->pos;
-    guint32 len = tsk->len;
-    guint32 tot = pos + len;
-    char posbuf[LONGEST_HUMAN_READABLE + 1];
-    char totbuf[LONGEST_HUMAN_READABLE + 1];
-    g_autofree char *posstr = NULL;
-    g_autofree char *totstr = NULL;
-    g_autofree char *sub = NULL;
-
-    gtsk = gtask_with_trans (sess_conn (sess), tsk->trans);
-    if (!gtsk) {
-        gtsk = gtask_new (sess_conn (sess), tsk->trans, 0);
-    }
-
-    /* tsk->str is the human-friendly task description from task_new
-     * (e.g. "Login", "Get file list", "Send chat"). Falls back to
-     * the trans id when missing so the row isn't a mystery. */
-    if (tsk->str && *tsk->str) {
-        gtk_label_set_text (GTK_LABEL (gtsk->title), tsk->str);
-    } else {
-        g_autofree char *title = g_strdup_printf (_ ("Task 0x%x"), tsk->trans);
-        gtk_label_set_text (GTK_LABEL (gtsk->title), title);
-    }
-
-    /* Subtitle: bytes received / total announced. The earlier
-     * "Step %u of %u" labelling was misleading — these are not
-     * discrete steps. human_size keeps the digits compact for
-     * the typical KB-sized TASK replies (and stays readable on
-     * the rare large ones). */
-    posstr = g_strdup (human_size (posbuf, pos));
-    totstr = g_strdup (human_size (totbuf, tot));
-    sub = g_strdup_printf (_ ("%1$s of %2$s"), posstr, totstr);
-    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
-
-    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
-
-    if (len == 0) {
-        gtask_delete (gtsk);
-    }
-}
-
 /* tasks_destroy retired. The Tasks
  * panel is a permanent resident of the toolbar's sidebar
  * PanelFrame; the standalone GtkWindow it used to hang under is
@@ -1018,30 +949,7 @@ task_stop (GtkWidget *widget, gpointer data)
                 gtask_delete (gtsk);
             }
         } else {
-            /* The row's own connection, not the focused one. The queue is
-             * shared now, so the selection can name a task on a server the
-             * user isn't looking at — cancelling it against `sess` would
-             * have hunted for that transaction id in the wrong connection's
-             * table and, on a collision, cancelled an unrelated task. NULL
-             * once that connection has gone, in which case the row is stale
-             * and only the row needs removing. */
-            session *owner = hx_session_with_serial (gtsk->conn);
-
-            struct task *tsk
-                = owner ? task_with_trans (owner, gtsk->trans) : NULL;
-
-            if (tsk != NULL) {
-                /* task_delete removes the row on its way through. */
-                task_delete (owner, tsk);
-            } else {
-                /* No model task behind it: the connection has gone, or the
-                 * task finished without its row being cleared. task_delete
-                 * returns early on a NULL task and would leave the row
-                 * standing — and nothing else removes it now that closing a
-                 * tab no longer destroys a page full of rows. */
-                gtask_delete (gtsk);
-            }
-            /*			gtask_delete(sess, gtsk); */
+            gtask_delete (gtsk);
         }
     }
     g_list_free (sel);
@@ -1052,8 +960,8 @@ task_stop (GtkWidget *widget, gpointer data)
  * `dir` is -1 for above, +1 for below. -1 when there is none.
  *
  * Reordering moves a transfer within the transfer queue, but the list holds
- * more than transfers: protocol tasks, each connection's connect row, the
- * tracker's progress. Moving the widget by one *visual* position would step it
+ * more than transfers: each connection's connect row, the tracker's
+ * progress. Moving the widget by one *visual* position would step it
  * past whichever of those happened to be adjacent while the queue swapped it
  * with a different transfer entirely, and the two orders would drift further
  * apart with every press. Interleaving connections made that common rather
@@ -1206,22 +1114,6 @@ task_go (GtkWidget *widget, gpointer data)
     }
 }
 
-static void
-task_tasks_update (session *sess)
-{
-    GHashTableIter iter;
-    gpointer val;
-
-    if (!sess->tasks) {
-        return;
-    }
-    g_hash_table_iter_init (&iter, sess->tasks);
-    while (g_hash_table_iter_next (&iter, NULL, &val)) {
-        gtkhx_session_emit_task_update (gtkhx_session_get_default (), sess,
-                                        (struct task *)val);
-    }
-}
-
 /* Tasks-headerbar pixmap buttons share the GTKHX_SCALE_WINDOW_BUTTONS
  * theme area with the other secondary windows (Users / Files / News /
  * Tracker). The default theme renders that area at 200% — the old
@@ -1293,18 +1185,17 @@ gtkhx_tasks_after_embed (session *sess)
     gtkhx_tasks_sync_conn (sess);
 }
 
-/* Put one connection's tasks and transfers into the queue.
+/* Put one connection's transfers into the queue.
  *
  * Split out of after_embed because the queue is shared: only the first
  * connection builds the panel, so every connection after it has state that
- * would otherwise never reach the list. Re-emitting is safe — both update
- * paths find an existing row or make one. */
+ * would otherwise never reach the list. Re-emitting is safe — the update
+ * finds an existing row or makes one. */
 void
 gtkhx_tasks_sync_conn (session *sess)
 {
     g_return_if_fail (sess != NULL);
 
-    task_tasks_update (sess);
     xfer_tasks_update (sess->htlc);
     gtkhx_tasks_refresh_tags ();
 }
@@ -1428,14 +1319,6 @@ file_update (session *sess, struct htxf_conn *htxf)
     }
 }
 
-/* The transaction table model — tasks_table_new / task_free / tasks_init /
- * task_new / task_with_trans / task_delete — is the Rust `hxtask` crate
- * (rust/crates/hxtask). It keeps sess->tasks a real GHashTable and preserves the
- * exact C ABI these callers link against; gtask_delete_tsk (above) is the view
- * hook task_delete calls before removing the model entry. The field accessors
- * the crate needs (hx_session_tasks / hx_session_set_tasks) live in
- * tasks_bridge.c. */
-
 /* task_error_extract lives in proto_helpers.c so the Tier 2 unit
  * tests can drive it without a GTK build. The prototype is in
  * tasks.h via #include "proto_helpers.h". */
@@ -1447,8 +1330,9 @@ task_error (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     gsize len = 0;
 
     (void)htlc;
-    if (!task_error_extract (frame, frame_len, errormsg, sizeof (errormsg),
-                             &len)) {
+    if (!gtkhx_proto_header_in_error (frame, frame_len)
+        || !task_error_extract (frame, frame_len, errormsg, sizeof (errormsg),
+                                &len)) {
         return;
     }
 
