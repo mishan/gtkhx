@@ -35,3 +35,8 @@ hxtask = { path = "../hxtask" }
 hxsession = { workspace = true }
 # chat.history_initial, the lines the history fetches ask for.
 hxconfig = { path = "../hxconfig" }
+
+[features]
+# Voice and video's requests (src/voice.rs), on with -Dvoice: they reach the
+# voice runtime and model, which only that build links.
+voice = []

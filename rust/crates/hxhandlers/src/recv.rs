@@ -114,8 +114,20 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             code,
             reason,
         } => crate::media::failed(htlc, *trans, *code, reason.as_deref()),
+        #[cfg(feature = "voice")]
+        Event::VoiceJoined {
+            trans,
+            cid,
+            sdp,
+            codec,
+            participants,
+        } => crate::voice::joined(htlc, *trans, *cid, sdp, codec, participants),
+        #[cfg(feature = "voice")]
+        Event::VoiceDone { trans } => crate::voice::done(htlc, *trans),
         Event::Failed { trans, reason } => {
             let quiet = user::failed(htlc, *trans, reason.as_deref());
+            #[cfg(feature = "voice")]
+            let quiet = crate::voice::failed(htlc, *trans, reason.as_deref()) || quiet;
             let quiet = icon::failed(htlc, *trans, reason.as_deref()) || quiet;
             news::failed(htlc, *trans);
             files::failed(htlc, *trans);
@@ -138,6 +150,8 @@ pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
     files::forget(htlc, login);
     icon::forget(htlc);
     crate::media::forget(htlc);
+    #[cfg(feature = "voice")]
+    crate::voice::forget(htlc);
 }
 
 /// `void hx_recv_forget (struct htlc_conn *htlc)` — [`forget`], for the

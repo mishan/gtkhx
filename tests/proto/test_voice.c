@@ -2,9 +2,9 @@
  * tests/proto/test_voice.c — pin the C-side FFI ABI of the fogWraith
  * voice-chat extension's receive/parse path (Capabilities-Voice.md).
  *
- * The send wrappers (hx_send_voice_*) moved to the hxvoice-send Rust
- * crate along with src/voice.c; their cap-gate + wire-shape cases now
- * run under `cargo test -p hxvoice-send` (the proto/voice/send cases).
+ * The send wrappers (hx_send_voice_*) are hxhandlers' `voice` module;
+ * their cap-gate cases run under `cargo test -p hxhandlers --features
+ * voice`, and their wire shapes are pinned in hxrequest's voice tests.
  * What stays here:
  *
  *   ffi    — call gtkhx_proto_parse_voice_reply on a hand-packed

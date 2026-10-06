@@ -84,5 +84,3 @@ use hxvoice as _;
 use hxvoice_model as _;
 #[cfg(feature = "voice")]
 use hxvoice_runtime as _;
-#[cfg(feature = "voice")]
-use hxvoice_send as _;

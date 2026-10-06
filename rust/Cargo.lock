@@ -1896,7 +1896,6 @@ dependencies = [
  "hxvoice",
  "hxvoice-model",
  "hxvoice-runtime",
- "hxvoice-send",
  "rotulus",
 ]
 
@@ -1940,7 +1939,6 @@ dependencies = [
  "hxupdate",
  "hxvoice-model",
  "hxvoice-runtime",
- "hxvoice-send",
  "libadwaita",
  "rotulus",
  "rotulus-layout",
@@ -2121,7 +2119,7 @@ dependencies = [
 [[package]]
 name = "hxcrypto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ac016f01f9dd092e62bdb218f45f4d546bccd216#ac016f01f9dd092e62bdb218f45f4d546bccd216"
+source = "git+https://github.com/mishan/hx-libs.git?rev=694528aa38f2760950ff3dc469b20bfcbdb095bd#694528aa38f2760950ff3dc469b20bfcbdb095bd"
 dependencies = [
  "blowfish",
  "chacha20poly1305",
@@ -2137,7 +2135,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ac016f01f9dd092e62bdb218f45f4d546bccd216#ac016f01f9dd092e62bdb218f45f4d546bccd216"
+source = "git+https://github.com/mishan/hx-libs.git?rev=694528aa38f2760950ff3dc469b20bfcbdb095bd#694528aa38f2760950ff3dc469b20bfcbdb095bd"
 dependencies = [
  "sha2",
 ]
@@ -2162,12 +2160,12 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ac016f01f9dd092e62bdb218f45f4d546bccd216#ac016f01f9dd092e62bdb218f45f4d546bccd216"
+source = "git+https://github.com/mishan/hx-libs.git?rev=694528aa38f2760950ff3dc469b20bfcbdb095bd#694528aa38f2760950ff3dc469b20bfcbdb095bd"
 
 [[package]]
 name = "hxhope"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ac016f01f9dd092e62bdb218f45f4d546bccd216#ac016f01f9dd092e62bdb218f45f4d546bccd216"
+source = "git+https://github.com/mishan/hx-libs.git?rev=694528aa38f2760950ff3dc469b20bfcbdb095bd#694528aa38f2760950ff3dc469b20bfcbdb095bd"
 dependencies = [
  "flate2",
  "hxcrypto",
@@ -2222,7 +2220,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ac016f01f9dd092e62bdb218f45f4d546bccd216#ac016f01f9dd092e62bdb218f45f4d546bccd216"
+source = "git+https://github.com/mishan/hx-libs.git?rev=694528aa38f2760950ff3dc469b20bfcbdb095bd#694528aa38f2760950ff3dc469b20bfcbdb095bd"
 
 [[package]]
 name = "hxrequest"
@@ -2236,7 +2234,7 @@ dependencies = [
 [[package]]
 name = "hxsession"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=ac016f01f9dd092e62bdb218f45f4d546bccd216#ac016f01f9dd092e62bdb218f45f4d546bccd216"
+source = "git+https://github.com/mishan/hx-libs.git?rev=694528aa38f2760950ff3dc469b20bfcbdb095bd#694528aa38f2760950ff3dc469b20bfcbdb095bd"
 dependencies = [
  "hxhope",
  "hxproto",
@@ -2308,14 +2306,6 @@ dependencies = [
  "gstreamer-webrtc",
  "hxproto",
  "hxvoice",
-]
-
-[[package]]
-name = "hxvoice-send"
-version = "0.1.0"
-dependencies = [
- "glib 0.22.10",
- "hxproto",
 ]
 
 [[package]]

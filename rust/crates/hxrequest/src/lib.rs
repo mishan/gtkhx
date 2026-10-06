@@ -13,6 +13,7 @@ pub mod media;
 pub mod news;
 pub mod path;
 pub mod user;
+pub mod voice;
 
 use hxproto::build::{HxChunk, PackChunk};
 

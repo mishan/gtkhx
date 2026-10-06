@@ -38,27 +38,6 @@ extern void hx_rcv_voice_room_status (struct htlc_conn *htlc,
 extern void hx_rcv_video_status (struct htlc_conn *htlc, const guint8 *frame,
                                  gsize frame_len);
 
-/* TASK-reply handlers for the client-initiated 600/601/603/606
- * transactions. The voice send wrappers in src/voice.c register
- * one of these via task_new() before each hlwrite_chunks call;
- * hx_rcv_task dispatches here when the matching trans id comes
- * back.
- *   _join         — 600 VOICE_JOIN reply parser. JOIN reply
- *                   carries the server's initial SDP offer +
- *                   active codec + current participants per spec.
- *                   `channel_ptr` is GUINT_TO_POINTER(cid) the
- *                   send wrapper handed task_new for the data.
- *   _simple_ack   — Empty-success reply for 601/603/606. Logs
- *                   that the trans completed. `opcode_ptr` is
- *                   the originating opcode (label only),
- *                   `cid_ptr` is the originating cid (diagnostic
- *                   only). */
-extern void rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
-                                 gsize frame_len, void *channel_ptr);
-extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
-                                       const guint8 *frame, gsize frame_len,
-                                       void *opcode_ptr, void *cid_ptr);
-
 /* USER_GETLIST, whose reply the session reads (hxhandlers::send::user). */
 extern void hx_user_list_get (struct htlc_conn *htlc);
 

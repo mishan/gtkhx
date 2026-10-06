@@ -10,8 +10,8 @@
 /*
  * GStreamer-based voice runtime — C-facing FFI prototypes.
  *
- * Distinct from src/voice.h, which is the Phase 8.A wire-out path
- * (HTLC_HDR_VOICE_* send wrappers). This header surfaces the Rust
+ * Distinct from the wire-out path (the hx_send_voice_* senders in
+ * hxhandlers' voice module). This header surfaces the Rust
  * hxvoice-runtime crate to the C side: the audio pipeline +
  * device-enumeration + (eventually) the per-session opaque runtime
  * handle. Phase 8.B lands just one entry point — the GStreamer
@@ -422,12 +422,12 @@ extern void gtkhx_voice_runtime_room_status (gtkhx_voice_runtime *rt,
                                              uint32_t cid, const uint8_t *blob,
                                              size_t len);
 
-/* Fire Event::ServerTaskError { origin_opcode, text }. Called from
- * the HTLS_HDR_TASK error dispatch when the originating opcode was
- * one of the voice opcodes that registers a TASK: 600 (JOIN),
- * 601 (LEAVE), 603 (SDP_ANSWER), 606 (MUTE). 604 (ICE) is a
- * bidirectional notification with no task reply, so it never
- * reaches this entry point. text may be NULL (empty message). */
+/* Fire Event::ServerTaskError { origin_opcode, text }. Called by
+ * hxhandlers' voice module when the server refuses 600 (JOIN),
+ * 601 (LEAVE), 603 (SDP_ANSWER), 606 (MUTE), 608 (VIDEO_STOP) or
+ * 610 (VIDEO_SUBSCRIBE). 604 (ICE) is a bidirectional notification
+ * with no reply, so it never reaches this entry point. text may be
+ * NULL (empty message). */
 extern void gtkhx_voice_runtime_task_error (gtkhx_voice_runtime *rt,
                                             uint32_t origin_opcode,
                                             const char *text);
@@ -456,7 +456,7 @@ extern void gtkhx_voice_runtime_video_status (gtkhx_voice_runtime *rt,
                                               size_t len);
 
 /* The server refused a Video Start of kind sent for room cid; gen is
- * the generation the send kept in the task's ptr slot, and text is the
+ * the generation the send kept with the request, and text is the
  * server's error string. A refusal for a room the runtime has left, or
  * of a start since superseded, is ignored. */
 extern void gtkhx_voice_runtime_video_start_failed (gtkhx_voice_runtime *rt,

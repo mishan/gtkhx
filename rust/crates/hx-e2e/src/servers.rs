@@ -19,6 +19,10 @@ pub enum Cap {
     GifIcons,
     /// Takes pictures for chat lines (`HTLC_CAP_INLINE_MEDIA`).
     InlineMedia,
+    /// Voice chat (`HTLC_CAP_VOICE`), open to the guest.
+    Voice,
+    /// Video, over voice (`HTLC_CAP_VIDEO`), open to the guest.
+    Video,
 }
 
 #[derive(Debug)]
@@ -31,6 +35,9 @@ pub struct Server {
     /// one (`Cap::FileAdmin`). The rig gives it no password.
     pub admin: &'static str,
     pub caps: &'static [Cap],
+    /// Whether the suites that run on every server run here. A server in
+    /// the rig for an extension's sake is reached only by asking for it.
+    pub every: bool,
 }
 
 impl Server {
@@ -48,6 +55,7 @@ pub const SERVERS: &[Server] = &[
         // mhxd ships `admin` with no password and every access bit.
         admin: "admin",
         caps: &[Cap::FileAdmin, Cap::GifIcons],
+        every: true,
     },
     Server {
         name: "janus",
@@ -63,7 +71,10 @@ pub const SERVERS: &[Server] = &[
             Cap::ChatHistory,
             Cap::GifIcons,
             Cap::InlineMedia,
+            Cap::Voice,
+            Cap::Video,
         ],
+        every: true,
     },
     Server {
         name: "hlservd",
@@ -75,6 +86,20 @@ pub const SERVERS: &[Server] = &[
         // networking, every test connection.
         admin: "admin",
         caps: &[Cap::FileAdmin],
+        every: true,
+    },
+    Server {
+        name: "hxd-ng",
+        host: "127.0.0.1",
+        port: 5520,
+        // Unused: the rig's hxd-ng serves no files, so nothing listens on
+        // the transfer port its control port implies.
+        xfer_port: 5521,
+        // The rig gives hxd-ng a guest and no admin: it is here for voice
+        // and video.
+        admin: "",
+        caps: &[Cap::Voice, Cap::Video],
+        every: false,
     },
 ];
 
@@ -92,7 +117,8 @@ pub fn servers_with(caps: &[Cap]) -> Vec<&'static Server> {
     };
     let out: Vec<_> = SERVERS
         .iter()
-        .filter(|s| wanted(s.name) && caps.iter().all(|c| s.has(*c)))
+        .filter(|s| wanted(s.name) && (s.every || !caps.is_empty()))
+        .filter(|s| caps.iter().all(|c| s.has(*c)))
         .collect();
     assert!(
         !out.is_empty() || only.is_some(),

@@ -86,10 +86,9 @@ pub mod voice_arbiter;
 // key-spec vocabulary stays C (voice_ptt_keyspec.c). Exports hx_voice_ptt_attach.
 #[cfg(feature = "voice")]
 pub mod voice_ptt;
-// the voice-chat wire-out senders (was voice.c) moved to their own
-// lean crate `hxvoice-send` (cargo-testable; native hxproto builders).
-// The sibling voice modules reach hx_send_voice_* through their existing
-// externs, resolved at the final C link against that staticlib.
+// The voice-chat wire-out senders (was voice.c) are hxhandlers' `voice`
+// module. The sibling voice modules reach hx_send_voice_* through their
+// existing externs.
 // the Users window shell (raise + dock registration + lifecycle).
 // The custom view widget + action-button handlers stay C behind
 // users_bridge.c / dock_bridge.c; create_users_window is now this module's

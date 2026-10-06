@@ -36,6 +36,9 @@
 pub mod media;
 pub mod recv;
 pub mod send;
+// Voice and video's requests and their replies.
+#[cfg(feature = "voice")]
+pub mod voice;
 // The file-transfer registry (the `xfers[]` list) — Y1 of the xfers.c → Rust
 // migration. See docs/rust/ROADMAP.md.
 pub mod xfer;

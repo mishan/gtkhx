@@ -31,7 +31,6 @@ hxtext = { path = "../hxtext", features = ["c-abi"] }
 hx-image-decode = { path = "../hx-image-decode", default-features = false }
 hxvoice-model = { path = "../hxvoice-model", optional = true }
 hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
-hxvoice-send = { path = "../hxvoice-send", optional = true }
 hxtls-trust = { path = "../hxtls-trust" }
 # First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
 # pinned in the workspace (rust/Cargo.toml, the gtk-rs-core family) and
@@ -92,4 +91,4 @@ hxupdate = { path = "../hxupdate" }
 #     off the voice_panel_* symbols are simply absent. That's fine — every C
 #     call site (chat.c / users_bridge.c / gtkutil.c) is itself #ifdef
 #     HAVE_VOICE, so nothing references them in a voice-off build.
-voice = ["dep:hxvoice-model", "dep:hxvoice-runtime", "dep:hxvoice-send"]
+voice = ["dep:hxvoice-model", "dep:hxvoice-runtime", "hxhandlers/voice"]

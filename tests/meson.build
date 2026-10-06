@@ -746,9 +746,9 @@ test('chat_history', test_chat_history,
 # Pins the field IDs (DATA_VOICE_SDP/ICE/CODEC/MUTED/PARTICIPANTS at
 # 0x01F5-0x01F9), the 600-606 opcode block, and the FFI ABI of the typed
 # reply / participant / mid-label / SDP-summary / ICE-JSON extractors +
-# builder. The send wrappers (hx_send_voice_*) moved to the hxvoice-send
-# Rust crate along with src/voice.c; their cap-gate + wire-shape cases run
-# under `cargo test -p hxvoice-send`, so this no longer compiles voice.c.
+# builder. The send wrappers (hx_send_voice_*) are hxhandlers' `voice`
+# module; their cap-gate cases run under `cargo test -p hxhandlers
+# --features voice`, and hxrequest pins their wire shapes.
 # Source: fogWraith Capabilities-Voice.md.
 if voice_enabled
 test_voice = executable('test_voice',

@@ -23,8 +23,8 @@
  *                                 ALWAYS the offerer per spec)
  *        - HTLS_DATA_VOICE_CODEC  active codec (typically "PCMU")
  *        - HTLS_DATA_VOICE_PARTICIPANTS  packed participants blob
- *      gtkhx_proto_parse_voice_reply (the same parser production
- *      rcv_task_voice_join uses) is the witness that the wire shape
+ *      gtkhx_proto_parse_voice_reply (over the hxproto parser the
+ *      session reads the JOIN reply with) witnesses that the wire shape
  *      hasn't drifted.
  *   3. Client sends HTLC_HDR_VOICE_LEAVE (601) to clean up and
  *      expects a non-error empty-body TASK ack.
@@ -188,8 +188,8 @@ test_voice_join_leave_round_trip (void)
                                                        /*max_messages=*/64));
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
-    /* The reply payload is parsed by the same Rust parser production
-     * runs in rcv.c::rcv_task_voice_join. Witnesses both the
+    /* The reply payload is parsed by the same Rust parser the session
+     * reads the JOIN reply with in production. Witnesses both the
      * presence-of-mandatory-chunks contract AND the byte-shape
      * round-trip. */
     struct gtkhx_proto_voice_reply r;
