@@ -104,6 +104,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/user_row.rs',
   'crates/gtkhx-ui/src/users_view.rs',
   'crates/gtkhx-ui/src/users_voice_col.rs',
+  'crates/gtkhx-ui/src/name_shadow.rs',
   'crates/gtkhx-ui/src/voice_panel.rs',
   'crates/gtkhx-ui/src/video_panel.rs',
   'crates/gtkhx-ui/src/screen_share.rs',
