@@ -22,6 +22,12 @@ fn dir(path: &str) -> Vec<u8> {
 }
 
 #[test]
+fn the_banner_is_asked_for_with_no_fields() {
+    let r = banner();
+    assert_eq!((r.opcode, r.chunks.len()), (212, 0));
+}
+
+#[test]
 fn list_always_names_a_directory_even_the_root() {
     assert_eq!(
         list(b"/").unwrap(),

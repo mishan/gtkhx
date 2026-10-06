@@ -33,7 +33,7 @@ pub unsafe extern "C" fn hx_user_list_get(htlc: *mut c_void) {
     if htlc.is_null() {
         return;
     }
-    crate::recv::forget(htlc);
+    crate::recv::forget(htlc, true);
     super::expect_next(htlc, Expect::UserList);
     hlwrite_chunks(
         htlc.cast(),
@@ -303,7 +303,7 @@ mod tests {
             assert_eq!(exists.get(), want_exists, "{can_read} {answer:?}");
             assert_eq!(quiet, want_quiet, "{can_read} {answer:?}");
             assert_eq!(made.get(), want_made, "{can_read} {answer:?}");
-            unsafe { crate::recv::forget(htlc) };
+            unsafe { crate::recv::forget(htlc, false) };
         }
     }
 
@@ -347,6 +347,6 @@ mod tests {
                 (351, 1)
             ]
         );
-        unsafe { crate::recv::forget(htlc) };
+        unsafe { crate::recv::forget(htlc, false) };
     }
 }

@@ -124,25 +124,29 @@ depth, not a guarantee.**
 - **Decoder** — the `hx-image-decode` crate, behind the C ABI in
   `src/inline_media_decode.h`.
 - **Send path** — `src/inline_media_attach.c` (paperclip button + file
-  dialog + pre-flight) and `src/inline_media_upload.c` (single-shot and
-  chunked dispatch). The paperclip is hidden unless the capability is
+  dialog + pre-flight) and `hxhandlers::media` (single-shot and chunked
+  upload, each part's reply expected by the session, which reads the
+  token or the handle off it). The paperclip is hidden unless the capability is
   negotiated for the live session; showing inert chrome would be
   misleading given how few servers speak the extension.
 - **Receive path** — hx-libs' `hxsession` reads the companion fields
   off a chat line, where the capability was agreed, and drops a line
   that carries only one of the pair; the line reaches the chat as an
-  `HxChatEvent` with its `HxChatMedia` (`hxhandlers::recv::chat`). Then
-  `src/inline_media_download.c` (chunked-reply accumulator), `src/chat.c`
-  (placeholder row + auto-fetch + swap-in), and the click-to-view dialog
-  in `gtkhx-ui/src/inline_media_dialog.rs`.
+  `HxChatEvent` with its `HxChatMedia` (`hxhandlers::recv::chat`), and a
+  private message as an `HxMsgEvent` with its own. Then
+  `hxhandlers::media` (the part-by-part download),
+  `gtkhx-ui/src/inline_media_row.rs` (placeholder row + auto-fetch +
+  swap-in, for chat and messages alike), and the click-to-view dialog in
+  `gtkhx-ui/src/inline_media_dialog.rs`.
 - **Chat rendering** — the `rotulus_view_append_media` /
   `_media_mark` / `_media_set_texture` / `_media_set_frames` family
   declared in `rotulus.h`, from the external `rotulus` crate (see
   [chat-view.md](chat-view.md)).
 
-Per-upload and per-download heap contexts are owned by the task table
-via a `GDestroyNotify` hook on the task, so a disconnect mid-transfer
-reclaims them rather than leaking.
+Each upload and download in flight is kept by `hxhandlers::media`
+under its connection and the trans of its part in flight, so a
+disconnect mid-transfer lets go of it: a download says nothing more, and
+an upload hands its caller's state to the caller's free function.
 
 ### Rendering
 

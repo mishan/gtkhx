@@ -8,138 +8,15 @@
  */
 
 #include "config.h"
-#include <gtk/gtk.h>     /* tasks.h references GtkWidget */
 #include <glib/gstdio.h> /* g_unlink */
 #include <errno.h>
 #include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
-#include "protocol.h" /* struct htlc_conn, RCV_TASK_FN */
+#include "protocol.h" /* struct htlc_conn */
 #include "hxconn.h"
-#include "proto_helpers.h" /* struct hx_chunk */
 #include "hotline_proto.h"
-#include "network.h"       /* hlwrite_chunks */
-#include "gtkhx_session.h" /* `session` typedef needed by tasks.h */
-#include "session.h" /* sess_from_htlc (for gtask_delete_tsk on probe timeout) */
-#include "tasks.h"   /* task_new, gtask_delete_tsk */
-#include "rcv.h"     /* rcv_task_icon_get / _getlist */
 #include "gif_icons.h"
 #include "debug.h"
-
-/* Watchdog window for the probe. Generous enough for a slow server,
- * short enough not to leave the UI guessing. Mirrors the tracker-v3
- * probe's order of magnitude. */
-#define GIF_ICONS_PROBE_TIMEOUT_S 2
-
-guint32
-hx_icon_getlist (struct htlc_conn *htlc)
-{
-    if (!htlc) {
-        return 0;
-    }
-    /* ICON_GETLIST is a zero-chunk request. */
-    guint32 trans = task_new (htlc, RCV_TASK_FN (rcv_task_icon_getlist), NULL,
-                              0, "icon-list")
-                        ->trans;
-    hlwrite_chunks (htlc, HTLC_HDR_ICON_GETLIST, 0, NULL, 0);
-    return trans;
-}
-
-static gboolean
-gif_icons_probe_timeout (gpointer data)
-{
-    struct htlc_conn *htlc = data;
-
-    hx_conn_set_gif_icons_probe_timer (htlc, 0);
-    if (hx_conn_gif_icons_state (htlc) == GIF_ICONS_UNKNOWN) {
-        hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
-        debug_log ("icon", "GIF-icons probe timed out; server appears not to "
-                           "support the extension");
-        /* Dismiss the probe's Tasks-window row. A legacy server drops
-         * the unknown ICON_GETLIST opcode with no reply, so the task
-         * would otherwise sit in the UI forever. We only remove the
-         * gtask row (not the model task), so a late reply — slow
-         * server, not an unsupporting one — still dispatches through
-         * hx_rcv_task -> rcv_task_icon_getlist and loads avatars. */
-        gtask_delete_tsk (sess_from_htlc (htlc),
-                          hx_conn_gif_icons_probe_trans (htlc));
-    }
-    return G_SOURCE_REMOVE;
-}
-
-void
-hx_icon_probe (struct htlc_conn *htlc)
-{
-    if (!htlc) {
-        return;
-    }
-    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNKNOWN);
-    if (hx_conn_gif_icons_probe_timer (htlc)) {
-        g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
-    }
-    hx_conn_set_gif_icons_probe_trans (htlc, hx_icon_getlist (htlc));
-    hx_conn_set_gif_icons_probe_timer (
-        htlc, g_timeout_add_seconds (GIF_ICONS_PROBE_TIMEOUT_S,
-                                     gif_icons_probe_timeout, htlc));
-    debug_log ("icon", "GIF-icons probe sent (ICON_GETLIST), watchdog armed");
-}
-
-void
-hx_icon_get (struct htlc_conn *htlc, guint16 uid)
-{
-    if (!htlc) {
-        return;
-    }
-    struct hx_chunk chunks[1];
-    guint8 scratch[2];
-    int hc = (int)gtkhx_proto_build_icon_get_chunks (
-        uid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
-    if (hc > 0) {
-        task_new (htlc, RCV_TASK_FN (rcv_task_icon_get),
-                  GUINT_TO_POINTER ((guint)uid), 0, "icon-get");
-        hlwrite_chunks (htlc, HTLC_HDR_ICON_GET, 0, chunks, hc);
-    }
-}
-
-void
-hx_icon_set (struct htlc_conn *htlc, const guint8 *gif, gsize len)
-{
-    if (!htlc) {
-        return;
-    }
-    /* A non-empty payload must be a real GIF — the server validates
-     * the signature and rejects non-GIF uploads, so mirror that
-     * client-side rather than earn a task error. A clear (len == 0)
-     * is always allowed. */
-    if (len > 0 && !gtkhx_proto_gif_icon_is_gif (gif, len)) {
-        debug_log ("icon",
-                   "refusing ICON_SET: payload is not a GIF (%zu bytes)",
-                   (size_t)len);
-        return;
-    }
-    struct hx_chunk chunks[1];
-    int hc = (int)gtkhx_proto_build_icon_set_chunks (gif, len, chunks,
-                                                     G_N_ELEMENTS (chunks));
-    if (hc <= 0) {
-        /* Builder rejected it — the only failure for a validated GIF is
-         * exceeding the u16 wire-length limit. Log + bail so an oversize
-         * upload is diagnosable rather than a silent no-op that looks
-         * like a hang. */
-        debug_log ("icon",
-                   "ICON_SET not sent: builder rejected %zu-byte payload "
-                   "(over the 64 KiB wire limit?)",
-                   (size_t)len);
-        return;
-    }
-    /* Untasked: the reply is a bare completion, and a refusal of a set
-     * the user made surfaces through hx_rcv_task's error toast. */
-    hlwrite_chunks (htlc, HTLC_HDR_ICON_SET, 0, chunks, hc);
-}
-
-void
-hx_icon_clear (struct htlc_conn *htlc)
-{
-    hx_icon_set (htlc, NULL, 0);
-}
 
 /* ---- Persisted avatar ($CONFIG/avatar.gif) ----------------------- */
 
@@ -275,10 +152,7 @@ hx_icon_send_saved (struct htlc_conn *htlc)
     if (!avatar_bytes_valid (gif, len)) {
         return;
     }
-    /* Tasked so a refusal is logged, not toasted: the user didn't ask. */
-    task_new (htlc, RCV_TASK_FN (rcv_task_icon_set_auto), NULL, 0,
-              "icon-set-auto");
-    hx_icon_set (htlc, gif, len);
+    hx_icon_set_saved (htlc, gif, len);
     debug_log ("icon", "sent saved avatar (%zu bytes) to capable server",
                (size_t)len);
 }

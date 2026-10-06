@@ -7,11 +7,10 @@
  * your option) any later version.
  */
 
-/* GIF-icons extension (fogWraith GIF-Icons.md) — client send path and
- * probe-and-fallback negotiation. Receive-side parsing lives in the
- * Rust hxproto crate (crate::gif_icons); the rcv handlers
- * (rcv_task_icon_get / _getlist, hx_rcv_icon_change in rcv.c) call
- * those parsers and emit GtkhxSession::gif-icon-* signals. */
+/* GIF-icons extension (fogWraith GIF-Icons.md) — the saved avatar. The
+ * requests, the probe that finds whether a server has the extension, and
+ * what their replies set off are Rust (hxhandlers' send::icon and
+ * recv::icon). */
 
 #ifndef GTKHX_GIF_ICONS_H
 #define GTKHX_GIF_ICONS_H
@@ -43,19 +42,12 @@ enum {
  * servers (one ignored transaction + a short timer). */
 void hx_icon_probe (struct htlc_conn *htlc);
 
-/* Request the full per-user avatar list (ICON_GETLIST / 1861); the trans
- * its reply will carry. */
-guint32 hx_icon_getlist (struct htlc_conn *htlc);
-
 /* Request one user's avatar (ICON_GET / 1863). */
 void hx_icon_get (struct htlc_conn *htlc, guint16 uid);
 
-/* Set our own avatar (ICON_SET / 1862). gif must be a valid GIF;
- * a non-GIF payload is rejected (no-op). */
-void hx_icon_set (struct htlc_conn *htlc, const guint8 *gif, gsize len);
-
-/* Clear our own avatar (ICON_SET with an empty payload). */
-void hx_icon_clear (struct htlc_conn *htlc);
+/* The saved avatar, sent without the user asking: a refusal is logged,
+ * not shown. */
+void hx_icon_set_saved (struct htlc_conn *htlc, const guint8 *gif, gsize len);
 
 /* ---- Persisted avatar -------------------------------------------------
  *

@@ -8,6 +8,8 @@
 //! they call reaches into C, which is what lets that suite link them.
 
 pub mod files;
+pub mod icon;
+pub mod media;
 pub mod news;
 pub mod path;
 pub mod user;

@@ -1,14 +1,21 @@
-//! GIF-icon receive path (ported from `rcv.c`).
+//! GIF icons: what the session made of the replies to the probe, a user's
+//! icon and our own set, and the server's `ICON_CHANGE` notice.
 //!
-//! The GIF-icons extension broadcasts an `ICON_CHANGE` frame (uid only) when a
-//! user changes their avatar. This crate owns that handler end to end: parse the
-//! uid out of the frame body (via `hxproto`) and emit the
-//! `gif-icon-changed` signal so the user list refreshes the avatar. Unlike the
-//! chat-invite handler (whose parse stayed C because it reads `htlc->in` through
-//! a struct), the icon-change parse is already a bytes-in Rust parser, so the
-//! whole handler moves here and the C side is a one-line forwarder.
+//! The extension has no capability bit and no version tie, so whether a
+//! server has it is found by the probe, the icon list asked for at login: a
+//! listing says it does, and a refusal, or no answer by the watchdog
+//! (`send::icon`), that it does not. Neither the probe's refusal nor that of
+//! the saved avatar sent once the server proves capable is the user's to
+//! hear of: they never asked. A refusal of anything else they did ask for
+//! goes to `request-failed`. The `ICON_CHANGE` broadcast still arrives
+//! whole; its parse is a bytes-in Rust parser, and the C side a one-line
+//! forwarder.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
+
+use hxsession::Icon;
 
 #[cfg(not(test))]
 use gtkhx_core::session::{
@@ -18,15 +25,10 @@ use gtkhx_core::session::{
 #[cfg(not(test))]
 use gtkhx_proto_ffi::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
 
-// Native reply parsers — pure Rust, identical in test and production. The C rcv
-// handlers used to round-trip through the `gtkhx_proto_parse_icon_*` C ABI; here
-// we walk the frame with the native `gif_icons` API directly (no FFI bounce).
-use hxproto::gif_icons::{parse_icon_get_reply, parse_icon_list};
-use hxproto::wire::ChunkIter;
-
 /// GIF-icons negotiation tri-state (mirror of the C `enum` in `gif_icons.h`).
+pub(crate) const GIF_ICONS_UNKNOWN: c_int = 0;
 const GIF_ICONS_SUPPORTED: c_int = 1;
-const GIF_ICONS_UNSUPPORTED: c_int = 2;
+pub(crate) const GIF_ICONS_UNSUPPORTED: c_int = 2;
 
 // The connection negotiation-state accessors (gtkhx-core `#[no_mangle]`), the
 // GLib watchdog disarm, and the saved-avatar push are reached over the C ABI;
@@ -44,21 +46,31 @@ extern "C" {
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
 }
 
-/// Borrow the reply frame as a byte slice (empty on a NULL frame).
-unsafe fn frame_slice<'a>(frame: *const c_void, frame_len: usize) -> &'a [u8] {
-    if frame.is_null() {
-        &[]
-    } else {
-        std::slice::from_raw_parts(frame as *const u8, frame_len)
-    }
+/// The icon requests whose refusal the user does not hear of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asked {
+    /// The login's probe: a refusal says the server has no GIF icons.
+    Probe,
+    /// The saved avatar, sent without the user asking.
+    Saved,
 }
 
-/// True when the reply frame's task-error bit is set — the native equivalent of
-/// the C `task_inerror()` (header parse + `flag & 1`). A frame too short to hold
-/// a header is treated as not-in-error, matching the C shim.
-unsafe fn task_in_error(frame: *const c_void, frame_len: usize) -> bool {
-    let s = frame_slice(frame, frame_len);
-    hxproto::parse::Header::parse(s).is_some_and(|h| h.in_error())
+thread_local! {
+    /// The requests in flight, by connection and trans.
+    static ASKED: RefCell<HashMap<(usize, u32), Asked>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn asked(htlc: *mut c_void, trans: u32, what: Asked) {
+    ASKED.with(|a| a.borrow_mut().insert((htlc as usize, trans), what));
+}
+
+fn answered(htlc: *mut c_void, trans: u32) -> Option<Asked> {
+    ASKED.with(|a| a.borrow_mut().remove(&(htlc as usize, trans)))
+}
+
+/// Let go of what `htlc` asked for.
+pub(crate) fn forget(htlc: *mut c_void) {
+    ASKED.with(|a| a.borrow_mut().retain(|(h, _), _| *h != htlc as usize));
 }
 
 /// Disarm the GIF-icons probe watchdog if armed (the reply beat the timeout).
@@ -70,114 +82,63 @@ unsafe fn disarm_probe_timer(htlc: *mut c_void) {
     }
 }
 
-/// `void rcv_task_icon_get (htlc, frame, frame_len, uid_ptr, data)` — HTLS reply
-/// to `ICON_GET` (1863): `UID` + `ICON_GIF`. A reply arriving at all proves the
-/// server speaks the GIF-icons extension, so flip negotiation to SUPPORTED. A
-/// `gif_len == 0` result is a valid "avatar cleared" and is still published so
-/// the view drops any stale cached avatar (`hx_icon_data_recv` maps empty →
-/// `(NULL, 0)`). The uid is echoed in the reply body, so `uid_ptr` is ignored.
+/// Every user's icon: the server has GIF icons, so ours goes up, and each
+/// listed one is published. A late answer to a probe the watchdog gave up
+/// on counts the same: the server was slow, not without them.
 ///
 /// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `uid_ptr` / `data` are unused.
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_icon_get(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    _uid_ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    let s = frame_slice(frame, frame_len);
-    let Some(e) = parse_icon_get_reply(ChunkIter::over_message(s, s.len())) else {
-        return;
-    };
-    hx_conn_set_gif_icons_state(htlc, GIF_ICONS_SUPPORTED);
-    hx_icon_data_recv(htlc, e.uid, e.gif.as_ptr(), e.gif.len() as u32);
-}
-
-/// `void rcv_task_icon_getlist (htlc, frame, frame_len, ptr, data)` — HTLS reply
-/// to `ICON_GETLIST` (1861): 0..N packed `ICON_LIST` entries. Also the
-/// resolution point for the post-login probe.
-///
-/// The extension has no capability/access bit and no version tie, so support is
-/// detected purely by this probe. An ERROR reply is the "not supported" answer —
-/// exactly like the watchdog timing out — so record UNSUPPORTED, disarm the
-/// watchdog, and return WITHOUT a user toast (a speculative probe's rejection is
-/// expected and non-actionable). Otherwise the server is confirmed capable:
-/// record SUPPORTED, disarm the watchdog, push our saved avatar (no-op when none
-/// saved), and publish each listed avatar.
-///
-/// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `ptr` / `data` are unused (NULL at register time).
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_icon_getlist(
-    htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    _ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    if task_in_error(frame, frame_len) {
-        hx_conn_set_gif_icons_state(htlc, GIF_ICONS_UNSUPPORTED);
-        disarm_probe_timer(htlc);
-        return;
-    }
-
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn listed(htlc: *mut c_void, trans: u32, icons: &[Icon]) {
+    answered(htlc, trans);
     hx_conn_set_gif_icons_state(htlc, GIF_ICONS_SUPPORTED);
     disarm_probe_timer(htlc);
     hx_icon_send_saved(htlc);
-
     // A uid is a u16, so a well-formed list holds at most 65536 entries; clamp
     // the walk so a hostile/duplicated reply can't drive an unbounded emit storm.
-    const MAX_ENTRIES: usize = u16::MAX as usize + 1;
-    let s = frame_slice(frame, frame_len);
-    for (n, e) in parse_icon_list(ChunkIter::over_message(s, s.len())).enumerate() {
-        if n >= MAX_ENTRIES {
-            break;
-        }
-        hx_icon_data_recv(htlc, e.uid, e.gif.as_ptr(), e.gif.len() as u32);
+    for i in icons.iter().take(u16::MAX as usize + 1) {
+        hx_icon_data_recv(htlc, i.uid, i.gif.as_ptr(), i.gif.len() as u32);
     }
 }
 
-/// `void rcv_task_icon_set_auto (htlc, frame, frame_len, ptr, data)` — HTLS
-/// reply to the `ICON_SET` (1862) that re-sends our saved avatar after login.
-///
-/// That send is automatic, so its refusal is not something the user asked to
-/// hear about at every login: a server may refuse a guest an icon, or
-/// rate-limit it, and there is nothing to do but carry on without one. The
-/// generic task-error toast is suppressed for this task (`hx_rcv_task`), and
-/// the refusal goes to the `icon` debug category instead. Nothing re-sends:
-/// the automatic send happens once, from the login probe's reply, and an
-/// avatar the user picks by hand goes out untasked, so its refusal still
-/// reaches them through the generic toast.
+/// One user's icon. An answer at all says the server has GIF icons; an
+/// empty icon clears the user's.
 ///
 /// # Safety
-/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
-/// valid for `frame_len` bytes; `ptr` / `data` are unused (NULL at register time).
-#[no_mangle]
-pub unsafe extern "C" fn rcv_task_icon_set_auto(
-    _htlc: *mut c_void,
-    frame: *const c_void,
-    frame_len: usize,
-    _ptr: *mut c_void,
-    _data: *mut c_void,
-) {
-    let line = if task_in_error(frame, frame_len) {
-        let s = frame_slice(frame, frame_len);
-        match hxproto::parse::parse_task_error(s, s.len(), 1024) {
-            Some(text) if !text.is_empty() => format!(
-                "server refused the saved avatar: {}; not re-sending on this connection",
-                hxproto::text::to_utf8(&text)
-            ),
-            _ => "server refused the saved avatar; not re-sending on this connection".to_owned(),
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn icon(htlc: *mut c_void, icon: &Icon) {
+    hx_conn_set_gif_icons_state(htlc, GIF_ICONS_SUPPORTED);
+    hx_icon_data_recv(htlc, icon.uid, icon.gif.as_ptr(), icon.gif.len() as u32);
+}
+
+/// A request on `trans` was refused, or its reply cut short. Whether the
+/// user is to hear of it: not of the probe, which marks the server as
+/// without GIF icons, nor of the saved avatar, which goes to the `icon`
+/// debug category; nothing sends it again on this connection.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>) -> bool {
+    match answered(htlc, trans) {
+        Some(Asked::Probe) => {
+            hx_conn_set_gif_icons_state(htlc, GIF_ICONS_UNSUPPORTED);
+            disarm_probe_timer(htlc);
+            true
         }
-    } else {
-        "server accepted the saved avatar".to_owned()
-    };
-    if let Ok(c) = std::ffi::CString::new(line.replace('\0', "")) {
-        debug_log_str(c"icon".as_ptr(), c.as_ptr());
+        Some(Asked::Saved) => {
+            let line = match reason.filter(|r| !r.is_empty()) {
+                Some(r) => format!(
+                    "server refused the saved avatar: {r}; not re-sending on this connection"
+                ),
+                None => {
+                    "server refused the saved avatar; not re-sending on this connection".to_owned()
+                }
+            };
+            if let Ok(c) = std::ffi::CString::new(line.replace('\0', "")) {
+                debug_log_str(c"icon".as_ptr(), c.as_ptr());
+            }
+            true
+        }
+        None => false,
     }
 }
 

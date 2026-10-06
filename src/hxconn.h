@@ -180,11 +180,6 @@ extern int hx_conn_gif_icons_state (const struct htlc_conn *h);
 extern void hx_conn_set_gif_icons_state (struct htlc_conn *h, int v);
 extern guint hx_conn_gif_icons_probe_timer (const struct htlc_conn *h);
 extern void hx_conn_set_gif_icons_probe_timer (struct htlc_conn *h, guint v);
-/* gif_icons_probe_trans: the trans of the probe's task, stashed so the
- * watchdog can dismiss the orphaned Tasks-window row when a legacy server
- * silently drops ICON_GETLIST. */
-extern guint32 hx_conn_gif_icons_probe_trans (const struct htlc_conn *h);
-extern void hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h, guint32 v);
 
 /* ---- Account access bitmap -----------------------------------------------
  *

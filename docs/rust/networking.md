@@ -87,17 +87,23 @@ chat-history request, a chat invitation, the user list, a user's info,
 a kick, creating and joining a private chat, a private message, a
 broadcast, an account read, made, saved or deleted, every news request —
 flat news's file and posts, and threaded news's listings, articles, posts,
-deletions and new bundles and categories — and every files request: a
+deletions and new bundles and categories — every files request: a
 listing, Get Info, a folder made, something deleted, moved or renamed, a
-comment set, and a download or upload of a file or a folder. Their
+comment set, and a download or upload of a file or a folder — the
+banner's, the GIF icons' (the login's probe of everyone's, a user's, and
+ours set), and each part of a picture going up or coming down. Their
 replies are the session's to read, and come back as its events, a
-refusal as `Failed`, which is shown and heard as any refused request is.
+refusal as `Failed`, which is shown and heard as any refused request is,
+but for the icon probe's and the saved avatar's, which the user never
+asked for. A picture's refusal is `MediaFailed`, with the extension's
+code, and goes to whatever started the upload or download.
 None of them is a task, so none shows in the Tasks list; a transfer
 shows there as its own row. A joined private chat is made when its reply
 arrives, a user's info reaches the user it was asked of, an account the
 editor that asked, a news reply the browser node that asked, a listing
-the files pane that asked and a transfer's reply the transfer, each
-matched by its trans; the rename of a move-and-rename goes once the
+the files pane that asked, a transfer's reply the transfer, the banner's
+its fetch, and a picture's part the upload or download it belongs to,
+each matched by its trans; the rename of a move-and-rename goes once the
 move's reply says it went through. What arrives is traced from the
 session's tap (`Session::set_tap`, on under `GTKHX_DEBUG=proto`): each
 transaction as it came, before the session acts on it and in plaintext

@@ -46,7 +46,6 @@
 #define HX_TEST_CAP_LARGE_FILES (1u << 0)   /* >4 GiB file transfers */
 #define HX_TEST_CAP_TEXT_ENCODING (1u << 1) /* UTF-8 negotiation     */
 /* (1u << 2) reserved — CAPABILITY_DATE_FORMAT in protocol.h */
-#define HX_TEST_CAP_INLINE_MEDIA (1u << 3) /* fogWraith spec        */
 #define HX_TEST_CAP_CHAT_HISTORY (1u << 4) /* fogWraith spec        */
 #define HX_TEST_CAP_VIDEO (1u << 10)       /* camera/screen video   */
 

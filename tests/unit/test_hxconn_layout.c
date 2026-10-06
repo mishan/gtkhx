@@ -88,7 +88,7 @@ static void
 test_serial_is_in_the_tail_padding (void)
 {
     g_assert_cmpuint (offsetof (struct htlc_conn, serial), >,
-                      offsetof (struct htlc_conn, gif_icons_probe_trans));
+                      offsetof (struct htlc_conn, gif_icons_probe_timer));
     g_assert_cmpuint (offsetof (struct htlc_conn, serial)
                           + sizeof (((struct htlc_conn *)0)->serial),
                       <=, sizeof (struct htlc_conn));

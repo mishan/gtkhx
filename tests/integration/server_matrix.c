@@ -128,16 +128,7 @@ const hx_test_server hx_test_server_matrix[] = {
                         * guest/admin account VoiceChat: true flip
                         * cover both the cap echo and the per-account
                         * access bit the toolbar gates on. */
-                | HX_TEST_CAP_VOICE
-                /* Phase 9.F inline-media tests. Janus
-                        * ships the extension but defaults
-                        * InlineMedia.Enabled to false — the Tier
-                        * 3 container's config.yaml flips it on
-                        * (and bumps SendMedia: true on the
-                        * account template) so the cap-negotiation
-                        * probe finds it echoed in the LOGIN reply.
-                        * See docs/inline-media.md. */
-                | HX_TEST_CAP_INLINE_MEDIA | HX_TEST_CAP_VIDEO,
+                | HX_TEST_CAP_VOICE | HX_TEST_CAP_VIDEO,
     },
     {
         /* hxd-ng: the video extension (capabilities-video.md), as on

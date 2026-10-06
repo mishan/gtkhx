@@ -19,6 +19,15 @@ use hxproto::messages::ClientHdr;
 use crate::path::{below_root, encode_dir, split};
 use crate::Request;
 
+/// DOWNLOAD_BANNER: the server's banner, for a transfer connection to
+/// fetch. No fields.
+pub fn banner() -> Request {
+    Request {
+        opcode: ClientHdr::DownloadBanner as u32,
+        chunks: Vec::new(),
+    }
+}
+
 /// FILE_LIST for the folder at `dir`.
 pub fn list(dir: &[u8]) -> Option<Request> {
     let enc = encode_dir(dir, false);

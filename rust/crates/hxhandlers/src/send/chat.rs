@@ -26,7 +26,7 @@ use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 
 use hxproto::build::{self, ChatRequest, ChatSubjectRequest, HxChunk};
-use hxproto::messages::ClientHdr;
+use hxproto::messages::{tag, ClientHdr};
 
 // Wire opcodes — single source of truth is hxproto::messages::ClientHdr
 // (the repr(u32) HTLC_HDR_* enum), not re-spelled magic numbers.
@@ -37,10 +37,13 @@ const HTLC_HDR_CHAT_JOIN: u32 = ClientHdr::ChatJoin as u32;
 const HTLC_HDR_CHAT_PART: u32 = ClientHdr::ChatPart as u32;
 const HTLC_HDR_CHAT_SUBJECT: u32 = ClientHdr::ChatSubject as u32;
 const HTLC_HDR_CHAT_DECLINE: u32 = ClientHdr::ChatDecline as u32;
+const HTLC_CAP_INLINE_MEDIA: u64 = hxsession::cap::INLINE_MEDIA as u64;
 
 // Real build: these resolve at the final C link. Test build: the `use
 // tests::{…}` below shadows them with recording stubs, so the extern
 // declarations are gated off to avoid a name clash.
+#[cfg(not(test))]
+use gtkhx_core::conn::hx_conn_has_cap;
 #[cfg(not(test))]
 use hxtext::gtkhx_text_for_wire;
 
@@ -59,7 +62,9 @@ extern "C" {
 // cargo-test build resolves without linking hxtext / chat_send_bridge /
 // network.
 #[cfg(test)]
-use tests::{gtkhx_text_for_wire, hlwrite_chunks, hx_chat_lookup, hx_htlc_text_encoding_cap};
+use tests::{
+    gtkhx_text_for_wire, hlwrite_chunks, hx_chat_lookup, hx_conn_has_cap, hx_htlc_text_encoding_cap,
+};
 
 /// A NUL-terminated C string's bytes (without the NUL), or empty for NULL.
 unsafe fn cstr_bytes<'a>(s: *const c_char) -> &'a [u8] {
@@ -112,23 +117,79 @@ pub unsafe extern "C" fn hx_send_chat(
     cid: u32,
     style: u16,
 ) {
+    send_chat(htlc, str_, cid, style, None);
+}
+
+/// `void hx_send_chat_with_media (htlc, str, cid, style, media_id,
+/// media_id_len, mime, mime_len)` — a chat line carrying the picture an
+/// upload gave the handle and type of. Without both, or where the server
+/// did not agree to inline media, it goes as a plain line: a server drops
+/// the picture of a sender that did not agree to it anyway.
+///
+/// # Safety
+/// As [`hx_send_chat`]; `media_id` points at `media_id_len` bytes and `mime`
+/// at `mime_len`, when not NULL.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn hx_send_chat_with_media(
+    htlc: *mut c_void,
+    str_: *const c_char,
+    cid: u32,
+    style: u16,
+    media_id: *const u8,
+    media_id_len: usize,
+    mime: *const c_char,
+    mime_len: usize,
+) {
+    if htlc.is_null() || str_.is_null() {
+        return;
+    }
+    let field = |p: *const u8, len: usize| {
+        (!p.is_null() && (1..=u16::MAX as usize).contains(&len))
+            .then(|| std::slice::from_raw_parts(p, len))
+    };
+    let media = field(media_id, media_id_len)
+        .zip(field(mime.cast(), mime_len))
+        .filter(|_| hx_conn_has_cap(htlc.cast(), HTLC_CAP_INLINE_MEDIA) != glib::ffi::GFALSE);
+    send_chat(htlc, str_, cid, style, media);
+}
+
+/// A chat line, with the picture `media` names (its handle and type).
+unsafe fn send_chat(
+    htlc: *mut c_void,
+    str_: *const c_char,
+    cid: u32,
+    style: u16,
+    media: Option<(&[u8], &[u8])>,
+) {
     // hlwrite_chunks dereferences htlc (htlc->trans, htlc->fd); a NULL would
     // crash there. Guard here — every sender does.
     if htlc.is_null() {
         return;
     }
     with_wire(htlc, str_, glib::ffi::GTRUE, |wire| {
-        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut chunks = [HxChunk::EMPTY; 5];
         let mut scratch = [0u8; 8];
         let req = ChatRequest {
             cid,
             style,
             body: wire,
         };
-        let hc = build::build_chat_chunks(&req, &mut chunks, &mut scratch);
-        if hc > 0 {
-            hlwrite_chunks(htlc, HTLC_HDR_CHAT, 0, chunks.as_ptr(), hc as c_int);
+        let mut hc = build::build_chat_chunks(&req, &mut chunks, &mut scratch);
+        if hc == 0 {
+            return;
         }
+        if let Some((id, mime)) = media {
+            for (tag, data) in [(tag::CHAT_MEDIA_ID, id), (tag::CHAT_MEDIA_TYPE, mime)] {
+                chunks[hc] = HxChunk {
+                    tag,
+                    len: data.len() as u16,
+                    data: data.as_ptr(),
+                };
+                hc += 1;
+            }
+        }
+        hlwrite_chunks(htlc, HTLC_HDR_CHAT, 0, chunks.as_ptr(), hc as c_int);
     });
 }
 

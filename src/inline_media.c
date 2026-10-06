@@ -8,18 +8,9 @@
  */
 
 /*
- * Inline-media extension client-side helpers (Phase 9.A).
- *
- * Wire shape and per-opcode builder/parser logic lives in the Rust
- * crate (hxproto::inline_media). This file
- * holds:
- *
- *   - inline_media_cap_ok: per-send cap gate.
- *   - inline_media_log_advertised_limits: LOGIN-time debug log of
- *     the server's advertised caps.
- *
- * The actual upload state machine (Phase 9.C), receive handler
- * (Phase 9.D), and Tier 3 wiring (Phase 9.F) build on top.
+ * Inline-media extension client-side helpers: the per-send cap gate and
+ * the LOGIN-time debug log of the server's advertised limits. The upload
+ * and download are hxhandlers' media.rs.
  */
 
 #include "config.h"

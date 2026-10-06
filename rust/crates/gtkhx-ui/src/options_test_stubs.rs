@@ -167,10 +167,6 @@ pub unsafe extern "C" fn hx_icon_forget() -> c_int {
 pub unsafe extern "C" fn hx_icon_load_saved() -> *mut c_void {
     std::ptr::null_mut()
 }
-#[no_mangle]
-pub unsafe extern "C" fn hx_icon_set(_htlc: *mut c_void, _gif: *const u8, _len: usize) {}
-#[no_mangle]
-pub unsafe extern "C" fn hx_icon_clear(_htlc: *mut c_void) {}
 
 // ---- session identity + the dock bridge ----------------------------------
 //

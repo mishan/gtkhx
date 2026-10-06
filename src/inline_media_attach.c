@@ -12,7 +12,7 @@
  *
  * Click → GtkFileDialog → g_file_load_bytes_async → pre-flight
  * (magic-byte sniff + size cap against server-advertised limits)
- * → hx_send_upload_media_single → on success
+ * → hx_send_upload_media → on success
  *   hx_send_chat_with_media to the chat's cid.
  *
  * The per-flow context is heap-allocated; lifetime crosses
@@ -49,14 +49,8 @@
  *   - when on_upload_done fires (success or failure),
  *   - when an earlier step synchronously rejects,
  *   - when the underlying connection drops while the upload
- *     task is still in flight (hx_send_upload_media_single
- *     gets attach_ctx_free as user_data_free; the upload
- *     helper's ptr_free chain invokes it from the task
- *     table's g_hash_table_remove_all sweep).
- *
- * The third bullet is what closes the previous leak: pre-this
- * change, on_upload_done never fired and the attach ctx (plus
- * its display_name string) lived until process exit. */
+ *     is still in flight (hx_send_upload_media gets
+ *     attach_ctx_free as user_data_free). */
 typedef struct {
     struct gtkhx_chat *gchat;
     struct htlc_conn *htlc;
@@ -230,7 +224,7 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
      * upload — a disconnect / reconnect-to-non-capable-server
      * race during the async load_bytes is the same shape as
      * the file-dialog race above. Without the explicit check
-     * here, hx_send_upload_media_single's internal cap gate
+     * here, hx_send_upload_media's internal cap gate
      * would fail and we'd surface the generic
      * "couldn't start image upload" toast even though
      * "inline media isn't available" is what actually
@@ -259,9 +253,8 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
 
     /* Pass attach_ctx_free as the upload's user_data_free hook.
      * On the success / failure path on_upload_done frees ctx
-     * itself; the hook only fires when the upload helper's
-     * task_table entry is reclaimed without on_done having run
-     * (the connection-tear-down case). Without this the attach
+     * itself; the hook only fires when the connection goes
+     * before on_done has run. Without this the attach
      * ctx leaks one-per-click during the disconnected window.
      *
      * The dispatcher picks single-shot vs chunked framing
@@ -277,11 +270,7 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
         return;
     }
 
-    /* The upload helper copied the bytes it needed onto the
-     * wire; we're done with the GBytes. The Phase 9.A builder
-     * works against the payload pointer until hlwrite_chunks
-     * returns, which is inside hx_send_upload_media_single, so
-     * unref is safe here. */
+    /* The upload helper copied what it needs. */
     g_bytes_unref (bytes);
 }
 

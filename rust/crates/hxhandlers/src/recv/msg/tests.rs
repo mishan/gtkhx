@@ -18,6 +18,7 @@ fn msg(uid: u16, name: &str, body: &str, is_self: bool) -> Emitted {
         name: name.into(),
         body: body.into(),
         is_self,
+        media: None,
     }
 }
 
@@ -28,8 +29,8 @@ fn a_message_is_the_msg_signal_on_its_connection() {
     test_env::reset();
     test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
     unsafe {
-        message(htlc(), 42, "alice", "hi :tada:");
-        message(htlc(), 7, "misha", "echo");
+        message(htlc(), 42, "alice", "hi :tada:", None);
+        message(htlc(), 7, "misha", "echo", None);
     }
     assert_eq!(
         test_env::emitted(),
@@ -41,14 +42,31 @@ fn a_message_is_the_msg_signal_on_its_connection() {
 }
 
 #[test]
+fn a_message_s_picture_rides_on_the_signal() {
+    test_env::reset();
+    let png = hxsession::ChatMedia {
+        id: vec![0xAB, 0xCD],
+        mime: b"image/png".to_vec(),
+        width: None,
+        height: None,
+        bytes: None,
+    };
+    unsafe { message(htlc(), 42, "alice", "[image]", Some(&png)) };
+    let Emitted::Msg { media, .. } = &test_env::emitted()[0] else {
+        panic!("no msg signal");
+    };
+    assert_eq!(media.as_deref(), Some(&[0xAB, 0xCD][..]));
+}
+
+#[test]
 fn a_message_the_server_left_unnamed_is_named_for_its_sender() {
     test_env::reset();
     test_env::OWN_UID.with(|c| c.set(7));
     test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
     test_env::MEMBER.with(|c| *c.borrow_mut() = Some(("bob".into(), 0)));
     unsafe {
-        message(htlc(), 7, "", "to myself");
-        message(htlc(), 5, "", "from bob");
+        message(htlc(), 7, "", "to myself", None);
+        message(htlc(), 5, "", "from bob", None);
     }
     assert_eq!(
         test_env::emitted(),
@@ -90,7 +108,7 @@ fn what_an_ignored_user_sends_is_dropped() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(true));
     unsafe {
-        message(htlc(), 42, "alice", "hi");
+        message(htlc(), 42, "alice", "hi", None);
         broadcast(htlc(), 42, "alice", "hi");
     }
     assert_eq!(test_env::emitted(), []);

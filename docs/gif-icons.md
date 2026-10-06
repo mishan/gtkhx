@@ -114,18 +114,17 @@ server does not return a task error for an unknown opcode — Janus
 with a bogus opcode: zero response). So the probe cannot rely on a
 non-zero error code; it uses a watchdog, the same shape the tracker-v3 probe already uses.
 
-As built (`src/gif_icons.c`):
+As built (`hxhandlers`' `send::icon` and `recv::icon`):
 
-1. After login, fire Get Icon List once, recording the transaction ID its
-   task is keyed on, which is the one it goes out on.
+1. After login, fire Get Icon List once, its reply expected by the
+   session, and remember the trans it went out on as the probe's.
 2. Arm a 2-second watchdog.
 3. A reply marks the session capable — ingest the entries, enable the
    send path, and auto-send the user's saved avatar if there is one.
-4. The watchdog firing marks the session unsupported, stays silent, and
-   dismisses the probe's row from the Tasks window (a legacy server
-   never replies, so the row would otherwise sit there forever). Only
-   the UI row is removed, not the model task — a merely *slow* server's
-   late reply still dispatches normally and loads avatars.
+4. A refusal, or the watchdog firing, marks the session unsupported and
+   stays silent. A merely *slow* server's late reply is still read and
+   loads avatars. Like every request whose reply the session expects,
+   the probe has no row in the Tasks window.
 
 Worst case against a legacy server: one ignored transaction and a
 two-second timer.
@@ -214,12 +213,11 @@ post-login probe once support is confirmed. A server may refuse that
 automatic send — hxd-ng refuses a guest an icon, and a server may
 rate-limit it — and since the user didn't ask for it at this login, the
 refusal is logged under `GTKHX_DEBUG=icon` rather than toasted, and it
-is not retried on that connection. The automatic send carries its own
-task (`icon-set-auto`, handled by `rcv_task_icon_set_auto`) so
-`hx_rcv_task` can tell it apart; a set the user makes in Settings goes
-out untasked and a refusal of it still reaches them as a toast. Clear
-forgets the saved file
-and, if connected and capable, sends a clear. The preview seeds from the
+is not retried on that connection. The automatic send is remembered by
+its trans (`hx_icon_set_saved`) so its refusal can be told apart; a
+refusal of a set the user makes in Settings still reaches them as a
+toast. Clear forgets the saved file and, if connected and capable, sends
+a clear. The preview seeds from the
 saved file so it shows before connecting.
 
 An in-memory copy backs both the preview and the auto-send, so the
@@ -257,9 +255,10 @@ benefits any test needing the uid on that server.
 - **Wire fixtures** in `hxproto` cover the four builders, the
   `0x0301` entry walker (including truncated and oversized rejection),
   and the GIF signature validator.
-- **Integration** (`tests/integration/test_gif_icons.c`) covers the
+- **End to end** (`rust/crates/hx-e2e/tests/icons.rs`) covers the
   set→get round-trip, getlist, the 1864 broadcast to a second client,
-  and clear — green against both mhxd and Janus.
+  and clear, as GtkHx sends and expects them — green against both mhxd
+  and Janus.
 
 ## Open
 

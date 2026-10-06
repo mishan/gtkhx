@@ -69,7 +69,7 @@ fn a_refused_listing_tells_the_provider_which_folder() {
 fn forgetting_a_connection_lets_go_of_only_its_requests() {
     asked(A, 9, listing(b"/a"));
     asked(B, 9, listing(b"/b"));
-    forget(A);
+    forget(A, false);
     unsafe {
         listed(A, 9, &[]);
         listed(B, 9, &[]);
@@ -100,4 +100,24 @@ fn a_new_listing_replaces_the_provider_s_last() {
             (PROVIDER as usize, b"/new".to_vec(), Some(vec![])),
         ]
     );
+}
+
+/// A server may send its banner, and be asked for it, before the login
+/// settles: the login's forgetting keeps the banner's request, and only the
+/// connection closing lets it go.
+#[test]
+fn the_banner_s_request_outlives_the_login_but_not_the_connection() {
+    use crate::recv::xfer::test_env as xfer;
+    let banner = Transfer {
+        reference: 3,
+        size: 10,
+        ..Transfer::default()
+    };
+    for (login, fetched) in [(true, Some((3, 10))), (false, None)] {
+        xfer::reset();
+        asked(A, 5, Asked::Banner);
+        forget(A, login);
+        unsafe { transfer(A, 5, &banner) };
+        assert_eq!(xfer::BANNER.with(|c| c.get()), fetched, "{login}");
+    }
 }

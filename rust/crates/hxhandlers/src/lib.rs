@@ -32,6 +32,8 @@
 //! `gtkhx-ffi` façade are all unaffected. The `#[cfg(test)]` doubles that let
 //! each handler's tests run headless moved with their module.
 
+// Inline media's uploads and downloads, part by part.
+pub mod media;
 pub mod recv;
 pub mod send;
 // The file-transfer registry (the `xfers[]` list) — Y1 of the xfers.c → Rust

@@ -26,8 +26,8 @@
  *     for it.
  *   - banner_show_active() — called from hx_chrome_refresh on a connection-tab
  *     switch; repaints the row for whichever connection is now focused.
- *   - banner_handle_htxf_reply() — called from rcv_task_banner_get (hxhandlers)
- *     with the file-mode reply's ref + size.
+ *   - banner_handle_htxf_reply() — called from hxhandlers with the file-mode
+ *     reply's ref + size.
  */
 
 /* Build the banner widget. Returned widget is the root of the
@@ -61,18 +61,9 @@ extern void banner_show_active (void);
 
 /* Continuation of the file-mode banner flow: the server's reply
  * to our HTLC_HDR_DOWNLOAD_BANNER carries a transfer refnum +
- * size. rcv_task_banner_get extracts them and calls this so
- * banner.c can spin up an HTXF worker to fetch the bytes.
+ * size, for the banner to spin up an HTXF worker to fetch the bytes.
  * Called on the main thread. */
 extern void banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref,
                                       guint32 size);
-
-/* Task callback for HTLC_HDR_DOWNLOAD_BANNER replies. Defined in
- * rcv.c (where the other rcv_task_* handlers live) but declared
- * here so banner.c can pass it to RCV_TASK_FN() when registering
- * the task, and so rcv.c itself sees a prior prototype for the
- * function body (avoids -Wmissing-prototypes). */
-extern void rcv_task_banner_get (struct htlc_conn *htlc, const guint8 *frame,
-                                 gsize frame_len, void *ptr, void *data);
 
 #endif /* HX_BANNER_H */

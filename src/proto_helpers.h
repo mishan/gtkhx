@@ -468,6 +468,15 @@ extern void hx_media_table_free (void *table);
 extern guint hx_media_table_register (void *table, const HxChatMedia *src);
 extern const HxChatMedia *hx_media_table_lookup (void *table, guint token);
 
+/* Append the picture `media` names to the chat view `view` and fetch it
+ * into the row (gtkhx-ui inline_media_row.rs). `table` is the
+ * conversation's; NULL keeps one on the view, whose clicks then open the
+ * picture. */
+struct _GtkWidget;
+extern void hx_inline_media_row_append (struct _GtkWidget *view, void *table,
+                                        const HxChatMedia *media,
+                                        struct htlc_conn *htlc);
+
 /*
  * HxMsgEvent — a parsed private-message value object.
  *
@@ -501,6 +510,7 @@ struct _HxMsgEvent {
     gsize body_len;
     gboolean is_self;
     gboolean is_broadcast;
+    HxChatMedia *media; /* NULL when the message carries no picture */
 };
 
 #define HX_TYPE_MSG_EVENT (hx_msg_event_get_type ())

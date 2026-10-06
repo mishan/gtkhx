@@ -32,3 +32,5 @@ gtkhx-core = { path = "../gtkhx-core" }
 hxtext = { path = "../hxtext", default-features = false }
 # The GLib main loop the app's connection delivers its events on.
 glib = { workspace = true }
+# Pictures to send as inline media.
+png = "0.18.1"

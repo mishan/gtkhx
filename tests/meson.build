@@ -764,18 +764,10 @@ test('voice', test_voice,
      suite : 'proto')
 endif # voice_enabled
 
-# inline_media — fogWraith inline-media extension wire shape (Phase 9.A).
-# Pins HTLC_CAP_INLINE_MEDIA (bit 3 = 0x0008), the 0x0201-0x0212 field
-# IDs, the 750 / 751 opcode block, the spec-recommended default cap
-# values, the CAP gate on the send wrappers, the limits-fallback
-# accessors, and the FFI ABI of every gtkhx_proto_build_* / parse_* /
-# extract_* entry point against hand-packed messages. Source:
-# fogWraith Capabilities-Inline-Media.md.
+# inline_media — the inline-media cap gate and the advisory-limit accessors.
 test_inline_media = executable('test_inline_media',
   'proto/test_inline_media.c',
   '../src/inline_media.c',
-  '../src/inline_media_upload.c',
-  '../src/proto_helpers.c',
   '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
@@ -1263,21 +1255,6 @@ test('ping', test_integration_ping,
      suite   : 'integration',
      timeout : 30)
 
-# gif_icons — fogWraith GIF-icons extension (TRAN 1861-1864). No
-# capability bit, so it runs against the default matrix server; both
-# mhxd and Janus implement it. Set/get round-trip, getlist, the
-# ICON_CHANGE broadcast to a second client, and clear.
-test_integration_gif_icons = executable('test_integration_gif_icons',
-  'integration/test_gif_icons.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('gif_icons', test_integration_gif_icons,
-     suite   : 'integration',
-     timeout : 30)
-
 # nick_colors — Tier 3 coverage for the Colored-Nicknames extension.
 # Two subtests:
 #   user_change_round_trip — outbound USER_CHANGE with DATA_COLOR is
@@ -1720,31 +1697,6 @@ test('hope_blowfish_banner', test_integration_hope_blowfish_banner,
      timeout     : 60)
 
 test('chat_history', test_integration_chat_history,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
-# inline_media — Phase 9.F Tier 3 coverage. First step per
-# docs/inline-media.md: verify Janus actually implements the
-# fogWraith inline-media extension by asserting the LOGIN reply
-# echoes CAP_INLINE_MEDIA and advertises at least one
-# DATA_CHAT_MEDIA_MAX_* advisory field. Filtered on
-# HX_TEST_CAP_INLINE_MEDIA — today only Janus advertises the bit.
-# Follow-up commits in the same Phase 9.F branch will add full
-# upload + chat-with-media-handle + download round-trip once
-# this first step is green. Failure mode is a clean assertion,
-# not a silent skip (per the no-test-skips feedback memory),
-# which gives a fast signal if Janus turns out to not actually
-# implement the extension and the mock-server fallback path
-# needs to be taken.
-test_integration_inline_media = executable('test_integration_inline_media',
-  'integration/test_inline_media.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('inline_media', test_integration_inline_media,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 60)

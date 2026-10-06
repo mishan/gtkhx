@@ -1,7 +1,8 @@
 //! `hxhandlers::send::files` — the files-browser RPC senders.
 //!
 //! FILE_LIST, MKDIR, DELETE, GETINFO, SETINFO, MOVE (with its rename-in-place
-//! SETINFO companion), and the upload / folder-transfer kickoffs. The requests
+//! SETINFO companion), the upload / folder-transfer kickoffs, and the banner's
+//! request. The requests
 //! themselves are built by `hxrequest::files`, which the end-to-end suite
 //! drives against real servers; what lives here is the C ABI the files
 //! browser calls, the session expecting each reply, and the send. A reply is
@@ -114,6 +115,20 @@ pub(crate) unsafe fn change(htlc: *mut c_void, req: Option<Request>) {
 pub(crate) unsafe fn expect_transfer(htlc: *mut c_void, what: Asked) {
     let trans = expect_next(htlc, Expect::Transfer);
     asked(htlc, trans, what);
+}
+
+/// `void hx_banner_get (struct htlc_conn *htlc)` — ask for the server's
+/// banner, for its fetch to take over the transfer the reply grants.
+///
+/// # Safety
+/// `htlc` is NULL or live. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn hx_banner_get(htlc: *mut c_void) {
+    if htlc.is_null() {
+        return;
+    }
+    let trans = send(htlc, &files::banner(), Expect::Transfer);
+    asked(htlc, trans, Asked::Banner);
 }
 
 /// `void hx_list_dir (struct htlc_conn *htlc, const char *path, gpointer

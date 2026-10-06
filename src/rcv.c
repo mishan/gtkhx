@@ -206,29 +206,22 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     gtkhx_proto_header_trans (frame, frame_len, &trans);
     tsk = task_with_trans (sess_from_htlc (htlc), trans);
 
-    /* Login-time requests whose rejection is expected and non-actionable:
-     * the GIF-icons probe (a task error is just "unsupported") and the
-     * saved avatar's automatic re-send (a guest, a rate limit). Their own
-     * rcv handler takes the error (dispatched below), so suppress the
-     * generic toast + ERROR sound — otherwise every login nags the user
-     * about a request they never made. */
-    gboolean silent_probe = tsk && tsk->str
-                            && (!strcmp (tsk->str, "icon-list")
-                                || !strcmp (tsk->str, "icon-set-auto"));
+    /* A refused voice or video request is the voice panel's to show, so
+     * the generic toast + ERROR sound is suppressed and its own handler
+     * takes the error (dispatched below). */
+    gboolean silent = FALSE;
 #ifdef HAVE_VOICE
     {
         session *vsess = sess_from_htlc (htlc);
         if (tsk && vsess && vsess->voice_runtime
             && voice_reports_error (tsk->str)) {
-            /* Not a probe, but the same treatment: the voice panel
-             * shows this one. */
-            silent_probe = TRUE;
+            silent = TRUE;
         }
     }
 #endif /* HAVE_VOICE */
 
     if (task_inerror (htlc, frame, frame_len)) {
-        if (!silent_probe) {
+        if (!silent) {
             task_error (htlc, frame, frame_len);
         }
         error = 1;
@@ -296,24 +289,7 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 #endif /* HAVE_VOICE */
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
-        /* Inline-media tasks ('upload-media', 'download-media') own
-         * per-request state their handler must reclaim on an error:
-         * rcv_task_upload_media owns the per-upload context (callback
-         * + user_data + heap state), checks task_inerror at its entry
-         * and routes to the failure-delivery path which invokes the
-         * caller's on_done with the spec MediaErrorCode + DATA_ERROR
-         * text. Without the dispatch, the ctx leaks and the caller's UI
-         * sits forever waiting for a callback that never fires.
-         *
-         * Other handlers (login, user-info, news, …) don't
-         * have per-task state to free; the error toast above is
-         * enough and we skip them as before. */
-        gboolean dispatch_on_error
-            = silent_probe
-              || (tsk->str
-                  && (!strcmp (tsk->str, "upload-media")
-                      || !strcmp (tsk->str, "download-media")));
-        if (tsk->rcv && (!error || dispatch_on_error)) {
+        if (tsk->rcv && (!error || silent)) {
             tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore
@@ -1082,14 +1058,6 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
         gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
     }
 }
-
-/* GIF-icons extension (fogWraith GIF-Icons.md). The ICON_GET / ICON_GETLIST
- * task-reply handlers (rcv_task_icon_get / rcv_task_icon_getlist) moved to the
- * hxhandlers Rust crate (rust/crates/hxhandlers/src/recv/icon.rs): each walks
- * the reply natively (crate::gif_icons), flips the probe negotiation state via
- * the hx_conn_gif_icons_* accessors, and publishes avatars through
- * hx_icon_data_recv (also Rust). The C senders (gif_icons.c) still register them
- * via RCV_TASK_FN(); the symbols resolve against the Rust crate at link. */
 
 /* ICON_CHANGE (1864) server broadcast: UID only. Parse + gif-icon-changed emit
  * live in the Rust hxhandlers::recv::icon module (rust/crates/hxhandlers/src/recv/icon.rs). */

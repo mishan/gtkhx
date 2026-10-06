@@ -156,10 +156,13 @@ mod bench;
 pub mod pchat;
 // the inline-media click-to-view dialog. Builds the
 // AdwDialog (Loading → image → error stack) + Save-As / Open-Externally
-// handlers in gtk4-rs; the download state machine (inline_media_download.c)
-// and glycin decoder (inline_media_decode.c / hx-image-decode) stay C behind
-// the FFI seam. inline_media_show_dialog is this module's #[no_mangle] export.
+// handlers in gtk4-rs; the download (hxhandlers::media) and glycin decoder
+// (inline_media_decode.c / hx-image-decode) sit behind the FFI seam.
+// inline_media_show_dialog is this module's #[no_mangle] export.
 pub mod inline_media_dialog;
+// The inline picture a chat line or private message carries, as a chat-view
+// row fetched and decoded in place. hx_inline_media_row_append is its export.
+pub mod inline_media_row;
 // the Get-User-Info result window (was gtkhx.c::output_user_info). A
 // small read-only text window; fired from the user-info GtkhxSession signal.
 // output_user_info is this module's #[no_mangle] export.

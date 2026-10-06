@@ -496,7 +496,7 @@ hx_chat_media_placeholder_line (const HxChatMedia *m)
  * (consumers read fields), so the Rust mirror's #[repr(C)] layout is
  * pinned against these asserts; bump both sides together if HxMsgEvent
  * ever changes shape. */
-_Static_assert (sizeof (HxMsgEvent) == 48,
+_Static_assert (sizeof (HxMsgEvent) == 56,
                 "HxMsgEvent layout must match the Rust #[repr(C)] mirror "
                 "in gtkhx-core::boxed::msg");
 /* Field offsets too — size alone misses reorderings / padding changes
@@ -509,3 +509,4 @@ _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, body_len) == 32, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_self) == 40, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_broadcast) == 44,
                 "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, media) == 48, "field offset");

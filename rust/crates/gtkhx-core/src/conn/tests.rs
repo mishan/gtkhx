@@ -250,8 +250,8 @@ fn connect_state_is_per_connection() {
         let a = hx_conn_new();
         let b = hx_conn_new();
 
-        hx_conn_set_gif_icons_probe_trans(a, 2);
-        assert_eq!(hx_conn_gif_icons_probe_trans(b), 0);
+        hx_conn_set_gif_icons_probe_timer(a, 2);
+        assert_eq!(hx_conn_gif_icons_probe_timer(b), 0);
 
         hx_conn_free(a);
         hx_conn_free(b);
@@ -264,11 +264,11 @@ fn connect_state_is_per_connection() {
 fn connect_state_is_cleared_by_a_reset() {
     unsafe {
         let h = hx_conn_new();
-        hx_conn_set_gif_icons_probe_trans(h, 9);
+        hx_conn_set_gif_icons_probe_timer(h, 9);
 
         hx_conn_reset(h);
 
-        assert_eq!(hx_conn_gif_icons_probe_trans(h), 0);
+        assert_eq!(hx_conn_gif_icons_probe_timer(h), 0);
 
         hx_conn_free(h);
     }
