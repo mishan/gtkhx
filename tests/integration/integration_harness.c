@@ -1381,8 +1381,8 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
          * Walk every drained message and stash the bits we care
          * about as we go; mhxd-style servers also send NAME in
          * SELFINFO so we still pick it up there. The CAPABILITIES
-         * stash mirrors src/rcv.c::rcv_task_login's variable-width
-         * big-endian decode (1..8 bytes) into htlc->caps. */
+         * stash is the variable-width big-endian decode (1..8 bytes) into
+         * htlc->caps. */
         {
             dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
             {
@@ -1403,7 +1403,8 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                     memcpy (&v, dh->data, sizeof v);
                     htlc->uid = ntohs (v);
                 } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
-                    htlc->caps = hl_capabilities_decode (dh->data, _len);
+                    htlc->caps
+                        = gtkhx_proto_capabilities_decode (dh->data, _len);
                 } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_BYTES
                            && _len >= 4) {
                     guint32 v;
@@ -1439,35 +1440,26 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
             dh_end ();
         }
 
-        /* The video limits go through the parser rcv.c's login handler
-         * uses, so a video test checks what production stores. */
+        /* DATA_VIDEO_LIMITS, once per kind: kind, width, height, fps (u16
+         * each), bitrate (u32). */
         if (type == HTLS_HDR_TASK) {
-            struct gtkhx_proto_login li;
-            uint8_t name[64];
-            unsigned seen = gtkhx_proto_parse_login (hx_test_in (htlc)->buf,
-                                                     hx_test_in (htlc)->pos,
-                                                     name, sizeof (name), &li);
-            static const struct {
-                unsigned seen;
-                guint16 kind;
-            } kinds[] = {
-                { HX_LOGIN_SEEN_VIDEO_CAMERA_LIMITS, HX_VIDEO_KIND_CAMERA },
-                { HX_LOGIN_SEEN_VIDEO_SCREEN_LIMITS, HX_VIDEO_KIND_SCREEN },
-            };
-            for (gsize i = 0; i < G_N_ELEMENTS (kinds); i++) {
-                if (!(seen & kinds[i].seen)) {
-                    continue;
+            dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
+            {
+                guint16 kind = 0;
+                if (_type == HTLS_DATA_VIDEO_LIMITS && _len >= 16) {
+                    HN16 (&kind, dh->data);
                 }
-                const struct gtkhx_proto_login_video_limits *pl
-                    = &li.video_limits[kinds[i].kind - 1];
-                struct hx_video_limits *vl
-                    = &htlc->video_limits[kinds[i].kind - 1];
-                vl->max_width = pl->max_width;
-                vl->max_height = pl->max_height;
-                vl->max_fps = pl->max_fps;
-                vl->max_bitrate = pl->max_bitrate;
-                vl->present = 1;
+                if (kind == HX_VIDEO_KIND_CAMERA
+                    || kind == HX_VIDEO_KIND_SCREEN) {
+                    struct hx_video_limits *vl = &htlc->video_limits[kind - 1];
+                    HN16 (&vl->max_width, dh->data + 2);
+                    HN16 (&vl->max_height, dh->data + 4);
+                    HN16 (&vl->max_fps, dh->data + 6);
+                    HN32 (&vl->max_bitrate, dh->data + 8);
+                    vl->present = 1;
+                }
             }
+            dh_end ();
         }
 
         if (type == HTLS_HDR_USER_SELFINFO) {
@@ -1836,7 +1828,7 @@ integration_open_login_hope_or_skip (const hx_test_server *srv,
                 memcpy (htlc->name, dh->data, nlen);
                 htlc->name[nlen] = '\0';
             } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
-                htlc->caps = hl_capabilities_decode (dh->data, _len);
+                htlc->caps = gtkhx_proto_capabilities_decode (dh->data, _len);
             } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_BYTES && _len >= 4) {
                 guint32 v;
                 HN32 (&v, dh->data);
@@ -1876,8 +1868,8 @@ integration_open_login_hope_or_skip (const hx_test_server *srv,
             /* The HOPE handshake is now complete, so the actor's
              * retained AEAD material is populated. Seed htlc->hope_aead
              * so an HTXF subchannel (banner / file) can derive its
-             * per-transfer keys in-process, mirroring production's
-             * rcv_task_login. NULL for non-AEAD. */
+             * per-transfer keys in-process, as production does at
+             * login. NULL for non-AEAD. */
             hxnet_connection *oh = orch_lookup (fd);
             if (oh) {
                 htlc->hope_aead = hxnet_connection_hope_aead_material (oh);

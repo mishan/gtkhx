@@ -595,22 +595,20 @@ pub unsafe extern "C" fn hxnet_connection_hope_compression(handle: *mut HxnetCon
     }
 }
 
-/// The trans the login goes out on, which its reply carries and the
-/// consumer's login task is keyed on: HOPE's step 2 on a HOPE connection.
-/// 0 for a NULL handle or a bare actor with no session.
+/// The capabilities the login agreed, of those offered: what the C
+/// connect path offers reaches the server only if it is here. 0 for a
+/// NULL handle or a connection not yet logged in.
 ///
 /// # Safety
 ///
 /// `handle` is NULL or valid.
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_login_trans(handle: *mut HxnetConnection) -> u32 {
-    match handle.as_ref().and_then(|h| h.session.as_ref()) {
-        Some(s) => s
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .login_trans(),
-        None => 0,
-    }
+pub unsafe extern "C" fn hxnet_connection_agreed_caps(handle: *mut HxnetConnection) -> u16 {
+    let Some(s) = handle.as_ref().and_then(|h| h.session.as_ref()) else {
+        return 0;
+    };
+    let s = s.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    s.server().map_or(0, |i| i.caps)
 }
 
 /// Drop the handle and abort its spawned task. The task is
@@ -1045,11 +1043,12 @@ pub(crate) unsafe fn parse_proxy_arg(
 /// side can drive the toolbar throbber off the same `on_state`
 /// callback wiring it already uses.
 ///
-/// The session handles chat, users, messages, news and the transfer
-/// queue itself (`Handled::CHAT`, `Handled::USERS`, `Handled::MSG`,
-/// `Handled::NEWS`, `Handled::FILES`): what it makes of them, and of the
-/// replies the consumer expects ([`connection_expect`]), reaches
-/// `on_session` rather than `on_event`, in the order the server sent it. The same holds for
+/// The session handles the login's reply, chat, users, messages, news and
+/// the transfer queue itself (`Handled::LOGIN`, `Handled::CHAT`,
+/// `Handled::USERS`, `Handled::MSG`, `Handled::NEWS`, `Handled::FILES`):
+/// what it makes of them, and of the replies the consumer expects
+/// ([`connection_expect`]), reaches `on_session` rather than `on_event`, in
+/// the order the server sent it. The same holds for
 /// `hxnet_connection_open_plaintext_tls` and `hxnet_connection_open_hope`.
 ///
 /// All input slices are non-NUL-terminated:
@@ -1230,8 +1229,14 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         proxy,
     };
 
-    let session =
-        req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS | Handled::FILES);
+    let session = req.session(
+        Handled::CHAT
+            | Handled::USERS
+            | Handled::MSG
+            | Handled::NEWS
+            | Handled::FILES
+            | Handled::LOGIN,
+    );
     traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
@@ -1254,15 +1259,15 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 
 /// Polling-mode sibling of [`hxnet_connection_open_plaintext`]: runs
 /// the same production plaintext lifecycle (DNS, TCP, magic, LOGIN,
-/// LOGIN-reply, Option-B replay, actor), but exposes events through
+/// LOGIN-reply, actor), but exposes events through
 /// the polling API ([`hxnet_connection_try_recv_frame`]) instead of
 /// the GLib-main-thread callback forwarder.
 ///
 /// This is the foundation for routing the synchronous Tier 3 test
 /// harness through the production connect path (increment 2): the
 /// harness has no GLib main loop, so it drives the lifecycle by
-/// polling for frames. The replayed LOGIN reply arrives as the first
-/// `HXNET_RECV_FRAME`; subsequent server frames (SELFINFO, agreement,
+/// polling for frames. Its session handles no domain, so the LOGIN reply
+/// arrives whole, as the first `HXNET_RECV_FRAME`; subsequent server frames (SELFINFO, agreement,
 /// chat, …) arrive as the actor reads them. Outbound frames go via
 /// [`hxnet_connection_send_frame`]. State events are dropped by the
 /// polling receiver (the harness keys off the frames, like the
@@ -1581,8 +1586,14 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         boxed
     });
 
-    let session =
-        req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS | Handled::FILES);
+    let session = req.session(
+        Handled::CHAT
+            | Handled::USERS
+            | Handled::MSG
+            | Handled::NEWS
+            | Handled::FILES
+            | Handled::LOGIN,
+    );
     traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {
@@ -1791,9 +1802,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
 /// the one compression to offer (`b"GZIP"`, `b"LZ4"`, `b"ZSTD"`), or is
 /// empty or `b"NONE"` for none; the server takes it or not.
 ///
-/// The step-2 reply, the login's, reaches the C side as `Event::Frame`
-/// on [`hxnet_connection_login_trans`]'s trans, which the C caller keys
-/// its login task on.
+/// The step-2 reply, the login's, reaches `on_session` as the session's
+/// `LoggedIn`, as on the plaintext path.
 ///
 /// `caps` is advertised in the step-2 LOGIN (BE u16 `HTLC_CAP_*`);
 /// `icon` / `version` likewise. `name` is the display name sent in
@@ -1994,8 +2004,14 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         proxy,
     };
 
-    let session =
-        req.session(Handled::CHAT | Handled::USERS | Handled::MSG | Handled::NEWS | Handled::FILES);
+    let session = req.session(
+        Handled::CHAT
+            | Handled::USERS
+            | Handled::MSG
+            | Handled::NEWS
+            | Handled::FILES
+            | Handled::LOGIN,
+    );
     traced(&session);
     let lifecycle_session = session.clone();
     let join = rt.handle().spawn(async move {

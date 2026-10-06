@@ -702,9 +702,9 @@ The order, each step its own branch and each checked against the rig:
 2. **The handshake, login and agreement.** The session, in raw mode, drives
    the connection from the magic on (`hxnet`'s `session.rs`): the login,
    the agreement and the wait for it, a 1.2 server's user change, and when
-   the post-login fetches may go out (`LoginReady`). C reads the login
-   reply's fields, shows the agreement, and keeps everything after.
-   *Done.*
+   the post-login fetches may go out (`LoginReady`). C shows the
+   agreement and keeps everything after; the login reply's fields moved
+   in step 5. *Done.*
 3. **Transaction ids and the keep-alive.** The session numbers every
    transaction from one counter, and a GtkHx task keeps its view-side
    state, keyed by the trans the session gives it
@@ -718,7 +718,7 @@ The order, each step its own branch and each checked against the rig:
    and GZIP, LZ4 and ZSTD beneath either — as a codec between the session's
    `feed` / `take_outgoing` and the socket. `Session::with_hope` runs both
    steps on the session's own counter, so the login is step 2, on trans 2,
-   and C keys its login task on the trans the session reports. `hxnet` only
+   and the session reports the login's reply as its own event. `hxnet` only
    moves bytes: the HOPE lifecycle is connect plus session, and the
    transfer keys an HTXF subchannel derives from come from what the session
    agreed. Compression is negotiated when the user picks it, and the suite
@@ -766,9 +766,11 @@ The order, each step its own branch and each checked against the rig:
    what a listing gave back, and the user editor an account, by the bytes
    the server sent. What arrives is traced
    from the session's tap. *In progress.*
+   The login's reply is the session's too (`Handled::LOGIN`): its
+   `Event::LoggedIn` carries every field GtkHx reads, which
+   `hxhandlers::recv::login` puts on the connection before `logged-in`,
+   and a refusal's reason reaches the view as `request-failed`.
    What remains:
-   - the login's reply, still a task (`rcv_task_login`) whose fields C
-     reads; the session's `Event::LoggedIn` has only the common ones;
    - voice and video's requests, still tasks (`hxvoice-send`,
      `rcv_task_voice_join`, `rcv_task_voice_simple_ack`), and the refusal
      handling `hx_rcv_task` does for them;

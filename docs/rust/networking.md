@@ -3,8 +3,8 @@
 Subject reference for GtkHx's network transport: the control-channel
 connect lifecycle, proxy support, and the tracker fetch — all of which
 live in the Rust `hxnet` crate. The C side that remains is glue. This is
-also the design record for the decisions that are easy to re-break: the
-LOGIN-reply replay, the three silent-failure axes around it, why the proxy
+also the design record for the decisions that are easy to re-break: how
+the LOGIN reply reaches GtkHx, the silent-failure axes around it, why the proxy
 config comes from where it does, and how compression is negotiated.
 Companion docs: `network-endgame.md` (the C receive layer still being
 retired), `ROADMAP.md` (sequencing).
@@ -59,9 +59,7 @@ LoginSending → LoginReplyWait → HandshakeDone → LoginReady.
 
 The session numbers every transaction on the connection, C's included,
 from one counter. Its own are the login (HOPE's two steps, on 1 and 2),
-the agreement, a 1.2 server's user change and the keep-alive. C keys its
-login task on the trans the login's reply will carry, which it asks the
-session for (`hxnet_connection_login_trans`): 1, or 2 under HOPE. A C
+the agreement, a 1.2 server's user change and the keep-alive. A C
 request takes its trans from the session when its task is keyed
 (`task_new`, through `hxnet_connection_take_trans`), and the send that
 follows goes out on it; the connection holds that one trans reserved in
@@ -135,7 +133,7 @@ connect path; there is no legacy path and no gate. Its job is:
   workers read those back), reset the chat-history cursor, and emit
   `GTKHX_CONNECTION_CONNECTING`.
 - **Pinning the LOGIN transaction id** and setting the `fd` sentinel —
-  see "The three silent-failure axes".
+  see "The two silent-failure axes".
 - **Assembling the capability bitmask** advertised at LOGIN (large files,
   text encoding, chat history, inline media, and voice when compiled in).
 - **Dispatching to the right transport mode.** HOPE-over-TLS is rejected
@@ -149,9 +147,7 @@ the TLS-verify trampoline, and turns each `Event::Frame` back into a
 `Event::Session` into an `hx_recv_session_event` call (hxhandlers) behind
 the same gates.
 
-Reading the LOGIN reply's fields is still `rcv_task_login` in
-`src/rcv.c`; what follows the reply is the session's. See
-`network-endgame.md`.
+The LOGIN reply is the session's too; see below.
 
 ### TLS trust
 
@@ -168,137 +164,74 @@ instead of returning the WebPKI error. The cert is never trusted unless
 WebPKI validated it or TOFU accepted it, and a reject closes the stream
 before any credentials go out.
 
-## The LOGIN reply — replay vs. payload
+## The LOGIN reply
 
-The session consumes the LOGIN reply itself. The C side needs what's in it: the
-server's `HTLS_DATA_VERSION`, the banner id, the server name, the
-capability echo, and the task-error bit. If the orchestrator swallowed
-the reply silently, all of that would be lost. Three options were
-weighed.
+The session reads the LOGIN reply itself (HOPE's step-2 reply under HOPE)
+and says what it said as `Event::LoggedIn` (`hxsession::ServerInfo`): the
+version, 0 for a 1.0/1.2 server, which sends none; the name; our uid; the
+capabilities agreed, of those offered; inline media's advisory limits;
+chat history's retention; and video's ceiling for each kind. GtkHx's
+session handles the login (`Handled::LOGIN`), so the reply never reaches
+C whole. The actor hands the event on as `Event::Session` ahead of
+`HandshakeDone`, and `hxhandlers::recv::login` puts it on the connection,
+with the HOPE transfer keys an HTXF subchannel derives its own from, then
+emits `logged-in` (the connection, and the server's name or NULL). Its
+view handler prints the "login successful" and capability lines, keeps
+the name on the session and titles the windows; the login chime rides
+the same signal.
 
-### Option A — payload on `HandshakeDone`
+A refused login is `Closed::LoginRefused`. The actor hands it on as
+`Event::Session` before it ends, and the server's reason goes to
+`request-failed`, a toast and the error sound; the shutdown that follows
+closes the connection as any other. mhxd says nothing when it refuses a
+login: it hangs up.
 
-Extend `Event::State(HandshakeDone)` to carry the parsed `LoginReply`;
-the FFI's `on_state` callback grows a reply-chunks payload.
+Order is the server's. What a server sends before answering the login
+waits for the reply and follows `LoggedIn`; the agreement, when there is
+one, follows that; `LoginReady` comes last, once the agreement is
+answered or none came in two seconds, or at once on a 1.0/1.2 server.
 
-**Pros**: explicit; the C side parses the chunks as before, no flow
-change. **Cons**: payload-bearing state events are a new shape — the
-`on_state` signature carries no payload today.
+A session that handles no domain (the polling FFIs the C integration
+harness uses) also hands the reply over whole, ahead of `LoggedIn`.
 
-### Option B — replay the LOGIN reply as a Frame event
+## The two silent-failure axes
 
-The orchestrator emits the LOGIN-reply bytes back to the C side as a
-synthetic `Event::Frame` **before** emitting `HandshakeDone`. The C
-side's existing bridge + dispatch table consume it through the normal
-LOGIN-reply path (`rcv_task_login`).
+Each of these lets a login "succeed" while every post-login side effect
+vanishes without an error. Both are live in `hx_connect_via_orchestrator`
+today, and both gate what the session says as well as frames
+(`bridge_on_session_cb`).
 
-**Pros**: no change to the FFI shape, no change to the receive dispatch;
-the orchestrator is purely additive transport, so the receive side stays
-byte-identical to the legacy path.
-
-**Cons**: the orchestrator has to retain the full reply bytes and re-emit
-them. The double-work is smaller than it looks — Rust parses only far
-enough to read the task-error bit (success vs. failure); the rich fields
-are parsed once, in C. The real cost is the trans-pinning and
-install-ordering glue, both of which fail *silently*.
-
-This is what shipped. In raw mode the session hands the reply over whole
-ahead of saying it is logged in, and the actor turns that into an
-`Event::Frame` ahead of `HandshakeDone` — the LOGIN reply on the
-plaintext and TLS paths, the step-2 reply on the HOPE path.
-
-### Option C — keep magic + LOGIN on the C side
-
-The orchestrator stops at "TCP connected"; C does magic + LOGIN itself.
-Smallest delta, reuses everything — and defeats the point. The reason to
-have hxnet own the lifecycle was so the C side's GIO/GPollable machinery
-could be deleted, which it now has been.
-
-### The intended convergence: B to bridge, A as the destination
-
-Option B was the right *migration* mechanism: it kept everything
-downstream of the LOGIN reply behaviourally identical while the transport
-was swapped underneath. But it is not the clean end state.
-
-Option A sidesteps both silent-failure axes — no trans matching, no
-install ordering — because the reply never rides the receive dispatch
-path; the handshake-done handler gets the parsed chunks directly. Its
-one cost is factoring the field extraction out of `rcv_task_login` into a
-callable parser, separate from the post-login orchestration. That
-refactor is wanted anyway: the Rust side already parses the reply to
-decide success, and the C side wants a clean "parse-reply-fields" entry
-point decoupled from "arm the post-login machinery". At that point A's
-payload is just handing already-parsed fields across instead of
-re-serializing them into a synthetic frame for C to re-parse.
-
-The convergence to A is a natural companion to moving `rcv_task_login`
-itself into Rust (`network-endgame.md`); doing them together is less net
-plumbing than doing either alone.
-
-## The three silent-failure axes
-
-These are the reasons Option B's glue is delicate. Each one lets login
-"succeed" while every post-login side effect vanishes without an error.
-All three are live in `hx_connect_via_orchestrator` today.
-
-**1. Transaction-ID pinning.** The LOGIN reply dispatches by transaction
-id: `hx_rcv_task` does `task_with_trans(trans)`, and a miss is a *silent*
-fallthrough. So the synthetic frame only reaches `rcv_task_login` if a
-task is registered under the exact trans the orchestrator's LOGIN
-carries. The orchestrator owns the send, so both sides must agree on the
-value up front — LOGIN is always the first transaction, so it is pinned
-to the constant `HX_LOGIN_TRANS`. The plaintext and TLS paths replay the
-LOGIN reply (trans `HX_LOGIN_TRANS`); the HOPE path replays the *step-2*
-reply, which carries `HX_LOGIN_TRANS + 1`. Everything after the login is
-numbered by the session (see "The session"), so no request collides with
-the login task or the session's own.
-
-**2. The `fd` sentinel is -1, not 0.** `hx_bridge_dispatch_frame`
+**1. The `fd` sentinel is -1, not 0.** `hx_bridge_dispatch_frame`
 early-returns on `fd == 0` — that is the bridge's "connection closed,
 drop the frame" signal. The orchestrator owns the socket, so the C side
 has no real fd; `-1` means "live but no C-visible fd". `0` would silently
-drop every replayed frame. `-1` also keeps the `if (fd) close(...)`
-close-time guards firing, and the sentinel is never passed to `close(2)`
-— teardown goes through the hxnet handle, not the fd.
+drop every event. `-1` also keeps the `if (fd) close(...)` close-time
+guards firing, and the sentinel is never passed to `close(2)` — teardown
+goes through the hxnet handle, not the fd.
 
-**3. Synchronous install ordering.** `hx_bridge_dispatch_frame` also
-gates on `hx_bridge_is_installed (htlc)`, so the handle must be stored on
-the connection before the first event callback fires. Because the
-orchestrator emits the replayed frame *before* `HandshakeDone`, and
-because events arrive on the GLib main loop (which is not re-entered
-until the connect function returns), installing the handle synchronously
-inside the open call closes the window. An "install on handshake-done"
-design would drop the LOGIN reply.
+**2. Synchronous install ordering.** The callbacks also gate on the
+event's handle being the one stored on the connection, so the handle
+must be stored before the first event callback fires. Because the actor
+hands on `LoggedIn` *before* `HandshakeDone`, and because events arrive
+on the GLib main loop (which is not re-entered until the connect function
+returns), installing the handle synchronously inside the open call
+closes the window. An "install on handshake-done" design would drop the
+login.
 
-A test that only checks "login succeeded" passes even when the replayed
-frame was dropped. The Tier 3 gate therefore asserts the *effects* — the
-recorded dispatch count is non-zero and the reply carries the expected
-opcode and error bit — which catches axes 1 and 3 at once. Axis 2 is the
-one *loud* failure mode: a straggler calling a socket API on the sentinel
-gets `EBADF`.
+A test that only checks "login succeeded" passes even when the login's
+event was dropped. The Tier 3 gate (`test_real_connect`) therefore
+asserts that a session event reached the C side before the first frame,
+and that frames followed.
 
-## Connect-task timing parity
+## Connect-state timing
 
-The orchestrator originally registered the "login" protocol task up front
-(it had to exist before the replayed reply could dispatch to it). That
-left the login task visible in the Tasks window *concurrently* with the
-coarse "Connecting" task for the whole connect — unlike the legacy path,
-where it appears only once the connection is up and credentials are going
-out. Root cause: the two paths reached "handshake done" at different
-moments. Legacy emitted it when magic was done and login was being sent,
-then registered the task; the orchestrator emitted it at the very end,
-after the login reply. So legacy meant "entering login phase" and the
-orchestrator meant "login complete."
-
-The fix maps the orchestrator's `LoginSending` state onto the coarse
-`HANDSHAKE_DONE` view transition and registers the login task there, from
-the bridge's state callback (`hx_orchestrator_register_login_task`, which
-is idempotent and restores the send counter afterwards). `LoginSending`
-is emitted strictly before the replayed reply frame on the same ordered
-channel, so the task is registered in time. Rust's end-of-handshake state
-no longer drives a view transition; login completion is signalled by
-`LOGIN_READY`, as in legacy. Net sequence: CONNECTING → TCP_CONNECTED →
-HANDSHAKE_DONE (login task appears) → reply → LOGIN_READY.
+The orchestrator's `LoginSending` state maps onto the coarse
+`HANDSHAKE_DONE` view transition, as the legacy connect path's
+send_login did: magic done, credentials going out. It deletes the coarse
+"Connecting" task. Rust's own `HandshakeDone` drives no view transition;
+the login's completion is `logged-in`, and the login settling is
+`LOGIN_READY`. Net sequence: CONNECTING → TCP_CONNECTED → HANDSHAKE_DONE
+→ `logged-in` → LOGIN_READY.
 
 ## Compression
 
@@ -504,7 +437,7 @@ modules.
 
 Alongside that, `/real_connect/capabilities_negotiated` drives the
 production orchestrator against a capability-aware server and asserts the
-server echoed `HTLC_DATA_CAPABILITIES` back, and a `login.rs` unit test
+session agreed chat history with it (`hxnet_connection_agreed_caps`), and a `login.rs` unit test
 guards the send side.
 
 ### The remaining coverage hole

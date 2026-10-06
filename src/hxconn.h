@@ -65,7 +65,7 @@ extern void hx_conn_set_chat_history_last_msgid (struct htlc_conn *h,
                                                  guint64 v);
 
 /* Inline-media advisory limits — server hints from the LOGIN reply
- * (0 = "use the client default"). Set as a group by rcv_task_login,
+ * (0 = "use the client default"). Set as a group by hxhandlers' recv::login,
  * reset as a group at connect, and read individually by the
  * inline_media.h ceiling helpers. Survive reconnect intentionally
  * (see the inline_media.h caps/limits note) until explicitly reset. */

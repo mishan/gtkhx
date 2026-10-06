@@ -121,10 +121,11 @@ sound_on_user_delete (GtkhxSession *emitter, struct htlc_conn *htlc,
 
 static void
 sound_on_logged_in (GtkhxSession *emitter, struct htlc_conn *htlc,
-                    gpointer user_data)
+                    gpointer name, gpointer user_data)
 {
     (void)emitter;
     (void)htlc;
+    (void)name;
     (void)user_data;
     play_sound (LOGIN);
 }

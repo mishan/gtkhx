@@ -59,8 +59,6 @@ extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
                                        const guint8 *frame, gsize frame_len,
                                        void *opcode_ptr, void *cid_ptr);
 
-extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame,
-                            gsize frame_len, char *pass);
 /* USER_GETLIST, whose reply the session reads (hxhandlers::send::user). */
 extern void hx_user_list_get (struct htlc_conn *htlc);
 

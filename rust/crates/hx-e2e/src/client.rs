@@ -17,8 +17,6 @@ use crate::Server;
 const HTLS_HDR_AGREEMENT: u32 = 0x6d;
 /// `HTLS_HDR_TASK` — the reply to a client request.
 const HTLS_HDR_TASK: u32 = 0x0001_0000;
-/// `HTLS_DATA_CAPABILITIES` — the capability bits a server agreed to.
-const TAG_CAPABILITIES: u16 = 0x01f0;
 /// `HTLS_DATA_FILE_LIST` — one entry of a FILE_LIST reply.
 const TAG_FILE_LIST: u16 = 0x00c8;
 /// `HTLC_CAP_TEXT_ENCODING` / `HTLC_CAP_LARGE_FILES`.
@@ -37,8 +35,7 @@ pub struct Client {
     events: mpsc::Receiver<Event>,
     /// What numbers requests, as in production.
     session: hxnet::session::SharedSession,
-    caps: u16,
-    login_reply: Reply,
+    login: hxsession::ServerInfo,
     /// What the session made of what came before the login settled.
     login_events: Vec<hxsession::Event>,
 }
@@ -143,7 +140,8 @@ impl Client {
 
     /// As [`Client::login`], going by `nick`, with the session acting on
     /// `handled` itself, as production's does: what those domains bring
-    /// arrives as `Event::Session`, among the frames.
+    /// arrives as `Event::Session`, among the frames. The login's reply is
+    /// the session's, as in production.
     pub fn login_handling(
         server: &'static Server,
         login: &str,
@@ -170,7 +168,7 @@ impl Client {
             trans: LOGIN_TRANS,
             proxy: None,
         };
-        let session = req.session(handled);
+        let session = req.session(handled | Handled::LOGIN);
         rt.spawn(run_plaintext_lifecycle(
             req,
             session.clone(),
@@ -178,21 +176,25 @@ impl Client {
             evt_tx,
         ));
 
-        // The LOGIN reply. Not necessarily the first frame: a server can
-        // broadcast another user's arrival ahead of it.
-        let reply = rt
+        // What the LOGIN reply said. Not necessarily the first event: a
+        // server can broadcast another user's arrival ahead of it.
+        let login = rt
             .block_on(async {
                 tokio::time::timeout(REPLY_TIMEOUT, async {
                     loop {
                         match events.recv().await {
-                            Some(Event::Frame(f))
-                                if f.header.type_ == HTLS_HDR_TASK
-                                    && f.header.trans == LOGIN_TRANS =>
-                            {
-                                return Ok(f);
+                            Some(Event::Session(hxsession::Event::LoggedIn(info))) => {
+                                return Ok(info);
+                            }
+                            Some(Event::Session(hxsession::Event::Closed(
+                                hxsession::Closed::LoginRefused(why),
+                            ))) => {
+                                return Err(format!("login refused: {}", why.unwrap_or_default()))
                             }
                             Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
-                            Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
+                            Some(Event::Shutdown(r)) => {
+                                return Err(format!("connect failed: {r:?}"))
+                            }
                             None => return Err("connection closed".to_string()),
                         }
                     }
@@ -200,15 +202,7 @@ impl Client {
                 .await
             })
             .map_err(|_| format!("{}: no LOGIN reply", server.name))?
-            .map_err(|e| format!("{}: connect failed: {e}", server.name))?;
-        let reply = Reply::from_frame(reply);
-        if reply.is_error() {
-            return Err(format!(
-                "{}: login refused: {}",
-                server.name,
-                reply.error_text()
-            ));
-        }
+            .map_err(|e| format!("{}: {e}", server.name))?;
         // Agree as a user would, and wait for the login to settle before
         // sending anything: hlservd hangs up on a request before then.
         let mut login_events = Vec::new();
@@ -235,17 +229,13 @@ impl Client {
         })
         .map_err(|_| format!("{}: the login never settled", server.name))?
         .map_err(|e| format!("{}: disconnected during login: {e}", server.name))?;
-        let agreed = reply.chunk(TAG_CAPABILITIES).map_or(0, |d| {
-            d.iter().fold(0u64, |acc, b| (acc << 8) | u64::from(*b)) as u16
-        });
         Ok(Client {
             server,
             rt,
             handle,
             events,
             session,
-            caps: agreed & caps,
-            login_reply: reply,
+            login,
             login_events,
         })
     }
@@ -271,19 +261,19 @@ impl Client {
         &self.login_events
     }
 
-    /// The server's reply to the LOGIN: what else it said of itself.
-    pub fn login_reply(&self) -> &Reply {
-        &self.login_reply
+    /// What the server's reply to the LOGIN said of it.
+    pub fn server_info(&self) -> &hxsession::ServerInfo {
+        &self.login
     }
 
     /// The capability bits both sides agreed to.
     pub fn caps(&self) -> u16 {
-        self.caps
+        self.login.caps
     }
 
     /// Whether names go out as UTF-8 on this connection.
     pub fn utf8(&self) -> bool {
-        self.caps & CAP_TEXT_ENCODING != 0
+        self.caps() & CAP_TEXT_ENCODING != 0
     }
 
     /// Send `req` and return its trans.

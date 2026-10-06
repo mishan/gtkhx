@@ -206,6 +206,7 @@ rust_sources = files(
   'crates/hxhandlers/src/recv/chat.rs',
   'crates/hxhandlers/src/recv/files.rs',
   'crates/hxhandlers/src/recv/icon.rs',
+  'crates/hxhandlers/src/recv/login.rs',
   'crates/hxhandlers/src/recv/msg.rs',
   'crates/hxhandlers/src/recv/news.rs',
   'crates/hxhandlers/src/recv/user.rs',

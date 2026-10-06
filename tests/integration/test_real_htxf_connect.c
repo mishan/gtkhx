@@ -265,8 +265,8 @@ test_htxf_connect_file_get_aead (void)
      * INSIDE hxnet_htxf_connect from the control connection's retained HOPE
      * material (htlc->hope_aead, an opaque handle) plus this transfer's
      * ref — the session key never crosses back into C. The orchestrated
-     * login already seeded htlc.hope_aead from the production actor
-     * (mirroring rcv_task_login); it's an owned handle that
+     * login already seeded htlc.hope_aead from the production actor,
+     * as production does at login; it's an owned handle that
      * integration_release_htlc frees at teardown. */
     g_assert_nonnull (htlc.hope_aead);
 

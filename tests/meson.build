@@ -889,9 +889,9 @@ test('handshake', test_integration_handshake,
 # (which now dispatches to the hxnet orchestrator unconditionally —
 # the connect-path gate was removed with delete-old-connect) against a
 # REAL mhxd container so the whole orchestrator runs end
-# to end (DNS + TCP + magic + LOGIN + LOGIN-reply + Option-B replay).
-# Asserts mhxd accepted the guest login and the reply was replayed to
-# the C dispatch with the pinned trans + success flag. No fake_server
+# to end (DNS + TCP + magic + LOGIN + LOGIN-reply). Asserts the login's
+# event reached the bridge before the first frame, and that Janus agreed
+# to the capabilities production offers. No fake_server
 # — this one needs a live server, so it fails loudly if mhxd is down.
 test_integration_real_connect = executable(
   'test_integration_real_connect',

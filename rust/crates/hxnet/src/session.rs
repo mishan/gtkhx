@@ -13,7 +13,10 @@
 //! - every transaction it hands over whole → `Event::Frame`
 //! - what it makes of the rest, the replies the consumer expected, and
 //!   with the tap on each transaction as it came → `Event::Session`
-//! - logged in → `ConnectionState::HandshakeDone`
+//! - logged in → what the login reply said, as `Event::Session`, then
+//!   `ConnectionState::HandshakeDone`
+//! - a refused login → the refusal, as `Event::Session`, before the actor
+//!   ends
 //! - the login settled, the agreement answered or not waited on any
 //!   longer → `ConnectionState::LoginReady`
 //! - closed → the actor ends, with the reason as its `Shutdown`
@@ -75,8 +78,8 @@ struct Shared {
     start: Instant,
     /// What the session has queued and the write side has not written.
     out: Mutex<Vec<u8>>,
-    /// Whether the login has gone out, for the state events the consumer
-    /// keys its login task off.
+    /// Whether the login has gone out, for the `LoginSending` and
+    /// `LoginReplyWait` states.
     login_sent: Mutex<bool>,
     /// Wakes the write side: there is something to write.
     to_write: Notify,
@@ -328,9 +331,24 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
                     }
                 }
             }
-            hxsession::Event::LoggedIn(_) => Event::State(ConnectionState::HandshakeDone),
+            // What the reply said, then the state it puts the connection in.
+            hxsession::Event::LoggedIn(info) => {
+                let said = Event::Session(hxsession::Event::LoggedIn(info));
+                if evt_tx.send(said).await.is_err() {
+                    return Some(ShutdownReason::HandleDropped);
+                }
+                Event::State(ConnectionState::HandshakeDone)
+            }
             hxsession::Event::Ready => Event::State(ConnectionState::LoginReady),
-            hxsession::Event::Closed(why) => return Some(closed(why)),
+            // A refusal's reason is the consumer's to show; the shutdown
+            // carries only that it ended.
+            hxsession::Event::Closed(why) => {
+                if matches!(why, Closed::LoginRefused(_)) {
+                    let said = Event::Session(hxsession::Event::Closed(why.clone()));
+                    let _ = evt_tx.send(said).await;
+                }
+                return Some(closed(why));
+            }
             // The agreement reaches the consumer as its frame.
             hxsession::Event::Agreement(_) => continue,
             e => Event::Session(e),
@@ -459,6 +477,13 @@ mod tests {
             }
         }
 
+        async fn expect_logged_in(&mut self, version: u16) {
+            match self.next().await {
+                Event::Session(hxsession::Event::LoggedIn(i)) if i.version == version => {}
+                other => panic!("wanted the login, got {other:?}"),
+            }
+        }
+
         async fn expect_frame(&mut self, opcode: u32) {
             match self.next().await {
                 Event::Frame(f) if f.header.type_ == opcode => {}
@@ -468,7 +493,7 @@ mod tests {
     }
 
     fn start() -> (Server, Client) {
-        start_handling(hxsession::Handled::NONE)
+        start_handling(hxsession::Handled::LOGIN)
     }
 
     fn start_handling(handled: hxsession::Handled) -> (Server, Client) {
@@ -498,7 +523,7 @@ mod tests {
         client.expect_state(ConnectionState::LoginSending).await;
         client.expect_state(ConnectionState::LoginReplyWait).await;
         server.send(&login_reply(Some(190))).await;
-        client.expect_frame(TASK).await;
+        client.expect_logged_in(190).await;
         client.expect_state(ConnectionState::HandshakeDone).await;
     }
 
@@ -573,7 +598,7 @@ mod tests {
         assert_eq!(server.next().await, (USER_CHANGE, 2));
         client.expect_state(ConnectionState::LoginSending).await;
         client.expect_state(ConnectionState::LoginReplyWait).await;
-        client.expect_frame(TASK).await;
+        client.expect_logged_in(0).await;
         client.expect_state(ConnectionState::HandshakeDone).await;
         client.expect_state(ConnectionState::LoginReady).await;
     }
@@ -586,12 +611,13 @@ mod tests {
         let mut refusal = server_says(TASK, 1, &[(0x0064, b"Incorrect login.")]);
         refusal[8..12].copy_from_slice(&1u32.to_be_bytes());
         server.send(&refusal).await;
-        // The refusal reaches the consumer whole, then the end.
+        // The refusal reaches the consumer, then the end.
         let mut refusal_seen = false;
         loop {
             match client.next().await {
                 Event::State(_) => continue,
-                Event::Frame(f) if f.header.type_ == TASK && f.header.flag == 1 => {
+                Event::Session(hxsession::Event::Closed(Closed::LoginRefused(Some(why)))) => {
+                    assert_eq!(why, "Incorrect login.");
                     refusal_seen = true
                 }
                 Event::Shutdown(ShutdownReason::StreamError(why)) => {
@@ -635,7 +661,8 @@ mod tests {
 
     #[tokio::test]
     async fn what_the_session_handles_arrives_among_the_frames_in_order() {
-        let (mut server, mut client) = start_handling(hxsession::Handled::CHAT);
+        let (mut server, mut client) =
+            start_handling(hxsession::Handled::CHAT | hxsession::Handled::LOGIN);
         logged_in(&mut server, &mut client).await;
         let sent = [
             server_says(0x6a, 0, &[(0x0065, b"one")]),
