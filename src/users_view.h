@@ -31,7 +31,7 @@
  * Per-view construction parameters cover the visual differences
  * between the standalone Users window and the per-chat sidebars:
  * row height, pixel scale (Users window does 1.25× both icon
- * and font), text outline (Users window only), and text x-offset
+ * and font), name shadow (Users window only), and text x-offset
  * (36 px in Users, 22 px in pchat lists).
  *
  * Selection state belongs to the view: callers ask via
@@ -58,9 +58,9 @@ G_DECLARE_FINAL_TYPE (HxUserListView, hx_user_list_view, HX, USER_LIST_VIEW,
 
 /* Visual style flags. The Users window passes USERS for the
  * standalone-window appearance (26 px rows, 1.25× pixel scale,
- * text outline, 36-px text offset). Chat / pchat sidebars pass
+ * name shadow, 36-px text offset). Chat / pchat sidebars pass
  * CHAT for the compact appearance (18-px rows, 1.0× scale, no
- * outline, 36-px offset — same offset as the Users window so
+ * shadow, 36-px offset — same offset as the Users window so
  * medium-wide non-banner icons clear the name in both layouts). */
 typedef enum {
     HX_USER_LIST_STYLE_USERS = 0, /* standalone Users window */

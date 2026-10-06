@@ -33,6 +33,7 @@ pub mod connect;
 /// The Hotline icon catalogue and its picker dialog, shared by the Identity
 /// and Connections settings pages.
 mod icon_picker;
+pub mod name_shadow;
 pub mod options;
 mod options_connections;
 mod options_identity;

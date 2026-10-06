@@ -43,9 +43,8 @@
  *      anchored to the cell's start edge, vertically centered.
  *   2. Text Pango layout positioned at text_x_offset * pixel_scale
  *      from the start edge, vertically centered. With text_outline
- *      on, four 1-px offset copies in a contrasting color paint
- *      first, then the foreground color on top — a halo so light
- *      user-set nick colors stay readable on busy banner icons.
+ *      on and a wide banner behind the name, a soft shadow keeps
+ *      user-set nick colors readable over the art.
  *
  * Backed by a borrowed HxUserRow that the column factory's bind
  * callback hands in. The cell connects to the row's "changed"
@@ -91,6 +90,8 @@ struct _HxUserCellName {
      * wide banners this is HX_USER_WIDE_ICON_LEFT_PAD, applied
      * scaled by pixel_scale at snapshot. */
     int icon_left_pad;
+    /* A wide cicn's art behind the name, from hx_user_name_art_luminance. */
+    double art_lum[2];
 
     /* Style — set once at construction. */
     int text_x_offset;
@@ -225,6 +226,9 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
         int pb_w = gdk_pixbuf_get_width (pixbuf);
         if (pb_w >= HX_USER_WIDE_ICON_THRESHOLD) {
             cell->icon_left_pad = MIN (HX_USER_WIDE_ICON_LEFT_PAD, pb_w);
+            hx_user_name_art_luminance (
+                pixbuf, cell->icon_left_pad + cell->text_x_offset,
+                cell->art_lum);
         }
         /* gtkhx_texture_from_pixbuf is the non-deprecated
          * GBytes / gdk_memory_texture_new wrapper; centralises
@@ -407,27 +411,15 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
         gtk_widget_get_color (widget, &fg_color);
     }
 
-    /* Text outline (Users window only) — paint four offset copies
-     * in a contrast color before the foreground. Contrast = inverse
-     * of fg luminance so the halo stays visible regardless of the
-     * row's color. Reasonable approximation: pick black when fg is
-     * light, white when fg is dark. */
-    if (cell->text_outline) {
-        GdkRGBA halo;
-        double lum = 0.299 * fg_color.red + 0.587 * fg_color.green
-                     + 0.114 * fg_color.blue;
-        halo.red = halo.green = halo.blue = (lum > 0.5 ? 0.0 : 1.0);
-        halo.alpha = 1.0;
-        static const int dx[] = { -1, 1, 0, 0 };
-        static const int dy[] = { 0, 0, -1, 1 };
-        for (int i = 0; i < 4; i++) {
-            gtk_snapshot_save (snapshot);
-            gtk_snapshot_translate (
-                snapshot, &GRAPHENE_POINT_INIT ((float)(text_x + dx[i]),
-                                                (float)(text_y + dy[i])));
-            gtk_snapshot_append_layout (snapshot, layout, &halo);
-            gtk_snapshot_restore (snapshot);
-        }
+    /* When and how to shadow a name over a banner: name_shadow.rs. */
+    float c = hx_user_name_shadow (fg_color.red, fg_color.green, fg_color.blue,
+                                   cell->using_avatar ? NULL : cell->art_lum);
+    gboolean shadow
+        = cell->text_outline && cell->icon && cell->icon_left_pad && c >= 0;
+    if (shadow) {
+        GskShadow glow = { { c, c, c, 1.0f }, 0, 0, 2 };
+        GskShadow shadows[] = { glow, glow, glow };
+        gtk_snapshot_push_shadow (snapshot, shadows, G_N_ELEMENTS (shadows));
     }
 
     gtk_snapshot_save (snapshot);
@@ -435,6 +427,9 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
         snapshot, &GRAPHENE_POINT_INIT ((float)text_x, (float)text_y));
     gtk_snapshot_append_layout (snapshot, layout, &fg_color);
     gtk_snapshot_restore (snapshot);
+    if (shadow) {
+        gtk_snapshot_pop (snapshot);
+    }
 
     g_object_unref (layout);
 

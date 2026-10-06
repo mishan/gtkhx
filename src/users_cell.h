@@ -12,8 +12,8 @@
  *
  * Split out of users_view.c when HxUserListView was ported to Rust
  * (Phase R5.9): the custom snapshot/measure rendering (Mac-classic
- * icon-as-background + name overlay, wide-banner shift, text-outline
- * halo, GIF-avatar click-to-pause) stays C for now, behind this minimal
+ * icon-as-background + name overlay, wide-banner shift, banner name
+ * shadow, GIF-avatar click-to-pause) stays C for now, behind this minimal
  * ABI. The Rust view (gtkhx-ui `users_view` module) constructs one cell
  * per Name column item via hx_user_cell_name_new and rebinds it with
  * hx_user_cell_name_set_row on each factory bind/unbind.
@@ -39,11 +39,15 @@ G_DECLARE_FINAL_TYPE (HxUserCellName, hx_user_cell_name, HX, USER_CELL_NAME,
 /* Construct a Name cell. `text_x_offset` is the unscaled start-edge
  * offset the name paints at (icon renders behind it); `themed` follows
  * the GTKHX_SCALE_USERLIST_* theme areas (standalone Users window) vs a
- * fixed 1.0 density (compact chat sidebar); `text_outline` paints the
- * contrast halo; `row_height` is the base row height tuned at the
- * default-theme icon scale. */
+ * fixed 1.0 density (compact chat sidebar); `text_outline` shadows the
+ * name where it overlays banner art; `row_height` is the base row
+ * height tuned at the default-theme icon scale. */
 GtkWidget *hx_user_cell_name_new (int text_x_offset, gboolean themed,
                                   gboolean text_outline, int row_height);
+
+/* In gtkhx-ui's name_shadow.rs. */
+void hx_user_name_art_luminance (GdkPixbuf *pixbuf, int x0, double out[2]);
+float hx_user_name_shadow (double r, double g, double b, const double art[2]);
 
 /* Bind (or, with row==NULL, unbind) the cell to a borrowed HxUserRow.
  * Reconnects the row's "changed" handler and re-resolves the icon. */

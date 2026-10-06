@@ -295,7 +295,7 @@ impl HxUserListView {
         imp.sess.set(sess);
 
         // Style parameters. STYLE_USERS = standalone window (themed, taller
-        // rows, text outline); anything else = compact chat sidebar.
+        // rows, name shadow); anything else = compact chat sidebar.
         let (row_height, themed, text_outline, text_x_offset) = if style == STYLE_USERS {
             (26, true, true, 36)
         } else {
