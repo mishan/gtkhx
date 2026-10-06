@@ -34,8 +34,6 @@ proto_test_deps = test_deps + [
   # every test that links proto_helpers.c needs the staticlib. Harmless for the few proto tests that don't reference
   # the symbol — the linker drops the unused archive members.
   rust_hxproto_dep,
-  # Phase R3.0: src/gtkhx_session.c::gtkhx_session_emit_task_update
-  # delegates to gtkhx_bridge_emit_pointer_pair_signal in hxbridge.
   # The integration harness + the production-connect Tier 3 tests
   # (real_connect, real_htxf_connect) need the staticlib. Same "linker
   # drops unused members" caveat for tests that don't reference it.
@@ -337,13 +335,6 @@ test_hotline_url = executable('test_hotline_url',
 )
 test('hotline_url', test_hotline_url,
      suite : 'unit')
-
-# task_hash — the transaction-table lifecycle contract (insert / lookup /
-# replace / remove / destroy → value destroy notify reclaims struct task + its
-# `str` + the optional `ptr`) now lives in the Rust hxtask crate's #[test]s
-# (`cargo test -p hxtask`), which additionally cover task_new / task_delete
-# end-to-end via in-crate C-environment doubles. The old C test
-# (unit/test_task_hash.c) + tasks_table.c were retired with the port.
 
 # dock_layout_parse — recursive-descent parser for the saved-layout
 # tree expression. Pure GLib so the test links just the parser .c
@@ -724,24 +715,6 @@ test_capabilities = executable('test_capabilities',
 test('capabilities', test_capabilities,
      suite : 'proto')
 
-# chat_history — fogWraith Capabilities-Chat-History.md extension.
-# Pins the field-ID and flag-bit numeric constants, exercises the
-# packed-binary HxHistoryEntry parser (typical / minimum / flag /
-# sub-field-skip / malformed inputs). The request senders' cases run
-# under `cargo test -p hxhandlers`.
-test_chat_history = executable('test_chat_history',
-  'proto/test_chat_history.c',
-  '../src/chat_history.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-  link_depends        : rust_build,
-)
-test('chat_history', test_chat_history,
-     suite : 'proto')
-
 # voice — fogWraith voice-chat extension receive/parse FFI ABI (Phase 8.A).
 # Pins the field IDs (DATA_VOICE_SDP/ICE/CODEC/MUTED/PARTICIPANTS at
 # 0x01F5-0x01F9), the 600-606 opcode block, and the FFI ABI of the typed
@@ -856,7 +829,6 @@ integration_harness_lib = static_library(
   '../src/proto_helpers.c',
   '../src/debug.c',
   '../src/hl_code.c',
-  '../src/chat_history.c',
   # The Tier 3 HOPE login + HTXF transfers run through the production
   # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
   # (cipher.c stream, cipher_aead.c AEAD) are gone, and so is the htxf_io.c
@@ -993,8 +965,7 @@ test('socks', test_integration_socks,
 # hx_htlc_close stubs are __attribute__((weak)) so network.c's strong
 # definitions win. Links the full production connect source pile
 # (network.c + hope / proto, with crypto + the HTXF channel in hxnet) plus the harness
-# control files (integration_harness/tls/tracker_matrix +
-# chat_history that the harness references).
+# control files (integration_harness/tls/tracker_matrix).
 test_integration_real_htxf_connect = executable('test_integration_real_htxf_connect',
   'integration/test_real_htxf_connect.c',
   'integration/connect_test_stubs.c',
@@ -1005,7 +976,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/chat_history.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
@@ -1518,22 +1488,6 @@ test('folder_get', test_integration_folder_get,
      suite   : 'integration',
      timeout : 30)
 
-# chat_history — Tier 3 coverage for the fogWraith chat-history
-# extension (TRAN 700 + DATA_HISTORY_*). Filters the matrix for
-# HX_TEST_CAP_CHAT_HISTORY; today only Janus advertises the bit.
-# Compiles src/chat_history.c in directly so the test can reuse
-# the production HxHistoryEntry parser (the harness lib stays
-# chat-history-free — only this binary needs the parser).
-# Skips silently when no chat-history-capable server is configured
-# in the matrix (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd).
-test_integration_chat_history = executable('test_integration_chat_history',
-  'integration/test_chat_history.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-
 # hope_chacha20 — Tier 3 coverage for the HOPE-Secure-Login +
 # ChaCha20-Poly1305 AEAD path against a server that supports it
 # (Janus today; filtered via HX_TEST_CAP_CHACHA20). Skips silently
@@ -1616,26 +1570,6 @@ test('hope_compression', test_integration_hope_compression,
      suite   : 'integration',
      timeout : 60)
 
-# hope_chacha20_chat_history — Tier 3 for the fogWraith chat-history
-# extension under HOPE+ChaCha20-Poly1305 AEAD framing. Janus is the
-# only matrix entry advertising both bits; the test skips cleanly
-# when neither is in scope. Exists because the user observed
-# regressions with chat history + cipher enabled — the harness
-# previously had no HOPE-aware chat-history send helper, so this
-# code path was uncovered.
-test_integration_hope_chacha20_chat_history = executable(
-  'test_integration_hope_chacha20_chat_history',
-  'integration/test_hope_chacha20_chat_history.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-test('hope_chacha20_chat_history', test_integration_hope_chacha20_chat_history,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
 # hope_chacha20_banner — Tier 3 for the file-mode banner HTXF
 # subchannel under HOPE+ChaCha20-Poly1305. Drives the production
 # hxnet_htxf_read/_write over the AEAD channel plus the
@@ -1656,33 +1590,9 @@ test('hope_chacha20_banner', test_integration_hope_chacha20_banner,
      is_parallel : false,
      timeout     : 60)
 
-# Blowfish variants of the chat-history + banner coverage. Same
-# shape as the chacha20 sisters above; the cap filter routes the
-# test to whichever matrix entry advertises both BLOWFISH and the
-# feature. mhxd advertises BLOWFISH+BANNER_HTXF but no chat-history;
-# Janus has chat-history+CHACHA20 but no stream cipher, so the
-# chat-history stream test skips cleanly until a matrix entry
-# combining stream-cipher + chat-history shows up. The RC4 sisters
-# were retired alongside the RC4 removal.
-test_integration_hope_blowfish_chat_history = executable(
-  'test_integration_hope_blowfish_chat_history',
-  'integration/test_hope_blowfish_chat_history.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-  link_depends        : rust_build,
-)
-# Stream-cipher × {chat_history, banner} matrices route to Janus
-# (mhxd advertises neither CHAT_HISTORY nor — since the matrix-fix
-# branch — BANNER_HTXF), so they're subject to the same per-IP
-# connect-rate caveat as the chacha20 sisters above. is_parallel:
-# false keeps them from racing each other in meson's default
-# parallel run.
-test('hope_blowfish_chat_history', test_integration_hope_blowfish_chat_history,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
+# The Blowfish sister of the banner test above. It routes to Janus
+# (mhxd advertises no BANNER_HTXF), so it shares the per-IP
+# connect-rate caveat, and is_parallel: false keeps the two from racing.
 test_integration_hope_blowfish_banner = executable(
   'test_integration_hope_blowfish_banner',
   'integration/test_hope_blowfish_banner.c',
@@ -1692,11 +1602,6 @@ test_integration_hope_blowfish_banner = executable(
   link_depends        : rust_build,
 )
 test('hope_blowfish_banner', test_integration_hope_blowfish_banner,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
-test('chat_history', test_integration_chat_history,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 60)

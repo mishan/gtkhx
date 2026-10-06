@@ -5,7 +5,7 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
-use hxproto::messages::tag;
+use hxproto::messages::{tag, ClientHdr};
 
 /// A request's chunks: (tag, data).
 type Fields = Vec<(u16, Vec<u8>)>;

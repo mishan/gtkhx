@@ -31,10 +31,10 @@ extern "C" {
     /// scroller). Returns a still-floating container, or NULL if `sess` is
     /// NULL. Requires `create_tasks` to have run.
     fn gtkhx_tasks_build_content(sess: *mut Session) -> *mut gtk4::ffi::GtkWidget;
-    /// Mark the panel open in prefs and push the current task + xfer state
-    /// into the freshly-embedded list.
+    /// Mark the panel open in prefs and push the current transfers into the
+    /// freshly-embedded list.
     fn gtkhx_tasks_after_embed(sess: *mut Session);
-    /// Push one connection's tasks and transfers into the queue, for a
+    /// Push one connection's transfers into the queue, for a
     /// connection joining a panel that already exists.
     fn gtkhx_tasks_sync_conn(sess: *mut Session);
 }

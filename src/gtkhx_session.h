@@ -44,7 +44,6 @@ struct cached_filelist;
 struct hl_filelist_hdr;
 
 #include "tracker_event.h" /* HxTrackerServer (boxed payload) */
-/* struct task already defined in protocol.h (included above). */
 
 #define GTKHX_TYPE_SESSION (gtkhx_session_get_type ())
 G_DECLARE_FINAL_TYPE (GtkhxSession, gtkhx_session, GTKHX, SESSION, GObject)
@@ -214,9 +213,6 @@ void gtkhx_session_emit_tracker_batch_begin (GtkhxSession *self,
                                              const char *tracker_url,
                                              guint8 version,
                                              guint16 expected_count);
-
-void gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
-                                     struct task *tsk);
 
 /* chat-log-line — "show this in chat `cid`'s output". `body` is fully
  * formatted text (post-vsnprintf); `name` is the bracketed tag for the

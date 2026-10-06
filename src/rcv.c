@@ -113,16 +113,6 @@ void print_binary(char *buf, int len)
 }
 */
 
-int
-task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* the header error-bit test moved to the Rust
-     * hxproto crate (gtkhx_proto_header_in_error). Same
-     * computation as the old g_ntohl(h->flag) & 1, with bounds
-     * checking on a short buffer. */
-    return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
-}
-
 /* An agreement with text is shown; the session has answered any other. */
 void
 hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
@@ -139,54 +129,6 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
         gtkhx_session_emit_agreement (gtkhx_session_get_default (),
                                       sess_from_htlc (htlc), buf,
                                       (guint16)body_len);
-    }
-}
-
-void
-hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    guint32 trans = 0;
-    struct task *tsk;
-    char error = 0;
-
-    /* transaction-id extraction moved to the Rust
-     * hxproto crate (replaces HN32(&trans, &h->trans)). A
-     * short buffer leaves trans at 0, which task_with_trans treats
-     * as "no such task" — the same safe fallthrough as before. */
-    gtkhx_proto_header_trans (frame, frame_len, &trans);
-    tsk = task_with_trans (sess_from_htlc (htlc), trans);
-
-    if (task_inerror (htlc, frame, frame_len)) {
-        task_error (htlc, frame, frame_len);
-        error = 1;
-    }
-    if (tsk) {
-        /* XXX tsk->rcv might call task_delete */
-        if (tsk->rcv && !error) {
-            tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data);
-        }
-        /* Liveness gate: skip task_delete if the rcv handler tore
-         * down the connection. hx_htlc_close
-         * clears htlc->fd to 0, so a non-zero fd here means the
-         * connection is still live and task_delete (hash remove +
-         * gtask UI row removal) is safe to run.
-         *
-         * The pre-GIOStream code used `hxd_files[fd].conn.htlc`
-         * here — that array stopped tracking the control fd after
-         * the GIOStream rewrite (see comment in network.c
-         * connect_finish_handshake) and the check became always-
-         * false, so task_delete was always skipped and Tasks-window
-         * rows accumulated forever. The bug was latent against
-         * servers like mhxd that mostly skip TASK replies for
-         * login-time setup; it surfaced against Heidrun's Inn
-         * (which echoed the request opcode in the TASK reply type —
-         * a since-fixed server bug — and reaches hx_rcv_task once the
-         * dispatch mask folds it). */
-        if (hx_conn_fd (htlc)) {
-            task_delete (sess_from_htlc (htlc), tsk);
-        }
-    } else {
-        /*	hx_printf_prefix(0, INFOPREFIX, "got task 0x%08x\n", trans); */
     }
 }
 
@@ -527,7 +469,9 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     void (*handler) (struct htlc_conn *, const guint8 *, gsize) = NULL;
     switch (hx_recv_route (type)) {
     case HX_RECV_TASK:
-        handler = hx_rcv_task;
+        /* The session reads every reply GtkHx expects. Nothing waits on
+         * what reaches here, and only a refusal is worth showing. */
+        handler = task_error;
         break;
     case HX_RECV_AGREEMENT:
         handler = hx_rcv_agreement_file;

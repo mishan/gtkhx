@@ -14,19 +14,9 @@
 
 /* ---- HxHistoryEntry layout pin --------------------------------- */
 
-/* Every function that used to live here moved to Rust:
- *   - hx_history_entry_parse / hx_history_entry_free → the gtkhx-core crate
- *     (rust/crates/gtkhx-core/src/boxed/history.rs).
- *   - the TRAN 700 senders (hx_chat_history_fetch_*) → the hxhandlers crate
- *     (rust/crates/hxhandlers/src/send/chat_history.rs).
- *   - hx_get_chat_history_build_chunks (the pure chunk builder) → hxproto
- *     (native build_get_chat_history_chunks + the C-ABI shim of the same name in
- *     ffi.rs, kept for the integration harness).
- *
- * All that remains in C is the byte-layout pin for HxHistoryEntry: chat.c reads
- * the struct's fields directly, so the layout is fixed on both sides — these
- * _Static_asserts against the `offset_of!` block in history.rs. The struct
- * definition stays in chat_history.h. */
+/* chat.c reads HxHistoryEntry's fields directly and the Rust gtkhx-core
+ * crate (boxed/history.rs) builds the entries, so the layout is fixed on
+ * both sides: these _Static_asserts against the `offset_of!` block there. */
 _Static_assert (sizeof (HxHistoryEntry) == 56, "HxHistoryEntry size drift");
 _Static_assert (offsetof (HxHistoryEntry, message_id) == 0, "field drift");
 _Static_assert (offsetof (HxHistoryEntry, timestamp) == 8, "field drift");

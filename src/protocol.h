@@ -197,53 +197,6 @@ extern void hl_code (void *__dst, const void *__src, size_t len);
 #define hl_decode(d, s, l) hl_code (d, s, l)
 #define hl_encode(d, s, l) hl_code (d, s, l)
 
-/* ---- Tasks (in-flight protocol transactions) ----------------------- */
-
-/* Type-erased per-task callback. The dispatcher in rcv.c calls it as
- * (htlc, ptr, data) when a TASK reply arrives, but the rcv_task_*
- * implementations have heterogeneous argument lists (some 1, some 2,
- * some 3 args). Callers cast their function pointer to rcv_task_fn at
- * task_new() time; extras are silently ignored on the register-passing
- * ABIs we run on. This typedef replaces the historic K&R-style
- * `void (*)()` so -Wstrict-prototypes doesn't trip on every consumer
- * of this header. */
-struct htlc_conn;
-typedef void (*rcv_task_fn) (struct htlc_conn *htlc, const guint8 *frame,
-                             gsize frame_len, void *ptr, void *data);
-
-/* Cast a heterogeneous rcv_task_* implementation to the canonical
- * 3-arg rcv_task_fn shape. The intermediate (void(*)(void)) cast is
- * GCC's documented escape hatch for -Wcast-function-type when the
- * type-erasure is intentional (see GCC manual §6.45). */
-#define RCV_TASK_FN(f) ((rcv_task_fn)(void (*) (void)) (f))
-
-struct task {
-    /* no next/prev — tasks live in session->tasks, a
-     * GHashTable<u32 trans, struct task*>. Lookup by trans goes
-     * through task_with_trans (now an O(1) wrapper around
-     * g_hash_table_lookup); iteration goes through GHashTableIter
-     * at the very small number of call sites that need it. */
-    guint32 trans;
-    guint32 pos, len;
-    void *data;
-
-    char *str;
-    void *ptr;
-    /* Optional destructor for `ptr`. When non-NULL, task_free
-     * invokes it as ptr_free(ptr) before reclaiming the task
-     * struct itself. Callers that allocate a per-task context
-     * — and want it freed when the connection is torn down
-     * (sess->tasks is cleared with g_hash_table_remove_all,
-     * which fires task_free per entry) — assign this after
-     * task_new returns. NULL means "no owned state", matching
-     * the historic default. */
-    GDestroyNotify ptr_free;
-    rcv_task_fn rcv;
-};
-
-extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
-                         gsize frame_len);
-
 #define XFER_GET 0
 #define XFER_PUT 1
 

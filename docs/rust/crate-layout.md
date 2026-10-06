@@ -106,11 +106,11 @@ so a Tier 2 proto test that pulls one boxed `_copy` links that archive *alone*
 — and those tests link the standalone staticlib, not the façade.
 
 Merging an extern-ful crate into a test-linked one therefore breaks the tests.
-The per-session task owner (`hxtask`) carries a set of undefined C externs, and
-folding it into the extern-free GObject core meant proto tests that wanted only
-a boxed `_copy` dragged in `task_new`'s unresolved references and failed to
-link. That is why `gtkhx-core` absorbed the session, boxed, and connection
-crates but **not** `hxtask`.
+`hxtask` carries a set of undefined C externs, and folding it into the
+extern-free GObject core meant proto tests that wanted only a boxed `_copy`
+dragged in its unresolved references and failed to link. That is why
+`gtkhx-core` absorbed the session, boxed, and connection crates but **not**
+`hxtask`.
 
 **The rule.** A crate in the test-linked set can only be merged with another
 crate whose undefined-extern set the linking tests already satisfy. In
@@ -159,7 +159,6 @@ sides are Rust — each category is a real constraint, not leftover work.
 |---|---|
 | `gtkhx-ui` → the voice crates (`hxvoice-model` / `-runtime` / `-send`) | Already *optional* Cargo dependencies, but the calls still go through `extern` blocks. Converting them means code that only typechecks under `--features voice`, and their callback parameters need `Option<fn>` wrapping — a careful pass, not a mechanical one. **Genuine remaining work**, not a constraint. |
 | `hxhandlers` → `gtkhx-ui` | The dependency cycle of §2a. `gtkhx-ui` depends on `hxhandlers` through Cargo, so the reverse edge cannot be one. |
-| `task_new` (`hxtask`) | Deliberate type erasure. The `rcv_task_*` reply handlers have heterogeneous argument lists cast to a canonical shape; each caller declares its own local `RcvTaskFn` alias. Importing the real signature would force a `transmute` at every call site. |
 
 ### What converting the extern edges to Cargo dependencies surfaced
 

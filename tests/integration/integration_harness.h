@@ -317,25 +317,6 @@ extern int integration_open_login_tls_or_skip (const hx_test_server *srv,
                                                guint16 icon);
 
 /*
- * Send HTLC_HDR_GET_CHAT_HISTORY (TRAN 700) for `channel_id`
- * with the same "0 means omit" cursor / limit semantics as
- * production's hx_chat_history_fetch_*. Returns the trans
- * id assigned by hlpack (or 0 on send failure) — the caller
- * filters the TASK reply by matching trans against this value.
- *
- * The harness does NOT cap-gate this call: tests can issue it
- * even against a server that didn't echo CAP_CHAT_HISTORY, in
- * order to verify the server's task-error response. Production
- * gtkhx gates the send (src/chat_history.c:137) and won't
- * exercise that path.
- */
-extern guint32 integration_send_get_chat_history (int fd,
-                                                  struct htlc_conn *htlc,
-                                                  guint32 channel_id,
-                                                  guint64 before, guint64 after,
-                                                  guint16 limit);
-
-/*
  * Send HTLC_HDR_CHAT with HTLC_DATA_STYLE=1 + HTLC_DATA_CHAT=text, to
  * the public chat. Returns TRUE on a full send.
  */
@@ -457,8 +438,7 @@ extern gsize integration_encode_hldir_one (guint8 *out, const char *name);
  * carry `marker` arrives; htlc->in then holds it. Matches on the
  * marker rather than the sender's uid because Janus stamps its chat
  * broadcasts with uid 0. `marker` should be high-entropy enough to be
- * unique across the parallel Tier 3 binaries (see make_marker in
- * test_chat_history).
+ * unique across the parallel Tier 3 binaries.
  */
 extern gboolean integration_drain_until_chat_marker (int fd,
                                                      struct htlc_conn *htlc,
@@ -596,21 +576,6 @@ extern gboolean integration_send_message_hope (int fd, struct htlc_conn *htlc,
 extern gboolean integration_recv_message_hope (int fd, struct htlc_conn *htlc,
                                                integration_hope_session *hope,
                                                int timeout_ms);
-
-/*
- * HOPE-aware variant of integration_send_get_chat_history. Routes the
- * GET_CHAT_HISTORY packet through integration_send_message_hope so
- * AEAD (or future stream-cipher) framing applies. Same return shape
- * as the plain version: trans id on success, 0 on failure.
- *
- * Tests that exercise the chat-history extension under HOPE must use
- * this variant; the plain integration_send_get_chat_history writes
- * cleartext bytes which the server cannot decrypt after HOPE
- * negotiation lands.
- */
-extern guint32 integration_send_get_chat_history_hope (
-    int fd, struct htlc_conn *htlc, integration_hope_session *hope,
-    guint32 channel_id, guint64 before, guint64 after, guint16 limit);
 
 /*
  * HOPE-aware AGREEMENTAGREE. Production sends this after the user

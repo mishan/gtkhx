@@ -6,12 +6,7 @@
 //! (stamping + advancing `htlc->trans`), emit the wire trace, then ship the
 //! bytes through the hxnet send bridge (tearing the connection down if the actor
 //! refuses) — used to live in `network.c::hlwrite_chunks`. It lives here now,
-//! behind the exact C ABI the ~14 caller files link against. It's a natural
-//! neighbour of the transaction table in this crate: every caller pairs a
-//! [`task_new`] with a send, so registering an outbound request and putting it
-//! on the wire are the two halves of the same idiom.
-//!
-//! [`task_new`]: crate::task_new
+//! behind the exact C ABI its callers link against.
 //!
 //! The frame is packed **natively in Rust** via `hxproto` (the same
 //! builder the old C `hlpack_chunks` wrapper delegated to), so nothing bounces
@@ -84,8 +79,8 @@ unsafe fn infoprefix() -> *const c_char {
 
 /// The trans the next request on `htlc` goes out on. The session numbers
 /// every transaction; the first ask takes one from it, and it stays this
-/// connection's next until a send uses it, because a request's task is keyed
-/// on it (`task_new`) before the send that follows.
+/// connection's next until a send uses it, because a request's reply is
+/// expected on it (`Session::expect`) before the send that follows.
 ///
 /// # Safety
 /// `htlc` is a live connection; main thread.

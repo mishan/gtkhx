@@ -82,7 +82,7 @@ looking for code in the wrong place.
 | **Settings** | `options.c` (change hooks, identity resolution, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `prefs_parser.c`, `icon_enum.c` (icon IDs for the Rust picker) |
 | **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c` |
 | **Files** | `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_ops.c` (the providers; the browser itself is `gtkhx-ui`'s `files` module) |
-| **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the dispatch switch for the frames the session hands over whole, the transaction correlator; the login's reply, chat, users, messages, news and files, and the replies to the banner, GIF-icon and inline-media requests, reach `hxhandlers` as the session's events instead), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
+| **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, and the dispatch switch for the frames the session hands over whole, where a reply nothing expected is shown if it is a refusal; the login's reply, chat, users, messages, news and files, and the replies to the banner, GIF-icon and inline-media requests, reach `hxhandlers` as the session's events instead), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
 | **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (the user editor's access-bit table), `tasks.c` |
 | **Sessions** | `session_registry.c` (the connection collection, the factory, and which connection has focus) |
@@ -92,7 +92,7 @@ looking for code in the wrong place.
 | **Messaging** | `msg.c` (private-message windows, broadcast render) |
 | **Voice** (optional) | `voice_bridge.c`, `voice_ptt_keyspec.c` |
 | **Desktop integration** | `tray.c`, `notify.c`, `sound.c`, `sound_events.c` |
-| **Bridges to Rust** | `hxnet_bridge.c`, `dock_bridge.c`, `gtkhx_ui_bridge.c`, `users_bridge.c`, `tasks_bridge.c`, `tracker_bridge.c`, `chat_send_bridge.c`, `voice_bridge.c`, `htxf_accessors.c`, `inline_media_decode.c` |
+| **Bridges to Rust** | `hxnet_bridge.c`, `dock_bridge.c`, `gtkhx_ui_bridge.c`, `users_bridge.c`, `tracker_bridge.c`, `chat_send_bridge.c`, `voice_bridge.c`, `htxf_accessors.c`, `inline_media_decode.c` |
 | **Infrastructure** | `debug.c`, `gtkhx_log.c`, `human_readable.c`, `uniquify_path.c`, `hl_code.c`, `cmd_exec.c` |
 
 Deliberately absent, and worth knowing so you don't go looking: `xtext.c` (replaced by the
@@ -122,8 +122,8 @@ Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships
 |---|---|
 | **Shared with hxd-ng** (from hx-libs) | `hxproto` — typed builders and parsers for every opcode, pure Rust; `hxfiles-xfer` (fork-header and HTXF codec); `hxhfs` (resource-fork sidecars); `hxsession` (the classic client session, which GtkHx drives in raw mode); `hxhope` (HOPE, the secure login: the handshake either side plays and the cipher and compression it agrees) over `hxcrypto` (its primitives). All are git dependencies pinned in `rust/Cargo.toml`. GtkHx's C ABI over them lives here: `gtkhx-proto-ffi` (the `gtkhx_proto_*` / `hx_recv_route` shims) and `gtkhx-files-ffi`, each also a standalone staticlib for the focused tests |
 | **Network** | `hxnet` (connect lifecycle, TLS, SOCKS, the session's I/O, file transfers, tracker fetch), `hxtls-trust` |
-| **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain; `hxrequest` — the requests the client sends, built as plain values with no C imports, so the end-to-end suites can send exactly what production sends |
-| **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
+| **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain; `hxtask` — the control channel's send primitive; `hxrequest` — the requests the client sends, built as plain values with no C imports, so the end-to-end suites can send exactly what production sends |
+| **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel` |
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-runtime` (gstreamer-rs + webrtcbin); the requests are `hxhandlers::voice`, behind that crate's `voice` feature |
 | **Media** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn) |
@@ -154,16 +154,15 @@ Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships
 
 ## The model / view boundary
 
-Model-side code (`rcv.c`, `network.c`, `commands.c`, `tasks.c`, and the Rust receive
-handlers, and the model-side interior of `tasks.c`) reaches the view by **emitting signals
+Model-side code (`rcv.c`, `network.c`, `commands.c`, and the Rust receive
+handlers) reaches the view by **emitting signals
 on `GtkhxSession`** — a singleton GObject
 implemented in Rust (`gtkhx-core`) exporting a stable C ABI (`gtkhx_session_get_default`,
 `gtkhx_session_emit_<name>`). Direct `gtk_*` / `GTK_*` calls in `rcv.c`, `network.c` and
-`commands.c` are bugs; the audit is one grep. (`tasks.c` is mixed — it holds both the task
-model and the task list's row widgets.)
+`commands.c` are bugs; the audit is one grep.
 
 Signals cover chat and chat history, messages, agreement, news, users, files, the transfer
-queue, tasks, tracker results, GIF icons, connection state, and login. Read
+queue, tracker results, GIF icons, connection state, and login. Read
 `rust/crates/gtkhx-core/src/session.rs` for the current list and payloads rather than
 trusting a table here — it grows.
 
@@ -184,8 +183,6 @@ signal-routed: `hx_printf` / `hx_printf_prefix`, `hx_clear_chat`.
 `session_registry.c`; `hx_active_session()` is a read of which one has focus. One exists
 today, created at the top of `fe_init`. Each holds:
 
-- `tasks` — `GHashTable` keyed by transaction ID. **Transaction 0 is a real key, not a
-  sentinel.**
 - `msg_windows` — `GHashTable` keyed by user ID.
 - `chats` — the Rust `HxChatRegistry` (not a `GHashTable`), keyed by chat ID, seeded with
   the always-present public chat at cid 0.

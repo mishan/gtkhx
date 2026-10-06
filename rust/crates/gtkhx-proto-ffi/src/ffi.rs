@@ -37,7 +37,6 @@ unsafe fn as_slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
 }
 
 /// True (non-zero) if the transaction header's task-error bit is set.
-/// Replaces the body of C `task_inerror()`.
 ///
 /// # Safety
 /// `buf` must be valid for `len` bytes, or NULL.
@@ -46,33 +45,6 @@ pub unsafe extern "C" fn gtkhx_proto_header_in_error(buf: *const u8, len: usize)
     let s = as_slice(buf, len);
     match Header::parse(s) {
         Some(h) => h.in_error(),
-        None => false,
-    }
-}
-
-/// Extract the transaction id from the header into `*out_trans`. Returns
-/// true on success, false (leaving `*out_trans` untouched) if the buffer is
-/// shorter than a header. Replaces the `HN32(&trans, &h->trans)` in
-/// `hx_rcv_task`.
-///
-/// # Safety
-/// `buf` must be valid for `len` bytes (or NULL); `out_trans` must be a
-/// valid, writable `u32` pointer.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_header_trans(
-    buf: *const u8,
-    len: usize,
-    out_trans: *mut u32,
-) -> bool {
-    if out_trans.is_null() {
-        return false;
-    }
-    let s = as_slice(buf, len);
-    match Header::parse(s) {
-        Some(h) => {
-            *out_trans = h.trans;
-            true
-        }
         None => false,
     }
 }
@@ -94,7 +66,7 @@ pub struct HeaderDecodedOut {
 
 // Pin the cross-language ABI layout from the Rust side so the C-side
 // uses don't need to know the exact byte breakdown. Same pattern as
-// `HxChunk` / `TrackerRecordFixedOut` / `HistoryEntryOut`. Layout
+// `HxChunk` / `TrackerRecordFixedOut`. Layout
 // under #[repr(C)] with natural alignment: five u32s @ 0/4/8/12/16
 // (size 20, align 4), then u16 @ 20 (size 2), then 2 bytes trailing
 // alignment-to-4 padding = 24 bytes total.
@@ -367,46 +339,6 @@ pub unsafe extern "C" fn gtkhx_proto_build_chat_chunks(
     build::build_chat_chunks(&req, chunks_slice, scratch_slice) as i32
 }
 
-/// C-ABI wrapper over [`build::build_get_chat_history_chunks`] — retains the
-/// historical `hx_get_chat_history_build_chunks` symbol (`src/chat_history.h`)
-/// so the integration harness's synchronous chat-history request builder links
-/// unchanged. The senders proper (`hx_chat_history_fetch_*`) are the
-/// hxhandlers crate's; only this pure chunk-builder is kept for the harness.
-///
-/// `scratch` points at a `struct hx_get_chat_history_scratch` — the harness only
-/// uses it as backing storage for the chunks' bytes (never reads the fields), so
-/// this treats it as a plain ≥22-byte buffer. `chunks_cap` is the C `int` slot
-/// count (must be ≥ 4).
-///
-/// # Safety
-/// `chunks` valid for `chunks_cap` `HxChunk` slots; `scratch` valid for at least
-/// 22 bytes (the C struct is larger).
-#[no_mangle]
-pub unsafe extern "C" fn hx_get_chat_history_build_chunks(
-    channel_id: u32,
-    before: u64,
-    after: u64,
-    limit: u16,
-    chunks: *mut HxChunk,
-    chunks_cap: i32,
-    scratch: *mut core::ffi::c_void,
-) -> i32 {
-    const MAX_CHUNKS: usize = 4;
-    const MAX_SCRATCH: usize = 22;
-    if chunks.is_null() || scratch.is_null() || chunks_cap < MAX_CHUNKS as i32 {
-        return 0;
-    }
-    let chunks = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
-    let scratch = slice::from_raw_parts_mut(scratch as *mut u8, MAX_SCRATCH);
-    let req = build::GetChatHistoryRequest {
-        channel_id,
-        before,
-        after,
-        limit,
-    };
-    build::build_get_chat_history_chunks(&req, chunks, scratch) as i32
-}
-
 // ---- Chat-admin SEND builders ----------------------------------------
 //
 // Same shape as the chat/msg/broadcast shims above: fill the caller's
@@ -658,117 +590,6 @@ pub unsafe extern "C" fn gtkhx_proto_build_agreement_agree_chunks(
         options,
     };
     build::build_agreement_agree_chunks(&req, chunks_slice, scratch_slice) as i32
-}
-
-/// C-ABI result of [`parse::parse_history_entry`]. Nick / message
-/// are returned as `(offset, length)` pairs into the caller's input
-/// buffer — the C side allocates owned copies by length
-/// (`g_malloc(len + 1)` + `memcpy(len)` + trailing NUL) since the
-/// owning struct in C wants heap-allocated strings AND the wire
-/// payload can contain embedded NULs that `g_strndup` would
-/// truncate at, leaving the allocation shorter than the recorded
-/// `*_len`.
-#[repr(C)]
-pub struct HistoryEntryOut {
-    pub message_id: u64,
-    /// i64 on the wire (Unix epoch UTC). Two's-complement
-    /// preserved — negative values are legal pre-1970 timestamps.
-    pub timestamp: i64,
-    pub flags: u16,
-    pub icon_id: u16,
-    pub nick_off: u16,
-    pub nick_len: u16,
-    pub msg_off: u16,
-    pub msg_len: u16,
-}
-
-// Pin the cross-language ABI layout from the Rust side so the
-// `_Static_assert(sizeof(gtkhx_proto_history_entry) == 32, ...)`
-// in src/hotline_proto.h has a peer compile-time check here. A
-// future field reorder / type change that drifts the struct fails
-// the Rust build before any C caller can read garbage at runtime.
-// Same pattern as `HxChunk` in build.rs.
-//
-// Layout under #[repr(C)] with natural alignment: u64 @ 0, i64 @ 8,
-// then six u16s at 16/18/20/22/24/26 = 28 bytes of data + 4 bytes
-// of trailing alignment-to-8 padding = 32 bytes, alignment 8.
-const _: () = {
-    assert!(std::mem::offset_of!(HistoryEntryOut, message_id) == 0);
-    assert!(std::mem::offset_of!(HistoryEntryOut, timestamp) == 8);
-    assert!(std::mem::offset_of!(HistoryEntryOut, flags) == 16);
-    assert!(std::mem::offset_of!(HistoryEntryOut, icon_id) == 18);
-    assert!(std::mem::offset_of!(HistoryEntryOut, nick_off) == 20);
-    assert!(std::mem::offset_of!(HistoryEntryOut, nick_len) == 22);
-    assert!(std::mem::offset_of!(HistoryEntryOut, msg_off) == 24);
-    assert!(std::mem::offset_of!(HistoryEntryOut, msg_len) == 26);
-    assert!(std::mem::size_of::<HistoryEntryOut>() == 32);
-    assert!(std::mem::align_of::<HistoryEntryOut>() == 8);
-};
-
-/// Parse one `HTLS_DATA_HISTORY_ENTRY` chunk body (chat-history
-/// extension). Returns false on NULL `out` or any of the
-/// `parse::parse_history_entry` reject conditions (sub-24-byte
-/// buffer, nick_len overruns, msg_len overruns); otherwise true.
-/// Surfaces nick / message as offsets into `data` — caller copies
-/// out by length (`g_malloc(len + 1)` + `memcpy(data + off, len)` +
-/// trailing NUL) since the owning struct in C wants heap-allocated
-/// strings AND the wire payload can contain embedded
-/// NULs that `g_strndup` would truncate at.
-///
-/// # Safety
-/// `data` valid for `len` bytes (or NULL when `len == 0`); `out` a
-/// valid writable `HistoryEntryOut`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_parse_history_entry(
-    data: *const u8,
-    len: usize,
-    out: *mut HistoryEntryOut,
-) -> bool {
-    if out.is_null() {
-        return false;
-    }
-    let s = as_slice(data, len);
-    match parse::parse_history_entry(s) {
-        Some(e) => {
-            // Offsets are stable in the C extractor's layout:
-            // nick starts at 22, message at 24 + nick_len. We
-            // recompute from the slice positions to keep this
-            // shim independent of the parser's internal layout.
-            let base = s.as_ptr() as usize;
-            let nick_off = e.nick.as_ptr() as usize - base;
-            let msg_off = e.message.as_ptr() as usize - base;
-            // Fallible u16 narrowing: chat-history chunks fit in
-            // u16 by spec (wire chunk lengths are u16, so the
-            // input buffer this shim receives is ≤ 65535 bytes),
-            // but a future caller that passes a larger frame
-            // would silently wrap an `as u16` cast and produce
-            // out-of-bounds `data + off` reads on the C side.
-            // Reject explicitly rather than write a truncated
-            // offset / length.
-            let Ok(nick_off_u16) = u16::try_from(nick_off) else {
-                return false;
-            };
-            let Ok(nick_len_u16) = u16::try_from(e.nick.len()) else {
-                return false;
-            };
-            let Ok(msg_off_u16) = u16::try_from(msg_off) else {
-                return false;
-            };
-            let Ok(msg_len_u16) = u16::try_from(e.message.len()) else {
-                return false;
-            };
-            (*out).message_id = e.message_id;
-            (*out).timestamp = e.timestamp;
-            (*out).flags = e.flags;
-            (*out).icon_id = e.icon_id;
-            (*out).nick_off = nick_off_u16;
-            (*out).nick_len = nick_len_u16;
-            (*out).msg_off = msg_off_u16;
-            (*out).msg_len = msg_len_u16;
-            true
-        }
-        None => false,
-    }
 }
 
 // ---- User-management SEND builders -----------------------------------
@@ -1316,7 +1137,7 @@ pub unsafe extern "C" fn gtkhx_proto_pack_message(
 /// receive-side counterpart to `pack_message`: the hxnet actor already parsed
 /// the header of an incoming frame, and the C bridge calls this to reconstruct
 /// the byte-exact header into `htlc->in` so the body handlers can decode it back
-/// out (`hl_hdr_decode`, `task_inerror`, the trans lookup). `body_len` is the
+/// out (`hl_hdr_decode`, the task-error bit, the trans). `body_len` is the
 /// application body byte count (after the header, excluding hc); the wire `len`
 /// / `len2` fields encode `body_len + sizeof(hc)`.
 ///

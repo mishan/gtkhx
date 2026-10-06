@@ -2065,15 +2065,6 @@ on_tracker_batch_begin_signal (GtkhxSession *emitter, const char *tracker_url,
     tracker_batch_begin (tracker_url, (guint8)version, (guint16)expected_count);
 }
 
-static void
-on_task_update_signal (GtkhxSession *emitter, gpointer sess, gpointer tsk,
-                       gpointer user_data)
-{
-    (void)emitter;
-    (void)user_data;
-    task_update ((session *)sess, (struct task *)tsk);
-}
-
 /* Translates GtkhxConnectionState (high-level FSM) into the per-aspect
  * UI calls that network.c hx_connect / connect_fail / hx_htlc_close
  * used to issue by name. setbtns / set_status_bar / set_disconnect_btn
@@ -2245,8 +2236,6 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_tracker_server_create_signal), NULL);
     g_signal_connect (emitter, "tracker-batch-begin",
                       G_CALLBACK (on_tracker_batch_begin_signal), NULL);
-    g_signal_connect (emitter, "task-update",
-                      G_CALLBACK (on_task_update_signal), NULL);
     g_signal_connect (emitter, "chat-log-line",
                       G_CALLBACK (chat_log_line_handler), NULL);
     g_signal_connect (emitter, "user-notice", G_CALLBACK (user_notice_handler),

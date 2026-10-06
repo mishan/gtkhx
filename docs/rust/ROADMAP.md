@@ -166,7 +166,7 @@ the map.
 | Banner fetch (URL mode over `ureq`, file mode over HTXF) | `hxnet` + `gtkhx-ui::banner` | `banner.c`, `banner_dispatch.c`, the `libsoup` dependency |
 | `GtkhxSession` GObject + its boxed signal payloads + `htlc_conn` accessors | `gtkhx-core` | `gtkhx_session.c`, the boxed types in `proto_helpers.c` / `tracker_event.c`, `hxconn.c` |
 | Receive- and send-side protocol handlers | `hxhandlers::{recv,send}` | the per-opcode handler bodies in `rcv.c` and the scattered `hlwrite` call sites |
-| Task registry + the send primitive | `hxtask` | `tasks_table.c`, the variadic `hlwrite` |
+| The send primitive | `hxtask` | the variadic `hlwrite` |
 | Client-side models: chat / membership / conversation registry, news, files | `hxmodel` | `struct chat` + `gchats`, the news GUI structs, `filelist_walker.c` |
 | Chat output surface | `rotulus` + `rotulus-layout`, from crates.io | vendored `xtext.c` |
 | Windows and dialogs | `gtkhx-ui`, module per window | see below |
@@ -212,7 +212,7 @@ Things that cost real time to learn and would cost it again.
   either side tripped a build error rather than a misalignment at decrypt time.
   Both halves went once no cipher state crossed to C. Every cross-language
   struct since follows the same pattern — C `_Static_assert` against Rust
-  `size_of` / `align_of` / `offset_of` consts. `tasks_bridge.c` and
+  `size_of` / `align_of` / `offset_of` consts. `chat_history.c` and
   `inline_media_decode.c` are current examples, the latter pinning enum
   discriminants as well as layout.
 - **The legacy `key||text` hash branches are pinned byte for byte.** Tier 1
@@ -706,12 +706,10 @@ The order, each step its own branch and each checked against the rig:
    agreement and keeps everything after; the login reply's fields moved
    in step 5. *Done.*
 3. **Transaction ids and the keep-alive.** The session numbers every
-   transaction from one counter, and a GtkHx task keeps its view-side
-   state, keyed by the trans the session gives it
-   (`hxnet_connection_take_trans`). The keep-alive is the session's, in
+   transaction from one counter, and a GtkHx request takes its trans from
+   it (`hxnet_connection_take_trans`). The keep-alive is the session's, in
    place of the ping timer in `network.c`. *Done.* Matching a reply to
-   its task is still `hx_rcv_task` and `hxtask`'s table; it moves with
-   the replies, in step 5.
+   its request moved to the session with the replies, in step 5.
 4. **HOPE and compression.** `hxcrypto` moved to hx-libs, and HOPE with it
    as `hxhope`: the handshake as either side plays it, its keys, and the
    transport it agrees — Blowfish with its rekey marker, ChaCha20-Poly1305,
@@ -727,9 +725,8 @@ The order, each step its own branch and each checked against the rig:
 5. **The receive handlers, domain by domain.** Chat, users, messages, news,
    files: each moves from `rcv.c` and `hxhandlers` onto session events. Until
    a domain moves, its frames reach GtkHx whole, as `Event::Unhandled` and
-   `Session::request` already allow. A domain's replies move with it, and
-   the task table's correlation (`hx_rcv_task`, `hxtask`) goes once the
-   last of them has.
+   `Session::request` already allow. A domain's replies moved with it, and
+   the task table's correlation went once the last of them had.
 
    Chat, users, messages, news and files have moved. The session handles
    them (`Config::handled`, `Handled::CHAT`, `Handled::USERS`,
@@ -767,18 +764,20 @@ The order, each step its own branch and each checked against the rig:
    session has none, to the generic toast. A private message shows the
    picture it carries as a chat line does. The files browser names what a
    listing gave back, and the user editor an account, by the bytes the
-   server sent. What arrives is traced from the session's tap. *In
-   progress.* The login's reply is the session's too (`Handled::LOGIN`):
-   its `Event::LoggedIn` carries every field GtkHx reads, which
-   `hxhandlers::recv::login` puts on the connection before `logged-in`, and
-   a refusal's reason reaches the view as `request-failed`. What remains is
-   the C history tests, which move to `hx-e2e`, retiring the
-   `hx_history_entry_parse` they read history through: the proto and
-   integration `test_chat_history.c` and the HOPE chat-history integration
-   tests. With those gone, nothing registers a task but a file transfer's
-   Tasks row, and `hx_rcv_task` and `hxtask`'s table go.
+   server sent. What arrives is traced from the session's tap. The login's
+   reply is the session's too (`Handled::LOGIN`): its `Event::LoggedIn`
+   carries every field GtkHx reads, which `hxhandlers::recv::login` puts on
+   the connection before `logged-in`, and a refusal's reason reaches the
+   view as `request-failed`. The chat-history tests are `hx-e2e`'s, against
+   Janus, plain and over HOPE, and `hx_history_entry_parse`, which the C
+   ones read history through, is gone. Nothing GtkHx asks registers a task:
+   `hx_rcv_task`, `hxtask`'s table and the `task-update` signal are gone,
+   and the Tasks list keeps its rows for transfers, connecting and the
+   tracker. A reply nothing expected still reaches `hx_dispatch_frame`
+   whole, and a refusal among them is shown (`task_error`). *Done.*
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
-   upload — rewritten around bytes in and bytes out. The largest step, last.
+   upload — rewritten around bytes in and bytes out. The largest step, last,
+   and the next.
 
 Of the extensions GtkHx negotiates, text encoding, chat history, inline
 media (the picture a chat line or a private message carries, and its
@@ -786,7 +785,8 @@ upload and download), GIF icons' requests, the color a user's nickname
 arrives with, Large Files' exact sizes and voice and video's requests
 have their session-side handling. What voice and video send unasked —
 the offers, candidates, and room and video status — and the GIF-icon
-change a server announces still reach GtkHx whole. hxproto has the codecs.
+change a server announces still reach GtkHx whole, through `rcv.c`;
+moving them is outside the steps above. hxproto has the codecs.
 
 ---
 

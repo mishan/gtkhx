@@ -218,6 +218,7 @@ rust_sources = files(
   'crates/hxhandlers/src/send/news.rs',
   'crates/hxhandlers/src/send/user.rs',
   'crates/hxhandlers/src/recv/news/carrier.rs',
+  'crates/hxrequest/src/chat.rs',
   'crates/hxrequest/src/files.rs',
   'crates/hxrequest/src/icon.rs',
   'crates/hxrequest/src/media.rs',
@@ -248,7 +249,6 @@ rust_sources = files(
   'crates/hxmacres/src/tests.rs',
   'crates/hxtask/src/lib.rs',
   'crates/hxtask/src/send.rs',
-  'crates/hxtask/src/tests.rs',
   'crates/hxtls-trust/src/lib.rs',
   'crates/hxtls-trust/src/ffi.rs',
   'crates/hxtls-trust/src/tests.rs',
@@ -528,10 +528,9 @@ rust_hxfiles_xfer_dep = declare_dependency(
 #
 # Every module in it is free of undefined C externs, which is load-bearing:
 # the Tier 2 proto tests link THIS archive on its own (not the gtkhx-ffi
-# façade), so anything extern-ful merged in would break them. hxtask is the
-# same layer but is extern-ful (the task-table accessors + the send
-# primitive's packer / trace / bridge / log / close), which is exactly why it
-# stays separate.
+# façade), so anything extern-ful merged in would break them. hxtask, the
+# send primitive, is extern-ful (its trace / bridge / log / close), which is
+# why it stays separate.
 rust_gtkhx_core_dep = declare_dependency(
   sources : rust_build,
   link_args : [

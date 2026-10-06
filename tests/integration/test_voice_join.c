@@ -111,8 +111,7 @@ send_voice_leave (int fd, struct htlc_conn *htlc, guint32 cid)
 /* Capability negotiation: advertising HTLC_CAP_VOICE in LOGIN earns
  * an echo in HTLS_DATA_CAPABILITIES from a voice-capable server. The
  * harness's drain captured the echo into htlc->caps; this test just
- * asserts the bit survived the trip. Same shape as
- * test_chat_history's cap_negotiation. */
+ * asserts the bit survived the trip. */
 static void
 test_voice_cap_negotiation (void)
 {

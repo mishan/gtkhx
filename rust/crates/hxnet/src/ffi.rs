@@ -147,9 +147,8 @@ pub struct HxnetFrame {
 }
 
 // Pin the cross-language ABI layout from the Rust side. Same
-// pattern as `HeaderDecodedOut` / `HistoryEntryOut` /
-// `TrackerRecordFixedOut` in hxproto. The fixed-size
-// prefix is stable across targets; `body_ptr`'s offset and the
+// pattern as `HeaderDecodedOut` / `TrackerRecordFixedOut` in
+// hxproto. The fixed-size prefix is stable across targets; `body_ptr`'s offset and the
 // struct's total size depend on pointer alignment (8 bytes on
 // 64-bit targets, 4 on 32-bit) so we express those in terms of
 // `align_of::<*mut u8>()` rather than hardcoding a 64-bit

@@ -7,7 +7,7 @@
 //!   and the inline-media `MediaTable`).
 //! - [`conn`] — `struct htlc_conn`, the per-connection state.
 //!
-//! ## Why `hxtask` is not in here, though it is the same layer
+//! ## Why `hxtask` is not in here
 //!
 //! The boxed payloads used to be a crate of their own, for two reasons. The
 //! first — two staticlibs each bundling the boxed `_copy`/`_free`, colliding at
@@ -17,11 +17,11 @@
 //! `hx_msg_event_copy` can link this archive on its own. Those tests link the
 //! standalone staticlib, not the façade, so the façade does nothing for them.
 //!
-//! `hxtask` has ten undefined C externs (`hx_session_tasks`,
-//! `hx_sess_from_htlc`, `gtask_delete_tsk`, …). Merging it here would make
-//! a Tier 2 test that wants only a boxed `_copy` drag in `task_new`'s
-//! unresolved references and fail to link. That is not
-//! hypothetical: it is exactly how the first attempt at this crate failed.
+//! `hxtask` has undefined C externs (`hx_bridge_send_frame`,
+//! `proto_trace_send_begin`, …). Merging it here would make a Tier 2 test
+//! that wants only a boxed `_copy` drag in the send primitive's unresolved
+//! references and fail to link. That is not hypothetical: it is exactly how
+//! the first attempt at this crate failed.
 //!
 //! The three modules here are all extern-free, so the merged archive stays
 //! self-contained and the Tier 2 tests keep linking it alone. **Anything added

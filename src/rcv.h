@@ -3,8 +3,6 @@
 
 extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
                                    gsize frame_len);
-extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame,
-                         gsize frame_len);
 extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame,
                          gsize frame_len);
 extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame,

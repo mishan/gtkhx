@@ -49,7 +49,6 @@
 #include "hxconn.h"
 #include "msg.h"
 #include "session_registry.h"
-#include "tasks.h"
 #include "hxnet_bridge.h"
 #include "hxnet_htxf.h" /* hxnet_hope_aead_free */
 
@@ -105,17 +104,16 @@ hx_session_new (void)
     /* The per-session collections. chats_init additionally seeds the public
      * chat at cid 0, which must exist for as long as the table does.
      *
-     * Two of these also register a process-global tab-close handler on the
+     * Both also register a process-global tab-close handler on the
      * way past (chats_init → pchat_close, msg_windows_init → msg_tab_on_close).
      * Re-registering the same function pointer per session is idempotent, so
      * this is harmless rather than merely tolerated — but it is a per-process
      * concern living inside a per-session call, and if either ever becomes
      * per-connection it has to move out of here.
      *
-     * All four are pure model calls — no widgets — which is what lets the
+     * All are pure model calls — no widgets — which is what lets the
      * factory run at the very top of fe_init, ahead of prefs_read. */
     chats_init (sess);
-    tasks_init (sess);
     msg_windows_init (sess);
 
 #ifdef HAVE_VOICE
@@ -299,11 +297,11 @@ hx_conn_release (struct htlc_conn *htlc)
  *
  * Ordering matters within each clear, and `g_clear_pointer` is what provides
  * it: the macro NULLs the field *before* calling the destroy function, not
- * after. So a destroy callback that re-enters — a chat's `chat_free`, a task's
- * `ptr_free` — finds `sess->chats` / `sess->tasks` already NULL and takes the
- * empty-table path, rather than walking a table mid-destruction. Reading it as
- * "destroy, then NULL" is the natural mistake, and would be a use-after-free
- * waiting for the first callback that looks back at its session.
+ * after. So a destroy callback that re-enters — a chat's `chat_free` — finds
+ * `sess->chats` already NULL and takes the empty-table path, rather than
+ * walking a table mid-destruction. Reading it as "destroy, then NULL" is the
+ * natural mistake, and would be a use-after-free waiting for the first
+ * callback that looks back at its session.
  *
  * The connection goes too. That used to be impossible: hxnet posts main-loop
  * events carrying the connection, and a shutdown already on the idle queue can
@@ -329,7 +327,6 @@ hx_session_free (session *sess)
         return;
     }
 
-    g_clear_pointer (&sess->tasks, g_hash_table_destroy);
     g_clear_pointer (&sess->msg_windows, g_hash_table_destroy);
     g_clear_pointer (&sess->chats, hx_chats_free);
     g_clear_pointer (&sess->server_name, g_free);

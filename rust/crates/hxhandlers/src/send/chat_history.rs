@@ -7,14 +7,12 @@
 use std::os::raw::{c_int, c_void};
 
 use glib::ffi::{gboolean, GFALSE, GTRUE};
-use hxproto::build::{self, GetChatHistoryRequest, HxChunk};
-use hxproto::messages::ClientHdr;
+use hxproto::build::HxChunk;
 
 use crate::recv::chat::{history_forget, history_requested};
 
 /// `HTLC_CAP_CHAT_HISTORY` (bit 4, hotline.h).
 const HTLC_CAP_CHAT_HISTORY: u64 = 0x0010;
-const HTLC_HDR_GET_CHAT_HISTORY: u32 = ClientHdr::GetChatHistory as u32;
 /// A page of history for someone who asked for one, when the setting for
 /// the fetch at login says none.
 const ASKED_PAGE: u16 = 50;
@@ -89,28 +87,16 @@ unsafe fn fetch(htlc: *mut c_void, cid: u32, before: u64, after: u64, limit: u16
     if hx_conn_has_cap(htlc.cast(), HTLC_CAP_CHAT_HISTORY) == 0 {
         return GFALSE;
     }
-    let mut chunks = [HxChunk::EMPTY; 4];
-    let mut scratch = [0u8; 22];
-    let req = GetChatHistoryRequest {
-        channel_id: cid,
-        before,
-        after,
-        limit,
-    };
-    let hc = build::build_get_chat_history_chunks(&req, &mut chunks, &mut scratch);
+    let req = hxrequest::chat::history(cid, before, after, limit);
     let line = format!("request: cid={cid} before={before} after={after} limit={limit}");
     if let Ok(line) = std::ffi::CString::new(line) {
         debug_log_str(c"chat-history".as_ptr(), line.as_ptr());
     }
     let trans = super::expect_next(htlc, hxsession::Expect::ChatHistory { cid });
     history_requested(htlc, trans, cid, before != 0);
-    hlwrite_chunks(
-        htlc,
-        HTLC_HDR_GET_CHAT_HISTORY,
-        0,
-        chunks.as_ptr(),
-        hc as c_int,
-    );
+    req.with_hx_chunks(|chunks| {
+        hlwrite_chunks(htlc, req.opcode, 0, chunks.as_ptr(), chunks.len() as c_int)
+    });
     GTRUE
 }
 
