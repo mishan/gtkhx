@@ -1,4 +1,4 @@
-## 1.4.1-dev
+## 1.5.0-dev
 
 - Files
   - Large folders open several times faster, and sorting by name is faster too
@@ -52,6 +52,8 @@
   - Server broadcasts show accented characters correctly
   - A picture sent in a private message now shows in the message window, as it does in chat
   - With two servers open, a picture in chat now appears in the chat it was sent to
+- Users
+  - Names show in their own color, without the outline that used to ring them; a name over a wide banner icon gets a soft shadow, and only where the art would make it hard to read
 - News
   - Accented characters in threaded news show correctly: folder and category names, subjects, authors and posts
   - A news folder, category or article the server refuses no longer stays stuck loading; you can try again
@@ -76,6 +78,7 @@
   - New User won't replace an account that already exists
   - The server banner, GIF icons, and sending or loading pictures in chat no longer flash by in the Tasks list
   - Logging in no longer adds a row to the Tasks list
+  - Security fix: TLS connections now use rustls 0.23.45, for RUSTSEC-2026-0285, in which a server could send handshake messages unencrypted that should have been encrypted (it could not tamper with the handshake)
 - Updates
   - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
   - Windows, macOS and Flatpak test builds show their real version, such as 1.4.1b2, in About instead of 1.4.1-dev
