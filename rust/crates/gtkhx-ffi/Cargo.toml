@@ -62,7 +62,6 @@ hxtls-trust = { path = "../hxtls-trust" }
 hxvoice = { path = "../hxvoice", optional = true }
 hxvoice-model = { path = "../hxvoice-model", optional = true }
 hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
-hxvoice-send = { path = "../hxvoice-send", optional = true }
 
 [features]
 # No defaults on purpose. The glycin-v1 build path passes cargo's
@@ -70,13 +69,13 @@ hxvoice-send = { path = "../hxvoice-send", optional = true }
 # empty means that flag can never silently drop something load-bearing here.
 default = []
 
-# Mirrors the meson `-Dvoice` gate. Pulls in the four voice crates and turns
-# on gtkhx-ui's own voice modules, so meson passes a single
+# Mirrors the meson `-Dvoice` gate. Pulls in the three voice crates and turns
+# on gtkhx-ui's and hxhandlers' own voice modules, so meson passes a single
 # `--features gtkhx-ffi/voice` instead of gating each crate separately.
 voice = [
     "dep:hxvoice",
     "dep:hxvoice-model",
     "dep:hxvoice-runtime",
-    "dep:hxvoice-send",
     "gtkhx-ui/voice",
+    "hxhandlers/voice",
 ]

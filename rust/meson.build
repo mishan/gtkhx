@@ -175,8 +175,6 @@ rust_sources = files(
   'crates/hxvoice/src/video.rs',
   'crates/hxvoice-model/src/lib.rs',
   'crates/hxvoice-model/src/tests.rs',
-  'crates/hxvoice-send/src/lib.rs',
-  'crates/hxvoice-send/src/tests.rs',
   'crates/hxtext/src/lib.rs',
   'crates/hxtext/src/tests.rs',
   'crates/hxbookmarks/src/lib.rs',
@@ -201,6 +199,7 @@ rust_sources = files(
   'crates/hxhandlers/src/lib.rs',
   'crates/hxhandlers/src/xfer.rs',
   'crates/hxhandlers/src/media.rs',
+  'crates/hxhandlers/src/voice.rs',
   'crates/hxhandlers/src/recv.rs',
   'crates/hxhandlers/src/send.rs',
   'crates/hxhandlers/src/recv/chat.rs',
@@ -226,6 +225,7 @@ rust_sources = files(
   'crates/hxrequest/src/news.rs',
   'crates/hxrequest/src/path.rs',
   'crates/hxrequest/src/user.rs',
+  'crates/hxrequest/src/voice.rs',
   'crates/hxhandlers/Cargo.toml',
   'crates/hxmodel/src/lib.rs',
   'crates/hxmodel/src/chat.rs',
@@ -283,7 +283,6 @@ rust_sources = files(
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-model/Cargo.toml',
-  'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
@@ -428,7 +427,7 @@ endif
 # `--workspace`.
 if voice_enabled
   cargo_voice_args = ''
-  # Turn on gtkhx-ffi's `voice` feature. That pulls the four voice crates
+  # Turn on gtkhx-ffi's `voice` feature. That pulls the three voice crates
   # into the façade archive AND enables gtkhx-ui's own `voice` feature
   # transitively, so the user-list voice-indicator column + the per-chat
   # voice toolbar compile their real (voice-model / runtime /
@@ -439,7 +438,7 @@ if voice_enabled
   # as the existing hxbridge/runtime + hxnet/socks entries.
   cargo_features = cargo_features + ',gtkhx-ffi/voice'
 else
-  cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime --exclude hxvoice-model --exclude hxvoice-send'
+  cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime --exclude hxvoice-model'
 endif
 
 # Build the Rust workspace. The custom_target output is a stamp file that

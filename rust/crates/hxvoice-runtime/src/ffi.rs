@@ -623,8 +623,8 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_user_volume(rt: *mut VoiceRuntime, 
 }
 
 /// Fire `Event::SdpOfferReceived { cid, sdp }`. Called from
-/// `rcv_task_voice_join` / `hx_rcv_voice_sdp_offer` after the
-/// server's 602 reply lands and the SDP has been extracted.
+/// hxhandlers' `voice::joined` / `hx_rcv_voice_sdp_offer` once the
+/// JOIN reply or a 602 lands and the SDP has been extracted.
 ///
 /// `sdp` is a C string (NUL-terminated). NULL is treated as empty
 /// (and dropped by the state machine via the wrong-shape guard
@@ -741,14 +741,13 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
     rt.handle_event(Event::ParticipantsUpdated { cid, entries });
 }
 
-/// Fire `Event::ServerTaskError { origin_opcode, text }`. Called
-/// from the `HTLS_HDR_TASK` error dispatch when the task's
-/// originating opcode was one of the voice opcodes that registers
-/// a TASK: 600 (JOIN), 601 (LEAVE), 603 (SDP_ANSWER), 606 (MUTE).
-/// 604 (ICE) is a bidirectional notification with no task reply,
-/// so it never reaches this entry point. The state machine decides
-/// whether to tear down (JOIN / SDP_ANSWER errors → fail) or
-/// surface as a toast only (LEAVE / MUTE errors).
+/// Fire `Event::ServerTaskError { origin_opcode, text }`. Called by
+/// `hxhandlers::voice` when the server refuses 600 (JOIN), 601 (LEAVE), 603
+/// (SDP_ANSWER), 606 (MUTE), 608 (VIDEO_STOP) or 610 (VIDEO_SUBSCRIBE). 604
+/// (ICE) is a bidirectional notification with no reply, so it never reaches
+/// this entry point. The state machine decides whether to tear down (JOIN /
+/// SDP_ANSWER errors → fail) or surface as a toast only (LEAVE / MUTE
+/// errors).
 ///
 /// # Safety
 /// `text` shape matches `gtkhx_voice_runtime_sdp_offer`. NULL is

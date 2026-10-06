@@ -125,7 +125,7 @@ Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships
 | **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain; `hxrequest` — the requests the client sends, built as plain values with no C imports, so the end-to-end suites can send exactly what production sends |
 | **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window) |
-| **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
+| **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-runtime` (gstreamer-rs + webrtcbin); the requests are `hxhandlers::voice`, behind that crate's `voice` feature |
 | **Media** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn) |
 | **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and the TOML file — the owner of every preference value at runtime), `hxupdate` (update-check version ordering, feed and decision), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
 | **External, from crates.io** | The chat view, `rotulus` (the GTK4 widget, LGPL) with its dependency-free layout engine `rotulus-layout` and `rotulus-mirc`. It lives in [its own repository](https://github.com/mishan/rotulus) and knows nothing about Hotline; GtkHx configures it in `gtkhx-ui`'s `chat_view.rs`. See `docs/chat-view.md` for how it is pinned, built and updated |
@@ -322,6 +322,7 @@ cargo clippy --workspace --all-targets \
   --features hx-image-decode/glycin-v3 -- -D warnings
 ../tools/isolated-run.sh cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
 ../tools/isolated-run.sh cargo test -p gtkhx-ui --features hx-image-decode/glycin-v3
+cargo test -p hxhandlers --features voice
 ```
 
 **Run tests under `tools/isolated-run.sh`, not bare `xvfb-run`** — the
@@ -342,8 +343,9 @@ here. Deprecations in particular, because the gtk-rs bindings are pinned to a
 GTK older than the one on a dev machine.
 
 The Rust test run matters in both: a module behind `#[cfg(feature = "voice")]`
-— `voice_arbiter`, `voice_panel` — is not even compiled without it, so its
-tests can be failing to build while the default run is green.
+— `voice_arbiter`, `voice_panel`, `hxhandlers::voice` — is not even compiled
+without it, so its tests can be failing to build while the default run is
+green.
 
 **Run the display-backed test more than once.** It is one `#[test]` holding
 every check in sequence against process-global widget state, so a check that

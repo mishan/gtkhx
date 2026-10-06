@@ -37,8 +37,8 @@ client asks for a stream by name with Video Subscribe (610).
 | Wire: opcodes, fields, publishers / subscriptions / limits codecs, 607–610 builders, mid grammar | `hxproto` (hx-libs): `messages.rs`, `video.rs`, `voice::MidLabel`, `dispatch` (`VideoStatus` handler kind), `parse::LoginInfo` (one limits slot per kind) |
 | Protocol decisions | `hxvoice`: `video.rs` (vocabulary, a `no_std` mid scanner held to hxproto's by a test), `state.rs` (publications, subscriptions, local publications) |
 | Pipeline | `hxvoice-runtime`: `video.rs` (receive and capture bins, frame store), `runtime.rs` (binding senders, pad routing, observers) |
-| Senders | `hxvoice-send`: `hx_send_video_start` / `_stop` / `_state` / `_subscribe` |
-| Receive | `rcv.c`: `hx_rcv_video_status`, the 607 refusal path, login limits → `hx_conn_*_video_limits` |
+| Senders | `hxrequest::voice` builds 607–610; `hxhandlers::voice` sends them (`hx_send_video_start` / `_stop` / `_state` / `_subscribe`) and routes their refusals |
+| Receive | `rcv.c`: `hx_rcv_video_status`; the login's limits → `hx_conn_*_video_limits` |
 | Presence | `hxvoice-model`: per-uid camera / screen / paused flags and the `video-changed` and `video-started` signals, shown by `users_voice_col.rs` and announced in chat by `video_panel.rs` |
 | UI | `gtkhx-ui`: `video_panel.rs` (the dockable panel), `voice_panel.rs` (camera and screen buttons), `screen_share.rs` (portal, consent, banner), `options_voice.rs` (camera picker) |
 | Settings | `hxconfig` `voice.camera_device`, `voice.metered_one_video` |
@@ -60,15 +60,15 @@ compiles none of it and advertises neither bit.
 - **local publications**, per kind: not publishing, live, or paused.
   Start, pause and stop emit the wire frame plus `SetVideoPublishing` /
   `SetVideoPaused` for the runtime. A refused start (`VideoStartFailed`,
-  from the task label `video-start-camera` / `-screen`) ends the
+  from the kind its request was kept with) ends the
   publication without a wire frame; a refused pause or resume
-  (`VideoPauseFailed`, from `video-state-camera` / `-screen`) puts the
+  (`VideoPauseFailed`, likewise) puts the
   capture back as the server still has it; a capture failure ends the
   publication with a 608.
 - **request generations**, per kind: every 607 and every 609 is numbered,
   and a start numbers the pauses too. The number rides in the action's
-  body, the send keeps it in the task's ptr slot — it never goes on the
-  wire — and rcv.c hands it back with a refusal. A refusal undoes its own
+  body, the send keeps it with the request — it never goes on the
+  wire — and `hxhandlers::voice` hands it back with a refusal. A refusal undoes its own
   request only if it is still the latest: start, stop, start inside one
   round trip with the first refused leaves the second publication alone,
   and likewise pause, resume, pause.

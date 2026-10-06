@@ -25,7 +25,6 @@ members = [
     "crates/hx-e2e",
     "crates/hxvoice",
     "crates/hxvoice-model",
-    "crates/hxvoice-send",
     "crates/hxvoice-runtime",
     "crates/hx-image-decode",
     "crates/feature-unify",
@@ -85,12 +84,12 @@ rust-version = "1.92"
 # widget crate and its layout engine release together; move them together.
 rotulus = "0.1"
 rotulus-layout = "0.1"
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "ac016f01f9dd092e62bdb218f45f4d546bccd216" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "ac016f01f9dd092e62bdb218f45f4d546bccd216" }
-hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "ac016f01f9dd092e62bdb218f45f4d546bccd216" }
-hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "ac016f01f9dd092e62bdb218f45f4d546bccd216" }
-hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "ac016f01f9dd092e62bdb218f45f4d546bccd216" }
-hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "ac016f01f9dd092e62bdb218f45f4d546bccd216" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
+hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
+hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
+hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
 glib = "0.22"
 gio = "0.22"
 gtk4 = "0.11"

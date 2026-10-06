@@ -85,7 +85,7 @@ capability never emit or receive these.
 
 The reply to 600 additionally carries `VOICE_SDP`, `VOICE_CODEC`, and
 `VOICE_PARTICIPANTS`. 604 is a bidirectional notification with no
-reply, so unlike 600/601/603/606 it registers no reply task.
+reply, so unlike 600/601/603/606 it has no reply expected.
 
 ### Data fields (0x01F5–0x01F9)
 
@@ -166,7 +166,8 @@ anything else — the spec's "mirror it, never play it".
 | `hxvoice` | The pure state machine. `no_std`, zero non-Rust dependencies — no GLib, GStreamer, GTK, or OS surface — so its tests run in any container on any architecture regardless of audio devices. Every transition is `step(&mut self, Event) -> Vec<Action>`, which makes the spec's annotated lifecycle examples replayable verbatim as event traces. |
 | `hxvoice-runtime` | The GStreamer runtime: owns the pipeline, `webrtcbin`, and the state machine. Pumps events in and walks the action list. Bridges back to the UI through a `SignalCallbacks` FFI struct. |
 | `hxvoice-model` | `HxVoiceModel` — the per-uid voice presence GObject behind the user-list indicators. |
-| `hxvoice-send` | The client-initiated wire senders (`hx_send_voice_*`). Deliberately lean — only glib plus the pure `hxproto`, no GTK — so it is `cargo test`-able and the send-path unit test links just that staticlib. |
+| `hxrequest` (`voice.rs`) | The client-initiated requests, 600–610, as values, byte for byte what goes on the wire; `hx-e2e` sends the same ones to Janus and hxd-ng. |
+| `hxhandlers` (`voice.rs`) | The `hx_send_voice_*` / `hx_send_video_*` C ABI over them, and what becomes of their replies: see [the request path](#the-request-path). Behind the crate's `voice` feature. |
 | `gtkhx-ui` (`voice_panel.rs`, `voice_ptt.rs`, `users_voice_col.rs`) | The per-chat-tab toolbar, the push-to-talk key controller, and the user-list indicator column. Behind the crate's `voice` Cargo feature. |
 
 ### C
@@ -175,18 +176,39 @@ anything else — the spec's "mirror it, never play it".
 |---|---|
 | `src/hotline.h` | `HTLC_HDR_VOICE_*` 600–606 and `HTLC_DATA_VOICE_*` `0x01F5`–`0x01F9` integer aliases for switch-case readability in `rcv.c`. The canonical typed definitions are in `hxproto`. |
 | `src/hl_access.h` | `HL_ACCESS_VOICE_CHAT` (bit 55). |
-| `src/voice.h` | The `hx_send_voice_*` C ABI the receive path calls; implemented by `hxvoice-send`. |
 | `src/voice_runtime.h` | The opaque-handle FFI surface for the Rust runtime — construction, event injection, device enumeration, signal callbacks. |
 | `src/voice_bridge.{c,h}` | Session / htlc field accessors for the Rust voice UI and senders. Rather than mirror the `session` / `htlc_conn` layouts in Rust — fragile, they change often and carry packed protocol fields — the Rust modules reach the handful of fields they need through these. |
 | `src/voice_ptt_keyspec.{c,h}` | The pure push-to-talk key vocabulary and canonicalisation, split out so its rules are unit-testable without GTK. |
 | `src/voice_panel.h`, `src/voice_model.h`, `src/voice_ptt.h` | Surviving headers for the ported modules; the matching `.c` files are gone. |
-| `src/rcv.c` | `rcv_task_voice_*` for the 600/601/603/606 replies; `hx_rcv_voice_*` for the 602/604/605 server-initiated notifications. Each calls a Rust parser and feeds the typed result to the runtime. |
+| `src/rcv.c` | `hx_rcv_voice_*` for the 602/604/605 server-initiated notifications, which still reach GtkHx whole. Each calls a Rust parser and feeds the typed result to the runtime. |
 | `src/options.c` | The Settings → Voice page. |
 | `src/sound_events.c` | Subscribes to the model's presence-chime signal and plays the chime, keeping the model itself sound-agnostic. |
 
 The runtime drives the toolbar directly through `SignalCallbacks`; no
 `GtkhxSession` signals were added for voice. The panel was the only
 prospective consumer, so the indirection would have bought nothing.
+
+### The request path
+
+Every request but an ICE candidate has its reply expected by hx-libs'
+`hxsession`, matched by connection and transaction: a join's as
+`Expect::VoiceJoin`, which the session reads into `Event::VoiceJoined`
+(the server's offer, its codec and the participants blob, as the server
+sent them), and the rest as `Expect::Voice`, which says nothing once it
+worked. A join's reply fills the runtime's map of media to users, starts
+the answer, and, for the room the runtime is in, is the voice model's
+first list. A join reply missing any of the three fails like a refusal
+with no reason.
+
+A refusal arrives as `Failed`. `hxhandlers::voice` keeps what each
+request was, so a refused one reaches the runtime — a video start or
+pause with its kind and generation (see `video.md`), anything else by
+its opcode — and the runtime's error shows on the voice panel, with the
+error sound. The generic toast stays quiet, since the panel already says
+it. When the connection's session has no runtime, the refusal is the
+generic `request-failed` toast. A reply cut short is dropped: the
+request was never answered. What is in flight is forgotten when the
+connection closes and at the next login.
 
 `webrtcbin`'s worker threads emit signals on arbitrary threads; the
 runtime marshals to the main loop via `glib::MainContext::default()

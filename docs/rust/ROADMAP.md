@@ -172,7 +172,7 @@ the map.
 | Windows and dialogs | `gtkhx-ui`, module per window | see below |
 | TLS trust store (TOFU + SHA-256 pinning) | `hxtls-trust` | `tls_trust.c`, `tls_trust_dialog.c` |
 | Bookmarks (HTsc format, legacy import, cipher vocabulary) | `hxbookmarks` | `bookmarks_io.c`, `bookmark_rc4_dialog.c`, `cipher_vocab.c` |
-| Voice chat, end to end | `hxvoice` (state machine), `hxvoice-runtime` (webrtcbin), `hxvoice-model`, `hxvoice-send` | `voice.c`, `voice_panel.c`, `voice_model.c`, `voice_ptt.c` |
+| Voice chat, end to end | `hxvoice` (state machine), `hxvoice-runtime` (webrtcbin), `hxvoice-model`, `hxhandlers::voice` (the requests) | `voice.c`, `voice_panel.c`, `voice_model.c`, `voice_ptt.c` |
 | Text encoding + emoji shortcodes; Mac resource fork + cicn decode; image decode; sound playback | `hxtext`, `hxmacres`, `hx-image-decode`, `hxsound` | `text_util.c`, `macres.c`, the decode half of `cicn.c`, GSound |
 
 **Windows and dialogs.** Every window's *shell* — its dock registration or
@@ -735,62 +735,58 @@ The order, each step its own branch and each checked against the rig:
    them (`Config::handled`, `Handled::CHAT`, `Handled::USERS`,
    `Handled::MSG`, `Handled::NEWS`, `Handled::FILES`), and `hxnet` hands
    what it makes of a chat line and the picture it carries, an invitation,
-   a subject, a page of history, a user arriving, changing or leaving,
-   what the server says about us, a private message, a broadcast, the
-   server's parting words, a flat news post and a queued transfer moving
-   up to `hx_recv_session_event` on the main thread, among the frames and
-   in their order.
-   `hxhandlers::recv::chat`, `::user`, `::msg`, `::news` and `::files` keep
-   the model — the ignore list, each chat's subject, the history cursor,
-   the rosters, our own uid and access bits, the user, news and file
-   requests in flight — and emit the signals they always did, a broadcast
-   and the parting words as `broadcast`; the chat and message events
-   themselves are built in `gtkhx-core`. A history request, an invitation,
-   the user list, a user's info, a kick, creating or joining a private
-   chat, a private message, a broadcast, the user editor's account read,
-   creation, save and delete, and every news request — flat news's file and
-   posts, threaded news's listings, articles, posts, deletions and new
-   bundles and categories — every files request — a listing, Get Info,
+   a subject, a page of history, a user arriving, changing or leaving, what
+   the server says about us, a private message, a broadcast, the server's
+   parting words, a flat news post and a queued transfer moving up to
+   `hx_recv_session_event` on the main thread, among the frames and in
+   their order. `hxhandlers::recv::chat`, `::user`, `::msg`, `::news` and
+   `::files` keep the model — the ignore list, each chat's subject, the
+   history cursor, the rosters, our own uid and access bits, the user, news
+   and file requests in flight — and emit the signals they always did, a
+   broadcast and the parting words as `broadcast`; the chat and message
+   events themselves are built in `gtkhx-core`. A history request, an
+   invitation, the user list, a user's info, a kick, creating or joining a
+   private chat, a private message, a broadcast, the user editor's account
+   read, creation, save and delete, and every news request — flat news's
+   file and posts, threaded news's listings, articles, posts, deletions and
+   new bundles and categories — every files request — a listing, Get Info,
    a folder made, something deleted, moved or renamed, a comment set, and a
    download or upload of a file or a folder — the banner's, the GIF icons'
-   (the login's probe of everyone's, a user's, and ours set) and each part
-   of a picture going up or coming down have their reply expected by the
-   session (`Session::expect`), so none is a task any more, and a refusal
-   comes back as `Failed`, or a picture's as `MediaFailed`. A private chat
-   is made when its join is answered; a user's info reaches the user it
-   was asked of, an account the editor that asked, a news reply the
-   browser node that asked, a listing the files pane, a transfer's reply
-   the transfer, the banner's its fetch and a picture's part its upload or
-   download (`hxhandlers::media`), by its trans. A private message shows
-   the picture it carries as a chat line does. The files browser names
-   what a listing gave back, and the user editor an account, by the bytes
-   the server sent. What arrives is traced
-   from the session's tap. *In progress.*
-   The login's reply is the session's too (`Handled::LOGIN`): its
-   `Event::LoggedIn` carries every field GtkHx reads, which
-   `hxhandlers::recv::login` puts on the connection before `logged-in`,
-   and a refusal's reason reaches the view as `request-failed`.
-   What remains:
-   - voice and video's requests, still tasks (`hxvoice-send`,
-     `rcv_task_voice_join`, `rcv_task_voice_simple_ack`), and the refusal
-     handling `hx_rcv_task` does for them;
-   - the C history tests, which move to `hx-e2e`, retiring the
-     `hx_history_entry_parse` they read history through: the proto and
-     integration `test_chat_history.c` and the HOPE chat-history
-     integration tests.
-
-   With those gone, nothing registers a task but a file transfer's Tasks
-   row, and `hx_rcv_task` and `hxtask`'s table go.
+   (the login's probe of everyone's, a user's, and ours set), each part of
+   a picture going up or coming down, and voice and video's requests have
+   their reply expected by the session (`Session::expect`), so none is a
+   task any more, and a refusal comes back as `Failed`, or a picture's as
+   `MediaFailed`. A private chat is made when its join is answered; a
+   user's info reaches the user it was asked of, an account the editor that
+   asked, a news reply the browser node that asked, a listing the files
+   pane, a transfer's reply the transfer, the banner's its fetch, a
+   picture's part its upload or download (`hxhandlers::media`) and a voice
+   join's reply the voice runtime of the connection's session
+   (`hxhandlers::voice`), by its trans. A refused voice or video request
+   goes to that runtime too, to show on the voice panel, or where the
+   session has none, to the generic toast. A private message shows the
+   picture it carries as a chat line does. The files browser names what a
+   listing gave back, and the user editor an account, by the bytes the
+   server sent. What arrives is traced from the session's tap. *In
+   progress.* The login's reply is the session's too (`Handled::LOGIN`):
+   its `Event::LoggedIn` carries every field GtkHx reads, which
+   `hxhandlers::recv::login` puts on the connection before `logged-in`, and
+   a refusal's reason reaches the view as `request-failed`. What remains is
+   the C history tests, which move to `hx-e2e`, retiring the
+   `hx_history_entry_parse` they read history through: the proto and
+   integration `test_chat_history.c` and the HOPE chat-history integration
+   tests. With those gone, nothing registers a task but a file transfer's
+   Tasks row, and `hx_rcv_task` and `hxtask`'s table go.
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last.
 
 Of the extensions GtkHx negotiates, text encoding, chat history, inline
 media (the picture a chat line or a private message carries, and its
 upload and download), GIF icons' requests, the color a user's nickname
-arrives with and Large Files' exact sizes have their session-side
-handling. Voice and video signaling need theirs before the domains that
-use them move, and the GIF-icon change a server announces still reaches
-GtkHx whole. hxproto has the codecs.
+arrives with, Large Files' exact sizes and voice and video's requests
+have their session-side handling. What voice and video send unasked —
+the offers, candidates, and room and video status — and the GIF-icon
+change a server announces still reach GtkHx whole. hxproto has the codecs.
 
 ---
 

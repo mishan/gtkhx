@@ -50,8 +50,6 @@
 #include "connect.h"
 #include "banner.h"
 #include "chat_history.h"
-#include "sound.h"
-#include "text_util.h"
 #include "gif_icons.h"
 #include "hl_access.h"
 #ifdef HAVE_VOICE
@@ -144,51 +142,6 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
     }
 }
 
-#ifdef HAVE_VOICE
-/* Whether `label` names a voice or video request whose refusal the voice
- * runtime reports itself. Its state machine turns every one into an Error
- * signal carrying the server's text, which the voice panel shows, so the
- * generic toast would say it a second time. */
-static gboolean
-voice_reports_error (const char *label)
-{
-    static const char *const labels[] = {
-        "voice-join",      "voice-leave",        "voice-sdp-answer",
-        "voice-mute",      "video-start-camera", "video-start-screen",
-        "video-stop",      "video-state-camera", "video-state-screen",
-        "video-subscribe",
-    };
-    if (!label) {
-        return FALSE;
-    }
-    for (gsize i = 0; i < G_N_ELEMENTS (labels); i++) {
-        if (!strcmp (label, labels[i])) {
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
-
-/* The server's text for a refused voice or video request, as UTF-8, or NULL
- * when it gave none. The runtime takes C strings as UTF-8, and a Mac server's
- * text is MacRoman, so convert here as toolbar_show_toast would have: once
- * the runtime has read it, the bytes it couldn't decode are already gone. */
-static char *
-voice_error_text (const guint8 *frame, gsize frame_len)
-{
-    char buf[8192 + 1];
-    gsize len = 0;
-    if (!task_error_extract (frame, frame_len, buf, sizeof (buf), &len)
-        || len == 0) {
-        return NULL;
-    }
-    if (g_utf8_validate (buf, -1, NULL)) {
-        return g_strdup (buf);
-    }
-    return gtkhx_text_to_utf8 (buf, strlen (buf), NULL);
-}
-#endif /* HAVE_VOICE */
-
 void
 hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
@@ -203,90 +156,13 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     gtkhx_proto_header_trans (frame, frame_len, &trans);
     tsk = task_with_trans (sess_from_htlc (htlc), trans);
 
-    /* A refused voice or video request is the voice panel's to show, so
-     * the generic toast + ERROR sound is suppressed and its own handler
-     * takes the error (dispatched below). */
-    gboolean silent = FALSE;
-#ifdef HAVE_VOICE
-    {
-        session *vsess = sess_from_htlc (htlc);
-        if (tsk && vsess && vsess->voice_runtime
-            && voice_reports_error (tsk->str)) {
-            silent = TRUE;
-        }
-    }
-#endif /* HAVE_VOICE */
-
     if (task_inerror (htlc, frame, frame_len)) {
-        if (!silent) {
-            task_error (htlc, frame, frame_len);
-        }
+        task_error (htlc, frame, frame_len);
         error = 1;
     }
-#ifdef HAVE_VOICE
-    /* Phase 8.D runtime wiring: a TASK error reply for one of the
-     * voice opcodes (600 JOIN, 601 LEAVE, 603 SDP_ANSWER, 606
-     * MUTE — 604 ICE doesn't register a task) needs to reach the
-     * state machine via gtkhx_voice_runtime_task_error so it can
-     * decide whether to tear the session down (JOIN/SDP failures
-     * are fatal) or just surface a toast (MUTE/LEAVE failures are
-     * benign). hx_rcv_task otherwise skips the task's rcv handler
-     * for non-xfer error paths, so this is the only place voice
-     * error replies get inspected. */
-    if (error && tsk && tsk->str) {
-        session *sess = sess_from_htlc (htlc);
-        uint32_t opcode = 0;
-        if (!strcmp (tsk->str, "voice-join")) {
-            opcode = HTLC_HDR_VOICE_JOIN;
-        } else if (!strcmp (tsk->str, "voice-leave")) {
-            opcode = HTLC_HDR_VOICE_LEAVE;
-        } else if (!strcmp (tsk->str, "voice-sdp-answer")) {
-            opcode = HTLC_HDR_VOICE_SDP_ANSWER;
-        } else if (!strcmp (tsk->str, "voice-mute")) {
-            opcode = HTLC_HDR_VOICE_MUTE;
-        } else if (!strcmp (tsk->str, "video-stop")) {
-            opcode = HTLC_HDR_VIDEO_STOP;
-        } else if (!strcmp (tsk->str, "video-subscribe")) {
-            opcode = HTLC_HDR_VIDEO_SUBSCRIBE;
-        }
-        /* A refused Video Start or Video State names its kind in the task
-         * label: the state machine has to undo that request and no other.
-         * send_video keeps the room in the task's data and the machine's
-         * generation for the request in its ptr. */
-        guint16 start_kind = 0, state_kind = 0;
-        if (!strcmp (tsk->str, "video-start-camera")) {
-            start_kind = HX_VIDEO_KIND_CAMERA;
-        } else if (!strcmp (tsk->str, "video-start-screen")) {
-            start_kind = HX_VIDEO_KIND_SCREEN;
-        } else if (!strcmp (tsk->str, "video-state-camera")) {
-            state_kind = HX_VIDEO_KIND_CAMERA;
-        } else if (!strcmp (tsk->str, "video-state-screen")) {
-            state_kind = HX_VIDEO_KIND_SCREEN;
-        }
-        if ((start_kind || state_kind || opcode) && sess
-            && sess->voice_runtime) {
-            g_autofree char *text = voice_error_text (frame, frame_len);
-            guint32 cid = GPOINTER_TO_UINT (tsk->data);
-            guint32 gen = GPOINTER_TO_UINT (tsk->ptr);
-            if (start_kind) {
-                gtkhx_voice_runtime_video_start_failed (
-                    sess->voice_runtime, cid, start_kind, gen, text);
-            } else if (state_kind) {
-                gtkhx_voice_runtime_video_state_failed (
-                    sess->voice_runtime, cid, state_kind, gen, text);
-            } else {
-                gtkhx_voice_runtime_task_error (sess->voice_runtime, opcode,
-                                                text);
-            }
-            /* The generic path was skipped for these; its toast is the
-             * voice panel's to show, but the alert is still ours. */
-            play_sound (ERROR);
-        }
-    }
-#endif /* HAVE_VOICE */
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
-        if (tsk->rcv && (!error || silent)) {
+        if (tsk->rcv && !error) {
             tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore
@@ -635,161 +511,6 @@ hx_rcv_video_status (struct htlc_conn *htlc, const guint8 *frame,
     }
 }
 
-/* ---- Voice TASK reply handlers (client-initiated 600/601/603/606) -- */
-/*
- * The voice send wrappers in src/voice.c register one of these via
- * task_new() before each hlwrite_chunks call. hx_rcv_task looks up
- * the task entry by trans id on the TASK reply and dispatches here.
- *
- * Per the fogWraith spec, the JOIN (600) reply carries the server's
- * initial SDP offer, codec name, and current participant list — the
- * bulk of the session bootstrap payload. The other three opcodes
- * (601 LEAVE / 603 SDP_ANSWER / 606 MUTE) get empty-body success
- * replies; the simple_ack handler logs that the trans completed.
- * (604 VOICE_ICE is a notification both directions per spec — no
- * reply expected, so no task is registered for outgoing 604s.)
- *
- * The Phase 8.C state machine in hxvoice consumes the SDP / codec /
- * participants extracted here via SessionMachine events; for now the
- * handler just logs structured info through the "voice" debug
- * category so the proto-trace shows the bootstrap succeeded.
- */
-
-void
-rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
-                     gsize frame_len, void *channel_ptr)
-{
-    guint32 expected_cid = GPOINTER_TO_UINT (channel_ptr);
-
-    /* JOIN reply shape: CHAT_ID (echo) + VOICE_SDP (server offer) +
-     * VOICE_CODEC (active codec name) + VOICE_PARTICIPANTS (current
-     * list). All four fields per spec; a missing one is malformed.
-     * gtkhx_proto_parse_voice_reply only returns false on NULL out,
-     * so we don't need the dead-code conditional here either. */
-    struct gtkhx_proto_voice_reply r;
-    gtkhx_proto_parse_voice_reply (frame, frame_len, &r);
-
-    if (r.cid != expected_cid) {
-        debug_log ("voice",
-                   "← VOICE_JOIN reply cid=%u (expected %u) — server echoed "
-                   "different room",
-                   r.cid, expected_cid);
-    }
-
-    if (!r.sdp_present || !r.codec_present || !r.participants_present) {
-        debug_log ("voice",
-                   "← VOICE_JOIN reply cid=%u: malformed (sdp=%d codec=%d "
-                   "participants=%d)",
-                   r.cid, (int)r.sdp_present, (int)r.codec_present,
-                   (int)r.participants_present);
-        return;
-    }
-
-    /* Defensive: same shape as the other voice handlers — the
-     * presence flag and the field walker agree on a well-formed
-     * frame, so a walker rejection after the presence flag passed
-     * is an internal inconsistency. Surface it instead of logging
-     * a misleading zero-mids/empty-blob summary.
-     *
-     * SDP summary for the trace; the full SDP body lands in the
-     * received frame at the offset the per-field accessor returns. */
-    const guint8 *sdp_ptr = NULL;
-    gsize sdp_len = 0;
-    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 0,
-                                        (const uint8_t **)&sdp_ptr, &sdp_len)) {
-        debug_log ("voice",
-                   "← VOICE_JOIN reply cid=%u: field walker rejected "
-                   "VOICE_SDP after presence check",
-                   r.cid);
-        return;
-    }
-    struct gtkhx_proto_voice_sdp_summary sum;
-    gtkhx_proto_parse_voice_sdp_summary (sdp_ptr, sdp_len, &sum);
-
-    /* Codec name (short ASCII, typically "PCMU"). */
-    const guint8 *codec_ptr = NULL;
-    gsize codec_len = 0;
-    if (!gtkhx_proto_voice_reply_field (
-            frame, frame_len, 2, (const uint8_t **)&codec_ptr, &codec_len)) {
-        debug_log ("voice",
-                   "← VOICE_JOIN reply cid=%u: field walker rejected "
-                   "VOICE_CODEC after presence check",
-                   r.cid);
-        return;
-    }
-    char codec[32] = "?";
-    if (codec_ptr && codec_len > 0 && codec_len < sizeof (codec)) {
-        memcpy (codec, codec_ptr, codec_len);
-        codec[codec_len] = '\0';
-    }
-
-    /* Participants — same walk as hx_rcv_voice_room_status. */
-    const guint8 *blob = NULL;
-    gsize blob_len = 0;
-    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 3,
-                                        (const uint8_t **)&blob, &blob_len)) {
-        debug_log ("voice",
-                   "← VOICE_JOIN reply cid=%u: field walker rejected "
-                   "VOICE_PARTICIPANTS after presence check",
-                   r.cid);
-        return;
-    }
-    enum { MAX_LOG_ENTRIES = 64 };
-    struct gtkhx_proto_voice_participant ents[MAX_LOG_ENTRIES];
-    size_t n = gtkhx_proto_parse_voice_participants (blob, blob_len, ents,
-                                                     MAX_LOG_ENTRIES);
-
-    debug_log ("voice",
-               "← VOICE_JOIN reply cid=%u codec=%s sdp_len=%u "
-               "mids=%u has_pcmu=%d participants=%zu",
-               r.cid, codec, r.sdp_len, sum.mid_count, (int)sum.has_pcmu, n);
-    for (size_t i = 0; i < n; i++) {
-        debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
-                   ents[i].user_id, ents[i].flags, ents[i].codec_id,
-                   (ents[i].flags & 0x0001) ? " MUTED" : "");
-    }
-
-    /* The reply's SDP offer starts the answer; its participants fill the
-     * runtime's mid -> user map and, for the room this client is in, are
-     * the voice model's first list. A reply for a room already switched
-     * away from would otherwise become the next room's baseline. */
-    session *sess = sess_from_htlc (htlc);
-    if (sess && sess->voice_runtime) {
-        gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid, blob,
-                                         blob_len);
-        if (sdp_ptr && sdp_len > 0) {
-            char *sdp_str = g_malloc (sdp_len + 1);
-            memcpy (sdp_str, sdp_ptr, sdp_len);
-            sdp_str[sdp_len] = '\0';
-            gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid, sdp_str);
-            g_free (sdp_str);
-        }
-    }
-    uint32_t active_cid = 0;
-    if (sess && sess->voice_model && sess->voice_runtime
-        && gtkhx_voice_runtime_active_cid (sess->voice_runtime, &active_cid)
-        && active_cid == r.cid) {
-        hx_voice_model_ingest_participants (
-            sess->voice_model, blob, blob_len,
-            hx_conn_has_cap (htlc, HTLC_CAP_VIDEO));
-    }
-}
-
-void
-rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame,
-                           gsize frame_len, void *tag_ptr, void *cid_ptr)
-{
-    /* The ptr slot holds the opcode, or for a video start or state the
-     * state machine's generation, which only the error path above uses;
-     * cid is in the data slot. Both are diagnostic only here — the
-     * empty-success-reply path doesn't carry any state worth
-     * extracting. task_inerror is handled before this is called by
-     * hx_rcv_task; we only see the success path. */
-    guint32 tag = GPOINTER_TO_UINT (tag_ptr);
-    guint32 cid = GPOINTER_TO_UINT (cid_ptr);
-    (void)htlc;
-    debug_log ("voice", "← VOICE ack (tag=%u cid=%u)", tag, cid);
-}
 #endif /* HAVE_VOICE */
 
 /* Dispatch a received frame. The Rust hxnet actor already parsed the header

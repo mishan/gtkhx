@@ -44,9 +44,9 @@
 //! Same as the rest of the workspace: hand-declared `extern` blocks
 //! on the C side, no cbindgen, signature drift surfaces as an
 //! undefined symbol at link time. The C-facing header for Phase
-//! 8.B is `src/voice_runtime.h` (separate from `src/voice.h` which
-//! is the wire-out path Phase 8.A shipped) so the wire layer and
-//! the GStreamer layer can evolve independently.
+//! 8.B is `src/voice_runtime.h` (separate from the wire-out path,
+//! `hxhandlers::voice`) so the wire layer and the GStreamer layer can
+//! evolve independently.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 

@@ -200,28 +200,33 @@ As of this writing the C bodies group into:
   `networking.md`, "The LOGIN reply").
 - **Server-initiated handlers still in C** — agreement, banner, the
   unknown-opcode dump, and a one-line icon-change forwarder.
-- **Voice** — the three server-initiated voice handlers and the two voice
-  task replies, all compiled out when voice is disabled.
+- **Voice** — the server-initiated voice and video handlers (offers,
+  candidates, room and video status), all compiled out when voice is
+  disabled. Voice and video's requests and their replies are
+  `hxhandlers::voice`'s.
 
 ## State and behaviour that must be preserved verbatim
 
 The highest-half-life content here. When these handlers move, none of the
 following is a cleanup opportunity.
 
-**Task-error suppression.** A server task error surfaces as a toast plus
-the error sound — deliberately *not* a modal dialog, because the common
-case is the server rejecting one of our auto-fired bootstrap requests, and
-a dialog blocks the user before they can do anything. Speculative
-bootstrap requests whose rejection is expected and non-actionable (the
-GIF-icons capability probe: no capability bit, no version tie, so an error
-just means "unsupported"; and the saved avatar sent once the probe
-succeeds) are suppressed entirely — `hxhandlers::recv::icon` records the
-verdict, or logs the refusal. Separately, a refusal still reaches what
-owns per-request state — a transfer, an inline-media upload or download
-— because that is what frees it; skipping it strands an orphaned transfer
-in the Tasks window forever, or leaves the picture's caller waiting.
-Voice error replies get their own inspection so the voice state machine
-can choose between tearing the session down and just toasting.
+**Task-error suppression.** A server task error surfaces as a toast plus the
+error sound — deliberately *not* a modal dialog, because the common case is
+the server rejecting one of our auto-fired bootstrap requests, and a dialog
+blocks the user before they can do anything. Speculative bootstrap requests
+whose rejection is expected and non-actionable (the GIF-icons capability
+probe: no capability bit, no version tie, so an error just means
+"unsupported"; and the saved avatar sent once the probe succeeds) are
+suppressed entirely — `hxhandlers::recv::icon` records the verdict, or logs
+the refusal. Separately, a refusal still reaches what owns per-request state
+— a transfer, an inline-media upload or download — because that is what
+frees it; skipping it strands an orphaned transfer in the Tasks window
+forever, or leaves the picture's caller waiting. A refused voice or video
+request goes to the voice runtime, where the connection's session has one,
+instead of the toast, with the error sound, so the state machine can choose
+between tearing the session down and just showing it on the voice panel; a
+video start or pause carries back the kind and generation it was sent with
+(`hxhandlers::voice`).
 
 **Transaction ID zero is a real key, not a sentinel.** A short or
 malformed header leaves the extracted trans at 0, and the table treats 0

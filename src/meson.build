@@ -144,13 +144,13 @@ endif
 # voice_bridge.c     — session/htlc field accessors for the Rust voice UI +
 #                      senders (users_voice_col + voice_panel + voice_ptt to
 #                      gtkhx-ui's `voice` feature; the hx_send_voice_* senders
-#                      to the hxvoice-send crate).
+#                      to hxhandlers' `voice` module).
 # voice_ptt_keyspec.c— pure PTT key-spec vocabulary / canonicalisation (keeps
 #                      its standalone C unit test; voice_ptt.rs externs _parse).
 # (voice_panel.c retired — ported to rust/crates/gtkhx-ui/src/voice_panel.rs.
 #  voice_model.c retired — ported to the hxvoice-model Rust crate.
 #  voice_ptt.c retired — ported to rust/crates/gtkhx-ui/src/voice_ptt.rs.
-#  voice.c retired — ported to the hxvoice-send Rust crate.)
+#  voice.c retired — its senders are now hxhandlers' `voice` module.)
 voice_sources = files(
   'voice_bridge.c',
   'voice_ptt_keyspec.c',

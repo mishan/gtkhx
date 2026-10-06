@@ -36,6 +36,7 @@
   - Video no longer sometimes stays blank, or fails to start, after someone turns their camera on
   - Screen readers can now name the camera and screen-share buttons and the users list's video icon
   - Join and leave sounds are right again after switching voice rooms
+  - Joining, leaving and muting voice, and starting, pausing or stopping video, no longer flash by in the Tasks list
 - Chat
   - Chat history shows line breaks and accented characters correctly
   - Very long scrollbacks stay fast as new messages arrive and while scrolling
