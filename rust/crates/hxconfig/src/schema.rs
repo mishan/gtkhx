@@ -366,7 +366,11 @@ pub struct Trackers {
 impl Default for Trackers {
     fn default() -> Self {
         Trackers {
-            addresses: vec!["hltracker.com".into()],
+            addresses: vec![
+                "hltracker.com".into(),
+                "tracker.vespernet.net".into(),
+                "tracker.preterhuman.net".into(),
+            ],
             case_sensitive: true,
         }
     }

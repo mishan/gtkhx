@@ -83,6 +83,8 @@
   - The server banner, GIF icons, and sending or loading pictures in chat no longer flash by in the Tasks list
   - Logging in no longer adds a row to the Tasks list
   - Security fix: TLS connections now use rustls 0.23.45, for RUSTSEC-2026-0285, in which a server could send handshake messages unencrypted that should have been encrypted (it could not tamper with the handshake)
+- Trackers
+  - New installs list tracker.vespernet.net and tracker.preterhuman.net beside hltracker.com
 - Updates
   - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
   - Windows, macOS and Flatpak test builds show their real version, such as 1.4.1b2, in About instead of 1.4.1-dev

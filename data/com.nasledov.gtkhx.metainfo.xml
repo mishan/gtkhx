@@ -7,8 +7,8 @@
   Flatpak repository's AppStream data. The schema is documented at:
     https://www.freedesktop.org/software/appstream/docs/
 
-  Validate with:
-    appstreamcli validate data/com.nasledov.gtkhx.metainfo.xml
+  Meson fills in the screenshots' git ref and installs the result; the
+  validate-metainfo test checks that, under `meson test`.
 
   Field choices that aren't obvious:
 
@@ -24,8 +24,9 @@
       if every category is "none" — software centers use it for
       the "all-ages" badge and for parental-control filters.
 
-    - <screenshots> are what a software center shows. The URLs
-      follow main, so they can be newer than the release.
+    - <screenshots> are what a software center shows. A released
+      tree's URLs point at its own tag, so a software center shows
+      that release's screenshots; a -dev tree's follow main.
 
     - <releases> wants at least one entry. Keep these in
       reverse-chronological order, and add one on each tagged
@@ -105,27 +106,27 @@
   <screenshots>
     <screenshot type="default">
       <caption>Chat on a Hotline server</caption>
-      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/chat.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/chat.png</image>
     </screenshot>
     <screenshot>
       <caption>Threaded news</caption>
-      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/news.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/news.png</image>
     </screenshot>
     <screenshot>
       <caption>Browsing a server's files</caption>
-      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/files.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/files.png</image>
     </screenshot>
     <screenshot>
       <caption>Finding servers on a tracker</caption>
-      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/tracker.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/tracker.png</image>
     </screenshot>
     <screenshot>
       <caption>Video chat and screen sharing</caption>
-      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/video.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/video.png</image>
     </screenshot>
     <screenshot>
       <caption>The Classic theme, with the original pixel-art icons</caption>
-      <image>https://raw.githubusercontent.com/mishan/gtkhx/main/data/screenshots/classic.png</image>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/classic.png</image>
     </screenshot>
   </screenshots>
 
@@ -147,6 +148,19 @@
   </content_rating>
 
   <releases>
+    <release version="1.5.0" date="2026-10-07" type="development">
+      <description>
+        <p>A new dock, a redesigned video panel, and a long list of fixes.</p>
+        <ul>
+          <li>A new dock: drag tabs between panes, out into windows of their own and back, and move between panes from the keyboard</li>
+          <li>Video tiles fill the panel at each stream's shape, and any one can be brought into focus</li>
+          <li>The Flatpak tells you when a new version is out, and can update and restart into it</li>
+          <li>User names are drawn in their own colors and stay readable on any theme</li>
+          <li>Large folders open several times faster, and accented and non-Roman file names work on more servers</li>
+          <li>Security fix in the TLS library (RUSTSEC-2026-0285)</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-09-25">
       <description>
         <p>Video chat and screen sharing, a slimmer main window, and a new file browser.</p>

@@ -107,7 +107,14 @@ fn defaults_match_the_shipped_c_defaults() {
     assert!(s.appearance.tint_window);
     assert_eq!(s.transfers.download_dir, ".");
     assert!(s.transfers.queue);
-    assert_eq!(s.trackers.addresses, vec!["hltracker.com".to_string()]);
+    assert_eq!(
+        s.trackers.addresses,
+        [
+            "hltracker.com",
+            "tracker.vespernet.net",
+            "tracker.preterhuman.net"
+        ]
+    );
     assert!(s.trackers.case_sensitive);
     // The high-signal notifications on, the noisy ones off.
     assert!(s.notify.chat_highlight);
@@ -1753,7 +1760,7 @@ fn a_list_reads_and_writes_as_one_comma_separated_string() {
 
     assert_eq!(
         take(ffi::hxconfig_get_string(c("TRACKER").as_ptr())),
-        "hltracker.com"
+        "hltracker.com,tracker.vespernet.net,tracker.preterhuman.net"
     );
     unsafe {
         ffi::hxconfig_set_string(

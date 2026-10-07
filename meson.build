@@ -377,10 +377,13 @@ endif
 # installed .desktop filename above. Mismatches get silently
 # dropped from search results, which is hard to diagnose after
 # the fact.
-metainfo_file = files('data/com.nasledov.gtkhx.metainfo.xml')
-
-install_data(
-  metainfo_file,
+metainfo_file = configure_file(
+  input : 'data/com.nasledov.gtkhx.metainfo.xml',
+  output : 'com.nasledov.gtkhx.metainfo.xml',
+  configuration : {
+    'SCREENSHOT_REF' : meson.project_version().endswith('-dev')
+      ? 'main' : 'v' + meson.project_version(),
+  },
   install_dir : get_option('datadir') / 'metainfo',
 )
 
