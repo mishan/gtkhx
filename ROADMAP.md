@@ -96,12 +96,6 @@ Open questions, and the reason this hasn't been built: what tone to strike, whet
 ship a curated server list, and whether to ping those servers for liveness before showing
 them — a list of dead servers is worse than no list.
 
-### Ship useful defaults
-
-Half done. The connection list now seeds several built-in servers, but the tracker list
-still defaults to a single address, which may not have survived. Ship a handful of
-trackers, and check they still answer before shipping them.
-
 ### Help
 
 There is a `/help` command that prints the slash-command list into chat, and that is all.
@@ -111,9 +105,8 @@ the desktop compositor, which a shortcuts window could at least explain.
 
 ### Flatpak repository
 
-Releases publish themselves to dl.gtkhx.org. What's left: the metainfo's screenshot URLs
-follow `main`, so a software center shows today's screenshots beside an older release.
-Pin them to the release tag.
+Releases publish themselves to dl.gtkhx.org, and a release's metainfo shows that
+release's screenshots.
 
 Inside the sandbox, video can share a screen but finds no camera; see
 [BACKLOG.md](BACKLOG.md).
