@@ -34,11 +34,6 @@ use hx_image_decode::ffi::{
     HxInlineMediaCaps, HxInlineMediaDecoded, HxInlineMediaFrame,
 };
 
-extern "C" {
-    /// `users.c` — have every list showing `uid` re-read its avatar.
-    fn users_refresh_avatar(uid: u16);
-}
-
 /// How often the timer looks for a frame that has outlived its delay:
 /// about 16 frames a second at most, plenty for GIFs, whose delays are
 /// typically 50–200 ms.
@@ -248,6 +243,12 @@ fn key_uid(key: u32) -> u16 {
     (key & 0xffff) as u16
 }
 
+/// Have the lists of the key's connection showing its uid re-read the
+/// avatar.
+fn refresh(key: u32) {
+    crate::users_view::refresh_avatar((key >> 16) as u16, key_uid(key));
+}
+
 fn lookup(htlc: *mut c_void, uid: u16) -> Option<AvatarPaintable> {
     if uid == 0 {
         return None;
@@ -347,7 +348,7 @@ unsafe extern "C" fn on_decoded(result: *mut HxInlineMediaDecoded, user_data: *m
         }
     });
     inline_media_decoded_free(result);
-    users_refresh_avatar(key_uid(key));
+    refresh(key);
 }
 
 fn debug(msg: &str) {
@@ -422,7 +423,7 @@ pub unsafe extern "C" fn gtkhx_avatar_update(
     if gif.is_null() || len == 0 {
         // The user dropped their avatar.
         STATE.with(|s| s.borrow_mut().cache.remove(&key));
-        users_refresh_avatar(uid);
+        refresh(key);
         return;
     }
     // A NULL token means the decode was refused on the spot, and the
@@ -539,12 +540,21 @@ pub unsafe extern "C" fn gtkhx_avatar_set_paused(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn texture() -> gdk::Texture {
         let bytes = glib::Bytes::from_owned(vec![0u8; 4 * 4 * 4]);
         gdk::MemoryTexture::new(4, 4, gdk::MemoryFormat::R8g8b8a8, &bytes, 16).upcast()
+    }
+
+    /// Cache a fresh still avatar for `uid` on `htlc`, as a decode landing
+    /// would, without the decoder.
+    pub(crate) fn give(htlc: *mut c_void, uid: u16) -> AvatarPaintable {
+        let a = AvatarPaintable::new(vec![(texture(), 0)]).unwrap();
+        let key = avatar_key(htlc, uid);
+        STATE.with(|s| s.borrow_mut().cache.insert(key, a.clone()));
+        a
     }
 
     fn animated(delays: &[u32]) -> AvatarPaintable {

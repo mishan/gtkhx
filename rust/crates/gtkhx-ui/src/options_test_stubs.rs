@@ -141,6 +141,11 @@ pub unsafe extern "C" fn gtkhx_active_htlc() -> *mut c_void {
 
 // ---- icons and avatars (icon_enum.c, gif_icons.c) -----------------------
 
+/// The image decoder's log line (inline_media_decode.c), reachable from
+/// `gtkhx_avatar_update`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_image_decode_log(_msg: *const c_char) {}
+
 #[no_mangle]
 pub unsafe extern "C" fn hx_icon_ids_begin() -> c_int {
     0

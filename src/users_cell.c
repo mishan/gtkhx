@@ -31,6 +31,7 @@
 #include "users_row.h"
 #include "users_cell.h"
 #include "gif_avatar.h" /* gtkhx_avatar_get_paintable / is_animated / is_paused / set_paused */
+#include "session_registry.h" /* hx_conn_with_serial */
 
 /* ============================================================ */
 /* HxUserCellName — custom widget for the Name column           */
@@ -71,6 +72,7 @@ struct _HxUserCellName {
 
     HxUserRow *row;        /* borrowed */
     gulong row_changed_id; /* notify handler on row */
+    guint16 conn_serial;   /* the list's connection; uids collide across them */
 
     /* Resolved from row->icon via load_icon, or the GIF avatar when one
      * is cached for this row's uid (using_avatar). An avatar's frame
@@ -177,9 +179,8 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
      * with the wide-banner left-shift for banner-width art. It animates
      * itself, invalidating its contents at each frame. */
     guint16 uid = cell->row ? hx_user_row_get_uid (cell->row) : 0;
-    GdkPaintable *avatar
-        = uid ? gtkhx_avatar_get_paintable (hx_active_session ()->htlc, uid)
-              : NULL;
+    GdkPaintable *avatar = gtkhx_avatar_get_paintable (
+        hx_conn_with_serial (cell->conn_serial), uid);
     if (avatar) {
         if (cell->using_avatar && cell->icon == avatar) {
             return; /* already showing this exact avatar */
@@ -481,14 +482,13 @@ pause_click_fire (gpointer user_data)
 {
     HxUserCellName *cell = HX_USER_CELL_NAME (user_data);
     guint16 uid = cell->pause_click_uid;
+    struct htlc_conn *htlc = hx_conn_with_serial (cell->conn_serial);
 
     cell->pause_click_source = 0;
     cell->pause_click_uid = 0;
-    if (uid != 0
-        && gtkhx_avatar_is_animated (hx_active_session ()->htlc, uid)) {
-        gtkhx_avatar_set_paused (
-            hx_active_session ()->htlc, uid,
-            !gtkhx_avatar_is_paused (hx_active_session ()->htlc, uid));
+    if (gtkhx_avatar_is_animated (htlc, uid)) {
+        gtkhx_avatar_set_paused (htlc, uid,
+                                 !gtkhx_avatar_is_paused (htlc, uid));
     }
     return G_SOURCE_REMOVE;
 }
@@ -535,8 +535,8 @@ on_cell_icon_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
         return;
     }
     guint16 uid = hx_user_row_get_uid (cell->row);
-    if (uid == 0
-        || !gtkhx_avatar_is_animated (hx_active_session ()->htlc, uid)) {
+    if (!gtkhx_avatar_is_animated (hx_conn_with_serial (cell->conn_serial),
+                                   uid)) {
         return;
     }
     /* Hit-test the icon column (icon renders from the start edge up to
@@ -571,10 +571,11 @@ hx_user_cell_name_init (HxUserCellName *cell)
 }
 
 GtkWidget *
-hx_user_cell_name_new (int text_x_offset, gboolean themed,
+hx_user_cell_name_new (guint16 conn_serial, int text_x_offset, gboolean themed,
                        gboolean text_outline, int row_height)
 {
     HxUserCellName *cell = g_object_new (HX_TYPE_USER_CELL_NAME, NULL);
+    cell->conn_serial = conn_serial;
     cell->text_x_offset = text_x_offset;
     cell->themed = themed;
     cell->text_outline = text_outline;
