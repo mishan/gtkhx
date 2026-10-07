@@ -1,5 +1,6 @@
-//! User requests: a user's info, a kick, an admin's broadcast, and the
-//! accounts an admin reads, makes, changes and deletes.
+//! User requests: our own name, icon and nick color, a user's info, a kick,
+//! an admin's broadcast, and the accounts an admin reads, makes, changes and
+//! deletes.
 //!
 //! An account's login and password go obfuscated, every byte inverted, but
 //! in the read, which names the login as it is. They and the account's
@@ -8,10 +9,29 @@
 //! Each builder returns `None` for input the wire can't carry: a chunk
 //! longer than its u16 length allows.
 
-use hxproto::build::{self, AccountModifyRequest, BroadcastRequest, HxChunk, UserKickRequest};
-use hxproto::messages::ClientHdr;
+use hxproto::build::{
+    self, AccountModifyRequest, BroadcastRequest, HxChunk, UserChangeRequest, UserKickRequest,
+};
+use hxproto::messages::{ClientHdr, NICK_COLOR_NONE};
 
 use crate::Request;
+
+/// USER_CHANGE: our `name` and `icon`, and our nick `color` (0x00RRGGBB, or
+/// `NICK_COLOR_NONE`). Any color opts the connection in to the others', so
+/// none goes until one has (`color_sent`); after that, a server takes a
+/// missing color as unchanged, so clearing ours sends `NICK_COLOR_NONE`.
+pub fn change(name: &[u8], utf8: bool, icon: u16, color: u32, color_sent: bool) -> Option<Request> {
+    let name = hxtext::for_wire(name, utf8, false);
+    let req = UserChangeRequest {
+        icon,
+        name: &name,
+        nick_color: (color != NICK_COLOR_NONE || color_sent).then_some(color),
+    };
+    let mut chunks = [HxChunk::EMPTY; 3];
+    let mut scratch = [0u8; 6];
+    let hc = build::build_user_change_chunks(&req, &mut chunks, &mut scratch);
+    Request::from_built(ClientHdr::UserChange as u32, &chunks, hc)
+}
 
 /// USER_GETINFO: what the server says of `uid`.
 pub fn info(uid: u16) -> Option<Request> {

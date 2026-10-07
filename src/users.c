@@ -62,41 +62,6 @@ PangoFontDescription *users_font_desc;
 GdkRGBA user_colors[8];
 GdkRGBA gdk_user_colors[4];
 
-void
-hx_change_name_icon (struct htlc_conn *htlc)
-{
-    /* encode the nick to the negotiated wire encoding.
-     * is_body = FALSE — nicks don't have line endings; we want the
-     * Mac-Roman transcoding (or UTF-8 passthrough) without the
-     * LF→CR substitution. */
-    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
-    gsize name_len = 0;
-    char *name_wire = gtkhx_text_for_wire ((const char *)hx_conn_name (htlc),
-                                           strlen (hx_conn_name (htlc)), utf8,
-                                           /*is_body=*/FALSE, &name_len);
-
-    /* chunk layout moved to gtkhx_proto_build_user_change
-     * _chunks. Colored-Nicknames extension: include DATA_COLOR ONLY
-     * when the local pref has set a real color — we deliberately
-     * don't send HX_NICK_COLOR_NONE because the spec's auto-opt-in
-     * marks the session as color-aware on first DATA_COLOR receipt
-     * regardless of the value, and a "no color" client shouldn't opt
-     * in. Servers that don't know the extension ignore the trailing
-     * chunk; supporting servers mark us color-aware and start
-     * decorating other users' USER_CHANGE pushes for us. */
-    bool has_color = hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE;
-    struct hx_chunk chunks[3];
-    guint8 scratch[6];
-    int hc = (int)gtkhx_proto_build_user_change_chunks (
-        hx_conn_icon (htlc), (const uint8_t *)name_wire, name_len,
-        has_color ? 1 : 0, hx_conn_nick_color (htlc), chunks,
-        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
-    if (hc > 0) {
-        hlwrite_chunks (htlc, HTLC_HDR_USER_CHANGE, 0, chunks, hc);
-    }
-    g_free (name_wire);
-}
-
 struct UserActionCtx {
     session *sess;
     guint32 cid;

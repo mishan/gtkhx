@@ -99,7 +99,8 @@ make_unique_color (void)
 }
 
 /* Send HTLC_HDR_USER_CHANGE with NAME + ICON + DATA_COLOR — the
- * 3-chunk shape src/users.c::hx_change_name_icon emits. */
+ * 3-chunk shape hxhandlers' send::user::hx_change_name_icon emits once
+ * a color is set. */
 static gboolean
 send_user_change_with_color (int fd, struct htlc_conn *htlc,
                              const char *display_name, guint16 icon,

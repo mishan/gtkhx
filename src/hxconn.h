@@ -161,11 +161,13 @@ extern void hx_conn_set_login (struct htlc_conn *h, const char *v);
  * logged_in: set on the first SELFINFO; the agreement Agree button reads it to
  * decide whether AGREEMENTAGREE is appropriate. post_login_fetched: the
  * spec-correct "we're a fully-joined user" boundary (USER_GETLIST / news / file
- * listing are safe only after it). Both are 1-bit flags, cleared on disconnect. */
+ * listing are safe only after it). nick_color_sent: a nick color has gone out,
+ * so clearing it must send HX_NICK_COLOR_NONE. All are cleared on disconnect. */
 extern gboolean hx_conn_logged_in (const struct htlc_conn *h);
 extern void hx_conn_set_logged_in (struct htlc_conn *h, gboolean v);
 extern gboolean hx_conn_post_login_fetched (const struct htlc_conn *h);
 extern void hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v);
+extern void hx_conn_set_nick_color_sent (struct htlc_conn *h, gboolean v);
 
 /* ---- GIF-icons capability probe ------------------------------------------
  *

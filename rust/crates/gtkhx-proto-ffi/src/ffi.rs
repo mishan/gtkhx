@@ -9,9 +9,7 @@
 //! pass `htlc->in.buf` + `htlc->in.pos`, and a truncated frame must fail
 //! closed rather than read out of bounds.
 
-use hxproto::build::{
-    self, AgreementAgreeRequest, ChatRequest, ChatSubjectRequest, HxChunk, UserChangeRequest,
-};
+use hxproto::build::{self, AgreementAgreeRequest, ChatRequest, ChatSubjectRequest, HxChunk};
 use hxproto::parse::{self, AgreementResult, Header};
 use std::slice;
 
@@ -590,68 +588,6 @@ pub unsafe extern "C" fn gtkhx_proto_build_agreement_agree_chunks(
         options,
     };
     build::build_agreement_agree_chunks(&req, chunks_slice, scratch_slice) as i32
-}
-
-// ---- User-management SEND builders -----------------------------------
-//
-// Same chunks[] + scratch[] contract as the chat / msg / broadcast
-// builders above. Each shim validates *_cap first, then constructs
-// fixed-size slices sized to MAX_* (NOT chunks_cap / scratch_cap) so a
-// too-large caller cap can't drive from_raw_parts_mut into UB.
-
-/// Build `HTLC_HDR_USER_CHANGE` chunks (ICON + NAME, + optional COLOR
-/// when `has_nick_color` is non-zero). `chunks_cap >= 3`,
-/// `scratch_cap >= 6`. Returns 2 (no color) or 3 (with color) on
-/// success, 0 on validation failure.
-///
-/// `nick_color` is consulted only when `has_nick_color != 0` (the C
-/// `HX_NICK_COLOR_NONE` sentinel is checked on the caller side; the
-/// FFI takes the chunk-emission decision as a bool to keep the wire
-/// shape decision close to the bytes).
-///
-/// # Safety
-/// `chunks` / `scratch` valid for their declared lengths, or NULL.
-/// `name_ptr` valid for `name_len` bytes, or NULL.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_build_user_change_chunks(
-    icon: u16,
-    name_ptr: *const u8,
-    name_len: usize,
-    has_nick_color: u8,
-    nick_color: u32,
-    chunks: *mut HxChunk,
-    chunks_cap: usize,
-    scratch: *mut u8,
-    scratch_cap: usize,
-) -> i32 {
-    const MAX_CHUNKS: usize = 3;
-    const MAX_SCRATCH: usize = 6;
-
-    if chunks.is_null() || scratch.is_null() {
-        return 0;
-    }
-    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
-        return 0;
-    }
-    if name_ptr.is_null() && name_len != 0 {
-        return 0;
-    }
-    if name_len > u16::MAX as usize {
-        return 0;
-    }
-    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
-    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
-    let name = as_slice(name_ptr, name_len);
-    let req = UserChangeRequest {
-        icon,
-        name,
-        nick_color: if has_nick_color != 0 {
-            Some(nick_color)
-        } else {
-            None
-        },
-    };
-    build::build_user_change_chunks(&req, chunks_slice, scratch_slice) as i32
 }
 
 // ---- HTRK tracker reply parsers ---------------------------------------

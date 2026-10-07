@@ -19,10 +19,12 @@ use std::os::raw::{c_char, c_int, c_uint, c_void};
 const HOSTLEN: usize = 256;
 
 /// `flags` bitfield bits. `visible` (C bit 0) is unused — no accessor — so only
-/// the two live flags are named. Because no C code reads `flags` directly (only
+/// the live flags are named. Because no C code reads `flags` directly (only
 /// these accessors), the bit assignment is this crate's alone.
 const FLAG_LOGGED_IN: u32 = 1 << 0;
 const FLAG_POST_LOGIN_FETCHED: u32 = 1 << 1;
+/// A nick color has gone out on this connection, so clearing it must say so.
+const FLAG_NICK_COLOR_SENT: u32 = 1 << 2;
 
 /// `#[repr(C)]` mirror of `struct htlc_conn` (was `protocol.h`). Field order,
 /// types, and sizes match the C definition exactly; the layout is pinned by the
@@ -507,6 +509,11 @@ flag!(
     hx_conn_post_login_fetched,
     hx_conn_set_post_login_fetched,
     FLAG_POST_LOGIN_FETCHED
+);
+flag!(
+    hx_conn_nick_color_sent,
+    hx_conn_set_nick_color_sent,
+    FLAG_NICK_COLOR_SENT
 );
 
 // ---- Access bitmap --------------------------------------------------------

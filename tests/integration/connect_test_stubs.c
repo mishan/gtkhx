@@ -263,8 +263,8 @@ trackconn_prog_update (session *sess, char *str, int num, int total)
     (void)total;
 }
 
-/* users.c — referenced by hx_htlc_close. The test path with
- * fd=0 avoids it, but the symbol must resolve. */
+/* hxhandlers — referenced by hx_send_agreement_agree. The test path
+ * with fd=0 avoids it, but the symbol must resolve. */
 void
 hx_change_name_icon (struct htlc_conn *htlc)
 {

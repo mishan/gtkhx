@@ -8,8 +8,8 @@
 use hx_e2e::client::CAP_TEXT_ENCODING;
 use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
-use hxproto::messages::tag;
-use hxrequest::Request;
+use hxproto::messages::{tag, NICK_COLOR_NONE};
+use hxrequest::{user, Request};
 use hxsession::{Expect, Handled, User};
 use std::time::{Duration, Instant};
 
@@ -145,6 +145,31 @@ fn users_arrive_change_and_leave_as_events_in_the_server_s_order() {
             &mut a,
             |e| matches!(e, hxsession::Event::UserLeft { cid: 0, uid } if *uid == b_uid),
         );
+    }
+}
+
+/// A color cleared after one went reaches the others: a server keeps the
+/// last color it was sent through a change that leaves it out.
+#[test]
+fn a_cleared_nick_color_reaches_the_others() {
+    for s in servers_with(&[Cap::NickColors]) {
+        let (mut a, na) = member(s, "ca");
+        // A color is what opts a session in to the others'. Janus keeps red
+        // for administrators, and no green this strong is red.
+        a.send(&user::change(na.as_bytes(), a.utf8(), 414, 0x0000_8000, false).unwrap());
+        let (mut b, nb) = member(s, "cb");
+        let b_uid = listed(&mut a, &nb)
+            .into_iter()
+            .find(|u| u.name == nb)
+            .unwrap()
+            .uid;
+        for (color, sent) in [(0x0012_8034, false), (NICK_COLOR_NONE, true)] {
+            b.send(&user::change(nb.as_bytes(), b.utf8(), 414, color, sent).unwrap());
+            until(
+                &mut a,
+                |e| matches!(e, hxsession::Event::UserChanged { cid: 0, user } if user.uid == b_uid && user.color == Some(color)),
+            );
+        }
     }
 }
 

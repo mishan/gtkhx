@@ -1,11 +1,17 @@
-//! The user list, asked for once the login settles; a user's info, a kick,
-//! an admin's broadcast, and an account read, saved or deleted. The
-//! requests are `hxrequest::user`'s; each reply is expected by the session,
-//! and a refusal reaches `request-failed`, or, for an account made or saved,
-//! the editor that asked.
+//! Our own name, icon and nick color; the user list, asked for once the
+//! login settles; a user's info, a kick, an admin's broadcast, and an
+//! account read, saved or deleted. The requests are `hxrequest::user`'s;
+//! each reply is expected by the session, and a refusal reaches
+//! `request-failed`, or, for an account made or saved, the editor that
+//! asked.
 
+use std::ffi::CStr;
 use std::os::raw::{c_int, c_void};
 
+use gtkhx_core::conn::{
+    hx_conn_fd, hx_conn_icon, hx_conn_name, hx_conn_nick_color, hx_conn_nick_color_sent,
+    hx_conn_set_nick_color_sent,
+};
 use hxproto::build::HxChunk;
 use hxproto::messages::ClientHdr;
 use hxrequest::{user, Request};
@@ -43,6 +49,42 @@ pub unsafe extern "C" fn hx_user_list_get(htlc: *mut c_void) {
         std::ptr::null::<HxChunk>(),
         0 as c_int,
     );
+}
+
+/// `void hx_change_name_icon (struct htlc_conn *htlc)` — our name, icon and
+/// nick color, as the connection holds them (USER_CHANGE, no reply).
+///
+/// # Safety
+/// `htlc` is NULL or a live connection; main thread.
+#[no_mangle]
+pub unsafe extern "C" fn hx_change_name_icon(htlc: *mut c_void) {
+    // Nothing goes out unconnected, so nothing counts as sent.
+    if htlc.is_null() || hx_conn_fd(htlc.cast()) == 0 {
+        return;
+    }
+    let h = htlc.cast();
+    let color = hx_conn_nick_color(h);
+    let Some(req) = user::change(
+        CStr::from_ptr(hx_conn_name(h)).to_bytes(),
+        hx_htlc_text_encoding_cap(htlc) != glib::ffi::GFALSE,
+        hx_conn_icon(h),
+        color,
+        hx_conn_nick_color_sent(h) != glib::ffi::GFALSE,
+    ) else {
+        return;
+    };
+    if color != hxproto::messages::NICK_COLOR_NONE {
+        hx_conn_set_nick_color_sent(h, glib::ffi::GTRUE);
+    }
+    req.with_hx_chunks(|chunks| {
+        hlwrite_chunks(
+            htlc.cast(),
+            req.opcode,
+            0,
+            chunks.as_ptr(),
+            chunks.len() as c_int,
+        )
+    });
 }
 
 /// Send `req`, its reply expected as `what`; the trans it went out on.
@@ -342,6 +384,40 @@ mod tests {
             assert_eq!(told.take(), Some(Err(Some(said))), "{reason:?}");
             unsafe { crate::recv::forget(htlc, false) };
         }
+    }
+
+    /// A connection says nothing of a color until one has gone out on it,
+    /// and says it is cleared once one has.
+    #[test]
+    fn a_nick_color_is_cleared_only_once_one_went() {
+        use gtkhx_core::conn::{hx_conn_free, hx_conn_new, hx_conn_set_fd, hx_conn_set_nick_color};
+        use hxproto::messages::NICK_COLOR_NONE as NONE;
+
+        // (connected, our color) -> chunks sent, if anything was.
+        let steps = [
+            (true, NONE, Some(2)),
+            (false, 0x0012_3456, None),
+            (true, NONE, Some(2)),
+            (true, 0x0012_3456, Some(3)),
+            (true, NONE, Some(3)),
+            (true, NONE, Some(3)),
+        ];
+        let h = hx_conn_new();
+        for (i, (connected, color, want)) in steps.into_iter().enumerate() {
+            SENT.with(|s| s.take());
+            unsafe {
+                hx_conn_set_fd(h, c_int::from(connected));
+                hx_conn_set_nick_color(h, color);
+                hx_change_name_icon(h.cast());
+            }
+            let sent = SENT.with(|s| s.take());
+            assert_eq!(
+                sent,
+                want.map(|hc| (304, hc)).into_iter().collect::<Vec<_>>(),
+                "step {i}"
+            );
+        }
+        unsafe { hx_conn_free(h) };
     }
 
     #[test]
