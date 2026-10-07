@@ -21,7 +21,7 @@ use gtk::glib;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_char;
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_void};
 use std::rc::Rc;
 
 use hxsession::Account;
@@ -31,12 +31,19 @@ extern "C" {
     fn gtkhx_useredit_access_count() -> c_int;
     fn gtkhx_useredit_access_name(i: c_int) -> *const c_char;
     fn gtkhx_useredit_access_bitno(i: c_int) -> c_int;
+    // sound.c
+    fn play_sound(sound: c_int);
 }
+
+/// `ERROR` (sound.h).
+const SOUND_ERROR: c_int = 2;
 
 /// `HTLC_CAP_TEXT_ENCODING` (hotline.h): the server takes UTF-8 text.
 const CAP_TEXT_ENCODING: u64 = 0x0002;
 /// `HL_ACCESS_READ_USERS` (hl_access.h): we may read accounts.
 const HL_ACCESS_READ_USERS: c_int = 16;
+/// `HL_ACCESS_DONT_SHOW_AGREEMENT` (hl_access.h).
+const HL_ACCESS_DONT_SHOW_AGREEMENT: c_int = 27;
 
 /// A field as the account read gave it: the server's bytes, sent back as
 /// they came unless the user changes what is shown.
@@ -70,10 +77,22 @@ impl Read {
             wire
         }
     }
+
+    /// The password to send for one that now shows `typed`: untouched,
+    /// none, which keeps the one the account has. Mobius reads back a
+    /// hash, which sent back would become the password.
+    fn password(&self, typed: &str) -> Vec<u8> {
+        if typed == self.shown {
+            Vec::new()
+        } else {
+            self.or_typed(typed, true)
+        }
+    }
 }
 
 struct UserEdit {
     window: gtk::Window,
+    toast: adw::ToastOverlay,
     login_row: adw::EntryRow,
     name_row: adw::EntryRow,
     pass_row: adw::PasswordEntryRow,
@@ -128,7 +147,7 @@ impl UserEdit {
                 .name
                 .borrow()
                 .or_typed(&self.name_row.text(), utf8 != 0);
-            let pass = self.pass.borrow().or_typed(&self.pass_row.text(), true);
+            let pass = self.pass.borrow().password(&self.pass_row.text());
             let access = access_to_wire(self.access_buf.get());
             let login = self.login.borrow();
             if self.is_new && self.made.borrow().as_ref() != Some(&*login) {
@@ -137,32 +156,26 @@ impl UserEdit {
                 if self.creating.replace(true) {
                     return;
                 }
-                let (id, made) = (self.id, login.clone());
-                let mark = move |ok: bool| {
+                let (id, conn, made) = (self.id, self.conn, login.clone());
+                let mark = move |r: Result<(), Option<String>>| {
                     if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
                         st.creating.set(false);
-                        if ok {
+                        if r.is_ok() {
                             *st.made.borrow_mut() = Some(made);
                         }
+                    }
+                    if let Err(Some(reason)) = r {
+                        refused(id, conn, &reason);
                     }
                 };
                 // Told it is there, nothing is made: a server may replace
                 // an account with a new one of the same login.
-                let (conn, shown) = (self.conn, Read::new(&login).shown);
+                let shown = Read::new(&login).shown;
                 let exists = move || {
                     if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
                         st.creating.set(false);
                     }
-                    if let Some(htlc) = dock::live_htlc(conn) {
-                        let msg = crate::cs(&tr1("An account named %s already exists", &shown));
-                        unsafe {
-                            gtkhx_core::session::gtkhx_session_emit_request_failed(
-                                gtkhx_core::session::gtkhx_session_get_default(),
-                                htlc,
-                                msg.as_ptr(),
-                            )
-                        };
-                    }
+                    refused(id, conn, &tr1("An account named %s already exists", &shown));
                 };
                 let can_read = unsafe {
                     gtkhx_core::conn::hx_conn_access_has(htlc.cast(), HL_ACCESS_READ_USERS)
@@ -173,7 +186,15 @@ impl UserEdit {
                     )
                 };
             } else {
-                unsafe { hxhandlers::send::user::account_save(htlc, &login, &pass, &name, access) };
+                let (id, conn) = (self.id, self.conn);
+                let done = move |r: Result<(), Option<String>>| {
+                    if let Err(Some(reason)) = r {
+                        refused(id, conn, &reason);
+                    }
+                };
+                unsafe {
+                    hxhandlers::send::user::account_save(htlc, &login, &pass, &name, access, done)
+                };
             }
         }
     }
@@ -193,6 +214,32 @@ impl UserEdit {
                 self.pass_row.set_text("");
             }
         }
+    }
+}
+
+/// The server's refusal of what editor `id` asked, `reason`, shown in the
+/// editor: a toast behind it goes unseen. Once the editor has closed, shown
+/// as any refusal is.
+fn refused(id: usize, conn: Bound, reason: &str) {
+    let generic;
+    let reason = if reason.is_empty() {
+        generic = tr("The server refused the change");
+        &generic
+    } else {
+        reason
+    };
+    if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
+        st.toast.add_toast(adw::Toast::new(reason));
+        unsafe { play_sound(SOUND_ERROR) };
+    } else if let Some(htlc) = dock::live_htlc(conn) {
+        let msg = crate::cs(reason);
+        unsafe {
+            gtkhx_core::session::gtkhx_session_emit_request_failed(
+                gtkhx_core::session::gtkhx_session_get_default(),
+                htlc,
+                msg.as_ptr(),
+            )
+        };
     }
 }
 
@@ -234,6 +281,14 @@ fn access_to_wire(bits: u64) -> [u8; 8] {
 
 fn access_from_wire(wire: [u8; 8]) -> u64 {
     u64::from_ne_bytes(wire)
+}
+
+/// The table's bit `bitno` as the wire numbers it (`hl_access.h`): bit 0
+/// the first byte's top bit.
+fn wire_bit(bitno: u8) -> c_int {
+    let wire = access_to_wire(1 << bitno);
+    let byte = wire.iter().position(|&b| b != 0).unwrap_or_default();
+    (byte * 8) as c_int + wire[byte].leading_zeros() as c_int
 }
 
 /// The account read for editor `id`, into its fields.
@@ -336,6 +391,19 @@ unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
         }
         let sw = adw::SwitchRow::new();
         sw.set_title(&name);
+        // A server, mhxd aside, refuses a new account a privilege its maker
+        // lacks; the 1.9 server's own rule spares Don't Show Agreement.
+        let bit = wire_bit(bitno as u8);
+        let mine = |htlc: *mut c_void| unsafe {
+            gtkhx_core::conn::hx_conn_access_has(htlc.cast(), bit) != 0
+        };
+        if is_new
+            && bit != HL_ACCESS_DONT_SHOW_AGREEMENT
+            && dock::live_htlc(conn).is_some_and(|h| !mine(h))
+        {
+            sw.set_sensitive(false);
+            sw.set_subtitle(&tr("You don't have this privilege"));
+        }
         if let Some(g) = &current_grp {
             g.add(&sw);
         }
@@ -343,7 +411,9 @@ unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
     }
 
     window.set_titlebar(Some(&header));
-    window.set_child(Some(&page));
+    let toast = adw::ToastOverlay::new();
+    toast.set_child(Some(&page));
+    window.set_child(Some(&toast));
     cffi::init_keyaccel_dialog(window.as_ptr() as *mut cffi::GtkWidget);
 
     let id: usize = NEXT_ID.with(|c| {
@@ -353,6 +423,7 @@ unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
     });
     let state = Rc::new(UserEdit {
         window: window.clone(),
+        toast,
         login_row,
         name_row,
         pass_row,
@@ -501,6 +572,21 @@ mod tests {
         let wire = [0, 0, 0, 0, 0x80, 0, 0, 0];
         assert_eq!(access_to_wire(1 << bitno), wire);
         assert_eq!(access_from_wire(wire), 1 << bitno);
+        assert_eq!(wire_bit(bitno as u8), x);
+    }
+
+    #[test]
+    fn an_untouched_password_goes_as_none() {
+        let hash = b"$2a$04$GtwQO3DnEdJDwZ1OFN6or.umlmsGrh6BpDbqnKklgW3nakS0XJFsa";
+        let cases: [(&[u8], &str, &[u8]); 4] = [
+            (hash, std::str::from_utf8(hash).unwrap(), b""),
+            (hash, "new", b"new"),
+            (b"", "", b""),
+            (b"", "pw", b"pw"),
+        ];
+        for (read, typed, want) in cases {
+            assert_eq!(Read::new(read).password(typed), want, "{typed:?}");
+        }
     }
 
     #[test]
