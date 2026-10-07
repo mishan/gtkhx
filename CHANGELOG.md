@@ -76,6 +76,9 @@
   - An accented name typed in the account editor is saved correctly on servers that don't use UTF-8
   - New User now works on Janus servers
   - New User won't replace an account that already exists
+  - When the server refuses to make or save an account, the account editor says why, instead of only playing the error sound
+  - New User turns off the privileges you don't have yourself, which most servers won't let you give
+  - Saving an account without touching its password no longer changes the password on Mobius servers
   - The server banner, GIF icons, and sending or loading pictures in chat no longer flash by in the Tasks list
   - Logging in no longer adds a row to the Tasks list
   - Security fix: TLS connections now use rustls 0.23.45, for RUSTSEC-2026-0285, in which a server could send handshake messages unencrypted that should have been encrypted (it could not tamper with the handshake)

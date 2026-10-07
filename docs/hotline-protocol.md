@@ -460,10 +460,10 @@ Field numbers are listed in [Fields](#fields).
 |---|---|---|---|---|---|
 | 348 | Get User List | C→S | none | 101 × n, each itself a complete field list: 102, 105 (obfuscated), 106 (`x` if set), 110 | 1.8.4 and later. Privilege 16. |
 | 349 | Set User List | C→S | 101 × n, each a nested field list | empty | Batch create, rename, modify and delete (see below). |
-| 350 | New User | C→S | 102, 105, 106, 110 | empty | Privilege 14. **You cannot grant privileges you lack**, except "don't show agreement". |
+| 350 | New User | C→S | 102, 105, 106, 110 | empty | Privilege 14. **You cannot grant privileges you lack**, except "don't show agreement". Janus, Mobius and hxd-ng allow no exception; mhxd checks nothing. |
 | 351 | Delete User | C→S | 105 | empty | Privilege 15. Online users of the account are notified and disconnected. |
-| 352 | Get User | C→S | 105 **in plain text** | 102, 105 (obfuscated), 106 (`x` if set), 110 | Privilege 16. The only place a login is sent unobfuscated. |
-| 353 | Set User | C→S | 102, 105, 106, 110 | empty | Privilege 17. A password of exactly one `00` byte means "keep the current one". **No check against granting more than you have**, unlike 350. Online users of the account get a fresh 354 and 301. |
+| 352 | Get User | C→S | 105 **in plain text** | 102, 105 (obfuscated), 106 (`x` if set), 110 | Privilege 16. The only place a login is sent unobfuscated. Mobius sends its password hash in 106: sent back in a 353, it becomes the password. |
+| 353 | Set User | C→S | 102, 105, 106, 110 | empty | Privilege 17. A password of exactly one `00` byte means "keep the current one". **No check against granting more than you have**, unlike 350 — except on hxd-ng, which refuses a change to an account that holds, or would hold, a privilege you lack. Online users of the account get a fresh 354 and 301. |
 | 354 | User Access | S→C | | 110 | After login and after changes to the account. |
 
 Each record of **Set User List (349)** is a nested field list (the server copies at most

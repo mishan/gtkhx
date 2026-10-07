@@ -1,7 +1,8 @@
 //! The user list, asked for once the login settles; a user's info, a kick,
 //! an admin's broadcast, and an account read, saved or deleted. The
 //! requests are `hxrequest::user`'s; each reply is expected by the session,
-//! and a refusal reaches `request-failed`.
+//! and a refusal reaches `request-failed`, or, for an account made or saved,
+//! the editor that asked.
 
 use std::os::raw::{c_int, c_void};
 
@@ -10,7 +11,7 @@ use hxproto::messages::ClientHdr;
 use hxrequest::{user, Request};
 use hxsession::{Account, Expect};
 
-use crate::recv::user::{asked, Asked};
+use crate::recv::user::{asked, Asked, Done};
 
 #[cfg(not(test))]
 use hxtask::send::hlwrite_chunks;
@@ -112,7 +113,7 @@ pub unsafe fn account_read(htlc: *mut c_void, login: &[u8], fill: impl FnOnce(&A
     }
 }
 
-/// A new account `login`; `made` is told whether the server made it. One
+/// A new account `login`; `done` is told whether the server made it. One
 /// that may read accounts (`can_read`) reads the
 /// login first, and makes nothing if it is there, running `exists`
 /// instead: a server may replace an account that is there with a new one.
@@ -129,14 +130,14 @@ pub unsafe fn account_create(
     access: [u8; 8],
     can_read: bool,
     exists: impl FnOnce() + 'static,
-    made: impl FnOnce(bool) + 'static,
+    done: impl FnOnce(Result<(), Option<String>>) + 'static,
 ) {
     let Some(req) = user::account_create(login, password, name, access) else {
         return;
     };
-    let made = Box::new(made);
+    let done = Box::new(done);
     if !can_read {
-        create(htlc, &req, made);
+        create(htlc, &req, done);
         return;
     }
     if let Some(read) = user::account_read(login) {
@@ -148,22 +149,23 @@ pub unsafe fn account_create(
             Asked::Check {
                 create: req,
                 exists,
-                made,
+                done,
             },
         );
     }
 }
 
-/// Send `req`, a new account, `made` to be told whether the server made it.
+/// Send `req`, a new account, `done` to be told whether the server made it.
 ///
 /// # Safety
 /// `htlc` is a live connection; main thread.
-pub(crate) unsafe fn create(htlc: *mut c_void, req: &Request, made: Box<dyn FnOnce(bool)>) {
+pub(crate) unsafe fn create(htlc: *mut c_void, req: &Request, done: Done) {
     let trans = send(htlc, req, Expect::AccountChange);
-    asked(htlc, trans, Asked::Made(made));
+    asked(htlc, trans, Asked::Changed(done));
 }
 
-/// Replace what the account `login` names holds.
+/// Replace what the account `login` names holds; `done` is told whether
+/// the server did.
 ///
 /// # Safety
 /// `htlc` is a live connection; main thread.
@@ -173,9 +175,11 @@ pub unsafe fn account_save(
     password: &[u8],
     name: &[u8],
     access: [u8; 8],
+    done: impl FnOnce(Result<(), Option<String>>) + 'static,
 ) {
     if let Some(req) = user::account_save(login, password, name, access) {
-        send(htlc, &req, Expect::AccountChange);
+        let trans = send(htlc, &req, Expect::AccountChange);
+        asked(htlc, trans, Asked::Changed(Box::new(done)));
     }
 }
 
@@ -229,9 +233,10 @@ mod tests {
         };
         // (may read, what answers the read) -> sent after the read, whether
         // `exists` ran, whether the refusal is kept from the user, what
-        // `made` was told.
+        // `done` was told.
         type Answer = Option<Result<(), Option<&'static str>>>;
-        type Case = (bool, Answer, Vec<u32>, bool, bool, Option<bool>);
+        type Told = Option<Result<(), Option<String>>>;
+        type Case = (bool, Answer, Vec<u32>, bool, bool, Told);
         let cases: [Case; 5] = [
             (false, None, vec![350], false, false, None),
             (true, Some(Ok(())), vec![], true, false, None),
@@ -250,8 +255,8 @@ mod tests {
                 Some(Err(Some(crate::recv::chat::CUT_SHORT))),
                 vec![],
                 false,
-                false,
-                Some(false),
+                true,
+                Some(Err(None)),
             ),
         ];
         for (can_read, answer, after, want_exists, want_quiet, want_made) in cases {
@@ -259,7 +264,7 @@ mod tests {
             SENT.with(|s| s.take());
             let htlc = std::ptr::dangling_mut();
             let exists = Rc::new(Cell::new(false));
-            let made = Rc::new(Cell::new(None));
+            let made = Rc::new(RefCell::new(None));
             let (seen, told) = (exists.clone(), made.clone());
             unsafe {
                 account_create(
@@ -270,7 +275,7 @@ mod tests {
                     [0; 8],
                     can_read,
                     move || seen.set(true),
-                    move |ok| told.set(Some(ok)),
+                    move |r| *told.borrow_mut() = Some(r),
                 )
             };
             let mut quiet = false;
@@ -302,7 +307,39 @@ mod tests {
             );
             assert_eq!(exists.get(), want_exists, "{can_read} {answer:?}");
             assert_eq!(quiet, want_quiet, "{can_read} {answer:?}");
-            assert_eq!(made.get(), want_made, "{can_read} {answer:?}");
+            assert_eq!(made.take(), want_made, "{can_read} {answer:?}");
+            unsafe { crate::recv::forget(htlc, false) };
+        }
+    }
+
+    /// A made or saved account the server refuses is the editor's to
+    /// show, with the server's reason or none: the caller shows nothing of
+    /// it.
+    #[test]
+    fn a_refused_account_change_goes_to_the_editor_with_its_reason() {
+        use crate::recv::user::failed;
+        use std::rc::Rc;
+
+        type Send = fn(*mut c_void, Box<dyn FnOnce(Result<(), Option<String>>)>);
+        let sends: [Send; 2] = [
+            |h, d| unsafe { account_create(h, b"bob", b"", b"Bob", [0; 8], false, || {}, d) },
+            |h, d| unsafe { account_save(h, b"bob", b"", b"Bob", [0; 8], d) },
+        ];
+        for (send, reason) in sends
+            .into_iter()
+            .flat_map(|s| [(s, Some("No.")), (s, None)])
+        {
+            crate::send::expected::take();
+            let htlc = std::ptr::dangling_mut();
+            let told = Rc::new(RefCell::new(None));
+            let t = told.clone();
+            send(htlc, Box::new(move |r| *t.borrow_mut() = Some(r)));
+            let [(trans, Expect::AccountChange)] = crate::send::expected::take()[..] else {
+                panic!("the change's reply is not expected");
+            };
+            assert!(unsafe { failed(htlc, trans, reason) });
+            let said = reason.unwrap_or_default().to_owned();
+            assert_eq!(told.take(), Some(Err(Some(said))), "{reason:?}");
             unsafe { crate::recv::forget(htlc, false) };
         }
     }
@@ -318,7 +355,7 @@ mod tests {
             broadcast(htlc, "hi");
             account_read(htlc, b"bob", |_| {});
             account_create(htlc, b"bob", b"", b"Bob", [0; 8], false, || {}, |_| {});
-            account_save(htlc, b"bob", b"", b"Bob", [0; 8]);
+            account_save(htlc, b"bob", b"", b"Bob", [0; 8], |_| {});
             account_delete(htlc, b"bob");
         }
         assert_eq!(

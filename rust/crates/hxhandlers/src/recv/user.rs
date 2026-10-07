@@ -1,7 +1,7 @@
 //! Users: what the session made of a user arriving, changing or leaving, a
 //! user list, what the server says about us, and the replies to creating
-//! and joining a private chat, to a user's info, a kick and an account
-//! read, on their way to the view.
+//! and joining a private chat, to a user's info, a kick, and an account
+//! read, made or saved, on their way to the view.
 //!
 //! A live change and a list both end in the same roster-apply decision: a
 //! new member becomes a `user-create`, an existing one is either a live
@@ -563,8 +563,10 @@ pub(crate) unsafe fn joined(
 /// A request the session said failed: what asked is let go. A refused
 /// check for a new account means there is none, and the account is made;
 /// that refusal is no news, and the caller shows nothing of it (true). A
-/// refused join drops its chat when nothing shows it: one that a new chat's
-/// reply made, with no window and no one in it. A chat already open stays.
+/// refused account change is the editor's to show, and the caller shows
+/// nothing of it either. A refused join drops its chat when nothing shows
+/// it: one that a new chat's reply made, with no window and no one in it. A
+/// chat already open stays.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -572,11 +574,17 @@ pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>)
     match answered(htlc, trans) {
         // A refusal says it is not there, whether or not the server said
         // why; a reply cut short says nothing either way.
-        Some(Asked::Check { create, made, .. }) if reason != Some(super::chat::CUT_SHORT) => {
-            crate::send::user::create(htlc, &create, made);
+        Some(Asked::Check { create, done, .. }) if reason != Some(super::chat::CUT_SHORT) => {
+            crate::send::user::create(htlc, &create, done);
             return true;
         }
-        Some(Asked::Check { made, .. }) | Some(Asked::Made(made)) => made(false),
+        Some(Asked::Check { done, .. }) | Some(Asked::Changed(done)) => {
+            done(Err(match reason {
+                Some(super::chat::CUT_SHORT) => None,
+                r => Some(r.unwrap_or_default().to_owned()),
+            }));
+            return true;
+        }
         _ => {}
     }
     let Some(join) = join_answered(htlc, trans) else {
@@ -599,17 +607,21 @@ pub(crate) enum Asked {
     Info(u16),
     /// An account read, for the editor that asked.
     Account(Box<dyn FnOnce(&Account)>),
-    /// An account made, for the editor that made it: told whether the
-    /// server made it.
-    Made(Box<dyn FnOnce(bool)>),
+    /// An account made or saved, for the editor that asked.
+    Changed(Done),
     /// A read of a new account's login, to tell whether it is taken: read,
     /// it is, and `exists` runs; refused, it isn't, and `create` goes.
     Check {
         create: hxrequest::Request,
         exists: Box<dyn FnOnce()>,
-        made: Box<dyn FnOnce(bool)>,
+        done: Done,
     },
 }
+
+/// Told when an account change is answered: done; refused, with the
+/// server's reason, empty when it gave none; or cut short (`Err(None)`),
+/// which says nothing either way.
+pub(crate) type Done = Box<dyn FnOnce(Result<(), Option<String>>)>;
 
 thread_local! {
     /// The requests in flight, by connection and trans.
@@ -680,14 +692,13 @@ pub(crate) unsafe fn kicked(htlc: *mut c_void) {
     );
 }
 
-/// An account change went through: an account made tells the editor that
-/// made it.
+/// An account change went through, told to the editor that asked.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn account_changed(htlc: *mut c_void, trans: u32) {
-    if let Some(Asked::Made(made)) = answered(htlc, trans) {
-        made(true);
+    if let Some(Asked::Changed(done)) = answered(htlc, trans) {
+        done(Ok(()));
     }
 }
 

@@ -230,6 +230,20 @@ interval to a day, which hides it.
 accounts wait for the account's user to leave before deleting it, so they
 don't crash the shared rig.
 
+## A new account can have privileges its maker lacks
+
+**Verified.**
+
+- **Sends:** a new account (`ACCOUNT_CREATE`, 350) from an admin who may
+  create accounts, with an access bit that admin doesn't hold.
+- **Gets:** the account, made. `rcv_account_create` (`accounts.c`) copies
+  the access bits it is sent without comparing them to the maker's.
+- **Should get:** a refusal, as from the 1.9 server (hlservd), Janus and
+  Mobius: "Cannot create account with more access than yourself."
+
+**GtkHx:** New User turns off the privileges its user lacks, so it asks
+mhxd for nothing the others would refuse.
+
 ## Adding an entry
 
 Reproduce it with an `hx-e2e` probe against the rig first, then record it here

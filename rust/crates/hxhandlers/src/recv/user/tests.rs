@@ -655,8 +655,8 @@ fn an_account_counts_as_made_only_once_the_server_says_so() {
         asked(
             CONN_A,
             trans,
-            Asked::Made(Box::new(move |ok| {
-                if ok {
+            Asked::Changed(Box::new(move |r| {
+                if r.is_ok() {
                     made.set(made.get() + 1)
                 }
             })),
