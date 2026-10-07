@@ -431,13 +431,13 @@ changed_tray (void)
     gtkhx_tray_set_enabled (gtkhx_prefs.tray);
 }
 
-/* Settings → General → "Tint window to match theme". The chrome colors
- * ride in the same provider as the rest of the theme CSS, so rebuilding
- * that is the whole job. */
+/* Settings → General → "Tint window to match theme". Tinting changes how
+ * the theme applies, so it is a theme change: the CSS is rebuilt, and the
+ * user list, whose name colors follow the list background, redraws. */
 static void
 changed_tint_window (void)
 {
-    gtkhx_refresh_css ();
+    g_signal_emit_by_name (gtkhx_theme_get_default (), "changed");
 }
 
 #ifdef HAVE_VOICE

@@ -32,6 +32,7 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
+use libadwaita as adw;
 
 use crate::tr::tr;
 use crate::user_row::HxUserRow;
@@ -90,6 +91,16 @@ extern "C" {
 
     // gtkhx_theme.c — the theming singleton (a GObject) for live rescale.
     fn gtkhx_theme_get_default() -> *mut c_void;
+}
+
+/// Queue a redraw of `w` and everything inside it.
+fn redraw_descendants(w: &gtk::Widget) {
+    w.queue_draw();
+    let mut child = w.first_child();
+    while let Some(c) = child {
+        redraw_descendants(&c);
+        child = c.next_sibling();
+    }
 }
 
 /// `*mut GtkWidget` for a gtk-rs widget.
@@ -162,10 +173,10 @@ mod imp {
         /// work; queued, they land in one splice before the next frame.
         pub pending: RefCell<Vec<HxUserRow>>,
         pub flush_scheduled: Cell<bool>,
-        /// Theme singleton + "changed" handler, disconnected on dispose so
-        /// a destroyed view leaves no dead handler on the process-lifetime
-        /// theme object (matches the old g_signal_connect_object).
-        pub theme_conn: RefCell<Option<(glib::Object, glib::SignalHandlerId)>>,
+        /// Handlers on the theme singleton and the style manager, both
+        /// process-lifetime, disconnected on dispose so a destroyed view
+        /// leaves no dead handler behind.
+        pub theme_conn: RefCell<Vec<(glib::Object, glib::SignalHandlerId)>>,
     }
 
     // Manual Default: the raw `*mut Session` in a Cell can't derive it.
@@ -180,7 +191,7 @@ mod imp {
                 by_uid: RefCell::new(HashMap::new()),
                 pending: RefCell::new(Vec::new()),
                 flush_scheduled: Cell::new(false),
-                theme_conn: RefCell::new(None),
+                theme_conn: RefCell::new(Vec::new()),
             }
         }
     }
@@ -194,8 +205,8 @@ mod imp {
 
     impl ObjectImpl for HxUserListView {
         fn dispose(&self) {
-            if let Some((theme, id)) = self.theme_conn.borrow_mut().take() {
-                theme.disconnect(id);
+            for (obj, id) in self.theme_conn.take() {
+                obj.disconnect(id);
             }
         }
     }
@@ -376,20 +387,40 @@ impl HxUserListView {
             column_view.add_controller(rclick);
         }
 
-        // Live rescale on theme changes (themed views only).
-        if themed {
-            let theme: glib::Object = unsafe {
-                from_glib_none(gtkhx_theme_get_default() as *mut glib::gobject_ffi::GObject)
-            };
+        // A theme change rescales a themed view, and a name's color follows
+        // the list background (see name_shadow.rs), which the theme, the
+        // accent and the dark style all move. Cells keep their last
+        // drawing until asked, so each is asked.
+        let redraw = {
             let cv_weak = column_view.downgrade();
-            let id = theme.connect_local("changed", false, move |_| {
+            move || {
                 if let Some(cv) = cv_weak.upgrade() {
-                    cv.queue_resize();
-                    cv.queue_draw();
+                    if themed {
+                        cv.queue_resize();
+                    }
+                    redraw_descendants(cv.upcast_ref());
                 }
+            }
+        };
+        let theme: glib::Object =
+            unsafe { from_glib_none(gtkhx_theme_get_default() as *mut glib::gobject_ffi::GObject) };
+        let id = theme.connect_local("changed", false, {
+            let redraw = redraw.clone();
+            move |_| {
+                redraw();
                 None
-            });
-            imp.theme_conn.replace(Some((theme, id)));
+            }
+        });
+        imp.theme_conn.borrow_mut().push((theme, id));
+        if adw::is_initialized() {
+            let style = adw::StyleManager::default();
+            for prop in ["dark", "accent-color-rgba"] {
+                let redraw = redraw.clone();
+                let id = style.connect_notify_local(Some(prop), move |_, _| redraw());
+                imp.theme_conn
+                    .borrow_mut()
+                    .push((style.clone().upcast(), id));
+            }
         }
     }
 

@@ -54,6 +54,7 @@
   - With two servers open, a picture in chat now appears in the chat it was sent to
 - Users
   - Names show in their own color, without the outline that used to ring them; a name over a wide banner icon gets a soft shadow, and only where the art would make it hard to read
+  - A name colored too close to the list's background, such as dark red on a dark theme, is lightened or darkened until it reads, keeping its hue; it reads on the selected row too
 - News
   - Accented characters in threaded news show correctly: folder and category names, subjects, authors and posts
   - A news folder, category or article the server refuses no longer stays stuck loading; you can try again

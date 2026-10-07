@@ -411,11 +411,10 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
         gtk_widget_get_color (widget, &fg_color);
     }
 
-    /* When and how to shadow a name over a banner: name_shadow.rs. */
-    float c = hx_user_name_shadow (fg_color.red, fg_color.green, fg_color.blue,
-                                   cell->using_avatar ? NULL : cell->art_lum);
-    gboolean shadow
-        = cell->text_outline && cell->icon && cell->icon_left_pad && c >= 0;
+    /* How a name is colored and shadowed to read: name_shadow.rs. */
+    float c = hx_user_name_style (&fg_color, cell->icon && cell->icon_left_pad,
+                                  cell->using_avatar ? NULL : cell->art_lum);
+    gboolean shadow = cell->text_outline && c >= 0;
     if (shadow) {
         GskShadow glow = { { c, c, c, 1.0f }, 0, 0, 2 };
         GskShadow shadows[] = { glow, glow, glow };
