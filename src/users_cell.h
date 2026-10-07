@@ -47,7 +47,7 @@ GtkWidget *hx_user_cell_name_new (int text_x_offset, gboolean themed,
 
 /* In gtkhx-ui's name_shadow.rs. */
 void hx_user_name_art_luminance (GdkPixbuf *pixbuf, int x0, double out[2]);
-float hx_user_name_shadow (double r, double g, double b, const double art[2]);
+float hx_user_name_style (GdkRGBA *fg, gboolean banner, const double art[2]);
 
 /* Bind (or, with row==NULL, unbind) the cell to a borrowed HxUserRow.
  * Reconnects the row's "changed" handler and re-resolves the icon. */
