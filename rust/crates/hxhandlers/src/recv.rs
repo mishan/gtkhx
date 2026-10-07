@@ -77,7 +77,7 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         Event::Account { trans, account } => user::account(htlc, *trans, account),
         Event::AccountChanged { trans } => user::account_changed(htlc, *trans),
         Event::UserList { users, subject, .. } => user::listed(htlc, users, subject.as_deref()),
-        Event::ChatCreated { cid, user, .. } => user::changed(htlc, *cid, user),
+        Event::ChatCreated { cid, user, .. } => user::created(htlc, *cid, user),
         Event::ChatJoined {
             trans,
             cid,

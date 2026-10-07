@@ -516,14 +516,23 @@ fn a_refused_join_drops_only_a_chat_nothing_shows() {
 }
 
 #[test]
-fn us_in_a_new_chat_makes_the_chat_but_not_our_row() {
+fn us_in_a_new_chat_makes_the_chat_and_our_row() {
     test_env::reset();
     test_env::CHAT_EXISTS.with(|c| c.set(false));
+    test_env::CONTAINS.with(|c| c.set(false));
     test_env::SELF_UID.with(|c| c.set(5));
-    unsafe { changed(std::ptr::null_mut(), 9, &user(5, 128, Some(0), "Me", None)) };
+    test_env::SELF_NICK_COLOR.with(|c| c.set(0x0011_2233));
+    unsafe { created(std::ptr::null_mut(), 9, &user(5, 128, Some(0), "Me", None)) };
     assert_eq!(test_env::CHATS_MADE.with(|c| c.take()), [9]);
-    // Our own row waits for a list, as for any change that is new to us.
-    assert_eq!(test_env::take(), None);
+    assert!(matches!(
+        test_env::take(),
+        Some(Emit::Create {
+            uid: 5,
+            nick_color: 0x0011_2233,
+            incremental: false,
+            ..
+        })
+    ));
 }
 
 // ---- what the server says about us, a user's info, a kick, an account -----
