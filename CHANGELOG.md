@@ -48,6 +48,7 @@
   - Settings → Chat can turn off opening links with a single click
   - Load Older no longer gets stuck on "Loading…" when the server turns it down
   - A private chat you closed no longer reopens when the server answers late
+  - A private chat you start now opens its window right away, instead of when the first person joins
   - Names with accented characters no longer show "is now known as" at every status change
   - Server broadcasts show accented characters correctly
   - A picture sent in a private message now shows in the message window, as it does in chat

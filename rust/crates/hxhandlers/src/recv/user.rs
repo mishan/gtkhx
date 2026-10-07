@@ -61,6 +61,7 @@ extern "C" {
     fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
     fn hx_conn_icon(htlc: *mut c_void) -> u16;
     fn hx_conn_set_icon(htlc: *mut c_void, v: u16);
+    fn hx_conn_nick_color(htlc: *mut c_void) -> u32;
     fn hx_conn_set_nick_color(htlc: *mut c_void, v: u32);
     /// Log a pre-formatted line under a debug category (debug.c) — the
     /// non-variadic sibling of debug_log.
@@ -194,8 +195,8 @@ unsafe fn hx_user_apply_recv(
     HX_USER_CHANGE_UPDATED
 }
 
-/// A user arriving in or changing on chat `cid`, or us in a chat we just
-/// created, as the server describes them.
+/// A user arriving in or changing on chat `cid`, as the server describes
+/// them.
 ///
 /// Resolves the chat (creating it if this is the first we've heard of the
 /// cid), snapshots the member's pre-change state from the model, and runs
@@ -560,13 +561,32 @@ pub(crate) unsafe fn joined(
     load(htlc, chat, users, subject);
 }
 
+/// The reply to our creating private chat `cid`: the chat, with us in it.
+/// Elsewhere a list brings our row; no list follows a create, and the
+/// chat's window opens on its first row, so our row is made here. The reply
+/// carries no nick color, so ours fills in.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn created(htlc: *mut c_void, cid: u32, user: &User) {
+    let sess = hx_conn_sess(htlc.cast());
+    let mut chat = chat_with_cid(sess, cid);
+    if chat.is_null() {
+        chat = chat_new(sess, cid);
+    }
+    let mut us = user.clone();
+    if us.color.is_none() && hx_conn_nick_color(htlc) != HX_NICK_COLOR_NONE {
+        us.color = Some(hx_conn_nick_color(htlc));
+    }
+    load(htlc, chat, std::slice::from_ref(&us), None);
+}
+
 /// A request the session said failed: what asked is let go. A refused
 /// check for a new account means there is none, and the account is made;
 /// that refusal is no news, and the caller shows nothing of it (true). A
 /// refused account change is the editor's to show, and the caller shows
 /// nothing of it either. A refused join drops its chat when nothing shows
-/// it: one that a new chat's reply made, with no window and no one in it. A
-/// chat already open stays.
+/// it: one with no window and no one in it. A chat already open stays.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -1094,6 +1114,11 @@ unsafe fn hx_conn_icon(_htlc: *mut c_void) -> u16 {
 #[cfg(test)]
 unsafe fn hx_conn_set_icon(_htlc: *mut c_void, v: u16) {
     test_env::SELF_ICON.with(|c| c.set(v));
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_nick_color(_htlc: *mut c_void) -> u32 {
+    test_env::SELF_NICK_COLOR.with(|c| c.get())
 }
 
 #[cfg(test)]

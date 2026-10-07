@@ -43,13 +43,6 @@ record.
   `voice_rejoin_media` asserts that every answer declares the send SSRC, so a
   slow audio source would fail that assertion rather than hang.
 
-## Private chat
-
-- **A new private chat shows nothing until someone joins it.** The reply to
-  creating one registers the chat but leaves out our own row (as for any new
-  user who turns out to be us), and the window opens on a chat's first row, so
-  the creator sees no window until the invitee joins.
-
 ## Nick colors
 
 - **Clearing a color mid-session doesn't reach the server.** `src/users.c`
