@@ -45,11 +45,6 @@ record.
 
 ## Nick colors
 
-- **Clearing a color mid-session doesn't reach the server.** `src/users.c`
-  leaves DATA_COLOR out of the USER_CHANGE when there is no color, so as not to
-  opt in, but servers read an absent DATA_COLOR as "unchanged": everyone keeps
-  seeing the old color. Once a session has sent a color, clearing it should send
-  `HX_NICK_COLOR_NONE` (0xFFFFFFFF).
 - **`test_nick_colors` runs against Janus only** (`HX_TEST_CAP_NICK_COLORS`).
   hxd-ng supports Colored Nicknames since mishan/hxd-ng#170, so the rig's
   hxd-ng can advertise it too.

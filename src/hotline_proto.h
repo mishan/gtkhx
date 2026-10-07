@@ -169,18 +169,6 @@ extern int32_t gtkhx_proto_build_agreement_agree_chunks (
     struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
     size_t scratch_cap);
 
-/* HTLC_HDR_USER_CHANGE: ICON + NAME + optional COLOR (Colored-
- * Nicknames extension). chunks_cap >= 3, scratch_cap >= 6.
- * has_nick_color is a 0/1 flag — when non-zero, emit DATA_COLOR with
- * the BE u32 nick_color (0x00RRGGBB); when zero, omit the chunk.
- * Returns 2 (no color) or 3 (with color) on success, or 0 on
- * validation failure (NULL pointer, short buffer, name_len > u16
- * max). */
-extern int32_t gtkhx_proto_build_user_change_chunks (
-    uint16_t icon, const uint8_t *name_ptr, size_t name_len,
-    uint8_t has_nick_color, uint32_t nick_color, struct hx_chunk *chunks,
-    size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
-
 /* ---- HTRK (Hotline tracker, v1) reply parsers ---- */
 
 /* Parse the 14-byte HTRK reply header. Writes nservers (host byte

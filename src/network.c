@@ -103,6 +103,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * remote provider reads this to know when FILE_LIST is safe to
      * send. */
     hx_conn_set_post_login_fetched (htlc, 0);
+    hx_conn_set_nick_color_sent (htlc, 0);
 
     /* Same idea for the DATA_CAPABILITIES bitmask — the next
      * connect renegotiates from zero. A stale CAP_TEXT_ENCODING

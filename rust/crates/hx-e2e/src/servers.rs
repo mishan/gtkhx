@@ -19,6 +19,8 @@ pub enum Cap {
     GifIcons,
     /// Takes pictures for chat lines (`HTLC_CAP_INLINE_MEDIA`).
     InlineMedia,
+    /// Colored nicknames (field 0x0500, which no capability bit announces).
+    NickColors,
     /// Voice chat (`HTLC_CAP_VOICE`), open to the guest.
     Voice,
     /// Video, over voice (`HTLC_CAP_VIDEO`), open to the guest.
@@ -77,6 +79,7 @@ pub const SERVERS: &[Server] = &[
             Cap::ChatHistory,
             Cap::GifIcons,
             Cap::InlineMedia,
+            Cap::NickColors,
             Cap::Voice,
             Cap::Video,
             Cap::Hope(hxhope::Cipher::ChaCha20Poly1305),

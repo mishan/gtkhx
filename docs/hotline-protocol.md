@@ -1289,7 +1289,9 @@ Nothing current implements them.
 Field **0x0500**, a 32-bit `0x00RRGGBB`, with `0xFFFFFFFF` or absence meaning "client
 default". Carried in 301, 117, 354, 304 and as a trailer on the user record. No
 capability bit: the server marks a session color-aware the first time that session sends
-a color, so a client should send one only when the user has chosen a color. Not the same
+a color, so a client should send one only when the user has chosen a color. A 304 without
+the field leaves the last color standing, so a client that has sent one clears it with
+`0xFFFFFFFF`. Not the same
 as field 112 (user flags), which mhxd confusingly names "color" too. Janus implements it
 and reserves red for administrators.
 
