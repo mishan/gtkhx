@@ -60,6 +60,7 @@ const LIST_ITEM_KEY: &[u8] = b"user-list-item\0";
 extern "C" {
     // users_cell.c — the custom Name-column cell.
     fn hx_user_cell_name_new(
+        conn_serial: u16,
         text_x_offset: i32,
         themed: glib::ffi::gboolean,
         text_outline: glib::ffi::gboolean,
@@ -154,6 +155,8 @@ mod imp {
 
     pub struct HxUserListView {
         pub sess: Cell<*mut Session>,
+        /// The serial of `sess`'s connection, which keys its avatars.
+        pub serial: Cell<u16>,
         /// The chat id this view lists (0 = public/Users window; a pchat's
         /// cid otherwise). M4b.3b-ii: lets the selection/popup path resolve
         /// members by (cid, uid) instead of a borrowed `hx_user*`.
@@ -184,6 +187,7 @@ mod imp {
         fn default() -> Self {
             Self {
                 sess: Cell::new(std::ptr::null_mut()),
+                serial: Cell::new(0),
                 cid: Cell::new(0),
                 store: RefCell::new(None),
                 selection: RefCell::new(None),
@@ -304,6 +308,8 @@ impl HxUserListView {
     fn build(&self, sess: *mut Session, style: i32) {
         let imp = self.imp();
         imp.sess.set(sess);
+        let serial = unsafe { gtkhx_core::conn::hx_conn_serial(gtkhx_session_htlc(sess).cast()) };
+        imp.serial.set(serial);
 
         // Style parameters. STYLE_USERS = standalone window (themed, taller
         // rows, name shadow); anything else = compact chat sidebar.
@@ -340,7 +346,7 @@ impl HxUserListView {
         }
 
         // Name column — the custom C cell.
-        let col_name = make_name_column(text_x_offset, themed, text_outline, row_height);
+        let col_name = make_name_column(serial, text_x_offset, themed, text_outline, row_height);
         column_view.append_column(&col_name);
 
         // Header sorter → sort model, default UID ascending.
@@ -538,6 +544,7 @@ fn make_uid_column(fixed_width: i32) -> gtk::ColumnViewColumn {
 }
 
 fn make_name_column(
+    serial: u16,
     text_x_offset: i32,
     themed: bool,
     text_outline: bool,
@@ -553,6 +560,7 @@ fn make_name_column(
         // set_child sinks it — the list item then owns it.
         let ptr = unsafe {
             hx_user_cell_name_new(
+                serial,
                 text_x_offset,
                 themed.into_glib(),
                 text_outline.into_glib(),
@@ -784,17 +792,15 @@ pub unsafe extern "C" fn hx_user_list_view_update(
     }
 }
 
-/// Re-fire member `uid`'s row "changed" so its cell re-resolves the GIF avatar.
-///
-/// # Safety
-/// `v` NULL or valid.
-#[no_mangle]
-pub unsafe extern "C" fn hx_user_list_view_refresh_avatar(v: *mut c_void, uid: u16) {
-    if v.is_null() {
-        return;
-    }
-    if let Some(row) = borrow(v).row_for(uid) {
-        row.touch_row();
+/// Re-fire `uid`'s row "changed" in every list of connection `serial`, so
+/// its cell re-resolves the GIF avatar.
+pub(crate) fn refresh_avatar(serial: u16, uid: u16) {
+    let views: Vec<HxUserListView> =
+        VIEWS.with(|v| v.borrow().iter().filter_map(|w| w.upgrade()).collect());
+    for view in views.iter().filter(|v| v.imp().serial.get() == serial) {
+        if let Some(row) = view.row_for(uid) {
+            row.touch_row();
+        }
     }
 }
 
@@ -927,5 +933,52 @@ pub(crate) mod tests {
         flush(&view);
         assert_eq!(store.n_items(), 0);
         assert!(view.row_for(4).is_none());
+    }
+
+    /// Two connections each with a user 5 wearing a different face: each
+    /// list finds its own connection's avatar, and a change to one
+    /// connection's user 5 refreshes only that connection's list.
+    pub(crate) fn check_avatars_stay_with_their_connection() {
+        use crate::avatar::{gtkhx_avatar_clear_conn, gtkhx_avatar_get_paintable};
+        use gtkhx_core::conn::{hx_conn_free, hx_conn_new, hx_conn_serial};
+
+        let conns = [hx_conn_new(), hx_conn_new()].map(|c| c.cast::<c_void>());
+        let views = conns.map(|c| {
+            let (view, _) = bare_view();
+            view.imp().serial.set(unsafe { hx_conn_serial(c.cast()) });
+            add(&view, 5);
+            VIEWS.with(|v| v.borrow_mut().push(view.downgrade()));
+            view
+        });
+        let faces = conns.map(|c| crate::avatar::tests::give(c, 5));
+        let face = |c| unsafe { gtkhx_avatar_get_paintable(c, 5) }.cast::<c_void>();
+        for (c, f) in conns.iter().zip(&faces) {
+            assert_eq!(face(*c), f.as_ptr().cast::<c_void>());
+        }
+
+        let touched = views.each_ref().map(|view| {
+            let n = std::rc::Rc::new(Cell::new(0));
+            let row = view.row_for(5).unwrap();
+            row.connect_local("changed", false, {
+                let n = n.clone();
+                move |_| {
+                    n.set(n.get() + 1);
+                    None
+                }
+            });
+            n
+        });
+        // User 5 on the second connection drops their avatar.
+        unsafe { crate::avatar::gtkhx_avatar_update(conns[1], 5, std::ptr::null(), 0) };
+        assert_eq!(touched.each_ref().map(|n| n.get()), [0, 1]);
+        assert!(face(conns[1]).is_null());
+        assert_eq!(face(conns[0]), faces[0].as_ptr().cast::<c_void>());
+
+        for c in conns {
+            unsafe {
+                gtkhx_avatar_clear_conn(c);
+                hx_conn_free(c.cast());
+            }
+        }
     }
 }

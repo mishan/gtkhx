@@ -36,14 +36,16 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (HxUserCellName, hx_user_cell_name, HX, USER_CELL_NAME,
                       GtkWidget)
 
-/* Construct a Name cell. `text_x_offset` is the unscaled start-edge
- * offset the name paints at (icon renders behind it); `themed` follows
+/* Construct a Name cell for connection `conn_serial`'s list, whose avatars
+ * it draws. `text_x_offset` is the unscaled start-edge offset the name
+ * paints at (icon renders behind it); `themed` follows
  * the GTKHX_SCALE_USERLIST_* theme areas (standalone Users window) vs a
  * fixed 1.0 density (compact chat sidebar); `text_outline` shadows the
  * name where it overlays banner art; `row_height` is the base row
  * height tuned at the default-theme icon scale. */
-GtkWidget *hx_user_cell_name_new (int text_x_offset, gboolean themed,
-                                  gboolean text_outline, int row_height);
+GtkWidget *hx_user_cell_name_new (guint16 conn_serial, int text_x_offset,
+                                  gboolean themed, gboolean text_outline,
+                                  int row_height);
 
 /* In gtkhx-ui's name_shadow.rs. */
 void hx_user_name_art_luminance (GdkPixbuf *pixbuf, int x0, double out[2]);

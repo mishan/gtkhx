@@ -191,16 +191,16 @@ tables are keyed on those with no connection dimension:
   The tab view itself is still a process-wide singleton, which is right under
   Model A: one strip serves every connection in turn. Its *content* is what
   switches.
-- **The GIF avatar caches** — *keys* fixed. Both tables key on
-  `(connection serial, uid)` now, and the clear-all became
+- **The GIF avatar caches** — keys and user-list readers fixed. Both tables key
+  on `(connection serial, uid)`, and the clear-all became
   `gtkhx_avatar_clear_conn`: one server's user list going away no longer takes
-  every other server's faces with it. The **readers** are not fixed:
-  `gtkhx_avatar_get` and the animation predicates are called from user-list
-  cell drawing, which resolves its connection through `hx_active_session()`.
-  So a background connection's rows would look up the *focused* connection's
-  face for a colliding uid — showing the wrong image, which is worse than
-  showing none. That is the `hx_active_session()` sweep below, not a gap in
-  the keying.
+  every other server's faces with it. Each user list carries its connection's
+  serial down to its Name cells, which look avatars up, and toggle their
+  pause, through it; a decoded or dropped avatar refreshes only that
+  connection's lists. Otherwise a background connection's rows would show the
+  *focused* connection's face for a colliding uid — the wrong image, which is
+  worse than none. The chat view's avatar lookup (`chat_avatar.c`) still goes
+  through `hx_active_session()`.
 - ~~**Notification IDs**~~ — fixed. The four connection-scoped classes carry
   the serial, so `msg-3-5` and `msg-7-5` are two notifications rather than one
   replacing the other. `news`, `xfer` and `broadcast` keep constant ids on

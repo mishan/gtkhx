@@ -255,8 +255,8 @@ on_user_toggle_anim (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
     gtkhx_avatar_set_paused (
-        hx_active_session ()->htlc, ctx->uid,
-        !gtkhx_avatar_is_paused (hx_active_session ()->htlc, ctx->uid));
+        ctx->sess->htlc, ctx->uid,
+        !gtkhx_avatar_is_paused (ctx->sess->htlc, ctx->uid));
 }
 
 /* Tthe GActionEntry table that drove the old GtkPopoverMenu
@@ -557,15 +557,14 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
     /* GIF-icons (Phase 10.D): pause / resume this user's animated
      * avatar. Only shown when they actually have an animated one — the
      * discoverable counterpart to clicking the avatar directly. */
-    if (gtkhx_avatar_is_animated (hx_active_session ()->htlc, uid)) {
+    if (gtkhx_avatar_is_animated (sess->htlc, uid)) {
         gtk_box_append (GTK_BOX (vbox),
                         gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
-        user_popup_append_button (
-            GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
-            gtkhx_avatar_is_paused (hx_active_session ()->htlc, uid)
-                ? _ ("Resume Animation")
-                : _ ("Pause Animation"),
-            on_user_toggle_anim);
+        user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
+                                  gtkhx_avatar_is_paused (sess->htlc, uid)
+                                      ? _ ("Resume Animation")
+                                      : _ ("Pause Animation"),
+                                  on_user_toggle_anim);
     }
 
 #ifdef HAVE_VOICE
@@ -1210,32 +1209,5 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
         if (mw) {
             msgwin_apply_user_change (mw, nam, icon, color);
         }
-    }
-}
-
-void
-users_refresh_avatar (guint16 uid)
-{
-    session *sess = hx_active_session ();
-
-    /* GIF avatar for `uid` changed in the gif_avatar cache — nudge
-     * every list that shows this user so the cell re-reads it. Mirrors
-     * user_change's fan-out: each pchat sidebar, then the standalone
-     * Users window (public chat). Each view's row map is keyed on the
-     * uid, so we refresh per chat the user appears in. */
-    if (sess->chats) {
-        guint n = hx_chats_count (sess->chats);
-        for (guint i = 0; i < n; i++) {
-            struct chat *c = hx_chats_get_at (sess->chats, i);
-            struct gtkhx_chat *gchat = hx_chat_view (c);
-            if (!gchat || !hx_gchat_userlist (gchat)) {
-                continue;
-            }
-            hx_user_list_view_refresh_avatar (hx_gchat_userlist (gchat), uid);
-        }
-    }
-
-    if (sess->users_view && hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
-        hx_user_list_view_refresh_avatar (sess->users_view, uid);
     }
 }

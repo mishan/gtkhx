@@ -39,10 +39,6 @@ extern void user_delete (struct htlc_conn *htlc, struct chat *chat,
 extern void user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
                          guint32 nick_color, const char *nam, guint16 icon,
                          guint16 color);
-/* Refresh every user-list view that shows `uid` so its cell re-reads
- * the GIF avatar cache (Phase 10.B). Called from the gif-icon-data
- * handler after the avatar cache is updated. */
-extern void users_refresh_avatar (guint16 uid);
 extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
 /* Right-click context menu for a user, used by the GtkGestureClick
  * controller inside HxUserListView. Both the standalone Users

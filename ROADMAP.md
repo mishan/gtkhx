@@ -62,12 +62,9 @@ The transport, the signals and the connection-scoped keys all carry the connecti
 What is left is making the rest of the UI stop asking "which connection has focus?" when
 it means "which connection is this for?":
 
-- **Readers that still route through `hx_active_session()`.** The GIF avatar caches are
-  keyed per connection, but user-list cell drawing looks them up through the focused
-  session, so a background connection can draw the focused one's face for a colliding
-  uid. The Rust UI reaches its connection through `gtkhx_active_htlc()` and friends in
-  the news dialogs, the user editor, chat input, file info, the voice panel and the
-  compose windows.
+- **Readers that still route through `hx_active_session()`.** The Rust UI reaches its
+  connection through `gtkhx_active_htlc()` and friends in the news dialogs, the user
+  editor, chat input, file info, the voice panel and the compose windows.
 - **`thread_local` singletons in `gtkhx-ui`** that hold per-connection state: the
   threaded news browser and its in-flight fetches, the flat news view, the banner and the
   create-post window. `useredit.rs`, an id-keyed map, is the shape they all want.
