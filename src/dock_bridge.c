@@ -60,7 +60,7 @@ static const struct {
     { HX_PANEL_ID_CHAT, N_ ("Chat"), "chat.png", "center" },
     { HX_PANEL_ID_NEWS15, N_ ("News (1.5+)"), "news_folder.png", "center" },
 #ifdef HAVE_VOICE
-    { HX_PANEL_ID_VIDEO, N_ ("Video"), NULL, "end" },
+    { HX_PANEL_ID_VIDEO, N_ ("Video"), "video.png", "end" },
 #endif
 };
 
@@ -331,9 +331,6 @@ set_icons (void)
         const char *symbolic;
         GIcon *icon = NULL;
 
-        if (PANES[i].pixmap == NULL) {
-            continue;
-        }
         resource = g_strconcat ("/com/nasledov/gtkhx/pixmaps/", PANES[i].pixmap,
                                 NULL);
         symbolic = gtkhx_icon_symbolic_name (resource);

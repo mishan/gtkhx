@@ -41,10 +41,13 @@
     <!-- The symbolic chrome icons Adwaita has no stock name for; see
          src/icons/README.md. Found by name through the same icon-theme
          resource path as the app icon above. -->
+    <file>icons/scalable/actions/com.nasledov.gtkhx-ban-symbolic.svg</file>
     <file>icons/scalable/actions/com.nasledov.gtkhx-broadcast-symbolic.svg</file>
     <file>icons/scalable/actions/com.nasledov.gtkhx-chat-symbolic.svg</file>
+    <file>icons/scalable/actions/com.nasledov.gtkhx-kick-symbolic.svg</file>
     <file>icons/scalable/actions/com.nasledov.gtkhx-news-symbolic.svg</file>
     <file>icons/scalable/actions/com.nasledov.gtkhx-users-symbolic.svg</file>
+    <file>icons/scalable/actions/com.nasledov.gtkhx-video-symbolic.svg</file>
     <file>pixmaps/ignore.png</file>
     <file>pixmaps/info.png</file>
     <file>pixmaps/kick.png</file>
@@ -84,6 +87,8 @@
     <file>pixmaps/file_image.png</file>
     <file>pixmaps/file_move.png</file>
     <file>pixmaps/file_movie.png</file>
+    <!-- The classic set has no camera; the Video tab borrows the film. -->
+    <file alias="pixmaps/video.png">pixmaps/file_movie.png</file>
     <file>pixmaps/file_note.png</file>
     <file>pixmaps/file_sit.png</file>
     <file>pixmaps/file_text.png</file>

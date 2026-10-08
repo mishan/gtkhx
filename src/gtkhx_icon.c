@@ -209,9 +209,9 @@ gtkhx_icon_load (const char *name_or_path)
  *
  * The icon each classic pixmap stands for under a theme that uses the
  * symbolic set. Standard actions use stock icon names, so they match the
- * rest of the desktop and follow a user's own icon theme; the Hotline
- * vocabulary Adwaita has no icon for (chat, the user list, news,
- * broadcast) is vendored under the app's own prefix in the GResource
+ * rest of the desktop and follow a user's own icon theme; what Adwaita
+ * has no fitting icon for (chat, the user list, news, broadcast, video,
+ * kick, ban) is vendored under the app's own prefix in the GResource
  * icon tree — see src/icons/README.md.
  *
  * Only non-legacy Adwaita names: the icon theme's legacy/ set is on its
@@ -231,14 +231,15 @@ static const struct {
     { "tasks", "view-list-symbolic" },
     { "tracker", "network-workgroup-symbolic" },
     { "broadcast", APP_ICON ("broadcast") },
+    { "video", APP_ICON ("video") },
     { "connect", "network-transmit-receive-symbolic" },
     { "options", "preferences-system-symbolic" },
     { "quit", "application-exit-symbolic" },
     /* People */
     { "message", "mail-unread-symbolic" },
     { "info", "help-about-symbolic" },
-    { "kick", "system-log-out-symbolic" },
-    { "ban", "action-unavailable-symbolic" },
+    { "kick", APP_ICON ("kick") },
+    { "ban", APP_ICON ("ban") },
     { "ignore", "view-conceal-symbolic" },
     { "edit_user", "document-edit-symbolic" },
     { "new_user", "contact-new-symbolic" },
