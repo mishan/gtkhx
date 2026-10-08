@@ -1,9 +1,10 @@
 # App-specific symbolic icons
 
 The icons GtkHx's symbolic chrome needs that Adwaita doesn't provide — the
-Hotline vocabulary: public chat, the user list, news, broadcast. Everything
-else in the symbolic set is a stock icon name; the mapping from each classic
-pixmap to its symbolic stand-in is the table in `src/gtkhx_icon.c`.
+Hotline vocabulary: public chat, the user list, news, broadcast, the Video
+panel's camera, and kicking and banning a user. Everything else in the
+symbolic set is a stock icon name; the mapping from each classic pixmap to its
+symbolic stand-in is the table in `src/gtkhx_icon.c`.
 
 They live under `scalable/actions/` with the app-id prefix, and ship in the
 GResource at `/com/nasledov/gtkhx/icons/…`, which `gtkhx_activate` adds to the
@@ -13,7 +14,7 @@ icon theme's own names.
 
 ## Source and license
 
-All four come from GNOME's
+All of them come from GNOME's
 [icon-development-kit](https://gitlab.gnome.org/Teams/Design/icon-development-kit),
 the icon set behind the Icon Library app, which is released under
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) — no attribution
@@ -25,6 +26,14 @@ required, credited here anyway.
 | `com.nasledov.gtkhx-users-symbolic.svg` | `icons/people.svg` |
 | `com.nasledov.gtkhx-broadcast-symbolic.svg` | `icons/megaphone.svg` |
 | `com.nasledov.gtkhx-news-symbolic.svg` | "newspaper" in the kit's earlier single-sheet `src/icons.svg` (the current set has none) |
+| `com.nasledov.gtkhx-video-symbolic.svg` | the kit's video camera (`camera-video`, Jakub Steiner) |
+| `com.nasledov.gtkhx-kick-symbolic.svg` | `icons/person.svg`, with an arrow out |
+| `com.nasledov.gtkhx-ban-symbolic.svg` | `icons/person.svg`, with `icons/forbidden.svg` |
+
+Kick and ban are composites: the person drawn at 80%, a circle cut from its
+lower right, and the mark drawn into it, joined with skia-pathops (picosvg's
+own dependency) into one filled path. Both show a person, so each reads as
+acting on a user, and the marks keep them apart.
 
 The kit's current icons use GTK's newer symbolic format — stroked paths with
 `gpa:` attributes — which only GTK 4.20 and later draw as intended; older GTK
