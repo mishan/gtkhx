@@ -2,8 +2,10 @@
 //! when it is configured (`-Dupdate_check`, see docs/updates.md); the user's
 //! own switch is `updates.check` in the settings.
 //!
-//! Inside the Flatpak the portal's update monitor does the asking: GtkHx
-//! makes no request of its own, and installs only when the user says so.
+//! Inside the Flatpak the portal's update monitor does the asking, and GtkHx
+//! installs only when the user says so. The portal first asks half an hour
+//! after it starts, so GtkHx also reads the feed once when it starts
+//! watching, to have something to say before then.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -32,13 +34,18 @@ pub(crate) fn checks_wired() -> bool {
     in_flatpak()
 }
 
-/// Inside the Flatpak the sandbox's own update machinery is asked, not the
-/// feed on dl.gtkhx.org.
+/// Inside the Flatpak the sandbox's own update machinery is asked; the feed
+/// only fills in until the portal first polls.
 pub(crate) fn in_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
 const RELEASES_URL: &str = "https://github.com/mishan/gtkhx/releases";
+const FEED_URL: &str = "https://dl.gtkhx.org/updates.json";
+/// The portal polls every half hour from when it starts, and says nothing
+/// when it finds nothing newer than what runs, so a monitor that has heard
+/// nothing by this long after opening has been told there is nothing new.
+const FEED_HOLDS: u32 = 32 * 60;
 
 const FLATPAK_BUS: &str = "org.freedesktop.portal.Flatpak";
 const FLATPAK_PATH: &str = "/org/freedesktop/portal/Flatpak";
@@ -95,7 +102,7 @@ pub(crate) fn banner() -> gtk::Widget {
     banner.connect_button_clicked(on_button);
     MONITOR.with_borrow_mut(|m| {
         m.banner = Some(banner.clone());
-        m.state.dismissed = read_dismissed(&dismissed_path());
+        (m.state.dismissed, m.state.dismissed_version) = read_dismissed(&dismissed_path());
     });
     refresh();
     banner.into()
@@ -118,24 +125,24 @@ pub(crate) fn refresh() {
         if on {
             let start = m.handle.is_none() && !m.starting;
             m.starting |= start;
-            return start;
+            return start.then_some(m.generation);
         }
         close_monitor(m);
         // "Later" was the user's answer, not something the portal said.
         m.state = PortalState {
             dismissed: std::mem::take(&mut m.state.dismissed),
+            dismissed_version: std::mem::take(&mut m.state.dismissed_version),
             ..PortalState::default()
         };
-        false
+        None
     });
-    if start {
-        glib::MainContext::default().spawn_local(start_monitor());
+    if let Some(generation) = start {
+        glib::MainContext::default().spawn_local(start_monitor(generation));
     }
     render();
 }
 
-async fn start_monitor() {
-    let generation = MONITOR.with_borrow(|m| m.generation);
+async fn start_monitor(generation: u32) {
     let started = open_monitor().await;
     let stale = MONITOR.with_borrow_mut(|m| {
         if m.generation != generation {
@@ -148,6 +155,16 @@ async fn start_monitor() {
                 m.conn = Some(conn);
                 m.handle = Some(handle);
                 m.subscriptions = subscriptions;
+                // Only with a monitor to update through.
+                glib::MainContext::default().spawn_local(read_feed(generation));
+                glib::timeout_add_seconds_local_once(FEED_HOLDS, move || {
+                    MONITOR.with_borrow_mut(|m| {
+                        if m.generation == generation {
+                            m.state.feed.clear();
+                        }
+                    });
+                    render();
+                });
             }
             Err(version) => m.state.version = version,
         }
@@ -157,6 +174,38 @@ async fn start_monitor() {
         close(&conn, &handle);
     }
     render();
+}
+
+/// What the feed says is out on the installed branch. Any failure is
+/// silent: the portal still reports in time.
+async fn read_feed(generation: u32) {
+    let Some(branch) = installed_branch() else {
+        return;
+    };
+    let Ok(Ok(bytes)) =
+        gio::spawn_blocking(|| hxnet::banner_http::http_get(FEED_URL, hxupdate::MAX_FEED_BYTES))
+            .await
+    else {
+        return;
+    };
+    let Ok(feed) = hxupdate::parse_feed(&bytes) else {
+        return;
+    };
+    let newer = hxupdate::flatpak::feed_newer(crate::ffi::VERSION, &branch, &feed);
+    MONITOR.with_borrow_mut(|m| {
+        if m.generation == generation {
+            m.state.feed = newer.unwrap_or_default();
+        }
+    });
+    render();
+}
+
+/// The Flatpak branch this instance runs, from `/.flatpak-info`.
+fn installed_branch() -> Option<String> {
+    let info = glib::KeyFile::new();
+    info.load_from_file("/.flatpak-info", glib::KeyFileFlags::NONE)
+        .ok()?;
+    info.string("Instance", "branch").ok().map(String::from)
 }
 
 type Opened = (
@@ -194,7 +243,7 @@ async fn open_monitor() -> Result<Opened, u32> {
     // One monitor at a time, and a closed one says nothing more, so every
     // signal on the interface is this monitor's. Subscribed before the call
     // so nothing it says early is missed.
-    let subscribe = |member: &str, f: fn(&mut PortalState, &glib::VariantDict)| {
+    let subscribe = |member: &str, f: fn(&mut Monitor, &glib::VariantDict)| {
         conn.subscribe_to_signal(
             Some(FLATPAK_BUS),
             Some(MONITOR_IFACE),
@@ -206,30 +255,34 @@ async fn open_monitor() -> Result<Opened, u32> {
                 let Some((info,)) = sig.parameters.get::<(glib::VariantDict,)>() else {
                     return;
                 };
-                MONITOR.with_borrow_mut(|m| f(&mut m.state, &info));
+                MONITOR.with_borrow_mut(|m| f(m, &info));
                 watch_for_stall();
                 render();
             },
         )
     };
     let subscriptions = vec![
-        subscribe("UpdateAvailable", |s, info| {
+        subscribe("UpdateAvailable", |m, info| {
             let commit = |key| {
                 info.lookup::<String>(key)
                     .ok()
                     .flatten()
                     .unwrap_or_default()
             };
-            s.update_available(
+            let carried = m.state.update_available(
                 commit("running-commit"),
                 commit("local-commit"),
                 commit("remote-commit"),
             );
+            if carried {
+                let s = &m.state;
+                write_dismissed(&dismissed_path(), &s.dismissed, &s.dismissed_version);
+            }
         }),
-        subscribe("Progress", |s, info| {
+        subscribe("Progress", |m, info| {
             let num = |key| info.lookup::<u32>(key).ok().flatten();
             let percent = overall_percent(num("progress").unwrap_or(0), num("op"), num("n_ops"));
-            s.progress = Some((num("status").unwrap_or(0), percent));
+            m.state.progress = Some((num("status").unwrap_or(0), percent));
         }),
     ];
     let options = glib::VariantDict::new(None);
@@ -328,11 +381,12 @@ fn ask_to_update(banner: &adw::Banner) {
     dialog.connect_response(None, |_, response| match response {
         "update" => update_now(),
         _ => {
-            let remote = MONITOR.with_borrow_mut(|m| {
+            let (remote, version) = MONITOR.with_borrow_mut(|m| {
                 m.state.dismissed = m.state.remote.clone();
-                m.state.remote.clone()
+                m.state.dismissed_version = m.state.feed.clone();
+                (m.state.remote.clone(), m.state.feed.clone())
             });
-            write_dismissed(&dismissed_path(), &remote);
+            write_dismissed(&dismissed_path(), &remote, &version);
             render();
         }
     });
@@ -482,24 +536,28 @@ fn restart() {
     });
 }
 
-/// The remote commit the user answered "Later" to, kept across restarts.
+/// The remote commit and the feed's version the user answered "Later" to,
+/// a line each, kept across restarts.
 /// State rather than a setting, so it lives with the cache, not the config.
 fn dismissed_path() -> std::path::PathBuf {
     glib::user_cache_dir().join("gtkhx").join("update-later")
 }
 
-fn read_dismissed(path: &std::path::Path) -> String {
-    std::fs::read_to_string(path)
-        .map(|s| s.trim().to_owned())
-        .unwrap_or_default()
+fn read_dismissed(path: &std::path::Path) -> (String, String) {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut lines = text.lines().map(|l| l.trim().to_owned());
+    (
+        lines.next().unwrap_or_default(),
+        lines.next().unwrap_or_default(),
+    )
 }
 
 /// Best effort: failing to remember means asking again next launch.
-fn write_dismissed(path: &std::path::Path, commit: &str) {
+fn write_dismissed(path: &std::path::Path, commit: &str, version: &str) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(path, commit);
+    let _ = std::fs::write(path, format!("{commit}\n{version}\n"));
 }
 
 #[cfg(test)]
@@ -510,9 +568,16 @@ pub(crate) mod tests {
     fn later_survives_a_restart() {
         let dir = std::env::temp_dir().join(format!("gtkhx-later-{}", std::process::id()));
         let path = dir.join("gtkhx").join("update-later");
-        assert_eq!(read_dismissed(&path), "", "nothing dismissed yet");
-        write_dismissed(&path, "abc123");
-        assert_eq!(read_dismissed(&path), "abc123");
+        assert_eq!(
+            read_dismissed(&path),
+            (String::new(), String::new()),
+            "nothing dismissed yet"
+        );
+        write_dismissed(&path, "abc123", "1.5.0b1");
+        assert_eq!(read_dismissed(&path), ("abc123".into(), "1.5.0b1".into()));
+        // As an older build wrote it: the commit alone.
+        std::fs::write(&path, "abc123").unwrap();
+        assert_eq!(read_dismissed(&path), ("abc123".into(), String::new()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

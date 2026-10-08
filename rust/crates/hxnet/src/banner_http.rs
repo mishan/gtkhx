@@ -54,10 +54,10 @@ enum BannerResult {
     Err(String),
 }
 
-/// Blocking HTTP(S) GET of `url`, capped at [`MAX_BANNER_BYTES`]. Runs on
-/// a blocking-pool thread (never an async executor). `https://` URLs go
+/// Blocking HTTP(S) GET of `url`, capped at `max` bytes. Runs on a
+/// blocking-pool thread (never an async executor). `https://` URLs go
 /// through ureq's rustls backend with the webpki root set.
-fn http_get(url: &str) -> Result<Vec<u8>, String> {
+pub fn http_get(url: &str, max: usize) -> Result<Vec<u8>, String> {
     let agent = ureq::builder()
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(20))
@@ -73,12 +73,12 @@ fn http_get(url: &str) -> Result<Vec<u8>, String> {
     // Read one byte past the cap so we can tell "exactly at cap" from
     // "over the cap" and reject the latter.
     let mut buf = Vec::new();
-    let mut reader = resp.into_reader().take((MAX_BANNER_BYTES as u64) + 1);
+    let mut reader = resp.into_reader().take((max as u64) + 1);
     if let Err(e) = reader.read_to_end(&mut buf) {
         return Err(format!("read: {e}"));
     }
-    if buf.len() > MAX_BANNER_BYTES {
-        return Err(format!("banner exceeds {MAX_BANNER_BYTES} bytes"));
+    if buf.len() > max {
+        return Err(format!("response exceeds {max} bytes"));
     }
     Ok(buf)
 }
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn hxnet_banner_fetch_open(
                 Ok(p) => p,
                 Err(_) => return Err("too many banner fetches in flight".to_owned()),
             };
-            http_get(&url_str)
+            http_get(&url_str, MAX_BANNER_BYTES)
         })
         .await;
         let result = match res {
@@ -311,7 +311,7 @@ mod tests {
     fn http_get_returns_body_on_200() {
         let body = b"\x89PNG\r\n\x1a\n-pretend-banner";
         let (url, server) = serve_once("200 OK", body);
-        let got = http_get(&url).expect("200 should yield the body");
+        let got = http_get(&url, MAX_BANNER_BYTES).expect("200 should yield the body");
         server.join().unwrap();
         assert_eq!(got, body);
     }
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn http_get_errors_on_404() {
         let (url, server) = serve_once("404 Not Found", b"nope");
-        let err = http_get(&url).unwrap_err();
+        let err = http_get(&url, MAX_BANNER_BYTES).unwrap_err();
         server.join().unwrap();
         assert!(
             err.contains("404"),

@@ -32,8 +32,9 @@ nothing. Turning it off stops the check and hides the banner at once.
 ## How a build checks
 
 - **Flatpak** asks Flatpak, through the portal, whether its own installation
-  has an update. The repository behind it is `https://dl.gtkhx.org`
-  ([flatpak-repo.md](flatpak-repo.md)). Nothing else is contacted. See below.
+  has an update, and reads `https://dl.gtkhx.org/updates.json` once when it
+  starts watching. Both go to the site its updates come from
+  ([flatpak-repo.md](flatpak-repo.md)). See below.
 - **Everything else** fetches `https://dl.gtkhx.org/updates.json` at most once
   a day. The request carries no information about the user or the servers
   they visit, and the comparison happens locally; the address it comes from
@@ -41,12 +42,25 @@ nothing. Turning it off stops the check and hides the banner at once.
 
 ## Inside the Flatpak
 
-The sandbox has no version to compare, only commits, and Flatpak already
-knows which are which. GtkHx reads the `version` of the
+The portal speaks in commits rather than versions, and Flatpak already knows
+which are which. GtkHx reads the `version` of the
 `org.freedesktop.portal.Flatpak` portal and, from 2 on, opens an update
 monitor with `CreateUpdateMonitor`; an older portal gets no notice at all.
-The monitor reports, now and then, the commit running, the one installed and
-the newest in the remote, and the banner says one of two things:
+The monitor reports the commit running, the one installed and the newest in
+the remote, but only when the portal polls, every half hour from when it
+starts, and only when one of those differs from the commit running: an
+up-to-date GtkHx hears nothing at all. The portal exits ten minutes after its
+last monitor closes, so a GtkHx started later waits the full half hour.
+
+Until the portal's first poll, the feed stands in. Once the monitor is open,
+GtkHx reads the feed's entry for the installed branch (`stable` or `beta`, from
+`/.flatpak-info`), and when it names a newer version than this build, the
+banner says an update is out; `Update` works then as it does later. A feed
+that can't be fetched or read says nothing. The feed's word lasts until the
+portal reports, or for a little over half an hour, by when a silent portal has
+found nothing newer (a masked ref, a bundle with no remote, or a feed ahead of
+the repository it describes). From then on the commits alone decide, so a
+rebuild of the same version shows only then. The banner says one of two things:
 
 - **A new version of GtkHx is available**, when the remote has a commit the
   installation doesn't. "Update…" asks whether to update now, later, or first
@@ -72,9 +86,12 @@ the newest in the remote, and the banner says one of two things:
 
 When both hold, the first wins: updating ends with a restart anyway. "Later"
 hides the notice until the remote has a newer commit still, across restarts:
-the commit is kept in `gtkhx/update-later` under the user cache directory. There is no "Skip
-this version" here; commits don't say which version they are. The decision
-from what the portal said to which banner is `hxupdate::flatpak::notice`.
+the commit, and the feed's version if the feed spoke, are kept in
+`gtkhx/update-later` under the user cache directory. A "Later" to the feed's
+version becomes a "Later" to the commit the portal first reports. There is
+no "Skip this version" here; commits don't say which version they are. The
+decision from what the portal said to which banner is
+`hxupdate::flatpak::notice`.
 
 `Update` is passed no parent window, so the portal's own permission dialog,
 when it shows one, isn't attached to GtkHx's window. A handle needs the
