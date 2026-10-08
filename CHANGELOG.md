@@ -1,3 +1,8 @@
+## 1.5.1-dev
+
+- Settings
+  - The icon picker fits its window again when wide banner icons are installed, instead of cutting off its columns and scrolling sideways
+
 ## 1.5.0
 
 - Docking
