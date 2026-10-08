@@ -37,6 +37,7 @@ fn display_backed() {
     crate::users_view::tests::check_rows_land_in_one_batch();
     crate::users_view::tests::check_avatars_stay_with_their_connection();
     crate::updates::tests::check_banner_starts_hidden();
+    crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_tile_shows_a_frame();
     #[cfg(feature = "voice")]

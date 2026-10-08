@@ -35,6 +35,16 @@ const WIDE_CROP: i32 = 198;
 /// The grid's cell height, and the width of a square cell.
 const THUMB_SIZE: i32 = 56;
 
+/// The dialog's width, and the narrowest it gets on a small parent.
+const DIALOG_WIDTH: i32 = 420;
+const DIALOG_MIN_WIDTH: i32 = 300;
+
+/// The widest a banner is drawn. Scaled to the cell height a banner runs to
+/// many hundreds of pixels, and the picker's content is as wide as its widest
+/// child, so one banner would push the square grid past the dialog's edge.
+/// This fits [`DIALOG_MIN_WIDTH`], less the margins.
+const WIDE_MAX_WIDTH: i32 = 260;
+
 /// How many icons to render per idle tick.
 ///
 /// The C version pumped the main loop inline every ten icons and then
@@ -84,18 +94,14 @@ pub(crate) fn preview_widget(size: i32) -> gtk::Picture {
     p
 }
 
-/// One picker thumbnail, plus whether the icon is a wide banner.
+/// An icon's picker thumbnail, plus whether the icon is a wide banner.
 ///
 /// Nearest-neighbour, because these are 16- and 32-pixel pixel-art sources
 /// being enlarged 3.5× and 1.75× — a smoothing filter turns them to mush.
 /// Wide banners keep their aspect ratio and scale to the cell *height*, so
-/// the art stays readable instead of being squashed into a square.
-fn thumbnail(id: u16) -> Option<(gtk::gdk::Texture, bool)> {
-    // No fallback here, unlike the preview: the picker is asking "is there an
-    // icon with this ID", and a default-icon substitute would put a row of
-    // identical placeholders in the grid.
-    let pixbuf = icon_pixbuf(id, false)?;
-
+/// the art stays readable instead of being squashed into a square, unless
+/// that would be wider than [`WIDE_MAX_WIDTH`].
+fn thumbnail(pixbuf: gdk_pixbuf::Pixbuf) -> Option<(gtk::gdk::Texture, bool)> {
     let wide = pixbuf.width() > WIDE_THRESHOLD;
     let pixbuf = if wide {
         pixbuf.new_subpixbuf(WIDE_CROP, 0, pixbuf.width() - WIDE_CROP, pixbuf.height())
@@ -105,7 +111,12 @@ fn thumbnail(id: u16) -> Option<(gtk::gdk::Texture, bool)> {
 
     let (w, h) = if wide {
         let scaled = pixbuf.width() * THUMB_SIZE / pixbuf.height().max(1);
-        (scaled.max(1), THUMB_SIZE)
+        if scaled <= WIDE_MAX_WIDTH {
+            (scaled.max(1), THUMB_SIZE)
+        } else {
+            let h = pixbuf.height() * WIDE_MAX_WIDTH / pixbuf.width().max(1);
+            (WIDE_MAX_WIDTH, h.max(1))
+        }
     } else {
         (THUMB_SIZE, THUMB_SIZE)
     };
@@ -118,7 +129,13 @@ fn thumbnail(id: u16) -> Option<(gtk::gdk::Texture, bool)> {
 /// Weak on the flowboxes throughout: closing the popup is the normal way out
 /// of a long render, and it should stop the walk rather than be something the
 /// walk has to notice.
-fn fill_grid(narrow: &gtk::FlowBox, wide: &gtk::FlowBox, ids: Vec<u16>, selected: u16) {
+fn fill_grid(
+    narrow: &gtk::FlowBox,
+    wide: &gtk::FlowBox,
+    ids: Vec<u16>,
+    selected: u16,
+    icon: impl Fn(u16) -> Option<gdk_pixbuf::Pixbuf> + 'static,
+) {
     let narrow_weak = narrow.downgrade();
     let wide_weak = wide.downgrade();
     let mut next = 0usize;
@@ -129,7 +146,7 @@ fn fill_grid(narrow: &gtk::FlowBox, wide: &gtk::FlowBox, ids: Vec<u16>, selected
         };
         let end = (next + RENDER_CHUNK).min(ids.len());
         for &id in &ids[next..end] {
-            let Some((texture, is_wide)) = thumbnail(id) else {
+            let Some((texture, is_wide)) = icon(id).and_then(thumbnail) else {
                 continue;
             };
             let cell = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -194,6 +211,43 @@ fn picker_flowbox(wide: bool) -> gtk::FlowBox {
     fb
 }
 
+/// The scrolled grids of `ids`, filled from `icon` over the next idle ticks,
+/// with `selected` picked out and `on_pick` told of an activated icon.
+fn content(
+    ids: Vec<u16>,
+    selected: u16,
+    icon: impl Fn(u16) -> Option<gdk_pixbuf::Pixbuf> + 'static,
+    on_pick: impl Fn(u16) + 'static,
+) -> gtk::ScrolledWindow {
+    let narrow = picker_flowbox(false);
+    let wide = picker_flowbox(true);
+
+    let on_pick = std::rc::Rc::new(on_pick);
+    let activated = move |_: &gtk::FlowBox, child: &gtk::FlowBoxChild| {
+        if let Some(p) = unsafe { child.data::<u16>("hx-icon-id") } {
+            on_pick(unsafe { *p.as_ref() });
+        }
+    };
+    narrow.connect_child_activated(activated.clone());
+    wide.connect_child_activated(activated);
+
+    let picker_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    picker_box.set_margin_top(6);
+    picker_box.set_margin_bottom(6);
+    picker_box.set_margin_start(6);
+    picker_box.set_margin_end(6);
+    picker_box.append(&narrow);
+    picker_box.append(&wide);
+
+    let scroller = gtk::ScrolledWindow::new();
+    scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scroller.set_vexpand(true);
+    scroller.set_child(Some(&picker_box));
+
+    fill_grid(&narrow, &wide, ids, selected, icon);
+    scroller
+}
+
 /// The whole icon catalogue in a scrolled dialog, presented on `anchor`.
 ///
 /// `selected` is pre-selected and scrolled to. `on_pick` fires with the chosen
@@ -221,48 +275,90 @@ pub(crate) fn open(
 
     let dialog = adw::Dialog::new();
     dialog.set_title(&tr("Choose Icon"));
-    dialog.set_content_width(420);
+    dialog.set_content_width(DIALOG_WIDTH);
     dialog.set_content_height(520);
-    dialog.set_size_request(300, 360);
+    dialog.set_size_request(DIALOG_MIN_WIDTH, 360);
     unsafe { crate::ffi::gtkhx_dialog_add_close_shortcuts(dialog.as_ptr() as *mut _) };
 
-    let narrow = picker_flowbox(false);
-    let wide = picker_flowbox(true);
-
-    let on_pick = std::rc::Rc::new(on_pick);
     let dialog_weak = dialog.downgrade();
-    let activated = move |_: &gtk::FlowBox, child: &gtk::FlowBoxChild| {
-        let id: u16 = match unsafe { child.data::<u16>("hx-icon-id") } {
-            Some(p) => unsafe { *p.as_ref() },
-            None => return,
-        };
-        on_pick(id);
-        if let Some(dialog) = dialog_weak.upgrade() {
-            dialog.close();
-        }
-    };
-    narrow.connect_child_activated(activated.clone());
-    wide.connect_child_activated(activated);
-
-    let picker_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    picker_box.set_margin_top(6);
-    picker_box.set_margin_bottom(6);
-    picker_box.set_margin_start(6);
-    picker_box.set_margin_end(6);
-    picker_box.append(&narrow);
-    picker_box.append(&wide);
-
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_vexpand(true);
-    scroller.set_child(Some(&picker_box));
+    // No fallback, unlike the preview: the picker is asking "is there an
+    // icon with this ID", and a default-icon substitute would put a row of
+    // identical placeholders in the grid.
+    let scroller = content(
+        ids,
+        selected,
+        |id| icon_pixbuf(id, false),
+        move |id| {
+            on_pick(id);
+            if let Some(dialog) = dialog_weak.upgrade() {
+                dialog.close();
+            }
+        },
+    );
 
     let view = adw::ToolbarView::new();
     view.add_top_bar(&adw::HeaderBar::new());
     view.set_content(Some(&scroller));
     dialog.set_child(Some(&view));
-
-    fill_grid(&narrow, &wide, ids, selected);
-
     dialog.present(Some(anchor));
     dialog
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// A plain `w`×`h` icon: the picker cares about its shape, not its art.
+    fn synthetic(w: i32, h: i32) -> gdk_pixbuf::Pixbuf {
+        let pb =
+            gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb, false, 8, w, h).expect("pixbuf");
+        pb.fill(0x8080_80ff);
+        pb
+    }
+
+    /// Square icons beside banners of the widths icon sets carry, the
+    /// widest scaling to over a thousand pixels at the cell height: the
+    /// picker's content still fits the dialog, so it never scrolls sideways
+    /// or cuts off a column.
+    pub(crate) fn check_banners_fit_the_dialog() {
+        const BANNERS: [(i32, i32); 3] = [(500, 32), (640, 24), (900, 18)];
+        let ids: Vec<u16> = (128..140)
+            .chain(1000..1000 + BANNERS.len() as u16)
+            .collect();
+        let scroller = content(
+            ids,
+            0,
+            |id| {
+                let (w, h) = match id.checked_sub(1000) {
+                    Some(i) => BANNERS[i as usize],
+                    None => (32, 32),
+                };
+                Some(synthetic(w, h))
+            },
+            |_| {},
+        );
+        let ctx = glib::MainContext::default();
+        while ctx.iteration(false) {}
+
+        let viewport = scroller.child().expect("viewport");
+        let picker = viewport.first_child().expect("picker box");
+        let wide = picker.last_child().expect("banner grid");
+        let mut banners = 0;
+        let mut child = wide.first_child();
+        while let Some(c) = child {
+            banners += 1;
+            child = c.next_sibling();
+        }
+        assert_eq!(banners, BANNERS.len(), "every banner is in the banner grid");
+
+        let (min, natural, _, _) = picker.measure(gtk::Orientation::Horizontal, -1);
+        assert!(
+            min <= DIALOG_MIN_WIDTH,
+            "picker needs {min}px, the dialog can be {DIALOG_MIN_WIDTH}px"
+        );
+        assert!(
+            natural <= DIALOG_WIDTH,
+            "picker wants {natural}px, the dialog is {DIALOG_WIDTH}px"
+        );
+    }
 }
