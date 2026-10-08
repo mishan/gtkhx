@@ -1,110 +1,87 @@
-## 1.5.0-dev
+## 1.5.0
 
-- Files
-  - Large folders open several times faster, and sorting by name is faster too
-  - Renaming in place now replaces the name instead of adding to it
-  - Moving a file and renaming it in one step no longer leaves it under its old name
-  - Get Info can save just a comment on Janus servers
-  - The right-click menu's last items are no longer cut off
-  - Local folders no longer show "(4096 items)" as their size
-  - Very long folder names no longer break the path sent to the server
-  - Downloading a folder that holds files of 4 GB or more no longer fails partway
-  - File names in non-Roman scripts, such as Japanese, no longer go missing from file listings, and files and folders with accented names now open, download, rename and delete on servers that don't use UTF-8
-  - Get Info shows accented names, types and comments correctly
-  - A server can no longer make a folder download write outside the folder you download it to
-  - Listing folders and the other quick file actions no longer flash by in the Tasks list; transfers still show there
 - Docking
   - A new dock, built on mullion-gtk in place of libpanel; your layout carries over
-  - A pane's tabs sit in its top corner as icons, in sight where the pane has room for them and otherwise while you are in the pane; Pane Titles puts tab strips with titles back
-  - Drag a tab onto another pane's tabs, onto a pane, or onto an edge to split it
-  - Drag a tab out of the window to give it a window of its own, and back to dock it
-  - Reset Layout puts the default layout back at once, rather than at the next launch
-  - Alt with the arrows moves between panes, and with Shift moves the pane; Alt+Enter zooms one to fill the window
-  - A pane closes when its last panel is moved out or closed
-  - A panel's toolbar button and menu item always bring it back after it was undocked
-- Voice and Video
-  - Changing the microphone, speaker or camera in Settings now switches a call in progress
-  - Video tiles fill the panel, each at its stream's shape, instead of fixed-height strips
-  - Click a tile to bring it into focus at the top of the panel; click it again to show everyone alike
-  - Each tile has controls to focus, mute, or stop watching someone, and you can watch them again from the bar below
-  - The users list shows who has a camera or screen share on, even when GtkHx can't play video
-  - Cameras you plug in or unplug show up right away, in Settings and on the camera button
-  - A chosen camera that isn't plugged in stays chosen in Settings, marked as missing
-  - Chat says when someone in your voice room turns their camera on or starts sharing their screen
+  - A pane's tabs sit in its top corner as icons, shown when the pane has room or while you are in it; Pane Titles brings back tab strips with titles
+  - Drag a tab onto another pane's tabs, onto a pane, or onto an edge to split it; drag it out of the window to give it a window of its own, and back to dock it
+  - Alt with the arrows moves between panes, Alt+Shift moves the pane, and Alt+Enter zooms one to fill the window
+  - Reset Layout takes effect at once, rather than at the next launch
+  - A pane closes when its last panel is moved out or closed, and a panel's toolbar button and menu item always bring it back
+- Video and Voice
+  - Video tiles fill the panel, each at its stream's shape; click one to bring it into focus, and again to show everyone alike
+  - Each tile can focus, mute, or stop watching someone, and the bar below brings them back
+  - On a metered connection you receive one video at a time and click another to switch; Settings → Voice can turn this off
   - No video is downloaded while the window is minimized
-  - On a metered connection you receive one video at a time, and click another to switch; Settings → Voice can turn this off
-  - Video no longer sometimes stays blank, or fails to start, after someone turns their camera on
-  - Screen readers can now name the camera and screen-share buttons and the users list's video icon
-  - Join and leave sounds are right again after switching voice rooms
-  - Joining, leaving and muting voice, and starting, pausing or stopping video, no longer flash by in the Tasks list
+  - Changing the microphone, speaker or camera in Settings switches a call in progress
+  - Cameras show up as soon as they are plugged in or out, and a chosen camera that is unplugged stays chosen, marked as missing
+  - The users list shows who has a camera or screen share on, even when GtkHx can't play video, and chat says when someone in your voice room starts one
+  - Fixed video sometimes staying blank, or failing to start, after someone turns their camera on
+  - Fixed join and leave sounds after switching voice rooms
+  - Screen readers can name the camera and screen-share buttons and the users list's video icon
 - Chat
-  - Chat history shows line breaks and accented characters correctly
-  - Very long scrollbacks stay fast as new messages arrive and while scrolling
-  - Nickname completion is faster on busy servers
-  - A link whose text isn't its address shows the real address before opening it, and every link shows its address on hover
-  - Email addresses are links again
-  - Dismissing a selection with a click no longer also opens the link under it
-  - Chat settings now reach every connection, not just the one in focus
+  - Very long scrollbacks stay fast, and nickname completion is faster on busy servers
+  - A link whose text isn't its address shows the real address before opening it, every link shows its address on hover, and email addresses are links again
   - Settings → Chat can turn off opening links with a single click
+  - Dismissing a selection with a click no longer also opens the link under it
+  - Chat settings reach every connection, not just the one in focus
+  - Chat history shows line breaks and accented characters correctly
   - Load Older no longer gets stuck on "Loading…" when the server turns it down
-  - A private chat you closed no longer reopens when the server answers late
-  - A private chat you start now opens its window right away, instead of when the first person joins
-  - Names with accented characters no longer show "is now known as" at every status change
-  - Server broadcasts show accented characters correctly
-  - A picture sent in a private message now shows in the message window, as it does in chat
-  - With two servers open, a picture in chat now appears in the chat it was sent to
+  - A private chat you start opens its window right away, and one you closed no longer reopens when the server answers late
+  - A picture sent in a private message shows in the message window, and with two servers open, a picture appears in the chat it was sent to
 - Users
-  - Names show in their own color, without the outline that used to ring them; a name over a wide banner icon gets a soft shadow, and only where the art would make it hard to read
-  - A name colored too close to the list's background, such as dark red on a dark theme, is lightened or darkened until it reads, keeping its hue; it reads on the selected row too
-  - With two servers open, each user list shows its own server's GIF icons, and shows new ones as they arrive
-  - Clearing your nick color now clears it for everyone else too, instead of leaving them your old color
+  - Names show in their own color without the old outline, with a soft shadow only where a wide banner icon would make them hard to read
+  - A name colored too close to the list's background, such as dark red on a dark theme, is lightened or darkened until it reads, keeping its hue, on the selected row too
+  - Clearing your nick color clears it for everyone else too
+  - With two servers open, each user list shows its own server's GIF icons, and new ones as they arrive
+- Files
+  - Large folders open several times faster, and sorting by name is faster too
+  - Get Info can save just a comment on Janus servers
+  - Fixed renaming in place adding to the name instead of replacing it, and moving and renaming in one step leaving the file under its old name
+  - Fixed downloading a folder that holds files of 4 GB or more failing partway
+  - Fixed very long folder names breaking the path sent to the server
+  - Fixed the right-click menu's last items being cut off, and local folders showing "(4096 items)" as their size
+  - Security fix: a server can no longer make a folder download write outside the folder you download it to
 - News
-  - Accented characters in threaded news show correctly: folder and category names, subjects, authors and posts
-  - A news folder, category or article the server refuses no longer stays stuck loading; you can try again
-  - Posting into a category, or making one inside a folder, with an accented name works on more servers
-  - Loading and posting news no longer flashes by in the Tasks list
-- Hotline Protocol
-  - A rejected login now shows the server's own message, a secure (HOPE) login the server doesn't support included
-  - Fixed HOPE-encrypted connections misreading a message split across frames
-  - No more error at every login on servers that refuse your saved GIF icon
-  - Sending text is faster on servers without Unicode
-  - GtkHx now tells servers it is GtkHx (client version 254) instead of the Hotline 1.8.5 client
-  - HOPE secure logins now compress the connection with the Compression setting's choice (GZIP, LZ4 or ZSTD) when the server supports it
-  - Closing a server's agreement window now declines it, like the Disagree button
-  - An empty server agreement no longer opens an empty window
-  - Older servers that refuse GtkHx's once-a-minute check that the connection is alive no longer cause an error each time
-  - Sending a message, loading the user list and fetching chat history no longer appear in the Tasks list
-  - Getting a user's info, kicking, broadcasting and opening, saving or deleting accounts no longer appear in the Tasks list
-  - The account editor shows accented logins and names correctly, and saving keeps an accented name you didn't change
-  - The account editor and the Broadcast window act on the server you opened them for, even after you switch to another connection, and send nothing once you've disconnected from it
-  - An accented name typed in the account editor is saved correctly on servers that don't use UTF-8
-  - New User now works on Janus servers
-  - New User won't replace an account that already exists
-  - When the server refuses to make or save an account, the account editor says why, instead of only playing the error sound
-  - New User turns off the privileges you don't have yourself, which most servers won't let you give
+  - A folder, category or article the server refuses no longer stays stuck loading; you can try again
+- Account Editor
+  - Save closes the editor once the server has saved the account; if it refuses, the editor stays open and says why, instead of only playing the error sound
+  - New User works on Janus servers, won't replace an account that already exists, and turns off the privileges you don't have yourself, which most servers won't let you give
   - Saving an account without touching its password no longer changes the password on Mobius servers
-  - The server banner, GIF icons, and sending or loading pictures in chat no longer flash by in the Tasks list
-  - Logging in no longer adds a row to the Tasks list
+  - The account editor and the Broadcast window act on the server you opened them for, even after you switch to another connection, and send nothing once you've disconnected from it
+- Accented and Non-Roman Text
+  - File names in non-Roman scripts, such as Japanese, no longer go missing from file listings, and files and folders with accented names open, download, rename and delete on servers that don't use UTF-8
+  - Accented text shows correctly in Get Info, server broadcasts, threaded news and the account editor
+  - Accented names are sent correctly when posting news, making news categories and saving accounts on servers that don't use UTF-8, and saving keeps an accented account name you didn't change
+  - Names with accented characters no longer show "is now known as" at every status change
+- Connecting
+  - A rejected login shows the server's own message, a secure (HOPE) login the server doesn't support included
+  - HOPE secure logins compress the connection with the Compression setting's choice (GZIP, LZ4 or ZSTD) when the server supports it
+  - Fixed HOPE-encrypted connections misreading a message split across frames
+  - GtkHx now tells servers it is GtkHx (client version 254) instead of the Hotline 1.8.5 client
+  - Closing a server's agreement window declines it, like the Disagree button, and an empty agreement no longer opens an empty window
+  - No more errors from servers that refuse your saved GIF icon at login, or that refuse GtkHx's once-a-minute check that the connection is alive
+  - Sending text is faster on servers without Unicode
   - Security fix: TLS connections now use rustls 0.23.45, for RUSTSEC-2026-0285, in which a server could send handshake messages unencrypted that should have been encrypted (it could not tamper with the handshake)
+- Tasks
+  - Logging in, listing folders, loading news, sending messages, joining voice, starting video and the other quick requests no longer flash by in the Tasks list; transfers still show there
 - Trackers
   - New installs list tracker.vespernet.net and tracker.preterhuman.net beside hltracker.com
 - Updates
-  - The Flatpak tells you when a new version is out, and can update and restart into it; Settings → General can turn this off
+  - The Flatpak tells you a new version is out as soon as it starts, and can update and restart into it; Settings → General can turn this off
   - Windows, macOS and Flatpak test builds show their real version, such as 1.4.1b2, in About instead of 1.4.1-dev
+- Translations
+  - The Local / Remote selector in the file browser is now translated
+  - The Flatpak download now includes the translations
 - Code Modernization
   - The file browser is now Rust
-  - GtkHx now reads tracker listings with code shared with the hxd-ng server
-  - HOPE secure login and its ciphers moved to hx-libs, the Hotline library GtkHx shares with hxd-ng and hx-ng
   - The chat view is now Rotulus, a standalone GTK 4 widget published on crates.io
+  - HOPE secure login and tracker listings now use hx-libs, the Hotline library GtkHx shares with hxd-ng and hx-ng
   - Moved to gtk-rs 0.22; building now needs Rust 1.92
 - Development
   - Performance benchmarks, from single functions up to the running app
   - End-to-end tests of GtkHx's own file requests against real servers
   - The test servers now include hlservd, the Hotline 1.9 server
   - A reference guide to the Hotline protocol and its extensions
-- Translations
-  - The Local / Remote selector in the file browser is now translated
-  - The Flatpak download now includes the translations
 
 ## 1.4.0
 
