@@ -106,11 +106,6 @@ struct UserEdit {
     name: RefCell<Read>,
     pass: RefCell<Read>,
     is_new: bool,
-    /// The login a New User window has made, once the server said so:
-    /// saved again, it is changed, not made a second time. A create the
-    /// server refused leaves the next Save a create too, so it can't
-    /// overwrite an account that was already there.
-    made: RefCell<Option<Vec<u8>>>,
     /// A create, or its check, is out and not yet answered.
     creating: Cell<bool>,
     /// The key this editor has in `EDITORS`.
@@ -150,23 +145,18 @@ impl UserEdit {
             let pass = self.pass.borrow().password(&self.pass_row.text());
             let access = access_to_wire(self.access_buf.get());
             let login = self.login.borrow();
-            if self.is_new && self.made.borrow().as_ref() != Some(&*login) {
+            if self.is_new {
                 // One create at a time: a second, sent before the first is
                 // answered, would make the account twice, or find it taken.
                 if self.creating.replace(true) {
                     return;
                 }
-                let (id, conn, made) = (self.id, self.conn, login.clone());
+                let (id, conn) = (self.id, self.conn);
                 let mark = move |r: Result<(), Option<String>>| {
                     if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
                         st.creating.set(false);
-                        if r.is_ok() {
-                            *st.made.borrow_mut() = Some(made);
-                        }
                     }
-                    if let Err(Some(reason)) = r {
-                        refused(id, conn, &reason);
-                    }
+                    answered(id, conn, r);
                 };
                 // Told it is there, nothing is made: a server may replace
                 // an account with a new one of the same login.
@@ -187,11 +177,7 @@ impl UserEdit {
                 };
             } else {
                 let (id, conn) = (self.id, self.conn);
-                let done = move |r: Result<(), Option<String>>| {
-                    if let Err(Some(reason)) = r {
-                        refused(id, conn, &reason);
-                    }
-                };
+                let done = move |r| answered(id, conn, r);
                 unsafe {
                     hxhandlers::send::user::account_save(htlc, &login, &pass, &name, access, done)
                 };
@@ -214,6 +200,20 @@ impl UserEdit {
                 self.pass_row.set_text("");
             }
         }
+    }
+}
+
+/// The server's answer to editor `id`'s Save. The editor closes once the
+/// account is saved; a refusal leaves it open, so nothing typed is lost.
+fn answered(id: usize, conn: Bound, r: Result<(), Option<String>>) {
+    match r {
+        Ok(()) => {
+            if let Some(st) = EDITORS.with_borrow(|m| m.get(&id).cloned()) {
+                st.window.close();
+            }
+        }
+        Err(Some(reason)) => refused(id, conn, &reason),
+        Err(None) => {}
     }
 }
 
@@ -434,7 +434,6 @@ unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
         name: RefCell::default(),
         pass: RefCell::default(),
         is_new,
-        made: RefCell::default(),
         creating: Cell::new(false),
         id,
     });
