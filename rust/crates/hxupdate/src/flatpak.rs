@@ -1,6 +1,9 @@
 //! What the Flatpak portal's update monitor has said, and which banner that
-//! calls for. Inside the Flatpak there are no versions to compare, only the
-//! commits the portal reports.
+//! calls for. The portal reports commits, not versions, and only once it
+//! first polls, up to half an hour after it starts; until then the feed's
+//! version for the installed branch stands in.
+
+use crate::{Feed, Version};
 
 /// The portal's `version` property from which `CreateUpdateMonitor` and
 /// `Update` exist.
@@ -20,8 +23,13 @@ pub struct PortalState {
     /// The `status` and `progress` of the last `Progress`, once the user has
     /// asked for the update.
     pub progress: Option<(u32, u32)>,
-    /// The remote commit the user answered "Later" to.
+    /// The version the feed names for this branch, when it is newer than
+    /// this build; empty otherwise.
+    pub feed: String,
+    /// The remote commit, and the feed's version, the user answered "Later"
+    /// to.
     pub dismissed: String,
+    pub dismissed_version: String,
 }
 
 /// `Progress`'s `status`.
@@ -33,13 +41,22 @@ impl PortalState {
     /// An `UpdateAvailable`, which the portal sends when the installed or
     /// remote commit changes. Unless an update is still running, the commits
     /// decide again, so an update the software center made shows here.
-    pub fn update_available(&mut self, running: String, local: String, remote: String) {
+    ///
+    /// A "Later" to the feed's version, at the portal's first report, becomes
+    /// a "Later" to the commit it reports; true when it did, to be kept.
+    pub fn update_available(&mut self, running: String, local: String, remote: String) -> bool {
         if !matches!(self.progress, Some((PROGRESS_RUNNING, _))) {
             self.progress = None;
+        }
+        let carried =
+            self.remote.is_empty() && !self.feed.is_empty() && self.feed == self.dismissed_version;
+        if carried {
+            self.dismissed = remote.clone();
         }
         self.running = running;
         self.local = local;
         self.remote = remote;
+        carried
     }
 }
 
@@ -80,15 +97,33 @@ pub fn notice(enabled: bool, s: &PortalState) -> Notice {
         // Empty: nothing was installed, so the commits still say it all.
         _ => {}
     }
+    // The feed speaks only until the portal reports.
+    let out = if s.remote.is_empty() {
+        !s.feed.is_empty() && s.feed != s.dismissed_version
+    } else {
+        s.remote != s.local && s.remote != s.dismissed
+    };
     // An update that is out wins over one already installed: installing it
     // ends with a restart anyway.
-    if !s.remote.is_empty() && s.remote != s.local && s.remote != s.dismissed {
+    if out {
         Notice::Available
     } else if !s.local.is_empty() && !s.running.is_empty() && s.local != s.running {
         Notice::Installed
     } else {
         Notice::None
     }
+}
+
+/// The version `feed` names for `branch`, the Flatpak branch installed
+/// (`stable` or `beta`), when it is newer than `running`. The beta branch
+/// follows stable, so each branch hears only about its own entry.
+pub fn feed_newer(running: &str, branch: &str, feed: &Feed) -> Option<String> {
+    let entry = match branch {
+        "stable" => feed.channels.stable.as_ref(),
+        "beta" => feed.channels.beta.as_ref(),
+        _ => None,
+    }?;
+    (Version::parse(&entry.version)? > Version::parse(running)?).then(|| entry.version.clone())
 }
 
 #[cfg(test)]
@@ -103,7 +138,7 @@ mod tests {
             local: local.into(),
             remote: remote.into(),
             progress,
-            dismissed: String::new(),
+            ..Default::default()
         };
         let current = ("a", "a", "a");
         let available = ("a", "a", "b");
@@ -200,6 +235,69 @@ mod tests {
                 overall_percent(progress, op, n_ops),
                 expected,
                 "{op:?}/{n_ops:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_feed_speaks_until_the_portal_reports() {
+        // (feed, dismissed version, commits reported, expected notice)
+        let cases = [
+            ("1.5.0b1", "", ("", "", ""), Notice::Available),
+            ("", "", ("", "", ""), Notice::None),
+            ("1.5.0b1", "1.5.0b1", ("", "", ""), Notice::None),
+            // Once the portal has reported, the commits decide.
+            ("1.5.0b1", "", ("a", "a", "a"), Notice::None),
+            ("1.5.0b1", "", ("a", "b", "b"), Notice::Installed),
+            ("1.5.0b1", "", ("a", "a", "b"), Notice::Available),
+        ];
+        for (feed, dismissed_version, (running, local, remote), expected) in cases {
+            let s = PortalState {
+                version: 2,
+                running: running.into(),
+                local: local.into(),
+                remote: remote.into(),
+                feed: feed.into(),
+                dismissed_version: dismissed_version.into(),
+                ..Default::default()
+            };
+            assert_eq!(notice(true, &s), expected, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn later_to_the_feed_becomes_later_to_the_first_commit_reported() {
+        let mut s = PortalState {
+            version: 2,
+            feed: "1.5.0b1".into(),
+            dismissed_version: "1.5.0b1".into(),
+            ..Default::default()
+        };
+        assert!(s.update_available("a".into(), "a".into(), "b".into()));
+        assert_eq!(notice(true, &s), Notice::None);
+        // A newer commit later in the session is announced.
+        assert!(!s.update_available("a".into(), "a".into(), "c".into()));
+        assert_eq!(notice(true, &s), Notice::Available);
+    }
+
+    #[test]
+    fn feed_newer_reads_the_installed_branch() {
+        let feed = crate::parse_feed(
+            br#"{"schema":1,"channels":{"stable":{"version":"1.4.0"},"beta":{"version":"1.5.0b1"}}}"#,
+        )
+        .expect("parse");
+        for (running, branch, expected) in [
+            ("1.4.1b2", "beta", Some("1.5.0b1")),
+            ("1.5.0b1", "beta", None),
+            ("1.3.2", "stable", Some("1.4.0")),
+            ("1.4.0", "stable", None),
+            ("1.3.2", "master", None),
+            ("dev", "beta", None),
+        ] {
+            assert_eq!(
+                feed_newer(running, branch, &feed).as_deref(),
+                expected,
+                "{running} on {branch}"
             );
         }
     }

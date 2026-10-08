@@ -1,5 +1,5 @@
 //! The pure half of the update check: what a GtkHx version string means and
-//! how two of them order, the `updates.json` feed the outside-Flatpak check
+//! how two of them order, the `updates.json` feed the update check
 //! reads, and the decision of when to ask and what to tell the user. The
 //! Flatpak's own decision, from what the portal reports, is in [`flatpak`].
 //!

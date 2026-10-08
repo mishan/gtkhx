@@ -33,7 +33,7 @@ What the site carries:
 | `gtkhx.flatpakrepo` | The repository alone, for `flatpak remote-add`. |
 | `GtkHx-<arch>.flatpak`, `GtkHx-beta-<arch>.flatpak` | Single-file bundles of the signed commits. Installed, they set up the repository as their remote and update from it. |
 | `gtkhx.gpg` | The public key. |
-| `updates.json` | The feed the update check outside Flatpak reads (docs/updates.md). |
+| `updates.json` | The feed the update check reads (docs/updates.md). |
 | `index.html`, `gtkhx.png` | The landing page. |
 
 The templates for all but the repository, the feed and the bundles live here, in

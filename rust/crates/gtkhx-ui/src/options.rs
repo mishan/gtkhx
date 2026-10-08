@@ -489,7 +489,7 @@ pub(crate) fn page_general(page: &adw::PreferencesPage) {
     if crate::updates::BUILD_ENABLED && crate::updates::checks_wired() {
         let updates = group(&tr("Updates"));
         let how = if crate::updates::in_flatpak() {
-            tr("Uses Flatpak to check for updates.")
+            tr("Uses Flatpak to check for updates, and asks dl.gtkhx.org once when GtkHx starts.")
         } else {
             tr("Asks dl.gtkhx.org once a day. Sends no information about you or your servers.")
         };
