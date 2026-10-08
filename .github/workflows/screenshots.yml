@@ -1,0 +1,44 @@
+# Check that the committed screenshots match what the tree draws, before a
+# release is tagged.
+#
+# A released tree's AppStream metadata points its screenshots at its own tag
+# (meson.build, SCREENSHOT_REF), so pictures that are stale when the tag is
+# cut stay stale in software centers for that whole release. The check runs
+# on a pull request whose meson.build names a release version (no -dev), the
+# release-prep PR, and by hand. Taking every scene is too slow for every PR.
+# See docs/screenshots.md.
+
+name: screenshots
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [meson.build]
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: committed screenshots are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          v=$(sed -n "s/^  version : '\(.*\)',$/\1/p" meson.build)
+          echo "version $v"
+          case "$v" in
+            '') echo "::error::no version in meson.build"; exit 1 ;;
+            *-dev) echo "release=" >> "$GITHUB_OUTPUT" ;;
+            *) echo "release=1" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - if: steps.version.outputs.release || github.event_name == 'workflow_dispatch'
+        run: tools/screenshots.sh --check
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build-screenshots/
+          if-no-files-found: ignore

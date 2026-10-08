@@ -12,6 +12,11 @@ tools/screenshots.sh chat news    # just these
 tools/screenshots.sh --check      # take them afresh; fail if any changed
 ```
 
+A release's AppStream metadata points its screenshots at its own tag, so the pictures a tag
+carries are the ones software centers show for that whole release. Retake them before the
+release-prep PR, the one that drops `-dev` from the version in `meson.build`: the
+`screenshots` workflow runs `--check` on that PR, and can be run by hand from the Actions tab.
+
 It needs only Docker. Everything else is in the image `tools/screenshots/Dockerfile` builds,
 and the image is what makes the pictures the same on any machine: it pins the toolkit, the fonts
 and the renderer (the CI base image, by digest), the Hotline servers (Janus by digest, hxd-ng by
