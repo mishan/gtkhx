@@ -1,5 +1,7 @@
-## 1.5.1-dev
+## 1.5.1
 
+- Connecting
+  - A lock in the header bar shows when the connection is encrypted with TLS or HOPE; its tooltip names the TLS version and cipher suite, or the HOPE cipher
 - Settings
   - The icon picker fits its window again when wide banner icons are installed, instead of cutting off its columns and scrolling sideways
 - Tabs
