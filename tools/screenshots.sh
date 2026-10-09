@@ -44,13 +44,17 @@ trap 'rm -rf "$fresh" "$subprojects"' EXIT
 # the image doesn't have it, and the source is mounted read-only.
 cp -r "$root/subprojects/." "$subprojects"
 
-# seccomp and AppArmor unconfined: glycin decodes images in a bubblewrap
-# sandbox, and Docker's default profile refuses the namespaces it needs.
-# tracker.example.org is the fake tracker the tracker scene lists.
+# glycin decodes unsandboxed: its bubblewrap sandbox needs user namespaces,
+# which CI's runners refuse, and every picture decoded here is one the scenes
+# drew. seccomp and AppArmor stay unconfined because the committed pictures
+# were taken that way: under Docker's default profiles the classic scene's
+# pane tabs come out as titled strips. tracker.example.org is the fake
+# tracker the tracker scene lists.
 status=0
 docker run --rm \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     --add-host tracker.example.org:127.0.0.1 \
+    -e GTKHX_GLYCIN_NO_SANDBOX=1 \
     -e GTKHX_DEBUG="${GTKHX_DEBUG:-}" -e EXPLORE="${EXPLORE:-}" \
     -v "$root:/src:ro" -v "$subprojects:/src/subprojects" \
     ${shotbox:+-v "$shotbox:/shotbox:ro"} \
