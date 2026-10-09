@@ -594,16 +594,13 @@ htxf_connect (struct htxf_conn *htxf)
      * so file_send_one / file_recv_one know to use the split-
      * encoded fork headers (and raw-data uploads).
      *
-     * Why we DON'T set LARGE_FILE for sub-4-GiB transfers even
-     * when caps include it: spec says large-file uploads send
-     * raw data only, no FFO. If we set the flag for every
-     * transfer on a large-file-capable server, we lose the
-     * INFO fork on small uploads — type/creator/comment go
-     * missing server-side. Keeping LARGE_FILE off for fits-in-
-     * 32-bit transfers preserves the legacy FFO behaviour for
-     * the common case. The cap negotiation still works — both
-     * peers KNOW they can speak large-file, they just don't have
-     * to use the wire shape for this particular transfer. */
+     * A file download sets LARGE_FILE whenever the cap was
+     * negotiated, as the spec requires: below 4 GiB the object
+     * is the same bytes either way, and a strict server refuses
+     * a handshake without it. A sub-4-GiB upload leaves it off:
+     * a large-file upload without HTXF_FLAG_FFO is raw data, so
+     * type/creator/comment would go missing, and a server that
+     * predates FFO would store the wrapper as the file. */
     gboolean size64
         = htxf->htlc
           && (hx_conn_has_cap (htxf->htlc, HTLC_CAP_LARGE_FILES)) != 0
@@ -618,9 +615,12 @@ htxf_connect (struct htxf_conn *htxf)
      * to the queued transfer by ref before any cipher state exists. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     guint16 type = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-    size_t hdr_len = hxnet_htxf_pack_preamble (hdr_buf, sizeof (hdr_buf),
-                                               htxf->ref, htxf->total_size,
-                                               type, /*flags=*/0, size64);
+    gboolean large_get = htxf->type == XFER_GET && !htxf->opt.folder
+                         && htxf->htlc
+                         && hx_conn_has_cap (htxf->htlc, HTLC_CAP_LARGE_FILES);
+    size_t hdr_len = hxnet_htxf_pack_preamble (
+        hdr_buf, sizeof (hdr_buf), htxf->ref, htxf->total_size, type,
+        large_get ? HTXF_FLAG_LARGE_FILE : 0, size64);
     if (hdr_len == 0) {
         return FALSE;
     }
