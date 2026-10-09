@@ -140,7 +140,7 @@ fn a_message_to_no_one_is_refused_or_unanswered() {
             let list = a.send_expecting(&request(300, &[]), Some(Expect::UserList));
             loop {
                 match a.next_event().unwrap_or_else(|e| panic!("{e}")) {
-                    Event::Frame(f) if f.header.trans == t => panic!("janus answered: {f:?}"),
+                    Event::Frame(f) if hx_e2e::is_reply(&f, t) => panic!("janus answered: {f:?}"),
                     Event::Session(hxsession::Event::UserList { trans, .. }) if trans == list => {
                         break
                     }

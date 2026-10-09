@@ -98,7 +98,7 @@ fn answer(c: &mut Client, t: u32) -> hxsession::Event {
                 | S::MediaFailed { trans, .. }
                 | S::Failed { trans, .. }),
             ) if trans == t => return e,
-            Event::Frame(f) if f.header.trans == t => {
+            Event::Frame(f) if hx_e2e::is_reply(&f, t) => {
                 panic!("{}: the expected reply came whole", c.server().name)
             }
             _ => {}

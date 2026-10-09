@@ -50,7 +50,7 @@ fn outcomes(c: &mut Client, ts: &[u32]) -> Vec<Result<(), Option<String>>> {
             Event::Session(S::Failed { trans, reason }) => {
                 got.insert(trans, Err(reason));
             }
-            Event::Frame(f) if ts.contains(&f.header.trans) => {
+            Event::Frame(f) if ts.iter().any(|&t| hx_e2e::is_reply(&f, t)) => {
                 panic!("{}: an expected reply came whole", c.server().name)
             }
             _ => {}

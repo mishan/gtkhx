@@ -17,7 +17,7 @@
 pub mod client;
 mod servers;
 
-pub use client::{Client, Entry, Reply};
+pub use client::{is_reply, Client, Entry, Reply};
 pub use servers::{servers_with, Cap, Server};
 
 use std::sync::atomic::{AtomicU32, Ordering};
