@@ -13,6 +13,9 @@ voice_chat = true
 video_chat = true
 screen_share = true
 download_files = true
+download_folders = true
+upload_files = true
+upload_folders = true
 
 # The HOPE tests ping in bursts that mhxd's flood limits, which hxd-ng
 # keeps by default, would kick.
