@@ -49,7 +49,8 @@ Janus:
 `conf/hxd-ng.toml` turns on voice and video with the spec's default
 ceilings — one screen-share slot a room, so the second-sharer refusal is
 testable. It also serves a file-mode banner and a files area holding
-`test.txt`, for the HOPE, TLS and transfer tests. `conf/accounts/` has
+`test.txt`, `test_folder/` and an `Uploads/` folder, for the HOPE, TLS,
+transfer and folder transfer tests. `conf/accounts/` has
 two accounts:
 
 - `guest` (the harness's login): voice, `video_chat` and `screen_share`.
