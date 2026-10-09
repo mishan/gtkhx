@@ -351,6 +351,79 @@ pub(crate) fn wheel_switches_tabs(
     bar.as_ref().add_controller(scroll);
 }
 
+/// Keep a tab bar's tabs in it: a tab dragged off the bar stops there.
+///
+/// Past the bar's edge libadwaita turns a tab drag into a drag and drop, and
+/// any tab bar or tab view in the process takes the tab — so a connection
+/// could land among a Chat panel's conversations, and a conversation in the
+/// connection strip or another connection's Chat. With animations off it also
+/// crashed GTK: a tab dragged back over its bar gets a placeholder, which is
+/// unparented the moment the pointer leaves again, while GTK is still walking
+/// up from it to deliver that crossing. None of our bars can put a tab
+/// anywhere else, so none of them needs the drop.
+///
+/// libadwaita starts the drop from the drag gesture on each of the bar's tab
+/// boxes, once the pointer — on a motion or on the release — is more than
+/// four drag thresholds outside that box. This controller sees each event
+/// first, being in the capture phase, and just short of that distance cancels
+/// the box's gesture, which ends the reorder with the tab where it is.
+pub(crate) fn keep_tabs_in_bar(bar: &libadwaita::TabBar) {
+    use gtk4::gdk;
+    use gtk4::prelude::*;
+
+    fn gestures(w: &gtk4::Widget, out: &mut Vec<(gtk4::Widget, gtk4::GestureDrag)>) {
+        if w.type_().name() == "AdwTabBox" {
+            let controllers = w.observe_controllers();
+            for i in 0..controllers.n_items() {
+                if let Some(g) = controllers.item(i).and_downcast::<gtk4::GestureDrag>() {
+                    out.push((w.clone(), g));
+                }
+            }
+        }
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            gestures(&c, out);
+            child = c.next_sibling();
+        }
+    }
+    let mut boxes = Vec::new();
+    gestures(bar.upcast_ref(), &mut boxes);
+
+    let legacy = gtk4::EventControllerLegacy::new();
+    legacy.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    legacy.connect_event(move |_, event| {
+        let kind = event.event_type();
+        if kind != gdk::EventType::MotionNotify && kind != gdk::EventType::ButtonRelease {
+            return gtk4::glib::Propagation::Proceed;
+        }
+        let Some((x, y)) = event.position() else {
+            return gtk4::glib::Propagation::Proceed;
+        };
+        for (tab_box, gesture) in boxes.iter().filter(|(_, g)| g.is_active()) {
+            let Some(native) = tab_box.native() else {
+                continue;
+            };
+            let (sx, sy) = native.surface_transform();
+            let Some(p) = native.compute_point(
+                tab_box,
+                &gtk4::graphene::Point::new((x - sx) as f32, (y - sy) as f32),
+            ) else {
+                continue;
+            };
+            let margin = (tab_box.settings().gtk_dnd_drag_threshold() * 4 - 1) as f32;
+            if p.x() < -margin
+                || p.y() < -margin
+                || p.x() > tab_box.width() as f32 + margin
+                || p.y() > tab_box.height() as f32 + margin
+            {
+                gesture.reset();
+            }
+        }
+        gtk4::glib::Propagation::Proceed
+    });
+    bar.add_controller(legacy);
+}
+
 /// C `char*` → owned `String` (empty on NULL). UTF-8 lossy.
 ///
 /// # Safety

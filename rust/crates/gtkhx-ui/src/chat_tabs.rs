@@ -198,6 +198,8 @@ pub extern "C" fn gtkhx_chat_tabs_init(htlc: *mut c_void) -> *mut gtk::ffi::GtkW
     let view = adw::TabView::new();
     view.connect_close_page(on_close_page);
     view.connect_selected_page_notify(on_selected_page_changed);
+    // A drop must not be answered with nothing; see conn_tabs' on_create_window.
+    view.connect_create_window(|view| Some(view.clone()));
 
     let ptr = view.as_ptr() as *mut gtk::ffi::GtkWidget;
     STATE.with(|s| {
