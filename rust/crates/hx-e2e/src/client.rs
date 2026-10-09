@@ -19,6 +19,13 @@ use crate::Server;
 const HTLS_HDR_AGREEMENT: u32 = 0x6d;
 /// `HTLS_HDR_TASK` — the reply to a client request.
 const HTLS_HDR_TASK: u32 = 0x0001_0000;
+
+/// Whether `f` is the reply to request `trans`. Only a reply echoes a
+/// request's number: a server's pushes count their own, as mhxd's do, and
+/// may share it.
+pub fn is_reply(f: &Frame, trans: u32) -> bool {
+    f.header.type_ == HTLS_HDR_TASK && f.header.trans == trans
+}
 /// `HTLS_DATA_FILE_LIST` — one entry of a FILE_LIST reply.
 const TAG_FILE_LIST: u16 = 0x00c8;
 /// `HTLC_CAP_TEXT_ENCODING` / `HTLC_CAP_LARGE_FILES`.
@@ -365,9 +372,7 @@ impl Client {
             tokio::time::timeout(REPLY_TIMEOUT, async {
                 loop {
                     match events.recv().await {
-                        Some(Event::Frame(f))
-                            if f.header.type_ == HTLS_HDR_TASK && f.header.trans == trans =>
-                        {
+                        Some(Event::Frame(f)) if is_reply(&f, trans) => {
                             return Ok(Reply::from_frame(f));
                         }
                         Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,

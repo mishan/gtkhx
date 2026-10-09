@@ -159,7 +159,7 @@ fn history(c: &mut Client, before: u64, after: u64, limit: u16) -> (Vec<HistoryE
             Event::Session(hxsession::Event::Failed { trans, .. }) if *trans == t => {
                 panic!("{name}: history refused: {e:?}")
             }
-            Event::Frame(f) if f.header.trans == t => {
+            Event::Frame(f) if hx_e2e::is_reply(f, t) => {
                 panic!("{name}: the expected reply came whole")
             }
             _ => None,
