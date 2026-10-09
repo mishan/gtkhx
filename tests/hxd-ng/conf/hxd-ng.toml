@@ -20,3 +20,11 @@ advertise = ["127.0.0.1:5524"]
 # Present = video on, with the spec's default ceilings. One screen slot
 # a room, so the second-sharer refusal is testable.
 [voice.video]
+
+# What the HTXF tests download: test.txt, "hello world\n".
+[files]
+root = "/srv/hxd-ng/files"
+
+# Served over HTXF, so the HOPE banner tests fetch it sealed or plain.
+[banner]
+file = "/etc/hxd-ng/banner.gif"
