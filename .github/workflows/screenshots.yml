@@ -34,6 +34,12 @@ jobs:
             *-dev) echo "release=" >> "$GITHUB_OUTPUT" ;;
             *) echo "release=1" >> "$GITHUB_OUTPUT" ;;
           esac
+      # gdk-pixbuf loads images through glycin in a bubblewrap sandbox, which
+      # needs the user namespaces Ubuntu's runners refuse by default. Without
+      # them the classic theme's pixmaps don't load and its pane tabs fall back
+      # to titles.
+      - if: steps.version.outputs.release || github.event_name == 'workflow_dispatch'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - if: steps.version.outputs.release || github.event_name == 'workflow_dispatch'
         run: tools/screenshots.sh --check
       - if: failure()
