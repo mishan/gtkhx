@@ -2,6 +2,8 @@
 
 - Settings
   - The icon picker fits its window again when wide banner icons are installed, instead of cutting off its columns and scrolling sideways
+- Tabs
+  - Fixed a crash when dragging a connection tab off the tab strip and back. A tab dragged off its tab bar now stops at the edge, so connection and chat tabs no longer end up in each other's bars
 
 ## 1.5.0
 

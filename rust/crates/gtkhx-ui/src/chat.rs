@@ -169,6 +169,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     if let Some(tv) = tab_view.downcast_ref::<adw::TabView>() {
         tab_bar.set_view(Some(tv));
         crate::wheel_switches_tabs(&tab_bar, tv);
+        crate::keep_tabs_in_bar(&tab_bar);
     }
     // Autohide alone isn't enough: it doesn't count the pinned public tab
     // as "only one", so a connection with no conversations open would show

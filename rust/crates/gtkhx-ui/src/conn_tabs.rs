@@ -317,7 +317,8 @@ fn finish_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, sess: *
     view.close_page_finish(page, true);
 }
 
-/// A tab was dragged out of the strip and dropped on the desktop.
+/// A tab was dragged out of the strip and dropped on the desktop — which
+/// `keep_tabs_in_bar` now prevents, so this is the fallback if one gets out.
 ///
 /// `AdwTabView` asks here for the view to move the page into, and **the answer
 /// may not be nothing**: libadwaita logs a critical for a NULL and then leaves
@@ -409,6 +410,7 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_new() -> *mut gtk::ffi::GtkWidget {
     let bar = adw::TabBar::new();
     bar.set_view(Some(&view));
     crate::wheel_switches_tabs(&bar, &view);
+    crate::keep_tabs_in_bar(&bar);
     // The default, set explicitly because the single-connection appearance
     // depends on it: with one page (and none pinned) the bar hides itself, so
     // a session with one connection looks as it did before this existed.
