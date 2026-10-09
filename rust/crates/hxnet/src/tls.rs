@@ -290,6 +290,28 @@ pub fn peer_cert_fingerprint(stream: &TlsStream<TcpStream>) -> Option<String> {
     Some(fingerprint_sha256(leaf.as_ref()))
 }
 
+/// What a completed handshake settled on, for telling the user how the
+/// connection is encrypted.
+#[derive(Debug, Clone)]
+pub struct Negotiated {
+    /// "1.2" or "1.3".
+    pub version: String,
+    /// The IANA name, e.g. `TLS13_AES_256_GCM_SHA384`.
+    pub suite: String,
+}
+
+pub fn negotiated(stream: &TlsStream<TcpStream>) -> Option<Negotiated> {
+    use tokio_rustls::rustls::ProtocolVersion;
+    let (_io, conn) = stream.get_ref();
+    let version = match conn.protocol_version()? {
+        ProtocolVersion::TLSv1_2 => "1.2".to_string(),
+        ProtocolVersion::TLSv1_3 => "1.3".to_string(),
+        v => format!("{v:?}"),
+    };
+    let suite = format!("{:?}", conn.negotiated_cipher_suite()?.suite());
+    Some(Negotiated { version, suite })
+}
+
 pub(crate) fn fingerprint_sha256(der: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;

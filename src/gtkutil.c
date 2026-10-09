@@ -525,6 +525,8 @@ status_bar_set (session *sess, int status, gboolean announce)
     }
 
     toolbar_set_status (fmt ? fmt : fixed);
+    /* Not at "Connected to": the TLS certificate prompt may still be up. */
+    gtkhx_encryption_lock_update (status == 2 ? sess->htlc : NULL);
     if (toast) {
         toolbar_show_toast (toast);
     }

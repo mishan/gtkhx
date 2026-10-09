@@ -65,6 +65,7 @@
 
 use std::ffi::c_void;
 use std::os::raw::{c_int, c_uint};
+use std::sync::{Arc, OnceLock};
 
 use hxbridge::runtime::Runtime;
 use hxsession::Handled;
@@ -114,6 +115,9 @@ pub struct HxnetConnection {
     /// requests. `None` on a bare actor with no session
     /// (`hxnet_connection_open_tcp`).
     session: Option<crate::session::SharedSession>,
+    /// Filled once a TLS handshake completes and its certificate is trusted;
+    /// empty on any other transport.
+    tls: Arc<OnceLock<crate::tls::Negotiated>>,
 }
 
 /// Callback-mode FFI state. Holds the tokio→async_channel pump
@@ -591,6 +595,35 @@ pub unsafe extern "C" fn hxnet_connection_hope_compression(handle: *mut HxnetCon
         Some(hxhope::Compression::Gzip) => 1,
         Some(hxhope::Compression::Lz4) => 2,
         Some(hxhope::Compression::Zstd) => 3,
+    }
+}
+
+/// How a connection's traffic is encrypted, for telling the user.
+pub enum Encryption {
+    Tls(crate::tls::Negotiated),
+    /// The HOPE cipher's display name.
+    Hope(&'static str),
+}
+
+/// The encryption `handle`'s transport settled on, or None when it runs in
+/// the clear — including HOPE without a cipher, which only authenticates.
+///
+/// # Safety
+///
+/// `handle` is NULL or valid.
+pub unsafe fn connection_encryption(handle: *const HxnetConnection) -> Option<Encryption> {
+    let h = handle.as_ref()?;
+    if let Some(n) = h.tls.get() {
+        return Some(Encryption::Tls(n.clone()));
+    }
+    let s = h
+        .session
+        .as_ref()?
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match s.negotiated()?.cipher? {
+        hxhope::Cipher::Blowfish => Some(Encryption::Hope("Blowfish")),
+        hxhope::Cipher::ChaCha20Poly1305 => Some(Encryption::Hope("ChaCha20-Poly1305")),
     }
 }
 
@@ -1405,6 +1438,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         _callback_state: None,
         _join: join,
         session: Some(session),
+        tls: Default::default(),
     });
     Box::into_raw(handle)
 }
@@ -1595,18 +1629,21 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     );
     traced(&session);
     let lifecycle_session = session.clone();
+    let tls: Arc<OnceLock<crate::tls::Negotiated>> = Default::default();
+    let lifecycle_tls = tls.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_tls_lifecycle(
             req,
             lifecycle_session,
             verify_closure,
+            lifecycle_tls,
             cmd_rx,
             evt_tx,
         )
         .await;
     });
 
-    wire_callback_state_with_on_state(
+    let handle = wire_callback_state_with_on_state(
         rt,
         cmd,
         events,
@@ -1617,7 +1654,11 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         on_session,
         user_data,
         Some(session),
-    )
+    );
+    if let Some(h) = handle.as_mut() {
+        h.tls = tls;
+    }
+    handle
 }
 
 /// Polling-mode sibling of [`hxnet_connection_open_plaintext_tls`]: runs
@@ -1767,11 +1808,14 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
     });
     let session = req.session(Handled::NONE);
     let lifecycle_session = session.clone();
+    let tls: Arc<OnceLock<crate::tls::Negotiated>> = Default::default();
+    let lifecycle_tls = tls.clone();
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_tls_lifecycle(
             req,
             lifecycle_session,
             verify_closure,
+            lifecycle_tls,
             cmd_rx,
             evt_tx,
         )
@@ -1786,6 +1830,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         _callback_state: None,
         _join: join,
         session: Some(session),
+        tls,
     });
     Box::into_raw(handle)
 }
@@ -2234,6 +2279,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         _callback_state: None,
         _join: join,
         session: Some(session),
+        tls: Default::default(),
     });
     Box::into_raw(handle)
 }
@@ -2354,6 +2400,7 @@ fn wire_callback_state_with_on_state(
         _callback_state: None,
         _join: join,
         session,
+        tls: Default::default(),
     });
     let handle_ptr = Box::into_raw(handle_box);
 

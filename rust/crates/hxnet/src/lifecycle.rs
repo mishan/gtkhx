@@ -10,6 +10,8 @@
 //! A step that fails does not start the session; the consumer gets an
 //! `Event::Shutdown` with a `ShutdownReason::StreamError` saying which.
 
+use std::sync::{Arc, OnceLock};
+
 use tokio::sync::mpsc;
 
 use crate::session::SharedSession;
@@ -138,6 +140,7 @@ pub async fn run_plaintext_tls_lifecycle(
     req: PlaintextOpenRequest,
     session: SharedSession,
     verify: TlsVerifyFn,
+    negotiated: Arc<OnceLock<crate::tls::Negotiated>>,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
@@ -216,6 +219,9 @@ pub async fn run_plaintext_tls_lifecycle(
         }
     }
 
+    if let Some(n) = crate::tls::negotiated(&tls) {
+        let _ = negotiated.set(n);
+    }
     run_plaintext_over(tls, session, cmd_rx, evt_tx).await;
 }
 
@@ -732,6 +738,7 @@ mod tests {
             req.clone(),
             req.session(Handled::NONE),
             verify,
+            Default::default(),
             cmd_rx,
             evt_tx,
         ));

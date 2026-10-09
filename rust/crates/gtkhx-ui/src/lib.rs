@@ -213,6 +213,8 @@ pub mod banner;
 // GIF user avatars and their animation (was gif_avatar.c). Exports the
 // gtkhx_avatar_* C ABI in gif_avatar.h.
 pub mod avatar;
+// the header bar's lock: whether, and how, the focused connection is encrypted.
+pub mod encryption_lock;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
