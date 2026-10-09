@@ -12,3 +12,9 @@ use_any_name = true
 voice_chat = true
 video_chat = true
 screen_share = true
+download_files = true
+
+# The HOPE tests ping in bursts that mhxd's flood limits, which hxd-ng
+# keeps by default, would kick.
+[extra]
+can_spam = true

@@ -20,3 +20,20 @@ advertise = ["127.0.0.1:5524"]
 # Present = video on, with the spec's default ceilings. One screen slot
 # a room, so the second-sharer refusal is testable.
 [voice.video]
+
+# The TLS tests' port, and its transfer port one above. A self-signed pair
+# made on first start, in the data volume where the server may write; the
+# harness accepts it as it accepts Janus's.
+[tls]
+bind = "0.0.0.0:5620"
+cert = "/var/lib/hxd-ng/tls/fullchain.pem"
+key = "/var/lib/hxd-ng/tls/privkey.pem"
+self_signed = true
+
+# What the HTXF tests download: test.txt, "hello world\n".
+[files]
+root = "/srv/hxd-ng/files"
+
+# Served over HTXF, so the HOPE banner tests fetch it sealed or plain.
+[banner]
+file = "/etc/hxd-ng/banner.gif"
