@@ -39,13 +39,18 @@ Janus:
 | Port | |
 |---|---|
 | 5520/tcp | Hotline |
+| 5521/tcp | File transfers and the banner (HTXF) |
+| 5620/tcp | Hotline over TLS, with a self-signed certificate made on first start |
+| 5621/tcp | HTXF over TLS |
 | 5524/udp | Voice and video media |
 
 ## Configuration
 
 `conf/hxd-ng.toml` turns on voice and video with the spec's default
 ceilings — one screen-share slot a room, so the second-sharer refusal is
-testable. `conf/accounts/` has two accounts:
+testable. It also serves a file-mode banner and a files area holding
+`test.txt`, for the HOPE, TLS and transfer tests. `conf/accounts/` has
+two accounts:
 
 - `guest` (the harness's login): voice, `video_chat` and `screen_share`.
 - `novideo` / `novideo`: voice but neither video bit, for the access

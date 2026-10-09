@@ -12,7 +12,7 @@ hand.
 |------------|------------------|-------------------------------------|------------|
 | `mhxd`     | Hotline server   | 5500 (HTLS), 5501 (HTXF)            | `localhost:5500` |
 | `janus`    | Hotline server   | 5510/5511, 5610/5611 (TLS), 5514/udp | `localhost:5510` |
-| `hxd-ng`   | Hotline server (voice + video) | 5520, 5524/udp        | `localhost:5520` |
+| `hxd-ng`   | Hotline server (voice + video) | 5520/5521, 5620/5621 (TLS), 5524/udp | `localhost:5520` |
 | `hlservd`  | Hotline server (the 1.9 server as a daemon) | 5530, 5531 (+5532/5533) | `localhost:5530` |
 | `hxtrackd` | Tracker (v1)     | 5498 (HTRK), 5499/udp               | tracker host `localhost:5498` |
 | `argus`    | Tracker (v1/2/3) | 5698 (HTRK), 6498 (TLS), 5699/udp   | tracker host `localhost:5698` |

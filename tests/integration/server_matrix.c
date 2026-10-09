@@ -135,19 +135,20 @@ const hx_test_server hx_test_server_matrix[] = {
          * first VOICE row, and stay on Janus; the video tests run
          * against every VIDEO row. The caps list only what the rig's
          * config turns on and a test here relies on. The HOPE tests
-         * take the first matching row, mhxd's or Janus's, so they reach
-         * this one under GTKHX_TEST_SERVERS=hxd-ng. */
+         * and the TLS tests take the first matching row, mhxd's or
+         * Janus's, so they reach this one under GTKHX_TEST_SERVERS=hxd-ng.
+         * TLS is on 5620/5621, the +100 Janus's ports follow. */
         .name = "hxd-ng",
         .host = "127.0.0.1",
         .port = 5520,
         .xfer_port = 5521,
-        .tls_port = 0,
-        .tls_xfer_port = 0,
+        .tls_port = 5620,
+        .tls_xfer_port = 5621,
         .voice_port = 5524,
         .hl_version = 185,
         .caps = HX_TEST_CAP_VOICE | HX_TEST_CAP_VIDEO | HX_TEST_CAP_HOPE
                 | HX_TEST_CAP_CHACHA20 | HX_TEST_CAP_BLOWFISH
-                | HX_TEST_CAP_BANNER_HTXF,
+                | HX_TEST_CAP_BANNER_HTXF | HX_TEST_CAP_TLS,
     },
 };
 

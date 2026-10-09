@@ -6,7 +6,7 @@
 #
 #   * Servers   : mhxd @ localhost:5500, Janus @ localhost:5510 (+TLS 5610,
 #                 voice + video on 5514/udp),
-#                 hxd-ng @ localhost:5520 (voice + video, media on 5524/udp),
+#                 hxd-ng @ localhost:5520 (+TLS 5620, voice + video on 5524/udp),
 #                 hlservd @ localhost:5530 (the 1.9 server as a daemon)
 #   * Trackers  : hxtrackd @ localhost:5498, Argus @ localhost:5698 (+TLS 6498)
 #   * SOCKS5    : localhost:1080
