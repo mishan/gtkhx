@@ -156,9 +156,8 @@ test_file_put_round_trip (void)
         = g_strdup_printf ("tier3_put_%08x.txt", g_random_int ());
 
     /* FFO upload total: 133-byte FILP header + data fork (no comment, no
-     * rsrc). Matches hxhandlers::recv::xfer::upload_ready's size accounting; the
-     * trailing 16-byte MACR marker file_send_one writes is not counted
-     * (the server stops after this many bytes). */
+     * rsrc). Matches hxhandlers::recv::xfer::upload_ready's size accounting,
+     * and is all file_send_one writes. */
     guint32 up_total = 133 + (guint32)body_len;
 
     guint8 hldir[64];
