@@ -193,10 +193,10 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
         cell->using_avatar = TRUE;
         /* Force a cicn re-resolve if the avatar is later cleared. */
         cell->icon_id_cached = 0;
+        /* Only a GIF wider than the name area has banner art past it. */
         int w = gdk_paintable_get_intrinsic_width (avatar);
-        cell->icon_left_pad = (w >= HX_USER_WIDE_ICON_THRESHOLD)
-                                  ? MIN (HX_USER_WIDE_ICON_LEFT_PAD, w)
-                                  : 0;
+        cell->icon_left_pad
+            = (w > HX_USER_WIDE_ICON_LEFT_PAD) ? HX_USER_WIDE_ICON_LEFT_PAD : 0;
         return;
     }
 
