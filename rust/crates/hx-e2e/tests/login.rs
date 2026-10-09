@@ -65,7 +65,12 @@ fn log_in(port: u16, login: &str, password: &str, over: Over) -> Outcome {
             let session = plain.session(Handled::LOGIN);
             let trust = Some(Box::new(|_: &str| true) as Box<dyn Fn(&str) -> bool + Send>);
             rt.spawn(run_plaintext_tls_lifecycle(
-                plain, session, trust, cmd_rx, evt_tx,
+                plain,
+                session,
+                trust,
+                Default::default(),
+                cmd_rx,
+                evt_tx,
             ));
         }
         Over::Hope(cipher) => {

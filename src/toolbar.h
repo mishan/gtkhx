@@ -14,6 +14,10 @@ extern GtkWidget *broadcast_btn;
  * before the toolbar is built (no-op). */
 extern void toolbar_set_status (const char *text);
 
+/* The lock beside the header's title (encryption_lock.rs); NULL hides it. */
+extern GtkWidget *gtkhx_encryption_lock_new (void);
+extern void gtkhx_encryption_lock_update (struct htlc_conn *htlc);
+
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);
 

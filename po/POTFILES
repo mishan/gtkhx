@@ -27,6 +27,7 @@ rust/crates/gtkhx-ui/src/connect.rs
 rust/crates/gtkhx-ui/src/conn_tabs.rs
 rust/crates/gtkhx-ui/src/create_post.rs
 rust/crates/gtkhx-ui/src/emoji.rs
+rust/crates/gtkhx-ui/src/encryption_lock.rs
 rust/crates/gtkhx-ui/src/file_info.rs
 rust/crates/gtkhx-ui/src/files/browser.rs
 rust/crates/gtkhx-ui/src/files/dialogs.rs

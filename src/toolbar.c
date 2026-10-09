@@ -1214,7 +1214,7 @@ create_toolbar_window (session *sess)
      * beside it — the header has no room for both at 468 px. The window
      * title itself still names the server for the taskbar. */
     {
-        GtkWidget *title_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+        GtkWidget *title_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
         GtkWidget *banner_row = banner_widget_new ();
 
         window_title = ADW_WINDOW_TITLE (
@@ -1222,6 +1222,7 @@ create_toolbar_window (session *sess)
         g_object_bind_property (toolbar_window, "title", window_title, "title",
                                 G_BINDING_SYNC_CREATE);
         gtk_widget_set_valign (banner_row, GTK_ALIGN_CENTER);
+        gtk_box_append (GTK_BOX (title_box), gtkhx_encryption_lock_new ());
         gtk_box_append (GTK_BOX (title_box), GTK_WIDGET (window_title));
         gtk_box_append (GTK_BOX (title_box), banner_row);
         g_signal_connect (banner_row, "notify::visible",
