@@ -1,3 +1,12 @@
+## 1.5.2-dev
+
+- Users
+  - Fixed avatars from 48 to 199 pixels wide showing nothing in the users list; on hxd-ng servers that was every avatar set from hx-ng
+- Files
+  - Fixed downloads failing on hxd-ng servers
+  - Fixed uploads to some servers, hxd-ng among them, reporting failure though the file arrived
+  - Fixed downloading a folder that holds files of 4 GB or more failing partway; 1.5.0 listed this as fixed but shipped without it
+
 ## 1.5.1
 
 - Connecting
