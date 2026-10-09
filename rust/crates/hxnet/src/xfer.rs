@@ -288,6 +288,48 @@ unsafe fn read_exact_progress(
     Ok(out)
 }
 
+/// Read the 16-byte MACR fork header that may follow a data fork.
+///
+/// `wait` is for a marker the FFO declared (a third fork): it is read like any
+/// other header. Without it the marker is optional, so a short read timeout is
+/// armed: servers send an empty trailing MACR even when the FFO says INFO +
+/// DATA, and some send none. `Ok(None)` is "nothing arrived"; a marker cut off
+/// partway is a desynced stream and an error.
+unsafe fn read_macr_marker(
+    hx: *mut HtxfConn,
+    p: &HxnetXferParams,
+    wait: bool,
+) -> Result<Option<[u8; ffo::FORK_HEADER_LEN]>, c_int> {
+    if !wait && crate::htxf::hxnet_htxf_set_read_timeout(hx, MACR_DRAIN_TIMEOUT_MS) != 0 {
+        return Err(EIO);
+    }
+    // Driven directly rather than through read_exact_progress, which collapses
+    // "nothing arrived" and "a partial marker" into one error.
+    let mut m = [0u8; ffo::FORK_HEADER_LEN];
+    let mut got = 0usize;
+    let marker = loop {
+        let n = crate::htxf::hxnet_htxf_read(hx, m[got..].as_mut_ptr(), m.len() - got);
+        if n < 1 {
+            break if got == 0 && !wait {
+                Ok(None)
+            } else {
+                Err(EIO)
+            };
+        }
+        p.report(n as u64);
+        got += n as usize;
+        if got == m.len() {
+            break Ok(Some(m));
+        }
+    };
+    // Disarm before the caller reads the resource fork itself, which can take
+    // longer than the drain timeout to arrive.
+    if !wait && crate::htxf::hxnet_htxf_set_read_timeout(hx, 0) != 0 {
+        return Err(EIO);
+    }
+    marker
+}
+
 /// Copy `data_len` bytes off the subchannel into `dst` (C `rd_wr_recv`).
 unsafe fn rd_wr_recv<W: Write>(
     hx: *mut HtxfConn,
@@ -467,6 +509,24 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     if is_preview {
         return 0; // previews never carry a resource fork
     }
+    if is_folder && p.file_budget == 0 {
+        // Large File: an item whose FFO does not fit the 4-byte per-item size
+        // is announced as 0, and its extent comes from the FFO's own fork
+        // headers (Capabilities-Large-File, "Per-item transfer size"). Read
+        // the MACR marker, waiting for it when the FFO declared a third fork,
+        // and discard the resource fork: folder-stream files never keep one.
+        let declared_rsrc = u16::from_be_bytes([hdr[22], hdr[23]]) >= 3;
+        match read_macr_marker(hx, p, declared_rsrc) {
+            Ok(Some(m)) => {
+                if let Err(e) = rd_wr_recv(hx, &mut std::io::sink(), ffo::fork_len(&m, large), p) {
+                    return e;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => return e,
+        }
+        return finish(&cfg, &path, typecrea, &pi, 0);
+    }
     if is_folder {
         // Folder-stream files never persist a resource fork, but the server may
         // have announced file_budget bytes and buffered a MACR marker. Drain up
@@ -495,45 +555,16 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos);
     }
     // 16-byte MACR fork header. The server declared more than the data fork, so
-    // a MACR marker *should* follow — but some servers over-declare file_budget
-    // and send nothing for a no-resource-fork file. Arm a short read timeout so
-    // a missing marker finishes cleanly instead of blocking until the server
-    // closes the socket (the ~2s stall the blocking C read had). A real marker
-    // is buffered right behind the data fork, so the timeout never clips it.
-    if crate::htxf::hxnet_htxf_set_read_timeout(hx, MACR_DRAIN_TIMEOUT_MS) != 0 {
-        return EIO;
-    }
-    // Drive the marker read directly so we can tell "nothing arrived" (a phantom
-    // the server over-declared → clean no-resource-fork completion) apart from a
-    // partial read that then failed (a real marker we've lost sync on → error).
-    // read_exact_progress collapses both into one Err, which would silently
-    // truncate a real resource fork and desync the stream, so it can't be used
-    // here.
-    let mut m = [0u8; ffo::FORK_HEADER_LEN];
-    let mut got = 0usize;
-    let marker_complete = loop {
-        let n = crate::htxf::hxnet_htxf_read(hx, m[got..].as_mut_ptr(), m.len() - got);
-        if n < 1 {
-            // No bytes yet → server sent no marker (clean finish). Some bytes
-            // already consumed → partial marker, the stream is desynced.
-            break if got == 0 { Ok(false) } else { Err(EIO) };
-        }
-        p.report(n as u64);
-        got += n as usize;
-        if got == m.len() {
-            break Ok(true);
-        }
+    // a MACR marker *should* follow, but some servers over-declare file_budget
+    // and send nothing for a no-resource-fork file: a missing marker finishes
+    // cleanly instead of blocking until the server closes the socket (the ~2s
+    // stall the blocking C read had). A real marker is buffered right behind
+    // the data fork, so the timeout never clips it.
+    let m = match read_macr_marker(hx, p, false) {
+        Ok(Some(m)) => m,
+        Ok(None) => return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos), // no marker at all
+        Err(e) => return e, // partial marker: desynced
     };
-    // Disarm before reading the resource fork itself — fork data can take longer
-    // than the drain timeout to arrive.
-    if crate::htxf::hxnet_htxf_set_read_timeout(hx, 0) != 0 {
-        return EIO;
-    }
-    match marker_complete {
-        Ok(true) => {} // full 16-byte marker
-        Ok(false) => return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos), // no marker at all
-        Err(e) => return e, // partial → desync
-    }
     let rfork_len = ffo::fork_len(&m, large);
     if rfork_len == 0 {
         return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos);
@@ -1284,10 +1315,13 @@ mod folder_loopback_tests {
     // header + data fork + 16-byte MACR), generated by running the send path
     // into a loopback capture.
     fn gen_filp(body: &[u8]) -> Vec<u8> {
+        // One directory per call: tests run in parallel, and two bodies of
+        // the same length must not share a file.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
             "hxnet_folder_gen_{}_{}",
             std::process::id(),
-            body.len()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("gen.bin");
@@ -1480,6 +1514,9 @@ mod folder_loopback_tests {
         Folder(&'static str, std::time::Duration),
         /// A file: its marker, then its FILP body on FILE_SEND.
         File(&'static str, Vec<u8>),
+        /// The same with a per-item size of 0, as a Large File server
+        /// announces an item whose FFO does not fit in 32 bits.
+        FileUnsized(&'static str, Vec<u8>),
         /// Part of an entry header, then nothing.
         PartialHeader,
         /// Reset the connection.
@@ -1523,6 +1560,13 @@ mod folder_loopback_tests {
                         s.read_exact(&mut cmd).unwrap();
                         assert_eq!(u16::from_be_bytes(cmd), FILE_SEND_CMD);
                         s.write_all(&(filp.len() as u32).to_be_bytes()).unwrap();
+                        s.write_all(&filp).unwrap();
+                    }
+                    Step::FileUnsized(name, filp) => {
+                        s.write_all(&entry_header(name, 0)).unwrap();
+                        s.read_exact(&mut cmd).unwrap();
+                        assert_eq!(u16::from_be_bytes(cmd), FILE_SEND_CMD);
+                        s.write_all(&0u32.to_be_bytes()).unwrap();
                         s.write_all(&filp).unwrap();
                     }
                     Step::PartialHeader => {
@@ -1616,6 +1660,43 @@ mod folder_loopback_tests {
     }
 
     const NOW: std::time::Duration = std::time::Duration::ZERO;
+
+    // Capabilities-Large-File: an item announced with a per-item size of 0
+    // is read to its end from the FFO's own fork headers, a declared
+    // resource fork included, so the next item's header is read in sync.
+    #[test]
+    fn folder_recv_reads_an_unsized_item_from_its_fork_headers() {
+        // A third fork declared, with a resource fork the folder stream
+        // discards: fork count 3, and a MACR header with 10 bytes behind it.
+        let mut with_rsrc = gen_filp(b"first body");
+        with_rsrc[22..24].copy_from_slice(&3u16.to_be_bytes());
+        let macr = with_rsrc.len() - ffo::FORK_HEADER_LEN;
+        assert_eq!(&with_rsrc[macr..macr + 4], b"MACR");
+        with_rsrc[macr + 12..macr + 16].copy_from_slice(&10u32.to_be_bytes());
+        with_rsrc.extend_from_slice(b"rsrc-bytes");
+        // Two forks declared and the empty trailing MACR period servers send.
+        let plain = gen_filp(b"second body");
+
+        let (port, server) = serve_steps(vec![
+            Step::FileUnsized("one.txt", with_rsrc),
+            Step::FileUnsized("two.txt", plain),
+        ]);
+        let (rv, _, got) = recv_folders(port, 2, None, "unsized");
+        server.join().unwrap();
+        assert_eq!(rv, 0);
+        let bodies: Vec<_> = got
+            .iter()
+            .filter(|(n, _)| !n.ends_with(".fndrinfo"))
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+        assert_eq!(
+            bodies,
+            vec![
+                ("one.txt", b"first body".as_slice()),
+                ("two.txt", b"second body".as_slice())
+            ]
+        );
+    }
 
     // A server that closes only on its own timeout once the tree is sent:
     // with the announced count, the download ends shortly after the last
