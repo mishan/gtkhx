@@ -735,6 +735,14 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         }
     }
 
+    // A lone file with no resource fork left declared two forks and a size
+    // ending at the data fork; a marker past it is bytes the server never
+    // reads, and one that closes on them resets the upload. A folder's
+    // per-file size counts the marker.
+    if !is_folder && p.rsrc_size.wrapping_sub(p.rsrc_pos) == 0 {
+        return 0;
+    }
+
     // MACR fork header. A short write at the marker boundary is a clean stop
     // (the server may not want the resource fork), not an error. The length is
     // the remaining resource fork (rsrc_size - rsrc_pos) so a resumed upload's
@@ -1272,13 +1280,12 @@ mod send_capture_tests {
             .collect();
         eprintln!("[capture] total={} header133={}", got.len(), hex);
 
-        // Header is 133 bytes (comlen == 0) + body + a trailing 16-byte MACR
-        // (written unconditionally, mirroring C; the server discards it once
-        // tot_pos == tot_len).
+        // Header is 133 bytes (comlen == 0) + body, and nothing past the size
+        // upload_ready declares: no MACR marker for an empty resource fork.
         assert_eq!(
             got.len(),
-            133 + body.len() + 16,
-            "wire = 133 header + body + 16 MACR; got {}",
+            133 + body.len(),
+            "wire = 133 header + body; got {}",
             got.len()
         );
         assert_eq!(&got[0..4], b"FILP", "FILP magic");
@@ -1292,12 +1299,6 @@ mod send_capture_tests {
             &got[133..133 + body.len()],
             body,
             "raw data fork follows header"
-        );
-        // Trailing 16 bytes are the MACR marker (rsrc_size == 0).
-        assert_eq!(
-            &got[133 + body.len()..133 + body.len() + 4],
-            b"MACR",
-            "MACR marker"
         );
     }
 }
@@ -1915,7 +1916,7 @@ mod recv_timeout_tests {
     use std::time::{Duration, Instant};
 
     // Generate a valid FILP header + data fork (no trailing MACR) by running the
-    // send path into a loopback capture and slicing off its 16-byte MACR tail.
+    // send path into a loopback capture.
     fn filp_header_and_data(body: &[u8]) -> Vec<u8> {
         // Unique per call: tests run in parallel and each call makes + removes
         // this dir, so a shared name would race.
@@ -1961,8 +1962,7 @@ mod recv_timeout_tests {
         drop(conn);
         let full = reader.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        // Drop the trailing 16-byte MACR marker: keep 133-byte header + data.
-        full[..133 + body.len()].to_vec()
+        full
     }
 
     // A server that over-declares file_budget (a phantom trailing MACR) but never
