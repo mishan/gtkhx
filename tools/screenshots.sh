@@ -38,22 +38,31 @@ docker build -q -t gtkhx-screenshots "$root/tools/screenshots" >/dev/null
 
 mkdir -p "$out"
 fresh=$(mktemp -d)
-trap 'rm -rf "$fresh"' EXIT
+subprojects=$(mktemp -d)
+trap 'rm -rf "$fresh" "$subprojects"' EXIT
+# A writable copy, because meson fetches mullion-gtk into subprojects/ when
+# the image doesn't have it, and the source is mounted read-only.
+cp -r "$root/subprojects/." "$subprojects"
 
-# seccomp and AppArmor unconfined: glycin decodes images in a bubblewrap
-# sandbox, and Docker's default profile refuses the namespaces it needs.
-# tracker.example.org is the fake tracker the tracker scene lists.
+# glycin decodes unsandboxed: its bubblewrap sandbox needs user namespaces,
+# which CI's runners refuse, and every picture decoded here is one the scenes
+# drew. seccomp and AppArmor stay unconfined because the committed pictures
+# were taken that way: under Docker's default profiles the classic scene's
+# pane tabs come out as titled strips. tracker.example.org is the fake
+# tracker the tracker scene lists.
 status=0
 docker run --rm \
     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
     --add-host tracker.example.org:127.0.0.1 \
+    -e GTKHX_GLYCIN_NO_SANDBOX=1 \
     -e GTKHX_DEBUG="${GTKHX_DEBUG:-}" -e EXPLORE="${EXPLORE:-}" \
-    -v "$root:/src:ro" ${shotbox:+-v "$shotbox:/shotbox:ro"} \
+    -v "$root:/src:ro" -v "$subprojects:/src/subprojects" \
+    ${shotbox:+-v "$shotbox:/shotbox:ro"} \
     -v "$volume:/work" \
     -v "$fresh:/out" -v "$out:/ref:ro" \
     gtkhx-screenshots sh -euc '
         owner=$(stat -c %u:%g /out)
-        trap "chown -R $owner /out" EXIT
+        trap "chown -R $owner /out /src/subprojects" EXIT
         export CARGO_HOME=/work/cargo-home
         [ -d /work/build ] || meson setup /work/build /src -Dtests=false \
             -Dcargo_target_dir=/work/cargo-target >/work/setup.log

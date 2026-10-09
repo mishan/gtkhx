@@ -606,7 +606,8 @@ def publisher(nick, icon, picture, screen=None):
         env += ["--env", "GTKHX_SCREEN_AUTOSTART=1",
                 "--env", f"GTKHX_VOICE_TEST_SCREEN_SRC=image:{screen}"]
     return subprocess.Popen(
-        [SHOTBOX, "run", *env, "--", GTKHX, "-s", "127.0.0.1", "-t", str(HXD_PORT)],
+        [SHOTBOX, "run", *env, "--pass", "GTKHX_GLYCIN_NO_SANDBOX",
+         "--", GTKHX, "-s", "127.0.0.1", "-t", str(HXD_PORT)],
         stdout=open(WORK / f"{nick}.log", "ab"), stderr=subprocess.STDOUT,
         start_new_session=True)
 
@@ -771,6 +772,7 @@ def main(argv):
                         "--env", f"EXPLORE={os.environ.get('EXPLORE', '')}",
                         "--env", f"SHOTBOX_FAILED={outdir / (name + '-failed.png')}",
                         "--pass", "GTKHX_SRC", "--pass", "PYTHONPATH",
+                        "--pass", "GTKHX_GLYCIN_NO_SANDBOX",
                         "--", sys.executable, __file__, "--inner", name, outdir / f"{name}.png"],
                        check=True)
         log(f"{name}: {outdir / (name + '.png')}")

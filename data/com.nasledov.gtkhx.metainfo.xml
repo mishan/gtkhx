@@ -148,7 +148,16 @@
   </content_rating>
 
   <releases>
-    <release version="1.5.0" date="2026-10-07" type="development">
+    <release version="1.5.1" date="2026-10-09">
+      <description>
+        <p>A lock for encrypted connections, and a fix to the icon picker.</p>
+        <ul>
+          <li>A lock in the header bar shows when the connection is encrypted with TLS or HOPE, and its tooltip says how</li>
+          <li>The icon picker fits its window again when wide banner icons are installed</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.5.0" date="2026-10-07">
       <description>
         <p>A new dock, a redesigned video panel, and a long list of fixes.</p>
         <ul>
