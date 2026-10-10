@@ -189,10 +189,6 @@ fn a_refusal_comes_with_a_reason() {
         let nowhere = format!("/{na} nowhere");
         let reason = change(&mut a, &news::delete(nowhere.as_bytes()).unwrap());
         assert!(reason.is_some_and(|r| !r.is_empty()), "{}", s.name);
-        // Janus never answers this one (docs/janus-bugs.md).
-        if s.name == "janus" {
-            continue;
-        }
         let t = a.send_expecting(
             &news::category(nowhere.as_bytes()).unwrap(),
             Some(Expect::NewsCategory),
