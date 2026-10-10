@@ -108,9 +108,6 @@ the desktop compositor, which a shortcuts window could at least explain.
 Releases publish themselves to dl.gtkhx.org, and a release's metainfo shows that
 release's screenshots.
 
-Inside the sandbox, video can share a screen but finds no camera; see
-[BACKLOG.md](BACKLOG.md).
-
 ### Plugin system
 
 The original dlopen ABI was deleted rather than ported, and nothing replaced it. The
