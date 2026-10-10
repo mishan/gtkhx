@@ -155,8 +155,8 @@ fn video_group(page: &adw::PreferencesPage) {
         }
     };
     // Held from the first time the group shows until the Settings window
-    // closes: starting a monitor is a synchronous scan, too slow to repeat
-    // on every switch between pages.
+    // closes: starting a monitor probes every device provider, too slow to
+    // repeat on every switch between pages.
     let watch: Rc<RefCell<Option<hxvoice_runtime::video::CameraWatch>>> = Rc::default();
     let refresh = Rc::new(refresh);
     grp.connect_map(move |grp| {

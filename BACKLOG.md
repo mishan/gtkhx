@@ -19,11 +19,6 @@ record.
   and GTK uploads each one to the GPU. `gtk4paintablesink` would keep frames on
   the GPU, but neither the GNOME runtime nor the bundle scripts ship it. A
   hidden Video page also still turns every local preview frame into a texture.
-- **The camera monitor starts on the main thread.** Each voice join
-  (unless Settings already holds one) starts the `GstDeviceMonitor`
-  synchronously, a PipeWire round trip plus libcamera's manager, a few
-  tenths of a second; a hung PipeWire would freeze the join. Starting it
-  off the main thread would fix that.
 - **A covered window on X11.** A hidden window stops receiving video when
   it is minimized or suspended, but X11 reports neither for a window that
   is merely covered by others, so there it keeps receiving.

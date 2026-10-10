@@ -484,7 +484,7 @@ static CAMERAS_SEEN: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::
 fn cameras_seen() -> bool {
     use std::sync::atomic::Ordering;
     match CAMERAS_SEEN.load(Ordering::Relaxed) {
-        0 => !camera_devices().is_empty(),
+        0 => !camera_devices(false).is_empty(),
         v => v == 2,
     }
 }
@@ -610,19 +610,32 @@ static CAMERA_MONITOR: Mutex<Option<gst::DeviceMonitor>> = Mutex::new(None);
 /// Whether the running monitor has listed a camera since it started.
 static WATCH_SAW_CAMERA: AtomicBool = AtomicBool::new(false);
 
+/// Monitors [`watch_cameras`] has set starting that haven't returned. A
+/// device provider starts once at a time, so while one is starting, a
+/// scan of its own would wait for it.
+static MONITORS_STARTING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn camera_monitor() -> Option<gst::DeviceMonitor> {
     CAMERA_MONITOR.lock().ok().and_then(|m| m.clone())
 }
 
 struct Watching {
+    /// Started off the main thread; [`CAMERA_MONITOR`] holds it once it is.
+    monitor: gst::DeviceMonitor,
     _bus: gst::bus::BusWatchGuard,
     listeners: Vec<(u64, std::rc::Rc<dyn Fn()>)>,
-    next: u64,
 }
 
 thread_local! {
     static WATCHING: std::cell::RefCell<Option<Watching>> =
         const { std::cell::RefCell::new(None) };
+    /// Watch ids, never reused: a failed start drops a `Watching` while its
+    /// watches are still held, and one of theirs mustn't match a later's.
+    static NEXT_WATCH: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn next_watch_id() -> u64 {
+    NEXT_WATCH.with(|n| n.replace(n.get() + 1))
 }
 
 /// Keeps the camera monitor running. Dropping the last one stops it, so
@@ -673,6 +686,13 @@ impl Drop for CameraWatch {
 /// live set meanwhile.
 /// On the portal path the portal's `IsCameraPresent` is the watch, and
 /// this does nothing.
+///
+/// Starting the monitor probes every device provider (a PipeWire round
+/// trip, libcamera's manager), which takes a few tenths of a second and
+/// would hang with PipeWire, so it starts on a thread of its own. Until it
+/// has, the UI is told of no camera and none is scanned for, and
+/// `on_change` is called once it has, or has failed. A start that never
+/// returns keeps its thread, and the list empty.
 pub fn watch_cameras(on_change: impl Fn() + 'static) -> CameraWatch {
     if camera_via_portal() || gst::init().is_err() {
         return CameraWatch(None, std::marker::PhantomData);
@@ -681,8 +701,7 @@ pub fn watch_cameras(on_change: impl Fn() + 'static) -> CameraWatch {
     let joined = WATCHING.with(|w| {
         let mut w = w.borrow_mut();
         let watching = w.as_mut()?;
-        let id = watching.next;
-        watching.next += 1;
+        let id = next_watch_id();
         watching.listeners.push((id, on_change.clone()));
         Some(id)
     });
@@ -693,50 +712,105 @@ pub fn watch_cameras(on_change: impl Fn() + 'static) -> CameraWatch {
     monitor.add_filter(Some("Video/Source"), None);
     let Ok(bus) = monitor.bus().add_watch_local(|_, msg| {
         use gst::MessageView;
-        if matches!(
-            msg.view(),
-            MessageView::DeviceAdded(_) | MessageView::DeviceRemoved(_)
-        ) {
-            camera_devices();
-            // Copied out: a listener may drop its watch.
-            let listeners: Vec<_> = WATCHING.with(|w| {
-                w.borrow()
-                    .iter()
-                    .flat_map(|w| w.listeners.iter().map(|(_, f)| f.clone()))
-                    .collect()
-            });
-            for f in listeners {
-                f();
-            }
+        // A provider posts what it finds while it starts; the monitor
+        // lists those once it is installed.
+        if camera_monitor().is_some()
+            && matches!(
+                msg.view(),
+                MessageView::DeviceAdded(_) | MessageView::DeviceRemoved(_)
+            )
+        {
+            camera_devices(false);
+            notify_camera_watchers();
         }
         glib::ControlFlow::Continue
     }) else {
         return CameraWatch(None, std::marker::PhantomData);
     };
-    if monitor.start().is_err() {
-        return CameraWatch(None, std::marker::PhantomData);
+    let id = next_watch_id();
+    WATCHING.with(|w| {
+        *w.borrow_mut() = Some(Watching {
+            monitor: monitor.clone(),
+            _bus: bus,
+            listeners: vec![(id, on_change)],
+        })
+    });
+    let ctx = glib::MainContext::ref_thread_default();
+    MONITORS_STARTING.fetch_add(1, Ordering::SeqCst);
+    let here = monitor.clone();
+    let spawned = std::thread::Builder::new()
+        .name("camera monitor".into())
+        .spawn(move || {
+            let started = monitor.start().is_ok();
+            // A source rather than invoke(), which would run it here if this
+            // thread could take the context.
+            let mut monitor = Some(monitor);
+            glib::idle_source_new(None, glib::Priority::DEFAULT, move || {
+                if let Some(monitor) = monitor.take() {
+                    camera_monitor_started(monitor, started);
+                }
+                glib::ControlFlow::Break
+            })
+            .attach(Some(&ctx));
+        });
+    if spawned.is_err() {
+        let started = here.start().is_ok();
+        camera_monitor_started(here, started);
+    }
+    CameraWatch(Some(id), std::marker::PhantomData)
+}
+
+/// Back on the main thread once `monitor` has started, or failed to.
+fn camera_monitor_started(monitor: gst::DeviceMonitor, started: bool) {
+    MONITORS_STARTING.fetch_sub(1, Ordering::SeqCst);
+    let current = WATCHING.with(|w| w.borrow().as_ref().is_some_and(|w| w.monitor == monitor));
+    if !current {
+        // Every watch was dropped while it started.
+        if started {
+            monitor.stop();
+        }
+        return;
+    }
+    if !started {
+        // Let the next watch try again rather than join one with no
+        // monitor, and tell the watchers, whose answers can scan now.
+        let failed = WATCHING.with(|w| w.borrow_mut().take());
+        for (_, f) in failed.map(|w| w.listeners).unwrap_or_default() {
+            f();
+        }
+        return;
     }
     if let Ok(mut m) = CAMERA_MONITOR.lock() {
         *m = Some(monitor);
         WATCH_SAW_CAMERA.store(false, Ordering::Relaxed);
     }
-    camera_devices();
-    WATCHING.with(|w| {
-        *w.borrow_mut() = Some(Watching {
-            _bus: bus,
-            listeners: vec![(0, on_change)],
-            next: 1,
-        })
-    });
-    CameraWatch(Some(0), std::marker::PhantomData)
+    camera_devices(false);
+    notify_camera_watchers();
 }
 
-fn camera_devices() -> Vec<gst::Device> {
+fn notify_camera_watchers() {
+    // Copied out: a listener may drop its watch.
+    let listeners: Vec<_> = WATCHING.with(|w| {
+        w.borrow()
+            .iter()
+            .flat_map(|w| w.listeners.iter().map(|(_, f)| f.clone()))
+            .collect()
+    });
+    for f in listeners {
+        f();
+    }
+}
+
+/// `wait` is for a capture thread, which can scan, waiting for a monitor
+/// that is starting; the UI's answers can't.
+fn camera_devices(wait: bool) -> Vec<gst::Device> {
     let live = camera_monitor().filter(|_| !camera_via_portal());
     let devices = if camera_via_portal() {
         portal_camera_devices()
     } else if let Some(monitor) = &live {
         monitor.devices().into_iter().collect()
+    } else if !wait && MONITORS_STARTING.load(Ordering::SeqCst) > 0 {
+        return Vec::new();
     } else {
         let monitor = gst::DeviceMonitor::new();
         monitor.add_filter(Some("Video/Source"), None);
@@ -787,7 +861,7 @@ pub fn list_cameras() -> Vec<Camera> {
     if gst::init().is_err() {
         return Vec::new();
     }
-    camera_devices()
+    camera_devices(false)
         .iter()
         .map(|d| Camera {
             name: device_key(d),
@@ -874,7 +948,7 @@ fn make_camera_source() -> Option<gst::Element> {
         return test_source(TEST_SRC_ENV);
     }
     let wanted = camera_device();
-    let devices = camera_devices();
+    let devices = camera_devices(true);
     let pick = match &wanted {
         Some(name) => devices
             .iter()

@@ -19,6 +19,10 @@ use hxvoice_runtime::video;
 static STARTS: AtomicUsize = AtomicUsize::new(0);
 static STOPS: AtomicUsize = AtomicUsize::new(0);
 
+/// While true, the provider's start blocks, as a hung PipeWire would.
+static HOLD_START: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+static RELEASE_START: std::sync::Condvar = std::sync::Condvar::new();
+
 mod imp {
     use super::*;
 
@@ -64,6 +68,8 @@ mod imp {
 
         fn start(&self) -> Result<(), gst::LoggableError> {
             STARTS.fetch_add(1, Ordering::SeqCst);
+            let held = HOLD_START.lock().unwrap();
+            drop(RELEASE_START.wait_while(held, |held| *held).unwrap());
             Ok(())
         }
 
@@ -103,11 +109,22 @@ fn a_watched_camera_comes_and_goes() {
     .unwrap();
 
     let changes = Rc::new(Cell::new(0));
+    // A provider that never finishes starting doesn't hold up the watch.
+    *HOLD_START.lock().unwrap() = true;
     let watch = video::watch_cameras({
         let changes = changes.clone();
         move || changes.set(changes.get() + 1)
     });
-    assert!(!listed());
+    // While it starts, nothing waits on it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while STARTS.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(STARTS.load(Ordering::SeqCst), 1, "the monitor is starting");
+    assert!(video::list_cameras().is_empty());
+    video::publish_available(VideoKind::Camera);
+    *HOLD_START.lock().unwrap() = false;
+    RELEASE_START.notify_all();
 
     // The monitor started the provider, and the factory hands out that
     // same instance.
@@ -126,6 +143,9 @@ fn a_watched_camera_comes_and_goes() {
         }
         assert_eq!(changes.get(), want);
     };
+    // The watcher hears once the monitor has started.
+    pump(1);
+    assert!(!listed());
 
     // The button follows the live set, given the encoder chain.
     let encodable = [
@@ -171,19 +191,19 @@ fn a_watched_camera_comes_and_goes() {
         )
         .build();
     provider.device_add(&screen);
-    pump(1);
+    pump(2);
     assert!(video::list_cameras()
         .iter()
         .all(|c| c.display_name != "GtkHx Test Screen"));
     fallback();
 
     provider.device_add(&camera);
-    pump(2);
+    pump(3);
     assert!(listed());
     button();
 
     provider.device_remove(&camera);
-    pump(3);
+    pump(4);
     assert!(!listed());
     button();
 
@@ -202,7 +222,7 @@ fn a_watched_camera_comes_and_goes() {
         ctx.iteration(false);
     }
     assert_eq!(second.get(), 1);
-    assert_eq!(changes.get(), 3);
+    assert_eq!(changes.get(), 4);
     assert!(listed());
     assert_eq!(STARTS.load(Ordering::SeqCst), 1, "one monitor for both");
     assert_eq!(STOPS.load(Ordering::SeqCst), 0);
