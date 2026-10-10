@@ -17,23 +17,13 @@ record.
   `rtpvp8depay`.
 - **Renderer cost.** The panel builds a new `GdkMemoryTexture` for every frame,
   and GTK uploads each one to the GPU. `gtk4paintablesink` would keep frames on
-  the GPU, but neither the GNOME runtime nor the bundle scripts ship it. A
-  hidden Video page also still turns every local preview frame into a texture.
+  the GPU, but neither the GNOME runtime nor the bundle scripts ship it.
 - **A covered window on X11.** A hidden window stops receiving video when
   it is minimized or suspended, but X11 reports neither for a window that
   is merely covered by others, so there it keeps receiving.
 
 ## Voice
 
-- **`voice_rejoin_media` against Janus is intermittent.** B sometimes stays in
-  ICE Connecting after a rejoin or a concurrent join, and `vad_speaker`
-  sometimes misses A's speaking flag. The rate didn't change when a
-  stale-answer race in the runtime was fixed, and it survived moving the rig to
-  a current Janus (September 2026), so it's ours. It shows up under
-  `tools/isolated-run.sh` — roughly one run in four, on `main` as much as on
-  any branch — but rarely when the tests share a desktop session's PipeWire,
-  which points at timing rather than the server. The test's wall time also
-  varies widely between runs.
 - **Every first answer now waits for the microphone's caps**, up to 1500 ms.
   `voice_rejoin_media` asserts that every answer declares the send SSRC, so a
   slow audio source would fail that assertion rather than hang.
@@ -41,8 +31,8 @@ record.
 ## Nick colors
 
 - **`test_nick_colors` runs against Janus only** (`HX_TEST_CAP_NICK_COLORS`).
-  hxd-ng supports Colored Nicknames since mishan/hxd-ng#170, so the rig's
-  hxd-ng can advertise it too.
+  The rig's pinned hxd-ng already includes Colored Nicknames
+  (mishan/hxd-ng#170), so its row in `server_matrix.c` can claim the bit.
 
 ## UI and theming
 
@@ -51,12 +41,16 @@ record.
   chosen by searching Adwaita's symbolic set and the icon-development-kit, not by
   browsing them. Go through both — the Icon Library app is the easiest way — and
   swap in anything that fits a button better. The weakest current matches:
-  kick (`system-log-out`), tasks (`view-list`), message (`mail-unread`), post
-  news (`mail-message-new`), news posts (`text-x-generic`), the drop box and
+  tasks (`view-list`), message (`mail-unread`), post news (`mail-message-new`), news posts (`text-x-generic`), the drop box and
   download (both `folder-download`), upload (`document-send`), disk images
   (`media-optical`), and HTML files (`text-x-generic`; Adwaita has no symbolic
   HTML icon). A kit icon has to be converted to filled paths before it's
   vendored — see `src/icons/README.md`.
+- **The classic theme's pixmaps load through gdk-pixbuf**, which decodes
+  through glycin in its own sandbox, out of `GTKHX_GLYCIN_NO_SANDBOX`'s
+  reach. Where bubblewrap can't start (CI's runners, Docker's default
+  profiles) they fail and the dock's tabs fall back to titles. GTK's own PNG
+  loader would take them without a sandbox.
 
 ## Tests and rig
 
@@ -64,10 +58,19 @@ record.
   loopback-only host, and the media tests then fail with "never reached
   CONNECTED". The README and the compose comment say "addresses" where only one
   is advertised.
-- hxd-ng's `xfer_port` (5521) isn't set in the rig config. Nothing uses it yet.
+- hxd-ng's `xfer_port` (5521) isn't set in the rig config, which relies on the
+  server's default; the server matrix and `hx-e2e` use 5521.
+- `hx-e2e`'s `callback` test fails now and then when mhxd doesn't finish a
+  login ("the login never settled"). A check that mhxd answers before the
+  suite runs, or a restart of a wedged container, would tell that apart from
+  a client bug.
+- **No test reaches Wayland input.** The connection-tab drag crash only
+  reproduced under a real Wayland compositor with animations off. Headless
+  sway with a wlroots virtual pointer (`zwlr_virtual_pointer_v1`), `grim` for
+  pictures and the app under gdb found it in seconds; made into a test tier, it
+  would cover drag and drop and other input that Xvfb drives differently.
 
 ## Legacy servers
 
 - hlserver.com eventually closes the connection, possibly on an idle timeout.
   If that is what it is, say so rather than reporting a plain disconnect.
-- hlserver.com broadcasts "0 command(s) at a time" on login.
