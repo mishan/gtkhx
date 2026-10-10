@@ -643,8 +643,8 @@ fn update_video_buttons(inner: &PanelInner, joined: bool) {
     crate::camera_portal::probe(|| for_each_panel(|_w, i| update_button_labels(i)));
     let rt = unsafe { crate::video_panel::runtime(sess) };
     let here = rt.and_then(|r| r.active_cid()) == Some(inner.cid);
-    // Elsewhere a device monitor is the watch. Starting one is a
-    // synchronous scan, so only once the button can be pressed.
+    // Elsewhere a device monitor is the watch. Starting one probes every
+    // device provider, so only once the button can be pressed.
     if !(joined && here) {
         inner.camera_watch.take();
     } else if inner.camera_watch.borrow().is_none() {
