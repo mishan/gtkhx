@@ -112,7 +112,7 @@ fn a_message_arrives_as_an_event() {
 }
 
 #[test]
-fn a_message_to_no_one_is_refused_or_unanswered() {
+fn a_message_to_no_one_is_refused() {
     for s in servers_with(&[]) {
         let (mut a, _) = member(s, "", "mr");
         let to_no_one = request(
@@ -122,33 +122,12 @@ fn a_message_to_no_one_is_refused_or_unanswered() {
                 (tag::BODY, b"anyone?"),
             ],
         );
-        if s.name != "janus" {
-            let t = a.send_expecting(&to_no_one, Some(Expect::Message));
-            let reason = until(&mut a, |e| match e {
-                hxsession::Event::Failed { trans, reason } if *trans == t => Some(reason.clone()),
-                _ => None,
-            });
-            assert!(reason.is_some_and(|r| !r.is_empty()), "{}", s.name);
-            continue;
-        }
-        // Janus sends no reply at all (docs/janus-bugs.md). Sent unexpected,
-        // any reply would come back whole; the requests after it are
-        // answered meanwhile.
-        let t = a.send(&to_no_one);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while Instant::now() < deadline {
-            let list = a.send_expecting(&request(300, &[]), Some(Expect::UserList));
-            loop {
-                match a.next_event().unwrap_or_else(|e| panic!("{e}")) {
-                    Event::Frame(f) if hx_e2e::is_reply(&f, t) => panic!("janus answered: {f:?}"),
-                    Event::Session(hxsession::Event::UserList { trans, .. }) if trans == list => {
-                        break
-                    }
-                    _ => {}
-                }
-            }
-            std::thread::sleep(Duration::from_millis(250));
-        }
+        let t = a.send_expecting(&to_no_one, Some(Expect::Message));
+        let reason = until(&mut a, |e| match e {
+            hxsession::Event::Failed { trans, reason } if *trans == t => Some(reason.clone()),
+            _ => None,
+        });
+        assert!(reason.is_some_and(|r| !r.is_empty()), "{}", s.name);
     }
 }
 

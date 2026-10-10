@@ -1,7 +1,7 @@
 # Janus bugs
 
 Janus is VesperNet's server and the rig's target for the fogWraith
-extensions (`tests/janus/`, Janus 2.0.18). Its source is closed, so this is
+extensions (`tests/janus/`, Janus 2.0.23). Its source is closed, so this is
 the list to send upstream: each entry says what a client sends, what it gets
 back, and what it should get. It also lets a failing test or an odd report be
 checked against what is already known before anyone goes looking for a client
@@ -34,34 +34,16 @@ before decompressing.
 **GtkHx:** does not offer LZ4 with Blowfish; that login runs uncompressed
 (`HopeOpenRequest::session` in `hxnet`).
 
-## A message to no one is never answered
+## Fixed upstream
 
-**Verified on 2.0.18.**
+Older servers still behave this way, which is worth knowing when a report
+comes from one.
 
-- **Sends:** a private message (`SEND_MSG`, 108) to a uid no one has.
-- **Gets:** nothing: no reply on its transaction within seconds, while what
-  the client sends after it is answered.
-- **Should get:** a refusal saying why, as mhxd and hlservd send.
-
-**GtkHx:** shows nothing, as for a message that went through; the session
-forgets the reply it expected once enough newer requests wait. `hx-e2e`'s
-`a_message_to_no_one_is_refused_or_unanswered` pins it.
-
-## A listing of a category that is not there is never answered
-
-**Verified on 2.0.18.**
-
-- **Sends:** a threaded-news category listing (`NEWSCATLIST`, 371) for a
-  path that names no category.
-- **Gets:** nothing: no reply on its transaction, while what the client
-  sends after it is answered.
-- **Should get:** a refusal saying why, as mhxd and hlservd send.
-
-**GtkHx:** the category stays empty with nothing shown, and the session
-forgets the reply it expected once enough newer requests wait. A category
-the browser lists is there, so this takes a category deleted between the
-listing and the click. `hx-e2e`'s `a_refusal_comes_with_a_reason` skips
-Janus for it.
+- **A message to no one, and a listing of a threaded-news category that is
+  not there, went unanswered** through 2.0.18: no reply on the transaction.
+  2.0.23 refuses both with a reason, as mhxd and hlservd do. GtkHx shows
+  nothing for the silence, and the session forgets the reply it expected
+  once enough newer requests wait.
 
 ## Adding an entry
 

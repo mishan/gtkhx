@@ -11,7 +11,7 @@
 # version: treat it the same way. Regenerate them in the same commit.
 
 ARG CI_BASE=ghcr.io/mishan/gtkhx-ci-base@sha256:be4942d9de06a79319a4c7528cf0115658a8dba7218ccc4a4933068ae130fecd
-ARG JANUS=ghcr.io/mishan/janus@sha256:d38d0f1c37a9eaa1fe3288d1f9ed6148f64b37bbde28807cf8d221eb4d9c2b0d
+ARG JANUS=ghcr.io/mishan/janus@sha256:8afddb00c8b22965db0cc8fc09657eff01c7767aa829d64c190525188859b654
 ARG HXD_NG=gtkhx-hxd-ng
 
 FROM ${JANUS} AS janus
