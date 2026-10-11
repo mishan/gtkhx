@@ -12,7 +12,7 @@
   - Previewing an audio or video file plays it while it downloads, with seeking; only what is played is fetched
   - Previewing audio or video never shows it as text: a build without GStreamer says it can't preview them, and a file past 4 GB says it's too large to preview
   - Fixed the 1.9 server disconnecting you when the file browser was opened before agreeing to its agreement
-  - Fixed the 1.9 server disconnecting you for anything sent before you agreed to its agreement, such as a chat line or a settings change; it now goes once you agree
+  - Fixed the 1.9 server disconnecting you for something done while its agreement was showing, such as sending a chat line or changing your name; it now goes once you agree
 
 ## 1.5.1
 

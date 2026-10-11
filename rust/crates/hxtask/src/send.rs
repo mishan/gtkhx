@@ -156,6 +156,36 @@ pub unsafe extern "C" fn hlwrite_chunks(
         }
     };
 
+    // A server with an agreement takes the user as not yet joined until it
+    // is accepted, and the 1.9 server drops a connection that asks for
+    // anything before then. What is asked before the login settles is held,
+    // and goes, in order, ahead of the first request after it.
+    if hx_conn_post_login_fetched(htlc) == glib::ffi::GFALSE {
+        if let Ok(frame) = packed {
+            HELD.with_borrow_mut(|h| h.push((htlc as usize, frame)));
+            if let Ok(msg) = std::ffi::CString::new(format!(
+                "hlwrite_chunks: trans {my_trans} held until the login settles"
+            )) {
+                debug_log_str(c"net".as_ptr(), msg.as_ptr());
+            }
+            return;
+        }
+    } else {
+        let held: Vec<Vec<u8>> = HELD.with_borrow_mut(|h| {
+            let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(h)
+                .into_iter()
+                .partition(|(c, _)| *c == htlc as usize);
+            *h = rest;
+            mine.into_iter().map(|(_, f)| f).collect()
+        });
+        for f in &held {
+            trace_frame(f);
+            if !send_frame(htlc, f) {
+                return;
+            }
+        }
+    }
+
     // Trace after the pack (so a pack-guard trip can't leave an open trace
     // block), walking the caller's original chunk array — the attempt is visible
     // in a proto trace even when the pack was rejected below.
@@ -184,44 +214,47 @@ pub unsafe extern "C" fn hlwrite_chunks(
         }
     };
 
-    // A server with an agreement takes the user as not yet joined until it
-    // is accepted, and the 1.9 server drops a connection that asks for
-    // anything before then. What is asked meanwhile is held, and goes, in
-    // order, ahead of the first request after the login settles.
-    let transport = hx_conn_bridge_handle(htlc) as usize;
-    if hx_conn_post_login_fetched(htlc) == glib::ffi::GFALSE {
-        HELD.with_borrow_mut(|h| h.push((htlc as usize, transport, frame)));
-        if let Ok(msg) = std::ffi::CString::new(format!(
-            "hlwrite_chunks: trans {my_trans} held until the login settles"
-        )) {
-            debug_log_str(c"net".as_ptr(), msg.as_ptr());
-        }
-        return;
-    }
-    // Held for an earlier connect of this connection: dropped, not sent to
-    // whichever server it is on now.
-    let held: Vec<Vec<u8>> = HELD.with_borrow_mut(|h| {
-        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(h)
-            .into_iter()
-            .partition(|(c, _, _)| *c == htlc as usize);
-        *h = rest;
-        mine.into_iter()
-            .filter(|(_, t, _)| *t == transport)
-            .map(|(_, _, f)| f)
-            .collect()
-    });
-    for f in held.iter().chain(std::iter::once(&frame)) {
-        if !send_frame(htlc, f) {
-            return;
-        }
-    }
+    send_frame(htlc, &frame);
     // `frame` (a Vec) frees itself here — no g_malloc / g_free round-trip.
 }
 
 thread_local! {
     /// Requests asked for before their connection's login settled: the
-    /// connection, its transport then, and the packed frame.
-    static HELD: RefCell<Vec<(usize, usize, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+    /// connection and the packed frame.
+    static HELD: RefCell<Vec<(usize, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Let go of what `htlc` holds: it is closing, and what it held was for a
+/// login that will not settle.
+pub fn drop_held(htlc: *mut HtlcConn) {
+    HELD.with_borrow_mut(|h| h.retain(|(c, _)| *c != htlc as usize));
+}
+
+/// Trace a held frame as it goes out, from its own bytes: the chunks it was
+/// built from are gone.
+///
+/// # Safety
+/// Main thread.
+unsafe fn trace_frame(frame: &[u8]) {
+    let be16 = |at: usize| u16::from_be_bytes([frame[at], frame[at + 1]]);
+    let be32 =
+        |at: usize| u32::from_be_bytes([frame[at], frame[at + 1], frame[at + 2], frame[at + 3]]);
+    if frame.len() < 22 {
+        return;
+    }
+    let count = be16(20);
+    proto_trace_send_begin(u32::from(be16(2)), be32(4), count);
+    let mut at = 22;
+    for _ in 0..count {
+        if at + 4 > frame.len() {
+            break;
+        }
+        let (tag, len) = (be16(at), be16(at + 2));
+        let data = frame[at + 4..].as_ptr();
+        proto_trace_send_chunk(tag, len, data);
+        at += 4 + len as usize;
+    }
+    proto_trace_send_end();
 }
 
 /// Hand `frame` to the connection's transport; false when that closed the
@@ -288,8 +321,6 @@ mod doubles {
         pub send_rc: c_int,
         /// The login has settled.
         pub settled: bool,
-        /// The connection's transport, standing for which connect it is on.
-        pub transport: usize,
         /// The trans of each frame sent, in order.
         pub sent: Vec<u32>,
         // observations
@@ -331,7 +362,7 @@ mod doubles {
         ENV.with(|e| e.borrow_mut().trans = v);
     }
     pub unsafe fn hx_conn_bridge_handle(_h: *const HtlcConn) -> *mut std::os::raw::c_void {
-        ENV.with(|e| e.borrow().transport as *mut std::os::raw::c_void)
+        std::ptr::null_mut()
     }
     pub unsafe fn hx_conn_post_login_fetched(_h: *const HtlcConn) -> glib::ffi::gboolean {
         ENV.with(|e| e.borrow().settled as glib::ffi::gboolean)
@@ -579,26 +610,23 @@ mod tests {
             hlwrite_chunks(fake_htlc(), 105, 0, chunks.as_ptr(), 1);
             hlwrite_chunks(fake_htlc(), 200, 0, std::ptr::null(), 0);
         }
-        ENV.with(|e| assert!(e.borrow().sent.is_empty(), "nothing before it settles"));
+        ENV.with(|e| {
+            let env = e.borrow();
+            assert!(env.sent.is_empty(), "nothing before it settles");
+            assert!(env.trace_begin_trans.is_none(), "nor traced as sent");
+        });
         ENV.with(|e| e.borrow_mut().settled = true);
         unsafe { hlwrite_chunks(fake_htlc(), 300, 0, std::ptr::null(), 0) };
         ENV.with(|e| assert_eq!(e.borrow().sent, [42, 43, 44]));
     }
 
     #[test]
-    fn requests_held_for_an_earlier_connect_are_dropped() {
+    fn requests_held_when_the_connection_closes_are_dropped() {
         doubles::reset(1, 42, true, 0);
-        ENV.with(|e| {
-            let mut env = e.borrow_mut();
-            env.settled = false;
-            env.transport = 1;
-        });
+        ENV.with(|e| e.borrow_mut().settled = false);
         unsafe { hlwrite_chunks(fake_htlc(), 105, 0, std::ptr::null(), 0) };
-        ENV.with(|e| {
-            let mut env = e.borrow_mut();
-            env.settled = true;
-            env.transport = 2;
-        });
+        drop_held(fake_htlc());
+        ENV.with(|e| e.borrow_mut().settled = true);
         unsafe { hlwrite_chunks(fake_htlc(), 300, 0, std::ptr::null(), 0) };
         ENV.with(|e| assert_eq!(e.borrow().sent, [43]));
     }
