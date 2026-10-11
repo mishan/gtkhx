@@ -412,8 +412,10 @@ jobs:
         run: |
           restarts=$(docker inspect -f '{{.RestartCount}}' gtkhx-mhxd 2>/dev/null || echo 0)
           echo "mhxd restarted $restarts time(s)"
-          [ "$restarts" -gt 0 ] || exit 0
+          # A hang restarts nothing, so a failed run shows the log too.
+          [ "$restarts" -gt 0 ] || [ "${{ job.status }}" = failure ] || exit 0
           docker exec gtkhx-mhxd tail -n 400 /opt/mhxd/run/log || true
+          [ "$restarts" -gt 0 ] || exit 0
           mkdir -p mhxd-crash
           docker cp gtkhx-mhxd:/opt/mhxd/run/bin/hxd mhxd-crash/ || true
           cores=$(docker exec gtkhx-mhxd sh -c 'ls /tmp/core.* 2>/dev/null' || true)
