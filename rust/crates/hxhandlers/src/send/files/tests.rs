@@ -8,6 +8,8 @@
 use super::*;
 use std::cell::RefCell;
 
+use hxsession::Transfer;
+
 const TAG_HTXF_SIZE: u16 = 0x006c;
 
 type Chunks = Vec<(u16, Vec<u8>)>;
@@ -356,7 +358,7 @@ fn a_refused_move_sends_no_rename() {
     let (_, trans) = start_move_and_rename();
     sends();
     unsafe {
-        crate::recv::files::failed(htlc(), trans);
+        crate::recv::files::failed(htlc(), trans, None);
         crate::recv::files::changed(htlc(), trans);
     }
     assert!(sends().is_empty());
@@ -377,4 +379,77 @@ fn null_arguments_send_nothing() {
     assert!(sends().is_empty());
     assert!(XFERS.with_borrow(Vec::is_empty));
     reset();
+}
+
+/// What a range's reader was told, for the outcome `answer` gives it.
+fn range_answered(answer: impl FnOnce(u32)) -> Option<Result<u32, Option<String>>> {
+    reset();
+    let told = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let t = told.clone();
+    let sent_ok = unsafe {
+        get_range(
+            htlc(),
+            b"/a",
+            b"f",
+            5,
+            Box::new(move |r| *t.borrow_mut() = Some(r.map(|x| x.reference))),
+        )
+    };
+    assert!(sent_ok);
+    assert_eq!(sends(), [sent(files::get_from(b"/a", b"f", 5))]);
+    let trans = last_trans();
+    assert_eq!(expected(), [Expect::Transfer]);
+    answer(trans);
+    let got = told.borrow_mut().take();
+    reset();
+    got
+}
+
+/// A case: its name, how the request is answered (given its trans), and
+/// what the reader should be told.
+type RangeCase<'a> = (
+    &'static str,
+    Box<dyn FnOnce(u32) + 'a>,
+    Result<u32, Option<String>>,
+);
+
+#[test]
+fn a_range_reply_goes_to_its_reader() {
+    let transfer = Transfer {
+        reference: 7,
+        ..Default::default()
+    };
+    let cases: [RangeCase<'_>; 4] = [
+        (
+            "granted",
+            Box::new(|trans| unsafe { crate::recv::files::transfer(htlc(), trans, &transfer) }),
+            Ok(7),
+        ),
+        (
+            "refused, quietly",
+            Box::new(|trans| unsafe {
+                assert!(crate::recv::files::failed(
+                    htlc(),
+                    trans,
+                    Some("1 at a time")
+                ));
+            }),
+            Err(Some("1 at a time".into())),
+        ),
+        (
+            "cut short",
+            Box::new(|trans| unsafe {
+                crate::recv::files::failed(htlc(), trans, Some(crate::recv::chat::CUT_SHORT));
+            }),
+            Err(None),
+        ),
+        (
+            "connection closed",
+            Box::new(|_| crate::recv::files::forget(htlc(), false)),
+            Err(None),
+        ),
+    ];
+    for (case, answer, want) in cases {
+        assert_eq!(range_answered(answer), Some(want), "{case}");
+    }
 }

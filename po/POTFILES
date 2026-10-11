@@ -37,6 +37,7 @@ rust/crates/gtkhx-ui/src/files/panel.rs
 rust/crates/gtkhx-ui/src/files/row.rs
 rust/crates/gtkhx-ui/src/icon_picker.rs
 rust/crates/gtkhx-ui/src/inline_media_dialog.rs
+rust/crates/gtkhx-ui/src/media_preview/mod.rs
 rust/crates/gtkhx-ui/src/news_browser.rs
 rust/crates/gtkhx-ui/src/news_compose.rs
 rust/crates/gtkhx-ui/src/news_dialogs.rs

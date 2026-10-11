@@ -9,6 +9,7 @@
   - Previews no longer download the whole file: a long text shows its first 256 KiB, and an image or PDF too large to preview says so, each with a Download button for the whole file
   - Fixed previewing an empty file leaving its window on "Loading…"
   - Fixed a crash closing a preview window after its download had failed partway
+  - Previewing an audio or video file plays it while it downloads, with seeking; only what is played is fetched
 
 ## 1.5.1
 

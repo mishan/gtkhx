@@ -217,6 +217,10 @@ pub mod avatar;
 pub mod encryption_lock;
 // the preview window's notice for a file it shows only part of, or none of.
 pub mod preview_notice;
+// Plays a remote audio or video file as it downloads; needs GStreamer, which
+// comes with voice.
+#[cfg(feature = "voice")]
+pub mod media_preview;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

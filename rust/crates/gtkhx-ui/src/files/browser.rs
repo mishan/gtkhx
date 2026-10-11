@@ -148,9 +148,22 @@ impl Browser {
             self.toast(&tr("Preview is for files, not folders."));
             return;
         }
-        if let Some(p) = panel.provider() {
-            p.preview(&e);
+        let Some(p) = panel.provider() else {
+            return;
+        };
+        #[cfg(feature = "voice")]
+        if let Some(conn) = p
+            .conn()
+            .filter(|_| crate::media_preview::plays(&e.name(), e.icon_id(), e.size()))
+        {
+            let path = p.path();
+            let (p, entry) = (p.clone(), e.clone());
+            unsafe {
+                crate::media_preview::open(conn.ptr(), &path, &e, move || p.activate(&entry))
+            };
+            return;
         }
+        p.preview(&e);
     }
 
     /// FILE_GETINFO for the selected remote file; the reply opens the Get Info

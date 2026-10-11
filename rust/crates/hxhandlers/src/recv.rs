@@ -130,7 +130,7 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             let quiet = crate::voice::failed(htlc, *trans, reason.as_deref()) || quiet;
             let quiet = icon::failed(htlc, *trans, reason.as_deref()) || quiet;
             news::failed(htlc, *trans);
-            files::failed(htlc, *trans);
+            let quiet = files::failed(htlc, *trans, reason.as_deref()) || quiet;
             chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
         }
         _ => {}

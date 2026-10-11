@@ -56,7 +56,7 @@ fn a_listing_reaches_only_what_asked_for_it() {
 #[test]
 fn a_refused_listing_tells_the_provider_which_folder() {
     asked(A, 7, listing(b"/Drop Box"));
-    unsafe { failed(A, 7) };
+    unsafe { failed(A, 7, None) };
     assert_eq!(
         test_env::take(),
         [(PROVIDER as usize, b"/Drop Box".to_vec(), None)]

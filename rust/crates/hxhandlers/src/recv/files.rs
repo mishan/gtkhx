@@ -64,7 +64,14 @@ pub(crate) enum Asked {
     Rename(Request),
     /// The server's banner, for its fetch.
     Banner,
+    /// Part of a file, for a reader that opens the transfer itself.
+    Range(RangeDone),
 }
+
+/// Told how a request for part of a file was answered: the transfer to open;
+/// refused, with the server's reason, empty when it gave none; or cut short
+/// (`Err(None)`), as by the connection closing.
+pub type RangeDone = Box<dyn FnOnce(Result<&Transfer, Option<String>>)>;
 
 /// A remote files provider, kept alive while its listing is in flight: a
 /// reply that comes after the browser closed, or after the provider gave
@@ -157,7 +164,7 @@ fn answered(htlc: *mut c_void, trans: u32) -> Option<Asked> {
 pub(crate) fn forget(htlc: *mut c_void, keep_banner: bool) {
     // Dropped once ASKED is released: letting go of a provider or transfer
     // can run its teardown, which must be free to reach ASKED.
-    let _gone: HashMap<_, _> = ASKED.with(|a| {
+    let gone: HashMap<_, _> = ASKED.with(|a| {
         let mut a = a.borrow_mut();
         let (gone, kept) = std::mem::take(&mut *a)
             .into_iter()
@@ -167,6 +174,11 @@ pub(crate) fn forget(htlc: *mut c_void, keep_banner: bool) {
         *a = kept;
         gone
     });
+    for what in gone.into_values() {
+        if let Asked::Range(done) = what {
+            done(Err(None));
+        }
+    }
 }
 
 #[cfg(not(test))]
@@ -222,6 +234,7 @@ pub(crate) unsafe fn transfer(htlc: *mut c_void, trans: u32, t: &Transfer) {
         Some(Asked::Download { htxf, folder }) => xfer::download_ready(htlc, htxf.0, folder, t),
         Some(Asked::Upload { htxf, folder }) => xfer::upload_ready(htlc, htxf.0, folder, t),
         Some(Asked::Banner) => xfer::banner(htlc, t),
+        Some(Asked::Range(done)) => done(Ok(t)),
         _ => {}
     }
 }
@@ -237,11 +250,12 @@ pub(crate) unsafe fn changed(htlc: *mut c_void, trans: u32) {
 }
 
 /// A request on `trans` was refused, or its reply cut short. The reason, if
-/// any, is `request-failed`'s to show.
+/// any, is `request-failed`'s to show, except a range's: its reader says,
+/// and true keeps it quiet.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
+pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>) -> bool {
     match answered(htlc, trans) {
         Some(Asked::Listing { provider, path }) => {
             let cfl = Box::into_raw(Box::new(CachedFileList {
@@ -253,8 +267,16 @@ pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
         }
         Some(Asked::Download { htxf, .. }) => xfer::download_refused(htlc, htxf.0),
         Some(Asked::Upload { htxf, .. }) => xfer::upload_refused(htlc, htxf.0),
+        Some(Asked::Range(done)) => {
+            done(Err(match reason {
+                Some(super::chat::CUT_SHORT) => None,
+                r => Some(r.unwrap_or_default().to_owned()),
+            }));
+            return true;
+        }
         Some(Asked::Info(_) | Asked::Rename(_) | Asked::Banner) | None => {}
     }
+    false
 }
 
 #[cfg(test)]

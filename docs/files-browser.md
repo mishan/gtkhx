@@ -75,7 +75,7 @@ behaviour is identical whether you pressed the key or clicked the icon.
 | Key | Alternate | Operation | On the remote side |
 |---|---|---|---|
 | F2 | — | Rename | `HTLC_HDR_FILE_SETINFO` rename |
-| F3 | Ctrl+P | Preview | fetch + `preview.c` |
+| F3 | Ctrl+P | Preview | fetch + `preview.c`, or the media player (below) |
 | F4 | — | Open / activate | descend, or `xdg-open` locally |
 | F5 | — | Copy active → inactive | download, upload, or GIO copy |
 | F6 | — | Move (destination dialog, defaulting to the inactive panel's path) | `HTLC_HDR_FILE_MOVE` |
@@ -179,6 +179,35 @@ tooltip.
    transfer path and `preview.c` through the same entry points the old UI used.
 
 ---
+
+## Media preview
+
+Preview on an audio or video file — a movie or audio type code, or a name with
+a media extension — opens a player instead of `preview.c`'s window, in builds
+with GStreamer (`-Dvoice`). It plays while the file downloads, and seeks, without
+fetching the whole file: `gtkhx-ui`'s `media_preview`.
+
+GStreamer's `playbin` reads the file through a source element of GtkHx's own
+(`gtkhxrangesrc`, at `gtkhx-range://<player>`), which the demuxer asks for bytes
+at any offset. Behind it, the file is read a range at a time: each range is a
+download resumed at its offset (`hxrequest::files::get_from`), which every rig
+server honors, read over a transfer connection of its own on a worker thread
+into a window the element takes from. A read the current range will soon reach
+waits for it; any other starts a new range, a little before the read, and the
+old one's connection closes. The element asks and waits on its own streaming
+thread, so a seek can't race stale bytes the way an `appsrc` pushing from
+another thread can.
+
+What earlier ranges read is kept, up to a limit: before it plays anything,
+GStreamer reads a file's start, its end and its middle, and an MP4 with its
+index at the end is read at the end and then from the start again. Kept, those
+don't each cost a request — which matters on mhxd, where a download asked for
+just after one closes is refused ("1 at a time") or queued for a couple of
+seconds. A refused range is asked for again for a few seconds before the player
+gives up.
+
+The resume offset and the fork length a transfer carries are 32-bit, so files
+past 4 GiB keep the ordinary preview.
 
 ## Protocol notes
 
