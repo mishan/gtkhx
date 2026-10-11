@@ -206,8 +206,11 @@ just after one closes is refused ("1 at a time") or queued for a couple of
 seconds. A refused range is asked for again for a few seconds before the player
 gives up.
 
-The resume offset and the fork length a transfer carries are 32-bit, so files
-past 4 GiB keep the ordinary preview.
+Audio and video never reach the text viewer. In a build without GStreamer,
+Preview on one says the build can't preview audio or video; past 4 GiB, which
+the player can't seek in (the resume offset and the fork length a transfer
+carries are 32-bit), it says the file is too large to preview. A local file
+opens in the desktop's own player either way.
 
 ## Protocol notes
 

@@ -151,19 +151,32 @@ impl Browser {
         let Some(p) = panel.provider() else {
             return;
         };
-        #[cfg(feature = "voice")]
-        if let Some(conn) = p
-            .conn()
-            .filter(|_| crate::media_preview::plays(&e.name(), e.icon_id(), e.size()))
-        {
-            let path = p.path();
-            let (p, entry) = (p.clone(), e.clone());
-            unsafe {
-                crate::media_preview::open(conn.ptr(), &path, &e, move || p.activate(&entry))
-            };
+        // A local file opens in the desktop's own player (its provider has
+        // no preview); a remote one plays here, never in the text viewer.
+        if p.is_remote() && super::row::is_media(&e.name(), e.icon_id()) {
+            self.preview_media(&p, &e);
             return;
         }
         p.preview(&e);
+    }
+
+    #[cfg(not(feature = "voice"))]
+    fn preview_media(&self, _p: &Provider, _e: &HxFileEntry) {
+        self.toast(&tr("This build of GtkHx can't preview audio or video."));
+    }
+
+    #[cfg(feature = "voice")]
+    fn preview_media(&self, p: &Provider, e: &HxFileEntry) {
+        if e.size() > crate::media_preview::MAX_SIZE {
+            self.toast(&tr("Too large to preview; download it instead."));
+            return;
+        }
+        let Some(conn) = p.conn() else {
+            return;
+        };
+        let path = p.path();
+        let (p, entry) = (p.clone(), e.clone());
+        unsafe { crate::media_preview::open(conn.ptr(), &path, e, move || p.activate(&entry)) };
     }
 
     /// FILE_GETINFO for the selected remote file; the reply opens the Get Info
