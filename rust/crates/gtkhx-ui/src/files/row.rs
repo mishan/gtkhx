@@ -136,6 +136,8 @@ pub fn cmp_kind(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn media_is_known_by_type_or_name() {
         use hxmodel::files::icon;
@@ -148,11 +150,9 @@ mod tests {
             ("mp4", icon::FILE, false),
             ("types.ts", icon::FILE, false),
         ] {
-            assert_eq!(super::is_media(name, icon_id), want, "{name}");
+            assert_eq!(is_media(name, icon_id), want, "{name}");
         }
     }
-
-    use super::*;
 
     #[test]
     fn folder_sizes_are_counts() {
