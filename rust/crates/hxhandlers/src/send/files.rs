@@ -117,6 +117,27 @@ pub(crate) unsafe fn expect_transfer(htlc: *mut c_void, what: Asked) {
     asked(htlc, trans, what);
 }
 
+/// FILE_GET for the file `name` in `dir`, its data fork from `data_pos` on,
+/// its reply to `done` rather than to a transfer: the caller opens the
+/// transfer and reads it. False when the request can't be made.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread only.
+pub unsafe fn get_range(
+    htlc: *mut c_void,
+    dir: &[u8],
+    name: &[u8],
+    data_pos: u32,
+    done: crate::recv::files::RangeDone,
+) -> bool {
+    let Some(req) = files::get_from(dir, name, data_pos) else {
+        return false;
+    };
+    let trans = send(htlc, &req, Expect::Transfer);
+    asked(htlc, trans, Asked::Range(done));
+    true
+}
+
 /// `void hx_banner_get (struct htlc_conn *htlc)` — ask for the server's
 /// banner, for its fetch to take over the transfer the reply grants.
 ///

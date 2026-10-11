@@ -243,3 +243,28 @@ fn pack_frames_the_request() {
     assert_eq!(h.trans, 7);
     assert_eq!(f.len(), 22 + 4 + dir("/x").len());
 }
+
+#[test]
+fn resume_rflt_is_well_formed() {
+    let (data_pos, rsrc_pos) = (0x0102_0304u32, 0x0a0b_0c0du32);
+    let r = resume_rflt(data_pos, rsrc_pos);
+
+    // Fork-list header: RFLT magic at byte 0, version 1, fork count 2, then
+    // the DATA + MACR fork tags at [42] / [58]. The historical bug had the
+    // record's C string literal leak 26 leading spaces in, shoving RFLT to
+    // [26] and the fork tags past byte 74 — this pins the correct layout.
+    assert_eq!(&r[0..4], b"RFLT");
+    assert_eq!(&r[4..6], &[0, 1]); // version 1 (u16 BE)
+    assert_eq!(&r[40..42], &[0, 2]); // fork count 2 (u16 BE)
+    assert_eq!(&r[42..46], b"DATA");
+    assert_eq!(&r[58..62], b"MACR");
+
+    // The two resume offsets, big-endian at the fixed positions mhxd reads.
+    assert_eq!(&r[46..50], &data_pos.to_be_bytes());
+    assert_eq!(&r[62..66], &rsrc_pos.to_be_bytes());
+
+    // Every other byte is zero (no stray content).
+    assert!(r[6..40].iter().all(|&b| b == 0));
+    assert!(r[50..58].iter().all(|&b| b == 0));
+    assert!(r[66..74].iter().all(|&b| b == 0));
+}

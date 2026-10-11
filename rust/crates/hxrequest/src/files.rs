@@ -13,7 +13,9 @@
 //! Each builder returns `None` for input the wire can't carry: a chunk longer
 //! than its u16 length allows.
 
-use hxproto::build::{self, FileMoveRequest, FilePutFolderRequest, FileSetInfoRequest, HxChunk};
+use hxproto::build::{
+    self, FileGetRequest, FileMoveRequest, FilePutFolderRequest, FileSetInfoRequest, HxChunk,
+};
 use hxproto::messages::ClientHdr;
 
 use crate::path::{below_root, encode_dir, split};
@@ -135,6 +137,40 @@ pub fn moves(src: &[u8], dst: &[u8]) -> Vec<Request> {
         ));
     }
     out
+}
+
+/// The 74-byte resume `RFLT` record a download carries to start its data fork
+/// at `data_pos` and its resource fork at `rsrc_pos`: a fork-list header (RFLT
+/// magic, version 1, fork count 2, "DATA" + "MACR" fork tags) with the two
+/// offsets big-endian at `[46..50]` and `[62..66]`. Byte-for-byte the record
+/// mhxd's own client emits; mhxd's server reads the offsets at those fixed
+/// positions. The wire's offsets are 32-bit.
+pub fn resume_rflt(data_pos: u32, rsrc_pos: u32) -> [u8; 74] {
+    let mut r = [0u8; 74];
+    r[0..4].copy_from_slice(b"RFLT");
+    r[5] = 1; // version 1 (u16 BE at [4..6])
+    r[41] = 2; // fork count 2 (u16 BE at [40..42])
+    r[42..46].copy_from_slice(b"DATA");
+    r[46..50].copy_from_slice(&data_pos.to_be_bytes());
+    r[58..62].copy_from_slice(b"MACR");
+    r[62..66].copy_from_slice(&rsrc_pos.to_be_bytes());
+    r
+}
+
+/// FILE_GET for the file `name` in `dir`, its data fork from `data_pos` on:
+/// a download that resumes there, which every rig server honors (hx-e2e's
+/// `a_resumed_download_starts_where_it_was_asked_to`).
+pub fn get_from(dir: &[u8], name: &[u8], data_pos: u32) -> Option<Request> {
+    let enc = below_root(dir).then(|| encode_dir(dir, false));
+    let rflt = resume_rflt(data_pos, 0);
+    let req = FileGetRequest {
+        name,
+        dir: enc.as_deref(),
+        rflt: (data_pos > 0).then_some(&rflt[..]),
+    };
+    let mut chunks = [HxChunk::EMPTY; 3];
+    let hc = build::build_file_get_chunks(&req, &mut chunks);
+    Request::from_built(ClientHdr::FileGet as u32, &chunks, hc)
 }
 
 /// FILE_GETFOLDER for the folder `name` in `dir`.

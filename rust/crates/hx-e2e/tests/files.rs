@@ -463,3 +463,69 @@ fn utf8_and_large_files_are_negotiated_where_offered() {
         assert_eq!(Client::guest(s, 0).caps(), 0, "{}", s.name);
     }
 }
+
+/// The data fork of `name` in the root, from `from` on, as a download
+/// resumed there delivers it.
+fn data_from(c: &mut Client, name: &[u8], from: u32) -> Vec<u8> {
+    use std::io::{Read, Write};
+    // mhxd refuses a download asked for just after one closes ("1 at a
+    // time") until it has seen that one go.
+    let mut r = c.request(&files::get_from(b"/", name, from).unwrap());
+    for _ in 0..30 {
+        if !r.is_error() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        r = c.request(&files::get_from(b"/", name, from).unwrap());
+    }
+    ok(c, &r, "a download");
+    let get = hxproto::parse::parse_file_get_reply(&r.raw, r.raw.len());
+    let mut pre = [0u8; 24];
+    let n =
+        hxproto::build::build_htxf_preamble(&mut pre, get.ref_, u64::from(get.size), 0, 0, false);
+    let server = c.server();
+    let mut sock = std::net::TcpStream::connect((server.host, server.xfer_port))
+        .unwrap_or_else(|e| panic!("{}: transfer port: {e}", server.name));
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(15)))
+        .unwrap();
+    sock.write_all(&pre[..n]).unwrap();
+    let mut read = |len: usize| {
+        let mut b = vec![0u8; len];
+        sock.read_exact(&mut b)
+            .unwrap_or_else(|e| panic!("{}: the transfer: {e}", server.name));
+        b
+    };
+    let header = read(24);
+    assert_eq!(&header[..4], b"FILP", "{}", server.name);
+    for _ in 0..u16::from_be_bytes([header[22], header[23]]) {
+        let fork = read(16);
+        let len = u32::from_be_bytes([fork[12], fork[13], fork[14], fork[15]]) as usize;
+        let bytes = read(len);
+        if &fork[..4] == b"DATA" {
+            return bytes;
+        }
+    }
+    Vec::new()
+}
+
+/// What a media preview's seeks rest on: a download resumed at an offset
+/// starts its data fork there, on every server.
+#[test]
+fn a_resumed_download_starts_where_it_was_asked_to() {
+    for s in servers_with(&[]) {
+        let mut c = Client::guest(s, 0);
+        let files: Vec<_> = c.list("/").into_iter().filter(|e| !e.is_folder()).collect();
+        let (file, whole) = files
+            .iter()
+            .map(|f| (f, data_from(&mut c, &f.name, 0)))
+            .find(|(_, whole)| whole.len() >= 2)
+            .unwrap_or_else(|| panic!("{}: no file in the root with data", s.name));
+        let half = (whole.len() / 2) as u32;
+        assert_eq!(
+            data_from(&mut c, &file.name, half),
+            whole[half as usize..],
+            "{}",
+            s.name
+        );
+    }
+}
