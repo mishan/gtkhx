@@ -1,4 +1,4 @@
-## 1.5.2-dev
+## 1.6.0-dev
 
 - Users
   - Fixed avatars from 48 to 199 pixels wide showing nothing in the users list; on hxd-ng servers that was every avatar set from hx-ng
