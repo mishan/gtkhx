@@ -35,23 +35,9 @@ use source::{Endpoint, Problem, Reader};
 const RETRY_EVERY_MS: u64 = 100;
 const RETRIES: u32 = 30;
 
-/// Whether the file is one this can play: a movie or audio type, or a name
-/// that says so. Files past 4 GiB are left out: the resume offset and the
-/// fork length the transfer carries are 32-bit.
-pub fn plays(name: &str, icon_id: u16, size: u64) -> bool {
-    const EXTENSIONS: &[&str] = &[
-        "mp4", "m4v", "mov", "mkv", "webm", "avi", "mpg", "mpeg", "ogv", "wmv", "flv", "3gp",
-        "mp3", "m4a", "aac", "ogg", "oga", "opus", "flac", "wav", "aif", "aiff",
-    ];
-    if size > u64::from(u32::MAX) {
-        return false;
-    }
-    if icon_id == hxmodel::files::icon::MOOV || icon_id == hxmodel::files::icon::NOTE {
-        return true;
-    }
-    name.rsplit_once('.')
-        .is_some_and(|(_, ext)| EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e)))
-}
+/// The largest file the player can read: the resume offset and the fork
+/// length a transfer carries are 32-bit.
+pub const MAX_SIZE: u64 = u32::MAX as u64;
 
 /// The newest picture off the appsink, for the main thread to show.
 #[derive(Default)]
@@ -533,23 +519,6 @@ fn clock(t: gst::ClockTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn plays_movies_and_audio_by_type_or_name() {
-        use hxmodel::files::icon;
-        for (name, icon_id, size, want) in [
-            ("clip.mp4", icon::FILE, 10, true),
-            ("Song.MP3", icon::FILE, 10, true),
-            ("untitled", icon::MOOV, 10, true),
-            ("untitled", icon::NOTE, 10, true),
-            ("notes.txt", icon::TEXT, 10, false),
-            ("mp4", icon::FILE, 10, false),
-            ("types.ts", icon::FILE, 10, false),
-            ("huge.mkv", icon::MOOV, u64::from(u32::MAX) + 1, false),
-        ] {
-            assert_eq!(plays(name, icon_id, size), want, "{name}");
-        }
-    }
 
     #[test]
     fn clock_reads_minutes_or_hours() {

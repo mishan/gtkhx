@@ -103,6 +103,21 @@ fn folders_first(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
 // folder's size is a count: a 7-item folder ranked against a 7-byte file means
 // nothing.
 
+/// Whether the file is audio or video: a movie or audio type, or a name that
+/// says so. `.ts` is left to the source viewer, TypeScript as often as
+/// MPEG-TS.
+pub fn is_media(name: &str, icon_id: u16) -> bool {
+    const EXTENSIONS: &[&str] = &[
+        "mp4", "m4v", "mov", "mkv", "webm", "avi", "mpg", "mpeg", "ogv", "wmv", "flv", "3gp",
+        "mp3", "m4a", "aac", "ogg", "oga", "opus", "flac", "wav", "aif", "aiff",
+    ];
+    if icon_id == hxmodel::files::icon::MOOV || icon_id == hxmodel::files::icon::NOTE {
+        return true;
+    }
+    name.rsplit_once('.')
+        .is_some_and(|(_, ext)| EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e)))
+}
+
 pub fn cmp_name(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
     folders_first(a, b).then_with(|| a.name_collate_key().cmp(b.name_collate_key()))
 }
@@ -121,6 +136,22 @@ pub fn cmp_kind(a: &HxFileEntry, b: &HxFileEntry) -> Ordering {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn media_is_known_by_type_or_name() {
+        use hxmodel::files::icon;
+        for (name, icon_id, want) in [
+            ("clip.mp4", icon::FILE, true),
+            ("Song.MP3", icon::FILE, true),
+            ("untitled", icon::MOOV, true),
+            ("untitled", icon::NOTE, true),
+            ("notes.txt", icon::TEXT, false),
+            ("mp4", icon::FILE, false),
+            ("types.ts", icon::FILE, false),
+        ] {
+            assert_eq!(super::is_media(name, icon_id), want, "{name}");
+        }
+    }
+
     use super::*;
 
     #[test]

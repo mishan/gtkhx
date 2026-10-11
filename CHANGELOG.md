@@ -10,6 +10,7 @@
   - Fixed previewing an empty file leaving its window on "Loading…"
   - Fixed a crash closing a preview window after its download had failed partway
   - Previewing an audio or video file plays it while it downloads, with seeking; only what is played is fetched
+  - Previewing audio or video in a build without GStreamer says it isn't supported, rather than showing the file as text
   - Fixed the 1.9 server disconnecting you when the file browser was opened before agreeing to its agreement
 
 ## 1.5.1
