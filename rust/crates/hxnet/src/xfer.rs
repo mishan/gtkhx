@@ -140,7 +140,9 @@ pub struct HxnetXferParams {
     /// Preview feed (the `hx_preview_*` C functions), or `None`. Receive-only;
     /// the send worker ignores them.
     pub preview_chunk: Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize)>,
-    pub preview_set_info: Option<unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char)>,
+    /// Takes the data fork's length; returns how much of it to stream.
+    pub preview_set_info:
+        Option<unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, u64) -> u64>,
     pub preview_done: Option<unsafe extern "C" fn(*mut c_void)>,
     /// Local fork sizes for a *send* (`htxf->data_size` / `htxf->rsrc_size`).
     /// Send-only; the receive worker ignores them (it uses `file_budget`).
@@ -401,9 +403,14 @@ fn finish(
 /// MACR read.
 const MACR_DRAIN_TIMEOUT_MS: u32 = 200;
 
+/// What [`hxnet_xfer_file_recv_one`] returns for a preview that stopped at the
+/// part of the file it shows: not a failure, but not the whole file either.
+pub const HXNET_XFER_STOPPED: c_int = -1;
+
 /// `int hxnet_xfer_file_recv_one (const HxnetXferParams *p)` — receive one file
 /// off the HTXF subchannel into `p->path` (was C `file_recv_one`). Returns 0 on
-/// success, an errno-like positive code on failure. Does NOT play the completion
+/// success, [`HXNET_XFER_STOPPED`] for a preview that stopped early, an
+/// errno-like positive code on failure. Does NOT play the completion
 /// sound, post a final update, or close the channel — the caller owns those.
 ///
 /// # Safety
@@ -459,56 +466,59 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     // 4. Data fork.
     let fork_len = pi.data_fork_len;
     tot_len += fork_len;
-    if fork_len != 0 {
-        if !is_preview {
-            // No truncate: a resumed download seeks to `data_pos` and writes
-            // into an existing partial file, so truncating would discard it.
-            let mut f = match std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(false)
-                .open(&path)
-            {
-                Ok(f) => f,
-                Err(e) => return io_errno(&e),
-            };
-            if p.data_pos != 0 && f.seek(SeekFrom::Start(p.data_pos)).is_err() {
-                return EIO;
-            }
-            if let Err(e) = rd_wr_recv(hx, &mut f, fork_len, p) {
-                return e;
-            }
-            let _ = f.sync_all();
-        } else {
-            if p.preview.is_null() {
-                return 0; // nothing to write into; quietly stop
-            }
-            let mut type_s = [0u8; 5];
-            let mut creator_s = [0u8; 5];
-            type_s[..4].copy_from_slice(&typecrea[0..4]);
-            creator_s[..4].copy_from_slice(&typecrea[4..8]);
-            if let Some(set_info) = p.preview_set_info {
-                set_info(
-                    p.preview,
-                    type_s.as_ptr() as *const c_char,
-                    creator_s.as_ptr() as *const c_char,
-                );
-            }
-            // Clamp the streamed preview to 32 bits (the C `preview_get` took a
-            // guint32 length via MIN(fork_len, 0xFFFFFFFF)). Previews are small
-            // by definition; the clamp guards against a hostile/pathological
-            // multi-GiB "preview" length flooding the UI pipeline.
-            let preview_len = fork_len.min(u32::MAX as u64);
-            if let Err(e) = preview_get(hx, preview_len, p) {
-                return e;
-            }
+    if is_preview {
+        // Even an empty file is shown: the window waits on set_info and done.
+        if p.preview.is_null() {
+            return 0; // nothing to write into; quietly stop
         }
+        let mut type_s = [0u8; 5];
+        let mut creator_s = [0u8; 5];
+        type_s[..4].copy_from_slice(&typecrea[0..4]);
+        creator_s[..4].copy_from_slice(&typecrea[4..8]);
+        let wanted = match p.preview_set_info {
+            Some(set_info) => set_info(
+                p.preview,
+                type_s.as_ptr() as *const c_char,
+                creator_s.as_ptr() as *const c_char,
+                fork_len,
+            ),
+            None => fork_len,
+        }
+        .min(fork_len);
+        if let Err(e) = preview_get(hx, wanted, p) {
+            return e;
+        }
+        // The rest of the file is left unread: the caller closes the
+        // channel, which is how a preview ends early. Previews never carry a
+        // resource fork.
+        return if wanted < fork_len {
+            HXNET_XFER_STOPPED
+        } else {
+            0
+        };
+    }
+    if fork_len != 0 {
+        // No truncate: a resumed download seeks to `data_pos` and writes
+        // into an existing partial file, so truncating would discard it.
+        let mut f = match std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+        {
+            Ok(f) => f,
+            Err(e) => return io_errno(&e),
+        };
+        if p.data_pos != 0 && f.seek(SeekFrom::Start(p.data_pos)).is_err() {
+            return EIO;
+        }
+        if let Err(e) = rd_wr_recv(hx, &mut f, fork_len, p) {
+            return e;
+        }
+        let _ = f.sync_all();
     }
 
     // 5. Resource fork.
-    if is_preview {
-        return 0; // previews never carry a resource fork
-    }
     if is_folder && p.file_budget == 0 {
         // Large File: an item whose FFO does not fit the 4-byte per-item size
         // is announced as 0, and its extent comes from the FFO's own fork
@@ -2104,5 +2114,99 @@ mod recv_timeout_tests {
             rv, 0,
             "a partial MACR marker must surface as an error, not a clean finish"
         );
+    }
+
+    // A preview streams only as much of the data fork as its viewer asked
+    // for, and says when that was less than the whole fork. The server sends
+    // no more than that and holds, so a worker that read on would stall. An
+    // empty file still reaches the viewer, which is waiting to be told what
+    // it is.
+    #[test]
+    fn a_preview_streams_only_what_it_asked_for() {
+        struct Got {
+            wanted: u64,
+            size: u64,
+            bytes: Vec<u8>,
+            done: bool,
+        }
+        unsafe extern "C" fn set_info(
+            p: *mut c_void,
+            _ty: *const c_char,
+            _cr: *const c_char,
+            size: u64,
+        ) -> u64 {
+            let got = &mut *(p as *mut Got);
+            got.size = size;
+            got.wanted
+        }
+        unsafe extern "C" fn chunk(p: *mut c_void, buf: *const c_char, len: usize) {
+            let got = &mut *(p as *mut Got);
+            got.bytes
+                .extend_from_slice(std::slice::from_raw_parts(buf.cast(), len));
+        }
+        unsafe extern "C" fn done(p: *mut c_void) {
+            (*(p as *mut Got)).done = true;
+        }
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+
+        let long: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
+        for (case, body, wanted, rv_want) in [
+            ("the start", &long[..], 1000, HXNET_XFER_STOPPED),
+            ("none", &long[..], 0, HXNET_XFER_STOPPED),
+            ("all", &long[..], long.len() as u64, 0),
+            ("an empty file", &[][..], 0, 0),
+        ] {
+            let mut wire = filp_header_and_data(body);
+            let file_budget = wire.len() as u64;
+            wire.truncate(wire.len() - body.len() + wanted as usize);
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+            let server = std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let _ = s.write_all(&wire);
+                let _ = done_rx.recv_timeout(SERVER_HOLD);
+            });
+
+            let mut got = Got {
+                wanted,
+                size: u64::MAX,
+                bytes: Vec::new(),
+                done: false,
+            };
+            let mut conn = HtxfConn::new_plain_for_test(TcpStream::connect(addr).unwrap());
+            let path = std::ffi::CString::new("unused").unwrap();
+            let params = HxnetXferParams {
+                hx: &mut conn as *mut HtxfConn,
+                path: path.as_ptr(),
+                file_budget,
+                data_pos: 0,
+                rsrc_pos: 0,
+                opt_preview: 1,
+                opt_folder: 0,
+                opt_large: 0,
+                preview: &mut got as *mut Got as *mut c_void,
+                user_data: std::ptr::null_mut(),
+                progress: Some(noop),
+                preview_chunk: Some(chunk),
+                preview_set_info: Some(set_info),
+                preview_done: Some(done),
+                data_size: 0,
+                rsrc_size: 0,
+            };
+            let rv = unsafe { hxnet_xfer_file_recv_one(&params) };
+            let _ = done_tx.send(());
+            drop(conn);
+            let _ = server.join();
+
+            assert_eq!(rv, rv_want, "{case}");
+            assert_eq!(
+                got.size,
+                body.len() as u64,
+                "{case}: the data fork's length"
+            );
+            assert_eq!(got.bytes, body[..wanted as usize], "{case}");
+            assert!(got.done, "{case}: the viewer is told the stream ended");
+        }
     }
 }

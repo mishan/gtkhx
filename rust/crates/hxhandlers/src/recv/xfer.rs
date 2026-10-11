@@ -29,6 +29,8 @@ use hxsession::{FileInfo, Transfer};
 use std::os::raw::{c_char, c_int, c_long};
 
 #[cfg(not(test))]
+use crate::xfer::offer_full_download;
+#[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_serverhost;
 #[cfg(not(test))]
 use gtkhx_core::session::{
@@ -202,6 +204,7 @@ pub(crate) unsafe fn download_ready(
         let pv = hx_preview_new(title);
         hx_htxf_set_preview(htxf, pv);
         hx_preview_set_cancel_cb(pv, Some(preview_cancel_xfer), htxf);
+        offer_full_download(pv, htxf);
     }
 
     hx_xfer_announce(htlc, htxf, t.queue);

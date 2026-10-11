@@ -86,14 +86,15 @@ struct HxnetXferParams {
     void *user_data; /* passed back to progress (the C side uses it as htxf) */
     void (*progress) (void *user_data, guint64 delta);
     void (*preview_chunk) (void *preview, const char *buf, gsize len);
-    void (*preview_set_info) (void *preview, const char *type,
-                              const char *creator);
+    guint64 (*preview_set_info) (void *preview, const char *type,
+                                 const char *creator, guint64 size);
     void (*preview_done) (void *preview);
     guint64 data_size; /* send-only: htxf->data_size (local data fork) */
     guint64 rsrc_size; /* send-only: htxf->rsrc_size (local rsrc fork) */
 };
 
-/* Returns 0 on success, an errno-like positive code on failure. Does NOT play
+/* Returns 0 on success, -1 for a preview that stopped at the part it shows,
+ * an errno-like positive code on failure. Does NOT play
  * the completion sound, post a final update, or close the channel — the caller
  * owns those (the get_thread driver for a solo download, or the Rust
  * hxnet_xfer_folder_recv_all loop for a folder file). */

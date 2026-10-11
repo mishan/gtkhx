@@ -215,6 +215,8 @@ pub mod banner;
 pub mod avatar;
 // the header bar's lock: whether, and how, the focused connection is encrypted.
 pub mod encryption_lock;
+// the preview window's notice for a file it shows only part of, or none of.
+pub mod preview_notice;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
