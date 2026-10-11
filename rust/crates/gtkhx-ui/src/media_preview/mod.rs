@@ -40,7 +40,7 @@ const RETRIES: u32 = 30;
 /// fork length the transfer carries are 32-bit.
 pub fn plays(name: &str, icon_id: u16, size: u64) -> bool {
     const EXTENSIONS: &[&str] = &[
-        "mp4", "m4v", "mov", "mkv", "webm", "avi", "mpg", "mpeg", "ogv", "wmv", "flv", "3gp", "ts",
+        "mp4", "m4v", "mov", "mkv", "webm", "avi", "mpg", "mpeg", "ogv", "wmv", "flv", "3gp",
         "mp3", "m4a", "aac", "ogg", "oga", "opus", "flac", "wav", "aif", "aiff",
     ];
     if size > u64::from(u32::MAX) {
@@ -68,6 +68,7 @@ struct Player {
     reader: Arc<Reader>,
     frames: Arc<Frames>,
     pipeline: RefCell<Option<gst::Element>>,
+    watch: RefCell<Option<gst::bus::BusWatchGuard>>,
     window: adw::Window,
     stack: gtk::Stack,
     picture: gtk::Picture,
@@ -99,8 +100,10 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
         return;
     }
     let id = NEXT_ID.with(|n| n.replace(n.get() + 1));
+    // Always from an idle, never inline: `fetch` asks with its lock held,
+    // and can be on the main thread, when a demuxer reads while it seeks.
     let reader = Arc::new(Reader::new(move |range, offset| {
-        glib::MainContext::default().invoke(move || {
+        glib::idle_add_once(move || {
             if let Some(p) = player(id) {
                 p.request(range, offset);
             }
@@ -160,6 +163,7 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
         reader,
         frames: Arc::new(Frames::default()),
         pipeline: RefCell::new(None),
+        watch: RefCell::new(None),
         window: window.clone(),
         stack,
         picture,
@@ -190,14 +194,13 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
     });
     let held = RefCell::new(Some(p));
     let ticker = RefCell::new(Some(ticker));
-    window.connect_close_request(move |_| {
+    window.connect_destroy(move |_| {
         if let Some(t) = ticker.take() {
             t.remove();
         }
         if let Some(p) = held.take() {
             p.close();
         }
-        glib::Propagation::Proceed
     });
     unsafe { crate::ffi::init_keyaccel(window.upcast_ref::<gtk::Widget>().as_ptr().cast()) };
     window.present();
@@ -235,10 +238,16 @@ impl Player {
     }
 
     fn answered(&self, range: u64, offset: u64, r: Result<(u32, u64), Option<String>>) {
+        // A range moved on from is still opened when granted, so the server
+        // lets go of it rather than waiting it out; refused, it's forgotten.
+        if r.is_err() && !self.reader.is_current(range) {
+            return;
+        }
         match r {
             Ok((reference, size)) => {
                 self.retries.set(0);
                 let Some(htlc) = dock::live_htlc(self.bound) else {
+                    self.fail(&tr("The connection to the server has closed."));
                     return;
                 };
                 let endpoint = unsafe { Endpoint::of(htlc) };
@@ -261,17 +270,7 @@ impl Player {
                         if let Some(problem) = error.filter(|_| first) {
                             glib::MainContext::default().invoke(move || {
                                 if let Some(p) = player(id) {
-                                    p.fail(&match problem {
-                                        Problem::Connect => {
-                                            tr("Couldn't connect to the server for the file.")
-                                        }
-                                        Problem::NotAFile => {
-                                            tr("The server sent something other than the file.")
-                                        }
-                                        Problem::Stopped => {
-                                            tr("The server stopped sending the file.")
-                                        }
-                                    });
+                                    p.fail(&problem_text(problem));
                                 }
                             });
                         }
@@ -320,10 +319,7 @@ impl Player {
             }
             glib::ControlFlow::Continue
         });
-        if let Ok(watch) = watch {
-            // The watch lives as long as the bus: the pipeline's.
-            std::mem::forget(watch);
-        }
+        self.watch.replace(watch.ok());
         let _ = playbin.set_state(gst::State::Playing);
         self.pipeline.replace(Some(playbin));
     }
@@ -377,7 +373,10 @@ impl Player {
     fn on_message(&self, msg: &gst::Message) {
         use gst::MessageView;
         match msg.view() {
-            MessageView::Error(e) => self.fail(&e.error().to_string()),
+            MessageView::Error(e) => self.fail(&match self.reader.problem() {
+                Some(p) => problem_text(p),
+                None => e.error().to_string(),
+            }),
             MessageView::Eos(_) => self.set_playing(false),
             MessageView::AsyncDone(_) => {
                 let videos = self
@@ -418,7 +417,7 @@ impl Player {
                 (Some(pos), Some(dur)) if pos >= dur
             );
             if at_end {
-                let _ = p.seek_simple(gst::SeekFlags::FLUSH, gst::ClockTime::ZERO);
+                seek(&p, gst::SeekFlags::FLUSH, gst::ClockTime::ZERO);
             }
         }
         let _ = p.set_state(if playing {
@@ -432,7 +431,7 @@ impl Player {
     fn seek_to(&self, seconds: f64) {
         if let Some(p) = self.pipeline.borrow().as_ref() {
             let at = gst::ClockTime::from_nseconds((seconds.max(0.0) * 1e9) as u64);
-            let _ = p.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, at);
+            seek(p, gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, at);
         }
     }
 
@@ -470,6 +469,7 @@ impl Player {
 
     fn close(&self) {
         self.reader.close();
+        self.watch.take();
         if let Some(p) = self.pipeline.take() {
             let _ = p.set_state(gst::State::Null);
         }
@@ -487,8 +487,9 @@ fn texture_of(sample: &gst::Sample) -> Option<gdk::MemoryTexture> {
         return None;
     }
     let buffer = sample.buffer_owned()?;
-    let stride = buffer.size() / height as usize;
-    if stride < width as usize * 4 {
+    // An appsink offers no video meta, so rows are packed.
+    let stride = width as usize * 4;
+    if buffer.size() < stride * height as usize {
         return None;
     }
     let bytes = glib::Bytes::from_owned(buffer.into_mapped_buffer_readable().ok()?);
@@ -499,6 +500,24 @@ fn texture_of(sample: &gst::Sample) -> Option<gdk::MemoryTexture> {
         &bytes,
         stride,
     ))
+}
+
+/// Seek on another thread: a demuxer can read while it seeks, on the
+/// seeking thread, and reading waits on the network.
+fn seek(p: &gst::Element, flags: gst::SeekFlags, at: gst::ClockTime) {
+    let p = p.clone();
+    std::thread::spawn(move || {
+        let _ = p.seek_simple(flags, at);
+    });
+}
+
+fn problem_text(p: Problem) -> String {
+    match p {
+        Problem::Connect => tr("Couldn't connect to the server for the file."),
+        Problem::NotAFile => tr("The server sent something other than the file."),
+        Problem::Stopped => tr("The server stopped sending the file."),
+        Problem::NoResume => tr("The server can only send this file from its start."),
+    }
 }
 
 /// A position as the time label shows it: m:ss, or h:mm:ss.
@@ -525,6 +544,7 @@ mod tests {
             ("untitled", icon::NOTE, 10, true),
             ("notes.txt", icon::TEXT, 10, false),
             ("mp4", icon::FILE, 10, false),
+            ("types.ts", icon::FILE, 10, false),
             ("huge.mkv", icon::MOOV, u64::from(u32::MAX) + 1, false),
         ] {
             assert_eq!(plays(name, icon_id, size), want, "{name}");

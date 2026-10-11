@@ -468,7 +468,16 @@ fn utf8_and_large_files_are_negotiated_where_offered() {
 /// resumed there delivers it.
 fn data_from(c: &mut Client, name: &[u8], from: u32) -> Vec<u8> {
     use std::io::{Read, Write};
-    let r = c.request(&files::get_from(b"/", name, from).unwrap());
+    // mhxd refuses a download asked for just after one closes ("1 at a
+    // time") until it has seen that one go.
+    let mut r = c.request(&files::get_from(b"/", name, from).unwrap());
+    for _ in 0..30 {
+        if !r.is_error() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        r = c.request(&files::get_from(b"/", name, from).unwrap());
+    }
     ok(c, &r, "a download");
     let get = hxproto::parse::parse_file_get_reply(&r.raw, r.raw.len());
     let mut pre = [0u8; 24];
@@ -505,12 +514,12 @@ fn data_from(c: &mut Client, name: &[u8], from: u32) -> Vec<u8> {
 fn a_resumed_download_starts_where_it_was_asked_to() {
     for s in servers_with(&[]) {
         let mut c = Client::guest(s, 0);
-        let file = c
-            .list("/")
-            .into_iter()
-            .find(|e| !e.is_folder() && e.size >= 2)
-            .unwrap_or_else(|| panic!("{}: no file in the root", s.name));
-        let whole = data_from(&mut c, &file.name, 0);
+        let files: Vec<_> = c.list("/").into_iter().filter(|e| !e.is_folder()).collect();
+        let (file, whole) = files
+            .iter()
+            .map(|f| (f, data_from(&mut c, &f.name, 0)))
+            .find(|(_, whole)| whole.len() >= 2)
+            .unwrap_or_else(|| panic!("{}: no file in the root with data", s.name));
         let half = (whole.len() / 2) as u32;
         assert_eq!(
             data_from(&mut c, &file.name, half),

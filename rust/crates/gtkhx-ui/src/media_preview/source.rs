@@ -118,6 +118,9 @@ pub(super) enum Problem {
     Connect,
     NotAFile,
     Stopped,
+    /// It started from the beginning when asked to start part way: the
+    /// server ignores where a download is to resume.
+    NoResume,
 }
 
 /// Why [`Reader::fetch`] has no bytes to give.
@@ -142,8 +145,10 @@ struct State {
     window: Vec<u8>,
     /// What earlier ranges read, newest last: (start, bytes).
     kept: Vec<(u64, Vec<u8>)>,
-    /// How far the player has taken: the worker reads up to `AHEAD` past it.
+    /// How far the player has taken: the worker reads up to `AHEAD` past it,
+    /// or to the end of a read waiting on it, if that is further.
     taken: u64,
+    waiting_to: u64,
     /// The data fork's length, once the first range's header says it.
     len: u64,
     failed: Option<Problem>,
@@ -180,6 +185,7 @@ impl State {
         self.active = true;
         self.start = offset;
         self.taken = offset;
+        self.waiting_to = 0;
         self.failed = None;
         self.abort = None;
         self.range
@@ -223,6 +229,11 @@ impl Reader {
 
     fn len(&self) -> u64 {
         self.lock().len
+    }
+
+    /// Why the current range failed, if it did.
+    pub(super) fn problem(&self) -> Option<Problem> {
+        self.lock().failed
     }
 
     /// Stop everything for good: the player closed or failed.
@@ -270,6 +281,7 @@ impl Reader {
                 let range = s.restart(from);
                 (self.ask)(range, from);
             }
+            s.waiting_to = end;
             self.cond.notify_all();
             s = self
                 .cond
@@ -343,6 +355,8 @@ impl Reader {
             let mut s = self.lock();
             if s.len == 0 {
                 s.len = end;
+            } else if end != s.len {
+                return Some(Problem::NoResume);
             }
         }
         on_length(end);
@@ -352,7 +366,10 @@ impl Reader {
             let want = (end - next).min(READ_CHUNK as u64) as usize;
             let n = unsafe { hxnet_htxf_read(hx, buf.as_mut_ptr(), want) };
             if n <= 0 {
-                return Some(Problem::Stopped);
+                // A range that delivered something just ends, as a server
+                // timing out a paused one does; the next read past it
+                // starts another.
+                return (next == offset).then_some(Problem::Stopped);
             }
             if !self.keep(range, &buf[..n as usize]) {
                 return None;
@@ -370,7 +387,7 @@ impl Reader {
             if s.range != range || s.closed {
                 return false;
             }
-            if s.read_to() < s.taken + AHEAD {
+            if s.read_to() < (s.taken + AHEAD).max(s.waiting_to) {
                 break;
             }
             s = self.cond.wait(s).unwrap_or_else(|p| p.into_inner());
@@ -518,12 +535,9 @@ mod imp {
                 Ok(bytes) => Ok(CreateSuccess::NewBuffer(gst::Buffer::from_mut_slice(bytes))),
                 Err(Short::Flushing) => Err(gst::FlowError::Flushing),
                 Err(Short::End) => Err(gst::FlowError::Eos),
-                Err(Short::Failed(_)) => {
-                    gst::element_imp_error!(
-                        self,
-                        gst::ResourceError::Read,
-                        ["The server stopped sending the file"]
-                    );
+                Err(Short::Failed(p)) => {
+                    // The player shows why, from Reader::problem.
+                    gst::element_imp_error!(self, gst::ResourceError::Read, ["{p:?}"]);
                     Err(gst::FlowError::Error)
                 }
             }
@@ -779,6 +793,23 @@ mod tests {
         assert!(!t.is_finished(), "it waits");
         r.fetch(1 << 20, 10).unwrap();
         assert!(t.join().unwrap(), "and goes on once the player catches up");
+    }
+
+    /// A read longer than the read-ahead is still read to its end.
+    #[test]
+    fn a_long_read_is_read_to_its_end() {
+        let (r, _) = reader_at(1 << 30, 0, 0);
+        let range = r.lock().range;
+        let want = (AHEAD + (1 << 20)) as usize;
+        let player = Arc::clone(&r);
+        let t = std::thread::spawn(move || player.fetch(0, want));
+        let chunk = vec![7u8; READ_CHUNK];
+        let mut read = 0;
+        while read < want {
+            assert!(r.keep(range, &chunk), "the worker reads on");
+            read += chunk.len();
+        }
+        assert_eq!(t.join().unwrap().map(|b| b.len()), Ok(want));
     }
 
     #[test]
