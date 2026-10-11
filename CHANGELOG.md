@@ -11,7 +11,7 @@
   - Fixed a crash closing a preview window after its download had failed partway
   - Previewing an audio or video file plays it while it downloads, with seeking; only what is played is fetched
   - Previewing audio or video never shows it as text: a build without GStreamer says it can't preview them, and a file past 4 GB says it's too large to preview
-  - Fixed the 1.9 server disconnecting you when the file browser was opened before agreeing to its agreement
+  - Nothing is sent to a server until the login is done: opening the file browser, sending a chat line or changing your name while an agreement is showing now waits until you're logged in, rather than going early, which the 1.9 server disconnected you for
 
 ## 1.5.1
 

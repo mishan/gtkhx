@@ -145,6 +145,9 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
 /// # Safety
 /// Main thread.
 pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
+    if !login {
+        hxtask::send::drop_held(htlc.cast());
+    }
     user::forget(htlc);
     news::forget(htlc);
     files::forget(htlc, login);

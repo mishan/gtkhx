@@ -31,7 +31,6 @@ extern "C" {
 /// `void hx_user_list_get (struct htlc_conn *htlc)` — ask for the user list
 /// (USER_GETLIST, no fields). Its reply comes back as the session's
 /// `UserList`, which loads the public chat's roster and then the news.
-/// Once a login, so what the last connection asked for goes with it.
 ///
 /// # Safety
 /// `htlc` is NULL or a live connection; main thread.
@@ -40,7 +39,6 @@ pub unsafe extern "C" fn hx_user_list_get(htlc: *mut c_void) {
     if htlc.is_null() {
         return;
     }
-    crate::recv::forget(htlc, true);
     super::expect_next(htlc, Expect::UserList);
     hlwrite_chunks(
         htlc.cast(),

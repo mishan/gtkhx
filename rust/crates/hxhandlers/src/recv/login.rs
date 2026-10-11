@@ -34,6 +34,10 @@ extern "C" {
 /// # Safety
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn logged_in(htlc: *mut c_void, info: &ServerInfo) {
+    // What an earlier connect asked for goes with it, before anything this
+    // one asks: requests made before the login settles are held, and their
+    // replies are this connect's.
+    super::forget(htlc, true);
     let h = htlc.cast();
     hx_conn_set_logged_in(h, 1);
     // The keys an HTXF subchannel derives its own from, where HOPE agreed

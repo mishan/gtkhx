@@ -453,3 +453,19 @@ fn a_range_reply_goes_to_its_reader() {
         assert_eq!(range_answered(answer), Some(want), "{case}");
     }
 }
+
+/// A request made before the login settles keeps its record through the
+/// user-list request that follows the login, so its reply still reaches
+/// what asked.
+#[test]
+fn a_request_made_before_the_login_settles_is_answered_after_it() {
+    let answered = range_answered(|trans| unsafe {
+        crate::send::user::hx_user_list_get(htlc());
+        let t = Transfer {
+            reference: 7,
+            ..Default::default()
+        };
+        crate::recv::files::transfer(htlc(), trans, &t);
+    });
+    assert_eq!(answered, Some(Ok(7)));
+}
