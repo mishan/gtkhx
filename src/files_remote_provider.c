@@ -268,7 +268,7 @@ remote_list_timeout (gpointer data)
 static void
 remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
 {
-    if (!hx_conn_fd (hx_conn_of (self))) {
+    if (remote_get_unavailable_reason (HX_FILES_PROVIDER (self))) {
         return;
     }
 
