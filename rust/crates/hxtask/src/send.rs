@@ -20,6 +20,7 @@
 //! left to keep it for. Callers build a `struct hx_chunk[]` and call
 //! `hlwrite_chunks` directly.
 
+use std::cell::RefCell;
 use std::os::raw::{c_char, c_int};
 
 use hxproto::build::HxChunk;
@@ -38,6 +39,8 @@ use crate::HtlcConn;
 extern "C" {
     /// gtkhx-core — `htlc->fd` (0 = no live socket).
     fn hx_conn_fd(h: *const HtlcConn) -> c_int;
+    /// gtkhx-core — the login has settled (`hx_post_login_fetches` has run).
+    fn hx_conn_post_login_fetched(h: *const HtlcConn) -> glib::ffi::gboolean;
     /// gtkhx-core — the trans reserved for the next request, 0 for none.
     fn hx_conn_trans(h: *const HtlcConn) -> u32;
     fn hx_conn_set_trans(h: *mut HtlcConn, v: u32);
@@ -181,6 +184,52 @@ pub unsafe extern "C" fn hlwrite_chunks(
         }
     };
 
+    // A server with an agreement takes the user as not yet joined until it
+    // is accepted, and the 1.9 server drops a connection that asks for
+    // anything before then. What is asked meanwhile is held, and goes, in
+    // order, ahead of the first request after the login settles.
+    let transport = hx_conn_bridge_handle(htlc) as usize;
+    if hx_conn_post_login_fetched(htlc) == glib::ffi::GFALSE {
+        HELD.with_borrow_mut(|h| h.push((htlc as usize, transport, frame)));
+        if let Ok(msg) = std::ffi::CString::new(format!(
+            "hlwrite_chunks: trans {my_trans} held until the login settles"
+        )) {
+            debug_log_str(c"net".as_ptr(), msg.as_ptr());
+        }
+        return;
+    }
+    // Held for an earlier connect of this connection: dropped, not sent to
+    // whichever server it is on now.
+    let held: Vec<Vec<u8>> = HELD.with_borrow_mut(|h| {
+        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(h)
+            .into_iter()
+            .partition(|(c, _, _)| *c == htlc as usize);
+        *h = rest;
+        mine.into_iter()
+            .filter(|(_, t, _)| *t == transport)
+            .map(|(_, _, f)| f)
+            .collect()
+    });
+    for f in held.iter().chain(std::iter::once(&frame)) {
+        if !send_frame(htlc, f) {
+            return;
+        }
+    }
+    // `frame` (a Vec) frees itself here — no g_malloc / g_free round-trip.
+}
+
+thread_local! {
+    /// Requests asked for before their connection's login settled: the
+    /// connection, its transport then, and the packed frame.
+    static HELD: RefCell<Vec<(usize, usize, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Hand `frame` to the connection's transport; false when that closed the
+/// connection.
+///
+/// # Safety
+/// As [`hlwrite_chunks`].
+unsafe fn send_frame(htlc: *mut HtlcConn, frame: &[u8]) -> bool {
     // When the bridge is installed, hxnet's transform stack handles the
     // negotiated cipher / compression, so we ship PLAINTEXT bytes.
     // Per-connection: the transport handle lives on the connection, so this
@@ -197,6 +246,7 @@ pub unsafe extern "C" fn hlwrite_chunks(
                 .unwrap_or_default();
             hx_printf_prefix(htlc, 0, infoprefix(), msg.as_ptr());
             hx_htlc_close(htlc, /*expected=*/ 0);
+            return false;
         }
     } else {
         // No bridge installed → no connection. The orchestrator installs the
@@ -210,7 +260,7 @@ pub unsafe extern "C" fn hlwrite_chunks(
             debug_log_str(c"net".as_ptr(), msg.as_ptr());
         }
     }
-    // `frame` (a Vec) frees itself here — no g_malloc / g_free round-trip.
+    true
 }
 
 // ---- test doubles for the C environment ------------------------------------
@@ -236,6 +286,12 @@ mod doubles {
         pub session_trans: u32,
         pub installed: bool,
         pub send_rc: c_int,
+        /// The login has settled.
+        pub settled: bool,
+        /// The connection's transport, standing for which connect it is on.
+        pub transport: usize,
+        /// The trans of each frame sent, in order.
+        pub sent: Vec<u32>,
         // observations
         pub trace_begin_trans: Option<u32>,
         pub trace_chunks: usize,
@@ -259,6 +315,7 @@ mod doubles {
                 session_trans,
                 installed,
                 send_rc,
+                settled: true,
                 ..Env::default()
             };
         });
@@ -274,7 +331,10 @@ mod doubles {
         ENV.with(|e| e.borrow_mut().trans = v);
     }
     pub unsafe fn hx_conn_bridge_handle(_h: *const HtlcConn) -> *mut std::os::raw::c_void {
-        std::ptr::null_mut()
+        ENV.with(|e| e.borrow().transport as *mut std::os::raw::c_void)
+    }
+    pub unsafe fn hx_conn_post_login_fetched(_h: *const HtlcConn) -> glib::ffi::gboolean {
+        ENV.with(|e| e.borrow().settled as glib::ffi::gboolean)
     }
     pub unsafe fn hxnet_connection_take_trans(_handle: *mut std::os::raw::c_void) -> u32 {
         ENV.with(|e| {
@@ -294,9 +354,12 @@ mod doubles {
     pub unsafe fn hx_bridge_is_installed(_htlc: *const HtlcConn) -> glib::ffi::gboolean {
         ENV.with(|e| if e.borrow().installed { 1 } else { 0 })
     }
-    pub unsafe fn hx_bridge_send_frame(htlc: *mut HtlcConn, _data: *const u8, len: u32) -> c_int {
+    pub unsafe fn hx_bridge_send_frame(htlc: *mut HtlcConn, data: *const u8, len: u32) -> c_int {
+        let frame = std::slice::from_raw_parts(data, len as usize);
         ENV.with(|e| {
             let mut env = e.borrow_mut();
+            env.sent
+                .push(u32::from_be_bytes([frame[4], frame[5], frame[6], frame[7]]));
             env.send_calls += 1;
             env.last_send_len = len;
             env.last_send_htlc = htlc;
@@ -325,8 +388,9 @@ mod doubles {
 #[cfg(test)]
 use doubles::{
     debug_log_str, hx_bridge_is_installed, hx_bridge_send_frame, hx_conn_bridge_handle, hx_conn_fd,
-    hx_conn_set_trans, hx_conn_trans, hx_htlc_close, hx_printf_prefix, hxnet_connection_take_trans,
-    infoprefix, proto_trace_send_begin, proto_trace_send_chunk, proto_trace_send_end,
+    hx_conn_post_login_fetched, hx_conn_set_trans, hx_conn_trans, hx_htlc_close, hx_printf_prefix,
+    hxnet_connection_take_trans, infoprefix, proto_trace_send_begin, proto_trace_send_chunk,
+    proto_trace_send_end,
 };
 
 #[cfg(test)]
@@ -502,5 +566,40 @@ mod tests {
             // the trans stays reserved — the pack was rejected before use.
             assert_eq!(env.trans, 42);
         });
+    }
+
+    /// What is asked before the login settles goes out once it has, in the
+    /// order it was asked, ahead of the request that follows.
+    #[test]
+    fn requests_before_the_login_settles_go_out_after_it_in_order() {
+        doubles::reset(1, 42, true, 0);
+        ENV.with(|e| e.borrow_mut().settled = false);
+        let chunks = one_chunk();
+        unsafe {
+            hlwrite_chunks(fake_htlc(), 105, 0, chunks.as_ptr(), 1);
+            hlwrite_chunks(fake_htlc(), 200, 0, std::ptr::null(), 0);
+        }
+        ENV.with(|e| assert!(e.borrow().sent.is_empty(), "nothing before it settles"));
+        ENV.with(|e| e.borrow_mut().settled = true);
+        unsafe { hlwrite_chunks(fake_htlc(), 300, 0, std::ptr::null(), 0) };
+        ENV.with(|e| assert_eq!(e.borrow().sent, [42, 43, 44]));
+    }
+
+    #[test]
+    fn requests_held_for_an_earlier_connect_are_dropped() {
+        doubles::reset(1, 42, true, 0);
+        ENV.with(|e| {
+            let mut env = e.borrow_mut();
+            env.settled = false;
+            env.transport = 1;
+        });
+        unsafe { hlwrite_chunks(fake_htlc(), 105, 0, std::ptr::null(), 0) };
+        ENV.with(|e| {
+            let mut env = e.borrow_mut();
+            env.settled = true;
+            env.transport = 2;
+        });
+        unsafe { hlwrite_chunks(fake_htlc(), 300, 0, std::ptr::null(), 0) };
+        ENV.with(|e| assert_eq!(e.borrow().sent, [43]));
     }
 }

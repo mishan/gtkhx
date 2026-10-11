@@ -341,9 +341,10 @@ C → S   Get User Name List (300), news, and so on
   automatic response text) when bit 2 is set. **Always include field 113**, even as 0:
   Mobius drops the connection when it is missing.
 - Before the login completes, the 1.9 server accepts only Login and Agreed. **Any other
-  transaction disconnects the client** as a probable attack. A client that sends Get
-  User Name List or news requests before Agreed will be dropped; this is why GtkHx
-  holds its post-login requests until after it has agreed.
+  transaction disconnects the client** as a probable attack — a keepalive, a banner
+  request, a chat line — so GtkHx holds every request asked for before it has agreed
+  and sends them, in order, once it has. A login that carries a name (field 102, the
+  1.0–1.2 shape) is joined at once, and its requests are answered.
 - A failed login gets error 1 and field 100 ("Incorrect login.", or a ban message).
   The server disconnects 30 seconds later if the client doesn't.
 
