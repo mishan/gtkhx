@@ -217,6 +217,7 @@ pub(crate) unsafe fn hx_preview_set_cancel_cb(
     _user_data: *mut c_void,
 ) {
 }
+pub(crate) unsafe fn offer_full_download(_p: *mut c_void, _htxf: *mut c_void) {}
 pub(crate) unsafe fn resource_len(_path: *const c_char) -> usize {
     test_env::RSRC_LEN.with(|c| c.get())
 }

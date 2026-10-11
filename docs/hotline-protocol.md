@@ -794,7 +794,19 @@ The INFO fork:
   `24 + 16 × forks + fork sizes`. Field 207 is the raw data + resource size.
 
 A **view** download (204 = 2) sends the data fork alone, with no FILP. The official
-client uses it for its preview window.
+client uses it for its preview window. mhxd, Janus and the 1.9 server (hlservd) honor
+it, as a 2-byte or a 4-byte int, and then 108 is the data fork's size; none of them
+sends anything smaller for an image, though mhxd built with ImageMagick would send a
+shrunken copy. hxd-ng ignores the field and sends the whole FILP. With resume data
+(203) as well, only mhxd honors both: Janus drops the view and sends a FILP from the
+offset, and the 1.9 server drops the offset and sends the whole data fork. A
+download resumed without a view starts at the offset on all four.
+
+GtkHx previews don't ask for a view. The FILP's type and creator are what pick a
+classic file's viewer when its name has no extension, a view would have to be told
+apart from a FILP on the servers that ignore it, and all it saves is the header: the
+preview reads the data fork as far as its viewer wants and closes the transfer, so
+the resource fork that follows is never read.
 
 ### Resume data (RFLT)
 

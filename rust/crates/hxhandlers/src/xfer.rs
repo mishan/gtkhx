@@ -102,10 +102,15 @@ extern "C" {
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     /// gtkhx_ui_bridge.c — the queue-downloads pref (xfer_new's inline-vs-queue).
     fn hx_prefs_queuedl() -> c_int;
-    /// preview.c — drop the per-htxf ref on the preview window (NULL-safe; a
-    /// no-op on a non-preview transfer). The one bit of the last-ref teardown
-    /// (`htxf_destructor`) that still reaches into GTK/C.
+    /// preview.c — drop the per-htxf ref on the preview window, and clear its
+    /// cancel hook first (both NULL-safe; no-ops on a non-preview transfer):
+    /// the steps of the last-ref teardown (`htxf_destructor`) that reach C.
     fn hx_preview_unref(p: *mut c_void);
+    fn hx_preview_set_cancel_cb(
+        p: *mut c_void,
+        f: Option<unsafe extern "C" fn(*mut c_void)>,
+        user_data: *mut c_void,
+    );
     /// htxf_accessors.c — the opt bitfield setters (C owns the bit layout).
     fn hx_htxf_set_opt_preview(htxf: *mut HtxfHandle, v: c_int);
     fn hx_htxf_set_opt_folder(htxf: *mut HtxfHandle, v: c_int);
@@ -131,8 +136,21 @@ extern "C" {
     /// param callbacks; cast to the void*-first shape hxnet::xfer expects (they
     /// really take `hx_preview *`, ABI-identical to a leading pointer arg).
     fn hx_preview_chunk(preview: *mut c_void, buf: *const c_char, len: usize);
-    fn hx_preview_set_info(preview: *mut c_void, type_: *const c_char, creator: *const c_char);
+    fn hx_preview_set_info(
+        preview: *mut c_void,
+        type_: *const c_char,
+        creator: *const c_char,
+        size: u64,
+    ) -> u64;
     fn hx_preview_done(preview: *mut c_void);
+    fn hx_preview_set_download_cb(
+        preview: *mut c_void,
+        f: Option<unsafe extern "C" fn(*mut c_void) -> glib::ffi::gboolean>,
+        user_data: *mut c_void,
+        destroy: glib::ffi::GDestroyNotify,
+    );
+    /// session_registry.c — the live connection with this serial, or NULL.
+    fn hx_conn_with_serial(serial: u16) -> *mut c_void;
     /// htxf_accessors.c — read the opt bitfield bits (C owns the layout).
     /// `*const c_void` htxf to match recv/xfer.rs's existing declaration.
     fn hx_htxf_opt_preview(htxf: *const c_void) -> c_int;
@@ -519,6 +537,69 @@ pub unsafe extern "C" fn xfer_new(
     htxf
 }
 
+/// The file a preview came from, for its window's Download: the window
+/// outlives the preview's transfer, and its connection can close, or its tab
+/// connect elsewhere, while the window is open.
+#[cfg(not(test))]
+struct FullDownload {
+    serial: u16,
+    generation: u32,
+    path: std::ffi::CString,
+    dir: std::ffi::CString,
+    name: Vec<u8>,
+}
+
+/// Give the preview window of `htxf` a Download that fetches the whole file,
+/// as the file browser's would.
+///
+/// # Safety
+/// `htxf` is a live transfer and `preview` its preview window.
+#[cfg(not(test))]
+pub(crate) unsafe fn offer_full_download(preview: *mut c_void, htxf: *mut c_void) {
+    let h = &*(htxf as *const HtxfHandle);
+    let d = Box::new(FullDownload {
+        serial: gtkhx_core::conn::hx_conn_serial(h.htlc.cast()),
+        generation: gtkhx_core::conn::generation(h.htlc.cast()),
+        path: std::ffi::CStr::from_ptr(h.path.as_ptr()).into(),
+        dir: std::ffi::CStr::from_ptr(h.remotedir.as_ptr()).into(),
+        name: remote_name(h).to_vec(),
+    });
+    hx_preview_set_download_cb(
+        preview,
+        Some(full_download),
+        Box::into_raw(d).cast(),
+        Some(drop_full_download),
+    );
+}
+
+#[cfg(not(test))]
+unsafe extern "C" fn full_download(data: *mut c_void) -> glib::ffi::gboolean {
+    let d = &*(data as *const FullDownload);
+    let htlc = hx_conn_with_serial(d.serial);
+    if htlc.is_null()
+        || gtkhx_core::conn::hx_conn_fd(htlc.cast()) == 0
+        || gtkhx_core::conn::generation(htlc.cast()) != d.generation
+    {
+        return glib::ffi::GFALSE;
+    }
+    xfer_new(
+        htlc,
+        d.path.as_ptr(),
+        d.dir.as_ptr(),
+        d.name.as_ptr().cast(),
+        d.name.len(),
+        XFER_GET.into(),
+        0,
+        0,
+    );
+    glib::ffi::GTRUE
+}
+
+#[cfg(not(test))]
+unsafe extern "C" fn drop_full_download(data: *mut c_void) {
+    drop(Box::from_raw(data as *mut FullDownload));
+}
+
 /// `struct htxf_conn *xfer_new_folder(struct htlc_conn *htlc, const char *path,
 /// const char *remotedir, const char *remotename, gsize remotename_len, guint16
 /// type)` — create a folder transfer on `htlc`. Flags `opt.folder` (so the
@@ -624,7 +705,7 @@ unsafe fn xfer_close_channel(htxf: *mut HtxfHandle) {
 /// `hx_htxf_unref` on a handle's final ref (just before `hx_htxf_free` releases
 /// the cancellation token + the struct). Drops the per-htxf preview-window ref
 /// (NULL / non-preview → no-op in `hx_preview_unref`) and closes the hxnet
-/// channel. The preview unref is the only step that still reaches into GTK/C.
+/// channel.
 ///
 /// # Safety
 /// `htxf` is the handle being freed; runs on the thread doing the last unref
@@ -633,6 +714,10 @@ unsafe extern "C" fn htxf_destructor(htxf: *mut HtxfHandle) {
     // A folder download's count whose worker never ran: queued, then
     // cancelled or disconnected.
     take_folder_items(htxf);
+    // The preview window can outlive the transfer, and its close would cancel
+    // this one: after a failed stream nothing ever told it the stream ended.
+    // Both run on the main thread, so this can't race the close.
+    hx_preview_set_cancel_cb((*htxf).preview, None, std::ptr::null_mut());
     hx_preview_unref((*htxf).preview);
     (*htxf).preview = std::ptr::null_mut();
     xfer_close_channel(htxf);
@@ -730,6 +815,7 @@ unsafe fn xfer_folder_params(htxf: *mut HtxfHandle) -> HxnetFolderParams {
 unsafe fn get_thread(htxf: *mut HtxfHandle) {
     if htxf_connect(htxf) != glib::ffi::GFALSE {
         let params = xfer_recv_params(htxf, (*htxf).total_size);
+        // A preview that stopped at the part it shows didn't finish the file.
         if hxnet_xfer_file_recv_one(&params) == 0 {
             play_sound(FILE_DONE);
             hx_htxf_set_total_pos(htxf, (*htxf).total_size);
@@ -1150,6 +1236,13 @@ unsafe fn hx_prefs_queuedl() -> c_int {
 #[cfg(test)]
 unsafe fn hx_preview_unref(_p: *mut c_void) {}
 #[cfg(test)]
+unsafe fn hx_preview_set_cancel_cb(
+    _p: *mut c_void,
+    _f: Option<unsafe extern "C" fn(*mut c_void)>,
+    _user_data: *mut c_void,
+) {
+}
+#[cfg(test)]
 unsafe fn hx_htxf_set_opt_preview(_htxf: *mut HtxfHandle, _v: c_int) {}
 #[cfg(test)]
 unsafe fn hx_htxf_set_opt_folder(_htxf: *mut HtxfHandle, _v: c_int) {}
@@ -1177,7 +1270,9 @@ unsafe extern "C" fn hx_preview_set_info(
     _preview: *mut c_void,
     _type_: *const c_char,
     _creator: *const c_char,
-) {
+    size: u64,
+) -> u64 {
+    size
 }
 #[cfg(test)]
 unsafe extern "C" fn hx_preview_done(_preview: *mut c_void) {}

@@ -37,10 +37,11 @@ the worker thread**:
 
 ```c
 void hx_preview_new (const char *name) -> hx_preview *   /* main; refcount = 2 */
-void hx_preview_set_info  (hx_preview *, type, creator);  /* worker */
+guint64 hx_preview_set_info (hx_preview *, type, creator, size); /* worker */
 void hx_preview_chunk     (hx_preview *, buf, len);       /* worker */
 void hx_preview_done      (hx_preview *);                 /* worker */
 void hx_preview_set_cancel_cb (hx_preview *, fn, data);   /* main */
+void hx_preview_set_download_cb (hx_preview *, fn, data, destroy); /* main */
 void hx_preview_unref     (hx_preview *);                 /* either */
 ```
 
@@ -62,11 +63,19 @@ the port must preserve:
 ### The viewer registry
 
 `struct hx_viewer` is a vtable — `{ name, score(type,creator,filename),
-create(p)->widget, chunk(p,buf,len), done(p), close(p) }`. `pick_viewer`
+create(p)->widget, chunk(p,buf,len), done(p), close(p) }` — plus the most of
+a file it takes, and whether it can show a longer file's start. `pick_viewer`
 runs every `score()` and installs the highest (ties → earlier table entry);
 the text viewer scores 1 unconditionally, so it's the universal fallback.
-`p->bytes` (a GByteArray) accumulates the whole stream regardless of viewer
-so Save always works.
+
+The scores read only type, creator and name, so `hx_preview_set_info` picks
+the viewer right there on the worker and returns how much of the data fork to
+stream: all of it, the start of a long text, or none of a file too large for
+its viewer. The worker stops there and the channel closes. A preview of part
+of a file, or none, hides Save and shows gtkhx-ui's `preview_notice` instead:
+a banner or a "Too Large" page whose Download fetches the whole file, through
+a hook `download_ready` registers. `p->bytes` (a GByteArray) accumulates the
+stream so Save works when the preview has the whole file.
 
 | Viewer  | Backend                                   | Optional? |
 |---------|-------------------------------------------|-----------|

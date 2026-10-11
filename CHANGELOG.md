@@ -6,6 +6,9 @@
   - Fixed downloads failing on hxd-ng servers
   - Fixed uploads to some servers, hxd-ng among them, reporting failure though the file arrived
   - Fixed downloading a folder that holds files of 4 GB or more failing partway; 1.5.0 listed this as fixed but shipped without it
+  - Previews no longer download the whole file: a long text shows its first 256 KiB, and an image or PDF too large to preview says so, each with a Download button for the whole file
+  - Fixed previewing an empty file leaving its window on "Loading…"
+  - Fixed a crash closing a preview window after its download had failed partway
 
 ## 1.5.1
 

@@ -35,9 +35,9 @@
  *                  classic QuickDraw input. Score ~= 10 on
  *                  image type/creator codes or known extensions.
  *
- * Adding a new viewer: implement the four hx_viewer entry points,
- * append a pointer to the viewers[] table. Higher scores win on
- * dispatch; ties go to the earlier table entry.
+ * Adding a new viewer: implement the four hx_viewer entry points, set
+ * max_bytes (0 takes none of a file), append it to viewers[]. Higher
+ * scores win on dispatch; ties go to the earlier table entry.
  *
  * Lifecycle on the worker→main marshal: each posted job holds a
  * reference to the hx_preview. The user closing the window flips
@@ -62,18 +62,16 @@
 #include "pict_embed.h"
 #include "pict_magick.h"
 #include "gtkutil.h"
-/* Image decode (June 2026): primary decode path runs through
- * the glycin loader via the same async FFI inline-media + the
- * banner fetcher use. Drops the in-process gdk-pixbuf decoder
- * surface, gets us sandboxed decode for the JPEG/PNG/GIF/BMP/
- * TIFF/WebP/HEIC/ICO formats glycin's loaders handle.
- * Preview uses HX_IMAGE_DECODE_WIDE — the user explicitly
- * opened a file, so the inline-media spec's JPEG/PNG/GIF gate
- * doesn't apply. PICT (QuickDraw raster opcodes) falls
- * through to ImageMagick via the existing pict_magick chain;
- * embedded-image-in-PICT recovery also runs through the
- * glycin path now. */
+/* Images decode through glycin, as inline media does, but with
+ * HX_IMAGE_DECODE_WIDE: the user opened the file, so inline media's
+ * JPEG/PNG/GIF gate doesn't apply. */
 #include "inline_media_decode.h"
+
+/* gtkhx-ui's preview_notice.rs */
+extern void gtkhx_preview_show_part (GtkWindow *window, GtkWidget *body,
+                                     guint64 shown, guint64 size,
+                                     hx_preview_download_fn download,
+                                     void *data);
 
 /* ---- Viewer protocol ----------------------------------------------- */
 
@@ -99,7 +97,17 @@ struct hx_viewer {
     /* Window close-request — viewer frees private state. Runs on
      * main. The window itself is destroyed by the caller. */
     void (*close) (hx_preview *p);
+
+    /* The most of a file the viewer takes. One that can show a file's
+     * start gets that much of a longer file; one that can't gets none. */
+    guint64 max_bytes;
+    gboolean shows_start;
 };
+
+/* Enough text to judge a file by, without fetching all of a large one. */
+#define PREVIEW_TEXT_MAX (256u * 1024u)
+#define PREVIEW_IMAGE_MAX (16u * 1024u * 1024u)
+#define PREVIEW_PDF_MAX (64u * 1024u * 1024u)
 
 /* ---- hx_preview definition ---------------------------------------- */
 
@@ -116,14 +124,13 @@ struct hx_preview {
     const struct hx_viewer *viewer; /* NULL until dispatch */
     void *viewer_data;
 
-    /* Full byte stream of the file's data fork, accumulated as
-     * chunks arrive. Always present; outlives the viewer; the
-     * Save button writes this to disk. Viewers that need to look
-     * at the whole buffer once (image, PDF) read from this at
-     * done() time instead of keeping their own copy. The text
-     * and source viewers don't need the bytes (their content
-     * lives in a GtkTextBuffer / GtkSourceBuffer) but the bytes
-     * stay around regardless so Save works for them too. */
+    /* What has streamed of the data fork, accumulated as chunks
+     * arrive; outlives the viewer. Save writes it out when it is the
+     * whole file. Viewers that need the whole buffer at once (image,
+     * PDF) read it at done() time instead of keeping their own copy.
+     * The text and source viewers' content lives in their text
+     * buffers, but the bytes stay around regardless so Save works
+     * for them too. */
     GByteArray *bytes;
 
     /* Set when the user closes the window. Both the worker's
@@ -158,6 +165,10 @@ struct hx_preview {
      * back the preview with an HTXF transfer). */
     hx_preview_cancel_fn cancel_cb;
     void *cancel_data;
+
+    hx_preview_download_fn download_cb;
+    void *download_data;
+    GDestroyNotify download_destroy;
 };
 
 static hx_preview *hx_preview_ref (hx_preview *p);
@@ -260,6 +271,8 @@ static const struct hx_viewer text_viewer = {
     .chunk = text_chunk,
     .done = text_done,
     .close = text_close,
+    .max_bytes = PREVIEW_TEXT_MAX,
+    .shows_start = TRUE,
 };
 
 /* ---- Image viewer (glycin → GtkPicture) ----------------------------- */
@@ -474,20 +487,10 @@ image_kick_decode (struct image_state *s, const guint8 *bytes, gsize len,
     gpointer token;
 
     s->stage = stage;
-    /* Preview is user-driven — they explicitly opened the
-     * file. Use the spec defaults (256 KiB / 2048×2048 /
-     * ~4 megapixels) for the caps; max_frames=1 because the
-     * image viewer renders a single still (animated GIF
-     * preview is a follow-up, mirrors xtext's per-frame
-     * tick). */
+    /* The image viewer shows a single still. */
     caps.max_frames = 1;
     caps.max_duration_ms = 1;
-    /* Bump the byte cap: previewable files are routinely
-     * larger than the 256 KiB inline-media spec floor (the
-     * user explicitly opened it). Cap at 16 MiB — enough
-     * for typical screenshots without letting a hostile
-     * server pin the main thread on a multi-gig "image". */
-    caps.max_bytes = 16u * 1024u * 1024u;
+    caps.max_bytes = PREVIEW_IMAGE_MAX;
     /* Loosen the dimension / pixel caps too: a 4K JPEG is a
      * reasonable thing to preview. */
     caps.max_dimension = 8192;
@@ -700,6 +703,7 @@ static const struct hx_viewer image_viewer = {
     .chunk = image_chunk,
     .done = image_done,
     .close = image_close,
+    .max_bytes = PREVIEW_IMAGE_MAX,
 };
 
 /* ---- PDF viewer (Poppler → GtkDrawingArea per page) ---------------- */
@@ -923,6 +927,7 @@ static const struct hx_viewer pdf_viewer = {
     .chunk = pdf_chunk,
     .done = pdf_done,
     .close = pdf_close,
+    .max_bytes = PREVIEW_PDF_MAX,
 };
 
 #endif /* HAVE_POPPLER */
@@ -1088,6 +1093,8 @@ static const struct hx_viewer source_viewer = {
     .chunk = source_chunk,
     .done = source_done,
     .close = source_close,
+    .max_bytes = PREVIEW_TEXT_MAX,
+    .shows_start = TRUE,
 };
 
 #endif /* HAVE_GTKSOURCEVIEW */
@@ -1143,6 +1150,9 @@ hx_preview_unref (hx_preview *p)
     if (!g_atomic_int_dec_and_test (&p->refcount)) {
         return;
     }
+    if (p->download_destroy) {
+        p->download_destroy (p->download_data);
+    }
     g_free (p->name);
     if (p->bytes) {
         g_byte_array_unref (p->bytes);
@@ -1188,11 +1198,11 @@ preview_close_request (GtkWindow *window, gpointer user_data)
     return FALSE; /* let default destroy proceed */
 }
 
-/* Install the chosen viewer's body widget into the window. Called
- * on main once we have the file type info. Replays any queued
- * pre-dispatch chunks. */
+/* Install the chosen viewer's body widget into the window, once we
+ * have the file type info and know how much of the file is coming.
+ * Replays any queued pre-dispatch chunks. */
 static void
-preview_install_viewer (hx_preview *p)
+preview_install_viewer (hx_preview *p, guint64 shown, guint64 size)
 {
     const struct hx_viewer *v;
     GtkWidget *body;
@@ -1200,22 +1210,33 @@ preview_install_viewer (hx_preview *p)
     if (p->closed || p->viewer) {
         return;
     }
+    if (shown == 0 && size > 0) {
+        v = NULL; /* none of the file is coming */
+        body = NULL;
+    } else {
+        v = pick_viewer (p->type, p->creator, p->name);
+        body = v->create (p);
+        p->viewer = v;
+    }
 
-    v = pick_viewer (p->type, p->creator, p->name);
-    body = v->create (p);
-    p->viewer = v;
-
-    /* gtkhx_widget_set_child unparents the previous child (the
-     * placeholder, on the common path), so the placeholder
-     * pointer is stale immediately after this call. */
-    gtkhx_widget_set_child (p->window, body);
+    /* Setting the child unparents the previous one (the placeholder,
+     * on the common path), so the placeholder pointer is stale
+     * immediately after this call. */
+    if (shown < size) {
+        /* Save would save only part of the file; Download replaces it. */
+        gtk_widget_set_visible (p->save_btn, FALSE);
+        gtkhx_preview_show_part (GTK_WINDOW (p->window), body, shown, size,
+                                 p->download_cb, p->download_data);
+    } else {
+        gtkhx_widget_set_child (p->window, body);
+    }
     p->placeholder = NULL;
     p->body = body;
 
     /* Replay any chunks that arrived before the viewer was
-     * installed. p->bytes always carries the full stream so
-     * the viewer sees the same bytes the dispatcher saw. */
-    if (p->bytes && p->bytes->len > 0 && v->chunk) {
+     * installed. p->bytes carries everything streamed so far,
+     * so the viewer sees the same bytes the dispatcher saw. */
+    if (v && p->bytes && p->bytes->len > 0 && v->chunk) {
         v->chunk (p, (const char *)p->bytes->data, p->bytes->len);
     }
 }
@@ -1226,6 +1247,8 @@ struct set_info_job {
     hx_preview *p;
     char type[5];
     char creator[5];
+    guint64 shown;
+    guint64 size;
 };
 
 static gboolean
@@ -1235,7 +1258,7 @@ set_info_dispatch (gpointer data)
     if (!j->p->closed) {
         memcpy (j->p->type, j->type, sizeof (j->p->type));
         memcpy (j->p->creator, j->creator, sizeof (j->p->creator));
-        preview_install_viewer (j->p);
+        preview_install_viewer (j->p, j->shown, j->size);
     }
     hx_preview_unref (j->p);
     g_free (j);
@@ -1484,12 +1507,24 @@ hx_preview_set_cancel_cb (hx_preview *p, hx_preview_cancel_fn fn,
 }
 
 void
-hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
+hx_preview_set_download_cb (hx_preview *p, hx_preview_download_fn fn,
+                            void *user_data, GDestroyNotify destroy)
+{
+    p->download_cb = fn;
+    p->download_data = user_data;
+    p->download_destroy = destroy;
+}
+
+guint64
+hx_preview_set_info (hx_preview *p, const char *type, const char *creator,
+                     guint64 size)
 {
     struct set_info_job *j;
+    const struct hx_viewer *v;
+    guint64 shown;
 
     if (!p) {
-        return;
+        return 0;
     }
     j = g_new0 (struct set_info_job, 1);
     j->p = hx_preview_ref (p);
@@ -1499,7 +1534,14 @@ hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
     if (creator) {
         memcpy (j->creator, creator, MIN (strlen (creator), 4u));
     }
+    /* Picking a viewer reads nothing that changes, so it can run here on
+     * the worker, which has to know now how much of the file to fetch. */
+    v = pick_viewer (j->type, j->creator, p->name);
+    shown = size <= v->max_bytes ? size : v->shows_start ? v->max_bytes : 0;
+    j->shown = shown;
+    j->size = size;
     g_idle_add (set_info_dispatch, j);
+    return shown;
 }
 
 void
