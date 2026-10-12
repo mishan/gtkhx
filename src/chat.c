@@ -147,7 +147,7 @@ struct gtkhx_chat {
     /* Inline-media extension (Phase 9.C UI). Pointer to the
      * paperclip 'Attach Image' button in this chat's input row.
      * Visibility is gated on HTLC_CAP_INLINE_MEDIA — initially
-     * hidden, flipped on by inline_media_attach_refresh_all_chats
+     * hidden, flipped on by inline_media_attach_refresh
      * (called from setbtns alongside the voice-panel refresh)
      * once the LOGIN reply populates htlc->caps. Stays NULL on
      * gchats whose input row hasn't been built yet (e.g. before
@@ -896,7 +896,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 
     /* Phase 9.E (inline media): the send-half defaults the chat
      * body to "[image]" when the user attaches without typing
-     * a caption (see inline_media_attach.c / hx_send_chat_with_
+     * a caption (see gtkhx-ui media_attach / hx_send_chat_with_
      * media). With Phase E rendering the image inline the row
      * below, that "[image]" text is redundant and clutters the
      * chat. Suppress the body for this exact match; nick column
@@ -1678,7 +1678,7 @@ gtkhx_chat_build_leaves (session *sess)
     gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
 
     /* Phase 9.C inline-media attach. Initially hidden; the
-     * setbtns->inline_media_attach_refresh_all_chats path flips it visible once
+     * setbtns->inline_media_attach_refresh path flips it visible once
      * the LOGIN reply confirms CAP_INLINE_MEDIA. Most servers don't ship the
      * extension, so it stays hidden there — same shape as the voice gating. */
     gchat->media_attach_btn

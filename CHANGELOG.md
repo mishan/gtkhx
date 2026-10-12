@@ -1,5 +1,7 @@
 ## 1.6.0-dev
 
+- Messages
+  - A private message can carry a picture, as a chat line can, on servers with inline media (Janus, hxd-ng): the paperclip beside the message's input sends one
 - Users
   - Fixed avatars from 48 to 199 pixels wide showing nothing in the users list; on hxd-ng servers that was every avatar set from hx-ng
 - Files

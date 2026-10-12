@@ -382,7 +382,7 @@ setbtns (session *sess, int stat)
      * less confusing than a button that always shows an
      * inert toast. Cleared on disconnect via the same caps
      * reset path. */
-    inline_media_attach_refresh_all_chats (sess);
+    inline_media_attach_refresh (sess->htlc);
 
     /* News-related toolbar buttons get sensitivity-only
      * gating — they always remain visible so the toolbar shape

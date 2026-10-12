@@ -21,12 +21,20 @@ const PART_SIZE: usize = 60_000;
 const MAX_BYTES: usize = 256 * 1024;
 const PNG: Option<&[u8]> = Some(b"image/png");
 
-/// A guest that agreed to inline media and whose session handles chat,
-/// going by a name no other test uses.
+/// A guest that agreed to inline media and whose session handles chat and
+/// private messages, going by a name no other test uses.
 fn member(server: &'static Server, who: &str) -> Client {
-    // Inside every server's 31-byte cap.
-    let nick: String = unique_name(who).chars().take(31).collect();
-    let c = Client::login_handling(server, "", None, CAP_INLINE_MEDIA, Handled::CHAT, &nick)
+    member_as(server, &nick(who))
+}
+
+/// A name no other test uses, inside every server's 31-byte cap.
+fn nick(who: &str) -> String {
+    unique_name(who).chars().take(31).collect()
+}
+
+fn member_as(server: &'static Server, nick: &str) -> Client {
+    let handled = Handled::CHAT | Handled::MSG;
+    let c = Client::login_handling(server, "", None, CAP_INLINE_MEDIA, handled, nick)
         .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         c.caps() & CAP_INLINE_MEDIA,
@@ -295,6 +303,75 @@ fn a_picture_reaches_others_on_a_chat_line() {
         a.send(&chat_with(&marker, &m));
         let got = heard(&mut b, &marker).unwrap_or_else(|| panic!("{}: no picture", s.name));
         assert_eq!((got.id, got.mime), (m.id, m.mime), "{}", s.name);
+    }
+}
+
+/// `nick`'s uid, as `c`'s user list has it once it does.
+fn uid_of(c: &mut Client, nick: &str) -> u16 {
+    loop {
+        let t = c.send_expecting(
+            &Request {
+                opcode: 300,
+                chunks: vec![],
+            },
+            Some(Expect::UserList),
+        );
+        loop {
+            if let Event::Session(hxsession::Event::UserList { trans, users, .. }) =
+                c.next_event().unwrap_or_else(|e| panic!("{e}"))
+            {
+                if trans == t {
+                    if let Some(u) = users.iter().find(|u| u.name == nick) {
+                        return u.uid;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// A private message to `uid` carrying `m`, as
+/// `hxhandlers::send::msg::send_msg_with_media` sends it.
+fn message_with(uid: u16, text: &str, m: &ChatMedia) -> Request {
+    Request {
+        opcode: 108,
+        chunks: vec![
+            (tag::UID, uid.to_be_bytes().to_vec()),
+            (tag::BODY, text.as_bytes().to_vec()),
+            (tag::CHAT_MEDIA_ID, m.id.clone()),
+            (tag::CHAT_MEDIA_TYPE, m.mime.clone()),
+        ],
+    }
+}
+
+/// The recipient is sent the picture, and it and the sender may both fetch
+/// it: the sender's window shows the picture by its handle too.
+#[test]
+fn a_picture_reaches_its_recipient_on_a_private_message() {
+    for s in servers_with(&[Cap::InlineMedia]) {
+        let mut a = member(s, "pa");
+        let nb = nick("pb");
+        let mut b = member_as(s, &nb);
+        let pic = small_png();
+        let m = upload(&mut a, &pic, PNG).unwrap_or_else(|e| panic!("{}: {e:?}", s.name));
+        let text = unique_name("psst");
+        let to = uid_of(&mut a, &nb);
+        a.send(&message_with(to, &text, &m));
+        let got = loop {
+            if let Event::Session(hxsession::Event::Message { text: t, media, .. }) =
+                b.next_event().unwrap_or_else(|e| panic!("{e}"))
+            {
+                if t == text {
+                    break media.unwrap_or_else(|| panic!("{}: no picture", s.name));
+                }
+            }
+        };
+        assert_eq!((&got.id, &got.mime), (&m.id, &m.mime), "{}", s.name);
+        for c in [&mut b, &mut a] {
+            let (bytes, _) = download(c, &m.id).unwrap_or_else(|e| panic!("{}: {e:?}", s.name));
+            assert!(is_picture(&bytes), "{}", s.name);
+        }
     }
 }
 
