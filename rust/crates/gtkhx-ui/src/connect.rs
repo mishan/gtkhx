@@ -572,6 +572,8 @@ fn server_connect(sess: *mut c_void) {
     if server.trim().is_empty() {
         if let Some(e) = w.address.as_ref() {
             e.grab_focus();
+            // Focus alone says nothing to a screen reader about why.
+            crate::announce::announce(Some(e.upcast_ref()), &tr("Enter a server address"), false);
         }
         return;
     }

@@ -41,6 +41,7 @@
 #include "msg.h"
 #include "proto_helpers.h"
 #include "toolbar.h"
+#include "gtkutil.h" /* gtkhx_announce_line */
 #include "notify.h"
 
 /* ---- Module state -------------------------------------------------- */
@@ -227,6 +228,9 @@ gtkhx_notify_chat (struct htlc_conn *htlc, HxChatEvent *event)
 
     event_slices (event, &sender, &body);
     is_mention = body_mentions_us (htlc, body);
+    if (is_mention && !event->is_self) {
+        gtkhx_announce_line (sender, body, FALSE);
+    }
 
     want = is_mention ? gtkhx_prefs.notify_chat_highlight
                       : gtkhx_prefs.notify_chat;
@@ -271,6 +275,9 @@ gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event)
     if (!event) {
         return;
     }
+    if (!event->is_self) {
+        gtkhx_announce_line (event->name, event->body, TRUE);
+    }
 
     if (!gtkhx_prefs.notify_msg) {
         return;
@@ -311,6 +318,9 @@ gtkhx_notify_pchat (struct htlc_conn *htlc, HxChatEvent *event)
 
     event_slices (event, &sender, &body);
     is_mention = body_mentions_us (htlc, body);
+    if (is_mention && !event->is_self) {
+        gtkhx_announce_line (sender, body, FALSE);
+    }
 
     want = is_mention ? gtkhx_prefs.notify_pchat_highlight
                       : gtkhx_prefs.notify_pchat;

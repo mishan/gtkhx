@@ -427,10 +427,11 @@ else
 endif
 
 # The chat view implements GtkAccessibleText, so a screen reader can read
-# the transcript, when the GTK it builds against has it (4.14). Below that
-# it exposes only its role.
+# the transcript, and gtkhx-ui announces events, when the GTK it builds
+# against has them (4.14). Below that the view exposes only its role and
+# nothing is announced.
 if gtk_dep.version().version_compare('>= 4.14')
-  cargo_features = cargo_features + ',rotulus/v4_14'
+  cargo_features = cargo_features + ',rotulus/v4_14,gtkhx-ui/v4_14'
 endif
 
 # Voice crate gating. When voice is compiled out (see -Dvoice / the
