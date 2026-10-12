@@ -19,7 +19,7 @@ use gtk4 as gtk;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::tr::tr;
+use crate::tr::{tr, tr_argv};
 
 extern "C" {
     fn rotulus_view_search(
@@ -88,8 +88,14 @@ impl FindCtx {
             self.count.set_text("");
         } else if n == 0 {
             self.count.set_text(&tr("No results"));
+            crate::announce::announce(Some(self.entry.upcast_ref()), &tr("No results"), false);
         } else {
             self.count.set_text(&format!("{cur} / {n}"));
+            crate::announce::announce(
+                Some(self.entry.upcast_ref()),
+                &tr_argv("Match %s of %s", &[&cur.to_string(), &n.to_string()]),
+                false,
+            );
         }
         // add/remove, not set_css_classes: the latter replaces the whole
         // list, which would drop whatever classes GtkSearchEntry itself

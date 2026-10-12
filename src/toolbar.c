@@ -717,6 +717,7 @@ toolbar_show_connection_lost (const char *server)
     title = g_strdup_printf (_ ("Lost connection to %s"), server ? server : "");
     adw_banner_set_title (toolbar_banner, title);
     adw_banner_set_revealed (toolbar_banner, TRUE);
+    gtkhx_announce (title, TRUE);
     g_free (title);
 }
 

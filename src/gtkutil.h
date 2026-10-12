@@ -208,6 +208,13 @@ extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
  * through it.
  */
 extern void gtkhx_set_name_tip (GtkWidget *widget, const char *text);
+
+/* Screen-reader announcements (gtkhx-ui's announce.rs), from the active
+ * window; nothing below GTK 4.14. _line says who a private message (or a
+ * line mentioning us) is from. */
+extern void gtkhx_announce (const char *text, gboolean assertive);
+extern void gtkhx_announce_line (const char *sender, const char *body,
+                                 gboolean private_msg);
 extern GtkWidget *gtkhx_icon_button_new (const char *icon_name,
                                          const char *label);
 

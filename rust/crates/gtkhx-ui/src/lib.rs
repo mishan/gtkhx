@@ -14,6 +14,7 @@
 //! marshal back to the main loop in `hxnet`/C before these entry points
 //! fire).
 
+mod announce;
 mod ffi;
 mod hl_date;
 mod tr;

@@ -297,6 +297,9 @@ fn open_capture_dialog(row: &adw::ActionRow) {
                      combination.",
                 ));
                 err.set_visible(true);
+                // From the dialog, which has focus: a label shown just now has
+                // no accessibility context yet, and GTK drops its announcement.
+                crate::announce::announce(Some(dlg.upcast_ref()), &err.text(), false);
             }
             // Consumed anyway: a rejected key must not reach the app either.
             return gtk::glib::Propagation::Stop;

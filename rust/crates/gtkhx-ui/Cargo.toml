@@ -104,3 +104,7 @@ voice = [
     "dep:gstreamer-base",
     "hxhandlers/voice",
 ]
+# Screen-reader announcements (announce.rs), which need GTK 4.14. Turned on
+# by rust/meson.build when the GTK it builds against has them; without it,
+# and on an older GTK at run time, announcing does nothing.
+v4_14 = ["gtk4/v4_14"]

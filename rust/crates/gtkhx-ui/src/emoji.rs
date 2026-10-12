@@ -129,6 +129,9 @@ struct EmojiTypeahead {
     changed_id: RefCell<Option<glib::SignalHandlerId>>,
     cursor_id: RefCell<Option<glib::SignalHandlerId>>,
     key_ctrl: RefCell<Option<gtk::EventControllerKey>>,
+    /// The suggestion last announced, so typing that keeps the same top match
+    /// doesn't repeat it.
+    announced: RefCell<String>,
 }
 
 fn ta_is_name_char(c: char) -> bool {
@@ -173,6 +176,7 @@ fn ta_current_token(view: &gtk::TextView) -> Option<(i32, String)> {
 fn ta_hide(ta: &EmojiTypeahead) {
     if ta.open.get() {
         ta.open.set(false);
+        ta.announced.borrow_mut().clear();
         if let Some(pop) = ta.popover.borrow().as_ref() {
             pop.popdown();
         }
@@ -209,6 +213,25 @@ fn ta_populate(ta: &EmojiTypeahead, matches: &[(&str, &str)]) {
 
     if let Some(first) = ta.listbox.row_at_index(0) {
         ta.listbox.select_row(Some(&first));
+        ta_announce(ta, &first);
+    }
+}
+
+/// Say which suggestion is selected. Focus stays in the text view, so a
+/// screen reader otherwise never hears the list move.
+fn ta_announce(ta: &EmojiTypeahead, row: &gtk::ListBoxRow) {
+    let Some(label) = row
+        .child()
+        .and_then(|hbox| hbox.last_child())
+        .and_downcast::<gtk::Label>()
+    else {
+        return;
+    };
+    // The shortcode, without the colons a screen reader would read out.
+    let name = label.text().trim_matches(':').replace('_', " ");
+    if *ta.announced.borrow() != name {
+        crate::announce::announce(Some(ta.view.upcast_ref()), &name, false);
+        ta.announced.replace(name);
     }
 }
 
@@ -289,6 +312,7 @@ fn ta_move(ta: &EmojiTypeahead, delta: i32) {
     let idx = ta.listbox.selected_row().map(|r| r.index()).unwrap_or(-1);
     if let Some(next) = ta.listbox.row_at_index(idx + delta) {
         ta.listbox.select_row(Some(&next));
+        ta_announce(ta, &next);
     }
 }
 
@@ -354,6 +378,7 @@ pub unsafe extern "C" fn hx_emoji_typeahead_attach(target_text_view: *mut gtk::f
         changed_id: RefCell::new(None),
         cursor_id: RefCell::new(None),
         key_ctrl: RefCell::new(None),
+        announced: RefCell::new(String::new()),
     }));
 
     // Signal closures deref the (box-stable) raw pointer; detach disconnects

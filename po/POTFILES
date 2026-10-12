@@ -19,6 +19,7 @@ src/usermod.c
 src/users.c
 rust/crates/gtkhx-ui/src/about.rs
 rust/crates/gtkhx-ui/src/agreement.rs
+rust/crates/gtkhx-ui/src/announce.rs
 rust/crates/gtkhx-ui/src/banner.rs
 rust/crates/gtkhx-ui/src/broadcast.rs
 rust/crates/gtkhx-ui/src/camera_portal.rs

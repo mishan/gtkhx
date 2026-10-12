@@ -159,11 +159,17 @@ impl SearchCtx {
         let n = self.matches.borrow().len();
         if n == 0 {
             self.count.set_text(&tr("No results"));
+            crate::announce::announce(Some(self.entry.upcast_ref()), &tr("No results"), false);
             self.prev_btn.set_sensitive(false);
             self.next_btn.set_sensitive(false);
         } else {
-            self.count
-                .set_text(&format!("{} / {}", self.current.get() + 1, n));
+            let cur = (self.current.get() + 1).to_string();
+            self.count.set_text(&format!("{cur} / {n}"));
+            crate::announce::announce(
+                Some(self.entry.upcast_ref()),
+                &crate::tr::tr_argv("Match %s of %s", &[&cur, &n.to_string()]),
+                false,
+            );
             self.prev_btn.set_sensitive(n > 1);
             self.next_btn.set_sensitive(n > 1);
         }

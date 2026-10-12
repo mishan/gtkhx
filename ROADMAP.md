@@ -123,11 +123,12 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    what they are; and `preview.c`, `notify.c` and the tab-title fallbacks are
    translated. Still unnamed: the avatar preview in Settings, inline pictures in chat,
    and transfer thumbnails.
-5. **Announcements.** Nothing is announced: incoming private messages and mentions, a
-   lost connection, and inline errors (an empty server address, a rejected push-to-talk
-   key). `gtk_accessible_announce` is 4.14, so it needs a build and runtime gate, with
-   toasts carrying the important ones on 4.10. The chat view's text is exposed only on
-   4.14 too.
+5. **Announcements.** *Done.* `announce.rs` (`gtkhx_announce` / `gtkhx_announce_line`
+   from C) announces incoming private messages and mentions, a lost connection, an
+   empty server address on Connect, a rejected push-to-talk key, find results and the
+   emoji suggestion being picked. `gtk_accessible_announce` is 4.14, so it is built
+   with the `v4_14` feature meson sets from the GTK it finds; below 4.14 nothing is
+   announced, and the chat view's text isn't exposed either.
 6. **Contrast.** Custom themes ignore system high contrast; links are a fixed blue told
    apart from text by color alone; the markdown delimiter color is fixed.
 7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields),
