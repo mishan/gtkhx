@@ -4,7 +4,8 @@
 //! reads it a range at a time: every place the player asks to read from is a
 //! download resumed there, which every rig server honors, so little is
 //! fetched that isn't played.
-//! Pictures come off an `appsink` as RGBA and go into a `GtkPicture`.
+//! Pictures come off an `appsink` as RGBA, no larger than the window, and
+//! go into a `GtkPicture`.
 
 mod source;
 
@@ -53,6 +54,8 @@ struct Player {
     name: Vec<u8>,
     reader: Arc<Reader>,
     frames: Arc<Frames>,
+    sink: RefCell<Option<gst_app::AppSink>>,
+    fit: Cell<(i32, i32)>,
     pipeline: RefCell<Option<gst::Element>>,
     watch: RefCell<Option<gst::bus::BusWatchGuard>>,
     window: adw::Window,
@@ -148,6 +151,8 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
         name: e.wire_name(),
         reader,
         frames: Arc::new(Frames::default()),
+        sink: RefCell::new(None),
+        fit: Cell::new((0, 0)),
         pipeline: RefCell::new(None),
         watch: RefCell::new(None),
         window: window.clone(),
@@ -311,13 +316,11 @@ impl Player {
     }
 
     fn video_sink(&self) -> gst::Element {
-        let caps = gst::Caps::builder("video/x-raw")
-            .field("format", "RGBA")
-            .build();
+        self.fit.set(self.window_size());
         let frames = Arc::clone(&self.frames);
         let id = self.id;
-        gst_app::AppSink::builder()
-            .caps(&caps)
+        let sink = gst_app::AppSink::builder()
+            .caps(&fit_caps(self.fit.get()))
             .max_buffers(2)
             .callbacks(
                 gst_app::AppSinkCallbacks::builder()
@@ -338,8 +341,37 @@ impl Player {
                     })
                     .build(),
             )
-            .build()
-            .upcast()
+            .build();
+        self.sink.replace(Some(sink.clone()));
+        sink.upcast()
+    }
+
+    /// The window's size at its scale, or its default size until shown.
+    fn window_size(&self) -> (i32, i32) {
+        let (w, h) = match (self.window.width(), self.window.height()) {
+            (0, _) | (_, 0) => self.window.default_size(),
+            size => size,
+        };
+        let f = self.window.scale_factor();
+        (w.max(1) * f, h.max(1) * f)
+    }
+
+    /// Have pictures converted no larger than the window shows them.
+    fn follow_window(&self) {
+        let size = self.window_size();
+        if self.fit.get() == size {
+            return;
+        }
+        if let Some(sink) = &*self.sink.borrow() {
+            sink.set_caps(Some(&fit_caps(size)));
+            // Refused while a seek flushes; the next frame asks again.
+            if sink
+                .static_pad("sink")
+                .is_some_and(|pad| pad.push_event(gst::event::Reconfigure::new()))
+            {
+                self.fit.set(size);
+            }
+        }
     }
 
     fn show_frame(&self) {
@@ -353,6 +385,7 @@ impl Player {
         if let Some(texture) = newest {
             self.picture.set_paintable(Some(&texture));
             self.stack.set_visible_child_name("video");
+            self.follow_window();
         }
     }
 
@@ -464,6 +497,18 @@ impl Player {
     }
 }
 
+/// Square pixels that fit in `(width, height)`, never scaled up.
+/// Converting a 4K file's pictures whole to RGBA and uploading them took
+/// longer than a frame lasts, for a window showing a fraction of the pixels.
+fn fit_caps((width, height): (i32, i32)) -> gst::Caps {
+    gst::Caps::builder("video/x-raw")
+        .field("format", "RGBA")
+        .field("width", gst::IntRange::new(1, width))
+        .field("height", gst::IntRange::new(1, height))
+        .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
+        .build()
+}
+
 /// A sample's picture, as a texture.
 fn texture_of(sample: &gst::Sample) -> Option<gdk::MemoryTexture> {
     let s = sample.caps()?.structure(0)?;
@@ -524,5 +569,34 @@ mod tests {
     fn clock_reads_minutes_or_hours() {
         assert_eq!(clock(gst::ClockTime::from_seconds(65)), "1:05");
         assert_eq!(clock(gst::ClockTime::from_seconds(3725)), "1:02:05");
+    }
+
+    #[test]
+    fn pictures_shrink_to_fit_the_window_with_square_pixels() {
+        gst::init().unwrap();
+        for (source, fitted) in [
+            ("width=3840,height=2160", (720, 405)),
+            ("width=720,height=480,pixel-aspect-ratio=32/27", (720, 405)),
+            ("width=320,height=240", (320, 240)),
+        ] {
+            let pipeline = gst::parse::launch(&format!(
+                "videotestsrc num-buffers=1 ! video/x-raw,{source} ! videoconvert ! videoscale ! appsink name=sink"
+            ))
+            .unwrap()
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+            let sink = pipeline
+                .by_name("sink")
+                .and_downcast::<gst_app::AppSink>()
+                .unwrap();
+            sink.set_caps(Some(&fit_caps((720, 480))));
+            pipeline.set_state(gst::State::Playing).unwrap();
+            let sample = sink
+                .try_pull_sample(gst::ClockTime::from_seconds(5))
+                .expect(source);
+            let texture = texture_of(&sample).unwrap();
+            pipeline.set_state(gst::State::Null).unwrap();
+            assert_eq!((texture.width(), texture.height()), fitted, "{source}");
+        }
     }
 }
