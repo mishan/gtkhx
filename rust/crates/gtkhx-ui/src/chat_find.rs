@@ -154,8 +154,8 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::Search
         view: view.clone(),
         entry: gtk::SearchEntry::new(),
         count: gtk::Label::new(None),
-        prev_btn: gtk::Button::from_icon_name("go-up-symbolic"),
-        next_btn: gtk::Button::from_icon_name("go-down-symbolic"),
+        prev_btn: crate::icon_button("go-up-symbolic", &tr("Previous match")),
+        next_btn: crate::icon_button("go-down-symbolic", &tr("Next match")),
         pending: Cell::new(None),
     });
 

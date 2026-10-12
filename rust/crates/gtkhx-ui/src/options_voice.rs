@@ -343,9 +343,8 @@ fn ptt_group(page: &adw::PreferencesPage) {
     key_row.set_activatable(true);
     key_row.connect_activated(open_capture_dialog);
 
-    let clear = gtk::Button::from_icon_name("edit-clear-symbolic");
+    let clear = crate::icon_button("edit-clear-symbolic", &tr("Clear PTT key"));
     clear.set_valign(gtk::Align::Center);
-    clear.set_tooltip_text(Some(&tr("Clear PTT key")));
     clear.add_css_class("flat");
     let row_weak = key_row.downgrade();
     clear.connect_clicked(move |_| {

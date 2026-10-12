@@ -2011,7 +2011,7 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
         gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/message.png"));
     g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),
                       gchat->userlist);
-    gtk_widget_set_tooltip_text (msg_btn, _ ("Msg"));
+    gtkhx_set_name_tip (msg_btn, _ ("Msg"));
 
     kick_btn = gtk_button_new ();
     gtkhx_widget_set_child (
@@ -2019,7 +2019,7 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
         gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/kick.png"));
     g_signal_connect (kick_btn, "clicked", G_CALLBACK (view_kick_btn),
                       gchat->userlist);
-    gtk_widget_set_tooltip_text (kick_btn, _ ("Kick"));
+    gtkhx_set_name_tip (kick_btn, _ ("Kick"));
 
     info_btn = gtk_button_new ();
     gtkhx_widget_set_child (
@@ -2027,17 +2027,17 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
         gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/info.png"));
     g_signal_connect (info_btn, "clicked", G_CALLBACK (view_info_btn),
                       gchat->userlist);
-    gtk_widget_set_tooltip_text (info_btn, _ ("User Info"));
+    gtkhx_set_name_tip (info_btn, _ ("User Info"));
 
     ban_btn = gtk_button_new ();
     g_signal_connect (ban_btn, "clicked", G_CALLBACK (view_ban_btn),
                       gchat->userlist);
     gtkhx_widget_set_child (
         ban_btn, gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/ban.png"));
-    gtk_widget_set_tooltip_text (ban_btn, _ ("Ban"));
+    gtkhx_set_name_tip (ban_btn, _ ("Ban"));
 
     chat_btn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (chat_btn, _ ("Private Chat"));
+    gtkhx_set_name_tip (chat_btn, _ ("Private Chat"));
     g_signal_connect (chat_btn, "clicked", G_CALLBACK (view_chat_btn),
                       gchat->userlist);
     gtkhx_widget_set_child (
@@ -2045,7 +2045,7 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
         gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/chat.png"));
 
     igno_btn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (igno_btn, _ ("Ignore"));
+    gtkhx_set_name_tip (igno_btn, _ ("Ignore"));
     g_signal_connect (igno_btn, "clicked", G_CALLBACK (view_igno_btn),
                       gchat->userlist);
     gtkhx_widget_set_child (

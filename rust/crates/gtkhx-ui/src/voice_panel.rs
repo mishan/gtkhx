@@ -1181,6 +1181,8 @@ pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gt
     // Icon-only toggles: the label names the control and the pressed state
     // says whether it is on. The tooltip, which follows the state, stays
     // the description.
+    join_btn.update_property(&[gtk::accessible::Property::Label(&tr("Voice room"))]);
+    mute_btn.update_property(&[gtk::accessible::Property::Label(&tr("Mute microphone"))]);
     cam_btn.update_property(&[gtk::accessible::Property::Label(&tr("Camera"))]);
     screen_btn.update_property(&[gtk::accessible::Property::Label(&tr("Share screen"))]);
     panel.append(&join_btn);

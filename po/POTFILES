@@ -10,6 +10,7 @@ src/hx_split.c
 src/msg.c
 src/network.c
 src/options.c
+src/preview.c
 src/rcv.c
 src/tasks.c
 src/toolbar.c

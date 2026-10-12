@@ -860,7 +860,7 @@ build_hamburger (void)
     btn = gtk_menu_button_new ();
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");
     gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (btn), G_MENU_MODEL (menu));
-    gtk_widget_set_tooltip_text (btn, _ ("Main menu"));
+    gtkhx_set_name_tip (btn, _ ("Main menu"));
     g_object_unref (menu);
     return btn;
 }
@@ -1133,7 +1133,7 @@ create_toolbar_window (session *sess)
     adw_split_button_set_icon_name (ADW_SPLIT_BUTTON (connect_btn),
                                     "network-transmit-receive-symbolic");
     gtk_widget_add_css_class (connect_btn, "suggested-action");
-    gtk_widget_set_tooltip_text (connect_btn, _ ("Connect"));
+    gtkhx_set_name_tip (connect_btn, _ ("Connect"));
     g_signal_connect (connect_btn, "clicked",
                       G_CALLBACK (create_connect_window), sess);
     {
@@ -1144,8 +1144,8 @@ create_toolbar_window (session *sess)
     }
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), connect_btn);
 
-    disconnect_btn = gtk_button_new_from_icon_name ("network-offline-symbolic");
-    gtk_widget_set_tooltip_text (disconnect_btn, _ ("Disconnect"));
+    disconnect_btn
+        = gtkhx_icon_button_new ("network-offline-symbolic", _ ("Disconnect"));
     g_signal_connect (disconnect_btn, "clicked",
                       G_CALLBACK (disconnect_clicked), sess);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), disconnect_btn);

@@ -1464,11 +1464,9 @@ hx_preview_new (const char *name)
 
     /* Trailing-edge Save button — writes p->bytes to a
      * user-chosen file. Insensitive until the first chunk lands
-     * (chunk_dispatch flips it on). The document-save-symbolic
-     * icon is the standard GNOME save glyph; the tooltip carries
-     * the verb for screen readers. */
-    p->save_btn = gtk_button_new_from_icon_name ("document-save-symbolic");
-    gtk_widget_set_tooltip_text (p->save_btn, "Save file");
+     * (chunk_dispatch flips it on). */
+    p->save_btn
+        = gtkhx_icon_button_new ("document-save-symbolic", _ ("Save file"));
     gtk_widget_set_sensitive (p->save_btn, FALSE);
     g_signal_connect (p->save_btn, "clicked", G_CALLBACK (save_clicked), p);
     adw_header_bar_pack_end (ADW_HEADER_BAR (headerbar), p->save_btn);

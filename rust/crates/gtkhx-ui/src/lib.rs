@@ -444,6 +444,26 @@ pub(crate) unsafe fn cstr(p: *const std::ffi::c_char) -> String {
     }
 }
 
+/// An icon-only button, named for assistive technology. An icon gives a
+/// button no name, and GTK below 4.14 exposes a tooltip only as the
+/// description, so a screen reader would announce just "button".
+/// `tools/check-icon-buttons.sh` keeps `from_icon_name` buttons coming through
+/// here.
+pub(crate) fn icon_button(icon: &str, label: &str) -> gtk4::Button {
+    let b = gtk4::Button::from_icon_name(icon);
+    set_name_tip(&b, label);
+    b
+}
+
+/// Set `text` as both the tooltip and the accessible name of a widget whose
+/// only content is an icon (see [`icon_button`]).
+pub(crate) fn set_name_tip(w: &impl gtk4::prelude::IsA<gtk4::Widget>, text: &str) {
+    use gtk4::prelude::*;
+    w.set_tooltip_text(Some(text));
+    w.upcast_ref::<gtk4::Widget>()
+        .update_property(&[gtk4::accessible::Property::Label(text)]);
+}
+
 /// `&str` → `CString`, dropping any interior NUL (never fails).
 pub(crate) fn cs(s: &str) -> std::ffi::CString {
     std::ffi::CString::new(s).unwrap_or_else(|e| {

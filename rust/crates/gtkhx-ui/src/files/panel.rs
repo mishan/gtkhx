@@ -166,8 +166,7 @@ impl Panel {
             dd
         });
 
-        let up = gtk::Button::from_icon_name("go-up-symbolic");
-        up.set_tooltip_text(Some(&tr("Up one level")));
+        let up = crate::icon_button("go-up-symbolic", &tr("Up one level"));
         path_row.append(&up);
 
         let path_entry = gtk::Entry::new();

@@ -719,7 +719,7 @@ fn header_buttons(br: &Rc<Browser>) -> (gtk::Box, gtk::Box) {
                 std::ptr::null_mut(),
             ))
         };
-        btn.set_tooltip_text(Some(&tip));
+        crate::set_name_tip(&btn, &tip);
         if let Some(b) = btn.downcast_ref::<gtk::Button>() {
             let weak = Rc::downgrade(br);
             b.connect_clicked(move |_| {

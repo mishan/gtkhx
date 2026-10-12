@@ -90,7 +90,7 @@ pub unsafe extern "C" fn hx_emoji_button_new(
     let button = gtk::MenuButton::new();
     button.set_icon_name("face-smile-symbolic");
     button.add_css_class("flat");
-    button.set_tooltip_text(Some(&tr("Insert emoji")));
+    crate::set_name_tip(&button, &tr("Insert emoji"));
 
     // The chooser is built the first time the button opens, not here.
     // GTK fills one with every emoji as it's created, measuring each

@@ -644,9 +644,8 @@ fn open_editor(anchor: &gtk::Widget, name: Option<&str>) {
 
     let nick_row = adw::EntryRow::new();
     set_nick_title(&nick_row);
-    let nick_clear = gtk::Button::from_icon_name("edit-undo-symbolic");
+    let nick_clear = crate::icon_button("edit-undo-symbolic", &tr("Use the default nickname"));
     nick_clear.set_valign(gtk::Align::Center);
-    nick_clear.set_tooltip_text(Some(&tr("Use the default nickname")));
     nick_clear.add_css_class("flat");
     nick_row.add_suffix(&nick_clear);
     identity_group.add(&nick_row);
@@ -657,9 +656,8 @@ fn open_editor(anchor: &gtk::Widget, name: Option<&str>) {
     icon_row.add_prefix(&icon_preview);
     let icon_choose = gtk::Button::with_label(&tr("Choose…"));
     icon_choose.set_valign(gtk::Align::Center);
-    let icon_clear = gtk::Button::from_icon_name("edit-undo-symbolic");
+    let icon_clear = crate::icon_button("edit-undo-symbolic", &tr("Use the default icon"));
     icon_clear.set_valign(gtk::Align::Center);
-    icon_clear.set_tooltip_text(Some(&tr("Use the default icon")));
     icon_clear.add_css_class("flat");
     icon_row.add_suffix(&icon_choose);
     icon_row.add_suffix(&icon_clear);
@@ -883,9 +881,8 @@ pub(crate) fn build(page: &adw::PreferencesPage) {
          how to log in, and optionally a nickname and icon to use there.",
     )));
 
-    let add = gtk::Button::from_icon_name("list-add-symbolic");
+    let add = crate::icon_button("list-add-symbolic", &tr("Add a connection"));
     add.set_valign(gtk::Align::Center);
-    add.set_tooltip_text(Some(&tr("Add a connection")));
     add.add_css_class("flat");
     add.connect_clicked(|btn| open_editor(btn.upcast_ref(), None));
     group.set_header_suffix(Some(&add));
