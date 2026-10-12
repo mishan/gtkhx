@@ -955,6 +955,8 @@ init_icons (void)
     g_ptr_array_free (paths, FALSE);
 }
 
+extern void gtkhx_shortcuts_install (GtkApplication *app);
+
 /* Defined below fe_init, next to the explanation of what it is for. */
 static void hx_debug_second_session (void);
 
@@ -1413,6 +1415,8 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
         gtk_application_set_accels_for_action (app, "app.settings",
                                                settings_accels);
     }
+    /* app.shortcuts, and the panels' Ctrl+1 and on (shortcuts.rs). */
+    gtkhx_shortcuts_install (app);
     {
         /* Ctrl+U clears the focused text input, in any window. See
          * toolbar.c::on_action_clear_input. */

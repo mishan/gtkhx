@@ -28,6 +28,7 @@ pub mod bookmark_store;
 pub mod chat_find;
 pub mod cipher_vocab;
 pub mod connect;
+mod shortcuts;
 // the Settings form: the window and its page table (options_window), the
 // shared row builders and the pages themselves (options), and the two pages
 // custom enough to want their own module.
