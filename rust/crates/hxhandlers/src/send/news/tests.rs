@@ -6,6 +6,7 @@
 
 use super::*;
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 /// A request as written: its opcode, and each chunk's tag and data.
 type Sent = (u32, Vec<(u16, Vec<u8>)>);
@@ -106,6 +107,12 @@ fn a_fetch_goes_with_its_reply_expected_and_waits_with_what_asked() {
         );
         hx_get_news(htlc());
     }
+    let heard: Rc<RefCell<Vec<Option<Vec<u8>>>>> = Rc::default();
+    for _ in 0..2 {
+        let heard = Rc::clone(&heard);
+        let done = Box::new(move |d: Option<&[u8]>| heard.borrow_mut().push(d.map(<[u8]>::to_vec)));
+        assert!(unsafe { get_part(htlc(), CAFE, 7, b"image/png", done) });
+    }
     assert_eq!(
         sent(),
         [
@@ -113,6 +120,8 @@ fn a_fetch_goes_with_its_reply_expected_and_waits_with_what_asked() {
             as_sent(news::category(CAFE)),
             as_sent(news::article(CAFE, 7, b"text/html")),
             as_sent(Some(news::file())),
+            as_sent(news::article(CAFE, 7, b"image/png")),
+            as_sent(news::article(CAFE, 7, b"image/png")),
         ]
     );
     assert_eq!(
@@ -121,20 +130,31 @@ fn a_fetch_goes_with_its_reply_expected_and_waits_with_what_asked() {
             Expect::NewsListing,
             Expect::NewsCategory,
             Expect::NewsArticle,
-            Expect::NewsFile
+            Expect::NewsFile,
+            Expect::NewsPart,
+            Expect::NewsPart,
         ]
     );
     let waiting: Vec<_> = (1..=3)
         .map(|t| crate::recv::news::answered(htlc(), t, |_| true))
         .collect();
-    assert_eq!(
-        waiting,
-        [
-            Some(Asked::Folder(tok())),
-            Some(Asked::Catalog(tok())),
-            Some(Asked::Article(tok())),
-        ]
+    assert!(
+        matches!(
+            waiting[..],
+            [
+                Some(Asked::Folder(f)),
+                Some(Asked::Catalog(c)),
+                Some(Asked::Article(a)),
+            ] if [f, c, a] == [tok(); 3]
+        ),
+        "what asked is not what waits"
     );
+    // One part is answered and the other never is: the connection goes.
+    unsafe {
+        crate::recv::news::part(htlc(), 5, b"\x89PNG");
+        crate::recv::news::forget(htlc());
+    }
+    assert_eq!(*heard.borrow(), [Some(b"\x89PNG".to_vec()), None]);
 }
 
 /// A change goes in the connection's encoding, with nothing to read in its

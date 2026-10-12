@@ -128,6 +128,7 @@ fn an_article(id: u32) -> Article {
         year: 2026,
         seconds: 0,
         mime: b"text/plain".to_vec(),
+        parts: Vec::new(),
     }
 }
 

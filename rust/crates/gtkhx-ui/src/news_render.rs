@@ -99,6 +99,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     } else {
         buffer.set_text(&crate::cstr(body_ptr));
     }
+    crate::news_pictures::append(&post_view, node);
     // Tag URLs so the hover-cursor + right-click popup have anchors.
     gtkurl_textview_apply_tags(post_view.as_ptr());
 }

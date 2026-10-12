@@ -22,7 +22,7 @@ use hxrequest::{news, Request};
 use hxsession::Expect;
 
 use super::expect_next;
-use crate::recv::news::{asked, Asked};
+use crate::recv::news::{asked, Asked, PartDone};
 
 // Real build: these resolve at the final C link. Test build: `use tests::{…}`
 // below shadows them with recording stubs, so the extern block is gated off.
@@ -103,6 +103,28 @@ pub unsafe extern "C" fn hx_news15_get_post(
         }
         None => release(target),
     }
+}
+
+/// GETTHREAD for the part of type `mime` of article `postid` in the
+/// category at `path`, such as a picture listed after its text; `done`
+/// hears its bytes, or nothing if the server refused or the connection
+/// went. False when nothing was sent.
+///
+/// # Safety
+/// `htlc` is a live connection; main thread only.
+pub unsafe fn get_part(
+    htlc: *mut c_void,
+    path: &[u8],
+    postid: u32,
+    mime: &[u8],
+    done: PartDone,
+) -> bool {
+    let Some(req) = news::article(path, postid, mime) else {
+        return false;
+    };
+    let trans = send(htlc, &req, Expect::NewsPart);
+    asked(htlc, trans, Asked::Part(done));
+    true
 }
 
 /// Drop a transfer-full GObject ref (no-op on NULL).

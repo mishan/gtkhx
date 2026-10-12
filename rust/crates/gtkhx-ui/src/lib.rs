@@ -201,6 +201,8 @@ pub mod news_compose;
 // The C functions stay as thin delegators. Exports gtkhx_news_render_post /
 // gtkhx_news_update_breadcrumb.
 pub mod news_render;
+// The pictures a news article lists after its text.
+pub mod news_pictures;
 // the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hxproto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
