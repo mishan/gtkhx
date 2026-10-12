@@ -39,6 +39,16 @@ const NB_KIND_FOLDER: i32 = 1;
 const NB_KIND_CATEGORY: i32 = 2;
 const NB_KIND_POST: i32 = 3;
 
+/// What a node's icon shows, in words, for assistive technology.
+pub(crate) fn kind_label(kind: i32) -> String {
+    match kind {
+        NB_KIND_FOLDER => crate::tr::tr("Folder"),
+        NB_KIND_CATEGORY => crate::tr::tr("Category"),
+        NB_KIND_POST => crate::tr::tr("Post"),
+        _ => String::new(),
+    }
+}
+
 /// `GtkhxScaleArea::GTKHX_SCALE_WINDOW_BUTTONS` (`gtkhx_theme.h`).
 const GTKHX_SCALE_WINDOW_BUTTONS: i32 = 1;
 

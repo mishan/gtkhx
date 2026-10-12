@@ -122,6 +122,7 @@ pub unsafe extern "C" fn create_post_window(
 
     // Body: a framed, generously-margined GtkTextView.
     let tv = gtk::TextView::new();
+    tv.update_property(&[gtk::accessible::Property::Label(&tr("Message"))]);
     tv.set_editable(true);
     tv.set_wrap_mode(gtk::WrapMode::Word);
     tv.set_top_margin(8);

@@ -805,6 +805,7 @@ fn build_window(sess: *mut c_void) {
     // Search row.
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_placeholder_text(Some(&tr("Search trackers")));
+    search_entry.update_property(&[gtk::accessible::Property::Label(&tr("Search trackers"))]);
     search_entry.connect_search_changed(|_| rerun_search());
     search_entry.connect_activate(|_| rerun_search());
 

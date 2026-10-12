@@ -169,6 +169,10 @@ fn fill_grid(
 
             let child = gtk::FlowBoxChild::new();
             child.set_child(Some(&cell));
+            child.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr1(
+                "Icon %s",
+                &id.to_string(),
+            ))]);
             // The ID rides on the child so the activate handler doesn't need a
             // parallel table.
             unsafe { child.set_data("hx-icon-id", id) };

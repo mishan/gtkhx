@@ -414,13 +414,14 @@ image_create (hx_preview *p)
 
     box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
-    s->status = gtk_label_new ("Loading image…");
+    s->status = gtk_label_new (_ ("Loading image…"));
     gtk_widget_add_css_class (s->status, "dim-label");
     gtk_widget_set_margin_top (s->status, 12);
     gtk_widget_set_margin_bottom (s->status, 12);
     gtk_box_append (GTK_BOX (box), s->status);
 
     s->picture = gtk_picture_new ();
+    gtk_picture_set_alternative_text (GTK_PICTURE (s->picture), p->name);
     gtk_widget_set_vexpand (s->picture, TRUE);
     gtk_widget_set_hexpand (s->picture, TRUE);
     gtk_picture_set_can_shrink (GTK_PICTURE (s->picture), TRUE);
@@ -461,7 +462,7 @@ image_done (hx_preview *p)
     s->preview = p;
 
     if (!p->bytes || p->bytes->len == 0) {
-        gtk_label_set_text (GTK_LABEL (s->status), "No image data");
+        gtk_label_set_text (GTK_LABEL (s->status), _ ("No image data"));
         return;
     }
 
@@ -581,7 +582,7 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
     if (image_input_is_likely_pict (p)) {
         image_try_magick_fallback (s);
     } else {
-        image_show_decode_error (s, "Failed to decode image");
+        image_show_decode_error (s, _ ("Failed to decode image"));
     }
 }
 
@@ -594,7 +595,7 @@ image_try_magick_fallback (struct image_state *s)
 
     p = s ? s->preview : NULL;
     if (!s || !p || !p->bytes || p->bytes->len == 0) {
-        image_show_decode_error (s, "No image data");
+        image_show_decode_error (s, _ ("No image data"));
         return;
     }
 
@@ -609,7 +610,8 @@ image_try_magick_fallback (struct image_state *s)
         s->stage = IMAGE_STAGE_DONE;
         return;
     }
-    image_show_decode_error (s, err ? err->message : "Failed to decode image");
+    image_show_decode_error (s,
+                             err ? err->message : _ ("Failed to decode image"));
     g_clear_error (&err);
 }
 
@@ -672,7 +674,7 @@ image_show_decode_error (struct image_state *s, const char *msg)
         return;
     }
     gtk_label_set_text (GTK_LABEL (s->status),
-                        msg ? msg : "Failed to decode image");
+                        msg ? msg : _ ("Failed to decode image"));
     s->stage = IMAGE_STAGE_DONE;
 }
 
@@ -798,7 +800,7 @@ pdf_create (hx_preview *p)
     gtk_widget_set_margin_start (s->page_box, 12);
     gtk_widget_set_margin_end (s->page_box, 12);
 
-    s->status = gtk_label_new ("Loading PDF…");
+    s->status = gtk_label_new (_ ("Loading PDF…"));
     gtk_widget_add_css_class (s->status, "dim-label");
     gtk_widget_set_margin_top (s->status, 12);
     gtk_widget_set_margin_bottom (s->status, 12);
@@ -832,7 +834,7 @@ pdf_done (hx_preview *p)
         return;
     }
     if (!p->bytes || p->bytes->len == 0) {
-        gtk_label_set_text (GTK_LABEL (s->status), "No PDF data");
+        gtk_label_set_text (GTK_LABEL (s->status), _ ("No PDF data"));
         return;
     }
 
@@ -844,7 +846,7 @@ pdf_done (hx_preview *p)
 
     if (!s->doc) {
         gtk_label_set_text (GTK_LABEL (s->status),
-                            err ? err->message : "Failed to decode PDF");
+                            err ? err->message : _ ("Failed to decode PDF"));
         g_clear_error (&err);
         return;
     }
@@ -868,7 +870,9 @@ pdf_done (hx_preview *p)
             continue;
         }
 
-        area = gtk_drawing_area_new ();
+        /* IMG: a drawing area's default role takes no name. */
+        area = g_object_new (GTK_TYPE_DRAWING_AREA, "accessible-role",
+                             GTK_ACCESSIBLE_ROLE_IMG, NULL);
         /* Set a fixed content width (the natural page width at
          * PDF_RENDER_SCALE) and a matching content height — the
          * draw callback scales to whatever width the layout
@@ -880,6 +884,14 @@ pdf_done (hx_preview *p)
         gtk_drawing_area_set_content_height (GTK_DRAWING_AREA (area),
                                              content_h);
         gtk_widget_set_hexpand (area, TRUE);
+        {
+            char *page_name
+                = g_strdup_printf (_ ("Page %d of %d"), i + 1, n_pages);
+            gtk_accessible_update_property (GTK_ACCESSIBLE (area),
+                                            GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                            page_name, -1);
+            g_free (page_name);
+        }
 
         /* Stash the page on the widget for the draw callback.
          * g_object_unref runs at widget destroy time, which
@@ -896,9 +908,11 @@ pdf_done (hx_preview *p)
 
     if (n_pages > PDF_PAGE_CAP) {
         GtkWidget *more = gtk_label_new (NULL);
-        char *txt = g_strdup_printf ("… %d more page%s — save to view fully",
-                                     n_pages - PDF_PAGE_CAP,
-                                     (n_pages - PDF_PAGE_CAP) == 1 ? "" : "s");
+        int more_n = n_pages - PDF_PAGE_CAP;
+        char *txt = g_strdup_printf (
+            g_dngettext (PACKAGE, "… %d more page — save to view fully",
+                         "… %d more pages — save to view fully", more_n),
+            more_n);
         gtk_label_set_text (GTK_LABEL (more), txt);
         g_free (txt);
         gtk_widget_add_css_class (more, "dim-label");
@@ -1398,7 +1412,7 @@ save_clicked (GtkButton *btn, gpointer user_data)
     (void)btn;
 
     fd = gtk_file_dialog_new ();
-    gtk_file_dialog_set_title (fd, "Save File");
+    gtk_file_dialog_set_title (fd, _ ("Save File"));
 
     /* Suggest the file's original name as the destination
      * filename so the user just clicks Save in the common
@@ -1471,7 +1485,7 @@ hx_preview_new (const char *name)
     g_signal_connect (p->save_btn, "clicked", G_CALLBACK (save_clicked), p);
     adw_header_bar_pack_end (ADW_HEADER_BAR (headerbar), p->save_btn);
 
-    placeholder = gtk_label_new ("Loading…");
+    placeholder = gtk_label_new (_ ("Loading…"));
     gtk_widget_add_css_class (placeholder, "dim-label");
     gtk_widget_set_valign (placeholder, GTK_ALIGN_CENTER);
     gtk_widget_set_halign (placeholder, GTK_ALIGN_CENTER);

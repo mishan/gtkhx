@@ -107,6 +107,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     subject.add_css_class("gtkhx-pane-reserve");
     if let Some(entry) = subject.downcast_ref::<gtk::Entry>() {
         entry.set_placeholder_text(Some(&tr("No subject")));
+        entry.update_property(&[gtk::accessible::Property::Label(&tr("Chat subject"))]);
     }
 
     // Output frame: xtext + its scrollbar.

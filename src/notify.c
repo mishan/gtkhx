@@ -248,11 +248,11 @@ gtkhx_notify_chat (struct htlc_conn *htlc, HxChatEvent *event)
                 event->cid);
 
     if (*sender) {
-        title
-            = g_strdup_printf (is_mention ? "%s mentioned you" : "%s", sender);
+        title = g_strdup_printf (is_mention ? _ ("%s mentioned you") : "%s",
+                                 sender);
     } else {
-        title
-            = g_strdup (is_mention ? "Mention in public chat" : "Public chat");
+        title = g_strdup (is_mention ? _ ("Mention in public chat")
+                                     : _ ("Public chat"));
     }
     send_notify (id, title, body);
     g_free (title);
@@ -290,7 +290,7 @@ gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event)
 
     g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("msg"), NOTIFY_CONN_ID (htlc),
                 event->uid);
-    title = g_strdup_printf ("%s (private message)",
+    title = g_strdup_printf (_ ("%s (private message)"),
                              (event->name && *event->name) ? event->name : "?");
     send_notify (id, title, event->body);
     g_free (title);
@@ -332,12 +332,13 @@ gtkhx_notify_pchat (struct htlc_conn *htlc, HxChatEvent *event)
                 event->cid);
 
     if (*sender) {
-        title = g_strdup_printf (is_mention ? "%s mentioned you (private chat)"
-                                            : "%s (private chat)",
+        title = g_strdup_printf (is_mention
+                                     ? _ ("%s mentioned you (private chat)")
+                                     : _ ("%s (private chat)"),
                                  sender);
     } else {
-        title = g_strdup (is_mention ? "Mention in private chat"
-                                     : "Private chat");
+        title = g_strdup (is_mention ? _ ("Mention in private chat")
+                                     : _ ("Private chat"));
     }
     send_notify (id, title, body);
     g_free (title);
@@ -360,8 +361,8 @@ gtkhx_notify_pchat_invite (struct htlc_conn *htlc, guint32 cid,
 
     g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("pchat-invite"),
                 NOTIFY_CONN_ID (htlc), cid);
-    title
-        = g_strdup_printf ("Chat invitation from %s", inviter ? inviter : "?");
+    title = g_strdup_printf (_ ("Chat invitation from %s"),
+                             inviter ? inviter : "?");
     send_notify (id, title, NULL);
     g_free (title);
 }
@@ -378,7 +379,7 @@ gtkhx_notify_news (const char *headline)
      * (news window isn't tracked by uid/cid, and a news post
      * arriving while the news window is open is still
      * notification-worthy). */
-    send_notify ("news", "New news post", headline ? headline : NULL);
+    send_notify ("news", _ ("New news post"), headline ? headline : NULL);
 }
 
 void
@@ -388,7 +389,8 @@ gtkhx_notify_xfer_done (const char *filename)
         return;
     }
 
-    send_notify ("xfer", "File transfer complete", filename ? filename : NULL);
+    send_notify ("xfer", _ ("File transfer complete"),
+                 filename ? filename : NULL);
 }
 
 void
@@ -398,5 +400,5 @@ gtkhx_notify_broadcast (const char *text)
         return;
     }
 
-    send_notify ("broadcast", "Server broadcast", text ? text : NULL);
+    send_notify ("broadcast", _ ("Server broadcast"), text ? text : NULL);
 }
