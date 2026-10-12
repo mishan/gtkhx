@@ -135,18 +135,18 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    accent's text color rather than a fixed blue; and the nickname color's Clear is live
    only while a color is set, which tells "not set" apart from black.
 7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields;
-   F6 is in mullion-gtk's next release), accelerators for the panels, and the shortcuts
-   window under Help. *Done:* a clicked notification opens the conversation it
-   announced, which took GtkHx becoming one instance that owns its app id, as GNOME
-   and the portal deliver a notification's action through it. A later launch hands
-   its `--server` or `--bookmark` to the running one, which connects in a new tab.
+   F6 is in mullion-gtk's next release). *Done:* a clicked notification opens the
+   conversation it announced, which took GtkHx becoming one instance that owns its app
+   id, as GNOME and the portal deliver a notification's action through it. A later
+   launch hands its `--server` or `--bookmark` to the running one, which connects in a
+   new tab. Ctrl+1 and on show the panels, and a Keyboard Shortcuts window (Ctrl+?)
+   lists every key, bound from the same table (`shortcuts.rs`).
 
 ### Help
 
-There is a `/help` command that prints the slash-command list into chat, and that is all.
-There is no shortcuts window. At minimum the keyboard shortcuts need to be discoverable —
-several are not guessable, and some function-key bindings in the file browser get stolen by
-the desktop compositor, which a shortcuts window could at least explain.
+There is a `/help` command that prints the slash-command list into chat, and a Keyboard
+Shortcuts window (Ctrl+?, and in the main menu) listing every key GtkHx binds. What is
+left is help for the rest: what the panels are for, and how the protocol's quirks show up.
 
 ### Flatpak repository
 

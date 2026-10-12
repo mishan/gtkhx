@@ -844,6 +844,7 @@ build_hamburger (void)
 
     app_section = g_menu_new ();
     g_menu_append_submenu (app_section, _ ("Admin"), G_MENU_MODEL (admin_menu));
+    g_menu_append (app_section, _ ("Keyboard Shortcuts"), "app.shortcuts");
     g_menu_append (app_section, _ ("About GtkHx"), "app.about");
     g_menu_append (app_section, _ ("Quit"), "app.quit");
 
