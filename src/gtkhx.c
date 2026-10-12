@@ -1462,6 +1462,7 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
          * built in subsequent windows would have inherited the
          * stale colors. */
         gtkhx_refresh_css ();
+        gtkhx_refresh_userlist_css (users_font_desc);
         g_signal_connect (sm, "notify::dark",
                           G_CALLBACK (on_style_manager_dark_changed), NULL);
         g_signal_connect (sm, "notify::high-contrast",
@@ -2489,7 +2490,7 @@ struct cli_args {
 static void
 parse_args (int argc, char **argv, struct cli_args *a, gboolean remote)
 {
-    char opt_char;
+    int opt_char;
     int index = 0;
 
     *a = (struct cli_args){ .port = 5500 };
@@ -2618,10 +2619,18 @@ hotline_client_init (int argc, char **argv)
     if (alone && !a.prompt_pass) {
         GApplication *fwd = g_application_new (
             GTKHX_APP_ID, G_APPLICATION_HANDLES_COMMAND_LINE);
-        int status = g_application_run (fwd, argc, argv);
 
+        if (g_application_register (fwd, NULL, NULL)
+            && g_application_get_is_remote (fwd)) {
+            int status = g_application_run (fwd, argc, argv);
+
+            g_object_unref (fwd);
+            exit (status);
+        }
+        /* The one that was running went before we reached it. Dropping
+         * fwd gives the id back, so this one carries on as the one. */
         g_object_unref (fwd);
-        exit (status);
+        alone = FALSE;
     }
 
     /* Remember it: this is the identity a profile that has never set a
@@ -2654,13 +2663,13 @@ hotline_client_init (int argc, char **argv)
          * override applies (Phase 4 adds a --tls CLI flag). */
         hx_connect (boot->htlc, a.server, a.port, a.login ? a.login : "guest",
                     pass ? pass : "", 0, /*tls=*/0);
-        g_free (a.server);
-        g_free (a.login);
         g_free (pass);
     } else if (a.bookmark) {
         connect_bookmark_name (a.bookmark);
-        g_free (a.bookmark);
     }
+    g_free (a.server);
+    g_free (a.login);
+    g_free (a.bookmark);
 
     loop (argc, argv, alone);
 }
