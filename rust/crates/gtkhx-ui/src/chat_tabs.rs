@@ -416,6 +416,61 @@ pub extern "C" fn gtkhx_chat_tabs_raise_msg(htlc: *mut c_void, uid: u16) {
     raise_and_select(find_msg(htlc, uid));
 }
 
+/// `app.open-notified`: clicking a notification opens the conversation it was
+/// about, and brings GtkHx forward either way. The target is the
+/// notification's own id (notify.c): `chat-`, `pchat-` or `msg-` with the
+/// connection's serial and the chat or user id, which opens nothing once
+/// that conversation has closed; anything else (news, transfers, broadcasts,
+/// invitations) only brings the window forward.
+fn open_notified(app: &gtk::Application, id: &str) {
+    let mut it = id.splitn(3, '-');
+    let (kind, conn, n) = (
+        it.next(),
+        it.next().and_then(|s| s.parse::<ConnKey>().ok()),
+        it.next(),
+    );
+    let page = match (kind, conn) {
+        (Some("chat"), Some(conn)) => view(conn)
+            .filter(|v| v.n_pages() > 0)
+            .map(|v| v.nth_page(0)),
+        (Some("pchat"), Some(conn)) => n
+            .and_then(|n| n.parse::<u32>().ok())
+            .and_then(|cid| STATE.with(|s| s.borrow().pchat.get(&(conn, cid)).cloned())),
+        (Some("msg"), Some(conn)) => n
+            .and_then(|n| n.parse::<u16>().ok())
+            .and_then(|uid| STATE.with(|s| s.borrow().msg.get(&(conn, uid)).cloned())),
+        _ => None,
+    };
+    let child = page.as_ref().map(|p| p.child());
+    raise_and_select(page);
+    // After the raise, which can move the Chat panel to another window.
+    let window = child
+        .and_then(|c| c.root())
+        .and_downcast::<gtk::Window>()
+        .or_else(|| app.active_window())
+        .or_else(|| app.windows().into_iter().next());
+    if let Some(w) = window {
+        w.present();
+    }
+}
+
+/// `void gtkhx_notify_install_actions (GtkApplication *app)`.
+///
+/// # Safety
+/// `app` is a valid `GtkApplication *`. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_notify_install_actions(app: *mut gtk::ffi::GtkApplication) {
+    let app: gtk::Application = from_glib_none(app);
+    let action = gtk::gio::SimpleAction::new("open-notified", Some(glib::VariantTy::STRING));
+    let weak = app.downgrade();
+    action.connect_activate(move |_, target| {
+        if let (Some(app), Some(id)) = (weak.upgrade(), target.and_then(|t| t.str())) {
+            open_notified(&app, id);
+        }
+    });
+    app.add_action(&action);
+}
+
 /// Raise the public-chat tab of the connection the user is looking at. The
 /// pinned tab is always at position 0.
 #[no_mangle]

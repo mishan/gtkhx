@@ -1061,6 +1061,30 @@ pub extern "C" fn connect_build_bookmark_menu() -> *mut gio::ffi::GMenu {
 // hotline:// URL handlers
 // ======================================================================
 
+/// `void connect_open_server(const char *host, guint16 port, const char
+/// *login)` — the `--server` a later launch handed to this one (gtkhx.c's
+/// on_command_line): plain Hotline, in a new tab when this one is busy.
+///
+/// # Safety
+/// `host` and `login` are NULL or valid C strings.
+#[no_mangle]
+pub unsafe extern "C" fn connect_open_server(host: *const c_char, port: u16, login: *const c_char) {
+    let login = cstr(login);
+    connect_with_args(
+        cffi::hx_active_session(),
+        &cstr(host),
+        port,
+        if login.is_empty() { "guest" } else { &login },
+        "",
+        0,
+        0,
+        0,
+        0,
+        Identity::ByEndpoint,
+        Target::NewTabIfBusy,
+    );
+}
+
 /// `gboolean connect_open_hotline_url(const char *url)`.
 ///
 /// # Safety

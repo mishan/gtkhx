@@ -173,6 +173,8 @@ send_notify (const char *id, const char *title, const char *body)
         g_free (trim);
     }
     g_notification_set_priority (n, G_NOTIFICATION_PRIORITY_NORMAL);
+    g_notification_set_default_action_and_target (n, "app.open-notified", "s",
+                                                  id);
 
     /* The icon is sourced from the app's installed icon (matching
      * the GApplication app-id) so we don't have to bundle a
@@ -188,6 +190,7 @@ void
 gtkhx_notify_init (GtkApplication *app)
 {
     notify_app = app;
+    gtkhx_notify_install_actions (app);
 }
 
 /* Pull a g_strdup'd sender + body out of an HxChatEvent so the

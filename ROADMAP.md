@@ -134,9 +134,12 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    and the markdown delimiters keep the text color; links are always underlined, in the
    accent's text color rather than a fixed blue; and the nickname color's Clear is live
    only while a color is set, which tells "not set" apart from black.
-7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields),
-   accelerators for the panels, notifications that open the message they announce, and
-   the shortcuts window under Help.
+7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields;
+   F6 is in mullion-gtk's next release), accelerators for the panels, and the shortcuts
+   window under Help. *Done:* a clicked notification opens the conversation it
+   announced, which took GtkHx becoming one instance that owns its app id, as GNOME
+   and the portal deliver a notification's action through it. A later launch hands
+   its `--server` or `--bookmark` to the running one, which connects in a new tab.
 
 ### Help
 

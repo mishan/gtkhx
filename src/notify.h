@@ -24,6 +24,8 @@
  * once-cached state. Call once from gtkhx_activate after the app
  * is alive. */
 extern void gtkhx_notify_init (GtkApplication *app);
+/* app.open-notified, the action a clicked notification runs (chat_tabs.rs). */
+extern void gtkhx_notify_install_actions (GtkApplication *app);
 
 /* One entry point per event class. Each consults gtkhx_prefs and
  * the focus state of the relevant window before posting.
