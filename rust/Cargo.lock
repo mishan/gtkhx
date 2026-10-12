@@ -2122,7 +2122,7 @@ dependencies = [
 [[package]]
 name = "hxcrypto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=932415ecbd2d91905c25729e22841d42bda4de2d#932415ecbd2d91905c25729e22841d42bda4de2d"
+source = "git+https://github.com/mishan/hx-libs.git?rev=c515452a0d81864cd56e9676f6faeefd0a2f0c4c#c515452a0d81864cd56e9676f6faeefd0a2f0c4c"
 dependencies = [
  "blowfish",
  "chacha20poly1305",
@@ -2138,7 +2138,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=932415ecbd2d91905c25729e22841d42bda4de2d#932415ecbd2d91905c25729e22841d42bda4de2d"
+source = "git+https://github.com/mishan/hx-libs.git?rev=c515452a0d81864cd56e9676f6faeefd0a2f0c4c#c515452a0d81864cd56e9676f6faeefd0a2f0c4c"
 dependencies = [
  "sha2",
 ]
@@ -2163,12 +2163,12 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=932415ecbd2d91905c25729e22841d42bda4de2d#932415ecbd2d91905c25729e22841d42bda4de2d"
+source = "git+https://github.com/mishan/hx-libs.git?rev=c515452a0d81864cd56e9676f6faeefd0a2f0c4c#c515452a0d81864cd56e9676f6faeefd0a2f0c4c"
 
 [[package]]
 name = "hxhope"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=932415ecbd2d91905c25729e22841d42bda4de2d#932415ecbd2d91905c25729e22841d42bda4de2d"
+source = "git+https://github.com/mishan/hx-libs.git?rev=c515452a0d81864cd56e9676f6faeefd0a2f0c4c#c515452a0d81864cd56e9676f6faeefd0a2f0c4c"
 dependencies = [
  "flate2",
  "hxcrypto",
@@ -2223,7 +2223,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=932415ecbd2d91905c25729e22841d42bda4de2d#932415ecbd2d91905c25729e22841d42bda4de2d"
+source = "git+https://github.com/mishan/hx-libs.git?rev=c515452a0d81864cd56e9676f6faeefd0a2f0c4c#c515452a0d81864cd56e9676f6faeefd0a2f0c4c"
 
 [[package]]
 name = "hxrequest"
@@ -2237,7 +2237,7 @@ dependencies = [
 [[package]]
 name = "hxsession"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=932415ecbd2d91905c25729e22841d42bda4de2d#932415ecbd2d91905c25729e22841d42bda4de2d"
+source = "git+https://github.com/mishan/hx-libs.git?rev=c515452a0d81864cd56e9676f6faeefd0a2f0c4c#c515452a0d81864cd56e9676f6faeefd0a2f0c4c"
 dependencies = [
  "hxhope",
  "hxproto",
