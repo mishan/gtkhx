@@ -574,6 +574,7 @@ boot_session (const char *where)
  * gives us libadwaita's AdwStyleManager (color-scheme tracking,
  * Adwaita stylesheet) for free. */
 static AdwApplication *gtkhx_app;
+#define GTKHX_APP_ID "com.nasledov.gtkhx"
 
 /* the dialog code paths in gtkutil.c (error_dialog) and
  * options.c need a transient parent to satisfy GTK 4's "GtkDialog
@@ -1307,9 +1308,18 @@ on_theme_changed (GtkhxTheme *theme, gpointer user_data)
 static void
 gtkhx_activate (GtkApplication *app, gpointer user_data)
 {
+    static gboolean done;
     GList *toplevels, *l;
 
     (void)user_data;
+    /* Once: owning the app id lets anything on the bus activate us again. */
+    if (done) {
+        if (toolbar_window) {
+            gtk_window_present (GTK_WINDOW (toolbar_window));
+        }
+        return;
+    }
+    done = TRUE;
 
     /* Hook the bundled icon up to the icon theme so windows can
      * find it by name, then declare it as the default icon for
@@ -1457,22 +1467,29 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     }
 }
 
+/* Defined beside hotline_client_init, which hands it later launches. */
+static int on_command_line (GApplication *app, GApplicationCommandLine *cmdline,
+                            gpointer data);
+
 static void
-loop (void)
+loop (int argc, char **argv, gboolean alone)
 {
     /* AdwApplication wraps GtkApplication and additionally
      * calls adw_init() so libadwaita's stylesheet, types, and the
      * AdwStyleManager singleton are available app-wide. The activate
      * signal still fires the same way; existing window-registration
      * logic in gtkhx_activate stays unchanged. */
-    gtkhx_app
-        = adw_application_new ("com.nasledov.gtkhx", G_APPLICATION_NON_UNIQUE);
+    gtkhx_app = adw_application_new (
+        GTKHX_APP_ID, G_APPLICATION_HANDLES_COMMAND_LINE
+                          | (alone ? G_APPLICATION_NON_UNIQUE : 0));
     g_signal_connect (gtkhx_app, "activate", G_CALLBACK (gtkhx_activate), NULL);
+    g_signal_connect (gtkhx_app, "command-line", G_CALLBACK (on_command_line),
+                      NULL);
 
-    /* g_application_run() takes argc/argv only to forward them to a
-     * "command-line" handler we don't install — pass 0/NULL so it
-     * doesn't try to re-parse our flags. */
-    g_application_run (G_APPLICATION (gtkhx_app), 0, NULL);
+    /* The command line was handled before the app existed; it goes in here
+     * only so that, should another GtkHx have taken the app id meanwhile,
+     * it is forwarded there (on_command_line) instead of lost. */
+    g_application_run (G_APPLICATION (gtkhx_app), argc, argv);
 
     g_object_unref (gtkhx_app);
     gtkhx_app = NULL;
@@ -2450,69 +2467,157 @@ static struct option hx_options[]
         { 0, 0, 0, 0 } };
 
 extern void connect_bookmark_name (char *name);
+extern void connect_open_server (const char *host, guint16 port,
+                                 const char *login);
+
+/* The connection a command line asks for. */
+struct cli_args {
+    char *server;
+    char *login;
+    char *bookmark;
+    int prompt_pass;
+    guint16 port;
+};
+
+/* `remote`: a command line handed over by a later launch, which never
+ * carries --help (the launch handles that itself) and must not end this
+ * one. */
+static void
+parse_args (int argc, char **argv, struct cli_args *a, gboolean remote)
+{
+    char opt_char;
+    int index = 0;
+
+    *a = (struct cli_args){ .port = 5500 };
+    optind = 0;
+    if (argc <= 1) {
+        return;
+    }
+    while (
+        (opt_char = getopt_long (argc, argv, "s:ht:pl:b:", hx_options, &index))
+        != -1) {
+        if (opt_char == 0) {
+            opt_char = hx_options[index].val;
+        }
+        switch (opt_char) {
+        case 't':
+            if (optarg) {
+                a->port = strtoul (optarg, 0, 0);
+            }
+            break;
+        case 's':
+            if (optarg) {
+                g_free (a->server);
+                a->server = g_strdup (optarg);
+                g_clear_pointer (&a->bookmark, g_free);
+            }
+            break;
+        case 'h':
+            if (!remote) {
+                print_help (argv[0]);
+                exit (0);
+            }
+            break;
+        case 'l':
+            if (optarg) {
+                g_free (a->login);
+                a->login = g_strdup (optarg);
+            }
+            break;
+        case 'p':
+            a->prompt_pass = 1;
+            break;
+        case 'b':
+            if (optarg) {
+                g_free (a->bookmark);
+                a->bookmark = g_strdup (optarg);
+                g_clear_pointer (&a->server, g_free);
+                g_clear_pointer (&a->login, g_free);
+            }
+            break;
+        }
+    }
+}
+
+/* Whether a GtkHx already owns the app id on the session bus. */
+static gboolean
+already_running (void)
+{
+    g_autoptr (GDBusConnection) bus
+        = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
+    g_autoptr (GVariant) reply = NULL;
+    gboolean owned = FALSE;
+
+    if (bus) {
+        reply = g_dbus_connection_call_sync (
+            bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+            "org.freedesktop.DBus", "NameHasOwner",
+            g_variant_new ("(s)", GTKHX_APP_ID), G_VARIANT_TYPE ("(b)"),
+            G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL);
+    }
+    if (reply) {
+        g_variant_get (reply, "(b)", &owned);
+    }
+    return owned;
+}
+
+/* A later launch's command line, handed over by hotline_client_init:
+ * connect as it asks, in a new tab when this one is busy, and come
+ * forward. This launch's own arrives here too, with nothing to connect. */
+static int
+on_command_line (GApplication *app, GApplicationCommandLine *cmdline,
+                 gpointer data)
+{
+    struct cli_args a;
+    char **argv;
+    int argc;
+
+    (void)data;
+    if (!g_application_command_line_get_is_remote (cmdline)) {
+        g_application_activate (app);
+        return 0;
+    }
+    argv = g_application_command_line_get_arguments (cmdline, &argc);
+    parse_args (argc, argv, &a, TRUE);
+    if (a.server) {
+        connect_open_server (a.server, a.port, a.login);
+    } else if (a.bookmark) {
+        connect_bookmark_name (a.bookmark);
+    }
+    g_free (a.server);
+    g_free (a.login);
+    g_free (a.bookmark);
+    g_strfreev (argv);
+    if (toolbar_window) {
+        gtk_window_present (GTK_WINDOW (toolbar_window));
+    }
+    return 0;
+}
 
 void
 hotline_client_init (int argc, char **argv)
 {
     const char *user = g_getenv ("USER");
-    char opt_char;
-    int index = 0;
-    char *server = 0;
-    char *login = 0;
+    struct cli_args a;
     char *pass = 0;
-    char *bookmark = 0;
-    int prompt_pass = 0;
-    guint16 port = 5500;
     session *boot;
+    gboolean alone;
 
-    optind = 0;
-    if (argc > 1) {
-        while ((opt_char
-                = getopt_long (argc, argv, "s:ht:pl:b:", hx_options, &index))
-               != -1) {
-            if (opt_char == 0) {
-                opt_char = hx_options[index].val;
-            }
-            switch (opt_char) {
-            case 't':
-                if (optarg) {
-                    port = strtoul (optarg, 0, 0);
-                }
-                break;
-            case 's':
-                if (optarg) {
-                    server = g_strdup (optarg);
-                    if (bookmark) {
-                        g_free (bookmark);
-                    }
-                }
-                break;
-            case 'h':
-                print_help (argv[0]);
-                exit (0);
-                break;
-            case 'l':
-                if (optarg) {
-                    login = g_strdup (optarg);
-                }
-                break;
-            case 'p':
-                prompt_pass = 1;
-                break;
+    parse_args (argc, argv, &a, FALSE);
 
-            case 'b':
-                if (optarg) {
-                    bookmark = g_strdup (optarg);
-                    if (server) {
-                        g_free (server);
-                    }
-                    if (login) {
-                        g_free (login);
-                    }
-                }
-                break;
-            }
-        }
+    /* One GtkHx: when one is already running, hand it this command line
+     * (on_command_line) and stop. Owning the app id is also what lets a
+     * clicked notification reach the running one (notify.c). --pass
+     * prompts on this terminal, so that one still runs on its own, as a
+     * second instance that doesn't own the id. */
+    alone = already_running ();
+    if (alone && !a.prompt_pass) {
+        GApplication *fwd = g_application_new (
+            GTKHX_APP_ID, G_APPLICATION_HANDLES_COMMAND_LINE);
+        int status = g_application_run (fwd, argc, argv);
+
+        g_object_unref (fwd);
+        exit (status);
     }
 
     /* Remember it: this is the identity a profile that has never set a
@@ -2534,24 +2639,24 @@ hotline_client_init (int argc, char **argv)
     hx_conn_set_icon (boot->htlc, 500);
     hx_conn_set_name (boot->htlc, user ? user : "GtkHx User");
 
-    if (server) {
+    if (a.server) {
 #ifdef G_OS_UNIX
-        if (prompt_pass) {
+        if (a.prompt_pass) {
             pass = g_malloc (128);
             get_password (pass);
         }
 #endif
         /* CLI --server bootstrap: tls=0 default. GTKHX_TLS=1 env-var
          * override applies (Phase 4 adds a --tls CLI flag). */
-        hx_connect (boot->htlc, server, port, login ? login : "guest",
+        hx_connect (boot->htlc, a.server, a.port, a.login ? a.login : "guest",
                     pass ? pass : "", 0, /*tls=*/0);
-        g_free (server);
-        g_free (login);
+        g_free (a.server);
+        g_free (a.login);
         g_free (pass);
-    } else if (bookmark) {
-        connect_bookmark_name (bookmark);
-        g_free (bookmark);
+    } else if (a.bookmark) {
+        connect_bookmark_name (a.bookmark);
+        g_free (a.bookmark);
     }
 
-    loop ();
+    loop (argc, argv, alone);
 }
