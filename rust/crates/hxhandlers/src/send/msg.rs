@@ -1,10 +1,10 @@
 //! A private message.
 
-use std::ffi::c_char;
+use std::ffi::{c_char, CStr};
 use std::os::raw::{c_int, c_void};
 
 use hxproto::build::{build_msg_chunks, HxChunk, MsgRequest};
-use hxproto::messages::ClientHdr;
+use hxproto::messages::{tag, ClientHdr};
 use hxsession::Expect;
 
 #[cfg(not(test))]
@@ -19,23 +19,50 @@ use hxtask::send::hlwrite_chunks;
 /// thread.
 #[no_mangle]
 pub unsafe extern "C" fn hx_send_msg(htlc: *mut c_void, uid: u16, msg: *const c_char) {
+    send(htlc, uid, msg, None);
+}
+
+/// As [`hx_send_msg`], carrying the picture an upload gave the handle `id`
+/// and type `mime` of. The caller has checked the server agreed to inline
+/// media.
+///
+/// # Safety
+/// As [`hx_send_msg`].
+pub unsafe fn send_msg_with_media(htlc: *mut c_void, uid: u16, msg: &CStr, id: &[u8], mime: &[u8]) {
+    send(htlc, uid, msg.as_ptr(), Some((id, mime)));
+}
+
+unsafe fn send(htlc: *mut c_void, uid: u16, msg: *const c_char, media: Option<(&[u8], &[u8])>) {
     if htlc.is_null() {
         return;
     }
     super::chat::with_wire(htlc, msg, glib::ffi::GTRUE, |body| {
-        let mut chunks = [HxChunk::EMPTY; 2];
+        let mut chunks = [HxChunk::EMPTY; 4];
         let mut scratch = [0u8; 2];
-        let hc = build_msg_chunks(&MsgRequest { uid, body }, &mut chunks, &mut scratch);
-        if hc > 0 {
-            super::expect_next(htlc, Expect::Message);
-            hlwrite_chunks(
-                htlc.cast(),
-                ClientHdr::Msg as u32,
-                0,
-                chunks.as_ptr(),
-                hc as c_int,
-            );
+        let mut hc = build_msg_chunks(&MsgRequest { uid, body }, &mut chunks, &mut scratch);
+        if hc == 0 {
+            return;
         }
+        // A field the wire can't carry drops the picture, as on a chat line.
+        let fits = |f: &[u8]| (1..=u16::MAX as usize).contains(&f.len());
+        if let Some((id, mime)) = media.filter(|(id, mime)| fits(id) && fits(mime)) {
+            for (tag, data) in [(tag::CHAT_MEDIA_ID, id), (tag::CHAT_MEDIA_TYPE, mime)] {
+                chunks[hc] = HxChunk {
+                    tag,
+                    len: data.len() as u16,
+                    data: data.as_ptr(),
+                };
+                hc += 1;
+            }
+        }
+        super::expect_next(htlc, Expect::Message);
+        hlwrite_chunks(
+            htlc.cast(),
+            ClientHdr::Msg as u32,
+            0,
+            chunks.as_ptr(),
+            hc as c_int,
+        );
     });
 }
 
@@ -79,6 +106,33 @@ mod tests {
         assert_eq!(
             SENT.with(|s| s.take()),
             [(108, vec![(0x67, vec![0, 42]), (0x65, b"hi".to_vec())])]
+        );
+    }
+
+    #[test]
+    fn a_message_carries_its_picture_after_its_text() {
+        crate::send::expected::take();
+        unsafe {
+            send_msg_with_media(
+                std::ptr::dangling_mut(),
+                42,
+                c"[image]",
+                b"h1",
+                b"image/png",
+            )
+        };
+        assert_eq!(crate::send::expected::take(), [(1, Expect::Message)]);
+        assert_eq!(
+            SENT.with(|s| s.take()),
+            [(
+                108,
+                vec![
+                    (0x67, vec![0, 42]),
+                    (0x65, b"[image]".to_vec()),
+                    (0x0202, b"h1".to_vec()),
+                    (0x0201, b"image/png".to_vec()),
+                ]
+            )]
         );
     }
 }

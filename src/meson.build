@@ -54,7 +54,6 @@ gtkhx_sources = files(
   'host_port.c',
   'hotline_url.c',
   'inline_media.c',
-  'inline_media_attach.c',
   'inline_media_decode.c',
   'hl_code.c',
   'human_readable.c',

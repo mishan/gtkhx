@@ -103,6 +103,9 @@ pub unsafe extern "C" fn create_msgwin(
     let emoji_btn: gtk::Widget = from_glib_none(hx_emoji_button_new(wptr(&input)));
     emoji_btn.set_valign(gtk::Align::End);
     input_hbox.append(&emoji_btn);
+    let attach = crate::media_attach::message_button(gtkhx_session_htlc(sess), uid);
+    attach.set_valign(gtk::Align::End);
+    input_hbox.append(&attach);
     hx_emoji_typeahead_attach(wptr(&input));
 
     let inputframe = gtk::Frame::new(None);

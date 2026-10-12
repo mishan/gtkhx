@@ -123,10 +123,14 @@ depth, not a guarantee.**
   limits advertisement, and the error-code enum).
 - **Decoder** — the `hx-image-decode` crate, behind the C ABI in
   `src/inline_media_decode.h`.
-- **Send path** — `src/inline_media_attach.c` (paperclip button + file
-  dialog + pre-flight) and `hxhandlers::media` (single-shot and chunked
-  upload, each part's reply expected by the session, which reads the
-  token or the handle off it). The paperclip is hidden unless the capability is
+- **Send path** — `gtkhx-ui/src/media_attach.rs` (the paperclip beside
+  a chat's or a private message's input, its file dialog and pre-flight)
+  and `hxhandlers::media` (single-shot and chunked upload, each part's
+  reply expected by the session, which reads the token or the handle off
+  it). The handle goes out on a chat line or a private message. A server
+  sends a private message to its recipient only, so the sender's window
+  shows its own picture by fetching it by the handle, which the server
+  lets the sender do. The paperclip is hidden unless the capability is
   negotiated for the live session; showing inert chrome would be
   misleading given how few servers speak the extension.
 - **Receive path** — hx-libs' `hxsession` reads the companion fields
@@ -182,10 +186,10 @@ Which `MediaErrorCode` the server picks, from the integration suite:
 - Download of a non-existent handle → `NotAuthorized` (4) or `Generic`.
 
 Integration coverage runs against Janus: capability echo, limits
-parsing, single-shot and chunked upload round-trips, chat-with-media
-relay, single-chunk and multi-chunk download, and each of the error
-paths above. The mixed-capability relay case (a capable and a legacy
-client in the same room) is not exercised.
+parsing, single-shot and chunked upload round-trips, a picture relayed
+on a chat line and on a private message, single-chunk and multi-chunk
+download, and each of the error paths above. The mixed-capability relay
+case (a capable and a legacy client in the same room) is not exercised.
 
 ## Not built
 

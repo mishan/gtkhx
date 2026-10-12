@@ -163,6 +163,8 @@ pub mod inline_media_dialog;
 // The inline picture a chat line or private message carries, as a chat-view
 // row fetched and decoded in place. hx_inline_media_row_append is its export.
 pub mod inline_media_row;
+// The paperclip that sends a picture on a chat line or a private message.
+pub mod media_attach;
 // the Get-User-Info result window (was gtkhx.c::output_user_info). A
 // small read-only text window; fired from the user-info GtkhxSession signal.
 // output_user_info is this module's #[no_mangle] export.
