@@ -33,6 +33,9 @@
 #include "dock_pages.h"
 #include "panel_registry.h"
 #include "toolbar.h" /* DEFAULT_LEAF_MIN_WIDTH */
+#ifdef HAVE_VOICE
+#include "voice_ptt.h"
+#endif
 
 /* A string xgettext picks up, translated where it is used. */
 #ifndef N_
@@ -296,8 +299,8 @@ on_pane_shown (MlnPanes *panes, const char *id, gboolean on, gpointer data)
 }
 
 /* A window for panels moved out of the main one, as the old undocked
- * windows were: the application's, with its keys. mullion-gtk titles it
- * and keeps its size with the layout. */
+ * windows were: the application's, with its keys and push-to-talk.
+ * mullion-gtk titles it and keeps its size with the layout. */
 static GtkWindow *
 make_window (MlnPanes *panes, gpointer data)
 {
@@ -314,6 +317,9 @@ make_window (MlnPanes *panes, gpointer data)
         gtk_window_set_application (GTK_WINDOW (win), GTK_APPLICATION (app));
     }
     init_keyaccel (win);
+#ifdef HAVE_VOICE
+    hx_voice_ptt_attach (win);
+#endif
 
     return GTK_WINDOW (win);
 }

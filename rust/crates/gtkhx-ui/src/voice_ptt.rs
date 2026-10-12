@@ -17,7 +17,6 @@
 use std::cell::Cell;
 use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
-use std::rc::Rc;
 
 use glib::translate::{from_glib_borrow, IntoGlib};
 use gtk::glib;
@@ -65,18 +64,18 @@ extern "C" {
     ) -> glib::ffi::gboolean;
 }
 
-/// Per-controller state. `pressed_keyval` latches the keyval that owns the
-/// current press (0 = none) so the release re-mutes on the originally-pressed
-/// key even if the user rebinds PTT mid-press.
-///
-/// Deliberately no session: the controller is attached once to the one
-/// toolbar window, with whichever session existed at the time, and latching
-/// that would have push-to-talk act on a connection that may not be the one
-/// in voice. There is one microphone, so the question "whose mute does this
-/// key toggle?" has exactly one answer — the connection holding it — and the
-/// arbiter is where that is written down.
-struct PttState {
-    pressed_keyval: Cell<u32>,
+thread_local! {
+    /// The keyval that owns the current press (0 = none), latched so the
+    /// release re-mutes on the originally-pressed key even if the user
+    /// rebinds PTT mid-press. One for the process, not one per window: there
+    /// is one microphone, and a press that starts in one window can end in
+    /// another, or after its window is gone.
+    ///
+    /// Deliberately no session latched beside it: whichever session existed
+    /// at attach time may not be the one in voice. The question "whose mute
+    /// does this key toggle?" has exactly one answer — the connection holding
+    /// the microphone — and the arbiter is where that is written down.
+    static PRESSED_KEYVAL: Cell<u32> = const { Cell::new(0) };
 }
 
 /// The connection currently in voice, and the room it is in.
@@ -166,11 +165,7 @@ fn drive_mute(sess: *mut c_void, cid: u32, muted: bool) -> bool {
     true
 }
 
-fn on_key_pressed(
-    state: &PttState,
-    keyval: gtk::gdk::Key,
-    modifiers: gtk::gdk::ModifierType,
-) -> glib::Propagation {
+fn on_key_pressed(keyval: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> glib::Propagation {
     let kv = keyval.into_glib();
     if !matches_bind(kv, modifiers) {
         return glib::Propagation::Proceed;
@@ -181,26 +176,31 @@ fn on_key_pressed(
     };
     // Edge-detect: auto-repeat fires this repeatedly while held — one
     // unmute per physical press. Still consume the repeat (the bind is ours).
-    if state.pressed_keyval.get() != 0 {
+    if PRESSED_KEYVAL.get() != 0 {
         return glib::Propagation::Stop;
     }
     if drive_mute(sess, active_cid, false) {
         // Latch the specific keyval so the release re-mutes on it even if the
         // user rebinds PTT mid-press.
-        state.pressed_keyval.set(kv);
+        PRESSED_KEYVAL.set(kv);
     }
     // In voice: consume regardless of send success so the key doesn't
     // double-act as a chat-input character.
     glib::Propagation::Stop
 }
 
-fn on_key_released(state: &PttState, keyval: gtk::gdk::Key) {
-    if state.pressed_keyval.get() == 0 {
-        return; // never latched (different bind / not joined / drive failed)
-    }
+fn on_key_released(keyval: gtk::gdk::Key) {
     // Match the LATCHED keyval (modifier state on release may differ), so a
     // mid-press rebind can't leave the user unmuted forever.
-    if keyval.into_glib() != state.pressed_keyval.get() {
+    if keyval.into_glib() == PRESSED_KEYVAL.get() {
+        release();
+    }
+}
+
+/// End a latched press: re-mute and clear the latch. No-op when unlatched
+/// (different bind / not joined / drive failed).
+fn release() {
+    if PRESSED_KEYVAL.get() == 0 {
         return;
     }
     // Re-derive the active cid — the user may have switched rooms between
@@ -209,17 +209,16 @@ fn on_key_released(state: &PttState, keyval: gtk::gdk::Key) {
     if let Some((sess, active_cid)) = voice_holder() {
         drive_mute(sess, active_cid, true);
     }
-    state.pressed_keyval.set(0);
+    PRESSED_KEYVAL.set(0);
 }
 
 /// `void hx_voice_ptt_attach(GtkWidget *window)` — attach the PTT key
 /// controller to `window`. Idempotent (a second call is a no-op).
 ///
-/// Takes no session, and that is the change: there is one microphone and one
-/// toolbar window, so a controller latched to whichever session existed at
-/// attach time would have gone on toggling that connection's mute while the
-/// microphone was somewhere else. The key acts on whoever holds voice, which
-/// the arbiter answers.
+/// Takes no session: there is one microphone, so a controller latched to
+/// whichever session existed at attach time would have gone on toggling that
+/// connection's mute while the microphone was somewhere else. The key acts on
+/// whoever holds voice, which the arbiter answers.
 ///
 /// # Safety
 /// `window` is a valid `GtkWidget *`. Main thread only.
@@ -230,7 +229,7 @@ pub unsafe extern "C" fn hx_voice_ptt_attach(window: *mut gtk::ffi::GtkWidget) {
     }
     crate::ensure_gtk_init();
     // Borrow, don't own: the controller we add is held BY the window, and the
-    // closures capture `state` (not the window), so nothing here retains it.
+    // closures capture nothing, so nothing here retains it.
     // `from_glib_none` would sink a floating reference and finalize the window
     // when this wrapper drops; `from_glib_borrow` leaves its lifetime with C.
     let window = from_glib_borrow::<_, gtk::Widget>(window);
@@ -247,23 +246,18 @@ pub unsafe extern "C" fn hx_voice_ptt_attach(window: *mut gtk::ffi::GtkWidget) {
     // widgets' default handling proceeds normally.
     ctrl.set_propagation_phase(gtk::PropagationPhase::Capture);
 
-    let state = Rc::new(PttState {
-        pressed_keyval: Cell::new(0),
-    });
-
-    {
-        let state = state.clone();
-        ctrl.connect_key_pressed(move |_c, keyval, _keycode, modifiers| {
-            on_key_pressed(&state, keyval, modifiers)
-        });
-    }
-    {
-        let state = state.clone();
-        ctrl.connect_key_released(move |_c, keyval, _keycode, modifiers| {
-            let _ = modifiers;
-            on_key_released(&state, keyval);
-        });
-    }
+    ctrl.connect_key_pressed(|_c, keyval, _keycode, modifiers| on_key_pressed(keyval, modifiers));
+    ctrl.connect_key_released(|_c, keyval, _keycode, _modifiers| on_key_released(keyval));
 
     window.add_controller(ctrl);
+
+    // A window that loses focus mid-press never sees the release, which
+    // would leave the microphone live until the key is pressed again.
+    if let Some(win) = window.downcast_ref::<gtk::Window>() {
+        win.connect_is_active_notify(|w| {
+            if !w.is_active() {
+                release();
+            }
+        });
+    }
 }
