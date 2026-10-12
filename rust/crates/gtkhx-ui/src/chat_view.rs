@@ -73,8 +73,10 @@ pub unsafe extern "C" fn gtkhx_chat_view_new(
 
 /// What every GtkHx chat view has, whatever the preferences say.
 fn setup(view: &RotulusView) {
-    // Typing goes to the input box beside the view, never to the view.
-    view.set_can_focus(false);
+    // Typing goes to the input box beside the view, so a click on the view
+    // leaves the focus there; the keyboard still reaches the view (its
+    // links, nicks and menu) by Tab from the subject above it.
+    view.set_focus_on_click(false);
     view.set_indent(true);
     // Room for the timestamp and a medium-length nick without the column
     // dominating the chat width.
