@@ -1556,9 +1556,12 @@ init (int argc, char **argv)
             }
         }
 #endif
-        /* The chat view's own strings are in the "rotulus" domain. */
+        /* The chat view's and the dock's own strings are in domains of
+         * their own. The dock binds its domain itself unless it finds it
+         * bound, which is what makes this one count in a relocated build. */
         for (const char *const *d
-             = (const char *const[]){ PACKAGE, "rotulus", NULL };
+             = (const char *const[]){ PACKAGE, "rotulus", "mullion-gtk-0",
+                                      NULL };
              *d; d++) {
             bindtextdomain (*d, localedir);
             bind_textdomain_codeset (*d, "UTF-8");

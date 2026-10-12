@@ -27,7 +27,9 @@ internal tabs inside the Chat panel's own `AdwTabView`. The user can:
 - zoom one pane to fill the window, and use mullion's keyboard chords
   (Alt + arrows to move the focus, Alt + Shift + arrows to move a pane,
   Alt + `\` / Alt + `-` to split, Alt + Enter to zoom, Alt + W to close,
-  Alt + 0 to reset).
+  Alt + 0 to reset; none of these while typing in a text field), F6 /
+  Shift + F6 to step between panes from anywhere, and Ctrl + Shift +
+  Page Up / Page Down to move a tab along its strip.
 
 The protocol layer is untouched by any of this — it is a view layer.
 
