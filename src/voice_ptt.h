@@ -17,8 +17,7 @@
  *
  *   - PTT is disabled in prefs, OR
  *   - PTT is enabled but no key is captured (empty CFG_VOICE_PTT_KEY), OR
- *   - The current session is not joined to a voice room (voice_runtime
- *     is NULL or no active cid).
+ *   - No connection holds voice (see voice_arbiter.rs).
  *
  * Behaviour when active:
  *
@@ -33,6 +32,8 @@
  *     order tail end and the matching press was already consumed
  *     above, no downstream widget would have a stale press state
  *     to act on anyway.
+ *   - the window losing focus with a press latched → VOICE_MUTE(1), since
+ *     the release will never arrive there.
  *
  * Modifier handling: we match on (keyval, ptt_modifier_mask & state).
  * Extra modifier bits we don't care about (lock states etc.) are
