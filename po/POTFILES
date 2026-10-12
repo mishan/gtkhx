@@ -9,6 +9,7 @@ src/hx_panel.c
 src/hx_split.c
 src/msg.c
 src/network.c
+src/notify.c
 src/options.c
 src/preview.c
 src/rcv.c
@@ -22,8 +23,10 @@ rust/crates/gtkhx-ui/src/banner.rs
 rust/crates/gtkhx-ui/src/broadcast.rs
 rust/crates/gtkhx-ui/src/camera_portal.rs
 rust/crates/gtkhx-ui/src/chat_find.rs
+rust/crates/gtkhx-ui/src/chat_input.rs
 rust/crates/gtkhx-ui/src/chat_invite.rs
 rust/crates/gtkhx-ui/src/chat.rs
+rust/crates/gtkhx-ui/src/chat_tabs.rs
 rust/crates/gtkhx-ui/src/connect.rs
 rust/crates/gtkhx-ui/src/conn_tabs.rs
 rust/crates/gtkhx-ui/src/create_post.rs
@@ -40,6 +43,7 @@ rust/crates/gtkhx-ui/src/icon_picker.rs
 rust/crates/gtkhx-ui/src/inline_media_dialog.rs
 rust/crates/gtkhx-ui/src/media_attach.rs
 rust/crates/gtkhx-ui/src/media_preview/mod.rs
+rust/crates/gtkhx-ui/src/msg.rs
 rust/crates/gtkhx-ui/src/news_browser.rs
 rust/crates/gtkhx-ui/src/news_compose.rs
 rust/crates/gtkhx-ui/src/news_dialogs.rs

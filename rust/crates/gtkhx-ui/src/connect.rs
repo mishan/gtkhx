@@ -870,6 +870,7 @@ fn save_dialog() {
 
     let name_entry = gtk::Entry::new();
     name_entry.set_activates_default(true);
+    name_entry.update_property(&[gtk::accessible::Property::Label(&tr("Bookmark name"))]);
     dialog.set_extra_child(Some(&name_entry));
 
     {

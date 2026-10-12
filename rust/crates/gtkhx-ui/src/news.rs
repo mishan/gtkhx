@@ -224,6 +224,8 @@ fn build_search_bar(ctx: &Rc<SearchCtx>) -> gtk::SearchBar {
     hbox.append(&ctx.next_btn);
 
     ctx.entry.set_hexpand(true);
+    ctx.entry
+        .update_property(&[gtk::accessible::Property::Label(&tr("Find in News"))]);
     ctx.count.add_css_class("dim-label");
     ctx.count.set_margin_start(6);
     ctx.count.set_margin_end(6);

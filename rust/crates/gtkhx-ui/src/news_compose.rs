@@ -121,6 +121,9 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
     let subject_lbl = gtk::Label::new(Some(&tr("Subject:")));
     subject_lbl.set_xalign(0.0);
     let subject_entry = gtk::Entry::new();
+    subject_entry.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
+        subject_lbl.upcast_ref()
+    ])]);
     subject_entry.set_hexpand(true);
     subject_entry.set_text(&prefill);
     subject_row.append(&subject_lbl);
@@ -132,6 +135,7 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
     body_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     body_scroll.set_vexpand(true);
     let body_view = gtk::TextView::new();
+    body_view.update_property(&[gtk::accessible::Property::Label(&tr("Message"))]);
     body_view.set_wrap_mode(gtk::WrapMode::WordChar);
     body_view.set_margin_start(4);
     body_view.set_margin_end(4);

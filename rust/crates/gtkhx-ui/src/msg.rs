@@ -166,6 +166,10 @@ pub unsafe extern "C" fn create_msgwin(
     msgwin_refresh_user_info(msg);
     gtkhx_chat_tabs_raise_msg(htlc, uid);
     init_keyaccel(wptr(&outer_vbox));
+    input.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr1(
+        "Message to %s",
+        &crate::cstr(name as *const c_char),
+    ))]);
     input.grab_focus();
 
     msg

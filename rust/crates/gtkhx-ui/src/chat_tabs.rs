@@ -263,7 +263,11 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
 
     let page = view.append_pinned(&w);
     let t = crate::cstr(title);
-    page.set_title(if t.is_empty() { "Chat" } else { &t });
+    page.set_title(&if t.is_empty() {
+        crate::tr::tr("Chat")
+    } else {
+        t
+    });
     // A pinned tab shows its icon and nothing else.
     page.set_icon(Some(&gtk::gio::ThemedIcon::new("system-users-symbolic")));
     set_meta(
@@ -297,7 +301,11 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
 
     let page = view.append(&w);
     let t = crate::cstr(title);
-    page.set_title(if t.is_empty() { "Private Chat" } else { &t });
+    page.set_title(&if t.is_empty() {
+        crate::tr::tr("Private Chat")
+    } else {
+        t
+    });
 
     set_meta(
         &page,
@@ -333,7 +341,7 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_msg(
 
     let page = view.append(&w);
     let t = crate::cstr(title);
-    page.set_title(if t.is_empty() { "PM" } else { &t });
+    page.set_title(&if t.is_empty() { crate::tr::tr("PM") } else { t });
 
     set_meta(
         &page,
@@ -475,7 +483,11 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_pchat(
 ) {
     if let Some(page) = find_pchat(htlc, cid) {
         let t = crate::cstr(title);
-        page.set_title(if t.is_empty() { "Private Chat" } else { &t });
+        page.set_title(&if t.is_empty() {
+            crate::tr::tr("Private Chat")
+        } else {
+            t
+        });
     }
 }
 
@@ -489,7 +501,7 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_msg(
 ) {
     if let Some(page) = find_msg(htlc, uid) {
         let t = crate::cstr(title);
-        page.set_title(if t.is_empty() { "PM" } else { &t });
+        page.set_title(&if t.is_empty() { crate::tr::tr("PM") } else { t });
     }
 }
 

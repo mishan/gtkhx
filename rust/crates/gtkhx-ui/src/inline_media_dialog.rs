@@ -432,6 +432,7 @@ pub unsafe extern "C" fn inline_media_show_dialog(
     let picture = gtk::Picture::new();
     picture.set_can_shrink(true);
     picture.set_content_fit(gtk::ContentFit::Contain);
+    picture.set_alternative_text(Some(&tr("Picture")));
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     scroll.set_child(Some(&picture));

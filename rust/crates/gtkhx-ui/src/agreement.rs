@@ -45,6 +45,7 @@ pub unsafe extern "C" fn gtkhx_show_agreement(
 
     let textview = gtk::TextView::new();
     textview.set_monospace(true);
+    textview.update_property(&[gtk::accessible::Property::Label(&tr("Agreement"))]);
     textview.set_editable(false);
     textview.set_cursor_visible(false);
     textview.set_wrap_mode(gtk::WrapMode::Word);

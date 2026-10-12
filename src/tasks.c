@@ -505,6 +505,10 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     pbar = gtk_progress_bar_new ();
     gtk_progress_bar_set_show_text (GTK_PROGRESS_BAR (pbar), FALSE);
     gtk_widget_set_valign (pbar, GTK_ALIGN_CENTER);
+    /* Named by the file, described by the speed and ETA beside it. */
+    gtk_accessible_update_relation (
+        GTK_ACCESSIBLE (pbar), GTK_ACCESSIBLE_RELATION_LABELLED_BY, title, NULL,
+        GTK_ACCESSIBLE_RELATION_DESCRIBED_BY, subtitle, NULL, -1);
 
     /* Which connection this row is on. Dim and to the right of the queue
      * badge, and hidden outright while only one connection is open — so a

@@ -129,6 +129,7 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
     let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 1.0);
     scale.set_hexpand(true);
     scale.set_draw_value(false);
+    scale.update_property(&[gtk::accessible::Property::Label(&tr("Position"))]);
     let time = gtk::Label::new(None);
     time.add_css_class("numeric");
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -464,11 +465,15 @@ impl Player {
         if let Some(pos) = pos {
             self.scale.set_value(pos.seconds_f64());
         }
-        self.time.set_text(&match (pos, dur) {
+        let text = match (pos, dur) {
             (Some(pos), Some(dur)) => format!("{} / {}", clock(pos), clock(dur)),
             (Some(pos), None) => clock(pos),
             _ => String::new(),
-        });
+        };
+        // Read out as the time, not as a count of seconds.
+        self.scale
+            .update_property(&[gtk::accessible::Property::ValueText(&text)]);
+        self.time.set_text(&text);
     }
 
     fn fail(&self, why: &str) {

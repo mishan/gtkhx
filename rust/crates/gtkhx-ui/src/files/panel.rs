@@ -171,6 +171,7 @@ impl Panel {
 
         let path_entry = gtk::Entry::new();
         path_entry.set_hexpand(true);
+        path_entry.update_property(&[gtk::accessible::Property::Label(&tr("Location"))]);
         path_row.append(&path_entry);
         root.append(&path_row);
 
@@ -397,6 +398,8 @@ impl Panel {
             if let Some(p) = weak.upgrade() {
                 p.set_row_icon(&icon, e.icon_id());
             }
+            // The icon is what says folder or file (Kind starts hidden).
+            icon.update_property(&[gtk::accessible::Property::Label(&e.kind())]);
             let name = e.name();
             label.set_text(&name);
             set_old_name(&label, Some((name, e.wire_name())));

@@ -81,6 +81,9 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     // Subject bar.
     let subj_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     subject.set_hexpand(true);
+    subject.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr(
+        "Chat subject",
+    ))]);
     subj_hbox.append(&subject);
     let subj_frame = gtk::Frame::new(None);
     subj_frame.set_child(Some(&subj_hbox));

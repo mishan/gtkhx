@@ -154,6 +154,9 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
         };
 
         let kind = unsafe { hx_news_node_kind(node.as_ptr().cast()) };
+        icon.update_property(&[gtk::accessible::Property::Label(
+            &crate::news_browser::kind_label(kind),
+        )]);
         if let Some(name) = crate::news_browser::symbolic_icon_for_kind(kind) {
             // Symbolic icons are drawn at 16px; the pixel art is upscaled
             // to 24 (see `load_icon`).

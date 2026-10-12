@@ -78,6 +78,9 @@ pub extern "C" fn create_about_window(_widget: *mut cffi::GtkWidget, _data: *mut
     let logo = gtk::Picture::for_paintable(&tex);
     logo.set_can_shrink(false);
     logo.set_halign(gtk::Align::Center);
+    logo.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr(
+        "GtkHx logo",
+    ))]);
     bx.append(&logo);
 
     let title = gtk::Label::new(None);

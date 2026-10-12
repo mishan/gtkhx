@@ -160,6 +160,8 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::Search
     });
 
     ctx.entry.set_placeholder_text(Some(&tr("Find in chat")));
+    ctx.entry
+        .update_property(&[gtk::accessible::Property::Label(&tr("Find in chat"))]);
     ctx.entry.set_hexpand(true);
     ctx.count.add_css_class("dim-label");
     ctx.count.set_margin_start(6);
