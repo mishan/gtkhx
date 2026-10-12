@@ -255,6 +255,9 @@ pub(crate) fn nick_color_row(cfg: &str) -> adw::ActionRow {
     dialog.set_title(&tr("Pick Nickname Color"));
     let picker = gtk::ColorDialogButton::new(Some(dialog));
     picker.set_valign(gtk::Align::Center);
+    picker.update_relation(&[gtk::accessible::Relation::LabelledBy(&[row
+        .upcast_ref::<gtk::Widget>()
+        .upcast_ref()])]);
 
     let cur = pref_get_int(cfg);
     if cur != -1 {
@@ -285,11 +288,18 @@ pub(crate) fn nick_color_row(cfg: &str) -> adw::ActionRow {
         })
     };
 
+    // Clear is what tells "not set" apart from black, so it is live only
+    // while a color is set.
     let clear = gtk::Button::with_label(&tr("Clear"));
     clear.set_valign(gtk::Align::Center);
+    clear.set_sensitive(cur != -1);
+    {
+        let clear = clear.clone();
+        picker.connect_rgba_notify(move |_| clear.set_sensitive(true));
+    }
     {
         let picker = picker.clone();
-        clear.connect_clicked(move |_| {
+        clear.connect_clicked(move |clear| {
             // Already unset — nothing to apply (matches the C early return).
             if pref_get_int(&name) == -1 {
                 return;
@@ -300,6 +310,7 @@ pub(crate) fn nick_color_row(cfg: &str) -> adw::ActionRow {
             picker.block_signal(&handler);
             picker.set_rgba(&gtk::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
             picker.unblock_signal(&handler);
+            clear.set_sensitive(false);
         });
     }
 

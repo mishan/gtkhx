@@ -62,6 +62,11 @@ struct _GtkhxTheme {
     /* The [palette.*] nick_colors lists, packed the same way. */
     int nick_rgb[GTKHX_NICK_COLORS_MAX][2];
     int n_nick[2];
+
+    /* The system's high-contrast setting: a theme's colors step aside for
+     * the default palette and the system chrome, which are made to meet it
+     * (see gtkhx_theme_set_high_contrast). */
+    gboolean high_contrast;
 };
 
 G_DEFINE_FINAL_TYPE (GtkhxTheme, gtkhx_theme, G_TYPE_OBJECT)
@@ -279,6 +284,9 @@ gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark)
         rgba = (GdkRGBA){ 0, 0, 0, 1.0 };
         return rgba;
     }
+    if (self->high_contrast) {
+        return gtkhx_theme_get_default_color (derived_role (role), dark);
+    }
     packed = self->palette_rgb[role][dark ? 1 : 0];
     if (packed < 0) {
         GtkhxPaletteRole parent = derived_role (role);
@@ -294,6 +302,17 @@ gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark)
     return rgba;
 }
 
+void
+gtkhx_theme_set_high_contrast (gboolean high_contrast)
+{
+    GtkhxTheme *self = gtkhx_theme_get_default ();
+
+    if (self->high_contrast != !!high_contrast) {
+        self->high_contrast = !!high_contrast;
+        g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
+    }
+}
+
 gboolean
 gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark)
 {
@@ -301,7 +320,7 @@ gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark)
     if (role < 0 || role >= GTKHX_PAL_N_ROLES) {
         return FALSE;
     }
-    return self->palette_rgb[role][dark ? 1 : 0] >= 0;
+    return !self->high_contrast && self->palette_rgb[role][dark ? 1 : 0] >= 0;
 }
 
 int
@@ -311,6 +330,9 @@ gtkhx_theme_get_nick_colors (gboolean dark, GdkRGBA out[GTKHX_NICK_COLORS_MAX])
     int v = dark ? 1 : 0;
     int i;
 
+    if (self->high_contrast) {
+        return 0;
+    }
     for (i = 0; i < self->n_nick[v]; i++) {
         int packed = self->nick_rgb[i][v];
         out[i] = (GdkRGBA){ ((packed >> 16) & 0xff) / 255.0,
@@ -325,7 +347,7 @@ gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
 {
     GtkhxTheme *self = gtkhx_theme_get_default ();
     int packed;
-    if (slot < 0 || slot >= GTKHX_USER_COLOR_N || !out) {
+    if (slot < 0 || slot >= GTKHX_USER_COLOR_N || !out || self->high_contrast) {
         return FALSE;
     }
     packed = self->user_color_rgb[slot][dark ? 1 : 0];
@@ -386,7 +408,8 @@ gtkhx_theme_get_chrome_color (GtkhxChromeRole role, gboolean dark, GdkRGBA *out)
     GdkRGBA fg;
     double step;
 
-    if (role < 0 || role >= GTKHX_CHROME_N_ROLES || !out) {
+    if (role < 0 || role >= GTKHX_CHROME_N_ROLES || !out
+        || self->high_contrast) {
         return FALSE;
     }
     if (self->chrome_rgb[role][v] >= 0) {

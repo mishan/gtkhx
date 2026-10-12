@@ -1270,6 +1270,17 @@ on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
     gtkhx_refresh_userlist_css (users_font_desc);
 }
 
+/* AdwStyleManager::notify::high-contrast: the theme sets its colors aside,
+ * and its "changed" repaints everything (on_theme_changed). */
+static void
+on_high_contrast_changed (GObject *object, GParamSpec *pspec, gpointer data)
+{
+    (void)pspec;
+    (void)data;
+    gtkhx_theme_set_high_contrast (
+        adw_style_manager_get_high_contrast (ADW_STYLE_MANAGER (object)));
+}
+
 /* GtkhxTheme::changed trampoline — when the active theme file is
  * reloaded (THEMENAME edit, Settings theme picker), re-pull every
  * UI-role slot for the *currently active* light/dark variant and
@@ -1424,6 +1435,9 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
      * reports. */
     {
         AdwStyleManager *sm = adw_style_manager_get_default ();
+        /* Before the first paint, which "changed" can't reach yet. */
+        gtkhx_theme_set_high_contrast (
+            adw_style_manager_get_high_contrast (sm));
         gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
         /* Re-emit the .gtkhx-text / .gtkhx-input CSS with the now-
          * settled light/dark variant. fe_init's earlier refresh_css
@@ -1436,6 +1450,8 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
         gtkhx_refresh_css ();
         g_signal_connect (sm, "notify::dark",
                           G_CALLBACK (on_style_manager_dark_changed), NULL);
+        g_signal_connect (sm, "notify::high-contrast",
+                          G_CALLBACK (on_high_contrast_changed), NULL);
         g_signal_connect (gtkhx_theme_get_default (), "changed",
                           G_CALLBACK (on_theme_changed), NULL);
     }

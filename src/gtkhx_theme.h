@@ -134,6 +134,11 @@ typedef enum {
  * for a future theme editor. */
 GdkRGBA gtkhx_theme_get_default_color (GtkhxPaletteRole role, gboolean dark);
 
+/* Follow the system's high-contrast setting: while it is on, the colors
+ * above come from the default theme and the chrome from the system, and
+ * the theme's nick and user-list colors are unset. Emits "changed". */
+void gtkhx_theme_set_high_contrast (gboolean high_contrast);
+
 /* Effective color for a (role, variant): the active theme's value if
  * set, otherwise the built-in default. */
 GdkRGBA gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark);

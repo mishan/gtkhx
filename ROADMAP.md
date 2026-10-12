@@ -129,8 +129,11 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    emoji suggestion being picked. `gtk_accessible_announce` is 4.14, so it is built
    with the `v4_14` feature meson sets from the GTK it finds; below 4.14 nothing is
    announced, and the chat view's text isn't exposed either.
-6. **Contrast.** Custom themes ignore system high contrast; links are a fixed blue told
-   apart from text by color alone; the markdown delimiter color is fixed.
+6. **Contrast.** *Done.* Under the system's high-contrast setting a theme's colors step
+   aside for the default palette and the system chrome (`gtkhx_theme_set_high_contrast`),
+   and the markdown delimiters keep the text color; links are always underlined, in the
+   accent's text color rather than a fixed blue; and the nickname color's Clear is live
+   only while a color is set, which tells "not set" apart from black.
 7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields),
    accelerators for the panels, notifications that open the message they announce, and
    the shortcuts window under Help.
