@@ -304,14 +304,34 @@ pub unsafe extern "C" fn hx_user_row_get_icon(row: *mut c_void) -> u16 {
     borrow(row).imp().icon.get()
 }
 
+/// Name the C name cell, which draws the nick itself and so exposes no text,
+/// for assistive technology: the nick, with the away and admin states the
+/// list otherwise shows only by color. A NULL `row` (an unbound cell) clears
+/// the name.
+///
 /// # Safety
-/// `row` is NULL or a valid `HxUserRow *`.
+/// `row` is NULL or a valid `HxUserRow *`; `cell` is a valid `GtkWidget *`.
+/// Main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn hx_user_row_get_color(row: *mut c_void) -> u16 {
-    if row.is_null() {
-        return 0;
-    }
-    borrow(row).imp().color.get()
+pub unsafe extern "C" fn hx_user_row_name_cell(row: *mut c_void, cell: *mut gtk4::ffi::GtkWidget) {
+    use crate::tr::tr1;
+    use gtk4::prelude::*;
+    let cell = glib::translate::from_glib_borrow::<_, gtk4::Widget>(cell);
+    let label = if row.is_null() {
+        String::new()
+    } else {
+        let row = borrow(row);
+        let imp = row.imp();
+        let name = imp.name.borrow().to_string_lossy().into_owned();
+        // Status bit 0 is away, bit 1 admin (see users.c).
+        match imp.color.get() & 3 {
+            1 => tr1("%s, away", &name),
+            2 => tr1("%s, admin", &name),
+            3 => tr1("%s, admin, away", &name),
+            _ => name,
+        }
+    };
+    cell.update_property(&[gtk4::accessible::Property::Label(&label)]);
 }
 
 /// Returns the cached foreground as `const GdkRGBA *`, or NULL for the

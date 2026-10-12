@@ -112,21 +112,24 @@ mod voice_impl {
         }
     }
 
-    /// Map the indicator enum to a stock symbolic icon, or None for NONE.
-    fn indicator_icon(ind: u32) -> Option<&'static str> {
+    /// Map the indicator enum to a stock symbolic icon and its name, or None
+    /// for NONE.
+    fn indicator_icon(ind: u32) -> Option<(&'static str, String)> {
+        use crate::tr::tr;
         match ind {
-            1 => Some("audio-volume-low-symbolic"), // IN_VOICE — dim speaker
-            2 => Some("audio-volume-high-symbolic"), // SPEAKING
-            3 => Some("microphone-disabled-symbolic"), // MUTED
-            _ => None,                              // NONE / unknown
+            1 => Some(("audio-volume-low-symbolic", tr("In voice"))), // dim speaker
+            2 => Some(("audio-volume-high-symbolic", tr("Speaking"))),
+            3 => Some(("microphone-disabled-symbolic", tr("Muted"))),
+            _ => None, // NONE / unknown
         }
     }
 
     fn voice_cell_refresh(img: &gtk::Image, model: &glib::Object, uid: u16) {
         let ind = unsafe { hx_voice_model_get_indicator(model.as_ptr() as *mut c_void, uid) };
         match indicator_icon(ind) {
-            Some(name) => {
+            Some((name, label)) => {
                 img.set_icon_name(Some(name));
+                crate::set_name_tip(img, &label);
                 img.set_visible(true);
             }
             None => {

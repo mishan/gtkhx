@@ -48,7 +48,7 @@ G_DECLARE_FINAL_TYPE (HxUserRow, hx_user_row, HX, USER_ROW, GObject)
  * NULL for the "regular user, theme default" slot. */
 extern const char *hx_user_row_get_name (HxUserRow *row);
 extern guint16 hx_user_row_get_icon (HxUserRow *row);
-extern guint16 hx_user_row_get_color (HxUserRow *row);
+extern void hx_user_row_name_cell (HxUserRow *row, GtkWidget *cell);
 extern const GdkRGBA *hx_user_row_get_foreground (HxUserRow *row);
 extern guint16 hx_user_row_get_uid (HxUserRow *row);
 

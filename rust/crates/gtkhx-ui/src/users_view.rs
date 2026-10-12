@@ -377,9 +377,10 @@ impl HxUserListView {
             });
         }
 
-        // Right-click → user popover. Capture phase, same as the C gesture.
-        // Weak self again — the gesture controller is owned by column_view,
-        // so a strong clone would form the same cycle as connect_activate.
+        // Right-click (capture phase, same as the C gesture), or Menu /
+        // Shift+F10 → user popover. Weak self again — the controllers are
+        // owned by column_view, so a strong clone would form the same cycle
+        // as connect_activate.
         if !sess.is_null() {
             let rclick = gtk::GestureClick::new();
             rclick.set_button(gtk::gdk::BUTTON_SECONDARY);
@@ -391,6 +392,19 @@ impl HxUserListView {
                 }
             });
             column_view.add_controller(rclick);
+
+            let keys = gtk::EventControllerKey::new();
+            let weak = self.downgrade();
+            keys.connect_key_pressed(move |_, key, _, mods| {
+                let menu_key = key == gtk::gdk::Key::Menu
+                    || (key == gtk::gdk::Key::F10
+                        && mods.contains(gtk::gdk::ModifierType::SHIFT_MASK));
+                match weak.upgrade() {
+                    Some(this) if menu_key && this.on_menu_key() => glib::Propagation::Stop,
+                    _ => glib::Propagation::Proceed,
+                }
+            });
+            column_view.add_controller(keys);
         }
 
         // A theme change rescales a themed view, and a name's color follows
@@ -476,8 +490,45 @@ impl HxUserListView {
             return;
         }
         let _ = gesture;
+        // Opened by the pointer, the menu shouldn't ring its first item as
+        // though the keyboard had put focus there.
+        if let Some(win) = cv.root().and_downcast::<gtk::Window>() {
+            win.set_focus_visible(false);
+        }
+        self.popup_at(pos, x, y);
+    }
 
-        let Some(sel) = self.selection() else {
+    /// Menu or Shift+F10: the user menu for the selected row, opened at the
+    /// focused row. Returns whether there was a row to open it for.
+    fn on_menu_key(&self) -> bool {
+        let Some(cv) = self.column_view() else {
+            return false;
+        };
+        let Some(pos) = self
+            .selection()
+            .map(|s| s.selected())
+            .filter(|&p| p != INVALID)
+        else {
+            return false;
+        };
+        let (x, y) = cv
+            .root()
+            .and_then(|r| r.focus())
+            .and_then(|f| {
+                let mid =
+                    gtk::graphene::Point::new(f.width() as f32 / 2.0, f.height() as f32 / 2.0);
+                f.compute_point(&cv, &mid)
+            })
+            .map_or((0.0, 0.0), |p| (f64::from(p.x()), f64::from(p.y())));
+        self.popup_at(pos, x, y);
+        true
+    }
+
+    /// Select row `pos` and open the user menu for it at (`x`, `y`) in the
+    /// column view.
+    fn popup_at(&self, pos: u32, x: f64, y: f64) {
+        let sess = self.imp().sess.get();
+        let (Some(cv), Some(sel)) = (self.column_view(), self.selection()) else {
             return;
         };
         // Select first so the toolbar buttons + menu see the right row.
@@ -490,7 +541,7 @@ impl HxUserListView {
             return;
         }
         let cid = self.imp().cid.get();
-        unsafe { user_popup_show(wptr(&cv_widget), sess, cid, uid, x, y) };
+        unsafe { user_popup_show(wptr(&cv), sess, cid, uid, x, y) };
     }
 }
 

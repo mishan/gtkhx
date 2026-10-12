@@ -283,15 +283,6 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
     gtk_widget_add_css_class (btn, "flat");
     gtk_widget_add_css_class (btn, "gtkhx-popup-item");
     gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
-    /* keyboard focus on the first button auto-paints a
-     * focus ring when the popover opens; the user reads that as
-     * 'this item is hovered' and gets confused when cursor motion
-     * doesn't update it. We don't expect the popup to be navigated
-     * by keyboard (right-click → click is the path), so just turn
-     * focus off for these buttons. The CSS provider below adds a
-     * visible :hover background so cursor tracking is obvious. */
-    gtk_widget_set_focusable (btn, FALSE);
-    gtk_widget_set_can_focus (btn, FALSE);
     /* Left-align label inside the flat button so the menu reads
      * like a menu, not a row of centred captions. */
     {
@@ -476,8 +467,8 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
     /* Header: bold name + dim details. */
     info_markup = g_markup_printf_escaped (
         "<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>", mi.name, mi.uid,
-        mi.icon, mi.status >= 2 ? _ ("Admin") : _ ("Guest"),
-        mi.status % 2 ? _ (" (Away)") : "");
+        mi.icon, mi.status & 2 ? _ ("Admin") : _ ("Guest"),
+        mi.status & 1 ? _ (" (Away)") : "");
     info_label = gtk_label_new (NULL);
     gtk_label_set_markup (GTK_LABEL (info_label), info_markup);
     gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
