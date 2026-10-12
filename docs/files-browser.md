@@ -206,6 +206,11 @@ just after one closes is refused ("1 at a time") or queued for a couple of
 seconds. A refused range is asked for again for a few seconds before the player
 gives up.
 
+Pictures come off an `appsink` as RGBA no larger than the window, in square
+pixels: converting a 4K picture whole took longer than a frame lasts, for a
+window showing a fraction of it. A resize asks for the new size on the next
+frame.
+
 Audio and video never reach the text viewer. In a build without GStreamer,
 Preview on one says the build can't preview audio or video; past 4 GiB, which
 the player can't seek in (the resume offset and the fork length a transfer

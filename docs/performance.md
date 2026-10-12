@@ -865,3 +865,17 @@ onwards from loopback.
     folder download taking ten seconds longer than its tree — Janus
     closes only on its own timeout — which the item-count change in #716
     fixes. A lead only for a TLS server that closes bare.
+30. **The media player converted every picture whole.** Its appsink took
+    RGBA at the video's own size, so each frame was converted on the CPU
+    and uploaded at full size, however small the window showing it. A
+    4K 60 fps file in the default 720×480 window played at 24 fps, with
+    the conversion alone about 33 ms a frame; a 1080p file kept up, at a
+    core's worth of CPU. `gtk4paintablesink`, which converts on the GPU
+    where it can, did worse on the same machine: 33 fps for 4K, and 42
+    for 1080p with two thirds of the main thread. **Fixed:** the appsink
+    asks for pictures no larger than the window, at its scale, and
+    the converter scales as it converts; a resize renegotiates on the
+    next frame. 4K now plays at 58 fps for 1.5 cores, and the main thread
+    went from 24% to 5%; 1080p from a core to two thirds of one. The Video
+    panel needs no change: its streams are decoded at the camera's size,
+    and its cost was measured above.
