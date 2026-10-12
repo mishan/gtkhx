@@ -96,6 +96,39 @@ Open questions, and the reason this hasn't been built: what tone to strike, whet
 ship a curated server list, and whether to ping those servers for liveness before showing
 them — a list of dead servers is worse than no list.
 
+### Accessibility
+
+An accessibility review in October 2026 found the gaps below, in the order they are
+being fixed. Settled along the way: Escape on the Agreement window disagrees (and so
+disconnects), only private messages and mentions are announced, and these fixes may grow
+the C side, with a `C-Growth` trailer, rather than wait for a port.
+
+1. **Icon-only buttons have accessible names.** *Done.* `gtkhx_icon_button_new` /
+   `gtkhx_set_name_tip` in C and `icon_button` / `set_name_tip` in `gtkhx-ui` set the
+   name with the tooltip. `tools/check-icon-buttons.sh` holds buttons built from an icon
+   name to them; it can't see menu buttons, toggles or buttons with an image child.
+2. **The user list.** The name cell draws the nick itself and exposes nothing, so each
+   row reads as blank; away and admin are shown only by color; the voice icons are
+   unnamed; and the per-user menu opens only on a right-click, with unfocusable items.
+3. **Keyboard reach.** In the files window Tab jumps between the lists from anywhere,
+   trapping the header and footer controls; links in text views and the server banner
+   need a mouse; news compose, File Info and Agreement have no Escape; F10 doesn't open
+   the main menu.
+4. **Labels.** Unnamed text inputs (chat, private message, subjects, find, paths,
+   tracker search), progress bars not tied to their file, unnamed PDF pages, pictures
+   without alternative text, file/folder told apart only by icon, and untranslated
+   strings in `preview.c` and elsewhere.
+5. **Announcements.** Nothing is announced: incoming private messages and mentions, a
+   lost connection, and inline errors (an empty server address, a rejected push-to-talk
+   key). `gtk_accessible_announce` is 4.14, so it needs a build and runtime gate, with
+   toasts carrying the important ones on 4.10. The chat view's text is exposed only on
+   4.14 too.
+6. **Contrast.** Custom themes ignore system high contrast; links are a fixed blue told
+   apart from text by color alone; the markdown delimiter color is fixed.
+7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields),
+   accelerators for the panels, notifications that open the message they announce, and
+   the shortcuts window under Help.
+
 ### Help
 
 There is a `/help` command that prints the slash-command list into chat, and that is all.

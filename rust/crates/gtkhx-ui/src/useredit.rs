@@ -368,10 +368,9 @@ unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
     let pass_row = adw::PasswordEntryRow::new();
     pass_row.set_title(&tr("Password"));
     info.add(&pass_row);
-    let gen_btn = gtk::Button::from_icon_name("view-refresh-symbolic");
+    let gen_btn = crate::icon_button("view-refresh-symbolic", &tr("Generate a random password"));
     gen_btn.set_valign(gtk::Align::Center);
     gen_btn.add_css_class("flat");
-    gen_btn.set_tooltip_text(Some(&tr("Generate a random password")));
     pass_row.add_suffix(&gen_btn);
     page.add(&info);
 

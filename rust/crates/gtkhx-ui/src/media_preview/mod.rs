@@ -105,8 +105,7 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
     window.set_default_size(720, 480);
     let view = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    let download_btn = gtk::Button::from_icon_name("folder-download-symbolic");
-    download_btn.set_tooltip_text(Some(&tr("Download")));
+    let download_btn = crate::icon_button("folder-download-symbolic", &tr("Download"));
     download_btn.connect_clicked(move |_| download());
     header.pack_end(&download_btn);
     view.add_top_bar(&header);
@@ -125,8 +124,7 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
     stack.add_named(&status, Some("status"));
     view.set_content(Some(&stack));
 
-    let play = gtk::Button::from_icon_name("media-playback-pause-symbolic");
-    play.set_tooltip_text(Some(&tr("Pause")));
+    let play = crate::icon_button("media-playback-pause-symbolic", &tr("Pause"));
     play.add_css_class("flat");
     let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 1.0);
     scale.set_hexpand(true);
@@ -421,7 +419,7 @@ impl Player {
             ("media-playback-start-symbolic", tr("Play"))
         };
         self.play.set_icon_name(icon);
-        self.play.set_tooltip_text(Some(&tip));
+        crate::set_name_tip(&self.play, &tip);
     }
 
     fn toggle(&self) {

@@ -227,10 +227,8 @@ fn build_search_bar(ctx: &Rc<SearchCtx>) -> gtk::SearchBar {
     ctx.count.add_css_class("dim-label");
     ctx.count.set_margin_start(6);
     ctx.count.set_margin_end(6);
-    ctx.prev_btn.set_tooltip_text(Some(&tr("Previous match")));
     ctx.prev_btn.add_css_class("flat");
     ctx.prev_btn.set_sensitive(false);
-    ctx.next_btn.set_tooltip_text(Some(&tr("Next match")));
     ctx.next_btn.add_css_class("flat");
     ctx.next_btn.set_sensitive(false);
 
@@ -310,7 +308,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
         ptr::null(),
         ptr::null_mut(),
     ));
-    let find_btn = gtk::Button::from_icon_name("system-search-symbolic");
+    let find_btn = crate::icon_button("system-search-symbolic", &tr("Find in News"));
     find_btn.set_tooltip_text(Some(&tr("Find in News (Ctrl+F)")));
 
     // Post → the Rust composer; Reload → reload_news (this module).
@@ -344,8 +342,8 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
         search_bar: gtk::SearchBar::new(),
         entry: gtk::SearchEntry::new(),
         count: gtk::Label::new(Some("")),
-        prev_btn: gtk::Button::from_icon_name("go-up-symbolic"),
-        next_btn: gtk::Button::from_icon_name("go-down-symbolic"),
+        prev_btn: crate::icon_button("go-up-symbolic", &tr("Previous match")),
+        next_btn: crate::icon_button("go-down-symbolic", &tr("Next match")),
         matches: RefCell::new(Vec::new()),
         current: Cell::new(-1),
     });

@@ -199,8 +199,7 @@ fn install_css() {
 }
 
 fn control(icon: &str, tooltip: &str) -> gtk::Button {
-    let b = gtk::Button::from_icon_name(icon);
-    b.set_tooltip_text(Some(tooltip));
+    let b = crate::icon_button(icon, tooltip);
     b.add_css_class("osd");
     b.add_css_class("circular");
     b
@@ -215,7 +214,11 @@ impl Tile {
         picture.set_content_fit(gtk::ContentFit::Contain);
         picture.add_css_class("hx-video-picture");
 
-        let root = gtk::Overlay::new();
+        // A named group, so a screen reader says whose tile its controls
+        // belong to (see `set_name`).
+        let root = gtk::Overlay::builder()
+            .accessible_role(gtk::AccessibleRole::Group)
+            .build();
         root.set_child(Some(&picture));
         root.add_css_class("card");
         root.add_css_class("hx-video-tile");
@@ -336,24 +339,30 @@ impl Tile {
             .then(|| f64::from(frame.width) / f64::from(frame.height))
     }
 
+    fn set_name(&self, label: &str) {
+        self.name.set_text(label);
+        self.root
+            .update_property(&[gtk::accessible::Property::Label(label)]);
+    }
+
     fn set_focused(&self, focused: bool) {
         if focused {
             self.focus.set_icon_name("view-restore-symbolic");
-            self.focus.set_tooltip_text(Some(&tr("Show all")));
+            crate::set_name_tip(&self.focus, &tr("Show all"));
         } else {
             self.focus.set_icon_name("view-fullscreen-symbolic");
-            self.focus.set_tooltip_text(Some(&tr("Focus")));
+            crate::set_name_tip(&self.focus, &tr("Focus"));
         }
     }
 
     fn set_muted(&self, muted: bool) {
         if muted {
             self.mute.set_icon_name("audio-volume-muted-symbolic");
-            self.mute.set_tooltip_text(Some(&tr("Unmute")));
+            crate::set_name_tip(&self.mute, &tr("Unmute"));
             self.mute.add_css_class("hx-video-muted");
         } else {
             self.mute.set_icon_name("audio-volume-high-symbolic");
-            self.mute.set_tooltip_text(Some(&tr("Mute")));
+            crate::set_name_tip(&self.mute, &tr("Mute"));
             self.mute.remove_css_class("hx-video-muted");
         }
     }
@@ -766,7 +775,7 @@ impl PanelInner {
                     self.grid.insert(*key, &t.root);
                     t
                 });
-                tile.name.set_text(label);
+                tile.set_name(label);
                 tile.paused.set_visible(*paused);
                 if *paused {
                     tile.picture.set_paintable(None::<&gdk::Paintable>);
@@ -1243,7 +1252,7 @@ fn relabel(tiles: &HashMap<StreamKey, Tile>, uid: u16, label: &str) {
     }
     for (key, tile) in tiles {
         if key.user_id == uid {
-            tile.name.set_text(label);
+            tile.set_name(label);
         }
     }
 }
@@ -1361,7 +1370,7 @@ pub(crate) mod tests {
             (0, VideoKind::Camera, "You"),
         ] {
             let t = Tile::new(StreamKey { user_id: uid, kind }, Weak::new());
-            t.name.set_text(label);
+            t.set_name(label);
             tiles.insert(StreamKey { user_id: uid, kind }, t);
         }
         let name = |uid, kind| {

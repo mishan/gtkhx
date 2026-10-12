@@ -200,6 +200,18 @@ extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
                                        GCallback cb, gpointer user_data);
 
 /*
+ * Set `text` as both the tooltip and the accessible name of a widget whose
+ * only content is an icon. An icon names nothing, and GTK below 4.14
+ * exposes a tooltip only as the description, so a screen reader would
+ * announce just "button". gtkhx_icon_button_new is the GtkButton form;
+ * tools/check-icon-buttons.sh keeps icon_name-built buttons coming
+ * through it.
+ */
+extern void gtkhx_set_name_tip (GtkWidget *widget, const char *text);
+extern GtkWidget *gtkhx_icon_button_new (const char *icon_name,
+                                         const char *label);
+
+/*
  * like gtkhx_pixmap_button, but takes an already-loaded
  * GdkPixbuf instead of a GResource path. Useful when the icon source
  * isn't a packaged GResource — e.g. the files browser pulling icons

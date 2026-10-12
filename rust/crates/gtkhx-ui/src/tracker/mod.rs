@@ -810,6 +810,7 @@ fn build_window(sess: *mut c_void) {
 
     let case_btn = gtk::ToggleButton::with_label("Aa");
     case_btn.set_tooltip_text(Some(&tr("Match case in tracker search")));
+    case_btn.update_property(&[gtk::accessible::Property::Label(&tr("Match case"))]);
     case_btn.add_css_class("flat");
     case_btn.set_active(unsafe { cffi::gtkhx_tracker_pref_case() } != 0);
     case_btn.connect_toggled(|b| {
@@ -836,8 +837,10 @@ fn build_window(sess: *mut c_void) {
         &tr("Connect to selected server"),
     );
     connbtn.connect_clicked(|_| tracker_connect());
-    let bookmarkbtn = gtk::Button::from_icon_name("bookmark-new-symbolic");
-    bookmarkbtn.set_tooltip_text(Some(&tr("Save selected server as a bookmark")));
+    let bookmarkbtn = crate::icon_button(
+        "bookmark-new-symbolic",
+        &tr("Save selected server as a bookmark"),
+    );
     bookmarkbtn.connect_clicked(|_| tracker_save_bookmark());
     let detailsbtn = pixmap_button(
         "/com/nasledov/gtkhx/pixmaps/info.png",

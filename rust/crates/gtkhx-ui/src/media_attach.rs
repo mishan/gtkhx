@@ -90,8 +90,7 @@ fn too_large(name: &str, len: u64, max: u32) -> String {
 }
 
 fn button(htlc: *mut c_void, target: Target) -> gtk::Button {
-    let btn = gtk::Button::from_icon_name("mail-attachment-symbolic");
-    btn.set_tooltip_text(Some(&tr("Attach Image")));
+    let btn = crate::icon_button("mail-attachment-symbolic", &tr("Attach Image"));
     btn.set_visible(unsafe { has_media(htlc) });
     let conn = dock::conn_key(htlc);
     btn.connect_clicked(move |b| pick(b, dock::bind(conn), target));

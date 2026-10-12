@@ -1167,6 +1167,23 @@ button_refresh_picture (GtkWidget *btn, gpointer unused_theme)
     g_object_unref (use_pb);
 }
 
+void
+gtkhx_set_name_tip (GtkWidget *widget, const char *text)
+{
+    gtk_widget_set_tooltip_text (widget, text);
+    gtk_accessible_update_property (GTK_ACCESSIBLE (widget),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL, text, -1);
+}
+
+GtkWidget *
+gtkhx_icon_button_new (const char *icon_name, const char *label)
+{
+    GtkWidget *btn = gtk_button_new_from_icon_name (icon_name);
+
+    gtkhx_set_name_tip (btn, label);
+    return btn;
+}
+
 /* Common tail: stash the area, render the first picture, subscribe to
  * the theme, and wire tooltip + clicked. */
 static void
@@ -1180,7 +1197,7 @@ button_finish_setup (GtkWidget *btn, GtkhxScaleArea area, const char *tooltip,
                              G_CALLBACK (button_refresh_picture), btn,
                              G_CONNECT_SWAPPED);
     if (tooltip) {
-        gtk_widget_set_tooltip_text (btn, tooltip);
+        gtkhx_set_name_tip (btn, tooltip);
     }
     if (cb) {
         g_signal_connect (btn, "clicked", cb, user_data);

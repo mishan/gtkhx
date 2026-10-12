@@ -47,6 +47,9 @@ jobs:
         # No tab indentation, no trailing whitespace, single final newline.
         run: python3 tools/fix-whitespace.py --check
 
+      - name: icon-only buttons are named
+        run: tools/check-icon-buttons.sh
+
       - name: flatpak cargo sources match Cargo.lock
         # The release Flatpak build vendors every Rust dependency from
         # rust/cargo-sources.json, and nothing reads that file before release
