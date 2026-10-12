@@ -60,6 +60,7 @@ rust/crates/gtkhx-ui/src/tracker/mod.rs
 rust/crates/gtkhx-ui/src/updates.rs
 rust/crates/gtkhx-ui/src/useredit.rs
 rust/crates/gtkhx-ui/src/user_info.rs
+rust/crates/gtkhx-ui/src/user_row.rs
 rust/crates/gtkhx-ui/src/users_view.rs
 rust/crates/gtkhx-ui/src/users_voice_col.rs
 rust/crates/gtkhx-ui/src/video_panel.rs

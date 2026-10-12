@@ -40,8 +40,8 @@ extern void user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
                          guint32 nick_color, const char *nam, guint16 icon,
                          guint16 color);
 extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
-/* Right-click context menu for a user, used by the GtkGestureClick
- * controller inside HxUserListView. Both the standalone Users
+/* Context menu for a user, opened by HxUserListView on a right-click
+ * or Menu / Shift+F10. Both the standalone Users
  * window and the pchat sidebars share this single popover builder.
  *
  * `anchor` is the widget the popover gets parented to (and where

@@ -245,7 +245,7 @@ static void
 on_row_changed (HxUserRow *row, gpointer user_data)
 {
     HxUserCellName *cell = HX_USER_CELL_NAME (user_data);
-    (void)row;
+    hx_user_row_name_cell (row, GTK_WIDGET (cell));
     hx_user_cell_name_refresh_icon (cell);
     gtk_widget_queue_draw (GTK_WIDGET (cell));
 }
@@ -271,6 +271,7 @@ hx_user_cell_name_set_row (HxUserCellName *cell, HxUserRow *row)
             row, "changed", G_CALLBACK (on_row_changed), cell);
         hx_user_cell_name_refresh_icon (cell);
     }
+    hx_user_row_name_cell (row, GTK_WIDGET (cell));
     gtk_widget_queue_draw (GTK_WIDGET (cell));
 }
 
@@ -472,6 +473,8 @@ hx_user_cell_name_class_init (HxUserCellNameClass *klass)
     object_class->dispose = hx_user_cell_name_dispose;
     widget_class->snapshot = hx_user_cell_name_snapshot;
     widget_class->measure = hx_user_cell_name_measure;
+    gtk_widget_class_set_accessible_role (widget_class,
+                                          GTK_ACCESSIBLE_ROLE_LABEL);
 }
 
 /* Deferred single-click fired: no second press arrived within the

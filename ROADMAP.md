@@ -107,9 +107,10 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    `gtkhx_set_name_tip` in C and `icon_button` / `set_name_tip` in `gtkhx-ui` set the
    name with the tooltip. `tools/check-icon-buttons.sh` holds buttons built from an icon
    name to them; it can't see menu buttons, toggles or buttons with an image child.
-2. **The user list.** The name cell draws the nick itself and exposes nothing, so each
-   row reads as blank; away and admin are shown only by color; the voice icons are
-   unnamed; and the per-user menu opens only on a right-click, with unfocusable items.
+2. **The user list.** *Done.* The name cell, which draws the nick itself, is named with
+   the nick and its away and admin states (`hx_user_row_name_cell`); the voice icons
+   are named; and the per-user menu opens on Menu and Shift+F10 too, with focusable
+   items.
 3. **Keyboard reach.** In the files window Tab jumps between the lists from anywhere,
    trapping the header and footer controls; links in text views and the server banner
    need a mouse; news compose, File Info and Agreement have no Escape; F10 doesn't open
