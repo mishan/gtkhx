@@ -291,16 +291,17 @@ modules:
         sha256: 6fef27ff04f37db43054c86bcdff6128c9fb1f6af4ef3c8b369a7e9abd68d0bb
 
   # The dock. A static library, built into gtkhx: the bundle keeps none
-  # of this module's files.
+  # of this module's files but its translations.
   - name: mullion-gtk
     buildsystem: meson
     cleanup:
-      - '*'
+      - /include
+      - /lib
     sources:
       - type: git
         url: https://github.com/mishan/mullion-gtk.git
-        tag: v0.2.1
-        commit: 727c164087433a9d71b3042dfb69b3f9534ab179
+        tag: v0.3.1
+        commit: dd4ae83db41d8fcd11c9077fbb8f5985f4d206b7
 
   - name: gtkhx
     buildsystem: meson

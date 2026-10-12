@@ -42,8 +42,18 @@ fn sections() -> Vec<(String, Option<String>, Vec<Row>)> {
         ),
         (
             tr("Panes"),
-            Some(tr("Not while the focus is in a text field.")),
+            Some(tr(
+                "The Alt keys don't work while the focus is in a text field.",
+            )),
             vec![
+                (
+                    &["F6", "<Shift>F6"][..],
+                    tr("Next and previous pane, from anywhere"),
+                ),
+                (
+                    &["<Control><Shift>Page_Up", "<Control><Shift>Page_Down"],
+                    tr("Move the tab along its strip"),
+                ),
                 (
                     &["<Alt>Left", "<Alt>Right", "<Alt>Up", "<Alt>Down"][..],
                     tr("Move the focus to the pane that way"),

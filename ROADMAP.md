@@ -134,13 +134,14 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    and the markdown delimiters keep the text color; links are always underlined, in the
    accent's text color rather than a fixed blue; and the nickname color's Clear is live
    only while a color is set, which tells "not set" apart from black.
-7. **Later.** Cycling panes from a text field (mullion-gtk's chords skip text fields;
-   F6 is in mullion-gtk's next release). *Done:* a clicked notification opens the
-   conversation it announced, which took GtkHx becoming one instance that owns its app
-   id, as GNOME and the portal deliver a notification's action through it. A later
-   launch hands its `--server` or `--bookmark` to the running one, which connects in a
-   new tab. Ctrl+1 and on show the panels, and a Keyboard Shortcuts window (Ctrl+?)
-   lists every key, bound from the same table (`shortcuts.rs`).
+7. **Later.** *Done.* F6 and Shift+F6 step between panes, from a text field too
+   (mullion-gtk 0.3, which also brought the dock's own names, announcements and
+   translations). A clicked notification opens the conversation it announced, which took
+   GtkHx becoming one instance that owns its app id, as GNOME and the portal deliver a
+   notification's action through it. A later launch hands its `--server` or `--bookmark`
+   to the running one, which connects in a new tab. Ctrl+1 and on show the panels, and a
+   Keyboard Shortcuts window (Ctrl+?) lists every key, bound from the same table
+   (`shortcuts.rs`).
 
 ### Help
 

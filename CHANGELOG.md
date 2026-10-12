@@ -1,5 +1,11 @@
 ## 1.6.0-dev
 
+- Accessibility
+  - Screen readers can name every button, the users list (with who is away or an admin), text inputs, chat views, transfers, previews and the dock's panes, and are told of private messages, mentions, a lost connection and changes to the layout
+  - More works from the keyboard: the users list's menu (Menu or Shift+F10), links in news, the server banner, Escape to close dialogs, F10 for the main menu, F6 to move between panes from anywhere, and Ctrl+1 to Ctrl+6 for the panels
+  - A Keyboard Shortcuts window (Ctrl+?) lists every key
+  - Clicking a notification opens the conversation it was about; a second launch with --server or --bookmark connects in the running GtkHx instead of opening another
+  - Themes step aside for the system's high-contrast setting, and links are underlined rather than told apart by color alone
 - Messages
   - A private message can carry a picture, as a chat line can, on servers with inline media (Janus, hxd-ng): the paperclip beside the message's input sends one
 - Users
