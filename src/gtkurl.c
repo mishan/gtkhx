@@ -15,6 +15,7 @@
 #include <string.h>
 #include <gtk/gtk.h>
 #include <gio/gio.h>
+#include <adwaita.h>
 #include "compat.h"
 #include "connect.h"
 #include "gtkurl.h"
@@ -395,6 +396,21 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
 #define KEY_HOVER_HI "gtkurl-hover-hi"
 #define KEY_HAS_HOVER "gtkurl-has-hover"
 
+/* A link's color is the accent as text: the standalone form, which meets
+ * contrast on the view background, following the accent and dark style.
+ * Its underline is always on, so color isn't the only thing marking it. */
+static void
+url_tag_restyle (GtkTextTag *tag)
+{
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    GdkRGBA rgba;
+
+    adw_accent_color_to_standalone_rgba (
+        adw_style_manager_get_accent_color (sm),
+        adw_style_manager_get_dark (sm), &rgba);
+    g_object_set (tag, "foreground-rgba", &rgba, NULL);
+}
+
 static void
 ensure_url_tags (GtkTextView *tv)
 {
@@ -402,10 +418,17 @@ ensure_url_tags (GtkTextView *tv)
     GtkTextTagTable *tt = gtk_text_buffer_get_tag_table (buf);
 
     if (!gtk_text_tag_table_lookup (tt, "url")) {
-        /* Adwaita-friendly accent for links. The exact hex matches
-         * libadwaita's @accent_color in light mode; dark theme also
-         * reads acceptably. */
-        gtk_text_buffer_create_tag (buf, "url", "foreground", "#1c71d8", NULL);
+        AdwStyleManager *sm = adw_style_manager_get_default ();
+        GtkTextTag *tag = gtk_text_buffer_create_tag (
+            buf, "url", "underline", PANGO_UNDERLINE_SINGLE, NULL);
+
+        url_tag_restyle (tag);
+        g_signal_connect_object (sm, "notify::accent-color",
+                                 G_CALLBACK (url_tag_restyle), tag,
+                                 G_CONNECT_SWAPPED);
+        g_signal_connect_object (sm, "notify::dark",
+                                 G_CALLBACK (url_tag_restyle), tag,
+                                 G_CONNECT_SWAPPED);
     }
     if (!gtk_text_tag_table_lookup (tt, "url-hover")) {
         gtk_text_buffer_create_tag (buf, "url-hover", "underline",

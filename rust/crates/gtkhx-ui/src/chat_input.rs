@@ -162,10 +162,13 @@ fn apply_tint(buf: &gtk::TextBuffer) {
         for t in [
             // Mid grey rather than an alpha on the theme foreground:
             // GtkTextTag has no alpha property, and grey is legible
-            // against both the light and the dark input background.
+            // against both the light and the dark input background. Not
+            // under high contrast, where it falls short; the delimiters
+            // keep the text color there.
             gtk::TextTag::builder()
                 .name("md-delim")
                 .foreground("#888888")
+                .foreground_set(!libadwaita::StyleManager::default().is_high_contrast())
                 .build(),
             gtk::TextTag::builder().name("md-bold").weight(700).build(),
             gtk::TextTag::builder()
