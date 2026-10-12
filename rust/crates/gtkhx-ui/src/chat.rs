@@ -93,6 +93,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
 
     // Leaf widgets: output/vscroll from create_chat, the rest from build_leaves.
     let output: gtk::Widget = from_glib_none(hx_gchat_output(gchat));
+    output.update_property(&[gtk::accessible::Property::Label(&tr("Public chat"))]);
     let vscroll: gtk::Widget = from_glib_none(hx_gchat_vscroll(gchat));
     let input: gtk::Widget = from_glib_none(hx_gchat_input(gchat));
     let subject: gtk::Widget = from_glib_none(hx_gchat_subject(gchat));

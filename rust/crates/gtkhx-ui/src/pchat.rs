@@ -73,6 +73,9 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
 
     // Leaf widgets from the C helper (still floating; append/set_child sink).
     let output: gtk::Widget = from_glib_none(hx_gchat_output(gchat));
+    output.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr(
+        "Private chat",
+    ))]);
     let vscroll: gtk::Widget = from_glib_none(hx_gchat_vscroll(gchat));
     let input: gtk::Widget = from_glib_none(hx_gchat_input(gchat));
     let subject: gtk::Widget = from_glib_none(hx_gchat_subject(gchat));
