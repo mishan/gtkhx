@@ -134,7 +134,8 @@ pub unsafe extern "C" fn gtkhx_show_agreement(
     agreebtn.set_receives_default(true);
     window.set_default_widget(Some(&agreebtn));
 
-    cffi::init_keyaccel(window.as_ptr() as *mut cffi::GtkWidget);
+    // Escape closes it, which disagrees (see close-request).
+    cffi::init_keyaccel_dialog(window.as_ptr() as *mut cffi::GtkWidget);
     // Hand the window to the session so disconnect cleanup can close it.
     gtkhx_session_set_agreementwin(sess, window.as_ptr() as *mut cffi::GtkWidget);
     window.present();

@@ -58,6 +58,12 @@ entry.gtkhx-chat-subject:focus-within {
   border-radius: 4px;
 }
 
+.gtkhx-banner-link:focus-visible {
+  outline: 2px solid alpha(@accent_color, 0.5);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
 /* The optional pixmap toolbar under the header. */
 .gtkhx-main-toolbar {
   padding: 1px 4px;

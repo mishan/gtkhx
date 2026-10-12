@@ -111,10 +111,11 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    the nick and its away and admin states (`hx_user_row_name_cell`); the voice icons
    are named; and the per-user menu opens on Menu and Shift+F10 too, with focusable
    items.
-3. **Keyboard reach.** In the files window Tab jumps between the lists from anywhere,
-   trapping the header and footer controls; links in text views and the server banner
-   need a mouse; news compose, File Info and Agreement have no Escape; F10 doesn't open
-   the main menu.
+3. **Keyboard reach.** *Done.* In the files window Tab and Backspace switch panels and go
+   up only from a list; a link in a text view opens its menu on Menu, Shift+F10 or Enter
+   at the cursor (F7 shows it), and the server banner is a focusable link; news
+   compose, File Info and Agreement close on Escape; F10 opens the main menu; Enter in
+   the Trackers address adds it.
 4. **Labels.** Unnamed text inputs (chat, private message, subjects, find, paths,
    tracker search), progress bars not tied to their file, unnamed PDF pages, pictures
    without alternative text, file/folder told apart only by icon, and untranslated

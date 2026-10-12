@@ -569,24 +569,33 @@ on_motion_leave (GtkEventControllerMotion *ctrl, gpointer data)
     clear_hover (GTK_TEXT_VIEW (data));
 }
 
+/* Open the link menu for `url` at (x, y), local to `tv`; gtkurl_show_popup
+ * wants toplevel-root coordinates. */
+static void
+popup_for_link (GtkTextView *tv, const char *url, double x, double y)
+{
+    GtkWidget *root = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (tv)));
+    graphene_point_t src_pt = { (float)x, (float)y };
+    graphene_point_t dst_pt = { (float)x, (float)y };
+
+    if (root && root != GTK_WIDGET (tv)) {
+        if (gtk_widget_compute_point (GTK_WIDGET (tv), root, &src_pt,
+                                      &dst_pt)) {
+            x = dst_pt.x;
+            y = dst_pt.y;
+        }
+    }
+    gtkurl_show_popup (GTK_WIDGET (tv), url, x, y);
+}
+
 static void
 on_textview_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
                      gpointer data)
 {
     GtkTextView *tv = data;
-    guint button;
     GtkTextIter iter;
     char *url;
-    GtkWidget *root;
-    graphene_point_t src_pt = { (float)x, (float)y };
-    graphene_point_t dst_pt = { (float)x, (float)y };
     (void)n_press;
-
-    button
-        = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
-    if (button != GDK_BUTTON_SECONDARY) {
-        return;
-    }
 
     if (!window_to_buffer_iter (tv, x, y, &iter)) {
         return;
@@ -595,19 +604,7 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
     if (!url) {
         return;
     }
-
-    /* gesture x/y are widget-local; gtkurl_show_popup wants them in
-     * the toplevel-root coordinate space. Translate. */
-    root = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (tv)));
-    if (root && root != GTK_WIDGET (tv)) {
-        if (gtk_widget_compute_point (GTK_WIDGET (tv), root, &src_pt,
-                                      &dst_pt)) {
-            x = dst_pt.x;
-            y = dst_pt.y;
-        }
-    }
-
-    gtkurl_show_popup (GTK_WIDGET (tv), url, x, y);
+    popup_for_link (tv, url, x, y);
     g_free (url);
 
     /* Swallow the event so the textview's default right-click
@@ -615,11 +612,47 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
     gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
+/* Menu, Shift+F10 or Enter on a link at the cursor (F7 shows the cursor in
+ * a read-only view) opens the menu a right-click does, so a link doesn't
+ * need a mouse. */
+static gboolean
+on_textview_key (GtkEventControllerKey *ctrl, guint keyval, guint keycode,
+                 GdkModifierType state, gpointer data)
+{
+    GtkTextView *tv = data;
+    GtkTextBuffer *buf = gtk_text_view_get_buffer (tv);
+    GtkTextIter iter;
+    GdkRectangle r;
+    int x, y;
+    char *url;
+    (void)ctrl;
+    (void)keycode;
+
+    if (keyval != GDK_KEY_Menu && keyval != GDK_KEY_Return
+        && keyval != GDK_KEY_KP_Enter
+        && !(keyval == GDK_KEY_F10 && (state & GDK_SHIFT_MASK))) {
+        return FALSE;
+    }
+    gtk_text_buffer_get_iter_at_mark (buf, &iter,
+                                      gtk_text_buffer_get_insert (buf));
+    url = url_at_iter (tv, &iter);
+    if (!url) {
+        return FALSE;
+    }
+    gtk_text_view_get_iter_location (tv, &iter, &r);
+    gtk_text_view_buffer_to_window_coords (tv, GTK_TEXT_WINDOW_WIDGET, r.x,
+                                           r.y + r.height, &x, &y);
+    popup_for_link (tv, url, x, y);
+    g_free (url);
+    return TRUE;
+}
+
 void
 gtkurl_textview_install (GtkTextView *tv)
 {
     GtkEventController *click;
     GtkEventController *motion;
+    GtkEventController *keys;
 
     if (!tv) {
         return;
@@ -641,6 +674,10 @@ gtkurl_textview_install (GtkTextView *tv)
     gtk_event_controller_set_propagation_phase (click, GTK_PHASE_CAPTURE);
     g_signal_connect (click, "pressed", G_CALLBACK (on_textview_pressed), tv);
     gtk_widget_add_controller (GTK_WIDGET (tv), click);
+
+    keys = gtk_event_controller_key_new ();
+    g_signal_connect (keys, "key-pressed", G_CALLBACK (on_textview_key), tv);
+    gtk_widget_add_controller (GTK_WIDGET (tv), keys);
 
     motion = gtk_event_controller_motion_new ();
     g_signal_connect (motion, "motion", G_CALLBACK (on_motion), tv);

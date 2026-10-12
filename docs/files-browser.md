@@ -84,8 +84,8 @@ behaviour is identical whether you pressed the key or clicked the icon.
 | — | Ctrl+I | Get Info | `HTLC_HDR_FILE_GETINFO` |
 | — | Ctrl+R | Reload | re-list |
 | Shift+F10 | Menu | Row menu at the focused row | — |
-| Tab | — | Switch active panel | — |
-| Backspace | — | Up one directory | — |
+| Tab | — | Switch active panel (from a list; elsewhere Tab moves focus as usual) | — |
+| Backspace | — | Up one directory (from a list) | — |
 
 **Several function keys get stolen by desktop compositors** — F-keys are
 commonly grabbed for media controls and brightness. That is why each classic

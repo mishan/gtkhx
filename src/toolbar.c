@@ -860,6 +860,7 @@ build_hamburger (void)
     btn = gtk_menu_button_new ();
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");
     gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (btn), G_MENU_MODEL (menu));
+    gtk_menu_button_set_primary (GTK_MENU_BUTTON (btn), TRUE); /* F10 */
     gtkhx_set_name_tip (btn, _ ("Main menu"));
     g_object_unref (menu);
     return btn;

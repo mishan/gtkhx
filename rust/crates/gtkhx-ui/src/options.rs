@@ -833,7 +833,11 @@ pub(crate) fn page_tracker(page: &adw::PreferencesPage) {
     let ent_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let entry = gtk::Entry::new();
     entry.set_hexpand(true);
-    ent_hbox.append(&gtk::Label::new(Some(&tr("Address:"))));
+    let addr_label = gtk::Label::new(Some(&tr("Address:")));
+    entry.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
+        addr_label.upcast_ref()
+    ])]);
+    ent_hbox.append(&addr_label);
     ent_hbox.append(&entry);
     vbox.append(&ent_hbox);
 
@@ -846,6 +850,10 @@ pub(crate) fn page_tracker(page: &adw::PreferencesPage) {
     btnhbox.append(&remove_btn);
     btnhbox.append(&add_btn);
     vbox.append(&btnhbox);
+    {
+        let add_btn = add_btn.clone();
+        entry.connect_activate(move |_| add_btn.emit_clicked());
+    }
 
     {
         let store = store.clone();
