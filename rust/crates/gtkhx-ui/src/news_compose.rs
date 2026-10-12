@@ -176,6 +176,25 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
         });
     }
 
+    // Escape cancels and Ctrl+Enter posts, as in the 1.2 composer
+    // (create_post.rs). Capture phase, ahead of the body's own Enter.
+    let kc = gtk::EventControllerKey::new();
+    kc.set_propagation_phase(gtk::PropagationPhase::Capture);
+    kc.connect_key_pressed(move |_, keyval, _, state| {
+        use gtk::gdk::Key;
+        if keyval == Key::Escape {
+            cancel_btn.emit_clicked();
+        } else if matches!(keyval, Key::Return | Key::KP_Enter)
+            && state.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+        {
+            post_btn.emit_clicked();
+        } else {
+            return glib::Propagation::Proceed;
+        }
+        glib::Propagation::Stop
+    });
+    window.add_controller(kc);
+
     window.present();
     // New post → focus the subject; reply → focus the body (the subject is
     // already prefilled "Re: …").

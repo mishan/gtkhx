@@ -200,8 +200,8 @@ pub unsafe extern "C" fn output_file_info(
         unsafe { save_file_info(conn, &path_bytes, rename, &comments) };
     });
 
-    // Esc-close accelerator (same C helper user_info.rs uses); present keeps the
-    // mapped toplevel alive after the Rust wrappers drop here.
-    cffi::init_keyaccel(window.as_ptr() as *mut cffi::GtkWidget);
+    // Escape closes it unsaved; present keeps the mapped toplevel alive after
+    // the Rust wrappers drop here.
+    cffi::init_keyaccel_dialog(window.as_ptr() as *mut cffi::GtkWidget);
     window.present();
 }

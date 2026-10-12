@@ -305,7 +305,15 @@ pub unsafe extern "C" fn banner_widget_new() -> *mut gtk::ffi::GtkWidget {
         return ptr;
     }
 
-    let root = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    // A link when the server gave a URL (see `repaint`), so it takes focus
+    // and Enter opens it, as a click does.
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .accessible_role(gtk::AccessibleRole::Link)
+        .build();
+    root.add_css_class("gtkhx-banner-link");
+    root.update_property(&[gtk::accessible::Property::Label(&tr("Server banner"))]);
     root.set_margin_start(6);
     root.set_margin_end(6);
     root.set_visible(false);
@@ -334,9 +342,23 @@ pub unsafe extern "C" fn banner_widget_new() -> *mut gtk::ffi::GtkWidget {
     let click = gtk::GestureClick::new();
     click.set_button(GDK_BUTTON_PRIMARY);
     click.connect_pressed(move |gesture, _n, _x, _y| {
-        on_banner_clicked(gesture);
+        if let Some(w) = gesture.widget() {
+            open_banner_url(&w);
+        }
     });
     root.add_controller(click);
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(|c, key, _, _| {
+        use gtk::gdk::Key;
+        match c.widget() {
+            Some(w) if matches!(key, Key::Return | Key::KP_Enter | Key::space) => {
+                open_banner_url(&w);
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        }
+    });
+    root.add_controller(keys);
 
     BANNER.with(|b| {
         *b.borrow_mut() = Some(BannerUi {
@@ -662,6 +684,8 @@ fn repaint(ui: &BannerUi, content: Option<&BannerContent>) {
     ui.caption.set_visible(false);
     ui.caption.set_text(&content.caption);
     ui.root.set_tooltip_text(content.url.as_deref());
+    ui.root
+        .set_focusable(content.url.as_deref().is_some_and(|u| !u.is_empty()));
     ui.root.set_visible(true);
 }
 
@@ -990,7 +1014,7 @@ unsafe extern "C" fn htxf_completion(arg: *mut c_void) {
 
 // Click handler ---------------------------------------------------- //
 
-fn on_banner_clicked(gesture: &gtk::GestureClick) {
+fn open_banner_url(widget: &gtk::Widget) {
     // The visible banner belongs to the focused connection, so that is whose
     // URL a click on it opens.
     let key = dock::active_key();
@@ -1001,8 +1025,7 @@ fn on_banner_clicked(gesture: &gtk::GestureClick) {
     if url.is_empty() {
         return;
     }
-    let widget = gesture.widget();
-    let parent = widget.and_then(|w| w.root()).and_downcast::<gtk::Window>();
+    let parent = widget.root().and_downcast::<gtk::Window>();
     let launcher = gtk::UriLauncher::new(&url);
     launcher.launch(parent.as_ref(), gio::Cancellable::NONE, |_res| {});
 }

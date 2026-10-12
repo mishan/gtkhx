@@ -894,14 +894,14 @@ fn settle_paned(paned: &gtk::Paned) {
     });
 }
 
-/// Whether focus is in something editable, where Tab and Backspace belong to
-/// the text. A GtkEntry hands focus to its internal GtkText, and both are
-/// editables.
-fn focus_is_editable(br: &Browser) -> bool {
-    br.content
-        .root()
-        .and_then(|r| r.focus())
-        .is_some_and(|f| f.is::<gtk::Editable>())
+/// Whether focus is on a file list, outside a rename's text, which is where
+/// Tab and Backspace mean the other panel and up. Anywhere else they keep their
+/// usual meaning, so Tab still reaches the header and footer controls. A
+/// GtkEntry hands focus to its internal GtkText, and both are editables.
+fn focus_in_list(br: &Browser) -> bool {
+    br.content.root().and_then(|r| r.focus()).is_some_and(|f| {
+        !f.is::<gtk::Editable>() && f.ancestor(gtk::ColumnView::static_type()).is_some()
+    })
 }
 
 /// The keyboard. F-keys follow the Norton layout, each with a Ctrl form for
@@ -931,14 +931,14 @@ fn install_shortcuts(br: &Rc<Browser>) {
     let ctrl = |k: gdk::Key| gtk::KeyvalTrigger::new(k, gdk::ModifierType::CONTROL_MASK).upcast();
 
     add(key(gdk::Key::Tab), |b| {
-        if focus_is_editable(b) {
+        if !focus_in_list(b) {
             return false;
         }
         b.panel(b.active().other()).column_view().grab_focus();
         true
     });
     add(key(gdk::Key::BackSpace), |b| {
-        if focus_is_editable(b) {
+        if !focus_in_list(b) {
             return false;
         }
         if let Some(p) = b.active_panel().provider() {
