@@ -184,13 +184,16 @@ pub unsafe fn open(htlc: *mut c_void, dir: &[u8], e: &HxFileEntry, download: imp
     });
     let held = RefCell::new(Some(p));
     let ticker = RefCell::new(Some(ticker));
-    window.connect_destroy(move |_| {
+    // Not on destroy: the player holds the window, so it is never
+    // disposed while the player lives.
+    window.connect_close_request(move |_| {
         if let Some(t) = ticker.take() {
             t.remove();
         }
         if let Some(p) = held.take() {
             p.close();
         }
+        glib::Propagation::Proceed
     });
     unsafe { crate::ffi::init_keyaccel(window.upcast_ref::<gtk::Widget>().as_ptr().cast()) };
     window.present();

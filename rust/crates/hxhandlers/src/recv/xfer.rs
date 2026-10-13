@@ -297,11 +297,15 @@ pub(crate) unsafe fn upload_refused(htlc: *mut c_void, htxf: *mut c_void) {
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn queued(htlc: *mut c_void, reference: u32, queue: u32) {
     let htxf = crate::xfer::htxf_with_ref(htlc, reference);
+    // Janus says 0 for the ranges the media player reads, which are not
+    // in the transfer list, and there is nothing to do when one goes.
     if htxf.is_null() {
-        glib::g_warning!(
-            "gtkhx",
-            "queue position {queue} for transfer {reference}, which is not one of ours"
-        );
+        if queue != 0 {
+            glib::g_warning!(
+                "gtkhx",
+                "queue position {queue} for transfer {reference}, which is not one of ours"
+            );
+        }
         return;
     }
     hx_htxf_set_queue(htxf.cast(), queue);
