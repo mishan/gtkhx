@@ -27,7 +27,7 @@ use libadwaita::prelude::*;
 use hxmodel::files_entry::HxFileEntry;
 
 use crate::dock::{self, Bound};
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 use source::{Endpoint, Problem, Reader};
 
 /// How long a refused range is asked for again: mhxd refuses a download
@@ -220,7 +220,7 @@ impl Player {
                 offset as u32,
                 Box::new(move |r| {
                     if let Some(p) = player(id) {
-                        p.answered(range, offset, r.map(|t| (t.reference, t.size)));
+                        p.answered(range, offset, r.map(|t| (t.reference, t.size, t.queue)));
                     }
                 }),
             )
@@ -230,47 +230,20 @@ impl Player {
         }
     }
 
-    fn answered(&self, range: u64, offset: u64, r: Result<(u32, u64), Option<String>>) {
+    fn answered(&self, range: u64, offset: u64, r: Result<(u32, u64, u32), Option<String>>) {
         // A range moved on from is still opened when granted, so the server
         // lets go of it rather than waiting it out; refused, it's forgotten.
         if r.is_err() && !self.reader.is_current(range) {
             return;
         }
         match r {
-            Ok((reference, size)) => {
+            Ok((reference, size, 0)) => {
                 self.retries.set(0);
-                let Some(htlc) = dock::live_htlc(self.bound) else {
-                    self.fail(&tr("The connection to the server has closed."));
-                    return;
-                };
-                let endpoint = unsafe { Endpoint::of(htlc) };
-                let reader = Arc::clone(&self.reader);
-                let id = self.id;
-                let first = !self.started.get();
-                let spawned = std::thread::Builder::new()
-                    .name("media-range".into())
-                    .spawn(move || {
-                        let error = reader.read(range, &endpoint, reference, size, offset, |_| {
-                            if first {
-                                glib::MainContext::default().invoke(move || {
-                                    if let Some(p) = player(id) {
-                                        p.start();
-                                    }
-                                });
-                            }
-                        });
-                        // Once playing, the source element reports it.
-                        if let Some(problem) = error.filter(|_| first) {
-                            glib::MainContext::default().invoke(move || {
-                                if let Some(p) = player(id) {
-                                    p.fail(&problem_text(problem));
-                                }
-                            });
-                        }
-                    });
-                if spawned.is_err() {
-                    self.fail(&tr("Couldn't start reading the file."));
-                }
+                self.read(range, offset, reference, size);
+            }
+            Ok((reference, size, queue)) => {
+                self.retries.set(0);
+                self.wait_in_queue(range, offset, reference, size, queue);
             }
             Err(Some(_)) if self.started.get() && self.retries.get() < RETRIES => {
                 self.retries.set(self.retries.get() + 1);
@@ -289,6 +262,92 @@ impl Player {
             Err(Some(reason)) if !reason.is_empty() => self.fail(&reason),
             Err(_) => self.fail(&tr("The server didn't send the file.")),
         }
+    }
+
+    /// Open the transfer the range was granted as, and read it.
+    fn read(&self, range: u64, offset: u64, reference: u32, size: u64) {
+        let Some(htlc) = dock::live_htlc(self.bound) else {
+            self.fail(&tr("The connection to the server has closed."));
+            return;
+        };
+        let endpoint = unsafe { Endpoint::of(htlc) };
+        let reader = Arc::clone(&self.reader);
+        let id = self.id;
+        let first = !self.started.get();
+        let spawned = std::thread::Builder::new()
+            .name("media-range".into())
+            .spawn(move || {
+                let error = reader.read(range, &endpoint, reference, size, offset, |_| {
+                    if first {
+                        glib::MainContext::default().invoke(move || {
+                            if let Some(p) = player(id) {
+                                p.start();
+                            }
+                        });
+                    }
+                });
+                // Once playing, the source element reports it.
+                if let Some(problem) = error.filter(|_| first) {
+                    glib::MainContext::default().invoke(move || {
+                        if let Some(p) = player(id) {
+                            p.fail(&problem_text(problem));
+                        }
+                    });
+                }
+            });
+        if spawned.is_err() {
+            self.fail(&tr("Couldn't start reading the file."));
+        }
+    }
+
+    /// The server queued the range: it is opened when its turn comes, as a
+    /// download is, and the player says where it waits until it starts.
+    fn wait_in_queue(&self, range: u64, offset: u64, reference: u32, size: u64, queue: u32) {
+        let Some(htlc) = dock::live_htlc(self.bound) else {
+            self.fail(&tr("The connection to the server has closed."));
+            return;
+        };
+        self.show_queue(queue);
+        let (id, bound, reader) = (self.id, self.bound, Arc::clone(&self.reader));
+        hxhandlers::recv::files::follow_queue(
+            htlc,
+            reference,
+            Box::new(move |queue| {
+                let Some(p) = player(id) else {
+                    // Closed while queued: opened all the same, so the
+                    // server lets go of its turn rather than waiting it out.
+                    if let (Some(0), Some(htlc)) = (queue, dock::live_htlc(bound)) {
+                        let endpoint = unsafe { Endpoint::of(htlc) };
+                        let reader = Arc::clone(&reader);
+                        std::thread::spawn(move || {
+                            reader.read(range, &endpoint, reference, size, offset, |_| {})
+                        });
+                    }
+                    return;
+                };
+                match queue {
+                    Some(0) => {
+                        if !p.started.get() {
+                            p.stack.set_visible_child_name("loading");
+                        }
+                        p.read(range, offset, reference, size);
+                    }
+                    Some(queue) => p.show_queue(queue),
+                    None => p.fail(&tr("The connection to the server has closed.")),
+                }
+            }),
+        );
+    }
+
+    fn show_queue(&self, queue: u32) {
+        if self.started.get() {
+            return;
+        }
+        self.status.set_icon_name(None);
+        self.status.set_title(&tr("Waiting in the Server's Queue"));
+        self.status
+            .set_description(Some(&tr1("Number %s in line", &queue.to_string())));
+        self.stack.set_visible_child_name("status");
     }
 
     /// The first range has said how long the file is: start playing.

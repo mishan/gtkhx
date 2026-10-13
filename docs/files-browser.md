@@ -204,7 +204,8 @@ index at the end is read at the end and then from the start again. Kept, those
 don't each cost a request — which matters on mhxd, where a download asked for
 just after one closes is refused ("1 at a time") or queued for a couple of
 seconds. A refused range is asked for again for a few seconds before the player
-gives up.
+gives up. A queued one is opened when its turn comes, as a download is; until
+the first plays, the player shows its place in line.
 
 Pictures come off an `appsink` as RGBA no larger than the window, in square
 pixels: converting a 4K picture whole took longer than a frame lasts, for a

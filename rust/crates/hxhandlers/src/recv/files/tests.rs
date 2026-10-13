@@ -121,3 +121,25 @@ fn the_banner_s_request_outlives_the_login_but_not_the_connection() {
         assert_eq!(xfer::BANNER.with(|c| c.get()), fetched, "{login}");
     }
 }
+
+/// A queued range hears its place on its own connection until its turn
+/// comes, and that the connection closed if it closes first.
+#[test]
+fn a_queued_range_follows_its_place_until_its_turn() {
+    let told = std::rc::Rc::new(RefCell::new(Vec::new()));
+    for (htlc, reference) in [(A, 3), (B, 4)] {
+        let told = std::rc::Rc::clone(&told);
+        follow_queue(
+            htlc,
+            reference,
+            Box::new(move |q| told.borrow_mut().push((reference, q))),
+        );
+    }
+    assert!(!range_queued(B, 3, 1));
+    assert!(range_queued(A, 3, 2));
+    assert!(range_queued(A, 3, 0));
+    assert!(!range_queued(A, 3, 0));
+    forget(B, false);
+    assert!(!range_queued(B, 4, 0));
+    assert_eq!(*told.borrow(), [(3, Some(2)), (3, Some(0)), (4, None)]);
+}
