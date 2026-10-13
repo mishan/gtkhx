@@ -228,7 +228,7 @@ static const struct {
     { "news", APP_ICON ("news") },
     { "news_folder", "folder-symbolic" },
     { "files", "folder-remote-symbolic" },
-    { "tasks", "view-list-symbolic" },
+    { "tasks", "mail-send-receive-symbolic" },
     { "tracker", "network-workgroup-symbolic" },
     { "broadcast", APP_ICON ("broadcast") },
     { "video", APP_ICON ("video") },

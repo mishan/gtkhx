@@ -290,8 +290,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 /* The post_* marshal helpers (post_prog / post_ts / post_log) lived
  * here until the tracker fetch went async (see hx_tracker_list_async
  * below). The worker that consumed them is gone — every callback in
- * the new design runs on the main loop, so the trackconn_prog_update /
- * track_prog_update /
+ * the new design runs on the main loop, so the
  * gtkhx_session_emit_tracker_server_create / hx_printf_prefix calls
  * happen directly. */
 
@@ -694,9 +693,8 @@ htxf_connect (struct htxf_conn *htxf)
  *     opens a fetch (hxnet_tracker_fetch_open) and drains its events on
  *     the main thread as they arrive (hxnet_tracker_fetch_watch).
  *   - the drain re-emits the EXISTING tracker-batch-begin /
- *     tracker-server-create signals and ticks track_prog_update,
- *     exactly as the old hand-rolled state machine did, so tracker.c
- *     (the view) is unchanged.
+ *     tracker-server-create signals, exactly as the old hand-rolled
+ *     state machine did, so tracker.c (the view) is unchanged.
  *   - tracker_kill_threads closes the handle, which cancels the walk and
  *     any drain still queued.
  *
@@ -725,12 +723,6 @@ static HxnetTrackerFetch *current_tracker_fetch;
 /* Wire version of the batch in progress, set on BEGIN; picks the v1 vs
  * v3 HxTrackerServer constructor for the records that follow. */
 static guint8 tracker_batch_version;
-/* 1-based progress counter within the current batch. */
-static int tracker_batch_server_i;
-/* URL of the batch in progress, stashed on BEGIN. RECORD events no
- * longer carry a url (the Rust side drops it to avoid a per-record
- * allocation), so progress updates key on this. Freed on cleanup. */
-static char *tracker_batch_url;
 
 /* Read the v3-probe watchdog timeout once per fetch. strtol with sane
  * clamps — values <100ms are pointless and >60000ms hangs the UI for a
@@ -794,20 +786,13 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
 {
     switch (ev->kind) {
     case HXNET_TRK_KIND_BEGIN: {
-        /* Take ownership of the batch URL for the records that follow. */
-        g_free (tracker_batch_url);
-        tracker_batch_url = tracker_dup_str (ev->url_ptr, ev->url_len);
+        g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
         tracker_batch_version = ev->version;
-        tracker_batch_server_i = 1;
         gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
-                                                tracker_batch_url, ev->version,
-                                                ev->count);
-        track_prog_update (sess, tracker_batch_url, 0, (int)ev->count);
+                                                url, ev->version, ev->count);
         break;
     }
     case HXNET_TRK_KIND_RECORD: {
-        /* Records carry no url; progress keys on the stashed batch url. */
-        const char *url = tracker_batch_url ? tracker_batch_url : "";
         HxTrackerServer *e = NULL;
         if (tracker_batch_version == 1) {
             /* v1 record: MacRoman name/desc (the v1 constructor
@@ -832,9 +817,6 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
             gtkhx_session_emit_tracker_server_create (
                 gtkhx_session_get_default (), e);
             hx_tracker_server_free (e);
-            track_prog_update (sess, (char *)url, tracker_batch_server_i,
-                               (int)ev->total);
-            tracker_batch_server_i++;
         }
         break;
     }
@@ -859,7 +841,7 @@ tracker_fetch_cleanup (void)
         hxnet_tracker_fetch_close (current_tracker_fetch);
         current_tracker_fetch = NULL;
     }
-    g_clear_pointer (&tracker_batch_url, g_free);
+    tracker_set_busy (FALSE);
 }
 
 /* The fetch's wakeup: pull every event waiting, and tear down once the
@@ -937,7 +919,7 @@ hx_tracker_list_async (session *sess)
     }
 
     tracker_batch_version = 0;
-    tracker_batch_server_i = 1;
+    tracker_set_busy (TRUE);
     hxnet_tracker_fetch_watch (
         current_tracker_fetch, tracker_fetch_drain,
         GUINT_TO_POINTER ((guint)hx_conn_serial (sess->htlc)));
@@ -947,11 +929,6 @@ void
 tracker_kill_threads (void)
 {
     tracker_fetch_cleanup ();
-    /* The progress rows go with the fetch. They are connection-less, so the
-     * per-connection sweep never touches them, and reaching the last server
-     * of a walk is the only other thing that removes them — which a fetch
-     * that errors out never does. */
-    gtasks_delete_tracker_rows ();
 }
 
 void

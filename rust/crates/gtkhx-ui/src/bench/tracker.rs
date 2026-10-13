@@ -3,9 +3,9 @@
 //!
 //! The listing takes the path a fetch's records take once `hxnet` hands
 //! them over: `tracker-batch-begin`, then per server an event built by
-//! `hx_tracker_server_new_v3`, the `tracker-server-create` signal and the
-//! Tasks progress tick — all in one main-loop turn, as the fetch's drain
-//! delivers every record that is ready. Nothing touches the network.
+//! `hx_tracker_server_new_v3` and the `tracker-server-create` signal — all
+//! in one main-loop turn, as the fetch's drain delivers every record that
+//! is ready. Nothing touches the network.
 //!
 //! The search is typed into the window's own search entry, one key at a
 //! time. The entry's search delay is held off for the run and each change
@@ -20,7 +20,7 @@
 //! the servers its regex matches, worked out here independently; clearing
 //! it shows all N again.
 
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{c_char, CString};
 
 use gtk::glib;
 use gtk::prelude::*;
@@ -50,8 +50,6 @@ extern "C" {
         tlv_bytes_len: usize,
         total: i32,
     ) -> *mut HxTrackerServer;
-    /// `tasks.c` — the Tasks panel's "Listing tracker" progress.
-    fn track_prog_update(sess: *mut c_void, url: *mut c_char, num: i32, total: i32);
 }
 
 /// `HTRK_V3_ADDR_IPV4` (hotline.h).
@@ -79,12 +77,11 @@ fn desc_of(i: u32) -> String {
 }
 
 /// Hand the window `n` servers the way a fetch's drain does.
-unsafe fn deliver_listing(sess: *mut c_void, n: u32) {
+unsafe fn deliver_listing(n: u32) {
     let url = CString::new(TRACKER_URL).unwrap();
     let emitter = gtkhx_session_get_default();
     let count = n.min(u16::MAX as u32) as u16;
     gtkhx_session_emit_tracker_batch_begin(emitter, url.as_ptr(), 3, count);
-    track_prog_update(sess, url.as_ptr().cast_mut(), 0, n as i32);
     for i in 0..n {
         // 10.x.y.z, a distinct address per server.
         let addr = [10, (i >> 16) as u8, (i >> 8) as u8, i as u8];
@@ -108,9 +105,6 @@ unsafe fn deliver_listing(sess: *mut c_void, n: u32) {
             gtkhx_session_emit_tracker_server_create(emitter, e.cast());
             hx_tracker_server_free(e);
         }
-        // Even for a record that didn't build: the last tick retires the
-        // Tasks entry.
-        track_prog_update(sess, url.as_ptr().cast_mut(), i as i32 + 1, n as i32);
     }
 }
 
@@ -137,21 +131,21 @@ pub(super) async fn run(n: u32) {
     let delay = entry.search_delay();
     entry.set_search_delay(u32::MAX);
 
-    measure(n, sess, &window, &entry).await;
+    measure(n, &window, &entry).await;
 
     entry.set_text("");
     entry.set_search_delay(delay);
     window.close();
 }
 
-async fn measure(n: u32, sess: *mut c_void, window: &gtk::Window, entry: &gtk::SearchEntry) {
+async fn measure(n: u32, window: &gtk::Window, entry: &gtk::SearchEntry) {
     let idle = warm_up(window).await;
     let mut r = Report::new("tracker", idle);
     r.line("servers", &format!("{n:9}"), "");
 
     // ---- listing --------------------------------------------------------
     let t = glib::monotonic_time();
-    unsafe { deliver_listing(sess, n) };
+    unsafe { deliver_listing(n) };
     // The records land in the stores from an idle ahead of the next frame;
     // run it now, so the frozen time is the whole of the work.
     crate::tracker::bench_flush();

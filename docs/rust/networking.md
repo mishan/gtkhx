@@ -100,7 +100,7 @@ extension's code, and goes to whatever started the upload or download.
 A reply to anything else reaches `hx_dispatch_frame` whole, and nothing
 waits on it: a refusal is shown and heard as any refused request is
 (`task_error`), and the rest go no further. Nothing GtkHx asks is a row
-in the Tasks list; a transfer shows there as its own row. A joined
+in the Transfers list; a transfer shows there as its own row. A joined
 private chat is made when its reply arrives, a user's info reaches the user it was asked of, an account the
 editor that asked, a news reply the browser node that asked, a listing
 the files pane that asked, a transfer's reply the transfer, the banner's
@@ -232,8 +232,9 @@ and that frames followed.
 
 The orchestrator's `LoginSending` state maps onto the coarse
 `HANDSHAKE_DONE` view transition, as the legacy connect path's
-send_login did: magic done, credentials going out. It deletes the coarse
-"Connecting" task. Rust's own `HandshakeDone` drives no view transition;
+send_login did: magic done, credentials going out. The view does nothing
+with it: the connect spinners on the header bar and the connection's tab
+run until `logged-in`. Rust's own `HandshakeDone` drives no view transition;
 the login's completion is `logged-in`, and the login settling is
 `LOGIN_READY`. Net sequence: CONNECTING → TCP_CONNECTED → HANDSHAKE_DONE
 → `logged-in` → LOGIN_READY.

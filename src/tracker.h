@@ -33,6 +33,8 @@ extern void tracker_batch_begin (const char *tracker_url, guint8 version,
 extern void create_tracker_window (GtkWidget *widget, gpointer data);
 extern void tracker_clear (void);
 extern void tracker_kill_threads (void);
+/* Show whether a fetch is running, in the tracker window if it is open. */
+extern void tracker_set_busy (gboolean busy);
 /* Re-run the tracker search filter against the cached server tree.
  * No-op when the tracker window isn't currently open. Called from
  * options.c's changed_case() so the visible result list stays in

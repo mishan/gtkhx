@@ -10,11 +10,6 @@ extern void output_xfer_queue (session *sess, struct htxf_conn *htxf);
  * every connection, so nothing else removes a departing connection's rows. */
 extern void gtasks_delete_on_conn (struct htlc_conn *htlc);
 
-/* Drop the tracker's progress rows. They belong to no connection, so the
- * per-connection sweep leaves them alone; this is what ends them when a fetch
- * stops early. */
-extern void gtasks_delete_tracker_rows (void);
-
 /* How many rows the shared queue holds for a connection. For the debug hooks
  * that exercise open-and-close headlessly. */
 extern guint gtkhx_tasks_rows_for_conn (guint16 conn);
@@ -46,9 +41,5 @@ extern void task_error (struct htlc_conn *htlc, const guint8 *frame,
 /* Pure-protocol-parsing half of task_error, broken out into
  * proto_helpers.c for the Tier 2 unit tests. */
 #include "proto_helpers.h"
-extern void conn_task_update (session *sess, int stat);
-extern void track_prog_update (session *sess, char *str, int num, int total);
-extern void trackconn_prog_update (session *sess, char *str, int num,
-                                   int total);
 
 #endif

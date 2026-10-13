@@ -3,7 +3,7 @@
 //! The two-panel browser is a window of its own, one per connection, rather
 //! than a dock panel: a two-panel file manager wants more width than a dock
 //! frame gives it, and it is used in bursts — browse, queue transfers, leave —
-//! while the transfers carry on in the Tasks panel. Closing the window closes
+//! while the transfers carry on in the Transfers panel. Closing the window closes
 //! the browser.
 //!
 //! This module owns the window: one per connection, raised if already open,

@@ -58,7 +58,7 @@ static const struct {
     const char *slot;
 } PANES[] = {
     { HX_PANEL_ID_USERS, N_ ("Users"), "users.png", "end" },
-    { HX_PANEL_ID_TASKS, N_ ("Tasks"), "tasks.png", "bottom" },
+    { HX_PANEL_ID_TASKS, N_ ("Transfers"), "tasks.png", "bottom" },
     { HX_PANEL_ID_NEWS, N_ ("News"), "news.png", "start" },
     { HX_PANEL_ID_CHAT, N_ ("Chat"), "chat.png", "center" },
 #ifdef HAVE_VOICE

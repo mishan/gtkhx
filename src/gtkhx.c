@@ -1183,17 +1183,6 @@ hx_debug_second_session (void)
                "page in every per-connection panel",
                hx_conn_serial (sess->htlc));
 
-    /* Give it a row in the shared task queue, so the close below has
-     * something to sweep. The connect row is the one every connection gets,
-     * and asking for it here is also the only way a headless run reaches the
-     * queue at all. */
-    conn_task_update (sess, 1);
-    if (gtkhx_tasks_rows_for_conn (hx_conn_serial (sess->htlc)) == 0) {
-        g_error ("second connection got no row in the shared task queue");
-    }
-    debug_log ("secondconn", "the shared queue holds %u row(s) for it",
-               gtkhx_tasks_rows_for_conn (hx_conn_serial (sess->htlc)));
-
     /* Opening a connection selects its tab, which would leave the app focused
      * on one that has nothing in it. Hand the focus back to the real one so
      * startup looks normal and switching over is something the user chooses to
@@ -1206,6 +1195,16 @@ hx_debug_second_session (void)
     if (debug_category_enabled ("closesecond")) {
         guint16 serial = hx_conn_serial (sess->htlc);
         guint freed_before = hx_debug_conns_freed ();
+        /* A transfer row for the close to sweep out of the shared queue. A
+         * size it hasn't reached keeps file_update from retiring it. */
+        struct htxf_conn *htxf = hx_htxf_new ();
+
+        htxf->type = XFER_GET;
+        htxf->total_size = 1;
+        file_update (sess, htxf);
+        if (gtkhx_tasks_rows_for_conn (serial) == 0) {
+            g_error ("second connection got no row in the transfer queue");
+        }
 
         gtkhx_conn_tabs_close (sess);
         /* `sess` is freed from here on — don't read it. The serial is all that
@@ -1232,14 +1231,13 @@ hx_debug_second_session (void)
         if (hx_debug_conns_freed () != freed_before + 1) {
             g_error ("closing connection %u freed no connection", serial);
         }
-        /* And its rows are out of the shared queue. Nothing destroys a page
-         * for it any more — the queue is one list for every connection — so
-         * if the sweep didn't run, its rows are simply still there, with a
-         * tag naming a server that no longer exists. */
+        /* Nothing destroys a page for it — the queue is one list for every
+         * connection — so without the sweep its row would still be there. */
         if (gtkhx_tasks_rows_for_conn (serial) != 0) {
-            g_error ("closed connection %u left %u row(s) in the task queue",
-                     serial, gtkhx_tasks_rows_for_conn (serial));
+            g_error ("closed connection %u left %u row(s) in the queue", serial,
+                     gtkhx_tasks_rows_for_conn (serial));
         }
+        hx_htxf_free (htxf);
         debug_log ("secondconn", "closed it again; %u session(s) left",
                    hx_session_count ());
     }
@@ -1765,6 +1763,7 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
         gtkhx_conn_tabs_set_title (htlc, label);
         g_free (label);
     }
+    gtkhx_conn_tabs_set_loading (htlc, FALSE);
     /* And the same name on this connection's rows in the shared task queue. */
     gtkhx_tasks_refresh_tags ();
     setbtns (sess, 1);
@@ -2091,20 +2090,20 @@ on_tracker_batch_begin_signal (GtkhxSession *emitter, const char *tracker_url,
 
 /* Translates GtkhxConnectionState (high-level FSM) into the per-aspect
  * UI calls that network.c hx_connect / connect_fail / hx_htlc_close
- * used to issue by name. setbtns / set_status_bar / set_disconnect_btn
- * / conn_task_update / changetitlesdisconnected are still view-side
- * helpers callable on their own; this just routes the state-change
- * notifications through the same signal mechanism as everything else. */
+ * used to issue by name. setbtns / set_status_bar / set_disconnect_btn /
+ * changetitlesdisconnected are still view-side helpers callable on their
+ * own; this just routes the state-change notifications through the same
+ * signal mechanism as everything else. */
 static void
 on_connection_state_changed_signal (GtkhxSession *emitter,
                                     struct htlc_conn *htlc, guint state,
                                     gpointer user_data)
 {
     /* Route by the connection whose state changed. The per-session calls
-     * here — setbtns, set_disconnect_btn, conn_task_update, the title
-     * changers — all act on one session's widgets, and handing them the
-     * focused session instead meant a background server dropping would grey
-     * out and retitle whichever one you were looking at.
+     * here — setbtns, set_disconnect_btn, the title changers — all act on
+     * one session's widgets, and handing them the focused session instead
+     * meant a background server dropping would grey out and retitle
+     * whichever one you were looking at.
      *
      * There is one status bar, one tray icon and one toast overlay, so that
      * chrome *follows the focus* rather than becoming per-connection: it shows
@@ -2155,6 +2154,7 @@ on_connection_state_changed_signal (GtkhxSession *emitter,
     switch (state) {
     case GTKHX_CONNECTION_DISCONNECTED:
         gtkhx_conn_tabs_set_title (htlc, _ ("Not connected"));
+        gtkhx_conn_tabs_set_loading (htlc, FALSE);
         break;
     case GTKHX_CONNECTION_CONNECTING:
     case GTKHX_CONNECTION_TCP_CONNECTED:
@@ -2163,6 +2163,7 @@ on_connection_state_changed_signal (GtkhxSession *emitter,
          * asked to go beats one saying nothing until the server introduces
          * itself. */
         gtkhx_conn_tabs_set_title (htlc, hx_conn_serverhost (htlc));
+        gtkhx_conn_tabs_set_loading (htlc, TRUE);
         break;
     default:
         break;
@@ -2176,25 +2177,12 @@ on_connection_state_changed_signal (GtkhxSession *emitter,
     case GTKHX_CONNECTION_DISCONNECTED:
         setbtns (sess, 0);
         set_disconnect_btn (sess, 0);
-        conn_task_update (sess, 2);
         changetitlesdisconnected (sess);
         break;
     case GTKHX_CONNECTION_CONNECTING:
         set_disconnect_btn (sess, 1);
-        conn_task_update (sess, 0);
         break;
-    case GTKHX_CONNECTION_TCP_CONNECTED:
-        conn_task_update (sess, 1);
-        break;
-    case GTKHX_CONNECTION_HANDSHAKE_DONE:
-        conn_task_update (sess, 2);
-        break;
-    case GTKHX_CONNECTION_LOGIN_READY:
-        /* Per-aspect UI (status bar / toolbar / tray) already
-         * settled at HANDSHAKE_DONE; LOGIN_READY exists purely as
-         * the boundary for late post-login RPCs (the files browser's
-         * remote provider is the first consumer). Nothing to do
-         * here. */
+    default:
         break;
     }
 }

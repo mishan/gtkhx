@@ -242,25 +242,13 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     g_free (buf);
 }
 
-/* tracker.c progress hooks — referenced by tracker fetch state
- * machine in network.c. The connect path doesn't fire the tracker
- * fetch, but the symbols need to link. */
+/* The tracker window's busy spinner — network.c's tracker fetch shows it.
+ * There is no window here. */
+extern void tracker_set_busy (gboolean busy);
 void
-track_prog_update (session *sess, char *str, int num, int total)
+tracker_set_busy (gboolean busy)
 {
-    (void)sess;
-    (void)str;
-    (void)num;
-    (void)total;
-}
-
-void
-trackconn_prog_update (session *sess, char *str, int num, int total)
-{
-    (void)sess;
-    (void)str;
-    (void)num;
-    (void)total;
+    (void)busy;
 }
 
 /* hxhandlers — referenced by hx_send_agreement_agree. The test path
@@ -385,12 +373,4 @@ void
 gtasks_delete_on_conn (struct htlc_conn *htlc)
 {
     (void)htlc;
-}
-
-/* Same, for the tracker's connection-less rows — tracker_kill_threads drops
- * them when a fetch stops early. */
-extern void gtasks_delete_tracker_rows (void);
-void
-gtasks_delete_tracker_rows (void)
-{
 }

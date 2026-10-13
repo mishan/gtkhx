@@ -112,7 +112,7 @@ on_server_create (GtkhxSession *hxsession G_GNUC_UNUSED, HxTrackerServer *event,
  * (via the unused-here hx_test_*_connect). This test never calls it, but
  * the symbol must resolve under -Wl,--no-undefined; we compile the matrix
  * files in directly rather than linking the full harness lib (whose
- * hlwrite_chunks / track_prog_update stubs would collide). */
+ * hlwrite_chunks / tracker_set_busy stubs would collide). */
 int hx_integration_connect_to (const char *host, int port, int timeout_ms);
 int
 hx_integration_connect_to (const char *host G_GNUC_UNUSED,

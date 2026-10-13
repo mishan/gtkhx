@@ -522,6 +522,21 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_set_title(htlc: *mut c_void, title: *co
     }
 }
 
+/// Spin a connection's tab while it connects and logs in, so a connection
+/// coming up in the background shows it on its tab.
+///
+/// # Safety
+/// `htlc` is a live connection.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_conn_tabs_set_loading(
+    htlc: *mut c_void,
+    loading: glib::ffi::gboolean,
+) {
+    if let Some(page) = tab_for(dock::conn_key(htlc)) {
+        page.set_loading(loading != glib::ffi::GFALSE);
+    }
+}
+
 /// Flag or clear a connection's tab.
 ///
 /// Setting is ignored for the connection already selected: its tab is the one

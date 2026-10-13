@@ -218,7 +218,7 @@ probe: no capability bit, no version tie, so an error just means
 suppressed entirely — `hxhandlers::recv::icon` records the verdict, or logs
 the refusal. Separately, a refusal still reaches what owns per-request state
 — a transfer, an inline-media upload or download — because that is what
-frees it; skipping it strands an orphaned transfer in the Tasks window
+frees it; skipping it strands an orphaned transfer in the Transfers panel
 forever, or leaves the picture's caller waiting. A refused voice or video
 request goes to the voice runtime, where the connection's session has one,
 instead of the toast, with the error sound, so the state machine can choose

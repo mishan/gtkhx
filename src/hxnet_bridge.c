@@ -563,8 +563,8 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
                                              GTKHX_CONNECTION_TCP_CONNECTED);
         break;
     case HXNET_BRIDGE_STATE_LOGIN_SENDING:
-        /* Magic done, credentials about to go out: HANDSHAKE_DONE deletes
-         * the coarse "Connecting" task. */
+        /* Magic done, credentials about to go out. Nothing in the view
+         * acts on HANDSHAKE_DONE; the connect spinners stop at login. */
         gtkhx_session_emit_connection_state (sess, htlc,
                                              GTKHX_CONNECTION_HANDSHAKE_DONE);
         break;

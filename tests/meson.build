@@ -883,8 +883,8 @@ test('real_connect', test_integration_real_connect,
 # GObject, so headless — no GdkDisplay needed). Complements test_tracker_
 # fetch, which stops at the hxnet FFI below the network.c HxTrackerServer
 # construction + signal emit. Same source pile as real_connect (network.c +
-# connect_test_stubs.c stubs the GUI refs, incl. the no-op track_prog_update
-# so the tasks-window widgets never get built), plus tracker_matrix.c for
+# connect_test_stubs.c stubs the GUI refs, incl. the no-op tracker_set_busy
+# so the tracker window is never needed), plus tracker_matrix.c for
 # hx_test_trackers_with.
 test_integration_tracker_signals = executable(
   'test_integration_tracker_signals',

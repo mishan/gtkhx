@@ -24,7 +24,7 @@ server's name — not a panel in the main window's dock. A two-panel file
 manager wants more width than a dock frame gives it (docked, it shared the
 center frame with Chat at about 450px, and neither panel could show more than
 names), and it is used in bursts: browse, queue transfers, leave. Transfers
-carry on in the Tasks panel, so closing the window costs nothing, and closing
+carry on in the Transfers panel, so closing the window costs nothing, and closing
 it closes the browser — the content's destroy is the browser's teardown.
 
 The window opens from the main menu (Files) or the toolbar's Files button,

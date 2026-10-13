@@ -463,7 +463,7 @@ genuinely-C leaves behind FFI. This is the big remaining category.
   UI leaf.
 - **Custom cells** — `users_cell.c`, the snapshot-rendered Name cell, stays C
   behind the `HxUserListView` FFI.
-- **Tasks content** — the `gtask` row build, progress and queue-badge updates,
+- **Transfers content** — the `gtask` row build, progress and queue-badge updates,
   the up/down queue reorder, and the transfer-progress handlers in `tasks.c`.
 - **Private-message model + broadcast rendering** — `msg.c` keeps the `msgwin`
   struct and its lifecycle, the input handlers, and the message / broadcast
@@ -665,7 +665,7 @@ In order:
 2. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
    the whole-app theming work is fresh.
 3. **The rest of inventory §B**, one feature at a time: Chat's render and
-   output path and window construction, the Tasks list, `msg.c`, and the
+   output path and window construction, the Transfers list, `msg.c`, and the
    Users controller once the Chat and Users slices have taken the session
    structs it depends on with them.
 4. **The standalone windows**: `tray.c` is unblocked; `preview.c` waits on the
@@ -772,9 +772,9 @@ The order, each step its own branch and each checked against the rig:
    Janus, plain and over HOPE, and `hx_history_entry_parse`, which the C
    ones read history through, is gone. Nothing GtkHx asks registers a task:
    `hx_rcv_task`, `hxtask`'s table and the `task-update` signal are gone,
-   and the Tasks list keeps its rows for transfers, connecting and the
-   tracker. A reply nothing expected still reaches `hx_dispatch_frame`
-   whole, and a refusal among them is shown (`task_error`). *Done.*
+   and the Transfers list holds only transfers. A reply nothing expected
+   still reaches `hx_dispatch_frame` whole, and a refusal among them is
+   shown (`task_error`). *Done.*
 6. **Transfers.** The HTXF state machines — single files, folders, resume,
    upload — rewritten around bytes in and bytes out. The largest step, last,
    and the next.
