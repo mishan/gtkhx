@@ -1,13 +1,12 @@
-## 1.6.0-dev
+## 1.6.0
 
 - Accessibility
-  - Screen readers can name every button, the users list (with who is away or an admin), text inputs, chat views, transfers, previews and the dock's panes, and are told of private messages, mentions, a lost connection and changes to the layout
+  - Screen readers can name every button, the users list (with who is away or an admin), text inputs, chat views, news, transfers, previews and the dock's panes, and are told of private messages, mentions, a lost connection and changes to the layout; a tracker's section reads as its title rather than every server in it
   - More works from the keyboard: the chat view (Tab through its links, nicks, pictures and "load more" rows, Enter to open one, Menu or Shift+F10 for its menu, Ctrl+A to select all), the users list's menu (Menu or Shift+F10), links in news, the server banner, Escape to close dialogs, F10 for the main menu, F6 to move between panes from anywhere, and Ctrl+1 to Ctrl+6 for the panels
   - A Keyboard Shortcuts window (Ctrl+?) lists every key
   - Clicking a notification opens the conversation it was about; a second launch with --server or --bookmark connects in the running GtkHx instead of opening another
   - Themes step aside for the system's high-contrast setting, and links are underlined rather than told apart by color alone
   - Away and admin names in the users list are easier to read when the theme doesn't color them
-  - Screen readers name the news views, the Transfers list and the users list itself, read a tracker's section by its title rather than every server in it, and skip the icons beside Settings' page names
 - Transfers
   - The Tasks panel is now Transfers, holds only downloads and uploads, and has a new icon; it stays where your saved layout put it
   - A connection shows its progress with a spinner beside the header bar's title and on its tab, rather than as a row in the list
@@ -16,20 +15,24 @@
   - Threaded news (News 1.5+) opens in a window of its own for each connection, as Files does, rather than as a panel; Ctrl+4 still opens it
   - The news browser shows the pictures an article carries below its text, as hxd-ng serves them to classic clients
   - Fixed an article whose only part is a picture showing as garbled text
+- File Previews
+  - Previewing an audio or video file plays it while it downloads, with seeking; only what is played is fetched
+  - Previews no longer download the whole file: a long text shows its first 256 KiB, and an image or PDF too large to preview says so, each with a Download button for the whole file
+  - Audio and video are never shown as text: a build without GStreamer says it can't preview them, and a file past 4 GB says it's too large to preview
+  - Fixed previewing an empty file leaving its window on "Loading…"
+  - Fixed a crash closing a preview window after its download had failed partway
 - Messages
   - A private message can carry a picture, as a chat line can, on servers with inline media (Janus, hxd-ng): the paperclip beside the message's input sends one
+- Voice
+  - Push-to-talk no longer leaves the microphone on when its window loses the focus with the key held
+  - Push-to-talk works in the Files and News windows and in panels moved out into windows of their own
 - Users
   - Fixed avatars from 48 to 199 pixels wide showing nothing in the users list; on hxd-ng servers that was every avatar set from hx-ng
 - Files
-  - Push-to-talk works while the Files window has the focus
   - Fixed downloads failing on hxd-ng servers
   - Fixed uploads to some servers, hxd-ng among them, reporting failure though the file arrived
   - Fixed downloading a folder that holds files of 4 GB or more failing partway; 1.5.0 listed this as fixed but shipped without it
-  - Previews no longer download the whole file: a long text shows its first 256 KiB, and an image or PDF too large to preview says so, each with a Download button for the whole file
-  - Fixed previewing an empty file leaving its window on "Loading…"
-  - Fixed a crash closing a preview window after its download had failed partway
-  - Previewing an audio or video file plays it while it downloads, with seeking; only what is played is fetched
-  - Previewing audio or video never shows it as text: a build without GStreamer says it can't preview them, and a file past 4 GB says it's too large to preview
+- Connecting
   - Nothing is sent to a server until the login is done: opening the file browser, sending a chat line or changing your name while an agreement is showing now waits until you're logged in, rather than going early, which the 1.9 server disconnected you for
 - Code Modernization
   - Building now needs GTK 4.16 and GLib 2.76
