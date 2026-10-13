@@ -88,7 +88,7 @@ build_button_bar (session *sess)
      * borrowed session pointer. Same handlers drive the chat.c pchat
      * sidebars. */
     sess->user_btns.msg = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/message.png", _ ("Msg"),
+        "/com/nasledov/gtkhx/pixmaps/message.png", _ ("Private Message"),
         GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_msg_btn), view);
     sess->user_btns.kick = gtkhx_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/kick.png", _ ("Kick"),

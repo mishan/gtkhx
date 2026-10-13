@@ -34,7 +34,8 @@ use crate::xfer::offer_full_download;
 use gtkhx_core::conn::hx_conn_serverhost;
 #[cfg(not(test))]
 use gtkhx_core::session::{
-    gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default,
+    gtkhx_session_emit_file_info, gtkhx_session_emit_file_update, gtkhx_session_emit_xfer_queue,
+    gtkhx_session_get_default,
 };
 
 #[cfg(not(test))]
@@ -145,9 +146,14 @@ unsafe extern "C" fn preview_cancel_xfer(user_data: *mut c_void) {
 /// `htxf` must be a live transfer.
 #[no_mangle]
 pub unsafe extern "C" fn hx_xfer_announce(htlc: *mut c_void, htxf: *mut c_void, queue: u32) {
-    gtkhx_session_emit_xfer_queue(gtkhx_session_get_default(), hx_sess_from_htlc(htlc), htxf);
+    let (emitter, sess) = (gtkhx_session_get_default(), hx_sess_from_htlc(htlc));
+    gtkhx_session_emit_xfer_queue(emitter, sess, htxf);
     if queue == 0 {
         xfer_ready_write(htxf);
+    } else {
+        // Its row learns the size the reply brought from a progress update,
+        // and a queued transfer has none until it starts.
+        gtkhx_session_emit_file_update(emitter, sess, htxf);
     }
 }
 
@@ -178,6 +184,7 @@ pub(crate) unsafe fn download_ready(
     if hx_htxf_in_list(htxf) == 0 || t.reference == 0 || (!folder && t.size == 0) {
         return;
     }
+    crate::xfer::download_answered(htxf);
     // A folder is legal at size 0; the progress bar reads better at 1.
     hx_htxf_set_ref(htxf, t.reference);
     hx_htxf_set_total_size(htxf, t.size.max(1));
@@ -210,13 +217,17 @@ pub(crate) unsafe fn download_ready(
     hx_xfer_announce(htlc, htxf, t.queue);
 }
 
-/// A download the server refused: try again in a second when the transfer
-/// asks for retries, else drop it.
+/// A download the server refused: a resumed one goes back to paused, one the
+/// queue started back to queued; another tries again in a second when the
+/// transfer asks for retries, else is dropped.
 ///
 /// # Safety
 /// As [`download_ready`].
 pub(crate) unsafe fn download_refused(htlc: *mut c_void, htxf: *mut c_void) {
-    if hx_htxf_in_list(htxf) == 0 {
+    if hx_htxf_in_list(htxf) == 0
+        || crate::xfer::resume_refused(htxf)
+        || crate::xfer::queued_refused(htxf)
+    {
         return;
     }
     if hx_htxf_opt_retry(htxf) != 0 {

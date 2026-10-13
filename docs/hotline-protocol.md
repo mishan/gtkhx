@@ -261,6 +261,10 @@ time with the current year as the base. mhxd sends 1904. A receiver must normali
 rather than assume either base. The 32-bit seconds field overflows for 1904-based dates
 in 2040; the capabilities extension's "modern dates" bit exists for that.
 
+GtkHx doesn't yet normalize the INFO fork's dates: it reads the seconds as 1904-based, so
+a file downloaded from the Windows server or the 1.9 server (hlservd, which sends the
+current year too) gets wrong create and modify dates in its sidecar.
+
 ### File paths
 
 Fields 202, 212 and 325 carry a path:
@@ -796,6 +800,9 @@ The INFO fork:
 | 72+n | 2 | comment length |
 | 74+n | m | comment |
 
+- Some peers end the fork right after the name, with no comment length: the 1.9 server
+  (hlservd) always, and the Nostalgia client when there is no comment. Receivers read a
+  fork that ends there as having no comment.
 - The Windows server caps the name at 63 characters, always sends an empty comment, and
   ignores the INFO fork on uploads. The Mac server applies the type, creator and Finder
   flags, clearing the alias and inited bits.

@@ -125,6 +125,10 @@
       <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/video.png</image>
     </screenshot>
     <screenshot>
+      <caption>Downloads you can pause and resume, and the server's queue</caption>
+      <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/transfers.png</image>
+    </screenshot>
+    <screenshot>
       <caption>The Classic theme, with the original pixel-art icons</caption>
       <image>https://raw.githubusercontent.com/mishan/gtkhx/@SCREENSHOT_REF@/data/screenshots/classic.png</image>
     </screenshot>
@@ -148,6 +152,21 @@
   </content_rating>
 
   <releases>
+    <release version="1.6.0" date="2026-10-13">
+      <description>
+        <p>Accessibility throughout, audio and video previews that play as they download, and threaded news in a window of its own.</p>
+        <ul>
+          <li>Screen readers can name every control and are told of private messages, mentions and a lost connection</li>
+          <li>Much more works from the keyboard, and a Keyboard Shortcuts window (Ctrl+?) lists every key</li>
+          <li>Themes follow the system's high-contrast setting, and links no longer rely on color alone</li>
+          <li>Previewing audio or video plays it while it downloads, and previews no longer fetch the whole file</li>
+          <li>Threaded news opens in a window for each connection, and shows the pictures an article carries</li>
+          <li>The Tasks panel is now Transfers, holding only downloads and uploads, and a download can be paused and resumed</li>
+          <li>A private message can carry a picture on servers with inline media</li>
+          <li>Fixed downloads and uploads on hxd-ng servers, and downloads from the Hotline Server 1.9.5 (hlservd)</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.1" date="2026-10-09">
       <description>
         <p>A lock for encrypted connections, and fixes to tab dragging and the icon picker.</p>

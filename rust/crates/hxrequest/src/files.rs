@@ -14,7 +14,8 @@
 //! than its u16 length allows.
 
 use hxproto::build::{
-    self, FileGetRequest, FileMoveRequest, FilePutFolderRequest, FileSetInfoRequest, HxChunk,
+    self, FileGetRequest, FileMoveRequest, FilePutFolderRequest, FilePutRequest,
+    FileSetInfoRequest, HxChunk,
 };
 use hxproto::messages::ClientHdr;
 
@@ -179,6 +180,23 @@ pub fn get_folder(dir: &[u8], name: &[u8]) -> Option<Request> {
     let mut chunks = [HxChunk::EMPTY; 2];
     let hc = build::build_file_getfolder_chunks(name, enc.as_deref(), &mut chunks);
     Request::from_built(ClientHdr::FileGetFolder as u32, &chunks, hc)
+}
+
+/// FILE_PUT for a new file `name` of `size` bytes uploaded into `dir`, with
+/// no resume and no 64-bit size.
+pub fn put(dir: &[u8], name: &[u8], size: u32) -> Option<Request> {
+    let enc = below_root(dir).then(|| encode_dir(dir, false));
+    let req = FilePutRequest {
+        name,
+        dir: enc.as_deref(),
+        has_preview: false,
+        size,
+        size64: None,
+    };
+    let mut chunks = [HxChunk::EMPTY; 5];
+    let mut scratch = [0u8; 12];
+    let hc = build::build_file_put_chunks(&req, &mut chunks, &mut scratch);
+    Request::from_built(ClientHdr::FilePut as u32, &chunks, hc)
 }
 
 /// FILE_PUTFOLDER for a folder `name` uploaded into `dir`, carrying the tree's

@@ -17,8 +17,8 @@ use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
 use hxnet::htxf::{
-    hxnet_htxf_abort, hxnet_htxf_close, hxnet_htxf_finish_send, hxnet_htxf_set_folder_items,
-    HtxfAbort, HtxfConn,
+    hxnet_htxf_abort, hxnet_htxf_abort_free, hxnet_htxf_abort_new, hxnet_htxf_close,
+    hxnet_htxf_finish_send, hxnet_htxf_set_folder_items, HtxfAbort, HtxfConn,
 };
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
@@ -26,7 +26,7 @@ use hxnet::xfer::{
 };
 use hxnet::xfer_handle::{
     hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
-    hx_htxf_set_destructor, hx_htxf_set_total_pos, hx_htxf_unref, HtxfHandle,
+    hx_htxf_set_destructor, hx_htxf_set_total_pos, hx_htxf_total_pos, hx_htxf_unref, HtxfHandle,
 };
 use hxproto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
 use hxproto::messages::ClientHdr;
@@ -182,17 +182,6 @@ pub unsafe extern "C" fn xfer_registry_add(htxf: *mut HtxfHandle) {
     with_list(|xs| xs.push(htxf));
 }
 
-/// `int xfer_count(void)` — number of live transfers (was `nxfers`). `xfer_new`
-/// reads it to decide whether the just-added transfer is the only one (start it
-/// immediately) or should queue.
-///
-/// # Safety
-/// Main thread only.
-#[no_mangle]
-pub unsafe extern "C" fn xfer_count() -> c_int {
-    with_list(|xs| xs.len() as c_int)
-}
-
 /// `void xfer_up(int num)` — swap slot `num` with the one above it (tasks-window
 /// move-up). Caller guarantees `num >= 1`.
 ///
@@ -279,12 +268,10 @@ pub unsafe extern "C" fn xfer_remove_from_list(htxf: *mut HtxfHandle) {
         hx_sess_from_htlc((*htxf).htlc),
         htxf as *mut c_void,
     );
+    set_pause(htxf, None);
+    set_tries(htxf, None);
     hx_htxf_unref(htxf); // drop the list's ref
-
-    // Auto-start the next queued transfer (the old `if (nxfers) xfer_go(xfers[0])`).
-    if let Some(head) = with_list(|xs| xs.first().copied()) {
-        xfer_go(head);
-    }
+    start_next();
 }
 
 /// `void xfer_delete(struct htxf_conn *htxf)` — public cancel (server cancel /
@@ -313,6 +300,8 @@ pub unsafe extern "C" fn xfer_delete(htxf: *mut HtxfHandle) {
 #[no_mangle]
 pub unsafe extern "C" fn xfers_delete_all() {
     let all: Vec<*mut HtxfHandle> = with_list(std::mem::take);
+    PAUSES.with_borrow_mut(Vec::clear);
+    QUEUED.with_borrow_mut(Vec::clear);
     for htxf in all {
         hx_htxf_cancel(htxf);
         hxnet_htxf_abort((*htxf).abort as *const HtxfAbort);
@@ -361,6 +350,243 @@ pub unsafe extern "C" fn xfer_tasks_update(htlc: *mut c_void) {
         with_list(|xs| xs.iter().copied().filter(|&e| (*e).htlc == htlc).collect());
     for htxf in matching {
         gtkhx_session_emit_file_update(gtkhx_session_get_default(), sess, htxf as *mut c_void);
+    }
+}
+
+// ---- pause and resume ----------------------------------------------------
+
+/// Where a paused download stands. Hotline has no pause: pausing ends the
+/// download's connection, keeping its row and its partial file, and resuming
+/// asks for the rest anew from what is on disk. The server's queue slot goes
+/// with the connection.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Pause {
+    /// Its connection is closing; the worker hasn't finished.
+    Winding,
+    /// Settled, its partial file `kept` bytes long.
+    Paused { kept: i64 },
+    /// Resumed, the server's reply not yet in.
+    Asked { kept: i64 },
+}
+
+thread_local! {
+    static PAUSES: RefCell<Vec<(*mut HtxfHandle, Pause)>> = const { RefCell::new(Vec::new()) };
+    /// The transfers whose worker is running.
+    static WORKING: RefCell<Vec<*mut HtxfHandle>> = const { RefCell::new(Vec::new()) };
+    /// The downloads the queue started and the server hasn't yet answered,
+    /// with how many times a refusal has put each back.
+    static QUEUED: RefCell<Vec<(*mut HtxfHandle, u8)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn pause_of(htxf: *mut HtxfHandle) -> Option<Pause> {
+    PAUSES.with_borrow(|p| p.iter().find(|e| e.0 == htxf).map(|e| e.1))
+}
+
+fn set_pause(htxf: *mut HtxfHandle, to: Option<Pause>) {
+    PAUSES.with_borrow_mut(|p| {
+        p.retain(|e| e.0 != htxf);
+        if let Some(to) = to {
+            p.push((htxf, to));
+        }
+    });
+}
+
+/// Paused, as the row shows it: from the click until it is resumed.
+fn paused(htxf: *mut HtxfHandle) -> bool {
+    matches!(pause_of(htxf), Some(Pause::Winding | Pause::Paused { .. }))
+}
+
+unsafe fn emit_file_update(htxf: *mut HtxfHandle) {
+    gtkhx_session_emit_file_update(
+        gtkhx_session_get_default(),
+        hx_sess_from_htlc((*htxf).htlc),
+        htxf as *mut c_void,
+    );
+}
+
+/// `int xfer_can_pause(struct htxf_conn *htxf)` — whether `htxf` is a
+/// single-file download whose worker is running.
+///
+/// # Safety
+/// `htxf` is a live handle. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_can_pause(htxf: *mut HtxfHandle) -> c_int {
+    ((*htxf).type_ == XFER_GET
+        && hx_htxf_opt_folder(htxf as *const c_void) == 0
+        && hx_htxf_opt_preview(htxf as *const c_void) == 0
+        && WORKING.with_borrow(|w| w.contains(&htxf))
+        && pause_of(htxf).is_none()) as c_int
+}
+
+/// `int xfer_can_start(struct htxf_conn *htxf)` — whether Start would send
+/// `htxf`'s request: a single-file transfer not yet asked for, or a settled
+/// pause.
+///
+/// # Safety
+/// `htxf` is a live handle. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_can_start(htxf: *mut HtxfHandle) -> c_int {
+    let fresh = (*htxf).gone == 0 && pause_of(htxf).is_none();
+    (hx_htxf_opt_folder(htxf as *const c_void) == 0
+        && (fresh || matches!(pause_of(htxf), Some(Pause::Paused { .. })))) as c_int
+}
+
+/// `int xfer_paused(struct htxf_conn *htxf)` — whether the row shows `htxf`
+/// paused.
+///
+/// # Safety
+/// Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_paused(htxf: *mut HtxfHandle) -> c_int {
+    paused(htxf) as c_int
+}
+
+/// `guint64 xfer_resumed_bytes(struct htxf_conn *htxf)` — the bytes a
+/// download already had on disk when it was asked for, which its progress
+/// counts on top of what this connection brings.
+///
+/// # Safety
+/// `htxf` is a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_resumed_bytes(htxf: *mut HtxfHandle) -> u64 {
+    let h = &*htxf;
+    if h.type_ == XFER_GET {
+        h.data_pos + h.rsrc_pos
+    } else {
+        0
+    }
+}
+
+/// `void xfer_pause(struct htxf_conn *htxf)` — pause a running download:
+/// end its connection, and let the next queued transfer go once it has
+/// ended. The row and the partial file stay; [`xfer_go`] resumes it once the
+/// worker has finished.
+///
+/// # Safety
+/// `htxf` is a live handle. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_pause(htxf: *mut HtxfHandle) {
+    if xfer_can_pause(htxf) == 0 {
+        return;
+    }
+    set_pause(htxf, Some(Pause::Winding));
+    hxnet_htxf_abort((*htxf).abort as *const HtxfAbort);
+    emit_file_update(htxf);
+}
+
+/// A finished worker's transfer, if it was paused: settle it, keep it in the
+/// list and let the queue move on. False for any other, which the caller
+/// unlinks.
+///
+/// # Safety
+/// `htxf` is a live handle whose worker has returned. Main thread only.
+unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
+    if pause_of(htxf) != Some(Pause::Winding) {
+        return false;
+    }
+    // Finished before the pause could stop it.
+    if hx_htxf_total_pos(htxf) >= (*htxf).total_size {
+        set_pause(htxf, None);
+        return false;
+    }
+    // The old token stays aborted; the next connection needs a live one.
+    hxnet_htxf_abort_free((*htxf).abort as *const HtxfAbort);
+    (*htxf).abort = hxnet_htxf_abort_new() as *mut c_void;
+    let kept = hx_file_size((*htxf).path.as_ptr());
+    set_pause(htxf, Some(Pause::Paused { kept }));
+    emit_file_update(htxf);
+    start_next();
+    true
+}
+
+/// The server answered a download's request: it is no longer paused, nor
+/// owed another try.
+pub(crate) fn download_answered(htxf: *mut c_void) {
+    let htxf = htxf as *mut HtxfHandle;
+    if matches!(pause_of(htxf), Some(Pause::Asked { .. })) {
+        set_pause(htxf, None);
+    }
+    set_tries(htxf, None);
+}
+
+/// The server refused a resumed download (mhxd's one-at-a-time, say): back
+/// to paused, to be tried again, rather than dropped. False for any other.
+///
+/// # Safety
+/// Main thread only; `htxf` is live if it is a resumed download.
+pub(crate) unsafe fn resume_refused(htxf: *mut c_void) -> bool {
+    let htxf = htxf as *mut HtxfHandle;
+    let Some(Pause::Asked { kept }) = pause_of(htxf) else {
+        return false;
+    };
+    set_pause(htxf, Some(Pause::Paused { kept }));
+    emit_file_update(htxf);
+    start_next();
+    true
+}
+
+/// How many times a refusal may put back a download the queue started, and
+/// how long it waits before the queue tries it again.
+const QUEUE_TRIES: u8 = 5;
+const QUEUE_RETRY_MS: u32 = 500;
+
+fn tries_of(htxf: *mut HtxfHandle) -> Option<u8> {
+    QUEUED.with_borrow(|q| q.iter().find(|e| e.0 == htxf).map(|e| e.1))
+}
+
+fn set_tries(htxf: *mut HtxfHandle, to: Option<u8>) {
+    QUEUED.with_borrow_mut(|q| {
+        q.retain(|e| e.0 != htxf);
+        if let Some(to) = to {
+            q.push((htxf, to));
+        }
+    });
+}
+
+/// The server refused a download the queue started: mhxd refuses one asked
+/// for before it has seen the last one's connection close ("1 at a time"),
+/// which is when the queue asks. Back to queued, and tried again shortly, a
+/// few times; false once those are spent, or for a download the user started.
+///
+/// # Safety
+/// Main thread only; `htxf` is live if the queue started it.
+pub(crate) unsafe fn queued_refused(htxf: *mut c_void) -> bool {
+    let htxf = htxf as *mut HtxfHandle;
+    match tries_of(htxf) {
+        Some(n) if n < QUEUE_TRIES => {
+            set_tries(htxf, Some(n + 1));
+            (*htxf).gone = 0;
+            hx_htxf_ref(htxf); // the timer's
+            glib::ffi::g_timeout_add(QUEUE_RETRY_MS, Some(queue_retry), htxf.cast());
+            true
+        }
+        _ => {
+            set_tries(htxf, None);
+            false
+        }
+    }
+}
+
+unsafe extern "C" fn queue_retry(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
+    let htxf = data as *mut HtxfHandle;
+    if xfer_num(htxf) >= 0 {
+        start_next();
+    }
+    hx_htxf_unref(htxf);
+    glib::ffi::G_SOURCE_REMOVE
+}
+
+/// Start the first transfer that isn't paused, if it hasn't started: the
+/// queue moving on when one ends or pauses.
+unsafe fn start_next() {
+    let head = with_list(|xs| xs.iter().copied().find(|&e| !paused(e)));
+    if let Some(head) = head {
+        let was = (*head).gone;
+        xfer_go(head);
+        // Only a request this sent is the queue's to try again.
+        if was == 0 && (*head).gone != 0 && tries_of(head).is_none() {
+            set_tries(head, Some(0));
+        }
     }
 }
 
@@ -429,12 +655,16 @@ unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
 /// choose. This used to read the *focused* connection instead, which made the
 /// pane a file was dropped on irrelevant to where it actually went — invisible
 /// at one connection, wrong at two.
+///
+/// `size` is what the row measures the transfer by until the server says,
+/// 0 for not known.
 unsafe fn xfer_init(
     htlc: *mut c_void,
     path: &[u8],
     remotedir: &[u8],
     remotename: &[u8],
     type_: u16,
+    size: u64,
 ) -> *mut HtxfHandle {
     // Register the last-ref destructor once — every handle comes through here, so
     // this runs before any can be dropped (was the g_once_init in xfer_init).
@@ -465,14 +695,13 @@ unsafe fn xfer_init(
 
     set_carr(&mut h.path, path);
     h.type_ = type_ as u8;
-    h.queue = u32::MAX; // -1
 
     // Seed the list's ref (0 → 1), then enqueue.
     hx_htxf_ref(htxf);
     xfer_registry_add(htxf);
 
     h.htlc = htlc;
-    h.total_size = 1;
+    h.total_size = size.max(1);
     gtkhx_session_emit_file_update(
         gtkhx_session_get_default(),
         hx_sess_from_htlc(h.htlc),
@@ -508,11 +737,18 @@ pub unsafe extern "C" fn xfer_new(
         cstr_bytes(remotedir),
         slice_bytes(remotename, remotename_len),
         type_,
+        // A download's size as the file listing gave it.
+        if type_ as u8 == XFER_GET {
+            srv_data_size.into()
+        } else {
+            0
+        },
     );
     hx_htxf_set_opt_preview(htxf, if preview != 0 { 1 } else { 0 });
     (*htxf).srv_data_size = srv_data_size as u64;
 
-    if xfer_count() == 1 || hx_prefs_queuedl() == 0 {
+    let alone = with_list(|xs| xs.iter().all(|&e| e == htxf || paused(e)));
+    if alone || hx_prefs_queuedl() == 0 {
         xfer_go(htxf);
     }
     htxf
@@ -605,6 +841,7 @@ pub unsafe extern "C" fn xfer_new_folder(
         cstr_bytes(remotedir),
         slice_bytes(remotename, remotename_len),
         type_,
+        0,
     );
     hx_htxf_set_opt_folder(htxf, 1);
     htxf
@@ -649,7 +886,10 @@ unsafe extern "C" fn fu_dispatch(data: glib::ffi::gpointer) -> glib::ffi::gboole
 /// GLib idle on the main thread; `data` is the completing htxf.
 unsafe extern "C" fn xfer_cleanup_dispatch(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
     let htxf = data as *mut HtxfHandle;
-    xfer_remove_from_list(htxf);
+    WORKING.with_borrow_mut(|w| w.retain(|&e| e != htxf));
+    if !settle_pause(htxf) {
+        xfer_remove_from_list(htxf);
+    }
     hx_htxf_unref(htxf); // drop the worker's ref
     glib::ffi::G_SOURCE_REMOVE
 }
@@ -938,12 +1178,21 @@ unsafe extern "C" fn xfer_worker_entry(arg: *mut c_void) {
 /// `htxf` is a live handle. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_ready_write(htxf: *mut HtxfHandle) {
+    // mhxd repeats a transfer's queue position, 0, once it has started. That
+    // must start neither a second worker nor one for a paused download, whose
+    // old reference it names, until the server has answered the resume.
+    if pause_of(htxf).is_some() || WORKING.with_borrow(|w| w.contains(&htxf)) {
+        return;
+    }
+    WORKING.with_borrow_mut(|w| w.push(htxf));
     hx_htxf_ref(htxf); // the worker's ref
     gtkhx_bridge_spawn_blocking_with_idle(
         xfer_worker_entry,
         xfer_completion_entry,
         htxf as *mut c_void,
     );
+    // Pause is offered from now, not from the first bytes.
+    emit_file_update(htxf);
 }
 
 // ---- xfer_go wire build + local-path helpers ---------------------------
@@ -1013,18 +1262,23 @@ unsafe fn hldir_dir_bytes(hldir: &*mut u8, hldirlen: u16, has_dir: bool) -> Opti
 
 /// The download half of [`xfer_go`]: resume-vs-rename decision, then the
 /// FILE_NAME / DIR / (resume) RFLT chunk build + FILE_GET request.
-unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
+unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<i64>) {
     let mut resuming = false;
 
     // Resume vs rename (skipped for previews, which don't write to disk):
     //   local absent            → fresh download
-    //   local < srv (known)     → resume from local size
+    //   local is what a pause kept, or < srv (known) → resume from local size
     //   otherwise (>= / unknown)→ rename to a free name
     if hx_htxf_opt_preview(htxf as *const c_void) == 0 {
         let sz = hx_file_size((*htxf).path.as_ptr());
         if sz >= 0 {
             let local_data = sz as u32; // C's (guint32)sb.st_size truncation
-            if (*htxf).srv_data_size > 0 && (local_data as u64) < (*htxf).srv_data_size {
+            let ours = kept == Some(sz) && sz <= i64::from(u32::MAX);
+            if ours && sz == 0 {
+                // Paused before any data came: start over into the same file.
+            } else if ours
+                || (*htxf).srv_data_size > 0 && (local_data as u64) < (*htxf).srv_data_size
+            {
                 (*htxf).data_pos = local_data as u64;
                 (*htxf).rsrc_pos = resource_len((*htxf).path.as_ptr()) as u64;
                 resuming = true;
@@ -1134,6 +1388,7 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
 /// `void xfer_go(struct htxf_conn *htxf)` — send the download/upload request that
 /// starts a (non-folder) transfer. Latches `gone` so a queued transfer's
 /// auto-start + an explicit kick can't double-fire, then dispatches on `type`.
+/// A settled pause is resumed; one still winding down is left alone.
 /// Called from tasks.c (queue restart) and natively (the retry timer + the
 /// next-in-queue kick after a removal).
 ///
@@ -1141,13 +1396,36 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
 /// `htxf` is a live handle. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
+    // A folder transfer's request is its own (GETFOLDER / PUTFOLDER), sent
+    // when it was made; the queue moving on must not send it a FILE_GET.
+    if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+        return;
+    }
+    let kept = match pause_of(htxf) {
+        Some(Pause::Paused { kept }) => Some(kept),
+        Some(_) => return,
+        None => None,
+    };
+    // The whole file's size, which a resume's estimate is cut from until the
+    // server says what is left.
+    let full = kept.map(|_| (*htxf).total_size + xfer_resumed_bytes(htxf));
+    if let Some(kept) = kept {
+        set_pause(htxf, Some(Pause::Asked { kept }));
+        let h = &mut *htxf;
+        (h.gone, h.data_pos, h.rsrc_pos) = (0, 0, 0);
+        hx_htxf_set_total_pos(htxf, 0);
+    }
     if (*htxf).gone != 0 {
         return;
     }
     (*htxf).gone = 1;
 
     if (*htxf).type_ == XFER_GET {
-        xfer_go_get(htxf);
+        xfer_go_get(htxf, kept);
+        if let Some(full) = full {
+            (*htxf).total_size = full.saturating_sub(xfer_resumed_bytes(htxf)).max(1);
+            emit_file_update(htxf);
+        }
     } else {
         xfer_go_put(htxf);
     }
@@ -1179,8 +1457,16 @@ unsafe fn gtkhx_session_emit_xfer_destroyed(_s: *mut c_void, _sess: *mut c_void,
 unsafe fn hx_sess_from_htlc(_htlc: *mut c_void) -> *mut c_void {
     std::ptr::null_mut()
 }
-// The xfer_go wire-build collaborators (xfer_go compiles under test but isn't invoked by
-// the reorder/registry unit tests, so these are compile-only no-ops).
+// The xfer_go wire-build collaborators: the local file's size is the test's to
+// set, and each request written is recorded as its chunks.
+#[cfg(test)]
+thread_local! {
+    static LOCAL_SIZE: std::cell::Cell<i64> = const { std::cell::Cell::new(-1) };
+    static WRITTEN: RefCell<Vec<Vec<Vec<u8>>>> = const { RefCell::new(Vec::new()) };
+    static WORKERS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The transfers flagged as folders.
+    static FOLDERS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
 #[cfg(test)]
 unsafe fn hx_conn_has_cap(_h: *const c_void, _cap: u64) -> glib::ffi::gboolean {
     glib::ffi::GFALSE
@@ -1194,9 +1480,20 @@ unsafe fn hlwrite_chunks(
     _htlc: *mut c_void,
     _ty: u32,
     _flag: u32,
-    _chunks: *const HxChunk,
-    _hc: c_int,
+    chunks: *const HxChunk,
+    hc: c_int,
 ) {
+    let req = (0..hc as usize)
+        .map(|i| {
+            let c = &*chunks.add(i);
+            if c.data.is_null() {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(c.data, c.len as usize).to_vec()
+            }
+        })
+        .collect();
+    WRITTEN.with_borrow_mut(|w| w.push(req));
 }
 #[cfg(test)]
 unsafe fn uniquify_path(
@@ -1208,11 +1505,11 @@ unsafe fn uniquify_path(
 }
 #[cfg(test)]
 unsafe fn hx_file_size(_path: *const c_char) -> i64 {
-    -1
+    LOCAL_SIZE.get()
 }
 #[cfg(test)]
 unsafe fn hx_prefs_queuedl() -> c_int {
-    0
+    1
 }
 #[cfg(test)]
 unsafe fn hx_preview_unref(_p: *mut c_void) {}
@@ -1226,7 +1523,14 @@ unsafe fn hx_preview_set_cancel_cb(
 #[cfg(test)]
 unsafe fn hx_htxf_set_opt_preview(_htxf: *mut HtxfHandle, _v: c_int) {}
 #[cfg(test)]
-unsafe fn hx_htxf_set_opt_folder(_htxf: *mut HtxfHandle, _v: c_int) {}
+unsafe fn hx_htxf_set_opt_folder(htxf: *mut HtxfHandle, v: c_int) {
+    FOLDERS.with_borrow_mut(|f| {
+        f.retain(|&e| e != htxf as usize);
+        if v != 0 {
+            f.push(htxf as usize);
+        }
+    });
+}
 #[cfg(test)]
 unsafe fn gtkhx_bridge_post_to_main(_func: glib::ffi::GSourceFunc, _user_data: *mut c_void) {}
 #[cfg(test)]
@@ -1235,6 +1539,7 @@ unsafe fn gtkhx_bridge_spawn_blocking_with_idle(
     _completion: unsafe extern "C" fn(*mut c_void),
     _user_data: *mut c_void,
 ) {
+    WORKERS.set(WORKERS.get() + 1);
 }
 #[cfg(test)]
 unsafe fn htxf_connect(_htxf: *mut HtxfHandle) -> glib::ffi::gboolean {
@@ -1262,8 +1567,8 @@ unsafe fn hx_htxf_opt_preview(_htxf: *const c_void) -> c_int {
     0
 }
 #[cfg(test)]
-unsafe fn hx_htxf_opt_folder(_htxf: *const c_void) -> c_int {
-    0
+unsafe fn hx_htxf_opt_folder(htxf: *const c_void) -> c_int {
+    FOLDERS.with_borrow(|f| f.contains(&(htxf as usize))) as c_int
 }
 #[cfg(test)]
 unsafe fn hx_htxf_opt_large(_htxf: *const c_void) -> c_int {
@@ -1282,6 +1587,10 @@ mod tests {
 
     fn reset(handles: &[*mut HtxfHandle]) {
         XFERS.with(|x| *x.borrow_mut() = handles.to_vec());
+        PAUSES.with_borrow_mut(Vec::clear);
+        WORKING.with_borrow_mut(Vec::clear);
+        QUEUED.with_borrow_mut(Vec::clear);
+        WRITTEN.with_borrow_mut(Vec::clear);
     }
 
     #[test]
@@ -1327,6 +1636,229 @@ mod tests {
         unsafe {
             assert_eq!(hx_htxf_in_list(a as *mut c_void), 1);
             assert_eq!(hx_htxf_in_list(dummy(9) as *mut c_void), 0);
+        }
+    }
+
+    unsafe fn new_download() -> *mut HtxfHandle {
+        xfer_new(
+            std::ptr::null_mut(),
+            c"/tmp/f".as_ptr(),
+            c"/".as_ptr(),
+            c"f".as_ptr(),
+            1,
+            XFER_GET.into(),
+            0,
+            0,
+        )
+    }
+
+    /// A download the server answered unqueued, its worker running partway.
+    unsafe fn running() -> *mut HtxfHandle {
+        let h = new_download();
+        assert_eq!((*h).gone, 1, "started");
+        ((*h).ref_, (*h).queue, (*h).total_size) = (7, 0, 5000);
+        hx_htxf_set_total_pos(h, 1200);
+        xfer_ready_write(h);
+        h
+    }
+
+    #[test]
+    fn a_download_waiting_its_turn_has_no_place_and_the_listings_size() {
+        reset(&[]);
+        unsafe {
+            running();
+            let waiting = xfer_new(
+                std::ptr::null_mut(),
+                c"/tmp/g".as_ptr(),
+                c"/".as_ptr(),
+                c"g".as_ptr(),
+                1,
+                XFER_GET.into(),
+                0,
+                4096,
+            );
+            assert_eq!((*waiting).gone, 0, "behind the running one");
+            assert_eq!((*waiting).queue, 0, "no place in a server's queue");
+            assert_eq!((*waiting).total_size, 4096);
+        }
+    }
+
+    /// Pause `h` with `kept` bytes on disk, and let its worker finish.
+    unsafe fn pause_settled(h: *mut HtxfHandle, kept: i64) {
+        xfer_pause(h);
+        LOCAL_SIZE.set(kept);
+        xfer_cleanup_dispatch(h.cast());
+    }
+
+    fn requests() -> usize {
+        WRITTEN.with_borrow(Vec::len)
+    }
+
+    /// The data offset the last request resumes at, if it carries an RFLT.
+    fn resumed_at() -> Option<u32> {
+        WRITTEN.with_borrow(|w| {
+            w.last()?
+                .iter()
+                .find(|c| c.starts_with(b"RFLT"))
+                .map(|c| u32::from_be_bytes(c[46..50].try_into().unwrap()))
+        })
+    }
+
+    #[test]
+    fn a_paused_download_stays_listed_and_out_of_the_queue() {
+        reset(&[]);
+        unsafe {
+            let r = running();
+            let a = new_download();
+            assert_eq!((*a).gone, 0, "queued behind a running download");
+            // mhxd repeats the queue position, 0, once a transfer has started.
+            let workers = WORKERS.get();
+            xfer_ready_write(r);
+            assert_eq!(WORKERS.get(), workers, "one worker to a transfer");
+
+            xfer_pause(r);
+            assert_eq!(xfer_paused(r), 1);
+            assert_eq!(xfer_can_pause(r), 0);
+            // Still winding down: Start waits for the worker, and the queue
+            // waits for its connection to close.
+            assert_eq!(xfer_can_start(r), 0);
+            assert_eq!((*a).gone, 0, "nothing new asked for yet");
+            let asked = requests();
+            xfer_go(r);
+            assert_eq!(requests(), asked);
+            xfer_ready_write(r);
+            assert_eq!(WORKERS.get(), workers, "nor one to a paused transfer");
+
+            LOCAL_SIZE.set(1000);
+            xfer_cleanup_dispatch(r.cast());
+            assert_eq!(xfer_num(r), 0, "kept in the list");
+            assert_eq!(xfer_paused(r), 1);
+            assert_eq!(xfer_can_start(r), 1);
+            assert_eq!((*a).gone, 1, "the queue moves on");
+
+            xfer_remove_from_list(a);
+            assert_eq!(xfer_paused(r), 1, "a transfer ending doesn't resume it");
+            assert_eq!(requests(), asked + 1);
+            let b = new_download();
+            assert_eq!((*b).gone, 1, "a paused download holds nothing back");
+        }
+    }
+
+    #[test]
+    fn a_refused_download_the_queue_started_is_queued_again() {
+        reset(&[]);
+        unsafe {
+            let r = running();
+            let a = new_download();
+            pause_settled(r, 1000);
+            assert_eq!((*a).gone, 1, "the queue started it");
+            for _ in 0..QUEUE_TRIES {
+                assert!(queued_refused(a.cast()));
+                assert_eq!((*a).gone, 0, "queued again");
+                assert_eq!(xfer_num(a), 1);
+                start_next();
+                assert_eq!((*a).gone, 1, "and asked for again");
+            }
+            assert!(!queued_refused(a.cast()), "until the tries are spent");
+
+            // Once answered, a later refusal isn't the queue's to retry.
+            let b = new_download();
+            xfer_remove_from_list(a);
+            assert_eq!((*b).gone, 1);
+            download_answered(b.cast());
+            assert!(!queued_refused(b.cast()));
+            // Nor one the user started.
+            let c = new_download();
+            xfer_go(c);
+            assert!(!queued_refused(c.cast()));
+            // Nor a folder download, whose request the queue never sends.
+            let f = xfer_new_folder(
+                std::ptr::null_mut(),
+                c"/tmp/d".as_ptr(),
+                c"/".as_ptr(),
+                c"d".as_ptr(),
+                1,
+                XFER_GET.into(),
+            );
+            xfer_remove_from_list(b);
+            xfer_remove_from_list(c);
+            assert_eq!(xfer_num(f), 1, "next up after the paused one");
+            assert!(!queued_refused(f.cast()));
+        }
+    }
+
+    #[test]
+    fn a_download_that_finished_as_it_paused_is_done() {
+        reset(&[]);
+        unsafe {
+            let r = running();
+            xfer_pause(r);
+            hx_htxf_set_total_pos(r, 5000);
+            xfer_cleanup_dispatch(r.cast());
+            assert_eq!(xfer_num(r), -1);
+        }
+    }
+
+    #[test]
+    fn a_resume_asks_from_what_the_pause_kept() {
+        // (local size at resume, the listing's size, offset asked)
+        for (local, srv, want) in [
+            (1000, 0, Some(1000)),    // as the pause left it
+            (1000, 5000, Some(1000)), // the same, the server's size known
+            (1500, 0, None),          // changed while paused: renamed
+            (1500, 5000, Some(1500)), // changed, but still short of the server's
+            (-1, 5000, None),         // removed while paused
+        ] {
+            reset(&[]);
+            unsafe {
+                let r = running();
+                (*r).srv_data_size = srv;
+                pause_settled(r, 1000);
+                LOCAL_SIZE.set(local);
+                xfer_go(r);
+                assert_eq!(resumed_at(), want, "local {local}, server {srv}");
+                assert_eq!((*r).data_pos, u64::from(want.unwrap_or(0)));
+                assert_eq!(xfer_paused(r), 0);
+                assert_eq!(hx_htxf_total_pos(r), 0);
+                assert_eq!(
+                    (*r).total_size + xfer_resumed_bytes(r),
+                    5000,
+                    "the row still measures the whole file"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_download_paused_before_any_data_starts_over_in_place() {
+        reset(&[]);
+        unsafe {
+            let r = running();
+            pause_settled(r, 0);
+            xfer_go(r);
+            assert_eq!(resumed_at(), None);
+            assert_eq!(xfer_paused(r), 0);
+        }
+    }
+
+    #[test]
+    fn a_refused_resume_is_paused_again_and_an_answered_one_is_not() {
+        reset(&[]);
+        unsafe {
+            let r = running();
+            pause_settled(r, 1000);
+            xfer_go(r);
+            let a = new_download();
+            assert_eq!((*a).gone, 0, "queued behind the resume");
+            assert!(resume_refused(r.cast()));
+            assert_eq!(xfer_paused(r), 1);
+            assert_eq!(xfer_can_start(r), 1);
+            assert_eq!((*a).gone, 1, "the queue moves on");
+
+            xfer_go(r);
+            download_answered(r.cast());
+            assert!(!resume_refused(r.cast()));
+            assert_eq!(xfer_paused(r), 0);
         }
     }
 }

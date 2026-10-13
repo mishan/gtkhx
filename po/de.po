@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-13 01:53-0700\n"
+"POT-Creation-Date: 2026-10-13 13:43-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: German <misha@nasledov.com>\n"
@@ -63,9 +63,9 @@ msgstr "%1$s heißt jetzt %2$s\n"
 msgid "kick successful"
 msgstr "Rauswurf erfolgreich"
 
-#: src/chat.c:2024 src/users_bridge.c:91
-msgid "Msg"
-msgstr "Private Nachricht senden"
+#: src/chat.c:2024 src/users.c:518 src/users_bridge.c:91
+msgid "Private Message"
+msgstr "Private Nachricht"
 
 #: src/chat.c:2032 src/users.c:499 src/users_bridge.c:94
 msgid "Kick"
@@ -478,46 +478,40 @@ msgstr "unbekannter Header-Typ 0x%08x\n"
 msgid "Transfers"
 msgstr "Übertragungen"
 
-#: src/tasks.c:340
+#: src/tasks.c:342
 #, c-format
 msgid "Queued #%u"
 msgstr "In Warteschlange #%u"
 
-#: src/tasks.c:399 rust/crates/gtkhx-ui/src/files/browser.rs:415
+#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:415
 msgctxt "files transfer"
 msgid "Download"
 msgstr "Herunterladen"
 
-#: src/tasks.c:400 rust/crates/gtkhx-ui/src/files/browser.rs:416
+#: src/tasks.c:402 rust/crates/gtkhx-ui/src/files/browser.rs:416
 msgctxt "files transfer"
 msgid "Upload"
 msgstr "Hochladen"
 
-#: src/tasks.c:902
+#: src/tasks.c:911
 msgid "Stop Transfer"
 msgstr "Übertragung stoppen"
 
-#: src/tasks.c:905
+#: src/tasks.c:914
+msgid "Pause Transfer"
+msgstr "Übertragung pausieren"
+
+#: src/tasks.c:918
 msgid "Start Transfer"
 msgstr "Übertragung starten"
 
-#: src/tasks.c:908
+#: src/tasks.c:923
 msgid "Move Transfer Up in Queue"
 msgstr "Übertragung in der Warteschlange nach oben verschieben"
 
-#: src/tasks.c:911
+#: src/tasks.c:926
 msgid "Move Transfer Down in Queue"
 msgstr "Übertragung in der Warteschlange nach unten verschieben"
-
-#: src/tasks.c:1055
-#, c-format
-msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
-msgstr "%1$s von %2$s · %3$s/s · Restzeit %4$d:%5$02d:%6$02d"
-
-#: src/tasks.c:1059
-#, c-format
-msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
-msgstr "%1$s von %2$s · %3$s/s · Restzeit %4$d:%5$02d"
 
 #: src/toolbar.c:254
 msgid "Quit GtkHx?"
@@ -690,10 +684,6 @@ msgstr "Nicht mehr ignorieren"
 #: src/users.c:516
 msgid "Get User Info"
 msgstr "Benutzerinfo abrufen"
-
-#: src/users.c:518
-msgid "Private Message"
-msgstr "Private Nachricht"
 
 #: src/users.c:530
 msgid "Resume Animation"
@@ -3025,6 +3015,22 @@ msgstr "Info abrufen"
 msgid "A file's menu"
 msgstr "Menü einer Datei"
 
+#: rust/crates/gtkhx-ui/src/tasks.rs:67
+msgid "%1$s of %2$s · Paused"
+msgstr "%1$s von %2$s · Pausiert"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:70
+msgid "%1$s of %2$s"
+msgstr "%1$s von %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:79
+msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
+msgstr "%1$s von %2$s · %3$s/s · Restzeit %4$d:%5$02d:%6$02d"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:84
+msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
+msgstr "%1$s von %2$s · %3$s/s · Restzeit %4$d:%5$02d"
+
 #: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:87
 msgid "Certificate changed"
 msgstr "Zertifikat geändert"
@@ -3734,3 +3740,6 @@ msgstr "Bildschirm freigeben"
 #: rust/crates/hxmodel/src/files_entry/populate.rs:61
 msgid "%s file"
 msgstr "%s-Datei"
+
+#~ msgid "Msg"
+#~ msgstr "Private Nachricht senden"

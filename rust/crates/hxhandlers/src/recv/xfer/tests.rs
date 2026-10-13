@@ -23,10 +23,11 @@ fn ready_transfer_announces_and_starts() {
 }
 
 #[test]
-fn queued_transfer_announces_only() {
+fn queued_transfer_announces_and_shows_its_size() {
     test_env::reset();
     unsafe { hx_xfer_announce(std::ptr::null_mut(), fake_htxf(), 3) };
     assert!(test_env::ANNOUNCED.with(|c| c.get()));
+    assert!(test_env::ROW_UPDATED.with(|c| c.get()));
     assert!(!test_env::STARTED.with(|c| c.get()));
 }
 

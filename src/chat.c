@@ -2021,7 +2021,7 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
         gtkhx_icon_image_new ("/com/nasledov/gtkhx/pixmaps/message.png"));
     g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),
                       gchat->userlist);
-    gtkhx_set_name_tip (msg_btn, _ ("Msg"));
+    gtkhx_set_name_tip (msg_btn, _ ("Private Message"));
 
     kick_btn = gtk_button_new ();
     gtkhx_widget_set_child (

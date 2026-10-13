@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-13 01:53-0700\n"
+"POT-Creation-Date: 2026-10-13 13:43-0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -60,8 +60,8 @@ msgstr ""
 msgid "kick successful"
 msgstr ""
 
-#: src/chat.c:2024 src/users_bridge.c:91
-msgid "Msg"
+#: src/chat.c:2024 src/users.c:518 src/users_bridge.c:91
+msgid "Private Message"
 msgstr ""
 
 #: src/chat.c:2032 src/users.c:499 src/users_bridge.c:94
@@ -465,45 +465,39 @@ msgstr ""
 msgid "Transfers"
 msgstr ""
 
-#: src/tasks.c:340
+#: src/tasks.c:342
 #, c-format
 msgid "Queued #%u"
 msgstr ""
 
-#: src/tasks.c:399 rust/crates/gtkhx-ui/src/files/browser.rs:415
+#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:415
 msgctxt "files transfer"
 msgid "Download"
 msgstr ""
 
-#: src/tasks.c:400 rust/crates/gtkhx-ui/src/files/browser.rs:416
+#: src/tasks.c:402 rust/crates/gtkhx-ui/src/files/browser.rs:416
 msgctxt "files transfer"
 msgid "Upload"
 msgstr ""
 
-#: src/tasks.c:902
+#: src/tasks.c:911
 msgid "Stop Transfer"
 msgstr ""
 
-#: src/tasks.c:905
+#: src/tasks.c:914
+msgid "Pause Transfer"
+msgstr ""
+
+#: src/tasks.c:918
 msgid "Start Transfer"
 msgstr ""
 
-#: src/tasks.c:908
+#: src/tasks.c:923
 msgid "Move Transfer Up in Queue"
 msgstr ""
 
-#: src/tasks.c:911
+#: src/tasks.c:926
 msgid "Move Transfer Down in Queue"
-msgstr ""
-
-#: src/tasks.c:1055
-#, c-format
-msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
-msgstr ""
-
-#: src/tasks.c:1059
-#, c-format
-msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr ""
 
 #: src/toolbar.c:254
@@ -674,10 +668,6 @@ msgstr ""
 
 #: src/users.c:516
 msgid "Get User Info"
-msgstr ""
-
-#: src/users.c:518
-msgid "Private Message"
 msgstr ""
 
 #: src/users.c:530
@@ -2875,6 +2865,22 @@ msgstr ""
 
 #: rust/crates/gtkhx-ui/src/shortcuts.rs:152
 msgid "A file's menu"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:67
+msgid "%1$s of %2$s · Paused"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:70
+msgid "%1$s of %2$s"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:79
+msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:84
+msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr ""
 
 #: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:87

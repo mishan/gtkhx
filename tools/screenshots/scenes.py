@@ -185,8 +185,9 @@ def make_assets(out):
 # ------------------------------------------------------------------- Janus --
 
 
-def janus_config(template, banner):
-    """The rig's Janus config, turned into the showcase server's."""
+def janus_config(template, banner, extra=None):
+    """The rig's Janus config, turned into the showcase server's, with a
+    scene's own `extra` settings."""
     server = load("server.json")
     replace = {
         "Port": str(JANUS_PORT),
@@ -200,6 +201,7 @@ def janus_config(template, banner):
         "EnableVoice": "false",
         "ChatHistoryEnabled": "false",
         "APIAddr": '""',
+        **(extra or {}),
     }
     lines = []
     for line in template.read_text().splitlines():
@@ -282,7 +284,7 @@ def seed_board(path):
 class Janus:
     """A fresh Janus with the showcase content, for one scene."""
 
-    def __init__(self, assets):
+    def __init__(self, assets, extra=None):
         self.dir = WORK / "janus"
         shutil.rmtree(self.dir, ignore_errors=True)
         shutil.copytree("/opt/janus", self.dir, symlinks=True)
@@ -291,7 +293,7 @@ class Janus:
             for f in server.glob(stale + "*"):
                 f.unlink()
         (server / "config.yaml").write_text(
-            janus_config(SRC / "tests/janus/conf/config.yaml", "banner.gif"))
+            janus_config(SRC / "tests/janus/conf/config.yaml", "banner.gif", extra))
         shutil.copy(assets / "banner.gif", server / "banner.gif")
         (server / "Agreement.txt").write_text(load("server.json")["agreement"])
         # Everyone logs in as guest; the scripted users post an image.
@@ -584,6 +586,98 @@ def scene_tracker(out, bots, assets):
     app.terminate()
 
 
+# GtkHx reaches Janus through a hotline.Relay here, and so its file
+# transfers through the relay's port + 1.
+RELAY_PORT = 5530
+
+# What the relay lets each download bring before it stalls: under half of
+# Harbor Session 01.flac and a third of dawn-02.jpg.
+SESSION_BYTES = 17_300_000
+DAWN_BYTES = 1_830_000
+
+
+def scene_transfers(out, bots, assets):
+    """Three rows that hold still: a download part way, one paused, and one
+    waiting in the server's queue. A row shows its speed and time left
+    only while its connection is bringing bytes, which no two runs do
+    alike, so the one downloading is a resumed download whose connection
+    the relay holds: it shows what it had when it paused, and no speed.
+    It is the large file because the hold relies on its rest, about 21 MB,
+    being more than the loopback socket buffers between Janus and the
+    relay take (a few MB; a JPEG's rest fits): Janus is still sending it,
+    and so queues the next."""
+    relay = hotline.Relay(RELAY_PORT, JANUS_PORT)
+    app = log_in(bots, port=RELAY_PORT)
+    since = time.monotonic()
+    say_lines(bots, load("transfers-chat.json"), assets)
+    menu(375)                                   # Transfers
+    display.wait_stable(window="GtkHx.*")
+    win = "Files.*"
+
+    def download(*rows):
+        """Open the folders at the heights `rows` give in turn, then
+        download the file at the last."""
+        menu(175)                               # Files
+        display.wait_window(win)
+        display.wait_stable(window=win)
+        *folders, file = rows
+        for y in folders:
+            display.click(600, y, window=win, double=True)
+            display.wait_stable(window=win)
+        display.click(600, file, window=win)
+        display.click(935, 614, window=win)     # Download
+        display.wait_stable(window=win)
+        # Closed, because it covers the Transfers panel.
+        display.click(971, 27, window=win)
+        display.until("the Files window to close",
+                      lambda: not display.backend.find_window(display.env, win))
+        display.wait_stable(window="GtkHx.*")
+
+    def stalled(n, name):
+        """Wait for download `n` to have read every byte the relay let it
+        bring. Pausing ends its connection, and what it had read by then
+        is the size its row shows. The relay settles once Janus has
+        finished sending, which it does some seconds after the last byte,
+        having waited for the client to close."""
+        display.until(f"{name}'s bytes", lambda: relay.settled(n))
+        part = WORK / "local" / name
+        sizes = []
+
+        def still():
+            sizes.append(part.stat().st_size if part.exists() else 0)
+            time.sleep(0.25)
+            return sizes[-1] > 0 and sizes[-4:] == [sizes[-1]] * 4
+        display.until(f"{name} to stop growing", still)
+
+    def act(row, button):
+        """Pick a row in the Transfers panel and press a button for it."""
+        display.click(150, row, window="GtkHx.*")
+        display.wait_stable(window="GtkHx.*")
+        display.click(button, 69, window="GtkHx.*")
+        display.wait_stable(window="GtkHx.*")
+
+    session, dawn = 115, 185                    # the rows
+    pause, start = 52, 82                       # the buttons
+
+    relay.allow(SESSION_BYTES)
+    download(158, 133, 133)                     # Music/Sessions/Harbor Session 01.flac
+    stalled(0, "Harbor Session 01.flac")
+    act(session, pause)
+    relay.allow(DAWN_BYTES)
+    download(183, 158, 158)                     # Photos/Harbor/dawn-02.jpg
+    stalled(1, "dawn-02.jpg")
+    act(dawn, pause)
+    relay.hold()
+    act(session, start)
+    display.until("the resumed download", lambda: relay.settled(2))
+    # Janus takes one download at a time here: this one waits in its
+    # queue behind the one resumed.
+    download(183, 158, 208)                     # Photos/Harbor/lighthouse.jpg
+    toast_gone(since)
+    display.capture(out, window="GtkHx.*", park=True)
+    app.terminate()
+
+
 # How long the video tiles take to show, once GtkHx is in the voice
 # session: the offer and answer, then the first keyframes.
 VIDEO_SETTLE = 12
@@ -700,6 +794,11 @@ SCENES = {
         "tree": "h(L[*chat:center],L[users,*video:end])",
         "sizes": "470", "closed": "news;tasks"}}),
     "classic": (scene_chat, {"theme": "classic"}),
+    # Downloads asked for as they come, not held in GtkHx's own queue, and
+    # Janus sending one at a time, so that its queue holds one.
+    "transfers": (scene_transfers, {"scheme": "dark",
+                                    "extra": {"transfers": {"queue": False}},
+                                    "janus": {"MaxDownloads": "1"}}),
     "explore": (scene_explore, {}),
 }
 
@@ -716,7 +815,7 @@ def inner(scene, out):
     if scene in ON_HXD_NG:
         server, bots = HxdNg(), {}
     else:
-        server = Janus(assets)
+        server = Janus(assets, opts.get("janus"))
         bots = log_in_users(assets, avatars=opts.get("avatars", True))
     try:
         fn(Path(out), bots, assets)
@@ -732,8 +831,11 @@ def inner(scene, out):
 # of pixels, a rounding difference that depends on the order the window
 # was laid out in. 0.5% forgives exactly that one level. The video tiles
 # are VP8 at a constant bitrate, and how the encoder spends its bits
-# depends on live timing: never more than 4% in any channel.
-FUZZ = ["--fuzz", "0.5%", "--fuzz", "video=5%"]
+# depends on live timing: never more than 4% in any channel. And the
+# color-emoji speaker heading the users list's voice column comes out one
+# of two ways, two pixels apart past that, in the scenes that show it.
+FUZZ = ["--fuzz", "0.5%", "--fuzz", "video=5%",
+        *[a for n in ("chat", "classic", "video", "transfers") for a in ("--max", f"{n}=2")]]
 
 
 def compare(ref, new, names):
@@ -762,7 +864,7 @@ def main(argv):
         _, opts = SCENES[name]
         conf = WORK / f"config-{name}"
         shutil.rmtree(conf, ignore_errors=True)
-        gtkhx_config(conf, **opts)
+        gtkhx_config(conf, **{k: v for k, v in opts.items() if k != "janus"})
         log(f"{name}...")
         # A wait that gives up leaves a picture of the screen as
         # NAME-failed.png, which tools/screenshots.sh keeps.

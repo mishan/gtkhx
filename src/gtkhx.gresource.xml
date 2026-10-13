@@ -65,7 +65,9 @@
     <file>pixmaps/preview.png</file>
     <file>pixmaps/quit.png</file>
     <file>pixmaps/refresh.png</file>
+    <file>pixmaps/pause.png</file>
     <file>pixmaps/start.png</file>
+    <file>pixmaps/stop.png</file>
     <file>pixmaps/tasks.png</file>
     <file>pixmaps/tracker.png</file>
     <file>pixmaps/trash.png</file>
