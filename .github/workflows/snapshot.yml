@@ -159,5 +159,8 @@ jobs:
     needs: [version, publish]
     permissions: {}
     uses: ./.github/workflows/flatpak-dispatch.yml
+    # Without it the called job's environment secret, the dispatch token,
+    # comes through empty.
+    secrets: inherit
     with:
       tag: ${{ needs.version.outputs.tag }}
