@@ -141,10 +141,9 @@ jobs:
 
               cargo fmt --all --check
 
-              # Voice-enabled feature set — mirrors the shipping meson build,
-              # GTK 4.14 paths included.
+              # Voice-enabled feature set — mirrors the shipping meson build.
               cargo clippy --workspace --all-targets \
-                --features "hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice,rotulus/v4_16,gtkhx-ui/v4_14" \
+                --features "hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice" \
                 -- -D warnings
 
               # Default (voice-off) configuration.

@@ -49,8 +49,8 @@ members = [
 # - gtk-rs-core 0.22 family: glib 0.22, gio 0.22, gtk4 0.11, libadwaita 0.9
 #   are the crates.io releases that ship together in this line, the
 #   current one. Its MSRV (rustc 1.92) sets the workspace's; see
-#   rust-toolchain.toml. The bindings build against any GTK 4 and
-#   libadwaita 1, so they raise no system floor: meson's gtk4 >= 4.10 and
+#   rust-toolchain.toml. The bindings' features ask for no more than
+#   meson's floors, so they raise none: meson's gtk4 >= 4.16 and
 #   libadwaita-1 >= 1.6 are what decide which distributions can run it.
 # - gstreamer-rs 0.25 family, the line released alongside. Its bindings
 #   build against GStreamer 1.14+, below meson's own 1.20 floor, and the
@@ -82,7 +82,10 @@ rust-version = "1.92"
 [workspace.dependencies]
 # The chat view, published from https://github.com/mishan/rotulus. The
 # widget crate and its layout engine release together; move them together.
-rotulus = "0.2"
+# v4_16 is what makes the view implement GtkAccessibleText, so a screen
+# reader can read the transcript, and reports where the text is on screen,
+# for magnifiers.
+rotulus = { version = "0.2", features = ["v4_16"] }
 rotulus-layout = "0.2"
 hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "c515452a0d81864cd56e9676f6faeefd0a2f0c4c" }
 hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "c515452a0d81864cd56e9676f6faeefd0a2f0c4c" }

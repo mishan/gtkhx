@@ -300,11 +300,7 @@ pub(crate) fn ensure_tab_attention_css() {
         return;
     };
     let css = gtk4::CssProvider::new();
-    // load_from_string is gtk 4.12; the crate targets v4_10, so use the
-    // (deprecated-in-4.12 but present) load_from_data — the same trade
-    // users_view.rs makes for its own provider.
-    #[allow(deprecated)]
-    css.load_from_data("tab.needs-attention .tab-title { font-weight: bold; }");
+    css.load_from_string("tab.needs-attention .tab-title { font-weight: bold; }");
     gtk4::style_context_add_provider_for_display(
         &display,
         &css,
@@ -448,9 +444,9 @@ pub(crate) unsafe fn cstr(p: *const std::ffi::c_char) -> String {
     }
 }
 
-/// An icon-only button, named for assistive technology. An icon gives a
-/// button no name, and GTK below 4.14 exposes a tooltip only as the
-/// description, so a screen reader would announce just "button".
+/// An icon-only button, named for assistive technology. An icon names
+/// nothing, so the name is an argument: no icon button goes without one, and
+/// it is stated rather than left to GTK's fallback to the tooltip.
 /// `tools/check-icon-buttons.sh` keeps `from_icon_name` buttons coming through
 /// here.
 pub(crate) fn icon_button(icon: &str, label: &str) -> gtk4::Button {

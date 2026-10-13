@@ -41,18 +41,16 @@ hxtls-trust = { path = "../hxtls-trust" }
 # compiled behind hxbridge's `voice` feature; this crate is the first to
 # consume them unconditionally. They build against the libgtk-4 /
 # libadwaita-1 the C binary already links, so the system-library surface
-# doesn't grow (meson floor: gtk4 >= 4.10, libadwaita-1 >= 1.6).
+# doesn't grow (meson floor: gtk4 >= 4.16, libadwaita-1 >= 1.6).
 glib = { workspace = true }
 gio = { workspace = true }
 # CSPRNG bytes for the user-editor password generator (useredit.rs),
 # replacing the Linux-only getrandom(2) C shim in src/rand.c. Same 0.3
 # line hxnet already pins; portable across Linux/macOS/Windows.
 getrandom = "0.3"
-# v4_10 enables the GtkColorDialog / GtkColorDialogButton bindings the
-# settings nick-colour row uses. The runtime GTK is already >= 4.10 (meson
-# floor) and the C options.c used GtkColorDialogButton, so this just turns
-# the binding-feature gate on.
-gtk4 = { workspace = true, features = ["v4_10"] }
+# The binding features match meson's gtk4 floor, so everything up to the
+# floor is callable, such as accessible announcements (announce.rs).
+gtk4 = { workspace = true, features = ["v4_16"] }
 # v1_6 enables AdwSpinner (inline-media dialog) on top of the AdwDialog /
 # AdwToolbarView bindings + AdwActionRow subtitle-selectable (transitively
 # v1_5 / v1_4 / v1_3). The runtime libadwaita is already >= 1.6 (meson
@@ -104,7 +102,3 @@ voice = [
     "dep:gstreamer-base",
     "hxhandlers/voice",
 ]
-# Screen-reader announcements (announce.rs), which need GTK 4.14. Turned on
-# by rust/meson.build when the GTK it builds against has them; without it,
-# and on an older GTK at run time, announcing does nothing.
-v4_14 = ["gtk4/v4_14"]

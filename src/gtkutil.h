@@ -201,17 +201,16 @@ extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
 
 /*
  * Set `text` as both the tooltip and the accessible name of a widget whose
- * only content is an icon. An icon names nothing, and GTK below 4.14
- * exposes a tooltip only as the description, so a screen reader would
- * announce just "button". gtkhx_icon_button_new is the GtkButton form;
- * tools/check-icon-buttons.sh keeps icon_name-built buttons coming
- * through it.
+ * only content is an icon. An icon names nothing; GTK would fall back to
+ * the tooltip, but this states the name rather than leaving it to that.
+ * gtkhx_icon_button_new is the GtkButton form, taking the name as an
+ * argument; tools/check-icon-buttons.sh keeps icon_name buttons on it.
  */
 extern void gtkhx_set_name_tip (GtkWidget *widget, const char *text);
 
 /* Screen-reader announcements (gtkhx-ui's announce.rs), from the active
- * window; nothing below GTK 4.14. _line says who a private message (or a
- * line mentioning us) is from. */
+ * window. _line says who a private message (or a line mentioning us) is
+ * from. */
 extern void gtkhx_announce (const char *text, gboolean assertive);
 extern void gtkhx_announce_line (const char *sender, const char *body,
                                  gboolean private_msg);
