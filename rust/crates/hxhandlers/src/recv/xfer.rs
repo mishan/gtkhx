@@ -297,11 +297,14 @@ pub(crate) unsafe fn upload_refused(htlc: *mut c_void, htxf: *mut c_void) {
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn queued(htlc: *mut c_void, reference: u32, queue: u32) {
     let htxf = crate::xfer::htxf_with_ref(htlc, reference);
+    // Janus also says 0 for a range it never queued.
     if htxf.is_null() {
-        glib::g_warning!(
-            "gtkhx",
-            "queue position {queue} for transfer {reference}, which is not one of ours"
-        );
+        if !crate::recv::files::range_queued(htlc, reference, queue) && queue != 0 {
+            glib::g_warning!(
+                "gtkhx",
+                "queue position {queue} for transfer {reference}, which is not one of ours"
+            );
+        }
         return;
     }
     hx_htxf_set_queue(htxf.cast(), queue);

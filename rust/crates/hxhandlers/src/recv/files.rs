@@ -73,6 +73,10 @@ pub(crate) enum Asked {
 /// (`Err(None)`), as by the connection closing.
 pub type RangeDone = Box<dyn FnOnce(Result<&Transfer, Option<String>>)>;
 
+/// Told a queued range's place in the server's queue as it moves, 0 when
+/// its turn comes; `None` if the connection closes first.
+pub type RangeQueued = Box<dyn FnMut(Option<u32>)>;
+
 /// A remote files provider, kept alive while its listing is in flight: a
 /// reply that comes after the browser closed, or after the provider gave
 /// up waiting, reaches a live object, which ignores it.
@@ -138,6 +142,30 @@ unsafe fn object_unref(p: *mut c_void) {
 thread_local! {
     /// The requests in flight, by connection and trans.
     static ASKED: RefCell<HashMap<(usize, u32), Asked>> = RefCell::new(HashMap::new());
+    /// The ranges waiting in a server's queue, by connection and reference.
+    static QUEUED: RefCell<HashMap<(usize, u32), RangeQueued>> = RefCell::new(HashMap::new());
+}
+
+/// Follow the range granted as `reference` on `htlc` through the server's
+/// queue, until its turn comes.
+pub fn follow_queue(htlc: *mut c_void, reference: u32, told: RangeQueued) {
+    QUEUED.with(|q| q.borrow_mut().insert((htlc as usize, reference), told));
+}
+
+/// The queue position for `reference`, to the range that follows it, if
+/// one does. Taken out while it is told, so what it does may reach QUEUED.
+pub(crate) fn range_queued(htlc: *mut c_void, reference: u32, queue: u32) -> bool {
+    let key = (htlc as usize, reference);
+    let Some(mut told) = QUEUED.with(|q| q.borrow_mut().remove(&key)) else {
+        return false;
+    };
+    told(Some(queue));
+    if queue != 0 {
+        QUEUED.with(|q| {
+            q.borrow_mut().entry(key).or_insert(told);
+        });
+    }
+    true
 }
 
 /// A request goes out on `trans`, its reply to go into `what`. A
@@ -178,6 +206,17 @@ pub(crate) fn forget(htlc: *mut c_void, keep_banner: bool) {
         if let Asked::Range(done) = what {
             done(Err(None));
         }
+    }
+    let waiting: HashMap<_, _> = QUEUED.with(|q| {
+        let mut q = q.borrow_mut();
+        let (waiting, kept) = std::mem::take(&mut *q)
+            .into_iter()
+            .partition(|((h, _), _)| *h == htlc as usize);
+        *q = kept;
+        waiting
+    });
+    for mut told in waiting.into_values() {
+        told(None);
     }
 }
 
