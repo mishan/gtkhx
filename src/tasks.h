@@ -30,6 +30,8 @@ extern void gtask_clear_htxf (session *sess, struct htxf_conn *htxf);
 extern void create_tasks_window (GtkWidget *widget, gpointer data);
 extern GtkWidget *gtkhx_tasks_build_content (session *sess);
 extern void gtkhx_tasks_after_embed (session *sess);
+extern char *gtkhx_tasks_subtitle (guint64 pos, guint64 size, guint64 run,
+                                   gint64 elapsed, int paused);
 
 /* Push one connection's transfers into the shared queue. For a
  * connection joining a panel another one already built. */

@@ -62,6 +62,7 @@ rust/crates/gtkhx-ui/src/preview_notice.rs
 rust/crates/gtkhx-ui/src/rc4_dialog.rs
 rust/crates/gtkhx-ui/src/screen_share.rs
 rust/crates/gtkhx-ui/src/shortcuts.rs
+rust/crates/gtkhx-ui/src/tasks.rs
 rust/crates/gtkhx-ui/src/tls_trust_dialog.rs
 rust/crates/gtkhx-ui/src/tracker/actions.rs
 rust/crates/gtkhx-ui/src/tracker/mod.rs

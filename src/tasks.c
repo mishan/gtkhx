@@ -18,19 +18,16 @@
 
 #include "config.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <sys/time.h>
-#include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "network.h"
 #include "gtkutil.h"
 #include "gtkhx_theme.h" /* gtkhx_theme_scale, GTKHX_SCALE_TASKS_ROW_ICON */
-#include "human_readable.h"
 #include "gtkhx.h"
 #include "gtkhx_icon.h"
 #include "xfers.h"
@@ -93,6 +90,7 @@ struct gtask {
 static struct gtask *gtask_list;
 static GtkWidget *gtklist;
 static GtkWidget *gtask_scroll;
+static GtkWidget *pausebtn, *gobtn; /* sensitive to the selection */
 
 /* One-time CSS provider for the tasks rows. Loads tabular-nums on
  * the subtitle (kills digit-width jitter), dims the subtitle, and
@@ -262,6 +260,8 @@ gtask_make_icon (const char *resource_path)
     return picture;
 }
 
+static void tasks_sync_buttons (GtkListBox *box, gpointer data);
+
 void
 create_tasks (void)
 {
@@ -290,6 +290,8 @@ create_tasks (void)
     /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
     gtkhx_apply_listview_style (gtklist);
     g_object_ref_sink (gtklist);
+    g_signal_connect (gtklist, "selected-rows-changed",
+                      G_CALLBACK (tasks_sync_buttons), NULL);
 
     gtask_scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (gtask_scroll),
@@ -754,33 +756,38 @@ gtklist_row_move (GtkListBox *box, GtkWidget *row, int new_index)
     gtk_list_box_select_row (box, GTK_LIST_BOX_ROW (row));
 }
 
+/* The first selected row's live transfer, or NULL; `row` gets the row. */
+static struct htxf_conn *
+selected_xfer (GtkWidget **row)
+{
+    GList *sel;
+    struct gtask *gtsk = NULL;
+
+    if (!hx_panel_was_constructed (HX_PANEL_ID_TASKS)) {
+        return NULL;
+    }
+    sel = gtk_list_box_get_selected_rows (GTK_LIST_BOX (gtklist));
+    if (sel) {
+        *row = sel->data;
+        gtsk = g_object_get_data (G_OBJECT (sel->data), "gtsk");
+    }
+    g_list_free (sel);
+    return gtsk ? gtsk->htxf : NULL;
+}
+
 static void
 task_up (GtkWidget *widget, gpointer data)
 {
-    struct gtask *gtsk;
-    GList *sel;
     GtkWidget *listitem;
+    struct htxf_conn *htxf = selected_xfer (&listitem);
     int num, gtkpos;
 
     (void)data;
-
-    if (!gtkhx_prefs.queuedl || !hx_panel_was_constructed (HX_PANEL_ID_TASKS)) {
+    if (!gtkhx_prefs.queuedl || !htxf) {
         return;
     }
 
-    sel = gtk_list_box_get_selected_rows (GTK_LIST_BOX (gtklist));
-    if (!sel) {
-        return;
-    }
-    listitem = sel->data;
-    g_list_free (sel);
-    gtsk = g_object_get_data (G_OBJECT (listitem), "gtsk");
-
-    if (!gtsk->htxf) {
-        return;
-    }
-
-    num = xfer_num (gtsk->htxf);
+    num = xfer_num (htxf);
 
     /* xfer_up swaps `num` with `num - 1`, so index 1 — the second transfer in
      * the queue — is a legitimate move to the top. Only index 0 and the
@@ -803,29 +810,16 @@ task_up (GtkWidget *widget, gpointer data)
 static void
 task_dn (GtkWidget *widget, gpointer data)
 {
-    struct gtask *gtsk;
-    GList *sel;
     GtkWidget *listitem;
+    struct htxf_conn *htxf = selected_xfer (&listitem);
     int num, gtkpos;
 
     (void)data;
-
-    if (!gtkhx_prefs.queuedl || !hx_panel_was_constructed (HX_PANEL_ID_TASKS)) {
-        return;
-    }
-    sel = gtk_list_box_get_selected_rows (GTK_LIST_BOX (gtklist));
-    if (!sel) {
-        return;
-    }
-    listitem = sel->data;
-    g_list_free (sel);
-    gtsk = g_object_get_data (G_OBJECT (listitem), "gtsk");
-
-    if (!gtsk->htxf) {
+    if (!gtkhx_prefs.queuedl || !htxf) {
         return;
     }
 
-    num = xfer_num (gtsk->htxf);
+    num = xfer_num (htxf);
 
     /* xfer_num answers -1 for "not in the queue" and a 0-based index
      * otherwise, so index 0 — the transfer at the top — is a legitimate move
@@ -848,24 +842,39 @@ task_dn (GtkWidget *widget, gpointer data)
 static void
 task_go (GtkWidget *widget, gpointer data)
 {
-    struct gtask *gtsk;
-    GList *sel;
-    GtkWidget *listitem;
+    GtkWidget *row;
+    struct htxf_conn *htxf = selected_xfer (&row);
 
     (void)data;
-    if (!hx_panel_was_constructed (HX_PANEL_ID_TASKS)) {
-        return;
+    if (htxf) {
+        xfer_go (htxf);
     }
+}
 
-    sel = gtk_list_box_get_selected_rows (GTK_LIST_BOX (gtklist));
-    if (!sel) {
-        return;
+static void
+task_pause (GtkWidget *widget, gpointer data)
+{
+    GtkWidget *row;
+    struct htxf_conn *htxf = selected_xfer (&row);
+
+    (void)data;
+    if (htxf) {
+        xfer_pause (htxf);
     }
-    listitem = sel->data;
-    g_list_free (sel);
-    gtsk = (struct gtask *)g_object_get_data (G_OBJECT (listitem), "gtsk");
-    if (gtsk->htxf) {
-        xfer_go (gtsk->htxf);
+}
+
+/* Pause and Start are offered only where they would do something. */
+static void
+tasks_sync_buttons (GtkListBox *box, gpointer data)
+{
+    GtkWidget *row;
+    struct htxf_conn *htxf = selected_xfer (&row);
+
+    (void)box;
+    (void)data;
+    if (pausebtn && gobtn) {
+        gtk_widget_set_sensitive (pausebtn, htxf && xfer_can_pause (htxf));
+        gtk_widget_set_sensitive (gobtn, htxf && xfer_can_start (htxf));
     }
 }
 
@@ -885,14 +894,14 @@ tasks_pixmap_button (const char *resource_name, const char *tooltip,
 
 /* Content build for the Rust Tasks window shell (gtkhx-ui `tasks`). The
  * dock registration moved to Rust via dock_bridge; the C content leaves —
- * the Stop/Start/Up/Down action buttons wired to the static task_* handlers
- * plus the task-list scroller built in create_tasks — are assembled here
- * and handed back as one still-floating container. Mirrors
+ * the Stop/Pause/Start/Up/Down action buttons wired to the static task_*
+ * handlers plus the task-list scroller built in create_tasks — are assembled
+ * here and handed back as one still-floating container. Mirrors
  * users_bridge.c::gtkhx_users_bridge_build_content. */
 GtkWidget *
 gtkhx_tasks_build_content (session *sess)
 {
-    GtkWidget *stopbtn, *gobtn, *upbtn, *dnbtn;
+    GtkWidget *stopbtn, *upbtn, *dnbtn;
     GtkWidget *content_vbox;
     GtkWidget *button_bar;
 
@@ -901,9 +910,15 @@ gtkhx_tasks_build_content (session *sess)
     stopbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/stop.png",
                                    _ ("Stop Transfer"), G_CALLBACK (task_stop),
                                    sess);
+    pausebtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/pause.png",
+                                    _ ("Pause Transfer"),
+                                    G_CALLBACK (task_pause), sess);
+    g_object_add_weak_pointer (G_OBJECT (pausebtn), (gpointer *)&pausebtn);
     gobtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/start.png",
                                  _ ("Start Transfer"), G_CALLBACK (task_go),
                                  sess);
+    g_object_add_weak_pointer (G_OBJECT (gobtn), (gpointer *)&gobtn);
+    tasks_sync_buttons (NULL, NULL);
     upbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/up.png",
                                  _ ("Move Transfer Up in Queue"),
                                  G_CALLBACK (task_up), sess);
@@ -911,12 +926,13 @@ gtkhx_tasks_build_content (session *sess)
                                  _ ("Move Transfer Down in Queue"),
                                  G_CALLBACK (task_dn), sess);
 
-    /* The four action buttons (Stop/Start on start, Up/Down on end)
+    /* The action buttons (Stop/Pause/Start on start, Up/Down on end)
      * relocate to a slim top-of-content GtkBox with an hexpand spacer
      * keeping the start/end grouping the old headerbar implied. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_add_css_class (button_bar, "gtkhx-panel-actions");
     gtk_box_append (GTK_BOX (button_bar), stopbtn);
+    gtk_box_append (GTK_BOX (button_bar), pausebtn);
     gtk_box_append (GTK_BOX (button_bar), gobtn);
     {
         GtkWidget *spacer = gtk_label_new (NULL);
@@ -956,109 +972,38 @@ gtkhx_tasks_sync_conn (session *sess)
     gtkhx_tasks_refresh_tags ();
 }
 
-/* LONGEST_HUMAN_READABLE + human_size come in via human_readable.h
- * now (transitively via files.h's include chain). */
-
 void
 file_update (session *sess, struct htxf_conn *htxf)
 {
     g_return_if_fail (sess != NULL);
 
     struct gtask *gtsk;
-    char humanbuf[LONGEST_HUMAN_READABLE + 1];
-    g_autofree char *posstr = NULL;
-    g_autofree char *sizestr = NULL;
-    g_autofree char *bpsstr = NULL;
     g_autofree char *basename = NULL;
     g_autofree char *subtitle = NULL;
-    /* htxf->total_pos / total_size are guint64 to support the
-     * Large-File extension (>4 GiB transfers). Earlier code stuffed
-     * them into guint32 and quietly broke past the 32-bit cap. */
-    guint64 pos, size, Bps, remaining, eta;
+    /* A resumed download's progress counts what it already had. */
+    guint64 run = hx_htxf_total_pos (htxf), had = xfer_resumed_bytes (htxf);
+    guint64 pos = run + had, size = htxf->total_size + had;
     struct timeval now;
-    time_t sdiff;
-    int hrs, mins, secs;
-    gboolean title_set;
 
     gtsk = gtask_with_htxf (htxf);
     if (!gtsk) {
         gtsk = gtask_new (hx_conn_serial (sess->htlc), htxf);
     }
 
-    pos = hx_htxf_total_pos (htxf);
-    size = htxf->total_size;
-
-    gettimeofday (&now, 0);
-    sdiff = now.tv_sec - htxf->start.tv_sec;
-    if (sdiff < 1) {
-        sdiff = 1;
-    }
-    Bps = pos / (guint64)sdiff;
-    if (Bps == 0) {
-        Bps = 1;
-    }
-
-    /* ETA = remaining bytes / Bps, rounded UP so the displayed
-     * countdown ticks down to 0 instead of clipping the last
-     * fractional second. The earlier code wrote
-     *   (size-pos)/Bps + ((size-pos)%Bps)/Bps
-     * which is dead-on-arrival in integer math: the second term
-     * is (a value < Bps) / Bps == 0.
-     *
-     * Guard against pos > size first — that case shows up when
-     * total_size is a placeholder (1 for unknown-size folder
-     * transfers, 0 for not-yet-stamped fresh htxf rows) and the
-     * counter creeps past it. Unsigned subtraction would wrap to
-     * an absurd remaining value otherwise. */
-    if (size > pos) {
-        remaining = size - pos;
-        eta = (remaining + Bps - 1) / Bps;
-    } else {
-        eta = 0;
-    }
-
-    hrs = (int)(eta / 3600);
-    eta %= 3600;
-    mins = (int)(eta / 60);
-    secs = (int)(eta % 60);
-
-    posstr = g_strdup (human_size (humanbuf, pos));
-    memset (&humanbuf, 0, sizeof (humanbuf));
-    sizestr = g_strdup (human_size (humanbuf, size));
-    memset (&humanbuf, 0, sizeof (humanbuf));
-    bpsstr = g_strdup (human_size (humanbuf, Bps));
-
     /* Title: just the filename. htxf->path is the local-filesystem
      * path (g_path_get_basename uses POSIX '/' which is what xfers.c
      * builds), so the basename is the bare filename. Tooltip carries
      * the full path for the curious. We only set the title once per
      * row — htxf->path doesn't change after xfer_new. */
-    title_set = (gtk_label_get_text (GTK_LABEL (gtsk->title))[0] != '\0');
-    if (!title_set) {
+    if (gtk_label_get_text (GTK_LABEL (gtsk->title))[0] == '\0') {
         basename = g_path_get_basename (htxf->path);
         gtk_label_set_text (GTK_LABEL (gtsk->title), basename);
         gtk_widget_set_tooltip_text (gtsk->title, htxf->path);
     }
 
-    /* Subtitle: structured stable-width metrics. Middle dots
-     * (U+00B7) separate the segments — easier to scan than a string
-     * of spaces, and the dim-label CSS makes the whole line read as
-     * supporting text below the title. Tabular-nums (CSS feature)
-     * keeps the digits from shifting siblings as values churn.
-     *
-     * Format:  3.2 MB of 12.5 MB \xb7 150 KB/s \xb7 ETA 1:15
-     *
-     * The "ETA" prefix matches Adwaita / GNOME Files conventions
-     * and avoids the trailing path that the old format glued on. */
-    if (hrs > 0) {
-        subtitle = g_strdup_printf (
-            _ ("%1$s of %2$s \xc2\xb7 %3$s/s \xc2\xb7 ETA %4$d:%5$02d:%6$02d"),
-            posstr, sizestr, bpsstr, hrs, mins, secs);
-    } else {
-        subtitle = g_strdup_printf (
-            _ ("%1$s of %2$s \xc2\xb7 %3$s/s \xc2\xb7 ETA %4$d:%5$02d"), posstr,
-            sizestr, bpsstr, mins, secs);
-    }
+    gettimeofday (&now, 0);
+    subtitle = gtkhx_tasks_subtitle (
+        pos, size, run, now.tv_sec - htxf->start.tv_sec, xfer_paused (htxf));
     gtk_label_set_text (GTK_LABEL (gtsk->subtitle), subtitle);
 
     if (size > 0 && pos <= size) {
@@ -1073,6 +1018,7 @@ file_update (session *sess, struct htxf_conn *htxf)
     if (pos >= size) {
         gtask_delete (gtsk);
     }
+    tasks_sync_buttons (NULL, NULL);
 }
 
 /* task_error_extract lives in proto_helpers.c so the Tier 2 unit

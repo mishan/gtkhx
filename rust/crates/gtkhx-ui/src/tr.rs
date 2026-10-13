@@ -79,7 +79,8 @@ pub fn tr_fmt(msgid: &str, args: &[&str]) -> String {
 /// `%%` literals, and repeated positional references — so a translation may
 /// switch to positional specifiers or reorder/repeat arguments without the
 /// UI showing raw `%…` tokens. The conversion letter is ignored (every value
-/// is inserted verbatim), so string and numeric arguments share one path.
+/// is inserted verbatim), so string and numeric arguments share one path; so
+/// are a positional one's flags and width, which the caller applies.
 /// Sequential placeholders consume `args` left to right; positional ones
 /// index directly. A placeholder with no matching argument is dropped.
 pub fn tr_argv(msgid: &str, args: &[&str]) -> String {
@@ -119,6 +120,7 @@ fn subst(s: &str, args: &[&str]) -> String {
                 }
                 if chars.peek() == Some(&'$') {
                     chars.next(); // '$'
+                    while chars.next_if(|c| "-+ #0123456789".contains(*c)).is_some() {}
                     chars.next(); // conversion letter
                     if let Ok(n) = num.parse::<usize>() {
                         if (1..=args.len()).contains(&n) {
@@ -259,5 +261,7 @@ mod tests {
         assert_eq!(subst("Wrote %u files.", &["3"]), "Wrote 3 files.");
         assert_eq!(subst("%2$s then %1$s", &["a", "b"]), "b then a");
         assert_eq!(subst("100%% done, %s", &["ok"]), "100% done, ok");
+        // Flags and width are the caller's to have applied.
+        assert_eq!(subst("%1$d:%2$02d", &["4", "07"]), "4:07");
     }
 }

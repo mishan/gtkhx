@@ -529,3 +529,242 @@ fn a_resumed_download_starts_where_it_was_asked_to() {
         );
     }
 }
+
+// ---- pause and resume ----------------------------------------------------------
+
+/// Open the transfer subchannel for `ref_` as the app's worker does, with a
+/// cancellation token armed on it.
+fn open_transfer(
+    c: &Client,
+    ref_: u32,
+    size: u64,
+) -> (*mut hxnet::htxf::HtxfConn, *const hxnet::htxf::HtxfAbort) {
+    use hxnet::htxf::{
+        hxnet_htxf_abort_arm, hxnet_htxf_abort_new, hxnet_htxf_connect, hxnet_htxf_pack_preamble,
+    };
+    let server = c.server();
+    let mut pre = [0u8; 24];
+    let n = unsafe { hxnet_htxf_pack_preamble(pre.as_mut_ptr(), pre.len(), ref_, size, 0, 0, 0) };
+    assert!(n > 0, "a preamble");
+    let h = unsafe {
+        hxnet_htxf_connect(
+            server.host.as_ptr(),
+            server.host.len(),
+            server.xfer_port,
+            std::ptr::null(),
+            0,
+            0,
+            pre.as_ptr(),
+            n,
+            std::ptr::null(),
+            ref_,
+            None,
+            std::ptr::null_mut(),
+        )
+    };
+    assert!(!h.is_null(), "{}: transfer port", server.name);
+    let abort = hxnet_htxf_abort_new();
+    unsafe { hxnet_htxf_abort_arm(h, abort) };
+    (h, abort)
+}
+
+fn xfer_params(
+    hx: *mut hxnet::htxf::HtxfConn,
+    path: &std::ffi::CStr,
+) -> hxnet::xfer::HxnetXferParams {
+    unsafe extern "C" fn no_progress(_u: *mut std::ffi::c_void, _d: u64) {}
+    hxnet::xfer::HxnetXferParams {
+        hx,
+        path: path.as_ptr(),
+        file_budget: 0,
+        data_pos: 0,
+        rsrc_pos: 0,
+        opt_preview: 0,
+        opt_folder: 0,
+        opt_large: 0,
+        preview: std::ptr::null_mut(),
+        user_data: std::ptr::null_mut(),
+        progress: Some(no_progress),
+        preview_chunk: None,
+        preview_set_info: None,
+        preview_done: None,
+        data_size: 0,
+        rsrc_size: 0,
+    }
+}
+
+/// Upload the local file `path` into `dir` as `name`, as the app's upload does.
+fn upload(c: &mut Client, dir: &str, name: &[u8], path: &std::ffi::CStr, len: u64) {
+    use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close, hxnet_htxf_finish_send};
+    let enc = hxrequest::path::encode_dir(dir.as_bytes(), false);
+    let put = hxproto::build::FilePutRequest {
+        name,
+        dir: Some(&enc),
+        has_preview: false,
+        size: len as u32,
+        size64: None,
+    };
+    let mut chunks = [hxproto::build::HxChunk::EMPTY; 5];
+    let mut scratch = [0u8; 12];
+    let hc = hxproto::build::build_file_put_chunks(&put, &mut chunks, &mut scratch);
+    let req = hxrequest::Request {
+        opcode: hxproto::messages::ClientHdr::FilePut as u32,
+        chunks: chunks[..hc]
+            .iter()
+            .map(|ch| {
+                (
+                    ch.tag,
+                    unsafe { std::slice::from_raw_parts(ch.data, ch.len as usize) }.to_vec(),
+                )
+            })
+            .collect(),
+    };
+    let r = c.request(&req);
+    ok(c, &r, "an upload");
+    let ref_ = hxproto::parse::parse_file_put_reply(&r.raw, r.raw.len()).ref_;
+    // The FILP header and the data fork's marker, then the data.
+    let (h, abort) = open_transfer(c, ref_, 133 + len);
+    let mut p = xfer_params(h, path);
+    p.data_size = len;
+    assert_eq!(
+        unsafe { hxnet::xfer::hxnet_xfer_file_send_one(&p) },
+        0,
+        "{}: the upload",
+        c.server().name
+    );
+    unsafe {
+        hxnet_htxf_finish_send(h);
+        hxnet_htxf_close(h);
+        hxnet_htxf_abort_free(abort);
+    }
+}
+
+/// What the progress hook of a download paused partway needs: the token to
+/// pull, and when.
+struct PauseAt {
+    abort: *const hxnet::htxf::HtxfAbort,
+    received: u64,
+    at: u64,
+}
+
+unsafe extern "C" fn pause_when_due(user: *mut std::ffi::c_void, delta: u64) {
+    let p = &mut *(user as *mut PauseAt);
+    p.received += delta;
+    if p.received >= p.at {
+        hxnet::htxf::hxnet_htxf_abort(p.abort);
+    }
+}
+
+/// Download `name` in `dir` into `path` from what is already there, as the
+/// app asks for a download it resumes, stopping as a pause does once `pause_at`
+/// bytes have come. The worker's result.
+fn download_from(
+    c: &mut Client,
+    dir: &str,
+    name: &[u8],
+    path: &std::ffi::CStr,
+    pause_at: u64,
+    (tries, wait_ms): (u32, u64),
+) -> i32 {
+    use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close};
+    let local = std::fs::metadata(path.to_str().unwrap()).map_or(0, |m| m.len()) as u32;
+    // mhxd refuses a download asked for just after one closes ("1 at a
+    // time") until it has seen that one go.
+    let req = files::get_from(dir.as_bytes(), name, local).unwrap();
+    let mut r = c.request(&req);
+    for _ in 0..tries {
+        if !r.is_error() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+        r = c.request(&req);
+    }
+    ok(c, &r, "a download");
+    let get = hxproto::parse::parse_file_get_reply(&r.raw, r.raw.len());
+    let (h, abort) = open_transfer(c, get.ref_, u64::from(get.size));
+    let mut at = PauseAt {
+        abort,
+        received: 0,
+        at: pause_at,
+    };
+    let mut p = xfer_params(h, path);
+    p.file_budget = u64::from(get.size);
+    p.data_pos = u64::from(local);
+    p.user_data = (&mut at as *mut PauseAt).cast();
+    p.progress = Some(pause_when_due);
+    let rv = unsafe { hxnet::xfer::hxnet_xfer_file_recv_one(&p) };
+    unsafe {
+        hxnet_htxf_close(h);
+        hxnet_htxf_abort_free(abort);
+    }
+    rv
+}
+
+/// How often, and how far apart, a refused download is asked for again: the
+/// app's for one its queue started (`QUEUE_TRIES`, `QUEUE_RETRY_MS` in
+/// hxhandlers), and a patient one for the rest.
+const QUEUE_RETRIES: (u32, u64) = (5, 500);
+const PATIENT: (u32, u64) = (30, 100);
+
+/// A download paused partway — its connection ended, its partial file kept —
+/// lets the next one go, and resumed from what is on disk arrives whole, byte
+/// for byte. The pause and the resume are this test's own, built from the
+/// pieces the app's are (the transfer's abort token, a resume FILE_GET);
+/// hxhandlers' unit tests cover the app's state around them.
+///
+/// Not hlservd: its INFO fork leaves out the comment's length, which the
+/// download's parser refuses as truncated, so no download from it completes.
+#[test]
+fn a_paused_download_resumes_to_the_same_bytes() {
+    const LEN: usize = 3 << 20;
+    let bytes: Vec<u8> = (0..LEN as u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
+    for mut c in admins()
+        .into_iter()
+        .filter(|c| c.server().name != "hlservd")
+    {
+        let name = c.server().name;
+        let tmp = std::env::temp_dir().join(hx_e2e::unique_name("hx-e2e-pause"));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let (src, dst, next) = (tmp.join("src"), tmp.join("dst"), tmp.join("next"));
+        std::fs::write(&src, &bytes).unwrap();
+        let src_c = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
+        let dst_c = std::ffi::CString::new(dst.to_str().unwrap()).unwrap();
+        let next_c = std::ffi::CString::new(next.to_str().unwrap()).unwrap();
+
+        let mut s = Scratch::new(&mut c, "pause");
+        let dir = s.path().to_string();
+        upload(s.client(), &dir, b"big", &src_c, LEN as u64);
+
+        upload(s.client(), &dir, b"next", &src_c, LEN as u64);
+
+        let rv = download_from(s.client(), &dir, b"big", &dst_c, LEN as u64 / 3, PATIENT);
+        assert_ne!(rv, 0, "{name}: the pause didn't stop the download");
+        let kept = std::fs::metadata(&dst).map_or(0, |m| m.len()) as usize;
+        assert!(0 < kept && kept < LEN, "{name}: kept {kept} of {LEN}");
+        assert_eq!(
+            std::fs::read(&dst).unwrap(),
+            bytes[..kept],
+            "{name}: the part kept"
+        );
+
+        // The next one in the queue goes as soon as the paused one's
+        // connection has closed, which mhxd may not have seen yet.
+        let rv = download_from(s.client(), &dir, b"next", &next_c, u64::MAX, QUEUE_RETRIES);
+        assert_eq!(rv, 0, "{name}: the next download failed");
+        assert!(
+            std::fs::read(&next).unwrap() == bytes,
+            "{name}: next download's bytes differ"
+        );
+
+        let rv = download_from(s.client(), &dir, b"big", &dst_c, u64::MAX, PATIENT);
+        assert_eq!(rv, 0, "{name}: the resumed download failed");
+        assert!(
+            std::fs::read(&dst).unwrap() == bytes,
+            "{name}: resumed bytes differ"
+        );
+        drop(s);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
