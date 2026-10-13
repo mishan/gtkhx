@@ -34,7 +34,8 @@ use crate::xfer::offer_full_download;
 use gtkhx_core::conn::hx_conn_serverhost;
 #[cfg(not(test))]
 use gtkhx_core::session::{
-    gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default,
+    gtkhx_session_emit_file_info, gtkhx_session_emit_file_update, gtkhx_session_emit_xfer_queue,
+    gtkhx_session_get_default,
 };
 
 #[cfg(not(test))]
@@ -145,9 +146,14 @@ unsafe extern "C" fn preview_cancel_xfer(user_data: *mut c_void) {
 /// `htxf` must be a live transfer.
 #[no_mangle]
 pub unsafe extern "C" fn hx_xfer_announce(htlc: *mut c_void, htxf: *mut c_void, queue: u32) {
-    gtkhx_session_emit_xfer_queue(gtkhx_session_get_default(), hx_sess_from_htlc(htlc), htxf);
+    let (emitter, sess) = (gtkhx_session_get_default(), hx_sess_from_htlc(htlc));
+    gtkhx_session_emit_xfer_queue(emitter, sess, htxf);
     if queue == 0 {
         xfer_ready_write(htxf);
+    } else {
+        // Its row learns the size the reply brought from a progress update,
+        // and a queued transfer has none until it starts.
+        gtkhx_session_emit_file_update(emitter, sess, htxf);
     }
 }
 

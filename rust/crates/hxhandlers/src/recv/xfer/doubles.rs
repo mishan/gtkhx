@@ -46,6 +46,7 @@ pub(crate) mod test_env {
         // Outcome recorders.
         pub static ANNOUNCED: Cell<bool> = const { Cell::new(false) };
         pub static STARTED: Cell<bool> = const { Cell::new(false) };
+        pub static ROW_UPDATED: Cell<bool> = const { Cell::new(false) };
         pub static XFER_DELETED: Cell<bool> = const { Cell::new(false) };
         pub static GTASK_DELETED: Cell<bool> = const { Cell::new(false) };
         pub static RETRY_TIMER: Cell<bool> = const { Cell::new(false) };
@@ -67,6 +68,7 @@ pub(crate) mod test_env {
         COMMENT_LEN.with(|c| c.set(0));
         ANNOUNCED.with(|c| c.set(false));
         STARTED.with(|c| c.set(false));
+        ROW_UPDATED.with(|c| c.set(false));
         XFER_DELETED.with(|c| c.set(false));
         GTASK_DELETED.with(|c| c.set(false));
         RETRY_TIMER.with(|c| c.set(false));
@@ -98,6 +100,14 @@ pub(crate) unsafe fn gtkhx_session_emit_xfer_queue(
     _htxf: *mut c_void,
 ) {
     test_env::ANNOUNCED.with(|c| c.set(true));
+}
+
+pub(crate) unsafe fn gtkhx_session_emit_file_update(
+    _self_: *mut c_void,
+    _sess: *mut c_void,
+    _htxf: *mut c_void,
+) {
+    test_env::ROW_UPDATED.with(|c| c.set(true));
 }
 
 pub(crate) unsafe fn xfer_ready_write(_htxf: *mut c_void) {
