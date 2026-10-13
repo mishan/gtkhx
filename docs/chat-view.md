@@ -36,7 +36,7 @@ Three crates, released together from the rotulus repository:
   `rotulus`.
 
 `rust/Cargo.toml` names the first two in `[workspace.dependencies]` with a
-caret requirement (`rotulus = "0.1"`, `rotulus-layout = "0.1"`), and
+caret requirement (`rotulus = "0.2"`, `rotulus-layout = "0.2"`), and
 `gtkhx-ui` and `gtkhx-ffi` take them with `workspace = true`. The exact
 versions are whatever `rust/Cargo.lock` holds, so a build never moves to a
 new release on its own. The two must move together: the widget is built
@@ -48,7 +48,8 @@ view renders it with; two copies could disagree on both.
 
 `rust/meson.build` turns on `rotulus/v4_14` when the GTK it builds against
 is 4.14 or newer; that feature is what makes the view implement
-`GtkAccessibleText`.
+`GtkAccessibleText`. From 4.16 it turns on `rotulus/v4_16` too, which tells
+magnifiers where the text is on screen.
 
 The Flatpak build is offline, so the crates are vendored through
 `rust/cargo-sources.json` like every other crates.io dependency. It is
@@ -102,10 +103,12 @@ rotulus repository.
 what it needs to know about Hotline. Every chat output is built by
 `gtkhx_chat_view_new`, which sets the palette and font, then:
 
-- **What never changes** (`setup`): the view never takes focus, so typing
-  stays in the input box beside it; the indented two-column layout with a
-  draggable separator; the maximum gutter width; the grouping gap; the
-  link schemes; the avatar resolver; and the two link handlers.
+- **What never changes** (`setup`): a click on the view leaves the focus
+  in the input box beside it, while the keyboard reaches the view by Tab
+  from the subject above it (its links, nicks and context menu); the
+  indented two-column layout with a draggable separator; the maximum
+  gutter width; the grouping gap; the link schemes; the avatar resolver;
+  and the two link handlers.
 - **The preferences** (`configure`): word wrap, scrollback length,
   timestamps and their format, avatars, markdown, "Open links with a single
   click", and the autocopy settings. `gtkhx_chat_view_configure` re-applies

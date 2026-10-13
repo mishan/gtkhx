@@ -435,6 +435,10 @@ endif
 if gtk_dep.version().version_compare('>= 4.14')
   cargo_features = cargo_features + ',rotulus/v4_14,gtkhx-ui/v4_14'
 endif
+# And from 4.16, where the transcript's text is on screen, for magnifiers.
+if gtk_dep.version().version_compare('>= 4.16')
+  cargo_features = cargo_features + ',rotulus/v4_16'
+endif
 
 # Voice crate gating. When voice is compiled out (see -Dvoice / the
 # `voice_enabled` boolean in the top-level meson.build), exclude the two

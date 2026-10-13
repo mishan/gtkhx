@@ -105,7 +105,9 @@ struct SearchCtx {
 
 impl SearchCtx {
     /// Buffer-scoped highlight tags — Adwaita-friendly (warning-yellow for all
-    /// hits, accent-orange for the active one), created on first use.
+    /// hits, accent-orange for the active one, both with black text, which
+    /// white on that orange isn't legible against), the same pair the chat's
+    /// find uses, created on first use.
     fn ensure_tags(&self) {
         let buf = self.text_view.buffer();
         let tt = buf.tag_table();
@@ -118,7 +120,7 @@ impl SearchCtx {
         if tt.lookup("search-current").is_none() {
             buf.create_tag(
                 Some("search-current"),
-                &[("background", &"#ff7800"), ("foreground", &"#ffffff")],
+                &[("background", &"#ff7800"), ("foreground", &"#000000")],
             );
         }
     }

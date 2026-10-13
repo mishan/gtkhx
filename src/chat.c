@@ -275,6 +275,16 @@ gtkhx_apply_theme_palette (gboolean dark)
         colors[role_to_slot[i].slot]
             = gtkhx_theme_get_color (role_to_slot[i].role, dark);
     }
+    /* A theme can recolor the view by its chrome rather than its chat
+     * palette, while tinting is on (gtkhx.c). The chat view can't read a
+     * CSS background, and keeps its text legible against the one it is
+     * told of, so it is told. */
+    if (colors[ROTULUS_PAL_BG].alpha == 0 && gtkhx_prefs.tint_window) {
+        GdkRGBA view;
+        if (gtkhx_theme_get_chrome_color (GTKHX_CHROME_VIEW, dark, &view)) {
+            colors[ROTULUS_PAL_BG] = view;
+        }
+    }
 
     /* Per-nick slots. Every slot is filled — a theme's list repeats
      * across them — because a rendered line keeps the slot number it

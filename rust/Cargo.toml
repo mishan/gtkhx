@@ -82,8 +82,8 @@ rust-version = "1.92"
 [workspace.dependencies]
 # The chat view, published from https://github.com/mishan/rotulus. The
 # widget crate and its layout engine release together; move them together.
-rotulus = "0.1"
-rotulus-layout = "0.1"
+rotulus = "0.2"
+rotulus-layout = "0.2"
 hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
 hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
 hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "694528aa38f2760950ff3dc469b20bfcbdb095bd" }
