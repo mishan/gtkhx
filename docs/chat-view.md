@@ -46,10 +46,9 @@ news views find links with GtkHx's `Linkifier` while the chat view uses
 the widget's, and the compose box highlights markdown with the parser the
 view renders it with; two copies could disagree on both.
 
-`rust/meson.build` turns on `rotulus/v4_14` when the GTK it builds against
-is 4.14 or newer; that feature is what makes the view implement
-`GtkAccessibleText`. From 4.16 it turns on `rotulus/v4_16` too, which tells
-magnifiers where the text is on screen.
+The workspace pin turns on rotulus's `v4_16` feature, which GtkHx's GTK
+floor allows: it is what makes the view implement `GtkAccessibleText`, and
+tells magnifiers where the text is on screen.
 
 The Flatpak build is offline, so the crates are vendored through
 `rust/cargo-sources.json` like every other crates.io dependency. It is

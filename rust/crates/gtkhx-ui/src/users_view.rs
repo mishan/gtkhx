@@ -712,10 +712,7 @@ fn install_padding_css() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let p = gtk::CssProvider::new();
-        // load_from_string is gtk 4.12; the crate targets v4_10, so use the
-        // (deprecated-in-4.12 but present) load_from_data.
-        #[allow(deprecated)]
-        p.load_from_data(
+        p.load_from_string(
             ".gtkhx-userlist > listview > row,\
              .gtkhx-userlist > listview > row > cell {\
                min-height: 0;\

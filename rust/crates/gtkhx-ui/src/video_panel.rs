@@ -186,11 +186,7 @@ fn install_css() {
     };
     INSTALLED.set(true);
     let css = gtk::CssProvider::new();
-    // load_from_string is GTK 4.12, above the bindings' floor. Deprecated
-    // only when a newer binding feature is on, as the chat view's
-    // accessibility turns on.
-    #[allow(deprecated)]
-    css.load_from_data(CSS);
+    css.load_from_string(CSS);
     gtk::style_context_add_provider_for_display(
         &display,
         &css,
@@ -425,10 +421,6 @@ struct PanelInner {
     toplevel: RefCell<Option<(gdk::Toplevel, glib::SignalHandlerId)>>,
 }
 
-/// `GDK_TOPLEVEL_STATE_SUSPENDED`, from GTK 4.12 on; the bindings are
-/// built for 4.10, and an older GTK never sets it.
-const SUSPENDED: gdk::ToplevelState = gdk::ToplevelState::from_bits_retain(1 << 16);
-
 /// Whether a window in `state` shows nothing. Not the backdrop state: a
 /// window without focus is often still in plain view. Suspended is the
 /// compositor saying none of it can be seen — minimized, on another
@@ -436,7 +428,7 @@ const SUSPENDED: gdk::ToplevelState = gdk::ToplevelState::from_bits_retain(1 << 
 /// reports, having no minimized state for a client to see; X11 reports
 /// minimized.
 fn window_hidden(state: gdk::ToplevelState) -> bool {
-    state.intersects(gdk::ToplevelState::MINIMIZED | SUSPENDED)
+    state.intersects(gdk::ToplevelState::MINIMIZED | gdk::ToplevelState::SUSPENDED)
 }
 
 /// On a metered connection, the one stream to receive of `eligible` —

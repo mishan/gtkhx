@@ -56,7 +56,7 @@ add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c'
 # -----------------------------------------------------------------------------
 # Dependencies
 # -----------------------------------------------------------------------------
-gtk_dep     = dependency('gtk4',      version : '>= 4.10')
+gtk_dep     = dependency('gtk4',      version : '>= 4.16')
 # Phase 5: libadwaita gives us AdwApplication (color-scheme tracking),
 # AdwPreferencesWindow (modern Settings layout), AdwHeaderBar, AdwToast,
 # AdwAboutDialog, AdwAlertDialog. 1.6 is the floor that ships the new

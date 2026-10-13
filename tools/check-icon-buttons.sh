@@ -1,10 +1,9 @@
 #!/bin/sh
 # Fail if an icon-only button is built outside the helpers that name it.
 #
-# An icon gives a button no accessible name, and GTK below 4.14 exposes a
-# tooltip only as the description, so a screen reader announces such a
-# button as just "button". gtkhx_icon_button_new (C) and icon_button (Rust)
-# take the name as an argument; this keeps new buttons going through them.
+# An icon gives a button no name of its own. gtkhx_icon_button_new (C) and
+# icon_button (Rust) take one as an argument and set it as both tooltip and
+# accessible name; this keeps new buttons going through them.
 set -eu
 cd "$(dirname "$0")/.."
 

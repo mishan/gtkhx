@@ -128,9 +128,7 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
 5. **Announcements.** *Done.* `announce.rs` (`gtkhx_announce` / `gtkhx_announce_line`
    from C) announces incoming private messages and mentions, a lost connection, an
    empty server address on Connect, a rejected push-to-talk key, find results and the
-   emoji suggestion being picked. `gtk_accessible_announce` is 4.14, so it is built
-   with the `v4_14` feature meson sets from the GTK it finds; below 4.14 nothing is
-   announced, and the chat view's text isn't exposed either.
+   emoji suggestion being picked.
 6. **Contrast.** *Done.* Under the system's high-contrast setting a theme's colors step
    aside for the default palette and the system chrome (`gtkhx_theme_set_high_contrast`),
    and the markdown delimiters keep the text color; links are always underlined, in the

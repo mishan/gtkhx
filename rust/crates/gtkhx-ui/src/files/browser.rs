@@ -1039,11 +1039,7 @@ fn install_css() {
         return;
     };
     let css = gtk::CssProvider::new();
-    // load_from_string is GTK 4.12, above the bindings' floor. Deprecated
-    // only when a newer binding feature is on, as the chat view's
-    // accessibility turns on.
-    #[allow(deprecated)]
-    css.load_from_data(CSS);
+    css.load_from_string(CSS);
     gtk::style_context_add_provider_for_display(
         &display,
         &css,

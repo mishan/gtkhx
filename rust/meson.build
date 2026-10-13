@@ -428,18 +428,6 @@ else
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'
 endif
 
-# The chat view implements GtkAccessibleText, so a screen reader can read
-# the transcript, and gtkhx-ui announces events, when the GTK it builds
-# against has them (4.14). Below that the view exposes only its role and
-# nothing is announced.
-if gtk_dep.version().version_compare('>= 4.14')
-  cargo_features = cargo_features + ',rotulus/v4_14,gtkhx-ui/v4_14'
-endif
-# And from 4.16, where the transcript's text is on screen, for magnifiers.
-if gtk_dep.version().version_compare('>= 4.16')
-  cargo_features = cargo_features + ',rotulus/v4_16'
-endif
-
 # Voice crate gating. When voice is compiled out (see -Dvoice / the
 # `voice_enabled` boolean in the top-level meson.build), exclude the two
 # voice crates from the workspace build: hxvoice-runtime pulls in the

@@ -13,7 +13,7 @@
 #
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
-# well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
+# well above GtkHx's meson floor (gtk4 >= 4.16, libadwaita >= 1.6).
 # gtksourceview-5 (syntax-highlighted source preview viewer) is
 # present in the runtime; poppler-glib, mullion-gtk and imagemagick
 # are NOT (poppler-glib was dropped in 49; mullion-gtk isn't part of

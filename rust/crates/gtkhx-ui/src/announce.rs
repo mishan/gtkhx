@@ -1,9 +1,6 @@
 //! Screen-reader announcements: things worth hearing that happen away from
 //! the keyboard focus, such as a private message, a mention or a dropped
 //! connection.
-//!
-//! `gtk_accessible_announce` is GTK 4.14, above the 4.10 floor, so this is
-//! built only with the `v4_14` feature, and does nothing without it.
 
 use std::ffi::c_char;
 
@@ -13,31 +10,26 @@ use gtk4 as gtk;
 /// window when there is no widget. `assertive` interrupts what the screen
 /// reader is saying; otherwise it waits its turn.
 pub(crate) fn announce(widget: Option<&gtk::Widget>, text: &str, assertive: bool) {
-    #[cfg(feature = "v4_14")]
-    {
-        use gtk::prelude::*;
-        if text.is_empty() {
-            return;
-        }
-        let from = widget.cloned().or_else(|| {
-            gtk::gio::Application::default()
-                .and_downcast::<gtk::Application>()
-                .and_then(|app| app.active_window())
-                .map(|w| w.upcast())
-        });
-        if let Some(w) = from {
-            w.announce(
-                text,
-                if assertive {
-                    gtk::AccessibleAnnouncementPriority::High
-                } else {
-                    gtk::AccessibleAnnouncementPriority::Medium
-                },
-            );
-        }
+    use gtk::prelude::*;
+    if text.is_empty() {
+        return;
     }
-    #[cfg(not(feature = "v4_14"))]
-    let _ = (widget, text, assertive);
+    let from = widget.cloned().or_else(|| {
+        gtk::gio::Application::default()
+            .and_downcast::<gtk::Application>()
+            .and_then(|app| app.active_window())
+            .map(|w| w.upcast())
+    });
+    if let Some(w) = from {
+        w.announce(
+            text,
+            if assertive {
+                gtk::AccessibleAnnouncementPriority::High
+            } else {
+                gtk::AccessibleAnnouncementPriority::Medium
+            },
+        );
+    }
 }
 
 /// `void gtkhx_announce (const char *text, gboolean assertive)` — announce
