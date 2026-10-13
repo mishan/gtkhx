@@ -330,6 +330,9 @@ create_tasks (void)
      * with the gtsk pointer stashed via g_object_set_data on the row
      * itself. */
     gtklist = gtk_list_box_new ();
+    gtk_accessible_update_property (GTK_ACCESSIBLE (gtklist),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL, _ ("Tasks"),
+                                    -1);
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (gtklist),
                                      GTK_SELECTION_MULTIPLE);
     /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */

@@ -144,6 +144,13 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    to the running one, which connects in a new tab. Ctrl+1 and on show the panels, and a
    Keyboard Shortcuts window (Ctrl+?) lists every key, bound from the same table
    (`shortcuts.rs`).
+8. **Checked with shotbox.** *Done.* shotbox's accessibility lint, run headless over
+   every window, found the flat news view, the news browser's tree and article,
+   the Tasks list and the users list unnamed, the Settings sidebar's icons read as
+   "image", and a tracker's section named with every server in it. Each is fixed, and
+   the lint passes; Ctrl+Tab goes round the main window and F6 round its panes. Running
+   the lint and keeping the accessible tree in `tools/screenshots` waits for a shotbox
+   release with it.
 
 ### Help
 

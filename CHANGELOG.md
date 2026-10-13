@@ -7,6 +7,7 @@
   - Clicking a notification opens the conversation it was about; a second launch with --server or --bookmark connects in the running GtkHx instead of opening another
   - Themes step aside for the system's high-contrast setting, and links are underlined rather than told apart by color alone
   - Away and admin names in the users list are easier to read when the theme doesn't color them
+  - Screen readers name the news views, the Tasks list and the users list itself, read a tracker's section by its title rather than every server in it, and skip the icons beside Settings' page names
 - News
   - The news browser shows the pictures an article carries below its text, as hxd-ng serves them to classic clients
   - Fixed an article whose only part is a picture showing as garbled text

@@ -336,6 +336,7 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     }
 
     let news_text = gtk::TextView::new();
+    news_text.update_property(&[gtk::accessible::Property::Label(&tr("News"))]);
     news_text.set_editable(false);
     news_text.set_cursor_visible(false);
     news_text.set_wrap_mode(gtk::WrapMode::Word);

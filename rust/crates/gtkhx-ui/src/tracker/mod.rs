@@ -477,6 +477,11 @@ fn update_title(sec: &Section) {
     };
     sec.expander.set_use_markup(true);
     sec.expander.set_label(Some(&markup));
+    // Its name is otherwise its title and every server listed under it.
+    if let Ok((_, text, _)) = gtk::pango::parse_markup(&markup, '\0') {
+        sec.expander
+            .update_property(&[gtk::accessible::Property::Label(&text)]);
+    }
 }
 
 fn set_count_labels(win: &Win) {
