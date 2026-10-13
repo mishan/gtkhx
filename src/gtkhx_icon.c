@@ -253,6 +253,7 @@ static const struct {
     { "download", "folder-download-symbolic" },
     { "upload", "document-send-symbolic" },
     { "start", "media-playback-start-symbolic" },
+    { "stop", "media-playback-stop-symbolic" },
     { "up", "go-up-symbolic" },
     { "down", "go-down-symbolic" },
     /* News */

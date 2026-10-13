@@ -898,7 +898,7 @@ gtkhx_tasks_build_content (session *sess)
 
     g_return_val_if_fail (sess != NULL, NULL);
 
-    stopbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
+    stopbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/stop.png",
                                    _ ("Stop Transfer"), G_CALLBACK (task_stop),
                                    sess);
     gobtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/start.png",
