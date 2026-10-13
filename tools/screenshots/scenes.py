@@ -553,17 +553,17 @@ def scene_files(out, bots, assets):
 def scene_news(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
-    display.key("ctrl+4")                       # News (1.5+)
+    menu(207)                                   # News (1.5+)
     win = "News.*"
     display.wait_window(win)
     display.wait_stable(window=win)
-    display.click(16, 113, window=win)          # Photography
+    display.click(16, 133, window=win)          # Photography
     display.wait_stable(window=win)
-    display.click(36, 136, window=win)          # Settings for low light?
+    display.click(36, 156, window=win)          # Settings for low light?
     display.wait_stable(window=win)
-    display.click(56, 159, window=win)          # Tripod and a slow shutter
+    display.click(56, 179, window=win)          # Tripod and a slow shutter
     display.wait_stable(window=win)
-    display.click(160, 159, window=win)
+    display.click(160, 179, window=win)
     display.wait_stable(window=win)
     # Room for the nested reply's title.
     display.drag(286, 450, 370, 450, window=win)
