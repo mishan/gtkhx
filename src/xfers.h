@@ -50,6 +50,11 @@ extern int xfer_num (struct htxf_conn *htxf);
 extern void xfer_tasks_update (struct htlc_conn *htlc);
 extern void xfers_delete_all (void);
 extern void xfer_delete (struct htxf_conn *htxf);
+extern void xfer_pause (struct htxf_conn *htxf);
+extern int xfer_paused (struct htxf_conn *htxf);
+extern int xfer_can_pause (struct htxf_conn *htxf);
+extern int xfer_can_start (struct htxf_conn *htxf);
+extern guint64 xfer_resumed_bytes (struct htxf_conn *htxf);
 
 /* Cancel every in-flight transfer on `htlc`. For disconnect: the transfers ride
  * their own HTXF subchannels, so closing the control connection does not stop

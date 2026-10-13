@@ -9,6 +9,7 @@
   - Away and admin names in the users list are easier to read when the theme doesn't color them
 - Transfers
   - The Tasks panel is now Transfers, holds only downloads and uploads, and has a new icon; it stays where your saved layout put it
+  - A download can be paused and resumed: Pause ends its connection and keeps what has arrived, and Start picks up from there; a paused download gives up its place in the server's queue
   - A connection shows its progress with a spinner beside the header bar's title and on its tab, rather than as a row in the list
   - The tracker window shows a spinner while it fetches its server list, rather than a row in the list
 - News
@@ -32,6 +33,8 @@
   - Fixed downloads failing on hxd-ng servers
   - Fixed uploads to some servers, hxd-ng among them, reporting failure though the file arrived
   - Fixed downloading a folder that holds files of 4 GB or more failing partway; 1.5.0 listed this as fixed but shipped without it
+  - Fixed a folder download in the queue being cancelled when another transfer ended
+  - Fixed downloads from mhxd being fetched twice over, which showed speeds above the server's limit and progress ahead of the file
 - Connecting
   - Nothing is sent to a server until the login is done: opening the file browser, sending a chat line or changing your name while an agreement is showing now waits until you're logged in, rather than going early, which the 1.9 server disconnected you for
 - Code Modernization

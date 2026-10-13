@@ -193,6 +193,23 @@ only the video tests use it so far. What is left:
   [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md#shared-code-with-hxd-ng).
 - **One home for extension specs**, and a wire-fixture corpus both projects run.
 
+### Transfer pause and resume
+
+Hotline has no pause in the protocol. Pausing ends a transfer's connection and keeps its
+row and what has arrived; resuming asks again from there. A paused transfer gives up its
+place in the server's queue, and waits behind whoever took it.
+
+1. **Single-file downloads.** *Done.* Pause in the Transfers panel ends the download's
+   connection and keeps its partial file; Start asks for the rest from the file's size, as
+   a resumed download already did, and falls back to that same resume-or-rename choice
+   when the file changed while paused. A paused download leaves the queue to the next
+   one, and a refused resume (mhxd's one at a time) stays paused (`hxhandlers::xfer`).
+2. **Folder downloads.** The folder loop answers each item with SEND; resuming needs it to
+   answer RESUME with an RFLT for an item already partly on disk.
+3. **Uploads.** The 1.5 upload-resume handshake: claim FILE_PREVIEW on the FILE_PUT and
+   send from the offset the server's reply names, tested against each rig server, whose
+   handling of it differs.
+
 ### Code modernization
 
 Ongoing, opportunistic rather than swept: better module boundaries and more reuse, and
