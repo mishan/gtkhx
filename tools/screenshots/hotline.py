@@ -204,3 +204,94 @@ def serve_tracker(port, servers):
 
     threading.Thread(target=loop, daemon=True).start()
     return listener
+
+
+class Relay:
+    """A server's control and transfer ports, relayed through `port` and
+    `port + 1`, so that a file transfer stops where a picture wants it to
+    and not where timing leaves it. Control traffic passes untouched, and
+    so does a transfer nothing was planned for (the login's banner)."""
+
+    def __init__(self, port, target):
+        self.target = target
+        self.cond = threading.Condition()
+        self.plans = []
+        self.done = []
+        self.held = []
+        for offset, accept in ((0, self._accept), (1, self._accept_transfer)):
+            listener = socket.create_server(("127.0.0.1", port + offset))
+            threading.Thread(target=accept, args=(listener,), daemon=True).start()
+
+    def allow(self, nbytes):
+        """The next transfer brings its client exactly `nbytes` of what the
+        server sends, then stalls with its connection open. The server
+        sends the rest into the void, and its download is over."""
+        with self.cond:
+            self.plans.append(nbytes)
+
+    def hold(self):
+        """The next transfer brings its client nothing, and nothing the
+        server sends is read: the server is still sending it, for as long
+        as the file is larger than the sockets between them can take."""
+        self.allow(None)
+
+    def settled(self, n):
+        """Whether planned transfer `n` (from 0) is where its plan leaves
+        it: its bytes delivered and its server finished, or held."""
+        with self.cond:
+            return n < len(self.done) and self.done[n]
+
+    def _connect(self, client, port):
+        server = socket.create_connection(("127.0.0.1", port))
+        threading.Thread(target=self._pipe, args=(client, server), daemon=True).start()
+        return server
+
+    def _accept(self, listener):
+        while True:
+            client, _ = listener.accept()
+            server = self._connect(client, self.target)
+            threading.Thread(target=self._pipe, args=(server, client), daemon=True).start()
+
+    def _accept_transfer(self, listener):
+        while True:
+            client, _ = listener.accept()
+            server = self._connect(client, self.target + 1)
+            with self.cond:
+                planned = bool(self.plans)
+                nbytes = self.plans.pop(0) if planned else None
+                n = len(self.done)
+                if planned:
+                    self.done.append(nbytes is None)
+            if not planned:
+                threading.Thread(target=self._pipe, args=(server, client), daemon=True).start()
+            elif nbytes is None:
+                self.held.append(server)
+            else:
+                threading.Thread(target=self._meter, args=(server, client, nbytes, n),
+                                 daemon=True).start()
+
+    def _meter(self, server, client, nbytes, n):
+        try:
+            while nbytes and (data := server.recv(min(nbytes, 65536))):
+                client.sendall(data)
+                nbytes -= len(data)
+            while server.recv(65536):
+                pass
+        except OSError:
+            pass
+        with self.cond:
+            self.done[n] = True
+
+    @staticmethod
+    def _pipe(src, dst):
+        try:
+            while data := src.recv(65536):
+                dst.sendall(data)
+        except OSError:
+            pass
+        # Both ways, so that the other direction's recv ends too.
+        try:
+            dst.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        dst.close()

@@ -655,12 +655,16 @@ unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
 /// choose. This used to read the *focused* connection instead, which made the
 /// pane a file was dropped on irrelevant to where it actually went — invisible
 /// at one connection, wrong at two.
+///
+/// `size` is what the row measures the transfer by until the server says,
+/// 0 for not known.
 unsafe fn xfer_init(
     htlc: *mut c_void,
     path: &[u8],
     remotedir: &[u8],
     remotename: &[u8],
     type_: u16,
+    size: u64,
 ) -> *mut HtxfHandle {
     // Register the last-ref destructor once — every handle comes through here, so
     // this runs before any can be dropped (was the g_once_init in xfer_init).
@@ -691,14 +695,13 @@ unsafe fn xfer_init(
 
     set_carr(&mut h.path, path);
     h.type_ = type_ as u8;
-    h.queue = u32::MAX; // -1
 
     // Seed the list's ref (0 → 1), then enqueue.
     hx_htxf_ref(htxf);
     xfer_registry_add(htxf);
 
     h.htlc = htlc;
-    h.total_size = 1;
+    h.total_size = size.max(1);
     gtkhx_session_emit_file_update(
         gtkhx_session_get_default(),
         hx_sess_from_htlc(h.htlc),
@@ -734,6 +737,12 @@ pub unsafe extern "C" fn xfer_new(
         cstr_bytes(remotedir),
         slice_bytes(remotename, remotename_len),
         type_,
+        // A download's size as the file listing gave it.
+        if type_ as u8 == XFER_GET {
+            srv_data_size.into()
+        } else {
+            0
+        },
     );
     hx_htxf_set_opt_preview(htxf, if preview != 0 { 1 } else { 0 });
     (*htxf).srv_data_size = srv_data_size as u64;
@@ -832,6 +841,7 @@ pub unsafe extern "C" fn xfer_new_folder(
         cstr_bytes(remotedir),
         slice_bytes(remotename, remotename_len),
         type_,
+        0,
     );
     hx_htxf_set_opt_folder(htxf, 1);
     htxf
@@ -1650,6 +1660,27 @@ mod tests {
         hx_htxf_set_total_pos(h, 1200);
         xfer_ready_write(h);
         h
+    }
+
+    #[test]
+    fn a_download_waiting_its_turn_has_no_place_and_the_listings_size() {
+        reset(&[]);
+        unsafe {
+            running();
+            let waiting = xfer_new(
+                std::ptr::null_mut(),
+                c"/tmp/g".as_ptr(),
+                c"/".as_ptr(),
+                c"g".as_ptr(),
+                1,
+                XFER_GET.into(),
+                0,
+                4096,
+            );
+            assert_eq!((*waiting).gone, 0, "behind the running one");
+            assert_eq!((*waiting).queue, 0, "no place in a server's queue");
+            assert_eq!((*waiting).total_size, 4096);
+        }
     }
 
     /// Pause `h` with `kept` bytes on disk, and let its worker finish.

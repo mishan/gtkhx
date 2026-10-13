@@ -10,6 +10,8 @@
 - Transfers
   - The Tasks panel is now Transfers, holds only downloads and uploads, and has a new icon; it stays where your saved layout put it
   - A download can be paused and resumed: Pause ends its connection and keeps what has arrived, and Start picks up from there; a paused download gives up its place in the server's queue
+  - A download waiting its turn shows its size, and no longer says "Queued #4294967295" while it waits in GtkHx's own queue or "0 of 1" while it waits in the server's
+  - Clicking a transfer selects just that one, rather than adding it to what was already selected, which left Pause and Start acting on the first
   - A connection shows its progress with a spinner beside the header bar's title and on its tab, rather than as a row in the list
   - The tracker window shows a spinner while it fetches its server list, rather than a row in the list
 - News

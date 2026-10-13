@@ -47,12 +47,21 @@ GtkHx configuration, and a sealed shotbox session.
   they show are drawn with ImageMagick at run time rather than committed.
 - **The tracker** is a stand-in in `hotline.py` that answers with a fixed v1 listing, under a
   name from the reserved `example.org` domain.
+- **Transfers** go through a relay in `hotline.py`. The transfers scene connects GtkHx to it
+  rather than to Janus, so its file transfers reach the relay's port + 1, and the relay hands each
+  one exactly as many bytes as the scene allowed and then stalls it, where a live transfer's
+  progress, speed and time left would be different on every run. The scene stalls a download,
+  pauses it and resumes it on a connection the relay holds, so the row shows what it had and no
+  speed (a row shows speed only while bytes arrive); stalls and pauses another, which shows its
+  size and "Paused"; and asks for a third while the resumed one is still in flight, which Janus,
+  allowed one download at a time for this scene, puts in its queue. The resumed one is a large file, so that
+  Janus can't push the rest of it into the sockets between it and the relay and call it done.
 - **Video** comes from two more GtkHx instances in sessions of their own, publishing a drawn
   picture through the test hooks `GTKHX_VOICE_TEST_VIDEO_SRC=image:PATH` and
   `GTKHX_VOICE_TEST_SCREEN_SRC`, with `GTKHX_SCREEN_AUTOSTART` to share the screen.
 
-Each scene also picks its look. News, the tracker and video are in the dark scheme, the rest
-light. The video scene starts from a dock layout of its own, written into the fresh
+Each scene also picks its look. News, the tracker, video and transfers are in the dark scheme,
+the rest light. The video scene starts from a dock layout of its own, written into the fresh
 configuration as `dock-layout.ini`, so the picture has only what it's about: chat and video
 without an empty column.
 
@@ -81,7 +90,7 @@ up waiting for something (`NAME-failed.png`, shotbox's `$SHOTBOX_FAILED`).
 
 ### How identical is identical
 
-The scenes come out byte for byte the same run after run, with two known exceptions, which is
+The scenes come out byte for byte the same run after run, with three known exceptions, which is
 why `--check` compares pixels with a small tolerance rather than bytes (`shotbox compare`, a
 line per picture, with the differences of any that fail beside them as `NAME-diff.png`):
 
@@ -90,6 +99,10 @@ line per picture, with the differences of any that fail beside them as `NAME-dif
   forgives exactly one level.
 - The video tiles are VP8 at a constant bitrate, and how the encoder spends its bits depends on
   live timing. The check forgives up to 5%; the differences seen stay under 4%.
+- The color-emoji speaker heading the users list's voice column is drawn one of two ways from
+  run to run, differing by up to a tenth in a few pixels, two of them past the tolerance above.
+  The check forgives those two pixels in the pictures that show the users list: chat, classic,
+  video and transfers.
 
 ## Quick pictures
 

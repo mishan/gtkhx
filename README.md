@@ -21,8 +21,8 @@ today.
 | Browsing a server's files | Threaded news |
 | ![Finding servers on a tracker](data/screenshots/tracker.png) | ![Video chat](data/screenshots/video.png) |
 | Finding servers on a tracker | Video chat and screen sharing |
-| ![The Classic theme](data/screenshots/classic.png) | |
-| The Classic theme, with the original pixel-art icons | |
+| ![The Classic theme](data/screenshots/classic.png) | ![Transfers](data/screenshots/transfers.png) |
+| The Classic theme, with the original pixel-art icons | Downloads you can pause and resume, and the server's queue |
 
 ## Get GtkHx
 

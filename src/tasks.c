@@ -276,17 +276,16 @@ create_tasks (void)
      * it. Idempotent if already loaded. */
     ensure_tasks_css ();
 
-    /* ported from GtkList (removed in GTK 3) to GtkListBox.
-     * Each transfer/task is a GtkListBoxRow holding the icon + title +
-     * subtitle + progress-bar layout; gtsk->listitem points at the row,
-     * with the gtsk pointer stashed via g_object_set_data on the row
-     * itself. */
+    /* A GtkListBoxRow per transfer, gtsk->listitem, holding its gtsk as
+     * object data. */
     gtklist = gtk_list_box_new ();
     gtk_accessible_update_property (GTK_ACCESSIBLE (gtklist),
                                     GTK_ACCESSIBLE_PROPERTY_LABEL,
                                     _ ("Transfers"), -1);
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (gtklist),
                                      GTK_SELECTION_MULTIPLE);
+    /* Activating on a single click would make a click add to the selection. */
+    gtk_list_box_set_activate_on_single_click (GTK_LIST_BOX (gtklist), FALSE);
     /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
     gtkhx_apply_listview_style (gtklist);
     g_object_ref_sink (gtklist);

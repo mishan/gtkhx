@@ -62,8 +62,26 @@ pub extern "C" fn gtkhx_tasks_subtitle(
     elapsed: i64,
     paused: c_int,
 ) -> *mut c_char {
+    let text = subtitle(pos, size, run, elapsed, paused != 0, human);
+    let text = CString::new(text).unwrap_or_default();
+    unsafe { gtk4::glib::ffi::g_strdup(text.as_ptr()) }
+}
+
+/// [`gtkhx_tasks_subtitle`]'s text, with sizes written by `human`.
+fn subtitle(
+    pos: u64,
+    size: u64,
+    run: u64,
+    elapsed: i64,
+    paused: bool,
+    human: impl Fn(u64) -> String,
+) -> String {
     let (p, s) = (human(pos), human(size));
-    let text = if paused != 0 {
+    if size <= 1 && pos == 0 && !paused {
+        // A size of 1 is the stand-in for one not known yet (an upload the
+        // server hasn't answered): nothing to tell.
+        String::new()
+    } else if paused {
         tr_argv("%1$s of %2$s · Paused", &[&p, &s])
     } else if run == 0 {
         // No speed to tell yet: waiting on the server, or queued by it.
@@ -85,9 +103,7 @@ pub extern "C" fn gtkhx_tasks_subtitle(
                 &[&p, &s, &rate, &m.to_string(), &sec],
             )
         }
-    };
-    let text = CString::new(text).unwrap_or_default();
-    unsafe { gtk4::glib::ffi::g_strdup(text.as_ptr()) }
+    }
 }
 
 /// Open (or raise) the Transfers panel. C ABI replacement for the old
@@ -131,5 +147,39 @@ pub unsafe extern "C" fn create_tasks_window(_widget: *mut c_void, data: *mut c_
         content,
     ) {
         gtkhx_tasks_after_embed(sess);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::subtitle;
+
+    #[test]
+    fn subtitle_tells_what_the_row_knows() {
+        // (pos, size, run, elapsed, paused, the line)
+        for (pos, size, run, elapsed, paused, want) in [
+            (0, 1, 0, 0, false, ""),              // size not known yet
+            (0, 5_000, 0, 3, false, "0 of 5000"), // waiting its turn
+            (1_200, 5_000, 0, 0, true, "1200 of 5000 · Paused"),
+            (
+                1_000,
+                5_000,
+                1_000,
+                2,
+                false,
+                "1000 of 5000 · 500/s · ETA 0:08",
+            ),
+            (
+                0,
+                4_000_000,
+                100,
+                1,
+                false,
+                "0 of 4000000 · 100/s · ETA 11:06:40",
+            ),
+        ] {
+            let got = subtitle(pos, size, run, elapsed, paused, |n| n.to_string());
+            assert_eq!(got, want, "pos {pos}, size {size}, run {run}");
+        }
     }
 }
