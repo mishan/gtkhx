@@ -528,7 +528,7 @@ Three tiers fall out naturally.
 
 **Global but tagged:**
 
-- Tasks and the transfer queue. One global list of every connection's in-flight
+- The Transfers panel. One global list of every connection's in-flight
   transfers, with a per-row tag naming the connection. This matches the "one
   place to watch every transfer" instinct.
 
@@ -542,10 +542,10 @@ Three tiers fall out naturally.
   process-wide list with each handle carrying its own connection, so the tagged
   view was close to free; the per-connection filter and the disconnect sweep
   were what had to be built. What the estimate missed is that the *rows* were
-  per-connection even though the transfers were not, and that the row keys —
-  transaction ids, plus fixed pseudo-ids for the connect and tracker progress
-  rows — are only unique within a connection. Sharing the list without keying
-  on the pair would have had two servers driving each other's rows.
+  per-connection even though the transfers were not. Every row is a transfer
+  now, keyed on its transfer handle, which is unique across the process; the
+  connection serial each row carries is what the tag and the disconnect sweep
+  read.
 
 ### Axis 4 — Voice exclusivity
 
@@ -649,7 +649,7 @@ put.
 │ │ (A's)    │ │ (A's, w/ pchat   │ │ (A's)     │ │
 │ │          │ │  + PM subtabs)   │ │           │ │
 │ └──────────┘ └──────────────────┘ └───────────┘ │
-│              ┌──── Tasks (global, all conns) ──┐ │
+│              ┌── Transfers (global, all conns) ┐ │
 │              └─────────────────────────────────┘ │
 └──────────────────────────────────────────────────┘
 switch to ServerB → the News/Chat/Users/Files panels swap to B's
@@ -692,7 +692,7 @@ unified tree.
 │ │                │ │                │ ├──────────┤│
 │ │                │ │                │ │ Users(B) ││
 │ └────────────────┘ └────────────────┘ └──────────┘│
-│ ┌──────────── Tasks (global) ──────────────────┐  │
+│ ┌──────────── Transfers (global) ──────────────┐  │
 │ └───────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────┘
 ```

@@ -2,7 +2,8 @@
 //!
 //! Exports the C ABI entry points the deleted `tracker.c` provided:
 //! `create_tracker_window`, `tracker_batch_begin`, `tracker_server_create`,
-//! `tracker_clear`, `tracker_search_refresh`. Everything runs on the GTK
+//! `tracker_clear`, `tracker_search_refresh`, and `tracker_set_busy` for the
+//! fetch's spinner. Everything runs on the GTK
 //! main thread; window-wide state lives in the [`WIN`] thread-local, and
 //! the compiled search regex in [`SEARCH`] (kept separate so the shared
 //! `GtkCustomFilter` match callback can read it without re-entering a
@@ -104,6 +105,7 @@ struct Win {
     search_entry: gtk::SearchEntry,
     lbl_found: gtk::Label,
     lbl_total: gtk::Label,
+    busy: adw::Spinner,
     filter: gtk::CustomFilter,
     order: Vec<Rc<Section>>,
     by_url: HashMap<String, Rc<Section>>,
@@ -759,6 +761,17 @@ pub extern "C" fn tracker_search_refresh() {
     rerun_search();
 }
 
+/// `void tracker_set_busy(gboolean busy)` — show the spinner while a fetch
+/// runs. No-op while the window is closed.
+#[no_mangle]
+pub extern "C" fn tracker_set_busy(busy: glib::ffi::gboolean) {
+    WIN.with_borrow(|w| {
+        if let Some(win) = w.as_ref() {
+            win.busy.set_visible(busy != glib::ffi::GFALSE);
+        }
+    });
+}
+
 /// `void create_tracker_window(GtkWidget *widget, gpointer data)` —
 /// `data` is a `session *`.
 #[no_mangle]
@@ -864,6 +877,14 @@ fn build_window(sess: *mut c_void) {
     count_box.append(&lbl_found);
     count_box.append(&lbl_total);
     header.pack_end(&count_box);
+    let busy = adw::Spinner::new();
+    busy.set_tooltip_text(Some(&tr("Fetching the server list")));
+    busy.upcast_ref::<gtk::Widget>()
+        .update_property(&[gtk::accessible::Property::Label(&tr(
+            "Fetching the server list",
+        ))]);
+    busy.set_visible(false);
+    header.pack_end(&busy);
     window.set_titlebar(Some(&header));
 
     // Sections stack.
@@ -897,6 +918,7 @@ fn build_window(sess: *mut c_void) {
             search_entry: search_entry.clone(),
             lbl_found,
             lbl_total,
+            busy,
             filter,
             order: Vec::new(),
             by_url: HashMap::new(),
@@ -941,6 +963,8 @@ pub(crate) fn bench_counts() -> (u32, u32) {
 }
 
 fn on_close() {
+    // The window is the fetch's only progress and its only way to stop it.
+    unsafe { ffi::tracker_kill_threads() };
     tracker_clear();
     WIN.with_borrow_mut(|w| *w = None);
     SEARCH.with_borrow_mut(|s| *s = None);

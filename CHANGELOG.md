@@ -7,7 +7,11 @@
   - Clicking a notification opens the conversation it was about; a second launch with --server or --bookmark connects in the running GtkHx instead of opening another
   - Themes step aside for the system's high-contrast setting, and links are underlined rather than told apart by color alone
   - Away and admin names in the users list are easier to read when the theme doesn't color them
-  - Screen readers name the news views, the Tasks list and the users list itself, read a tracker's section by its title rather than every server in it, and skip the icons beside Settings' page names
+  - Screen readers name the news views, the Transfers list and the users list itself, read a tracker's section by its title rather than every server in it, and skip the icons beside Settings' page names
+- Transfers
+  - The Tasks panel is now Transfers, holds only downloads and uploads, and has a new icon; it stays where your saved layout put it
+  - A connection shows its progress with a spinner beside the header bar's title and on its tab, rather than as a row in the list
+  - The tracker window shows a spinner while it fetches its server list, rather than a row in the list
 - News
   - Threaded news (News 1.5+) opens in a window of its own for each connection, as Files does, rather than as a panel; Ctrl+4 still opens it
   - The news browser shows the pictures an article carries below its text, as hxd-ng serves them to classic clients

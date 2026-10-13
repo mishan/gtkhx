@@ -50,11 +50,13 @@ the Rust `gtkhx-ui` crate and are embedded through the C `dock_bridge`
 | Chat         | `gtkhx-ui/src/chat.rs`                    | `chat`   | center  |
 | News 1.0     | `gtkhx-ui/src/news.rs`                    | `news`   | start   |
 | Users        | `gtkhx-ui/src/users.rs`                   | `users`  | end     |
-| Tasks        | `gtkhx-ui/src/tasks.rs`                   | `tasks`  | bottom  |
+| Transfers    | `gtkhx-ui/src/tasks.rs`                   | `tasks`  | bottom  |
 | Video        | `gtkhx-ui/src/video_panel.rs` (voice builds) | `video` | end   |
 
 The ids are defined once in `src/panel_registry.h`; the titles, icons and
-slots in the panel table at the top of `src/dock_bridge.c`.
+slots in the panel table at the top of `src/dock_bridge.c`. An id is what a
+saved layout records, so it stays when a panel is renamed: Transfers was
+Tasks, and keeps `tasks`.
 
 **Becomes a tab inside the Chat panel:** private chats and private
 messages. New activity flags `needs-attention` on the tab and on the Chat
@@ -89,11 +91,11 @@ and a user's request builds it regardless and presents it.
 ### Default layout and slots
 
 ```
-row: [ News, Tasks ]        [ Chat ]       [ Users ]
+row: [ News, Transfers ]    [ Chat ]       [ Users ]
        slots start,bottom    slot center    slot end
 ```
 
-Tasks shares the News column: the queue is empty most of the time, and a
+Transfers shares the News column: the queue is empty most of the time, and a
 transfer raises its tab (`gtkhx_dock_show_if_open` in `gtask_new`) unless
 the user has closed it. A leaf's slots move with it; when the leaf empties,
 they pass to the leaf that takes its room, so a panel new in a release (or
@@ -149,7 +151,7 @@ closing a connection, never for switching one.
 ## Startup
 
 `fe_init` builds each open panel for the first connection and raises
-Chat, News, Users and Tasks in a fixed order. Those raises would decide
+Chat, News, Users and Transfers in a fixed order. Those raises would decide
 which tab is in front of each leaf — whichever came last — where the saved
 layout already says. So until `gtkhx_dock_settled` (the end of `fe_init`),
 `gtkhx_dock_raise_if_open` raises nothing; from then on every raise is the

@@ -13,7 +13,7 @@ const PANELS: &[(&str, &str, &str)] = &[
     ("chat", "<Control>1", "Chat"),
     ("users", "<Control>2", "Users"),
     ("news", "<Control>3", "News"),
-    ("tasks", "<Control>5", "Tasks"),
+    ("tasks", "<Control>5", "Transfers"),
     #[cfg(feature = "voice")]
     ("video", "<Control>6", "Video"),
 ];

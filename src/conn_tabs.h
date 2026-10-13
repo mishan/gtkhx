@@ -58,6 +58,9 @@ void gtkhx_conn_tabs_close (struct _session *sess);
 /* Retitle a connection's tab. No-op for a connection with no tab. */
 void gtkhx_conn_tabs_set_title (struct htlc_conn *htlc, const char *title);
 
+/* Show or stop a connection's tab spinner, for while it connects and logs in. */
+void gtkhx_conn_tabs_set_loading (struct htlc_conn *htlc, gboolean loading);
+
 /* Flag / clear a connection's tab. Setting is ignored for the connection
  * already selected — a badge on the tab you are looking at says "look here"
  * about the thing you are already looking at. Clearing always applies. */

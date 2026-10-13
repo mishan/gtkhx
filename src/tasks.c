@@ -71,35 +71,17 @@ struct gtask {
      *
      * A serial rather than a session pointer for the usual reason: a row can
      * outlive the tab that made it by the length of one main-loop turn, and
-     * closing a tab frees the session.
-     *
-     * It is also what makes lookups correct. The progress rows below use
-     * fixed pseudo-ids (-127 / -128 / -129), so two connections would
-     * otherwise collide on every one of them — a second server connecting
-     * would drive the first server's connect row. Every search keys on the
-     * pair. */
+     * closing a tab frees the session. */
     guint16 conn;
-    guint32 trans;
     struct htxf_conn *htxf;
     GtkWidget *icon;
     GtkWidget *title;
     GtkWidget *subtitle;
     GtkWidget *pbar;
     GtkWidget *listitem;
-    GtkWidget *queue; /* badge on the title row; NULL for non-xfer tasks */
+    GtkWidget *queue; /* badge on the title row */
     GtkWidget *tag;   /* which connection this row is on; see tags_refresh */
 };
-
-/* A row that belongs to no connection.
- *
- * Serials start at 1, so 0 is free for this. The tracker rows use it: a
- * tracker fetch is one process-wide operation, not something a connection
- * owns, so tagging its progress row with whichever connection happened to be
- * focused would name a server that has nothing to do with it — and then
- * disconnecting that server mid-refresh would delete the row out from under a
- * fetch that is still running. Rows on this connection are exempt from the
- * per-connection sweep and show no tag. */
-#define CONN_NONE 0
 
 /* The queue itself: one list, one widget, for the whole application.
  *
@@ -111,21 +93,6 @@ struct gtask {
 static struct gtask *gtask_list;
 static GtkWidget *gtklist;
 static GtkWidget *gtask_scroll;
-
-/* The connection a session is on. Every public entry point below still takes
- * the session — its callers are signal handlers that have one — and turns it
- * into the serial the rows are keyed on right here.
- *
- * NULL answers CONN_NONE, which is a real key rather than a failure: it is
- * where the tracker's connection-less rows live. That makes it the wrong
- * answer for anything else, which is why the entry points reject a NULL
- * session rather than letting one through to here. A freed connection is not
- * tolerated at all — hx_conn_serial dereferences. */
-static guint16
-sess_conn (session *sess)
-{
-    return sess != NULL ? hx_conn_serial (sess->htlc) : CONN_NONE;
-}
 
 /* One-time CSS provider for the tasks rows. Loads tabular-nums on
  * the subtitle (kills digit-width jitter), dims the subtitle, and
@@ -207,29 +174,14 @@ gtask_apply_smaller_font (GtkLabel *label, double scale)
     pango_attr_list_unref (attrs);
 }
 
-/* Resolve a gresource path for the row icon column. We use the
- * same retro pixmaps the toolbar carries (download/upload/tracker/
- * connect/tasks) so the Tasks window keeps the period-appropriate look
- * instead of jumping into Adwaita's symbolic icon set. The pixmaps
- * are 16x16 originals; gtask_make_icon scales 2x to 32px to match
- * the toolbar treatment. */
+/* The row icon: the same retro pixmaps the toolbar carries, so the
+ * Transfers panel keeps the period-appropriate look. The pixmaps are 16x16
+ * originals; gtask_make_icon scales them to the theme's row size. */
 static const char *
-gtask_icon_for (guint32 trans, struct htxf_conn *htxf)
+gtask_icon_for (struct htxf_conn *htxf)
 {
-    if (htxf) {
-        return htxf->type == XFER_GET
-                   ? "/com/nasledov/gtkhx/pixmaps/download.png"
-                   : "/com/nasledov/gtkhx/pixmaps/upload.png";
-    }
-    switch ((gint32)trans) {
-    case -127: /* tracker list */
-    case -129: /* tracker connect */
-        return "/com/nasledov/gtkhx/pixmaps/tracker.png";
-    case -128: /* main control-channel connect */
-        return "/com/nasledov/gtkhx/pixmaps/connect.png";
-    default:
-        return "/com/nasledov/gtkhx/pixmaps/tasks.png";
-    }
+    return htxf->type == XFER_GET ? "/com/nasledov/gtkhx/pixmaps/download.png"
+                                  : "/com/nasledov/gtkhx/pixmaps/upload.png";
 }
 
 /* Build a GtkPicture from a gresource pixmap path, scaled
@@ -331,8 +283,8 @@ create_tasks (void)
      * itself. */
     gtklist = gtk_list_box_new ();
     gtk_accessible_update_property (GTK_ACCESSIBLE (gtklist),
-                                    GTK_ACCESSIBLE_PROPERTY_LABEL, _ ("Tasks"),
-                                    -1);
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                    _ ("Transfers"), -1);
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (gtklist),
                                      GTK_SELECTION_MULTIPLE);
     /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
@@ -352,22 +304,7 @@ create_tasks (void)
     g_object_ref_sink (gtask_scroll);
 }
 
-/* Keyed on the pair: every connection's connect row has the same id. */
 static void gtask_delete (struct gtask *gtsk);
-
-static struct gtask *
-gtask_with_trans (guint16 conn, guint32 trans)
-{
-    struct gtask *gtsk;
-
-    for (gtsk = gtask_list; gtsk; gtsk = gtsk->prev) {
-        if (gtsk->conn == conn && gtsk->trans == trans) {
-            return gtsk;
-        }
-    }
-
-    return 0;
-}
 
 /* No connection needed: a transfer handle is unique across the process, and
  * the row that holds it is the one that owns it. */
@@ -424,7 +361,7 @@ output_xfer_queue (session *sess, struct htxf_conn *htxf)
 }
 
 static struct gtask *
-gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
+gtask_new (guint16 conn, struct htxf_conn *htxf)
 {
     GtkWidget *row_box;     /* outer hbox: icon | vbox */
     GtkWidget *content_box; /* inner vbox: title-row, subtitle, pbar */
@@ -433,11 +370,6 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     struct gtask *gtsk;
     gboolean transfer_is_first;
 
-    /* `conn` must be a real connection serial (>= 1) unless the caller is
-     * building one of the tracker's rows, which ask for CONN_NONE by name.
-     * Anything else arriving with CONN_NONE is building a row that no
-     * disconnect will ever sweep, because the sweep is per connection and
-     * this one belongs to none. */
     /* Whether a transfer row already exists, before this one joins. */
     transfer_is_first = TRUE;
     for (struct gtask *t = gtask_list; t != NULL; t = t->prev) {
@@ -458,17 +390,15 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
      * gtask_make_icon scales nearest-neighbour so the pixel art
      * stays crisp at the 2x size. Vcentered against the title +
      * subtitle block to its right. */
-    icon = gtask_make_icon (gtask_icon_for (trans, htxf));
+    icon = gtask_make_icon (gtask_icon_for (htxf));
     gtk_widget_set_valign (icon, GTK_ALIGN_CENTER);
-    /* A transfer's title is only the file name; the icon is what tells a
-     * download from an upload. Other tasks' titles already say it. */
-    if (htxf) {
-        gtk_accessible_update_property (
-            GTK_ACCESSIBLE (icon), GTK_ACCESSIBLE_PROPERTY_LABEL,
-            htxf->type == XFER_GET ? C_ ("files transfer", "Download")
-                                   : C_ ("files transfer", "Upload"),
-            -1);
-    }
+    /* The title is only the file name; the icon is what tells a download
+     * from an upload. */
+    gtk_accessible_update_property (
+        GTK_ACCESSIBLE (icon), GTK_ACCESSIBLE_PROPERTY_LABEL,
+        htxf->type == XFER_GET ? C_ ("files transfer", "Download")
+                               : C_ ("files transfer", "Upload"),
+        -1);
 
     /* Title — bold via CSS class, ellipsize keeps it on one line,
      * expands horizontally inside the title row so the queue badge
@@ -503,17 +433,13 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     gtk_label_set_ellipsize (GTK_LABEL (subtitle), PANGO_ELLIPSIZE_END);
     gtask_apply_smaller_font (GTK_LABEL (subtitle), PANGO_SCALE_SMALL);
 
-    /* Queue badge — only allocated for xfer rows (HTLC tasks never
-     * carry a queue position). Starts hidden; gtask_refresh_queue_badge
-     * flips it on when htxf->queue > 0. */
-    queue = NULL;
-    if (htxf) {
-        queue = gtk_label_new ("");
-        gtk_widget_add_css_class (queue, "gtkhx-task-queue");
-        gtk_widget_set_valign (queue, GTK_ALIGN_CENTER);
-        gtk_widget_set_visible (queue, FALSE);
-        gtask_apply_smaller_font (GTK_LABEL (queue), PANGO_SCALE_X_SMALL);
-    }
+    /* Queue badge. Starts hidden; gtask_refresh_queue_badge flips it on
+     * when htxf->queue > 0. */
+    queue = gtk_label_new ("");
+    gtk_widget_add_css_class (queue, "gtkhx-task-queue");
+    gtk_widget_set_valign (queue, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible (queue, FALSE);
+    gtask_apply_smaller_font (GTK_LABEL (queue), PANGO_SCALE_X_SMALL);
 
     /* Progress bar — slim Adwaita-styled bar via CSS min-height,
      * no overlaid percent text (subtitle carries position info). */
@@ -543,12 +469,10 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     gtk_widget_set_visible (tag, FALSE);
     gtask_apply_smaller_font (GTK_LABEL (tag), PANGO_SCALE_X_SMALL);
 
-    /* Top-row hbox: title (hexpand) + optional queue badge + connection. */
+    /* Top-row hbox: title (hexpand) + queue badge + connection. */
     title_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
     gtkhx_box_pack (title_row, title, 1, 1, 0);
-    if (queue) {
-        gtkhx_box_pack (title_row, queue, 0, 0, 0);
-    }
+    gtkhx_box_pack (title_row, queue, 0, 0, 0);
     gtkhx_box_pack (title_row, tag, 0, 0, 0);
 
     /* Content vbox stacks title-row, subtitle, progress bar. */
@@ -579,7 +503,6 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     gtsk->subtitle = subtitle;
     gtsk->pbar = pbar;
     gtsk->listitem = listitem;
-    gtsk->trans = trans;
     gtsk->htxf = htxf;
     gtsk->queue = queue;
     gtsk->tag = tag;
@@ -590,18 +513,18 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
     gtask_refresh_queue_badge (gtsk);
     gtkhx_tasks_refresh_tags ();
 
-    /* A transfer brings the queue forward. Tasks shares a frame by
+    /* A transfer brings the queue forward. Transfers shares a frame by
      * default (it has no leaf of its own), so without this a download
      * started from Files would progress out of sight. Only:
-     *   - transfers, not previews: a login, news fetch or preview is too
-     *     brief to be worth switching tabs for;
+     *   - transfers, not previews: a preview is too brief to be worth
+     *     switching tabs for;
      *   - the connection the user is looking at, not one in the
      *     background;
      *   - the first transfer of a burst: a folder download or a queue
-     *     of files would otherwise pull Tasks forward again every time
+     *     of files would otherwise pull Transfers forward again every time
      *     the user went back to what they were reading;
      *   - a panel that is docked: one the user closed stays closed. */
-    if (htxf != NULL && !hx_htxf_opt_preview (htxf) && transfer_is_first
+    if (!hx_htxf_opt_preview (htxf) && transfer_is_first
         && hx_active_session () != NULL
         && conn == hx_conn_serial (hx_active_session ()->htlc)) {
         gtkhx_dock_show_if_open (HX_PANEL_ID_TASKS);
@@ -626,14 +549,6 @@ gtasks_delete_on_conn (struct htlc_conn *htlc)
     guint16 conn = hx_conn_serial (htlc);
     struct gtask *gtsk, *prev;
 
-    /* Never sweep the connection-less rows: that is where the tracker's live,
-     * and a NULL htlc reads as CONN_NONE. A *freed* connection is a different
-     * matter and is not tolerated here — hx_conn_serial dereferences, so the
-     * caller must still hold a live connection or NULL. */
-    if (conn == CONN_NONE) {
-        return;
-    }
-
     for (gtsk = gtask_list; gtsk; gtsk = prev) {
         prev = gtsk->prev;
         if (gtsk->conn == conn) {
@@ -643,31 +558,9 @@ gtasks_delete_on_conn (struct htlc_conn *htlc)
     gtkhx_tasks_refresh_tags ();
 }
 
-/* Drop the tracker's progress rows.
- *
- * They belong to no connection, so nothing sweeps them; and the only path
- * that removed them was reaching the last server of a walk. A tracker that
- * errors out never gets there, which left a stale "Listing tracker" row that
- * the next refresh would sit beside rather than replace. Called from
- * tracker_kill_threads, which is every way a fetch ends early. */
-void
-gtasks_delete_tracker_rows (void)
-{
-    struct gtask *gtsk, *prev;
-
-    for (gtsk = gtask_list; gtsk; gtsk = prev) {
-        prev = gtsk->prev;
-        if (gtsk->conn == CONN_NONE
-            && (gtsk->trans == (guint32)-127 || gtsk->trans == (guint32)-129)) {
-            gtask_delete (gtsk);
-        }
-    }
-}
-
 /* How many rows the queue is holding for `conn`. Debug-only: the sweep on
  * disconnect has no other visible effect in a headless run, and "the shared
- * queue kept a dead connection's rows" is the failure this port could
- * plausibly introduce. */
+ * queue kept a dead connection's rows" is the failure it guards against. */
 guint
 gtkhx_tasks_rows_for_conn (guint16 conn)
 {
@@ -701,12 +594,8 @@ gtkhx_tasks_refresh_tags (void)
         session *owner;
         char *label;
 
-        if (!gtsk->tag) {
-            continue;
-        }
-        /* A row that belongs to no connection has nothing to say here. */
-        gtk_widget_set_visible (gtsk->tag, show && gtsk->conn != CONN_NONE);
-        if (!show || gtsk->conn == CONN_NONE) {
+        gtk_widget_set_visible (gtsk->tag, show);
+        if (!show) {
             continue;
         }
         /* NULL for a row whose connection is on its way out — it will be
@@ -784,133 +673,6 @@ gtask_clear_htxf (session *sess, struct htxf_conn *htxf)
     gtsk->htxf = NULL;
 }
 
-/* Set the progress bar fraction to num/total, guarded against zero
- * total and clamped to [0.0, 1.0]. Caller semantics here are
- * the natural "X of Y" — num is current count, total is the
- * denominator. */
-static void
-gtask_set_fraction (GtkProgressBar *pbar, guint32 num, guint32 total)
-{
-    gdouble frac;
-
-    if (total == 0) {
-        gtk_progress_bar_set_fraction (pbar, 0.0);
-        return;
-    }
-    frac = (gdouble)num / (gdouble)total;
-    if (frac < 0.0) {
-        frac = 0.0;
-    }
-    if (frac > 1.0) {
-        frac = 1.0;
-    }
-    gtk_progress_bar_set_fraction (pbar, frac);
-}
-
-void
-track_prog_update (session *sess, char *str, int num, int total)
-{
-    struct gtask *gtsk;
-    guint32 pos = (guint32)(num < 0 ? 0 : num);
-    guint32 tot = (guint32)(total < 0 ? 0 : total);
-    g_autofree char *sub = NULL;
-
-    /* Deliberately ignored: the tracker's rows belong to no connection, so
-     * this asks for CONN_NONE by name rather than deriving a serial from
-     * whichever session happened to start the fetch. */
-    (void)sess;
-    gtsk = gtask_with_trans (CONN_NONE, -127);
-    if (!gtsk) {
-        gtsk = gtask_new (CONN_NONE, -127, 0);
-    }
-
-    gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Listing tracker"));
-    /* g_strdup_printf sizes itself so a long tracker hostname (str)
-     * or a translated form with extra glyphs can't truncate. Cast
-     * the int args explicitly so the %u format matches the type
-     * actually passed through varargs. */
-    sub = g_strdup_printf (_ ("%1$s \xc2\xb7 %2$u of %3$u servers"),
-                           str ? str : "", pos, tot);
-    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
-
-    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
-
-    if (num >= total) {
-        gtask_delete (gtsk);
-    }
-}
-
-void
-trackconn_prog_update (session *sess, char *str, int num, int total)
-{
-    struct gtask *gtsk;
-    guint32 pos = (guint32)(num < 0 ? 0 : num);
-    guint32 tot = (guint32)(total < 0 ? 0 : total);
-    g_autofree char *sub = NULL;
-
-    /* Deliberately ignored: the tracker's rows belong to no connection, so
-     * this asks for CONN_NONE by name rather than deriving a serial from
-     * whichever session happened to start the fetch. */
-    (void)sess;
-    gtsk = gtask_with_trans (CONN_NONE, -129);
-    if (!gtsk) {
-        gtsk = gtask_new (CONN_NONE, -129, 0);
-    }
-
-    gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Connecting to tracker"));
-    sub = g_strdup_printf (_ ("%1$s \xc2\xb7 %2$u of %3$u"), str ? str : "",
-                           pos, tot);
-    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
-
-    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
-
-    if (num >= total) {
-        gtask_delete (gtsk);
-    }
-}
-
-void
-conn_task_update (session *sess, int stat)
-{
-    g_return_if_fail (sess != NULL);
-
-    char sub[64];
-    struct gtask *gtsk;
-    /* Callers (toolbar.c / gtkhx.c) pass stat in {0, 1, 2}
-     * representing the connection-phase step. The old code split
-     * that into pos=stat/2 + len=2 which gave nonsense progress
-     * (e.g. stat==2 -> "Step 1 of 3" at ~33%). Treat stat as the
-     * step directly: "Step 0..2 of 2", fraction = stat/2. */
-    guint32 pos = (guint32)(stat < 0 ? 0 : stat);
-    const guint32 len = 2;
-    if (pos > len) {
-        pos = len;
-    }
-
-    gtsk = gtask_with_trans (sess_conn (sess), -128);
-    if (!gtsk) {
-        gtsk = gtask_new (sess_conn (sess), -128, 0);
-    }
-
-    gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Connecting"));
-    g_snprintf (sub, sizeof (sub), _ ("Step %1$u of %2$u"), pos, len);
-    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
-
-    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, len);
-
-    if (pos >= len) {
-        gtask_delete (gtsk);
-    }
-}
-
-/* tasks_destroy retired. The Tasks
- * panel is a permanent resident of the toolbar's sidebar
- * PanelFrame; the standalone GtkWindow it used to hang under is
- * gone, so there's nothing to unparent on close. The panel still
- * marks itself constructed at creation time, so the rest of tasks.c
- * continues to gate worker-thread updates on that. */
-
-extern void tracker_kill_threads (void);
 static void
 task_stop (GtkWidget *widget, gpointer data)
 {
@@ -945,46 +707,20 @@ task_stop (GtkWidget *widget, gpointer data)
              * xfers[]-scan in this spot; the signal-based clear
              * obsoletes it. */
             xfer_delete (gtsk->htxf);
-            gtask_delete (gtsk);
-        } else if (gtsk->trans == (guint32)-127
-                   || gtsk->trans == (guint32)-129) {
-            /* Tracker cancel (-127) and tracker-quit (-129) both tear down
-             * the tracker worker pool, and that removes both rows — there is
-             * only ever one fetch, so there is nothing to be selective
-             * about. */
-            tracker_kill_threads ();
-        } else if (gtsk->trans == (guint32)-128) {
-            /* The connect row's Stop is a disconnect — of the connection the
-             * row names. It used to be `disconnect_clicked`, which acts on
-             * whichever connection is focused; from a shared queue that would
-             * disconnect the server you are looking at because you asked to
-             * stop a different one. Closing the connection drives
-             * conn_task_update, which removes the row. */
-            session *owner = hx_session_with_serial (gtsk->conn);
-
-            if (owner != NULL && hx_conn_fd (owner->htlc)) {
-                hx_htlc_close (owner->htlc, 1);
-            } else {
-                gtask_delete (gtsk);
-            }
-        } else {
-            gtask_delete (gtsk);
         }
+        gtask_delete (gtsk);
     }
     g_list_free (sel);
 }
 
-/* The index of the nearest row above or below `from` that is a transfer.
+/* The index of the nearest row above or below `from` that is still a live
+ * transfer.
  *
  * `dir` is -1 for above, +1 for below. -1 when there is none.
  *
- * Reordering moves a transfer within the transfer queue, but the list holds
- * more than transfers: each connection's connect row, the tracker's
- * progress. Moving the widget by one *visual* position would step it
- * past whichever of those happened to be adjacent while the queue swapped it
- * with a different transfer entirely, and the two orders would drift further
- * apart with every press. Interleaving connections made that common rather
- * than occasional. */
+ * A row outlives its transfer by a moment (gtask_clear_htxf), and stepping
+ * the widget past one of those while the queue swapped it with a different
+ * transfer would drift the two orders apart. */
 static int
 gtklist_adjacent_xfer_index (GtkListBox *box, GtkWidget *from, int dir)
 {
@@ -1162,16 +898,17 @@ gtkhx_tasks_build_content (session *sess)
 
     g_return_val_if_fail (sess != NULL, NULL);
 
-    stopbtn
-        = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
-                               _ ("Stop Task"), G_CALLBACK (task_stop), sess);
+    stopbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
+                                   _ ("Stop Transfer"), G_CALLBACK (task_stop),
+                                   sess);
     gobtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/start.png",
-                                 _ ("Start Task"), G_CALLBACK (task_go), sess);
+                                 _ ("Start Transfer"), G_CALLBACK (task_go),
+                                 sess);
     upbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/up.png",
-                                 _ ("Move Xfer Up in Queue"),
+                                 _ ("Move Transfer Up in Queue"),
                                  G_CALLBACK (task_up), sess);
     dnbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/down.png",
-                                 _ ("Move Xfer Down in Queue"),
+                                 _ ("Move Transfer Down in Queue"),
                                  G_CALLBACK (task_dn), sess);
 
     /* The four action buttons (Stop/Start on start, Up/Down on end)
@@ -1245,7 +982,7 @@ file_update (session *sess, struct htxf_conn *htxf)
 
     gtsk = gtask_with_htxf (htxf);
     if (!gtsk) {
-        gtsk = gtask_new (sess_conn (sess), 0, htxf);
+        gtsk = gtask_new (hx_conn_serial (sess->htlc), htxf);
     }
 
     pos = hx_htxf_total_pos (htxf);

@@ -41,7 +41,7 @@ record.
   chosen by searching Adwaita's symbolic set and the icon-development-kit, not by
   browsing them. Go through both — the Icon Library app is the easiest way — and
   swap in anything that fits a button better. The weakest current matches:
-  tasks (`view-list`), message (`mail-unread`), post news (`mail-message-new`), news posts (`text-x-generic`), the drop box and
+  message (`mail-unread`), post news (`mail-message-new`), news posts (`text-x-generic`), the drop box and
   download (both `folder-download`), upload (`document-send`), disk images
   (`media-optical`), and HTML files (`text-x-generic`; Adwaita has no symbolic
   HTML icon). A kit icon has to be converted to filled paths before it's

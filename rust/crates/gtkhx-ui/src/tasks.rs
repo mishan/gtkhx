@@ -1,7 +1,8 @@
-//! Tasks window — Phase R5.10 gtk4-rs shell over the C task list.
+//! Transfers panel — Phase R5.10 gtk4-rs shell over the C task list.
 //!
-//! The Tasks panel is docked into the toolbar window's bottom-area
-//! `PanelFrame`. Its content — the `GtkListBox` of per-transfer/task rows
+//! The Transfers panel is docked into the toolbar window's bottom-area
+//! `PanelFrame`. It keeps its old `tasks` id, so saved layouts still place
+//! it. Its content — the `GtkListBox` of per-transfer rows
 //! (`struct gtask`, progress bars, queue badges) and the Stop/Start/Up/Down
 //! action buttons wired to the C `task_*` handlers — stays C in `tasks.c`,
 //! built by `gtkhx_tasks_build_content`. This module owns the *window
@@ -27,7 +28,7 @@ use crate::dock;
 type Session = c_void;
 
 extern "C" {
-    /// Build the Tasks panel content (action button bar over the task list
+    /// Build the Transfers panel content (action button bar over the task list
     /// scroller). Returns a still-floating container, or NULL if `sess` is
     /// NULL. Requires `create_tasks` to have run.
     fn gtkhx_tasks_build_content(sess: *mut Session) -> *mut gtk4::ffi::GtkWidget;
@@ -39,7 +40,7 @@ extern "C" {
     fn gtkhx_tasks_sync_conn(sess: *mut Session);
 }
 
-/// Open (or raise) the Tasks panel. C ABI replacement for the old
+/// Open (or raise) the Transfers panel. C ABI replacement for the old
 /// `tasks.c::create_tasks_window`. `widget` is vestigial (the panel is a
 /// resident of the toolbar dock, not reparented); `data` is the `session *`.
 ///
@@ -75,8 +76,8 @@ pub unsafe extern "C" fn create_tasks_window(_widget: *mut c_void, data: *mut c_
         &page,
         dock::KIND_SIDEBAR,
         dock::AREA_BOTTOM,
-        "Tasks",
-        "view-list-symbolic",
+        "Transfers",
+        "mail-send-receive-symbolic",
         content,
     ) {
         gtkhx_tasks_after_embed(sess);

@@ -303,7 +303,6 @@ disconnect_clicked (void)
         setbtns (sess, 0);
         set_status_bar (sess, 0);
         set_disconnect_btn (sess, 0);
-        conn_task_update (sess, 2);
         hx_printf_prefix (sess->htlc, 0, INFOPREFIX, "%s: %s\n", addr,
                           _ ("connection closed"));
         g_free (addr);
@@ -806,8 +805,10 @@ build_hamburger (void)
         const char *label;
         const char *id;
     } panels[] = {
-        { _ ("Chat"), HX_PANEL_ID_CHAT },   { _ ("Users"), HX_PANEL_ID_USERS },
-        { _ ("News"), HX_PANEL_ID_NEWS },   { _ ("Tasks"), HX_PANEL_ID_TASKS },
+        { _ ("Chat"), HX_PANEL_ID_CHAT },
+        { _ ("Users"), HX_PANEL_ID_USERS },
+        { _ ("News"), HX_PANEL_ID_NEWS },
+        { _ ("Transfers"), HX_PANEL_ID_TASKS },
 #ifdef HAVE_VOICE
         { _ ("Video"), HX_PANEL_ID_VIDEO },
 #endif
@@ -1190,7 +1191,7 @@ create_toolbar_window (session *sess)
                                         (gpointer)HX_PANEL_ID_CHAT));
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tasks.png",
-                                        _ ("Tasks"),
+                                        _ ("Transfers"),
                                         G_CALLBACK (toolbar_show_panel),
                                         (gpointer)HX_PANEL_ID_TASKS));
     /* Broadcast — sends an admin-wide message via

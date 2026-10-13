@@ -161,11 +161,10 @@ only be done by users with the proper priveleges.
    --- Chat button: This button displays the main chat of the server you are
 connected to
 
-   --- Tasks button: This button displays the tasks which GtkHx is doing at
-any given time, such as downloading a file, getting user info, or sending a
-private message. From here, you may cancel any given task by pressing the
-standard red "kill" button, or force-unqueue a download or task, by pressing
-the green "go" light button
+   --- Transfers button: This button displays the files GtkHx is downloading
+or uploading. From here, you may cancel any transfer by pressing the
+standard red "kill" button, or force-unqueue a transfer by pressing the
+green "go" light button
 
    --- About button: Standard application about box :)
 

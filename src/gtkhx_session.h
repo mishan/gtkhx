@@ -261,8 +261,8 @@ typedef enum {
                                       * exchange + login send in
                                       * flight. Status bar reads
                                       * "connected". */
-    GTKHX_CONNECTION_HANDSHAKE_DONE, /* LOGIN sent. Connect task
-                                      * progress ticker is done. */
+    GTKHX_CONNECTION_HANDSHAKE_DONE, /* LOGIN sent. No view
+                                      * handler acts on it. */
     GTKHX_CONNECTION_LOGIN_READY,    /* hx_post_login_fetches has
                                       * fired — the server has accepted
                                       * us as a fully-joined user

@@ -123,8 +123,8 @@ As built (`hxhandlers`' `send::icon` and `recv::icon`):
    send path, and auto-send the user's saved avatar if there is one.
 4. A refusal, or the watchdog firing, marks the session unsupported and
    stays silent. A merely *slow* server's late reply is still read and
-   loads avatars. Like every request whose reply the session expects,
-   the probe has no row in the Tasks window.
+   loads avatars. Like every request that isn't a transfer, the probe
+   has no row in the Transfers panel.
 
 Worst case against a legacy server: one ignored transaction and a
 two-second timer.
