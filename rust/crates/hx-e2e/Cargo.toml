@@ -26,6 +26,8 @@ hxsession = { workspace = true }
 # The ciphers a HOPE login offers.
 hxhope = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
+# The hotline-ng wire's JSON (`ng`).
+serde_json = "1"
 
 [dev-dependencies]
 # What the view makes of a chat line, and how a line goes out to a server

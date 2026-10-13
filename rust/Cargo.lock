@@ -2069,6 +2069,7 @@ dependencies = [
  "hxsession",
  "hxtext",
  "png",
+ "serde_json",
  "tokio",
 ]
 

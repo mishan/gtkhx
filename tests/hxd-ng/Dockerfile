@@ -3,14 +3,15 @@
 # hxd-ng for the GtkHx Tier 3 rig.
 #
 # hxd-ng (https://github.com/mishan/hxd-ng) implements the video
-# extension, and every video test runs against it as well as Janus. The
+# extension, and every video test runs against it as well as Janus; the
+# news test reads the pictures it attaches to articles. The
 # server itself comes from the image hxd-ng's own CI publishes to GHCR
 # for every commit on main, so nothing compiles here;
 # this layer adds only the rig's config, accounts and entrypoint. Pinned
 # by commit tag and digest, like the other servers are pinned: an
 # unpinned main has broken this rig before. Bump both deliberately, with
 # the tests run against the new one.
-FROM ghcr.io/mishan/hxd-ng:sha-6dc8be3@sha256:87fe6ee6f0ad99cfab58c94002aa21b72b3985957f5243561e3795b609a6ad6c
+FROM ghcr.io/mishan/hxd-ng:sha-37b845f@sha256:32a20c984d852c70261925f5911f25304ff6044308c7bb99a119710e01607c3c
 
 # The base image runs as the unprivileged hxd user (10001), which owns
 # /var/lib/hxd-ng and /run/hxd-ng; the accounts go in owned by it too.

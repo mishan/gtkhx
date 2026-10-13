@@ -7,10 +7,12 @@
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
+use hx_e2e::ng::Ng;
 use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
 use hxrequest::{news, Request};
 use hxsession::{Article, Expect, Handled, NewsItem};
+use serde_json::json;
 
 /// A session that handles what the app's does, logged in as `login` (the
 /// guest, or the server's admin), going by a name no other test uses.
@@ -220,6 +222,79 @@ fn a_picture_part_is_listed_and_comes_back_whole() {
         assert_eq!(got, picture, "{}", s.name);
         let gone = news::delete(&path).unwrap();
         assert_eq!(change(&mut a, &gone), None, "{}", s.name);
+    }
+}
+
+/// A picture attached to an article on the hotline-ng wire reaches a
+/// classic client as a part after the text: listed by its type and size,
+/// and fetched whole by its type, as the news browser fetches it.
+#[test]
+fn a_picture_attached_on_the_ng_wire_is_a_part_after_the_text() {
+    // tests/hxd-ng/conf: the ng wire's port, and the account with every
+    // news bit.
+    const NG: &str = "127.0.0.1:5525";
+    let mut picture = Vec::new();
+    {
+        let mut e = png::Encoder::new(&mut picture, 8, 8);
+        e.set_color(png::ColorType::Rgba);
+        let mut w = e.write_header().unwrap();
+        w.write_image_data(&[0x80; 8 * 8 * 4]).unwrap();
+    }
+    for s in servers_with(&[Cap::NgNewsPictures]) {
+        let mut ng = Ng::login(NG, "news", "news").unwrap_or_else(|e| panic!("{e}"));
+        let staged = ng
+            .post("/news/blob", "image/png", &picture)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let cat = unique_name("np");
+        let made = ng
+            .ok(
+                "news_node_create",
+                json!({ "parent": null, "kind": "category", "name": cat }),
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+        let attach = [&staged["blob"]["id"]];
+        let post = json!({ "category": made["node"]["id"], "subject": "Shot",
+                           "body": "Look.", "attach": attach });
+        ng.ok("news_post", post).unwrap_or_else(|e| panic!("{e}"));
+
+        let mut c = Client::login_handling(
+            s,
+            "news",
+            Some("news"),
+            CAP_TEXT_ENCODING,
+            Handled::NEWS,
+            &unique_name("nv").chars().take(31).collect::<String>(),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let path = format!("/{cat}").into_bytes();
+        let listed = articles(&mut c, &path);
+        let [shot] = &listed[..] else {
+            panic!("{}: {listed:?}", s.name);
+        };
+        let image = shot
+            .parts
+            .iter()
+            .find(|p| p.mime.starts_with(b"image/"))
+            .unwrap_or_else(|| panic!("{}: no picture in {:?}", s.name, shot.parts));
+        assert_eq!(shot.parts[0].mime, b"text/plain", "{}", s.name);
+
+        let t = c.send_expecting(
+            &news::article(&path, shot.id, &image.mime).unwrap(),
+            Some(Expect::NewsPart),
+        );
+        let got = until(&mut c, |e| match e {
+            hxsession::Event::NewsPart { trans, data } if *trans == t => Some(data.clone()),
+            _ => None,
+        });
+        assert_eq!(got.len(), usize::from(image.size), "{}", s.name);
+        let magic: &[u8] = match image.mime.as_slice() {
+            b"image/png" => b"\x89PNG",
+            b"image/jpeg" => b"\xff\xd8\xff",
+            other => panic!("{}: {:?}", s.name, String::from_utf8_lossy(other)),
+        };
+        assert!(got.starts_with(magic), "{}", s.name);
+        let gone = news::delete(&path).unwrap();
+        assert_eq!(change(&mut c, &gone), None, "{}", s.name);
     }
 }
 
