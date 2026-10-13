@@ -1,17 +1,26 @@
 #!/bin/sh
-# Fail if po/POTFILES has drifted from the Rust sources that actually carry
-# translatable strings.
+# Fail if po/POTFILES lists a file that is gone, or has drifted from the Rust
+# sources that actually carry translatable strings.
 #
 # The list went years listing no `.rs` file at all, so every string the Rust
 # half added was silently untranslatable — a failure with no symptom until a
 # translator notices the catalog is missing half the UI. Nothing about adding
 # a file to a crate reminds anyone to touch POTFILES, so this is the reminder.
 #
-# Only the Rust half is checked. The C list predates this and is maintained by
-# hand; extending the check to it means deciding what to do about the files
+# Only the Rust half is checked for completeness; of the C list, only that
+# each file exists. The C list predates this and is maintained by hand;
+# extending the check to it means deciding what to do about the files
 # that legitimately have no strings, which is a separate cleanup.
 set -eu
 cd "$(dirname "$0")/.."
+
+# A listed file that is gone fails xgettext, and so the catalog update.
+missing=$(while read -r f; do [ -e "$f" ] || echo "$f"; done < po/POTFILES)
+if [ -n "$missing" ]; then
+    echo "po/POTFILES lists files that don't exist:" >&2
+    echo "$missing" >&2
+    exit 1
+fi
 
 expected=$(./tools/potfiles-rs.sh)
 listed=$(grep '\.rs$' po/POTFILES || true)
