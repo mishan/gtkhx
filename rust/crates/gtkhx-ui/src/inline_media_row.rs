@@ -8,6 +8,7 @@
 //! picture, and the row is found by its token in the view it was appended
 //! to — never by looking a conversation up again.
 
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
 
@@ -18,6 +19,7 @@ use gtk4 as gtk;
 use rotulus::RotulusView;
 
 use crate::inline_media_dialog::{inline_media_download_start, DownloadResult};
+use crate::tr::trc;
 use gtkhx_core::boxed::chat::HxChatMedia;
 use gtkhx_core::boxed::media_table::{
     hx_media_table_free, hx_media_table_lookup, hx_media_table_new, hx_media_table_register,
@@ -29,8 +31,36 @@ use hx_image_decode::ffi::{
 
 extern "C" {
     fn inline_media_cap_ok(htlc: *mut c_void) -> glib::ffi::gboolean;
-    fn hx_chat_media_placeholder_line(m: *const HxChatMedia) -> *mut c_char;
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
+}
+
+/// The line a picture's row shows until the picture arrives, and what a
+/// screen reader reads for it: "[image · PNG · 800×600 · 121.1 KB · click
+/// to view]", each detail only when the server sent it.
+fn placeholder(mime: Option<&[u8]>, size: Option<(u32, u32)>, bytes: Option<u32>) -> String {
+    let mut parts = vec![trc("chat picture", "image")];
+    // The type is the server's bytes, so one that isn't UTF-8 is left out
+    // rather than put into the line.
+    if let Some(Ok(mime)) = mime.map(std::str::from_utf8) {
+        let short = ["PNG", "JPEG", "GIF"]
+            .into_iter()
+            .find(|s| mime.eq_ignore_ascii_case(&format!("image/{s}")));
+        if !mime.is_empty() {
+            parts.push(short.unwrap_or(mime).to_owned());
+        }
+    }
+    if let Some((w, h)) = size {
+        parts.push(format!("{w}×{h}"));
+    }
+    if let Some(b) = bytes {
+        parts.push(match b {
+            0..1024 => format!("{b} B"),
+            1024..1048576 => format!("{:.1} KB", b as f64 / 1024.0),
+            _ => format!("{:.1} MB", b as f64 / 1048576.0),
+        });
+    }
+    parts.push(trc("chat picture", "click to view"));
+    format!("[{}]", parts.join(" · "))
 }
 
 /// A fetch in flight: where its picture goes.
@@ -117,21 +147,23 @@ pub unsafe extern "C" fn hx_inline_media_row_append(
         table
     };
     let token = hx_media_table_register(table, media);
-    let placeholder = hx_chat_media_placeholder_line(media);
-    if placeholder.is_null() {
-        return;
-    }
+    let m = &*media;
+    // SAFETY: `mime` is NULL or NUL-terminated (the chat event copies it so).
+    let mime = (!m.mime.is_null()).then(|| CStr::from_ptr(m.mime).to_bytes());
+    let placeholder = crate::cs(&placeholder(
+        mime,
+        (m.width_present != 0 && m.height_present != 0).then_some((m.width, m.height)),
+        (m.bytes_present != 0).then_some(m.bytes),
+    ));
     rotulus::ffi::rotulus_view_append_media(
         view.upcast_ref::<gtk::Widget>().to_glib_none().0,
         ptr::null_mut(),
-        placeholder,
+        placeholder.as_ptr(),
         token,
         0,
     );
-    glib::ffi::g_free(placeholder.cast());
 
     // A server without the extension never answers the fetch.
-    let m = &*media;
     if inline_media_cap_ok(htlc) == 0 || m.id_len == 0 || m.id_len > 65535 {
         return;
     }
@@ -202,4 +234,47 @@ unsafe extern "C" fn on_decoded(decoded: *mut HxInlineMediaDecoded, user_data: *
         }
     }
     inline_media_decoded_free(decoded);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::placeholder;
+
+    #[test]
+    fn placeholder_shows_only_what_the_server_sent() {
+        for (mime, size, bytes, want) in [
+            (
+                Some(&b"image/png"[..]),
+                Some((800, 600)),
+                Some(124000),
+                "[image · PNG · 800×600 · 121.1 KB · click to view]",
+            ),
+            (
+                Some(b"IMAGE/JPEG"),
+                None,
+                None,
+                "[image · JPEG · click to view]",
+            ),
+            (
+                Some(b"image/webp"),
+                None,
+                Some(512),
+                "[image · image/webp · 512 B · click to view]",
+            ),
+            (
+                Some(b"\xC3\xC3invalid"),
+                None,
+                None,
+                "[image · click to view]",
+            ),
+            (
+                None,
+                None,
+                Some(3 << 20),
+                "[image · 3.0 MB · click to view]",
+            ),
+        ] {
+            assert_eq!(placeholder(mime, size, bytes), want);
+        }
+    }
 }

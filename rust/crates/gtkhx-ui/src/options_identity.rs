@@ -73,6 +73,7 @@ fn icon_group(page: &adw::PreferencesPage) {
     );
 
     let preview = icon_picker::preview_widget(40);
+    preview.update_property(&[gtk::accessible::Property::Label(&tr("Your icon"))]);
     icon_picker::set_preview(&preview, row.value().clamp(0.0, u16::MAX as f64) as u16);
 
     let preview_weak = preview.downgrade();
@@ -289,6 +290,7 @@ fn avatar_group(page: &adw::PreferencesPage) {
     preview.set_size_request(48, 48);
     preview.set_valign(gtk::Align::Center);
     preview.set_content_fit(gtk::ContentFit::Contain);
+    preview.update_property(&[gtk::accessible::Property::Label(&tr("Your avatar"))]);
     // Seeded from what was saved, not from the live per-session cache, so it
     // shows before connecting.
     if let Some(saved) = load_saved_avatar() {

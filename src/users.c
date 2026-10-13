@@ -60,7 +60,16 @@
 PangoFontDescription *users_font_desc;
 
 GdkRGBA user_colors[8];
-GdkRGBA gdk_user_colors[4];
+/* The status colors when no theme sets them, per variant: { light, dark }
+ * by { regular, idle, admin, admin-idle }. No one color reaches 4.5:1
+ * against both libadwaita's white and #1e1e1e list backgrounds, so each
+ * variant has its own. The regular slot is unused (NULL → theme fg). */
+static GdkRGBA gdk_user_colors[2][4] = {
+    { RGB16 (0, 0, 0), RGB16 (0x7070, 0x7070, 0x7070),
+      RGB16 (0xc0c0, 0x1c1c, 0x2828), RGB16 (0xa0a0, 0x5a5a, 0x5a5a) },
+    { RGB16 (0, 0, 0), RGB16 (0x8c8c, 0x8c8c, 0x8c8c),
+      RGB16 (0xffff, 0x7b7b, 0x6363), RGB16 (0xc8c8, 0x7878, 0x7878) },
+};
 
 struct UserActionCtx {
     session *sess;
@@ -977,7 +986,7 @@ user_color_gdk (guint16 color)
     if (slot == GTKHX_USER_COLOR_ACTIVE) {
         return NULL;
     }
-    return &gdk_user_colors[color % 4];
+    return &gdk_user_colors[!!dark][slot];
 }
 
 /* Pointer-free core: compute a foreground from a raw nick_color +
@@ -995,9 +1004,7 @@ user_nick_color_rgb (guint32 nick_color, guint16 status, GdkRGBA *out)
          * is idle, dim their custom color so the idle indication
          * still reads visually — without this an away user with a
          * vibrant nick_color would look just as "alive" as an
-         * active user. 0.55 is roughly what the legacy
-         * gdk_user_colors[1] (idle) and [3] (admin-idle) slots use
-         * relative to their non-idle siblings. */
+         * active user. */
         if (status & 1) {
             r *= 0.55;
             g *= 0.55;

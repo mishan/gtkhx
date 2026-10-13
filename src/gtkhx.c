@@ -753,16 +753,9 @@ init_colors (GtkWidget *widget)
         RGB16 (0x0000, 0x0000, 0xffff), RGB16 (0xffff, 0x0000, 0xffff),
         RGB16 (0x0000, 0xffff, 0xffff), RGB16 (0xffff, 0xffff, 0xffff),
     };
-    static const GdkRGBA defaults_gdk_user_colors[4] = {
-        RGB16 (0x0000, 0x0000, 0x0000), /* black */
-        RGB16 (0xa0a0, 0xa0a0, 0xa0a0), /* grey */
-        RGB16 (0xffff, 0x0000, 0x0000), /* red */
-        RGB16 (0xffff, 0xa7a7, 0xb0b0), /* light pink */
-    };
 
     (void)widget;
     memcpy (user_colors, defaults_user_colors, sizeof user_colors);
-    memcpy (gdk_user_colors, defaults_gdk_user_colors, sizeof gdk_user_colors);
 }
 
 char *
