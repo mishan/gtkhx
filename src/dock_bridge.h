@@ -144,10 +144,6 @@ guint gtkhx_dock_page_count (const char *id);
 struct _session;
 extern void gtkhx_dock_remove_session_pages (struct _session *sess);
 
-/* Call `func' each time the panel comes into view: raised, its tab
- * clicked, reopened. For the News browser's fetch on open. */
-void gtkhx_dock_connect_shown (const char *id, void (*func) (void));
-
 /* ---- The dock itself: C only ----------------------------------------- */
 
 /* Make the dock: every static panel a pane, the saved layout read and put

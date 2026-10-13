@@ -553,18 +553,22 @@ def scene_files(out, bots, assets):
 def scene_news(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
-    win = "GtkHx.*"
-    display.click(16, 169, window=win)          # Photography
+    display.key("ctrl+4")                       # News (1.5+)
+    win = "News.*"
+    display.wait_window(win)
     display.wait_stable(window=win)
-    display.click(36, 192, window=win)          # Settings for low light?
+    display.click(16, 113, window=win)          # Photography
     display.wait_stable(window=win)
-    display.click(56, 215, window=win)          # Tripod and a slow shutter
+    display.click(36, 136, window=win)          # Settings for low light?
     display.wait_stable(window=win)
-    display.click(160, 215, window=win)
+    display.click(56, 159, window=win)          # Tripod and a slow shutter
+    display.wait_stable(window=win)
+    display.click(160, 159, window=win)
     display.wait_stable(window=win)
     # Room for the nested reply's title.
     display.drag(286, 450, 370, 450, window=win)
-    capture_window(out, since)
+    toast_gone(since)
+    display.capture(out, window=win, park=True)
     app.terminate()
 
 
@@ -688,16 +692,12 @@ def scene_explore(out, bots, assets):
 
 SCENES = {
     "chat": (scene_chat, {}),
-    # Threaded news alone in the middle: the message board beside it
-    # would be a second news view saying less.
-    "news": (scene_news, {"scheme": "dark", "layout": {
-        "tree": "h(L[chat,*news15:center],L[*users,video:end])",
-        "sizes": "880", "closed": "news;tasks"}}),
+    "news": (scene_news, {"scheme": "dark"}),
     "files": (scene_files, {}),
     "tracker": (scene_tracker, {"scheme": "dark"}),
     # Chat and the video beside it; nothing in the left column to crowd it.
     "video": (scene_video, {"scheme": "dark", "layout": {
-        "tree": "h(L[*chat,news15:center],L[users,*video:end])",
+        "tree": "h(L[*chat:center],L[users,*video:end])",
         "sizes": "470", "closed": "news;tasks"}}),
     "classic": (scene_chat, {"theme": "classic"}),
     "explore": (scene_explore, {}),

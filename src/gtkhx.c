@@ -1836,22 +1836,17 @@ on_news_post_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     }
 }
 
-/* 1.5 threaded-news replies. The unified browser is the only
- * producer of gnews_folder / gnews_catalog / news_post stubs since
- * the legacy two-window UI was retired, so the browser handlers
- * always own the reply. If the browser closed in flight (handler
- * returns FALSE), the stub is leaked — that's the deliberate
- * trade-off described in news_browser.c's pending-table comment;
- * one-shot 4 kB allocations on a now-defunct window aren't worth
- * tracking. */
+/* 1.5 threaded-news replies. The browser is the only producer of
+ * gnews_folder / gnews_catalog / news_post carriers and frees each
+ * one, whether or not the window that asked is still open. The
+ * listings find their connection's browser by the request they
+ * answer; a post's body by the connection it came in on. */
 static void
 on_news_folder_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                        gpointer gfnews, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
-    /* The browser is a singleton bound to the active session; the
-     * connection rides through so it can bind per-connection instead. */
     (void)htlc;
     gnews_browser_handle_dirlist (gfnews);
 }
@@ -1862,8 +1857,6 @@ on_news_catalog_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 {
     (void)emitter;
     (void)user_data;
-    /* The browser is a singleton bound to the active session; the
-     * connection rides through so it can bind per-connection instead. */
     (void)htlc;
     gnews_browser_handle_catlist (gcnews);
 }
@@ -1874,10 +1867,7 @@ on_news_thread_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 {
     (void)emitter;
     (void)user_data;
-    /* The browser is a singleton bound to the active session; the
-     * connection rides through so it can bind per-connection instead. */
-    (void)htlc;
-    gnews_browser_handle_thread (post);
+    gnews_browser_handle_thread (htlc, post);
 }
 
 static void

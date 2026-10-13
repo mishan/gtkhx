@@ -9,6 +9,7 @@
   - Away and admin names in the users list are easier to read when the theme doesn't color them
   - Screen readers name the news views, the Tasks list and the users list itself, read a tracker's section by its title rather than every server in it, and skip the icons beside Settings' page names
 - News
+  - Threaded news (News 1.5+) opens in a window of its own for each connection, as Files does, rather than as a panel; Ctrl+4 still opens it
   - The news browser shows the pictures an article carries below its text, as hxd-ng serves them to classic clients
   - Fixed an article whose only part is a picture showing as garbled text
 - Messages
@@ -16,6 +17,7 @@
 - Users
   - Fixed avatars from 48 to 199 pixels wide showing nothing in the users list; on hxd-ng servers that was every avatar set from hx-ng
 - Files
+  - Push-to-talk works while the Files window has the focus
   - Fixed downloads failing on hxd-ng servers
   - Fixed uploads to some servers, hxd-ng among them, reporting failure though the file arrived
   - Fixed downloading a folder that holds files of 4 GB or more failing partway; 1.5.0 listed this as fixed but shipped without it

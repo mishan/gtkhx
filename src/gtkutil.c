@@ -402,12 +402,8 @@ setbtns (session *sess, int stat)
      *               redundant.
      *
      *   news15_btn (threaded News): NOT gated here. Like Files,
-     *               News 1.5 is a permanent panel in the dock now;
-     *               clicking the button just brings it forward.
-     *               The panel itself can show its cached state
-     *               when disconnected, or a 'this server is older
-     *               than 1.5' message when connected to an old
-     *               server. */
+     *               it opens a window of its own, which shows its
+     *               cached state when disconnected. */
     if (!stat) {
         gtk_widget_set_sensitive (news_btn, FALSE);
     } else {

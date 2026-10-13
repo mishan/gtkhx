@@ -105,9 +105,8 @@ pub mod tasks;
 // dock_bridge; the news content (viewers, search, fetch/post RPC) stays C
 // in news.c. create_news_window is now this module's #[no_mangle] export.
 pub mod news;
-// the News browser (1.5 threaded news, CENTER) window shell. Dock
-// registration via dock_bridge; the browser content + fetch/RPC stay C in
-// news_browser.c. create_news_browser_window is this module's export.
+// the News browser (1.5 threaded news): a window per connection, its content
+// and its fetches. open_news_browser is this module's export.
 pub mod news_browser;
 // the Chat window shell (public chat, CENTER; hosts the pchat/PM tabs).
 // Dock registration via dock_bridge; chat content + xtext + wire senders stay
@@ -182,24 +181,20 @@ pub mod file_info;
 pub mod create_post;
 // the 1.5 news-browser create (new folder / category) + delete
 // confirmation dialogs (were news_browser.c's open_create_dialog +
-// on_delete_clicked bodies). AdwAlertDialogs over the hxhandlers::send::news senders;
-// C keeps the selection logic + the refresh bridge. Exports
-// gtkhx_news_create_dialog_open / gtkhx_news_delete_dialog_open.
+// on_delete_clicked bodies). AdwAlertDialogs over the hxhandlers::send::news
+// senders; news_browser keeps the selection logic and the refresh.
 pub mod news_dialogs;
 // the 1.5 news-browser tree view: the GtkTreeListModel child-model
 // function + the GtkListView row factory (setup/bind/unbind + lazy
-// fetch-on-expand), was news_browser.c's factory callbacks. Exports
-// gtkhx_news_build_tree_model / gtkhx_news_build_factory.
+// fetch-on-expand), was news_browser.c's factory callbacks.
 pub mod news_tree;
 // the 1.5 news-browser compose window (New Post / Reply), was
 // news_browser.c's open_compose_window + build_reply_context_panel. Modal
-// GtkWindow over hxhandlers::send::news's post_thread sender. Exports
-// gtkhx_news_compose_open.
+// GtkWindow over hxhandlers::send::news's post_thread sender.
 pub mod news_compose;
 // the 1.5 news-browser right-pane post rendering + selection
 // breadcrumb (was news_browser.c's render_selected_post + update_breadcrumb).
-// The C functions stay as thin delegators. Exports gtkhx_news_render_post /
-// gtkhx_news_update_breadcrumb.
+// news_browser calls both.
 pub mod news_render;
 // The pictures a news article lists after its text.
 pub mod news_pictures;

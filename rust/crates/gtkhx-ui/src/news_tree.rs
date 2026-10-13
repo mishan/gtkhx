@@ -4,15 +4,11 @@
 //! (`news_node_create_child_model` + `on_factory_setup/bind/unbind` +
 //! `on_row_expanded`).
 //!
-//! The C side keeps the ~15 lines that stitch these together (create the
-//! `root_store`, wrap the returned tree model in a `GtkSingleSelection`, drop
-//! the returned factory into a `GtkListView`) because `root_store` /
-//! `tree_model` / `selection` are read from a dozen other spots in the browser.
-//! The selection-changed handler also stays C (it drives `render_selected_post`
-//! / `sync_action_buttons`, which are the content side). Everything the factory
-//! needs from the browser goes through two small C bridges:
-//! `gtkhx_news_icon_for_kind` (the per-kind row icon) and
-//! `gtkhx_news_fetch_for_expanded` (fire the DIRLIST / CATLIST on first expand).
+//! `news_browser` stitches these together (the `root_store`, the selection
+//! over the tree model, the `GtkListView`) and handles selection changes.
+//! Everything the factory needs from the browser comes from two `news_browser` calls on the
+//! connection the tree belongs to: `icon_for_kind` (the per-kind row icon) and
+//! `fetch_for_expanded` (fire the DIRLIST / CATLIST on first expand).
 
 use std::ffi::c_void;
 
@@ -22,10 +18,12 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 
+use crate::dock::ConnKey;
+
 // NB_KIND_POST from the NB_KIND_* enum in news_browser.c (FOLDER=1,
 // CATEGORY=2, POST=3). Only POST is inspected here — the create-child-model
 // decision special-cases posts; the folder/category fetch dispatch lives in
-// the C bridge (gtkhx_news_fetch_for_expanded).
+// news_browser::fetch_for_expanded.
 const NB_KIND_POST: i32 = 3;
 
 use hxmodel::news::node::{hx_news_node_children, hx_news_node_ensure_children, hx_news_node_name};
@@ -33,14 +31,6 @@ use hxmodel::news::node::{hx_news_node_children, hx_news_node_ensure_children, h
 extern "C" {
     // hxmodel::news C ABI — node accessors (the browser externs these too).
     fn hx_news_node_kind(node: *mut c_void) -> i32;
-    // news_browser.c bridges — the browser's per-kind icon + the
-    // lazy-fetch-on-expand dispatch (keeps fetch_dirlist / fetch_catlist +
-    // the pending-request tables C).
-    fn gtkhx_news_icon_for_kind(
-        browser: *mut c_void,
-        kind: i32,
-    ) -> *mut gtk::gdk::ffi::GdkPaintable;
-    fn gtkhx_news_fetch_for_expanded(browser: *mut c_void, node: *mut c_void);
 }
 
 /// `GtkTreeListModelCreateModelFunc`: given a row's `HxNewsNode`, decide whether
@@ -92,20 +82,10 @@ pub unsafe extern "C" fn gtkhx_news_build_tree_model(
     model.into_glib_ptr()
 }
 
-/// Build the `GtkListView` row factory (setup / bind / unbind). `browser` is the
-/// opaque `gnews_browser *`, captured for the icon + expand bridges; it outlives
-/// the factory. Returned transfer-full (the `GtkListView` takes ownership).
-///
-/// # Safety
-/// `browser` is a valid `gnews_browser *` for the browser's lifetime.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_build_factory(
-    browser: *mut c_void,
-) -> *mut gtk::ffi::GtkListItemFactory {
+/// Build the `GtkListView` row factory (setup / bind / unbind) for `conn`'s
+/// browser, whose icons and fetches the rows use.
+pub fn build_factory(conn: ConnKey) -> gtk::ListItemFactory {
     crate::ensure_gtk_init();
-    // `browser` is a raw `*mut c_void` — `Copy`, so it's captured by the `move`
-    // closures directly. (No `usize` round-trip: that would strip the pointer's
-    // provenance under Rust's strict-provenance model.)
 
     let factory = gtk::SignalListItemFactory::new();
 
@@ -163,14 +143,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
             icon.set_icon_name(Some(&name));
             icon.set_pixel_size(16);
         } else {
-            let paintable = unsafe {
-                let p = gtkhx_news_icon_for_kind(browser, kind);
-                if p.is_null() {
-                    None
-                } else {
-                    Some(from_glib_none::<_, gtk::gdk::Paintable>(p))
-                }
-            };
+            let paintable = crate::news_browser::icon_for_kind(conn, kind);
             icon.set_pixel_size(24);
             match paintable {
                 Some(p) => icon.set_paintable(Some(&p)),
@@ -187,9 +160,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
                     return;
                 }
                 if let Some(node) = row.item() {
-                    unsafe {
-                        gtkhx_news_fetch_for_expanded(browser, node.as_ptr() as *mut c_void);
-                    }
+                    crate::news_browser::fetch_for_expanded(conn, node.as_ptr() as *mut c_void);
                 }
             });
             unsafe { item.set_data(EXP_KEY, (row, handler)) };
@@ -212,7 +183,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
         }
     });
 
-    factory.upcast::<gtk::ListItemFactory>().into_glib_ptr()
+    factory.upcast()
 }
 
 /// qdata key for the per-binding `(row, notify::expanded handler)` stash. Uses

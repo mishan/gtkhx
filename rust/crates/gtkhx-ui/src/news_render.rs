@@ -17,6 +17,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 
+use crate::dock::ConnKey;
 use crate::tr::{tr, tr_fmt};
 
 const NB_KIND_POST: i32 = 3;
@@ -28,8 +29,6 @@ extern "C" {
     fn hx_news_node_kind(node: *mut c_void) -> i32;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
-    // news_browser.c bridges.
-    fn gtkhx_news_fetch_thread(browser: *mut c_void, node: *mut c_void);
     // gtkurl.c — (re)tag URLs in a text view after a buffer mutation.
     fn gtkurl_textview_apply_tags(tv: *mut gtk::ffi::GtkTextView);
 }
@@ -39,12 +38,11 @@ extern "C" {
 /// On a body cache-miss it shows "Loading…" and fires the GETTHREAD fetch.
 ///
 /// # Safety
-/// C-ABI entry on the GTK main thread. The widget pointers are the browser's
-/// live `post_view` / `subject_label` / `meta_label` / `header_strip`; `node`
-/// is NULL or a valid `HxNewsNode *`; `browser` is the `gnews_browser *`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_render_post(
-    browser: *mut c_void,
+/// GTK main thread. The widget pointers are the browser's live `post_view` /
+/// `subject_label` / `meta_label` / `header_strip`; `node` is NULL or a valid
+/// `HxNewsNode *` from `conn`'s browser.
+pub unsafe fn gtkhx_news_render_post(
+    conn: ConnKey,
     post_view: *mut gtk::ffi::GtkWidget,
     subject_label: *mut gtk::ffi::GtkLabel,
     meta_label: *mut gtk::ffi::GtkLabel,
@@ -95,11 +93,11 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     let body_ptr = hx_news_node_body(node.cast());
     if body_ptr.is_null() {
         buffer.set_text(&tr("Loading…"));
-        gtkhx_news_fetch_thread(browser, node);
+        crate::news_browser::fetch_thread_for(conn, node);
     } else {
         buffer.set_text(&crate::cstr(body_ptr));
     }
-    crate::news_pictures::append(&post_view, node);
+    crate::news_pictures::append(conn, &post_view, node);
     // Tag URLs so the hover-cursor + right-click popup have anchors.
     gtkurl_textview_apply_tags(post_view.as_ptr());
 }

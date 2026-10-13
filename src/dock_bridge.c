@@ -61,7 +61,6 @@ static const struct {
     { HX_PANEL_ID_TASKS, N_ ("Tasks"), "tasks.png", "bottom" },
     { HX_PANEL_ID_NEWS, N_ ("News"), "news.png", "start" },
     { HX_PANEL_ID_CHAT, N_ ("Chat"), "chat.png", "center" },
-    { HX_PANEL_ID_NEWS15, N_ ("News (1.5+)"), "news_folder.png", "center" },
 #ifdef HAVE_VOICE
     { HX_PANEL_ID_VIDEO, N_ ("Video"), "video.png", "end" },
 #endif
@@ -69,18 +68,14 @@ static const struct {
 
 /* The first run's layout, and what Reset Layout puts back: News and Tasks
  * in a column on the left (the transfer queue is empty most of the time,
- * and a transfer raises its tab), Chat and News 1.5 in the middle, Users on
- * the right. The slots are where each area's panels go when nothing
- * remembers where they were. */
+ * and a transfer raises its tab), Chat in the middle, Users on the right.
+ * The slots are where each area's panels go when nothing remembers where
+ * they were. */
 static const char *DEFAULT_LAYOUT
     = "{\"dir\":\"row\",\"size\":[0.24,0.58,0.18],\"kids\":["
       "{\"tabs\":[\"news\",\"tasks\"],\"slots\":[\"start\",\"bottom\"]},"
-      "{\"tabs\":[\"chat\",\"news15\"],\"slots\":[\"center\"]},"
+      "{\"tabs\":[\"chat\"],\"slots\":[\"center\"]},"
       "{\"tabs\":[\"users\"],\"slots\":[\"end\"]}]}";
-
-/* id -> GPtrArray of void (*) (void): what gtkhx_dock_connect_shown
- * asked for. */
-static GHashTable *shown_hooks;
 
 static GtkWidget *
 pane_content (const char *id)
@@ -281,23 +276,6 @@ on_layout_kept (MlnPanes *panes, const char *mode, const char *layout,
     dock_layout_keep (layout);
 }
 
-static void
-on_pane_shown (MlnPanes *panes, const char *id, gboolean on, gpointer data)
-{
-    GPtrArray *hooks;
-
-    (void)panes;
-    (void)data;
-
-    if (!on || shown_hooks == NULL) {
-        return;
-    }
-    hooks = g_hash_table_lookup (shown_hooks, id);
-    for (guint i = 0; hooks != NULL && i < hooks->len; i++) {
-        ((void (*) (void))hooks->pdata[i]) ();
-    }
-}
-
 /* A window for panels moved out of the main one, as the old undocked
  * windows were: the application's, with its keys and push-to-talk.
  * mullion-gtk titles it and keeps its size with the layout. */
@@ -401,7 +379,6 @@ gtkhx_dock_new (void)
 
     mln_panes_set_window_func (dock, make_window, NULL, NULL);
     g_signal_connect (dock, "layout-kept", G_CALLBACK (on_layout_kept), NULL);
-    g_signal_connect (dock, "pane-shown", G_CALLBACK (on_pane_shown), NULL);
     g_signal_connect (dock, "corner-changed", G_CALLBACK (on_corner_changed),
                       NULL);
 
@@ -479,25 +456,6 @@ gtkhx_dock_reset (void)
     if (dock != NULL) {
         mln_panes_reset (dock);
     }
-}
-
-void
-gtkhx_dock_connect_shown (const char *id, void (*func) (void))
-{
-    GPtrArray *hooks;
-
-    g_return_if_fail (id != NULL && func != NULL);
-
-    if (shown_hooks == NULL) {
-        shown_hooks = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
-                                             (GDestroyNotify)g_ptr_array_unref);
-    }
-    hooks = g_hash_table_lookup (shown_hooks, id);
-    if (hooks == NULL) {
-        hooks = g_ptr_array_new ();
-        g_hash_table_insert (shown_hooks, g_strdup (id), hooks);
-    }
-    g_ptr_array_add (hooks, (gpointer)func);
 }
 
 /* ---- The Rust ports' ABI --------------------------------------------- */

@@ -2,25 +2,24 @@
 //! ported from `news_browser.c` (`open_compose_window` +
 //! `build_reply_context_panel` + `compose_do_post` / `compose_cancel`).
 //!
-//! A modal `GtkWindow` transient over the toolbar window: subject entry, body
+//! A modal `GtkWindow` transient over the news browser's window: subject entry, body
 //! `GtkTextView`, and (for a reply) a "Replying to …" context card above the
 //! form. Post sends `hx_news15_post_thread` (the Rust `hxhandlers::send::news` sender) and
 //! refreshes the containing category; Cancel / close just destroys.
 //!
-//! The C side keeps the selection logic (the toolbar handlers pick the category
-//! path + reply target and fire the body prefetch), and two small bridges:
-//! `gtkhx_news_refresh_category` (find the category in the tree and refetch it,
-//! else root) and `gtkhx_news_node_date_string` (format a post's date the same
-//! way the browser's post pane does). Everything else is here.
+//! The browser keeps the selection logic (its toolbar handlers pick the
+//! category path + reply target and fire the body prefetch) and
+//! `news_browser::refresh_category` (find the category in the tree and refetch
+//! it, else root). Everything else is here.
 
 use std::ffi::{c_char, c_void};
 
-use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
 
+use crate::dock::{self, ConnKey};
 use crate::tr::{tr, tr_fmt};
 
 const NB_KIND_POST: i32 = 3;
@@ -34,17 +33,12 @@ extern "C" {
     fn hx_news_node_postid(node: *mut c_void) -> u32;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
-    // news_browser.c bridges.
-    fn gtkhx_news_refresh_category(path: *const c_char);
-    // gtkhx_ui_bridge.c — the focused session's &htlc (single-session).
-    fn gtkhx_active_htlc() -> *mut c_void;
     // gtkhx.c — themed .gtkhx-input CSS class + font for the compose body.
     fn gtkhx_apply_input_style(w: *mut gtk::ffi::GtkWidget);
-    // toolbar.c — transient-for parent. May be NULL.
-    static toolbar_window: *mut gtk::ffi::GtkWidget;
 }
 
-/// Open the compose window.
+/// Open the compose window for posting on `conn`, over `parent`, its browser's
+/// window.
 ///
 /// `category_path` is the category to post into. `reply_to` is NULL for a new
 /// post, or the `HxNewsNode *` of the post being replied to (its postid becomes
@@ -52,11 +46,12 @@ extern "C" {
 /// the subject entry ("Re: …" for replies).
 ///
 /// # Safety
-/// C-ABI entry from a toolbar handler on the GTK main thread. `category_path` /
+/// Called from the browser's toolbar on the GTK main thread. `category_path` /
 /// `prefill_subject` are NUL-terminated C strings; `reply_to` is NULL or a valid
 /// `HxNewsNode *` read synchronously here (not retained past this call).
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_compose_open(
+pub unsafe fn gtkhx_news_compose_open(
+    conn: ConnKey,
+    parent: Option<&gtk::Window>,
     category_path: *const c_char,
     reply_to: *mut c_void,
     prefill_subject: *const c_char,
@@ -83,16 +78,9 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
         tr("New Post")
     }));
     window.set_size_request(560, if is_reply { 540 } else { 380 });
-    // br->window is a PanelWidget, not a GtkWindow — parent on the toolbar
-    // window every panel uses for sub-dialogs.
-    let parent: Option<gtk::Window> = if toolbar_window.is_null() {
-        None
-    } else {
-        from_glib_none::<_, gtk::Widget>(toolbar_window)
-            .downcast::<gtk::Window>()
-            .ok()
-    };
-    window.set_transient_for(parent.as_ref());
+    window.set_transient_for(parent);
+    // Its connection closing takes the browser window, and this with it.
+    window.set_destroy_with_parent(true);
     window.set_modal(true);
 
     // Header bar: Cancel (start) + Post (end).
@@ -167,7 +155,7 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
             let s = crate::cs(subject.as_str());
             let b = crate::cs(body.as_str());
             hx_news15_post_thread(
-                gtkhx_active_htlc(),
+                dock::htlc_for(conn),
                 category_path.as_ptr(),
                 s.as_ptr(),
                 parent_postid,
@@ -175,7 +163,7 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
             );
             // Settle: refetch the affected category (or root if it's not
             // currently in the tree). The server pushes no notification.
-            gtkhx_news_refresh_category(category_path.as_ptr());
+            crate::news_browser::refresh_category(conn, category_path.to_bytes());
             window.destroy();
         });
     }
