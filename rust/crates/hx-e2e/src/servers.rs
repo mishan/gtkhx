@@ -30,6 +30,9 @@ pub enum Cap {
     /// Keeps a threaded-news article whose part is a picture, its type and
     /// its bytes as they were posted.
     NewsPictures,
+    /// Takes a picture attached to a news article on the hotline-ng wire,
+    /// and lists it to a classic client as a part after the text.
+    NgNewsPictures,
 }
 
 #[derive(Debug)]
@@ -106,13 +109,11 @@ pub const SERVERS: &[Server] = &[
         name: "hxd-ng",
         host: "127.0.0.1",
         port: 5520,
-        // Unused: the rig's hxd-ng serves no files, so nothing listens on
-        // the transfer port its control port implies.
         xfer_port: 5521,
-        // The rig gives hxd-ng a guest and no admin: it is here for voice
-        // and video.
+        // The rig gives hxd-ng a guest and no admin: it is here for voice,
+        // video and news pictures.
         admin: "",
-        caps: &[Cap::Voice, Cap::Video],
+        caps: &[Cap::Voice, Cap::Video, Cap::NgNewsPictures],
         every: false,
     },
 ];

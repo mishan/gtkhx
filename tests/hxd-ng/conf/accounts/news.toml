@@ -1,0 +1,19 @@
+# The news tests' account: every news bit, and pictures to attach.
+name = "news"
+password = "news"
+
+[access]
+read_chat = true
+send_chat = true
+read_news = true
+post_news = true
+delete_articles = true
+create_categories = true
+delete_categories = true
+create_news_bundles = true
+delete_news_bundles = true
+send_media = true
+
+# Past the article limit a run posts within five minutes.
+[extra]
+can_spam = true

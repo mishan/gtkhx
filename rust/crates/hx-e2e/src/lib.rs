@@ -15,6 +15,7 @@
 //! drop, and never asserts on anything outside it.
 
 pub mod client;
+pub mod ng;
 mod servers;
 
 pub use client::{is_reply, Client, Entry, Reply};

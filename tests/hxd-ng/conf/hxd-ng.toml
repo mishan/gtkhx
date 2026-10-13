@@ -1,5 +1,5 @@
 # hxd-ng for the GtkHx Tier 3 rig: with Janus, a server that speaks the
-# video extension. Ports sit clear of mhxd (5500) and Janus (5510) on the
+# video extension, and the one that attaches pictures to news. Ports sit clear of mhxd (5500) and Janus (5510) on the
 # host network the whole rig shares; see tests/COMPOSE.md.
 
 [server]
@@ -37,3 +37,24 @@ root = "/srv/hxd-ng/files"
 # Served over HTXF, so the HOPE banner tests fetch it sealed or plain.
 [banner]
 file = "/etc/hxd-ng/banner.gif"
+
+# The hotline-ng wire, which is how a picture is attached to a news article:
+# the news test posts one there and reads it back over the classic wire.
+[ng]
+bind = "0.0.0.0:5525"
+
+# Threaded news, with attachments: a classic client is listed each one
+# as a picture part (docs/news.md §12.3 in hxd-ng's tree).
+[news]
+db = "/var/lib/hxd-ng/news.db"
+blobs = "/var/lib/hxd-ng/news-blobs"
+
+# The tests stage a picture each run, and the rig lives for days; 0
+# would mean none at all, not no limit.
+[news.attach]
+per_hour = 100000
+
+# The suites log the same accounts in many times a minute; the burst an
+# account earns back every two seconds is for a server with people on it.
+[limits]
+reconnect_seconds = 0

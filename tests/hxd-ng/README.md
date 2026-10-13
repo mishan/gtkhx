@@ -2,10 +2,12 @@
 
 [hxd-ng](https://github.com/mishan/hxd-ng) from the image its CI
 publishes to GHCR (`ghcr.io/mishan/hxd-ng`), configured for GtkHx's Tier
-3 rig. It is here for one reason: it implements the video extension
+3 rig. It implements the video extension
 (`docs/capabilities-video.md` in its tree), so every video test runs
 against it as well as Janus. It also serves voice — ICE-lite, on str0m —
-which the video media tests use as a matter of course.
+which the video media tests use as a matter of course, and it is the
+rig's one server where a picture is attached to a news article on the
+hotline-ng wire.
 
 ## Build
 
@@ -43,6 +45,7 @@ Janus:
 | 5620/tcp | Hotline over TLS, with a self-signed certificate made on first start |
 | 5621/tcp | HTXF over TLS |
 | 5524/udp | Voice and video media |
+| 5525/tcp | The hotline-ng wire (WebSocket and HTTP), which attaches pictures to news |
 
 ## Configuration
 
@@ -50,12 +53,15 @@ Janus:
 ceilings — one screen-share slot a room, so the second-sharer refusal is
 testable. It also serves a file-mode banner and a files area holding
 `test.txt`, `test_folder/` and an `Uploads/` folder, for the HOPE, TLS,
-transfer and folder transfer tests. `conf/accounts/` has
-two accounts:
+transfer and folder transfer tests. Threaded news is on, with
+attachments: the news test attaches a picture to an article on the
+hotline-ng wire and reads it back over the classic one, where hxd-ng
+lists it as a part after the text. `conf/accounts/` has three accounts:
 
 - `guest` (the harness's login): voice, `video_chat` and `screen_share`.
 - `novideo` / `novideo`: voice but neither video bit, for the access
   refusal tests.
+- `news` / `news`: every news bit and `send_media`, for the news tests.
 
 The voice section's `advertise` line is rewritten at every start by
 `entrypoint.sh` to the host's own addresses. hxd-ng is ICE-lite and

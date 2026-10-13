@@ -12,7 +12,7 @@ hand.
 |------------|------------------|-------------------------------------|------------|
 | `mhxd`     | Hotline server   | 5500 (HTLS), 5501 (HTXF)            | `localhost:5500` |
 | `janus`    | Hotline server   | 5510/5511, 5610/5611 (TLS), 5514/udp | `localhost:5510` |
-| `hxd-ng`   | Hotline server (voice + video) | 5520/5521, 5620/5621 (TLS), 5524/udp | `localhost:5520` |
+| `hxd-ng`   | Hotline server (voice + video) | 5520/5521, 5620/5621 (TLS), 5524/udp, 5525 (hotline-ng) | `localhost:5520` |
 | `hlservd`  | Hotline server (the 1.9 server as a daemon) | 5530, 5531 (+5532/5533) | `localhost:5530` |
 | `hxtrackd` | Tracker (v1)     | 5498 (HTRK), 5499/udp               | tracker host `localhost:5498` |
 | `argus`    | Tracker (v1/2/3) | 5698 (HTRK), 6498 (TLS), 5699/udp   | tracker host `localhost:5698` |
@@ -142,9 +142,10 @@ uniquely named scratch folder it deletes afterwards, so runs don't collide
 and the shared servers don't drift.
 
 Operations that need a file-admin account run on mhxd, Janus and hlservd
-(all `admin`, empty password); the pinned hxd-ng has no mkdir, delete or
-move. hlservd's `admin` has no password until one is set, and until then
-logs in only from the machine running the server, which host networking
-makes every test connection; its flood ban is off for loopback
+(all `admin`, empty password); the rig's hxd-ng account is a guest, which
+may download and upload into `Uploads` but not make, delete or move.
+hlservd's `admin` has no password until one is set, and until then logs
+in only from the machine running the server, which host networking makes
+every test connection; its flood ban is off for loopback
 (`tests/hlservd/README.md`).
 Janus's `admin` has the empty password too; see `tests/janus/README.md`.
