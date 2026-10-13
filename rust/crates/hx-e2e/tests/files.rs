@@ -308,34 +308,40 @@ fn folder_transfers_are_granted_a_reference() {
     }
 }
 
-/// Download the folder `name` in `dir` the way the app does — its reply's
-/// item count handed to the connection — into a scratch directory, and
-/// return the worker's result, how long it took and the relative paths
-/// that arrived.
-fn download_folder(
-    c: &mut Client,
-    dir: &str,
-    name: &[u8],
-) -> (i32, std::time::Duration, Vec<String>) {
-    use hxnet::htxf::{
-        hxnet_htxf_close, hxnet_htxf_connect, hxnet_htxf_pack_preamble, hxnet_htxf_set_folder_items,
-    };
-    use hxnet::xfer::{hxnet_xfer_folder_recv_all, HxnetFolderParams};
-    use std::ffi::{c_void, CString};
+/// mhxd runs one download at a time for each user (`individual_downloads`),
+/// and every test here connects from the same address: the tests that move
+/// a file's bytes take turns.
+fn transfer_turn() -> std::sync::MutexGuard<'static, ()> {
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    TURN.lock().unwrap_or_else(|p| p.into_inner())
+}
 
-    unsafe extern "C" fn no_progress(_u: *mut c_void, _d: u64) {}
+/// Ask for a transfer, and again while mhxd refuses one asked for just
+/// after another closes ("1 at a time") until it has seen that one go.
+fn granted(c: &mut Client, req: &hxrequest::Request, what: &str) -> hx_e2e::Reply {
+    let mut r = c.request(req);
+    for _ in 0..30 {
+        if !r.is_error() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        r = c.request(req);
+    }
+    ok(c, &r, what);
+    r
+}
 
-    let r = c.request(&files::get_folder(dir.as_bytes(), name).unwrap());
-    ok(c, &r, "folder download");
-    let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
+/// The transfer connection for `ref_`, opened the way the app opens it.
+fn open_xfer(c: &Client, ref_: u32, size: u64, folder: bool) -> *mut hxnet::htxf::HtxfConn {
+    use hxnet::htxf::{hxnet_htxf_connect, hxnet_htxf_pack_preamble};
     let mut pre = [0u8; 24];
     let n = unsafe {
         hxnet_htxf_pack_preamble(
             pre.as_mut_ptr(),
             pre.len(),
-            get.ref_,
-            u64::from(get.size),
-            1,
+            ref_,
+            size,
+            u16::from(folder),
             0,
             0,
         )
@@ -353,20 +359,131 @@ fn download_folder(
             pre.as_ptr(),
             n,
             std::ptr::null(),
-            get.ref_,
+            ref_,
             None,
             std::ptr::null_mut(),
         )
     };
     assert!(!h.is_null(), "{}: transfer port", server.name);
+    h
+}
+
+/// A new local directory of the test's own.
+fn local_dir(c: &Client, what: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(hx_e2e::unique_name(&format!(
+        "hx-e2e-{what}-{}",
+        c.server().name
+    )));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+unsafe extern "C" fn no_progress(_u: *mut std::ffi::c_void, _d: u64) {}
+
+/// The params of a solo transfer of the local file `path`, no resume.
+fn xfer_params(
+    hx: *mut hxnet::htxf::HtxfConn,
+    path: &std::ffi::CStr,
+    budget: u64,
+) -> hxnet::xfer::HxnetXferParams {
+    hxnet::xfer::HxnetXferParams {
+        hx,
+        path: path.as_ptr(),
+        file_budget: budget,
+        data_pos: 0,
+        rsrc_pos: 0,
+        opt_preview: 0,
+        opt_folder: 0,
+        opt_large: 0,
+        preview: std::ptr::null_mut(),
+        user_data: std::ptr::null_mut(),
+        progress: Some(no_progress),
+        preview_chunk: None,
+        preview_set_info: None,
+        preview_done: None,
+        data_size: 0,
+        rsrc_size: 0,
+    }
+}
+
+/// Download the file `name` in the root through the app's download worker
+/// and return its data fork: as saved, or as a preview is fed it.
+fn download_file(c: &mut Client, name: &[u8], preview: bool) -> Vec<u8> {
+    use std::ffi::{c_char, c_void, CString};
+
+    unsafe extern "C" fn set_info(
+        _p: *mut c_void,
+        _t: *const c_char,
+        _c: *const c_char,
+        len: u64,
+    ) -> u64 {
+        len
+    }
+    unsafe extern "C" fn chunk(p: *mut c_void, data: *const c_char, len: usize) {
+        let shown = &mut *(p as *mut Vec<u8>);
+        shown.extend_from_slice(std::slice::from_raw_parts(data as *const u8, len));
+    }
+
+    let r = granted(c, &files::get_from(b"/", name, 0).unwrap(), "a download");
+    let get = hxproto::parse::parse_file_get_reply(&r.raw, r.raw.len());
+    let budget = u64::from(get.size);
+    let h = open_xfer(c, get.ref_, budget, false);
+    let dir = local_dir(c, "get");
+    let path = dir.join(hxproto::text::to_utf8(name));
+    let path_c = CString::new(path.to_str().unwrap()).unwrap();
+    let mut shown = Vec::new();
+    let mut p = xfer_params(h, &path_c, budget);
+    if preview {
+        p.opt_preview = 1;
+        p.preview = &mut shown as *mut Vec<u8> as *mut c_void;
+        p.preview_set_info = Some(set_info);
+        p.preview_chunk = Some(chunk);
+    }
+    let rv = unsafe { hxnet::xfer::hxnet_xfer_file_recv_one(&p) };
+    unsafe { hxnet::htxf::hxnet_htxf_close(h) };
+    let saved = std::fs::read(&path);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(rv, 0, "{}: the download failed", c.server().name);
+    if preview {
+        shown
+    } else {
+        saved.unwrap_or_else(|e| panic!("{}: the downloaded file: {e}", c.server().name))
+    }
+}
+
+/// Upload `bytes` as the file `name` in `dir` through the app's upload worker.
+fn upload_file(c: &mut Client, dir: &str, name: &str, bytes: &[u8]) {
+    let local = local_dir(c, "put");
+    let path = local.join(name);
+    std::fs::write(&path, bytes).unwrap();
+    let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    upload(c, dir, name.as_bytes(), &path_c, bytes.len() as u64);
+    let _ = std::fs::remove_dir_all(&local);
+}
+
+/// What a folder download left on disk: each relative path, with a file's
+/// contents.
+type Arrived = Vec<(String, Option<Vec<u8>>)>;
+
+/// Download the folder `name` in `dir` the way the app does — its reply's
+/// item count handed to the connection — into a scratch directory, and
+/// return the worker's result, how long it took and what arrived, less the
+/// sidecars that keep a file's Finder data.
+fn download_folder(c: &mut Client, dir: &str, name: &[u8]) -> (i32, std::time::Duration, Arrived) {
+    use hxnet::htxf::{hxnet_htxf_close, hxnet_htxf_set_folder_items};
+    use hxnet::xfer::{hxnet_xfer_folder_recv_all, HxnetFolderParams};
+    use std::ffi::CString;
+
+    let r = granted(
+        c,
+        &files::get_folder(dir.as_bytes(), name).unwrap(),
+        "folder download",
+    );
+    let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
+    let h = open_xfer(c, get.ref_, u64::from(get.size), true);
     unsafe { hxnet_htxf_set_folder_items(h, get.nfiles) };
 
-    let dest = std::env::temp_dir().join(format!(
-        "hx-e2e-folder-{}-{}",
-        server.name,
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dest);
+    let dest = local_dir(c, "folder");
     let dest_c = CString::new(dest.to_str().unwrap()).unwrap();
     let fp = HxnetFolderParams {
         hx: h,
@@ -382,10 +499,15 @@ fn download_folder(
     let took = t0.elapsed();
     unsafe { hxnet_htxf_close(h) };
 
-    fn walk(root: &std::path::Path, at: &std::path::Path, out: &mut Vec<String>) {
+    fn walk(root: &std::path::Path, at: &std::path::Path, out: &mut Arrived) {
         for e in std::fs::read_dir(at).into_iter().flatten().flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.ends_with(".fndrinfo") || n.ends_with(".rsrc") {
+                continue;
+            }
             let p = e.path();
-            out.push(p.strip_prefix(root).unwrap().display().to_string());
+            let rel = p.strip_prefix(root).unwrap().display().to_string();
+            out.push((rel, p.is_file().then(|| std::fs::read(&p).unwrap())));
             walk(root, &p, out);
         }
     }
@@ -401,17 +523,35 @@ fn download_folder(
 /// own, ten seconds on; mhxd counts the top level alone.
 #[test]
 fn a_folder_download_arrives_whole_and_ends_promptly() {
+    let _turn = transfer_turn();
     for mut c in admins() {
         let mut s = Scratch::new(&mut c, "fget");
         let (dir, tree) = (s.path().to_string(), s.join("tree"));
         for p in ["", "/a", "/a/x", "/a/x/y", "/b"] {
             mkdir(s.client(), &format!("{tree}{p}"));
         }
+        upload_file(
+            s.client(),
+            &format!("{tree}/a/x"),
+            "f.txt",
+            b"in a folder\n",
+        );
         let c = s.client();
         let (rv, took, got) = download_folder(c, &dir, b"tree");
         let name = c.server().name;
         assert_eq!(rv, 0, "{name}: the download failed");
-        assert_eq!(got, ["a", "a/x", "a/x/y", "b"], "{name}: the tree");
+        let folder = |p: &str| (p.to_string(), None);
+        assert_eq!(
+            got,
+            [
+                folder("a"),
+                folder("a/x"),
+                ("a/x/f.txt".to_string(), Some(b"in a folder\n".to_vec())),
+                folder("a/x/y"),
+                folder("b"),
+            ],
+            "{name}: the tree"
+        );
         assert!(
             took < std::time::Duration::from_secs(5),
             "{name}: took {took:?} to end"
@@ -468,17 +608,7 @@ fn utf8_and_large_files_are_negotiated_where_offered() {
 /// resumed there delivers it.
 fn data_from(c: &mut Client, name: &[u8], from: u32) -> Vec<u8> {
     use std::io::{Read, Write};
-    // mhxd refuses a download asked for just after one closes ("1 at a
-    // time") until it has seen that one go.
-    let mut r = c.request(&files::get_from(b"/", name, from).unwrap());
-    for _ in 0..30 {
-        if !r.is_error() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        r = c.request(&files::get_from(b"/", name, from).unwrap());
-    }
-    ok(c, &r, "a download");
+    let r = granted(c, &files::get_from(b"/", name, from).unwrap(), "a download");
     let get = hxproto::parse::parse_file_get_reply(&r.raw, r.raw.len());
     let mut pre = [0u8; 24];
     let n =
@@ -512,6 +642,7 @@ fn data_from(c: &mut Client, name: &[u8], from: u32) -> Vec<u8> {
 /// starts its data fork there, on every server.
 #[test]
 fn a_resumed_download_starts_where_it_was_asked_to() {
+    let _turn = transfer_turn();
     for s in servers_with(&[]) {
         let mut c = Client::guest(s, 0);
         let files: Vec<_> = c.list("/").into_iter().filter(|e| !e.is_folder()).collect();
@@ -539,92 +670,22 @@ fn open_transfer(
     ref_: u32,
     size: u64,
 ) -> (*mut hxnet::htxf::HtxfConn, *const hxnet::htxf::HtxfAbort) {
-    use hxnet::htxf::{
-        hxnet_htxf_abort_arm, hxnet_htxf_abort_new, hxnet_htxf_connect, hxnet_htxf_pack_preamble,
-    };
-    let server = c.server();
-    let mut pre = [0u8; 24];
-    let n = unsafe { hxnet_htxf_pack_preamble(pre.as_mut_ptr(), pre.len(), ref_, size, 0, 0, 0) };
-    assert!(n > 0, "a preamble");
-    let h = unsafe {
-        hxnet_htxf_connect(
-            server.host.as_ptr(),
-            server.host.len(),
-            server.xfer_port,
-            std::ptr::null(),
-            0,
-            0,
-            pre.as_ptr(),
-            n,
-            std::ptr::null(),
-            ref_,
-            None,
-            std::ptr::null_mut(),
-        )
-    };
-    assert!(!h.is_null(), "{}: transfer port", server.name);
+    use hxnet::htxf::{hxnet_htxf_abort_arm, hxnet_htxf_abort_new};
+    let h = open_xfer(c, ref_, size, false);
     let abort = hxnet_htxf_abort_new();
     unsafe { hxnet_htxf_abort_arm(h, abort) };
     (h, abort)
 }
 
-fn xfer_params(
-    hx: *mut hxnet::htxf::HtxfConn,
-    path: &std::ffi::CStr,
-) -> hxnet::xfer::HxnetXferParams {
-    unsafe extern "C" fn no_progress(_u: *mut std::ffi::c_void, _d: u64) {}
-    hxnet::xfer::HxnetXferParams {
-        hx,
-        path: path.as_ptr(),
-        file_budget: 0,
-        data_pos: 0,
-        rsrc_pos: 0,
-        opt_preview: 0,
-        opt_folder: 0,
-        opt_large: 0,
-        preview: std::ptr::null_mut(),
-        user_data: std::ptr::null_mut(),
-        progress: Some(no_progress),
-        preview_chunk: None,
-        preview_set_info: None,
-        preview_done: None,
-        data_size: 0,
-        rsrc_size: 0,
-    }
-}
-
 /// Upload the local file `path` into `dir` as `name`, as the app's upload does.
 fn upload(c: &mut Client, dir: &str, name: &[u8], path: &std::ffi::CStr, len: u64) {
     use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close, hxnet_htxf_finish_send};
-    let enc = hxrequest::path::encode_dir(dir.as_bytes(), false);
-    let put = hxproto::build::FilePutRequest {
-        name,
-        dir: Some(&enc),
-        has_preview: false,
-        size: len as u32,
-        size64: None,
-    };
-    let mut chunks = [hxproto::build::HxChunk::EMPTY; 5];
-    let mut scratch = [0u8; 12];
-    let hc = hxproto::build::build_file_put_chunks(&put, &mut chunks, &mut scratch);
-    let req = hxrequest::Request {
-        opcode: hxproto::messages::ClientHdr::FilePut as u32,
-        chunks: chunks[..hc]
-            .iter()
-            .map(|ch| {
-                (
-                    ch.tag,
-                    unsafe { std::slice::from_raw_parts(ch.data, ch.len as usize) }.to_vec(),
-                )
-            })
-            .collect(),
-    };
-    let r = c.request(&req);
+    let r = c.request(&files::put(dir.as_bytes(), name, len as u32).unwrap());
     ok(c, &r, "an upload");
     let ref_ = hxproto::parse::parse_file_put_reply(&r.raw, r.raw.len()).ref_;
     // The FILP header and the data fork's marker, then the data.
     let (h, abort) = open_transfer(c, ref_, 133 + len);
-    let mut p = xfer_params(h, path);
+    let mut p = xfer_params(h, path, 0);
     p.data_size = len;
     assert_eq!(
         unsafe { hxnet::xfer::hxnet_xfer_file_send_one(&p) },
@@ -687,8 +748,7 @@ fn download_from(
         received: 0,
         at: pause_at,
     };
-    let mut p = xfer_params(h, path);
-    p.file_budget = u64::from(get.size);
+    let mut p = xfer_params(h, path, u64::from(get.size));
     p.data_pos = u64::from(local);
     p.user_data = (&mut at as *mut PauseAt).cast();
     p.progress = Some(pause_when_due);
@@ -711,19 +771,14 @@ const PATIENT: (u32, u64) = (30, 100);
 /// for byte. The pause and the resume are this test's own, built from the
 /// pieces the app's are (the transfer's abort token, a resume FILE_GET);
 /// hxhandlers' unit tests cover the app's state around them.
-///
-/// Not hlservd: its INFO fork leaves out the comment's length, which the
-/// download's parser refuses as truncated, so no download from it completes.
 #[test]
 fn a_paused_download_resumes_to_the_same_bytes() {
+    let _turn = transfer_turn();
     const LEN: usize = 3 << 20;
     let bytes: Vec<u8> = (0..LEN as u32)
         .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
         .collect();
-    for mut c in admins()
-        .into_iter()
-        .filter(|c| c.server().name != "hlservd")
-    {
+    for mut c in admins() {
         let name = c.server().name;
         let tmp = std::env::temp_dir().join(hx_e2e::unique_name("hx-e2e-pause"));
         std::fs::create_dir_all(&tmp).unwrap();
@@ -766,5 +821,47 @@ fn a_paused_download_resumes_to_the_same_bytes() {
         );
         drop(s);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// The rig's seed `test.txt`, downloaded through the app's own worker on
+/// every server: saved whole, and fed whole to a preview.
+#[test]
+fn a_file_downloads_whole_and_previews_whole() {
+    let _turn = transfer_turn();
+    for s in servers_with(&[Cap::SeedFile]) {
+        let mut c = Client::guest(s, 0);
+        assert_eq!(
+            download_file(&mut c, b"test.txt", false),
+            b"hello world\n",
+            "{}",
+            s.name
+        );
+        assert_eq!(
+            download_file(&mut c, b"test.txt", true),
+            b"hello world\n",
+            "{} preview",
+            s.name
+        );
+    }
+}
+
+#[test]
+fn the_seed_folder_downloads_whole() {
+    let _turn = transfer_turn();
+    for s in servers_with(&[Cap::SeedFolder]) {
+        let mut c = Client::guest(s, 0);
+        let (rv, _, got) = download_folder(&mut c, "/", b"test_folder");
+        assert_eq!(rv, 0, "{}: the download failed", s.name);
+        let file = |p: &str, b: &[u8]| (p.to_string(), Some(b.to_vec()));
+        assert_eq!(
+            got,
+            [
+                file("leaf_a.txt", b"folder-leaf-A\n"),
+                file("leaf_b.txt", b"folder-leaf-B\n"),
+            ],
+            "{}",
+            s.name
+        );
     }
 }

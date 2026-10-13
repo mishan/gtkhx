@@ -23,6 +23,20 @@ An entry marked *verified* was reproduced against the rig's container.
 - **Should get:** the folder's name between them, as the delete error does:
   "Cannot delete «nope» because it does not exist or cannot be found."
 
+## A download leaves the file's comment out
+
+**Verified.**
+
+- **Sends:** FILE_SETINFO (207) giving `test.txt` a comment, then FILE_GET
+  (202) for it.
+- **Gets:** GET_INFO reads the comment back, but the download's INFO fork
+  ends right after the name, with no comment length and no comment.
+- **Should get:** the comment length and the comment after the name, as the
+  Mac server sends them, so the comment survives a download.
+
+The fork itself is readable — GtkHx reads one that ends at the name as
+having no comment — so only the comment is lost.
+
 ## The log double-encodes non-ASCII text
 
 **Verified.** Cosmetic. The admin-account line in the server's log reads

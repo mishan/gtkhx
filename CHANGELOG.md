@@ -31,6 +31,7 @@
   - Fixed avatars from 48 to 199 pixels wide showing nothing in the users list; on hxd-ng servers that was every avatar set from hx-ng
 - Files
   - Fixed downloads failing on hxd-ng servers
+  - Fixed downloads from hlservd (the Hotline Server 1.9.5) failing, single files, previews and folders alike; broken since 1.3.0
   - Fixed uploads to some servers, hxd-ng among them, reporting failure though the file arrived
   - Fixed downloading a folder that holds files of 4 GB or more failing partway; 1.5.0 listed this as fixed but shipped without it
   - Fixed a folder download in the queue being cancelled when another transfer ended
