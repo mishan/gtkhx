@@ -4,8 +4,6 @@
 //! expects it.
 #![cfg(feature = "rig")]
 
-use std::time::{Duration, Instant};
-
 use hx_e2e::client::CAP_TEXT_ENCODING;
 use hx_e2e::{servers_with, unique_name, Client, Server};
 use hxnet::Event;

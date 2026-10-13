@@ -159,7 +159,7 @@
           <li>Threaded news opens in a window for each connection, and shows the pictures an article carries</li>
           <li>The Tasks panel is now Transfers, holding only downloads and uploads, and a download can be paused and resumed</li>
           <li>A private message can carry a picture on servers with inline media</li>
-          <li>Fixed downloads and uploads on hxd-ng servers</li>
+          <li>Fixed downloads and uploads on hxd-ng servers, and downloads from the Hotline Server 1.9.5 (hlservd)</li>
         </ul>
       </description>
     </release>

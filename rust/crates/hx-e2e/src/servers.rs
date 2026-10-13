@@ -33,6 +33,11 @@ pub enum Cap {
     /// Takes a picture attached to a news article on the hotline-ng wire,
     /// and lists it to a classic client as a part after the text.
     NgNewsPictures,
+    /// Lets the guest download the rig's seed `test.txt` from the root.
+    SeedFile,
+    /// Lets the guest download the rig's seed `test_folder`, holding
+    /// `leaf_a.txt` and `leaf_b.txt`.
+    SeedFolder,
 }
 
 #[derive(Debug)]
@@ -68,6 +73,8 @@ pub const SERVERS: &[Server] = &[
             Cap::FileAdmin,
             Cap::GifIcons,
             Cap::Hope(hxhope::Cipher::Blowfish),
+            Cap::SeedFile,
+            Cap::SeedFolder,
         ],
         every: true,
     },
@@ -90,6 +97,8 @@ pub const SERVERS: &[Server] = &[
             Cap::Video,
             Cap::Hope(hxhope::Cipher::ChaCha20Poly1305),
             Cap::Hope(hxhope::Cipher::Blowfish),
+            Cap::SeedFile,
+            Cap::SeedFolder,
         ],
         every: true,
     },
@@ -102,7 +111,7 @@ pub const SERVERS: &[Server] = &[
         // logs in from the machine running the server: over host
         // networking, every test connection.
         admin: "admin",
-        caps: &[Cap::FileAdmin, Cap::NewsPictures],
+        caps: &[Cap::FileAdmin, Cap::NewsPictures, Cap::SeedFile],
         every: true,
     },
     Server {
@@ -111,9 +120,15 @@ pub const SERVERS: &[Server] = &[
         port: 5520,
         xfer_port: 5521,
         // The rig gives hxd-ng a guest and no admin: it is here for voice,
-        // video and news pictures.
+        // video, news pictures and the downloads of its seed files.
         admin: "",
-        caps: &[Cap::Voice, Cap::Video, Cap::NgNewsPictures],
+        caps: &[
+            Cap::Voice,
+            Cap::Video,
+            Cap::NgNewsPictures,
+            Cap::SeedFile,
+            Cap::SeedFolder,
+        ],
         every: false,
     },
 ];
