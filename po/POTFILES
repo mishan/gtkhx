@@ -1,12 +1,11 @@
 src/chat.c
+src/dock_bridge.c
 src/files_local_provider.c
 src/files_ops.c
 src/files_remote_provider.c
 src/gtkhx.c
 src/gtkurl.c
 src/gtkutil.c
-src/hx_panel.c
-src/hx_split.c
 src/msg.c
 src/network.c
 src/notify.c
@@ -17,6 +16,7 @@ src/tasks.c
 src/toolbar.c
 src/usermod.c
 src/users.c
+src/users_bridge.c
 rust/crates/gtkhx-ui/src/about.rs
 rust/crates/gtkhx-ui/src/agreement.rs
 rust/crates/gtkhx-ui/src/announce.rs

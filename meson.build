@@ -72,7 +72,7 @@ adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 # fetches the tagged release and builds it static into the program.
 mullion_dep = dependency('mullion-gtk-0', version : '>= 0.3.1',
                          fallback : 'mullion-gtk')
-glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
+glib_dep    = dependency('glib-2.0',  version : '>= 2.76')
 gthread_dep = dependency('gthread-2.0')
 threads_dep = dependency('threads')
 
