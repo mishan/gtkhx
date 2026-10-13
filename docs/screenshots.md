@@ -52,9 +52,9 @@ GtkHx configuration, and a sealed shotbox session.
   `GTKHX_VOICE_TEST_SCREEN_SRC`, with `GTKHX_SCREEN_AUTOSTART` to share the screen.
 
 Each scene also picks its look. News, the tracker and video are in the dark scheme, the rest
-light. The news and video scenes start from a dock layout of their own, written into the fresh
-configuration as `dock-layout.ini`, so the picture has only what it's about: threaded news
-without the message board beside it, chat and video without an empty column.
+light. The video scene starts from a dock layout of its own, written into the fresh
+configuration as `dock-layout.ini`, so the picture has only what it's about: chat and video
+without an empty column.
 
 A scene drives GtkHx the way a person would, through shotbox's Python API (`shotbox.here()`,
 the session's display, over one X connection): it clicks, drags, types and presses keys, and

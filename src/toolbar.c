@@ -459,14 +459,12 @@ on_news_clicked (GtkButton *btn, gpointer data)
     open_news (GTK_WIDGET (btn), sess);
 }
 
+/* Threaded news is a window per connection, as Files is. */
 static void
 on_news15_clicked (GtkButton *btn, gpointer data)
 {
-    session *sess = hx_active_session ();
-
     (void)data;
-    toolbar_build_panel (HX_PANEL_ID_NEWS15, sess, FALSE);
-    open_news_browser (GTK_WIDGET (btn), sess);
+    open_news_browser (GTK_WIDGET (btn), hx_active_session ());
 }
 
 /* Ctrl+U — clear whatever text input has focus, anywhere in the app.
@@ -557,7 +555,8 @@ on_action_broadcast (GSimpleAction *action, GVariant *param, gpointer data)
     gtkhx_broadcast_dialog_open (NULL, data);
 }
 
-/* app.show-panel::<id> — what the matching toolbar button does. */
+/* app.show-panel::<id> — what the matching toolbar button does. news15
+ * is the threaded news window, kept under this action for its key. */
 static void
 on_action_show_panel (GSimpleAction *action, GVariant *param, gpointer data)
 {
@@ -786,8 +785,8 @@ toolbar_register_actions (GApplication *app, session *sess)
  * Disconnect and the title, so the menu is where everything else can
  * always be found — including every button on the optional toolbar:
  *
- *   Settings / Connections… / Tracker / Files
- *   Panels: Chat, Users, News, News (1.5+), Tasks
+ *   Settings / Connections… / Tracker / Files / News (1.5+)
+ *   Panels: Chat, Users, News, Tasks
  *   Show Toolbar / Pane Titles / Reset Layout
  *   Admin > New User…, Edit User…, Broadcast…
  *   About GtkHx / Quit
@@ -807,11 +806,8 @@ build_hamburger (void)
         const char *label;
         const char *id;
     } panels[] = {
-        { _ ("Chat"), HX_PANEL_ID_CHAT },
-        { _ ("Users"), HX_PANEL_ID_USERS },
-        { _ ("News"), HX_PANEL_ID_NEWS },
-        { _ ("News (1.5+)"), HX_PANEL_ID_NEWS15 },
-        { _ ("Tasks"), HX_PANEL_ID_TASKS },
+        { _ ("Chat"), HX_PANEL_ID_CHAT },   { _ ("Users"), HX_PANEL_ID_USERS },
+        { _ ("News"), HX_PANEL_ID_NEWS },   { _ ("Tasks"), HX_PANEL_ID_TASKS },
 #ifdef HAVE_VOICE
         { _ ("Video"), HX_PANEL_ID_VIDEO },
 #endif
@@ -822,6 +818,8 @@ build_hamburger (void)
     g_menu_append (prefs_section, _ ("Connections…"), "app.connections");
     g_menu_append (prefs_section, _ ("Tracker"), "app.tracker");
     g_menu_append (prefs_section, _ ("Files"), "app.files");
+    g_menu_append (prefs_section, _ ("News (1.5+)"),
+                   "app.show-panel::" HX_PANEL_ID_NEWS15);
 
     /* In the menu itself, not a submenu: with the toolbar off by
      * default, this is how a closed pane comes back, and it should be
@@ -972,10 +970,6 @@ panel_factory_run (const char *id, session *sess)
         create_users_window (toolbar_window, sess);
     } else if (g_strcmp0 (id, HX_PANEL_ID_TASKS) == 0) {
         create_tasks_window (toolbar_window, sess);
-    } else if (g_strcmp0 (id, HX_PANEL_ID_NEWS15) == 0) {
-        /* The news browser is a singleton and ignores its widget
-         * argument; NULL is what every other caller passes. */
-        open_news_browser (NULL, sess);
 #ifdef HAVE_VOICE
     } else if (g_strcmp0 (id, HX_PANEL_ID_VIDEO) == 0) {
         create_video_window (toolbar_window, sess);
@@ -1167,11 +1161,11 @@ create_toolbar_window (session *sess)
         make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.png",
                             _ ("Tracker"), G_CALLBACK (create_tracker_window),
                             sess));
-    /* Chat / Files / Users / Tasks buttons use the toolbar_show_panel
-     * helper, which builds the panel if it isn't up, re-attaches it if
-     * it was closed, and raises it. The two news buttons wrap that with
-     * their own entry point, purely for the server fetch it fires when
-     * connected — that's the bit the bare helper can't do. */
+    /* Chat / Users / Tasks buttons use the toolbar_show_panel helper,
+     * which builds the panel if it isn't up, re-attaches it if it was
+     * closed, and raises it. News wraps that with its own entry point,
+     * purely for the server fetch it fires when connected — that's the
+     * bit the bare helper can't do. Files and News (1.5+) open windows. */
     news_btn
         = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
                               _ ("News"), G_CALLBACK (on_news_clicked), NULL);
@@ -1299,8 +1293,8 @@ create_toolbar_window (session *sess)
      *
      * files_btn and news15_btn stay enabled regardless of
      * connection state — the Files window's local panel works
-     * offline, and News 1.5 (always resident in the dock) shows
-     * whatever it has cached. */
+     * offline, and the News (1.5+) window shows whatever it has
+     * cached. */
     gtk_widget_set_sensitive (disconnect_btn, FALSE);
 
     /* Close-request → close_toolbar_window, which calls hx_quit() so
@@ -1365,7 +1359,7 @@ create_toolbar_window (session *sess)
      * A panel built late therefore comes up populated, not empty.
      *
      * On first launch and after Reset Layout nothing is recorded as
-     * closed, so all six get built exactly as before. */
+     * closed, so every panel gets built. */
     for (const char *const *idp = hx_panel_static_ids; *idp != NULL; idp++) {
         toolbar_build_panel (*idp, sess, TRUE);
     }

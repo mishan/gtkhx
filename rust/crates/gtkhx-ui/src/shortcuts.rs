@@ -13,11 +13,13 @@ const PANELS: &[(&str, &str, &str)] = &[
     ("chat", "<Control>1", "Chat"),
     ("users", "<Control>2", "Users"),
     ("news", "<Control>3", "News"),
-    ("news15", "<Control>4", "News (1.5+)"),
     ("tasks", "<Control>5", "Tasks"),
     #[cfg(feature = "voice")]
     ("video", "<Control>6", "Video"),
 ];
+
+/// The threaded news window's key; a window, so not in `PANELS`.
+const NEWS15_ACCEL: &str = "<Control>4";
 
 /// A shortcut: the keys (any of which does it) and what it does.
 type Row = (&'static [&'static str], String);
@@ -32,6 +34,7 @@ fn sections() -> Vec<(String, Option<String>, Vec<Row>)> {
             vec![
                 (&["<Control>k"][..], tr("Connect")),
                 (&["<Control>t"], tr("Tracker")),
+                (&[NEWS15_ACCEL], tr("News (1.5+)")),
                 (&["<Control>comma"], tr("Settings")),
                 (&["F10"], tr("Main menu")),
                 (&["<Control>question"], tr("Keyboard Shortcuts")),
@@ -220,4 +223,5 @@ pub unsafe extern "C" fn gtkhx_shortcuts_install(app: *mut gtk::ffi::GtkApplicat
     for (id, accel, _) in PANELS {
         app.set_accels_for_action(&format!("app.show-panel::{id}"), &[accel]);
     }
+    app.set_accels_for_action("app.show-panel::news15", &[NEWS15_ACCEL]);
 }

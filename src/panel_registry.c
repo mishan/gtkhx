@@ -24,7 +24,6 @@ const char *const hx_panel_static_ids[] = {
     HX_PANEL_ID_TASKS,
     HX_PANEL_ID_NEWS,
     HX_PANEL_ID_CHAT,
-    HX_PANEL_ID_NEWS15,
 #ifdef HAVE_VOICE
     HX_PANEL_ID_VIDEO,
 #endif

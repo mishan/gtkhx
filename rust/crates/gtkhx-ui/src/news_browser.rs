@@ -1,10 +1,12 @@
 //! News browser (1.5) — the unified threaded-news window, ported from
 //! `news_browser.c`.
 //!
-//! One process-singleton browser docked into the toolbar window's CENTER area.
-//! The `NewsBrowser` thread-local owns the whole content tree (the
-//! `GtkTreeListModel` view, the two-pane layout, the cached row icons) plus the
-//! RPC state (the in-flight DIRLIST / CATLIST fetch tables). Everything the
+//! A window of its own for each connection, as the Files browser is: a tree
+//! and an article side by side want more room than a dock frame gives them,
+//! and threaded news is read in sittings. Each connection's `NewsBrowser`
+//! holds its content tree (the `GtkTreeListModel` view, the two-pane layout,
+//! the cached row icons); the in-flight DIRLIST / CATLIST fetch tables record
+//! the connection each request went out on. Everything the
 //! model needs from the C session — the live htlc version + access bitmap, the
 //! `gnews_folder` / `gnews_catalog` request carriers, the post-date formatter,
 //! the row-icon loader — comes through thin C leaves in `news_recv_bridge.c`.
@@ -26,9 +28,9 @@ use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::pango;
-use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
+use libadwaita::prelude::*;
 
 use crate::dock;
 use crate::dock::ConnKey;
@@ -86,13 +88,13 @@ extern "C" {
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     fn hx_news_node_set_body(node: *mut c_void, s: *const c_char);
 
-    // ---- gtkhx-core::conn: read the active connection's version / access bits directly
-    // (over gtkhx_active_htlc), rather than through news-specific C wrappers ----
+    // ---- gtkhx-core::conn: read the connection's version / access bits directly,
+    // rather than through news-specific C wrappers ----
     fn hx_conn_version(htlc: *mut c_void) -> u16;
-    // ---- news_recv_bridge.c: session / carrier / leaf helpers ----
-    fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx_ui_bridge.c — the connection a session owns.
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
+    /// The session that owns a connection.
+    fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     /// gtkhx-core — has this connection passed the post-login boundary? The
     /// gate for anything that puts a post-login RPC on the wire; see hxconn.h
     /// for why the socket being up is not the same question.
@@ -108,10 +110,12 @@ extern "C" {
     // from crate::ffi) ----
     fn gtkurl_textview_install(tv: *mut gtk::ffi::GtkTextView);
     fn gtkurl_textview_apply_tags(tv: *mut gtk::ffi::GtkTextView);
-
-    // ---- the dock ----
-    fn gtkhx_dock_connect_shown(id: *const c_char, func: extern "C" fn());
 }
+
+/// The window's name for its saved size, and the size it opens at without one.
+const WINDOW_NAME: &str = "news15";
+const DEFAULT_W: i32 = 900;
+const DEFAULT_H: i32 = 600;
 
 // One browser per connection, plus the in-flight fetch tables.
 //
@@ -142,8 +146,9 @@ thread_local! {
 /// (`selected_post`, the session handler id) sits in interior-mutable cells so
 /// callbacks reach it through a shared `&NewsBrowser`.
 struct NewsBrowser {
-    /// Content box; also the dialog-parent / keyaccel anchor.
-    window: gtk::Widget,
+    conn: ConnKey,
+    /// Weak, so the map never keeps a closed window alive.
+    window: glib::WeakRef<adw::Window>,
     root_store: gio::ListStore,
     tree_model: gtk::TreeListModel,
     selection: gtk::SingleSelection,
@@ -171,14 +176,19 @@ fn with_browser_on<R>(conn: ConnKey, f: impl FnOnce(&NewsBrowser) -> R) -> Optio
     NEWS_BROWSER.with(|b| b.borrow().get(&conn).map(f))
 }
 
-/// Run `f` against the browser the user is looking at, if any.
-///
-/// The right resolution for everything driven by the user — a button, a tree
-/// expansion, a selection — because only the visible page's widgets can
-/// receive input. Wire-driven paths must not use it: see the note on the
-/// pending tables.
-fn with_browser<R>(f: impl FnOnce(&NewsBrowser) -> R) -> Option<R> {
-    with_browser_on(dock::active_key(), f)
+fn window_for(conn: ConnKey) -> Option<adw::Window> {
+    with_browser_on(conn, |br| br.window.upgrade()).flatten()
+}
+
+fn window_title(sess: *mut c_void) -> String {
+    let label = dock::session_label(sess);
+    if label.is_empty() {
+        tr("News")
+    } else {
+        // TRANSLATORS: The threaded news window's title. %s is the server's
+        // name, or its address before it has sent one.
+        crate::tr::tr1("News — %s", &label)
+    }
 }
 
 // ---------- Icons ----------
@@ -262,7 +272,7 @@ pub(crate) fn rerender_if_selected(conn: ConnKey, node: *mut c_void) {
 fn render_selected_post(br: &NewsBrowser) {
     unsafe {
         crate::news_render::gtkhx_news_render_post(
-            std::ptr::null_mut(),
+            br.conn,
             br.post_view.as_ptr() as *mut gtk::ffi::GtkWidget,
             br.subject_label.as_ptr(),
             br.meta_label.as_ptr(),
@@ -272,8 +282,8 @@ fn render_selected_post(br: &NewsBrowser) {
     }
 }
 
-fn on_selection_changed() {
-    with_browser(|br| {
+fn on_selection_changed(conn: ConnKey) {
+    with_browser_on(conn, |br| {
         let leaf = update_breadcrumb(br);
         let is_post = !leaf.is_null() && unsafe { hx_news_node_kind(leaf) } == NB_KIND_POST;
         br.selected_post
@@ -315,7 +325,7 @@ fn sync_action_buttons(br: &NewsBrowser) {
         // that does send a map and withholds a bit still denies: `permits` only
         // differs when nothing at all was sent. Anything the server disagrees with
         // comes back as a task error.
-        let htlc = gtkhx_active_htlc();
+        let htlc = dock::htlc_for(br.conn);
         br.btn_new_folder
             .set_sensitive(hx_conn_access_permits(htlc.cast(), HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
         br.btn_new_category
@@ -358,11 +368,9 @@ unsafe fn threaded_news_available(htlc: *mut c_void) -> bool {
 /// wrong browser, leaving the background one empty and re-firing forever.
 /// Is a NEWSDIRLIST for this exact `(connection, target)` already on the wire?
 ///
-/// Opening the browser has three legitimate reasons to want the root listing —
-/// the panel's `presented` hook, the LOGIN_READY transition, and the toolbar
-/// entry point — and `open_news_browser` reaches two of them in a single call:
-/// `create_news_browser_window` docks the page, which presents the panel and
-/// fires the first fetch, then the post-login block below it fires the second.
+/// More than one path wants the root listing — opening the window, opening it
+/// again, the LOGIN_READY transition, Refresh — and nothing keeps a second
+/// from coming while the first is still on the wire.
 ///
 /// Each of those guarded on `root_store.n_items() == 0`, which asks a different
 /// question. The store is still empty while a request is in flight, so both
@@ -565,13 +573,17 @@ pub unsafe extern "C" fn gnews_browser_handle_catlist(
     glib::ffi::GTRUE
 }
 
-/// GETTHREAD reply. Sets the fetched body on the target node and, if it's still
-/// the selected post, pushes it into the view.
+/// GETTHREAD reply on `htlc`. Sets the fetched body on the target node and, if
+/// it's still the selected post in that connection's browser, pushes it into
+/// the view.
 ///
 /// # Safety
 /// C-ABI entry on the GTK main thread; `post_p` is a `news_post *` carrier.
 #[no_mangle]
-pub unsafe extern "C" fn gnews_browser_handle_thread(post_p: *mut c_void) -> glib::ffi::gboolean {
+pub unsafe extern "C" fn gnews_browser_handle_thread(
+    htlc: *mut c_void,
+    post_p: *mut c_void,
+) -> glib::ffi::gboolean {
     if post_p.is_null() {
         return glib::ffi::GFALSE;
     }
@@ -591,11 +603,7 @@ pub unsafe extern "C" fn gnews_browser_handle_thread(post_p: *mut c_void) -> gli
         };
         hx_news_node_set_body(target.cast(), body_ptr);
 
-        with_browser(|br| {
-            if br.selected_post.get() == target {
-                render_selected_post(br);
-            }
-        });
+        rerender_if_selected(dock::conn_key(htlc), target);
         glib::gobject_ffi::g_object_unref(target as *mut glib::gobject_ffi::GObject);
     }
 
@@ -609,9 +617,10 @@ pub unsafe extern "C" fn gnews_browser_handle_thread(post_p: *mut c_void) -> gli
 /// root refresh.
 fn refresh_node(br: &NewsBrowser, node: *mut c_void) {
     unsafe {
+        let htlc = dock::htlc_for(br.conn);
         if node.is_null() {
             br.root_store.remove_all();
-            fetch_dirlist(gtkhx_active_htlc(), std::ptr::null_mut());
+            fetch_dirlist(htlc, std::ptr::null_mut());
             return;
         }
         let ch = hx_news_node_children(node.cast());
@@ -621,8 +630,8 @@ fn refresh_node(br: &NewsBrowser, node: *mut c_void) {
         }
         hx_news_node_set_loaded(node.cast(), glib::ffi::GFALSE);
         match hx_news_node_kind(node.cast()) {
-            NB_KIND_FOLDER => fetch_dirlist(gtkhx_active_htlc(), node),
-            NB_KIND_CATEGORY => fetch_catlist(gtkhx_active_htlc(), node),
+            NB_KIND_FOLDER => fetch_dirlist(htlc, node),
+            NB_KIND_CATEGORY => fetch_catlist(htlc, node),
             _ => {}
         }
     }
@@ -657,7 +666,7 @@ fn find_category_node(store: &gio::ListStore, path: &[u8]) -> Option<glib::Objec
     None
 }
 
-// ---------- Connection state / panel present ----------
+// ---------- Connection state ----------
 
 fn reset_browser_state(br: &NewsBrowser) {
     br.root_store.remove_all();
@@ -685,6 +694,10 @@ fn on_connection_state(htlc: *mut c_void, state: u32) {
             br.disconnected_banner.set_revealed(true);
         }
         GTKHX_CONNECTION_LOGIN_READY => {
+            // The server has named itself by now.
+            if let Some(win) = br.window.upgrade() {
+                win.set_title(Some(&window_title(unsafe { hx_sess_from_htlc(htlc) })));
+            }
             br.disconnected_banner.set_revealed(false);
             if br.root_store.n_items() == 0 {
                 fetch_dirlist(htlc, std::ptr::null_mut());
@@ -694,28 +707,10 @@ fn on_connection_state(htlc: *mut c_void, state: u32) {
     });
 }
 
-fn on_panel_presented() {
-    // Post-login, not socket-up: a NEWSDIRLIST between TCP-connect and the
-    // "fully joined" boundary is the same mid-handshake RPC the files
-    // browser's remote provider refuses to send, and stricter 1.5+ servers
-    // answer it with a disconnect. See hxconn.h.
-    let htlc = unsafe { gtkhx_active_htlc() };
-    if unsafe { hx_conn_post_login_fetched(htlc) } == 0 {
-        return;
-    }
-    // The panel reveals whichever connection's page is visible, so this is a
-    // user-driven path: the active browser and the active connection.
-    with_browser(|br| {
-        if br.root_store.n_items() == 0 {
-            fetch_dirlist(htlc, std::ptr::null_mut());
-        }
-    });
-}
+// ---------- Toolbar ----------
 
-// ---------- Toolbar callbacks (C-ABI: connected via gtkhx_pixmap_button) ----------
-
-unsafe extern "C" fn on_refresh_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
-    with_browser(|br| {
+fn on_refresh_clicked(conn: ConnKey) {
+    with_browser_on(conn, |br| unsafe {
         let node = selected_node(br);
         // Post selected → refetch its body. Otherwise refresh the folder /
         // category, or the root when nothing suitable is selected.
@@ -736,8 +731,16 @@ unsafe extern "C" fn on_refresh_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut
     });
 }
 
-unsafe extern "C" fn on_new_folder_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
-    with_browser(|br| {
+/// The window a browser's dialogs go over, as a raw widget for their C-ABI
+/// entry points.
+fn dialog_parent(br: &NewsBrowser) -> *mut gtk::ffi::GtkWidget {
+    br.window.upgrade().map_or(std::ptr::null_mut(), |w| {
+        w.as_ptr() as *mut gtk::ffi::GtkWidget
+    })
+}
+
+fn on_new_container_clicked(conn: ConnKey, kind: i32) {
+    with_browser_on(conn, |br| unsafe {
         let sel = selected_node(br);
         let parent = if !sel.is_null() && hx_news_node_kind(sel.cast()) == NB_KIND_FOLDER {
             sel
@@ -745,31 +748,16 @@ unsafe extern "C" fn on_new_folder_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *
             std::ptr::null_mut()
         };
         crate::news_dialogs::gtkhx_news_create_dialog_open(
-            br.window.as_ptr(),
+            conn,
+            dialog_parent(br),
             parent,
-            NB_KIND_FOLDER as c_int,
+            kind as c_int,
         );
     });
 }
 
-unsafe extern "C" fn on_new_category_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
-    with_browser(|br| {
-        let sel = selected_node(br);
-        let parent = if !sel.is_null() && hx_news_node_kind(sel.cast()) == NB_KIND_FOLDER {
-            sel
-        } else {
-            std::ptr::null_mut()
-        };
-        crate::news_dialogs::gtkhx_news_create_dialog_open(
-            br.window.as_ptr(),
-            parent,
-            NB_KIND_CATEGORY as c_int,
-        );
-    });
-}
-
-unsafe extern "C" fn on_new_post_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
-    with_browser(|br| {
+fn on_new_post_clicked(conn: ConnKey) {
+    with_browser_on(conn, |br| unsafe {
         let sel = selected_node(br);
         if sel.is_null() {
             return;
@@ -784,6 +772,8 @@ unsafe extern "C" fn on_new_post_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mu
         }
         let empty = crate::cs("");
         crate::news_compose::gtkhx_news_compose_open(
+            conn,
+            br.window.upgrade().as_ref().map(|w| w.upcast_ref()),
             cat_path,
             std::ptr::null_mut(),
             empty.as_ptr(),
@@ -791,8 +781,8 @@ unsafe extern "C" fn on_new_post_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mu
     });
 }
 
-unsafe extern "C" fn on_reply_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
-    with_browser(|br| {
+fn on_reply_clicked(conn: ConnKey) {
+    with_browser_on(conn, |br| unsafe {
         let sel = selected_node(br);
         if sel.is_null()
             || hx_news_node_kind(sel.cast()) != NB_KIND_POST
@@ -811,11 +801,13 @@ unsafe extern "C" fn on_reply_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c
 
         // Make sure the original body is loading before the context card renders.
         if hx_news_node_body(sel.cast()).is_null() && hx_news_node_body_fetching(sel.cast()) == 0 {
-            fetch_thread(gtkhx_active_htlc(), sel);
+            fetch_thread(dock::htlc_for(conn), sel);
         }
 
         let subj_c = crate::cs(&subj);
         crate::news_compose::gtkhx_news_compose_open(
+            conn,
+            br.window.upgrade().as_ref().map(|w| w.upcast_ref()),
             hx_news_node_path(sel.cast()),
             sel,
             subj_c.as_ptr(),
@@ -823,14 +815,15 @@ unsafe extern "C" fn on_reply_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c
     });
 }
 
-unsafe extern "C" fn on_delete_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
-    with_browser(|br| {
+fn on_delete_clicked(conn: ConnKey) {
+    with_browser_on(conn, |br| unsafe {
         let sel = selected_node(br);
         if sel.is_null() || hx_news_node_path(sel.cast()).is_null() {
             return;
         }
         crate::news_dialogs::gtkhx_news_delete_dialog_open(
-            br.window.as_ptr(),
+            conn,
+            dialog_parent(br),
             hx_news_node_kind(sel.cast()) as c_int,
             hx_news_node_name(sel.cast()),
             hx_news_node_path(sel.cast()),
@@ -841,74 +834,48 @@ unsafe extern "C" fn on_delete_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut 
 
 // ---------- Bridges the sibling Rust modules call back into ----------
 
-/// Per-kind row icon (borrowed) for the `news_tree` factory. `_browser` is the
-/// opaque pointer the factory carries; we use the process singleton.
-///
-/// # Safety
-/// C-ABI entry on the GTK main thread.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_icon_for_kind(
-    _browser: *mut c_void,
-    kind: i32,
-) -> *mut gdk::ffi::GdkPaintable {
-    with_browser(|br| {
-        let icon = match kind {
-            NB_KIND_FOLDER => br.icon_folder.as_ref(),
-            NB_KIND_CATEGORY => br.icon_category.as_ref(),
-            NB_KIND_POST => br.icon_post.as_ref(),
-            _ => None,
-        };
-        icon.map(|p| p.as_ptr()).unwrap_or(std::ptr::null_mut())
+/// Per-kind row icon for `conn`'s `news_tree` factory.
+pub(crate) fn icon_for_kind(conn: ConnKey, kind: i32) -> Option<gdk::Paintable> {
+    with_browser_on(conn, |br| match kind {
+        NB_KIND_FOLDER => br.icon_folder.clone(),
+        NB_KIND_CATEGORY => br.icon_category.clone(),
+        NB_KIND_POST => br.icon_post.clone(),
+        _ => None,
     })
-    .unwrap_or(std::ptr::null_mut())
+    .flatten()
 }
 
-/// Fire the DIRLIST / CATLIST fetch the first time a folder / category expands.
-///
-/// # Safety
-/// C-ABI entry on the GTK main thread; `node` is an `HxNewsNode *`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_fetch_for_expanded(_browser: *mut c_void, node: *mut c_void) {
-    if node.is_null() || hx_news_node_loaded(node.cast()) != 0 {
-        return;
+/// Fire the DIRLIST / CATLIST fetch the first time a folder / category in
+/// `conn`'s tree expands. `node` is an `HxNewsNode *` or NULL.
+pub(crate) fn fetch_for_expanded(conn: ConnKey, node: *mut c_void) {
+    unsafe {
+        if node.is_null() || hx_news_node_loaded(node.cast()) != 0 {
+            return;
+        }
+        match hx_news_node_kind(node.cast()) {
+            NB_KIND_FOLDER => fetch_dirlist(dock::htlc_for(conn), node),
+            NB_KIND_CATEGORY => fetch_catlist(dock::htlc_for(conn), node),
+            _ => {}
+        }
     }
-    match hx_news_node_kind(node.cast()) {
-        NB_KIND_FOLDER => fetch_dirlist(gtkhx_active_htlc(), node),
-        NB_KIND_CATEGORY => fetch_catlist(gtkhx_active_htlc(), node),
-        _ => {}
-    }
 }
 
-/// Cache-miss body fetch the `news_render` post renderer calls back into.
-///
-/// # Safety
-/// C-ABI entry on the GTK main thread; `node` is an `HxNewsNode *`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_fetch_thread(_browser: *mut c_void, node: *mut c_void) {
-    fetch_thread(gtkhx_active_htlc(), node);
+/// Cache-miss body fetch the `news_render` post renderer calls back into, for
+/// a post `node` in `conn`'s tree.
+pub(crate) fn fetch_thread_for(conn: ConnKey, node: *mut c_void) {
+    fetch_thread(dock::htlc_for(conn), node);
 }
 
-/// Re-fetch a listing after a create / delete (no server push). NULL = root.
-///
-/// # Safety
-/// C-ABI entry on the GTK main thread; `node` is NULL or an `HxNewsNode *`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_browser_refresh(node: *mut c_void) {
-    with_browser(|br| refresh_node(br, node));
+/// Re-fetch a listing in `conn`'s browser after a create / delete (no server
+/// push). NULL = root.
+pub(crate) fn refresh(conn: ConnKey, node: *mut c_void) {
+    with_browser_on(conn, |br| refresh_node(br, node));
 }
 
-/// Settle after a post: refetch just the affected category if still in the tree,
-/// else the whole root.
-///
-/// # Safety
-/// C-ABI entry on the GTK main thread; `path` is a valid C string or NULL.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_refresh_category(path: *const c_char) {
-    if path.is_null() {
-        return;
-    }
-    let path = std::ffi::CStr::from_ptr(path).to_bytes();
-    with_browser(|br| match find_category_node(&br.root_store, path) {
+/// Settle after a post on `conn`: refetch just the affected category if still
+/// in the tree, else the whole root.
+pub(crate) fn refresh_category(conn: ConnKey, path: &[u8]) {
+    with_browser_on(conn, |br| match find_category_node(&br.root_store, path) {
         Some(cat) => refresh_node(br, cat.as_ptr() as *mut c_void),
         None => refresh_node(br, std::ptr::null_mut()),
     });
@@ -917,28 +884,27 @@ pub unsafe extern "C" fn gtkhx_news_refresh_category(path: *const c_char) {
 // ---------- Construction ----------
 
 /// A `gtkhx_pixmap_button` wrapping the C leaf, returning an owned `gtk::Widget`.
-unsafe fn pixmap_button(
-    resource: &str,
-    tooltip: &str,
-    cb: unsafe extern "C" fn(*mut gtk::ffi::GtkButton, *mut c_void),
-) -> gtk::Widget {
+fn pixmap_button(resource: &str, tooltip: &str, on_click: impl Fn() + 'static) -> gtk::Widget {
     let res = crate::cs(resource);
     let tip = crate::cs(tooltip);
-    let w = crate::ffi::gtkhx_pixmap_button(
-        res.as_ptr(),
-        tip.as_ptr(),
-        GTKHX_SCALE_WINDOW_BUTTONS,
-        cb as *const c_void,
-        std::ptr::null_mut(),
-    );
-    from_glib_none(w)
+    let w: gtk::Widget = unsafe {
+        from_glib_none(crate::ffi::gtkhx_pixmap_button(
+            res.as_ptr(),
+            tip.as_ptr(),
+            GTKHX_SCALE_WINDOW_BUTTONS,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        ))
+    };
+    if let Some(btn) = w.downcast_ref::<gtk::Button>() {
+        btn.connect_clicked(move |_| on_click());
+    }
+    w
 }
 
-/// Build the whole browser + content tree, register it as the process
-/// singleton, and return the content box (transfer to the dock).
-/// Build one connection's browser. `conn` is the connection it belongs to, and
-/// the key it is indexed, signal-routed and torn down under.
-fn build_content(conn: ConnKey) -> gtk::Widget {
+/// Build `conn`'s browser into a new window, and register it. `sess` is the
+/// session that owns the connection.
+unsafe fn build_window(conn: ConnKey, sess: *mut c_void) -> adw::Window {
     crate::ensure_gtk_init();
 
     // ---- Cached row icons ----
@@ -946,7 +912,7 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     let icon_category = load_icon(NEWS_CATEGORY_ICON);
     let icon_post = load_icon(NEWS_POST_ICON);
 
-    // ---- Breadcrumb (its own row; the panel header holds the tab title) ----
+    // ---- Breadcrumb (its own row; the window's title names the server) ----
     let breadcrumb = gtk::Label::new(Some("/"));
     breadcrumb.add_css_class("heading");
     breadcrumb.set_xalign(0.0);
@@ -955,53 +921,45 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     breadcrumb.set_margin_top(4);
     breadcrumb.set_margin_bottom(4);
 
-    // ---- Action buttons ----
-    let (btn_refresh, btn_new_folder, btn_new_category, btn_new_post, btn_reply, btn_delete) = unsafe {
-        (
-            pixmap_button(
-                "/com/nasledov/gtkhx/pixmaps/refresh.png",
-                &tr("Refresh"),
-                on_refresh_clicked,
-            ),
-            pixmap_button(
-                "/com/nasledov/gtkhx/pixmaps/news_folder.png",
-                &tr("New Folder"),
-                on_new_folder_clicked,
-            ),
-            pixmap_button(
-                "/com/nasledov/gtkhx/pixmaps/news_category.png",
-                &tr("New Category"),
-                on_new_category_clicked,
-            ),
-            pixmap_button(
-                "/com/nasledov/gtkhx/pixmaps/pencil.png",
-                &tr("New Post"),
-                on_new_post_clicked,
-            ),
-            pixmap_button(
-                "/com/nasledov/gtkhx/pixmaps/post_news.png",
-                &tr("Reply"),
-                on_reply_clicked,
-            ),
-            pixmap_button(
-                "/com/nasledov/gtkhx/pixmaps/trash.png",
-                &tr("Delete"),
-                on_delete_clicked,
-            ),
-        )
-    };
+    // ---- Action buttons, in the header bar as the Files window has them ----
+    let btn_refresh = pixmap_button(
+        "/com/nasledov/gtkhx/pixmaps/refresh.png",
+        &tr("Refresh"),
+        move || on_refresh_clicked(conn),
+    );
+    let btn_new_folder = pixmap_button(
+        "/com/nasledov/gtkhx/pixmaps/news_folder.png",
+        &tr("New Folder"),
+        move || on_new_container_clicked(conn, NB_KIND_FOLDER),
+    );
+    let btn_new_category = pixmap_button(
+        "/com/nasledov/gtkhx/pixmaps/news_category.png",
+        &tr("New Category"),
+        move || on_new_container_clicked(conn, NB_KIND_CATEGORY),
+    );
+    let btn_new_post = pixmap_button(
+        "/com/nasledov/gtkhx/pixmaps/pencil.png",
+        &tr("New Post"),
+        move || on_new_post_clicked(conn),
+    );
+    let btn_reply = pixmap_button(
+        "/com/nasledov/gtkhx/pixmaps/post_news.png",
+        &tr("Reply"),
+        move || on_reply_clicked(conn),
+    );
+    let btn_delete = pixmap_button(
+        "/com/nasledov/gtkhx/pixmaps/trash.png",
+        &tr("Delete"),
+        move || on_delete_clicked(conn),
+    );
 
-    let button_bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    button_bar.add_css_class("gtkhx-panel-actions");
-    button_bar.append(&btn_refresh);
-    button_bar.append(&btn_new_folder);
-    button_bar.append(&btn_new_category);
-    button_bar.append(&btn_new_post);
-    let spacer = gtk::Label::new(None);
-    spacer.set_hexpand(true);
-    button_bar.append(&spacer);
-    button_bar.append(&btn_reply);
-    button_bar.append(&btn_delete);
+    let header = adw::HeaderBar::new();
+    header.pack_start(&btn_refresh);
+    header.pack_start(&btn_new_folder);
+    header.pack_start(&btn_new_category);
+    header.pack_start(&btn_new_post);
+    header.pack_end(&btn_delete);
+    header.pack_end(&btn_reply);
 
     // ---- Two-pane body ----
     let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
@@ -1011,31 +969,23 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     paned.set_vexpand(true);
 
     // Left: GtkListView over a GtkTreeListModel (factory + child model in Rust).
-    let node_type: glib::Type = unsafe { from_glib(hx_news_node_get_type()) };
+    let node_type: glib::Type = from_glib(hx_news_node_get_type());
     let root_store = gio::ListStore::with_type(node_type);
     // Consumes one root_store ref (transfer full), like gtk_tree_list_model_new;
     // our own root_store ref stays as the borrowed alias.
     let root_model: gio::ListModel = root_store.clone().upcast();
-    let tree_model: gtk::TreeListModel = unsafe {
-        from_glib_full(crate::news_tree::gtkhx_news_build_tree_model(
-            root_model.into_glib_ptr(),
-        ))
-    };
+    let tree_model: gtk::TreeListModel = from_glib_full(
+        crate::news_tree::gtkhx_news_build_tree_model(root_model.into_glib_ptr()),
+    );
     let selection = gtk::SingleSelection::new(Some(tree_model.clone()));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
-    let factory: gtk::ListItemFactory = unsafe {
-        from_glib_full(crate::news_tree::gtkhx_news_build_factory(
-            std::ptr::null_mut(),
-        ))
-    };
+    let factory = crate::news_tree::build_factory(conn);
     let list_view = gtk::ListView::new(Some(selection.clone()), Some(factory));
     list_view.update_property(&[gtk::accessible::Property::Label(&tr("News"))]);
     list_view.set_show_separators(false);
-    unsafe {
-        crate::ffi::gtkhx_apply_listview_style(list_view.as_ptr() as *mut gtk::ffi::GtkWidget)
-    };
-    selection.connect_selection_changed(|_sel, _pos, _n| on_selection_changed());
+    crate::ffi::gtkhx_apply_listview_style(list_view.as_ptr() as *mut gtk::ffi::GtkWidget);
+    selection.connect_selection_changed(move |_sel, _pos, _n| on_selection_changed(conn));
 
     let left_scroll = gtk::ScrolledWindow::new();
     left_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
@@ -1076,11 +1026,11 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     post_view.set_margin_end(12);
     post_view.set_margin_top(10);
     post_view.set_margin_bottom(10);
-    unsafe { crate::ffi::gtkhx_apply_text_style(post_view.as_ptr() as *mut gtk::ffi::GtkWidget) };
+    crate::ffi::gtkhx_apply_text_style(post_view.as_ptr() as *mut gtk::ffi::GtkWidget);
     post_view
         .buffer()
         .set_text(&tr("Select a post in the tree to view it here."));
-    unsafe { gtkurl_textview_install(post_view.as_ptr()) };
+    gtkurl_textview_install(post_view.as_ptr());
     right_scroll.set_child(Some(&post_view));
     right_scroll.set_vexpand(true);
     right_box.append(&right_scroll);
@@ -1089,22 +1039,29 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     // ---- Disconnected banner + content assembly ----
     // Post-login, to match what actually clears this banner: the
     // connection-state handler reveals it on DISCONNECTED and hides it on
-    // LOGIN_READY, so seeding it from the socket would have a panel built
+    // LOGIN_READY, so seeding it from the socket would have a window opened
     // mid-handshake come up claiming a connection it doesn't have yet.
-    let connected = unsafe { hx_conn_post_login_fetched(gtkhx_active_htlc()) } != 0;
+    let connected = hx_conn_post_login_fetched(gtkhx_session_htlc(sess)) != 0;
     let disconnected_banner = adw::Banner::new(&tr("Not connected to a server."));
     disconnected_banner.set_revealed(!connected);
 
     let content_vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content_vbox.append(&disconnected_banner);
-    content_vbox.append(&button_bar);
     content_vbox.append(&breadcrumb);
     content_vbox.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     content_vbox.append(&paned);
 
-    let window: gtk::Widget = content_vbox.clone().upcast();
+    let win = adw::Window::new();
+    win.set_title(Some(&window_title(sess)));
+    dock::adopt_window(&win, WINDOW_NAME, (DEFAULT_W, DEFAULT_H));
+    let view = adw::ToolbarView::new();
+    view.add_top_bar(&header);
+    view.set_content(Some(&content_vbox));
+    win.set_content(Some(&view));
+
     let browser = NewsBrowser {
-        window: window.clone(),
+        conn,
+        window: win.downgrade(),
         root_store,
         tree_model,
         selection,
@@ -1125,16 +1082,16 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
         selected_post: Cell::new(std::ptr::null_mut()),
         conn_handler: RefCell::new(None),
     };
-    NEWS_BROWSER.with(|b| {
-        b.borrow_mut().insert(conn, browser);
-    });
+    // A stale entry is dropped outside the borrow, as in the destroy handler.
+    let stale = NEWS_BROWSER.with(|b| b.borrow_mut().insert(conn, browser));
+    drop(stale);
 
     // Initial button state (no selection → New Folder + New Category visible).
     with_browser_on(conn, sync_action_buttons);
 
     // Connection-state changes drive the banner + LOGIN_READY auto-fetch.
     let session_obj: glib::Object =
-        unsafe { from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject) };
+        from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject);
     // vals[1] is the connection, vals[2] the state.
     //
     // Filtered on the connection this browser was built for, not merely routed
@@ -1157,9 +1114,18 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     });
     with_browser_on(conn, |br| *br.conn_handler.borrow_mut() = Some(id));
 
-    // Teardown on content destroy (embed failure / app exit): drop the session
-    // handler + the singleton so no stale callback fires into a dead browser.
-    content_vbox.connect_destroy(move |_w| {
+    // Teardown when the window goes, whether closed by the user or with its
+    // connection: drop the session handler and this connection's browser so
+    // no stale callback fires into a dead one. Only this window's: a destroy
+    // that lands late must not take a newer window's browser with it.
+    let weak = win.downgrade();
+    win.connect_destroy(move |_| {
+        let ours = with_browser_on(conn, |br| {
+            br.window.upgrade().is_none() || br.window.upgrade() == weak.upgrade()
+        });
+        if ours != Some(true) {
+            return;
+        }
         with_browser_on(conn, |br| {
             if let Some(id) = br.conn_handler.borrow_mut().take() {
                 let s: glib::Object = unsafe {
@@ -1169,11 +1135,10 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
             }
         });
         // Only this connection's entry: another connection's browser is a
-        // different tree with its own handler, and clearing the map wholesale
-        // would leave those handlers connected to nothing.
-        NEWS_BROWSER.with(|b| {
-            b.borrow_mut().remove(&conn);
-        });
+        // different tree with its own handler. Dropped outside the borrow, as
+        // letting go of the widgets can run handlers that look the browser up.
+        let gone = NEWS_BROWSER.with(|b| b.borrow_mut().remove(&conn));
+        drop(gone);
         // Drop its in-flight fetches too. The carriers are freed by whoever
         // owns them; what has to go is this browser's claim on the replies, or
         // a later one for the same connection inherits them.
@@ -1181,87 +1146,49 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
         PENDING_CATLISTS.with(|t| t.borrow_mut().retain(|_, (c, _)| *c != conn));
     });
 
-    window
+    win
 }
 
-/// Wire the one panel-level hook — the News panel coming into view — once
-/// the dock has embedded us: a tab switch onto News while connected + empty
-/// auto-fetches.
-///
-/// Once for the *panel*, not once per browser. There is one News panel holding
-/// a content page per connection, so a per-browser subscription would add a
-/// second copy of the same handler for the second connection and double every
-/// auto-fetch. The handler itself resolves the active browser, which is the
-/// right question: in view means the user is looking at it.
-fn after_embed() {
-    thread_local! {
-        static WIRED: Cell<bool> = const { Cell::new(false) };
-    }
-    if WIRED.with(|w| w.get()) {
-        return;
-    }
-    extern "C" fn shown() {
-        on_panel_presented();
-    }
-    let id = crate::cs(dock::ID_NEWS15);
-    unsafe { gtkhx_dock_connect_shown(id.as_ptr(), shown) };
-    WIRED.with(|w| w.set(true));
-}
-
-/// Open (or raise) the News-browser panel: build + dock the content, or
-/// re-attach if already open.
+/// Open (or raise) the threaded news window for `sess`'s connection, and pull
+/// a fresh tree while logged in.
 ///
 /// # Safety
-/// C-ABI entry on the GTK main thread. `_widget` is vestigial; `sess` names
-/// the connection whose page this would be.
+/// C-ABI entry on the GTK main thread. `_widget` is vestigial; `sess` is a
+/// `session *` or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn create_news_browser_window(_widget: *mut c_void, sess: *mut c_void) {
+pub unsafe extern "C" fn open_news_browser(_widget: *mut c_void, sess: *mut c_void) {
     crate::ensure_gtk_init();
 
-    let dock::Open::Build(page) = dock::open(dock::ID_NEWS15, sess) else {
+    // Every request routes through the session's connection; a NULL one has
+    // nothing to fall back on.
+    if sess.is_null() {
+        glib::g_critical!("gtkhx", "open_news_browser: no session");
         return;
-    };
-
-    let content = build_content(dock::key_for_session(sess));
-    if dock::place(
-        dock::ID_NEWS15,
-        &page,
-        dock::KIND_CENTER,
-        dock::AREA_CENTER,
-        "News (1.5+)",
-        "text-x-generic-symbolic",
-        content.into_glib_ptr(),
-    ) {
-        after_embed();
     }
-}
-
-/// Toolbar entry point for the News (1.5+) button: build/raise the panel, wire
-/// the keyaccels on first open, and pull a fresh tree while connected.
-///
-/// # Safety
-/// C-ABI entry on the GTK main thread.
-#[no_mangle]
-pub unsafe extern "C" fn open_news_browser(widget: *mut c_void, sess: *mut c_void) {
     let conn = dock::key_for_session(sess);
     let htlc = gtkhx_session_htlc(sess);
-    let had_page = dock::has_page(dock::ID_NEWS15, &conn.to_string());
 
-    create_news_browser_window(widget, sess);
+    let reopened = match window_for(conn) {
+        Some(win) => {
+            // The server may have named itself since the window opened.
+            win.set_title(Some(&window_title(sess)));
+            win.present();
+            true
+        }
+        None => {
+            build_window(conn, sess).present();
+            false
+        }
+    };
 
-    // Everything below is about *this session's* browser, not the active one.
-    // `was_open` used to ask whether the panel existed, which is true as soon
-    // as any connection has a page in it — so opening a second connection's
-    // news browser wiped and refetched the first connection's tree.
-    if !had_page {
-        // Freshly built: Ctrl+Q / Ctrl+K / Ctrl+T on the content box.
-        with_browser_on(conn, |br| crate::ffi::init_keyaccel(br.window.as_ptr()));
-    }
-
-    // Post-login, not socket-up — see on_panel_presented.
+    // Post-login, not socket-up: a NEWSDIRLIST between TCP-connect and the
+    // "fully joined" boundary is the same mid-handshake RPC the files
+    // browser's remote provider refuses to send, and stricter 1.5+ servers
+    // answer it with a disconnect. See hxconn.h. Before then, LOGIN_READY
+    // fetches.
     if hx_conn_post_login_fetched(htlc) != 0 {
         with_browser_on(conn, |br| {
-            if had_page {
+            if reopened {
                 br.root_store.remove_all();
             }
             fetch_dirlist(htlc, std::ptr::null_mut());
@@ -1269,16 +1196,24 @@ pub unsafe extern "C" fn open_news_browser(widget: *mut c_void, sess: *mut c_voi
     }
 }
 
+/// Close this connection's news window, if it has one. The connection is going
+/// away, and the browser's teardown (on the window's destroy) has to run while
+/// the session is still intact.
+pub(crate) fn close_for_session(sess: *mut c_void) {
+    if let Some(win) = window_for(dock::key_for_session(sess)) {
+        win.destroy();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Opening the browser asks for the root listing from more than one place —
-    /// `open_news_browser` alone reaches two, via the panel's `presented` hook
-    /// and its own post-login block. Each used to guard on `root_store` being
-    /// empty, which stays true for as long as the request is in flight, so both
-    /// went out and both replies were appended: the whole tree, twice. The guard
-    /// has to be on the request.
+    /// More than one path asks for the root listing — opening the window,
+    /// LOGIN_READY, Refresh — and two can overlap. Each used to guard on
+    /// `root_store` being empty, which stays true for as long as the request is
+    /// in flight, so both went out and both replies were appended: the whole
+    /// tree, twice. The guard has to be on the request.
     ///
     /// No display and no widgets — this is the fetch table, not the view.
     #[test]

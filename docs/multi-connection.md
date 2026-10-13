@@ -167,8 +167,8 @@ pointer, so a later split can happen without touching the signal shapes again.
   `toolbar_clear_toasts` take no session at all. See "App-global chrome"
   below.
 - Singletons that take any connection's event because they are bound to none:
-  the files browser and the news browser. Both now *receive* the connection;
-  neither can use it until it becomes a per-connection panel.
+  the files browser and the news browser. Both now *receive* the connection,
+  and each has since become a window per connection.
 - The flat cid/uid key namespaces below. `msg` is the one where tagging
   changed behaviour rather than carrying a pointer — the PM window lookup now
   resolves through the message's own connection — but the chat tab strip still
@@ -249,16 +249,17 @@ site-by-site:
   active session.
 - **The Rust UI reaches for a connection through C shims** —
   `gtkhx_active_htlc()` and friends in `gtkhx_ui_bridge.c` and
-  `tracker_bridge.c`. Consumers are the news dialogs and browser, the user
-  editor, chat input, file info, the voice panel and compose windows. The
+  `tracker_bridge.c`. Consumers are the user editor, chat input, file info,
+  the voice panel and the create-post window. The
   correct pattern is in the same file: `gtkhx_htlc_chat_window(htlc)` routes by
   connection and its comment says why.
 
 ### UI singletons that hold per-connection state
 
-Beyond the tab strip: the threaded news browser and its in-flight fetch tables,
-the flat news view, the banner, and the create-post window are all
-`thread_local` singletons in `gtkhx-ui`. `useredit.rs` is the in-tree
+Beyond the tab strip: the flat news view, the banner, and the create-post
+window are all `thread_local` singletons in `gtkhx-ui`. The threaded news
+browser, a window per connection keyed on it with its fetches tagged by the
+connection they went out on, no longer is. `useredit.rs` is the in-tree
 counter-example — an id-keyed map with closures capturing the id by value — and
 is the shape all of them want, keyed by connection instead of by dialog.
 

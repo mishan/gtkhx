@@ -2,14 +2,14 @@
 //! `news_browser.c::open_create_dialog` / `create_response` and the
 //! `on_delete_clicked` confirm dialog).
 //!
-//! Both are `AdwAlertDialog`s. The C side keeps the selection logic (the
-//! toolbar button handlers pick the target node); it hands us either the
-//! parent node (create) or a snapshot of the target's identity (delete), and
-//! we own the dialog + the wire send + the post-send refresh.
+//! Both are `AdwAlertDialog`s. `news_browser` keeps the selection logic (its
+//! toolbar buttons pick the target node); it hands us either the parent node
+//! (create) or a snapshot of the target's identity (delete), and we own the
+//! dialog + the wire send + the post-send refresh.
 //!
 //! The senders are the Rust `hxhandlers::send::news` ones (`hx_news15_mkdir` / `mkcat` /
 //! `delete` / `delete_thread`); none has a reply handler, so we re-fetch the
-//! affected listing ourselves via `gtkhx_news_browser_refresh` once the RPC is
+//! affected listing ourselves via `news_browser::refresh` once the RPC is
 //! away. Create refreshes just the parent folder (targeted, tree state mostly
 //! preserved); delete refreshes from the root — the model has no path→node
 //! index yet, so locating the affected parent cheaply isn't doable, and a root
@@ -23,6 +23,7 @@ use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 
+use crate::dock::{self, ConnKey};
 use crate::tr::tr;
 
 // Mirror of the NB_KIND_* enum in news_browser.c.
@@ -40,26 +41,22 @@ use hxhandlers::send::news::{
 use hxmodel::news::node::hx_news_node_path;
 
 extern "C" {
-    // gtkhx_ui_bridge.c — the active session's htlc (single-conn today).
-    fn gtkhx_active_htlc() -> *mut c_void;
     // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
     fn gtkhx_dialog_add_close_shortcuts(dialog: *mut gtk::ffi::GtkWidget);
-    // news_browser.c — re-fetch a listing after a create/delete (the server
-    // doesn't push notifications for these). `node` NULL means refresh the root.
-    fn gtkhx_news_browser_refresh(node: *mut c_void);
 }
 
 /// Present the "New News Folder" / "New News Category" dialog.
 ///
 /// `parent` is the folder to create inside (an `HxNewsNode *`, or NULL for the
 /// root); `kind` is `NB_KIND_FOLDER` or `NB_KIND_CATEGORY`. `parent_window` is
-/// the browser window the dialog is presented over.
+/// `conn`'s browser window, the dialog is presented over it, and the folder is
+/// made on `conn`.
 ///
 /// # Safety
-/// C-ABI entry from a toolbar handler on the GTK main thread. `parent` is NULL
-/// or a valid `HxNewsNode *`; `parent_window` is a valid `GtkWidget *`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
+/// Called from the browser's toolbar on the GTK main thread. `parent` is NULL
+/// or a valid `HxNewsNode *`; `parent_window` is NULL or a valid `GtkWidget *`.
+pub unsafe fn gtkhx_news_create_dialog_open(
+    conn: ConnKey,
     parent_window: *mut gtk::ffi::GtkWidget,
     parent: *mut c_void,
     kind: c_int,
@@ -121,7 +118,7 @@ pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
                 } else {
                     std::ffi::CStr::from_ptr(path).to_owned()
                 };
-                let htlc = gtkhx_active_htlc();
+                let htlc = dock::htlc_for(conn);
                 // Both senders take (parent path, new name): the server
                 // resolves the path as an existing folder and creates the name
                 // inside it. Folder creation used to join the two and send one
@@ -135,7 +132,8 @@ pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
                     }
                 }
                 // Settle: re-fetch the parent's listing so the new item shows.
-                gtkhx_news_browser_refresh(parent);
+                // The server pushes nothing for this.
+                crate::news_browser::refresh(conn, parent);
             }
         }
         if !parent.is_null() {
@@ -153,18 +151,18 @@ pub unsafe extern "C" fn gtkhx_news_create_dialog_open(
 
 /// Present the delete-confirmation dialog for a folder / category / post.
 ///
-/// The C side snapshots the target's identity at click time rather than holding
+/// The browser snapshots the target's identity at click time rather than holding
 /// a node ref across the dialog: a held ref keeps the node alive but doesn't
 /// stop the `GListStore` dropping its ref during a refresh, which clears the
 /// path pointer in flight (→ NULL to `path_to_hldir`, crash). So we take
-/// `kind` / `name` / `path` / `postid` by value.
+/// `kind` / `name` / `path` / `postid` by value. The delete goes to `conn`.
 ///
 /// # Safety
-/// C-ABI entry from the delete toolbar handler on the GTK main thread.
-/// `name` / `path` are NUL-terminated C strings; `parent_window` is a valid
-/// `GtkWidget *`.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_news_delete_dialog_open(
+/// Called from the browser's Delete button on the GTK main thread.
+/// `name` / `path` are NUL-terminated C strings; `parent_window` is NULL or a
+/// valid `GtkWidget *`.
+pub unsafe fn gtkhx_news_delete_dialog_open(
+    conn: ConnKey,
     parent_window: *mut gtk::ffi::GtkWidget,
     kind: c_int,
     name: *const c_char,
@@ -211,14 +209,14 @@ pub unsafe extern "C" fn gtkhx_news_delete_dialog_open(
     dialog.connect_response(None, move |_dlg, response| unsafe {
         if response == "delete" {
             if let Some(p) = path_owned.as_ref() {
-                let htlc = gtkhx_active_htlc();
+                let htlc = dock::htlc_for(conn);
                 if kind == NB_KIND_POST {
                     hx_news15_delete_thread(htlc, p.as_ptr(), postid);
                 } else {
                     hx_news15_delete(htlc, p.as_ptr());
                 }
                 // Root refresh — heavier but correct without a path→node index.
-                gtkhx_news_browser_refresh(std::ptr::null_mut());
+                crate::news_browser::refresh(conn, std::ptr::null_mut());
             }
         }
     });

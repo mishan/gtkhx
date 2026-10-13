@@ -36,22 +36,22 @@ pub const ID_CHAT: &str = "chat";
 pub const ID_USERS: &str = "users";
 pub const ID_TASKS: &str = "tasks";
 pub const ID_NEWS: &str = "news";
-pub const ID_NEWS15: &str = "news15";
 pub const ID_VIDEO: &str = "video";
 
 /// Every panel whose content belongs to one connection — the set a connection
 /// switch has to swap.
 ///
-/// Files is absent because it is not a panel: each connection's browser is a
-/// window of its own (see `files/mod.rs`), closed with the rest of the
-/// connection's content in [`gtkhx_dock_remove_session_pages`].
+/// Files and the threaded news browser are absent because they are not panels:
+/// each connection's is a window of its own (see `files/mod.rs` and
+/// `news_browser.rs`), closed with the rest of the connection's content in
+/// [`gtkhx_dock_remove_session_pages`].
 ///
 /// Tasks is deliberately absent: the transfer queue is one list for the whole
 /// application, tagged per row, so switching tabs must leave it alone. See
 /// [`GLOBAL_PAGE`] and docs/multi-connection.md, "Global but tagged". The
 /// Tracker is absent for a different reason — it is a standalone window rather
 /// than a panel at all.
-pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_NEWS15, ID_VIDEO];
+pub const PER_CONNECTION: &[&str] = &[ID_CHAT, ID_USERS, ID_NEWS, ID_VIDEO];
 
 /// The page name a global panel lives under.
 ///
@@ -93,6 +93,19 @@ extern "C" {
     /// open.
     fn hx_conn_with_serial(serial: u16) -> *mut c_void;
     fn hx_conn_fd(htlc: *const c_void) -> std::ffi::c_int;
+
+    /// `gtkutil.c` — what to call a session: the server's name once it has
+    /// sent one, else the address. Newly allocated.
+    fn hx_session_label(sess: *mut c_void) -> *mut c_char;
+    fn gtkhx_get_application() -> *mut gtk4::gio::ffi::GApplication;
+    /// `dock_layout.c` — the last size a named window was left at; FALSE
+    /// when none was saved.
+    fn dock_layout_get_window_size(
+        name: *const c_char,
+        w: *mut std::ffi::c_int,
+        h: *mut std::ffi::c_int,
+    ) -> glib::ffi::gboolean;
+    fn dock_layout_set_window_size(name: *const c_char, w: std::ffi::c_int, h: std::ffi::c_int);
 }
 
 /// Which connection a thing belongs to.
@@ -113,6 +126,71 @@ pub fn conn_key(htlc: *mut c_void) -> ConnKey {
 /// The key of the connection a session owns. NULL reads as 0.
 pub fn key_for_session(sess: *mut c_void) -> ConnKey {
     unsafe { hx_conn_serial(gtkhx_session_htlc(sess)) }
+}
+
+/// The connection `conn` names, or NULL once it has closed.
+pub fn htlc_for(conn: ConnKey) -> *mut c_void {
+    unsafe { hx_conn_with_serial(conn) }
+}
+
+/// What to call a session: the server's name once it has sent one, else the
+/// address. Empty when it has neither.
+pub fn session_label(sess: *mut c_void) -> String {
+    unsafe {
+        let p = hx_session_label(sess);
+        if p.is_null() {
+            return String::new();
+        }
+        let s = std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned();
+        glib::ffi::g_free(p as *mut c_void);
+        s
+    }
+}
+
+/// Make `win` one of a connection's windows of its own (Files, threaded News):
+/// the application's, with the app-wide keys, and sized as the last one left
+/// under `name`, else `default`.
+pub fn adopt_window(win: &libadwaita::Window, name: &'static str, default: (i32, i32)) {
+    use glib::translate::from_glib_none;
+    use gtk4::prelude::*;
+
+    let cname = crate::cs(name);
+    let (mut w, mut h) = default;
+    unsafe { dock_layout_get_window_size(cname.as_ptr(), &mut w, &mut h) };
+    win.set_default_size(w, h);
+
+    // Registered with the application so it counts as one of its windows
+    // (dialogs parent to it, and the app doesn't consider itself idle).
+    let app = unsafe { gtkhx_get_application() };
+    if !app.is_null() {
+        let app: gtk4::gio::Application = unsafe { from_glib_none(app) };
+        if let Ok(app) = app.downcast::<gtk4::Application>() {
+            app.add_window(win);
+        }
+    }
+
+    // The app-wide accelerators (Ctrl+W close, Ctrl+Q quit, …) on the window
+    // itself: Ctrl+W acts on a GtkWindow, and the content box can't be one.
+    unsafe { crate::ffi::init_keyaccel(win.as_ptr() as *mut crate::ffi::GtkWidget) };
+    // Push-to-talk while this window has the focus, as the dock's own windows.
+    #[cfg(feature = "voice")]
+    unsafe {
+        crate::voice_ptt::hx_voice_ptt_attach(win.as_ptr() as *mut gtk4::ffi::GtkWidget)
+    };
+
+    // Remember the size as the user changes it, for the next one. On every
+    // change rather than at close: a connection closing destroys the window
+    // without a close-request, and quitting destroys nothing at all. The
+    // layout file's save is debounced, so a drag is one write.
+    let save_size = move |win: &libadwaita::Window| {
+        let (w, h) = win.default_size();
+        if w > 0 && h > 0 {
+            let name = crate::cs(name);
+            unsafe { dock_layout_set_window_size(name.as_ptr(), w, h) };
+        }
+    };
+    win.connect_default_width_notify(save_size);
+    win.connect_default_height_notify(save_size);
 }
 
 /// The key of the connection the user is looking at.
@@ -325,18 +403,10 @@ pub unsafe extern "C" fn gtkhx_dock_remove_session_pages(sess: *mut c_void) {
         let cid = crate::cs(id);
         gtkhx_dock_remove_page(cid.as_ptr(), cpage.as_ptr());
     }
-    // Not a page, but the same connection's content, with the same teardown
+    // Not pages, but the same connection's content, with the same teardown
     // on destroy.
     crate::files::close_for_session(sess);
-}
-
-/// Whether `id` already holds a page for this connection. The per-connection
-/// form of "is this open?", for callers that want to know without changing
-/// what is on screen.
-pub fn has_page(id: &str, page: &str) -> bool {
-    let cid = crate::cs(id);
-    let cpage = crate::cs(page);
-    unsafe { gtkhx_dock_has_page(cid.as_ptr(), cpage.as_ptr()) != glib::ffi::GFALSE }
+    crate::news_browser::close_for_session(sess);
 }
 
 /// Make `page` the visible one in panel `id`, for a caller switching every

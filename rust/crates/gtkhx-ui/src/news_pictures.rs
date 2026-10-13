@@ -28,7 +28,6 @@ const PICTURES: &str = "hx-news-pictures";
 extern "C" {
     fn hx_news_node_postid(node: *mut c_void) -> u32;
     fn hx_news_node_path(node: *mut c_void) -> *const c_char;
-    fn gtkhx_active_htlc() -> *mut c_void;
 }
 
 enum Picture {
@@ -53,11 +52,11 @@ fn pictures(node: &HxNewsNode) -> &RefCell<Vec<Picture>> {
 }
 
 /// Append `node`'s pictures below the text in `buffer`, fetching any not yet
-/// asked for.
+/// asked for from `conn`, the connection whose browser shows it.
 ///
 /// # Safety
 /// Main thread; `node` is a live `HxNewsNode *`.
-pub unsafe fn append(view: &gtk::TextView, node: *mut c_void) {
+pub unsafe fn append(conn: ConnKey, view: &gtk::TextView, node: *mut c_void) {
     let obj: glib::Object = from_glib_none(node as *mut glib::gobject_ffi::GObject);
     let Ok(n) = obj.downcast::<HxNewsNode>() else {
         return;
@@ -92,7 +91,7 @@ pub unsafe fn append(view: &gtk::TextView, node: *mut c_void) {
                         tr("Loading picture…")
                     },
                 );
-                fetch(&n, i, mime);
+                fetch(conn, &n, i, mime);
             }
         }
     }
@@ -111,17 +110,16 @@ fn fitted(texture: &gdk::Texture, room: i32) -> gtk::Picture {
 }
 
 /// Ask for picture `i` of `node`, of type `mime`, unless it has been.
-unsafe fn fetch(node: &HxNewsNode, i: usize, mime: &CStr) {
+unsafe fn fetch(conn: ConnKey, node: &HxNewsNode, i: usize, mime: &CStr) {
     if !matches!(pictures(node).borrow()[i], Picture::Unfetched) {
         return;
     }
     let raw = node.as_ptr() as *mut c_void;
     let path = hx_news_node_path(raw);
-    let htlc = gtkhx_active_htlc();
+    let htlc = dock::htlc_for(conn);
     if path.is_null() || htlc.is_null() {
         return;
     }
-    let conn = dock::conn_key(htlc);
     let weak = node.downgrade();
     let done = Box::new(move |data: Option<&[u8]>| {
         let Some(node) = weak.upgrade() else {

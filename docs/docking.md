@@ -48,7 +48,6 @@ the Rust `gtkhx-ui` crate and are embedded through the C `dock_bridge`
 | Panel        | Content shell                             | Panel id | Slot    |
 |--------------|-------------------------------------------|----------|---------|
 | Chat         | `gtkhx-ui/src/chat.rs`                    | `chat`   | center  |
-| News 1.5     | `gtkhx-ui/src/news_browser.rs`            | `news15` | center  |
 | News 1.0     | `gtkhx-ui/src/news.rs`                    | `news`   | start   |
 | Users        | `gtkhx-ui/src/users.rs`                   | `users`  | end     |
 | Tasks        | `gtkhx-ui/src/tasks.rs`                   | `tasks`  | bottom  |
@@ -63,8 +62,9 @@ panel's tab in the dock.
 
 **Stays a real window:** Agreement, About, the user editor, the news
 composer, file preview; **Files**, one window per connection
-(`docs/files-browser.md`); and the **Tracker**, which exists before any
-connection.
+(`docs/files-browser.md`); **News (1.5+)**, the threaded news browser, also
+one window per connection (`gtkhx-ui/src/news_browser.rs`); and the
+**Tracker**, which exists before any connection.
 
 ## The dock (`src/dock_bridge.c`)
 
@@ -89,8 +89,8 @@ and a user's request builds it regardless and presents it.
 ### Default layout and slots
 
 ```
-row: [ News, Tasks ]      [ Chat, News 1.5 ]      [ Users ]
-       slots start,bottom   slot center             slot end
+row: [ News, Tasks ]        [ Chat ]       [ Users ]
+       slots start,bottom    slot center    slot end
 ```
 
 Tasks shares the News column: the queue is empty most of the time, and a
@@ -161,7 +161,7 @@ user's.
 
 ```ini
 [Dock]
-layout={"layout":{"dir":"row","size":[0.24,0.58,0.18],"kids":[...]},"closed":["news15"],"floating":[{"layout":{"tabs":["users"]},"size":[500,400]}]}
+layout={"layout":{"dir":"row","size":[0.24,0.58,0.18],"kids":[...]},"closed":["video"],"floating":[{"layout":{"tabs":["users"]},"size":[500,400]}]}
 
 [Chrome]
 toolbar=true
@@ -170,6 +170,7 @@ hidden-actions=news;users
 
 [Windows]
 files=900,600
+news15=900,600
 ```
 
 `layout` is the dock's own JSON, handed over on `::layout-kept` and handed
@@ -179,7 +180,12 @@ the windows of their own with their sizes. mullion reads the same tree.
 
 `[Chrome]` keys are written only when they differ from the default
 (toolbar and pane titles off, every action row shown). `[Windows]` keeps
-the sizes of windows that are not panels (Files).
+the sizes of windows that are not panels (Files, threaded News).
+
+A layout saved before threaded news became a window names `news15`. It loads
+as it is: the dock drops a pane id it has none registered for, a leaf left
+with no tabs goes and its slots pass to its neighbor, and the next save
+leaves the id out.
 
 Saves are debounced on a 200 ms timer; `dock_layout_shutdown` (from
 `hx_quit`) flushes a pending one. **Reset Layout** (`app.reset_layout`)
@@ -216,7 +222,6 @@ ABI.
 | `gtkhx_dock_embed (id, kind, area, title, icon, page, content)` | The panel's first content: `content` as page `page`, and the title. |
 | `gtkhx_dock_add_page` / `has_page` / `show_page` / `remove_page` / `page_count` | A connection's page, through `dock_pages`. |
 | `gtkhx_dock_set_needs_attention (id, state)` | The attention mark on the panel's tab, until it is looked at. |
-| `gtkhx_dock_connect_shown (id, func)` | `func` each time the panel comes into view (the News browser's fetch on open). |
 
 **`content` is always consumed**: on success the panel's stack takes it; on
 failure (no such panel, or the page name taken) the bridge sinks the

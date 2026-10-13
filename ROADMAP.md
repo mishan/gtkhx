@@ -32,7 +32,7 @@ extension is allowed to degrade the legacy path.
 
 | | |
 |---|---|
-| **Toolkit** | GTK 4 + libadwaita, with mullion-gtk for the dock. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, threaded news, voice and video are dockable panels in a persistable split layout; the file browser (one per connection), the tracker and the file preview are standalone windows. |
+| **Toolkit** | GTK 4 + libadwaita, with mullion-gtk for the dock. Light/dark/system theme tracking, and consistent `AdwHeaderBar` chrome. Chat, users, tasks, news, voice and video are dockable panels in a persistable split layout; the file browser and the threaded news browser (one of each per connection), the tracker and the file preview are standalone windows. |
 | **Build** | Meson + Cargo. Autotools, the RPM spec and the old `debian/` tree are gone. |
 | **Language** | Hybrid C + Rust, with Rust now the larger half. C no longer grows: a CI check fails any pull request that adds net lines of C. See [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). |
 | **Shared code** | The wire protocol, the file-transfer codec and the HFS sidecars come from [hx-libs](https://github.com/mishan/hx-libs), shared with the hxd-ng server. |
@@ -63,11 +63,11 @@ What is left is making the rest of the UI stop asking "which connection has focu
 it means "which connection is this for?":
 
 - **Readers that still route through `hx_active_session()`.** The Rust UI reaches its
-  connection through `gtkhx_active_htlc()` and friends in the news dialogs, the user
-  editor, chat input, file info, the voice panel and the compose windows.
-- **`thread_local` singletons in `gtkhx-ui`** that hold per-connection state: the
-  threaded news browser and its in-flight fetches, the flat news view, the banner and the
-  create-post window. `useredit.rs`, an id-keyed map, is the shape they all want.
+  connection through `gtkhx_active_htlc()` and friends in the user editor, chat input,
+  file info, the voice panel and the create-post window.
+- **`thread_local` singletons in `gtkhx-ui`** that hold per-connection state: the flat
+  news view, the banner and the create-post window. `useredit.rs`, an id-keyed map, is
+  the shape they all want, and the one the threaded news browser now has.
 
 Coexisting per-connection panels (Model B) remain undecided. Full survey:
 [docs/multi-connection.md](docs/multi-connection.md).

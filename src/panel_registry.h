@@ -28,11 +28,13 @@ G_BEGIN_DECLS
 #define HX_PANEL_ID_USERS "users"
 #define HX_PANEL_ID_TASKS "tasks"
 #define HX_PANEL_ID_NEWS "news"
+/* Not a panel: the threaded news browser is a window per connection
+ * (gtkhx-ui/src/news_browser.rs), opened through app.show-panel for its
+ * Ctrl+4. No HX_PANEL_ID_FILES any more either: the files browser is
+ * a window per connection too. A layout from before either still names
+ * them; the import leaves "files" out (dl_import_legacy), and the dock
+ * drops an id it has no pane for. */
 #define HX_PANEL_ID_NEWS15 "news15"
-/* No HX_PANEL_ID_FILES any more: the files browser is a window per
- * connection (gtkhx-ui/src/files.rs). A layout from before that still
- * names "files"; the import leaves it out (dl_import_legacy), and the
- * dock drops an id it has no pane for. */
 #define HX_PANEL_ID_VIDEO "video"
 /* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
  * not a docked panel. */
