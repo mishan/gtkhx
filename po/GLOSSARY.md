@@ -53,16 +53,19 @@ literal gloss of the English.
 | download | herunterladen | descargar | télécharger | transferir |
 | transfer | Übertragung | transferencia | transfert | transferência |
 | queue | Warteschlange | cola | file d'attente | fila |
-| task | Aufgabe | tarea | tâche | tarefa |
+| Transfers (the panel) | Übertragungen | Transferencias | Transferts | Transferências |
 | panel | Panel | panel | panneau | painel |
+| pane | Panel | panel | panneau | painel |
 | layout | Layout | disposición | disposition | disposição |
 | icon | Symbol | icono | icône | ícone |
 | avatar | Avatar | avatar | avatar | avatar |
 | inline media | Inline-Medien | medios en línea | médias intégrés | multimédia integrado |
 | voice chat | Sprachchat | chat de voz | chat vocal | conversa de voz |
 | push-to-talk | Push-to-Talk | pulsar para hablar | alternat | premir para falar |
-| mute / muted | stummschalten / stumm | silenciar / silenciado | couper le micro / muet | silenciar / silenciado |
+| mute / muted | stummschalten / stumm | silenciar / silenciado | couper le micro / muet (your own mic); couper le son (someone else's playback) | silenciar / silenciado |
 | settings / preferences | Einstellungen | preferencias | préférences | preferências |
+| keyboard shortcuts | Tastenkürzel | atajos del teclado | raccourcis clavier | atalhos de teclado |
+| metered connection | getaktete Verbindung | conexión medida | connexion limitée | ligação limitada |
 | kick | rauswerfen | expulsar | expulser | expulsar |
 | ban | sperren | vetar | bannir | banir |
 | fingerprint (TLS) | Fingerabdruck | huella digital | empreinte | impressão digital |
@@ -77,6 +80,12 @@ Notes on the harder ones:
   *function*, not the word — "Vereinbarung"/"acuerdo" reads like a contract negotiation.
 - **news** here is a forum/message board, not current affairs. French "actualités" is the
   established Hotline-client rendering; keep it.
+- **pane** takes the same word as **panel**: in the dock a pane *is* a tool window
+  (Chat, Users, Files…), and the split area that stacks several as tabs is a leaf,
+  which no string names. The exception is the Keyboard Shortcuts window, which lists
+  a "Panels" group (Ctrl+1 and on) and a "Panes" group (F6, the Alt chords, split,
+  zoom, close, reset) side by side; that "Panes" heading takes the **layout** word
+  so the two stay apart.
 - **pt** is European Portuguese: *ficheiro* not *arquivo*, *transferir* not *baixar*,
   *ecrã* not *tela*, *utilizador* not *usuário*. **connection → *ligação***, which is the
   GNOME/KDE pt-PT term and the one that pairs with *ligar* / *desligar*; *conexão* reads
@@ -120,8 +129,9 @@ Japanese joined later and does not fit the four-column table, so it gets its own
 | upload / download | アップロード / ダウンロード | |
 | transfer | 転送 | |
 | queue | キュー | "queued" → キューに追加 |
-| task | タスク | |
+| Transfers (the panel) | 転送 | |
 | panel | パネル | |
+| pane | パネル | same word as panel |
 | layout | レイアウト | |
 | icon | アイコン | |
 | avatar | アバター | |
@@ -130,6 +140,8 @@ Japanese joined later and does not fit the four-column table, so it gets its own
 | push-to-talk | プッシュトゥトーク | abbreviate as PTT where the source does |
 | mute / muted | ミュート / ミュート中 | |
 | settings / preferences | 設定 | both, they are the same dialog |
+| keyboard shortcuts | キーボードショートカット | |
+| metered connection | 従量制接続 | |
 | kick | キック | |
 | ban | アクセス禁止 | |
 | cipher | 暗号方式 | the named algorithm |
