@@ -312,7 +312,11 @@ fn present(page: Option<&str>) {
         rbox.set_margin_end(6);
         rbox.set_margin_top(8);
         rbox.set_margin_bottom(8);
-        let img = gtk::Image::from_icon_name(entry.icon);
+        // Beside its page's name, which says it.
+        let img = gtk::Image::builder()
+            .icon_name(entry.icon)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
         let lbl = gtk::Label::new(Some(&title));
         lbl.set_xalign(0.0);
         rbox.append(&img);

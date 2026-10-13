@@ -1030,6 +1030,7 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
         ))
     };
     let list_view = gtk::ListView::new(Some(selection.clone()), Some(factory));
+    list_view.update_property(&[gtk::accessible::Property::Label(&tr("News"))]);
     list_view.set_show_separators(false);
     unsafe {
         crate::ffi::gtkhx_apply_listview_style(list_view.as_ptr() as *mut gtk::ffi::GtkWidget)
@@ -1067,6 +1068,7 @@ fn build_content(conn: ConnKey) -> gtk::Widget {
     let right_scroll = gtk::ScrolledWindow::new();
     right_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     let post_view = gtk::TextView::new();
+    post_view.update_property(&[gtk::accessible::Property::Label(&tr("Article"))]);
     post_view.set_editable(false);
     post_view.set_cursor_visible(false);
     post_view.set_wrap_mode(gtk::WrapMode::WordChar);
