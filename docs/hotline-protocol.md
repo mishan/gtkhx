@@ -498,6 +498,15 @@ The 1.9 server serves the flat message board (101/102/103) and threaded news sid
 side; 1.5 through 1.8 servers have threaded news only. The 1.9 client shows the board
 only for servers ≥ 190 or < 150.
 
+An article lists its parts in 371's reply, each a MIME type (327's) and a u16 size,
+and 400 fetches the part whose type it names. Period clients only ever post and fetch
+`text/plain`, but the list is open: hxd-ng lists an article's pictures after its text,
+as `image/png` or `image/jpeg` of at most 60,000 bytes, and hlservd keeps a part of
+any type as it was posted. mhxd keeps the type but turns a part's line feeds into
+carriage returns, which ruins a picture, and Janus relabels every part `text/plain`.
+GtkHx's news browser fetches the text part and shows PNG, JPEG and GIF parts below
+it.
+
 Transaction IDs 201, 305–347, 356–369, 372–379, 383–399, 401–409 and 412–499 are not
 used by the official protocol. See [ID allocations](#id-allocations) for what
 extensions have put in the gaps.

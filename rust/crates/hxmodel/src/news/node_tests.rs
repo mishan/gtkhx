@@ -150,7 +150,7 @@ fn ffi_null_ptr_is_safe() {
 
 // ---- hx_news_build_category_tree_from_articles -----------------------------
 
-use hxsession::{Article, NewsItem};
+use hxsession::{Article, NewsItem, Part};
 
 fn article(id: u32, parent: u32, subject: &str, poster: &str, mime: &str) -> Article {
     Article {
@@ -161,6 +161,66 @@ fn article(id: u32, parent: u32, subject: &str, poster: &str, mime: &str) -> Art
         year: 0,
         seconds: 0,
         mime: mime.as_bytes().to_vec(),
+        parts: Vec::new(),
+    }
+}
+
+/// What an article listing `parts` is fetched as: its text part, and the
+/// pictures after it a period client can show; one with parts but no text
+/// has no text to fetch.
+#[test]
+fn a_post_fetches_its_text_part_and_lists_its_pictures() {
+    // The listed parts; the text part asked for, the body, the pictures.
+    type Case = (
+        &'static [&'static str],
+        &'static str,
+        Option<&'static str>,
+        &'static [&'static str],
+    );
+    let cases: [Case; 4] = [
+        (
+            &["text/plain", "text/markdown", "image/png"],
+            "text/plain",
+            None,
+            &["image/png"],
+        ),
+        (&["image/jpeg"], "text/plain", Some(""), &["image/jpeg"]),
+        (
+            &["text/plain", "image/webp", "image/gif", "image/gif"],
+            "text/plain",
+            None,
+            &["image/gif"],
+        ),
+        (&["application/pdf"], "text/plain", Some(""), &[]),
+    ];
+    for (parts, text, body, pictures) in cases {
+        let mut a = article(1, 0, "s", "p", parts[0]);
+        a.parts = parts
+            .iter()
+            .map(|m| Part {
+                mime: m.as_bytes().to_vec(),
+                size: 1,
+            })
+            .collect();
+        let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+        unsafe {
+            hx_news_build_category_tree_from_articles(dest.as_ptr(), std::ptr::null(), &[a]);
+        }
+        let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+        let mime = n.imp().mime_type.borrow().clone().unwrap();
+        assert_eq!(mime.to_str().unwrap(), text, "{parts:?}");
+        let got = n.imp().body.borrow().clone();
+        assert_eq!(
+            got.as_deref().map(|b| b.to_str().unwrap()),
+            body,
+            "{parts:?}"
+        );
+        let got: Vec<_> = n
+            .pictures()
+            .into_iter()
+            .map(|p| p.into_string().unwrap())
+            .collect();
+        assert_eq!(got, pictures, "{parts:?}");
     }
 }
 

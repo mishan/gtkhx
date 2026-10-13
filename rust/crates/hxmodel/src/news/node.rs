@@ -65,6 +65,9 @@ mod imp {
         /// empty body. Populated by the GETTHREAD reply.
         pub body: RefCell<Option<CString>>,
         pub body_fetching: Cell<bool>,
+        /// The types of the pictures listed after the text, each fetched
+        /// by its type.
+        pub pictures: RefCell<Vec<CString>>,
     }
 
     #[glib::object_subclass]
@@ -86,6 +89,11 @@ glib::wrapper! {
 }
 
 impl HxNewsNode {
+    /// The types of the pictures listed after a post's text.
+    pub fn pictures(&self) -> Vec<CString> {
+        self.imp().pictures.borrow().clone()
+    }
+
     /// Build a node of `kind` with `name` and optional `path` (the shape the C
     /// `hx_news_node_new` constructor produced).
     pub fn new(kind: i32, name: CString, path: Option<CString>) -> Self {
@@ -364,7 +372,41 @@ struct CorePost {
     subject: CString,
     sender: CString,
     mime_type: CString,
+    /// Set when the article lists parts and none of them is text: there is
+    /// no text to fetch.
+    no_text: bool,
+    pictures: Vec<CString>,
     date: HxNewsDate,
+}
+
+/// The pictures a period client can be served, by the type the listing
+/// names them with.
+const PICTURES: [&[u8]; 3] = [b"image/png", b"image/jpeg", b"image/gif"];
+
+/// The text part to fetch, if the article lists one, and its pictures.
+/// An article listing no parts at all is fetched as text/plain, as before.
+fn article_parts(a: &Article) -> (Option<CString>, Vec<CString>) {
+    if a.parts.is_empty() {
+        return (Some(bytes_or(&a.mime, "text/plain", true)), Vec::new());
+    }
+    let text = a
+        .parts
+        .iter()
+        .find(|p| p.mime.starts_with(b"text/"))
+        .map(|p| bytes_or(&p.mime, "text/plain", true));
+    // A part is fetched by its type, so a second of a type is the first.
+    let mut pictures: Vec<CString> = Vec::new();
+    for p in a
+        .parts
+        .iter()
+        .filter(|p| PICTURES.contains(&p.mime.as_slice()))
+    {
+        let mime = bytes_or(&p.mime, "", false);
+        if !pictures.contains(&mime) {
+            pictures.push(mime);
+        }
+    }
+    (text, pictures)
 }
 
 /// `[u8]` → owned `CString`, truncating at the first NUL (C-string semantics)
@@ -399,6 +441,10 @@ fn build_category_tree_core(dest: &gio::ListStore, path: Option<&CString>, posts
             imp.postid.set(p.postid);
             imp.sender.replace(Some(p.sender));
             imp.mime_type.replace(Some(p.mime_type));
+            if p.no_text {
+                imp.body.replace(Some(CString::default()));
+            }
+            imp.pictures.replace(p.pictures);
             imp.date.set(p.date);
         }
         links.push(crate::news::PostLink {
@@ -447,17 +493,22 @@ pub unsafe fn hx_news_build_category_tree_from_articles(
     };
     let posts: Vec<CorePost> = articles
         .iter()
-        .map(|a| CorePost {
-            postid: a.id,
-            parentid: a.parent,
-            subject: bytes_or(a.subject.as_bytes(), "(no subject)", true),
-            sender: bytes_or(a.poster.as_bytes(), "", false),
-            mime_type: bytes_or(&a.mime, "text/plain", true),
-            date: HxNewsDate {
-                base_year: a.year,
-                pad: 0,
-                seconds: a.seconds,
-            },
+        .map(|a| {
+            let (text, pictures) = article_parts(a);
+            CorePost {
+                postid: a.id,
+                parentid: a.parent,
+                subject: bytes_or(a.subject.as_bytes(), "(no subject)", true),
+                sender: bytes_or(a.poster.as_bytes(), "", false),
+                no_text: text.is_none(),
+                mime_type: text.unwrap_or_else(|| CString::new("text/plain").unwrap()),
+                pictures,
+                date: HxNewsDate {
+                    base_year: a.year,
+                    pad: 0,
+                    seconds: a.seconds,
+                },
+            }
         })
         .collect();
     build_category_tree_core(&dest, path.as_ref(), posts);

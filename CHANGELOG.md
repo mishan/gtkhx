@@ -6,6 +6,9 @@
   - A Keyboard Shortcuts window (Ctrl+?) lists every key
   - Clicking a notification opens the conversation it was about; a second launch with --server or --bookmark connects in the running GtkHx instead of opening another
   - Themes step aside for the system's high-contrast setting, and links are underlined rather than told apart by color alone
+- News
+  - The news browser shows the pictures an article carries below its text, as hxd-ng serves them to classic clients
+  - Fixed an article whose only part is a picture showing as garbled text
 - Messages
   - A private message can carry a picture, as a chat line can, on servers with inline media (Janus, hxd-ng): the paperclip beside the message's input sends one
 - Users

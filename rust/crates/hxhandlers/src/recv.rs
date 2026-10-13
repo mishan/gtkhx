@@ -97,6 +97,7 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         Event::NewsListing { trans, items } => news::listing(htlc, *trans, items),
         Event::NewsCategory { trans, articles } => news::category(htlc, *trans, articles),
         Event::NewsArticle { trans, text } => news::article(htlc, *trans, text),
+        Event::NewsPart { trans, data } => news::part(htlc, *trans, data),
         Event::FileList { trans, files } => files::listed(htlc, *trans, files),
         Event::FileInfo { trans, info } => files::info(htlc, *trans, info),
         Event::FileChanged { trans } => files::changed(htlc, *trans),
@@ -129,7 +130,7 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             #[cfg(feature = "voice")]
             let quiet = crate::voice::failed(htlc, *trans, reason.as_deref()) || quiet;
             let quiet = icon::failed(htlc, *trans, reason.as_deref()) || quiet;
-            news::failed(htlc, *trans);
+            let quiet = news::failed(htlc, *trans) || quiet;
             let quiet = files::failed(htlc, *trans, reason.as_deref()) || quiet;
             chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
         }

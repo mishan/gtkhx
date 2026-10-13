@@ -31,7 +31,6 @@ use tests::{
 };
 
 /// What a threaded-news fetch in flight is answered into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Asked {
     /// A bundle's listing, into its `gnews_folder` carrier.
     Folder(*mut c_void),
@@ -39,7 +38,12 @@ pub(crate) enum Asked {
     Catalog(*mut c_void),
     /// An article's text, for the `HxNewsNode` whose ref it holds.
     Article(*mut c_void),
+    /// A part of an article, such as a picture, for whoever asked.
+    Part(PartDone),
 }
+
+/// Hears a part's bytes, or nothing when there is no answer.
+pub type PartDone = Box<dyn FnOnce(Option<&[u8]>)>;
 
 thread_local! {
     /// The fetches in flight, by connection and trans.
@@ -90,6 +94,7 @@ unsafe fn unanswered(htlc: *mut c_void, what: Asked) {
         Asked::Folder(g) => gtkhx_session_emit_news_folder(gtkhx_session_get_default(), htlc, g),
         Asked::Catalog(g) => gtkhx_session_emit_news_catalog(gtkhx_session_get_default(), htlc, g),
         Asked::Article(target) => news_post_fetch_failed(target),
+        Asked::Part(done) => done(None),
     }
 }
 
@@ -146,6 +151,16 @@ pub(crate) unsafe fn category(htlc: *mut c_void, trans: u32, articles: &[Article
     }
 }
 
+/// A part of an article, for whoever asked.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn part(htlc: *mut c_void, trans: u32, data: &[u8]) {
+    if let Some(Asked::Part(done)) = answered(htlc, trans, |a| matches!(a, Asked::Part(_))) {
+        done(Some(data));
+    }
+}
+
 /// An article's text, for the node that asked.
 ///
 /// # Safety
@@ -159,14 +174,18 @@ pub(crate) unsafe fn article(htlc: *mut c_void, trans: u32, text: &str) {
 }
 
 /// A request on `trans` was refused, or its reply cut short. The reason, if
-/// any, is `request-failed`'s to show.
+/// any, is `request-failed`'s to show, unless it was for a picture, whose
+/// place in the post says so: true for that.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
-    if let Some(what) = answered(htlc, trans, |_| true) {
-        unanswered(htlc, what);
-    }
+pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) -> bool {
+    let Some(what) = answered(htlc, trans, |_| true) else {
+        return false;
+    };
+    let quiet = matches!(what, Asked::Part(_));
+    unanswered(htlc, what);
+    quiet
 }
 
 #[cfg(test)]

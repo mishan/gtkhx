@@ -7,7 +7,7 @@
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
-use hx_e2e::{servers_with, unique_name, Client, Server};
+use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
 use hxrequest::{news, Request};
 use hxsession::{Article, Expect, Handled, NewsItem};
@@ -177,6 +177,49 @@ fn threaded_news_is_made_read_and_deleted_through_its_replies() {
             "{}: {cat:?} is still there",
             s.name
         );
+    }
+}
+
+/// An article's picture is listed as a part of its own and comes back as it
+/// was posted, its CRs and LFs untouched, fetched by its type as the news
+/// browser fetches it.
+#[test]
+fn a_picture_part_is_listed_and_comes_back_whole() {
+    let picture = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\n\r\n\xff".to_vec();
+    for s in servers_with(&[Cap::NewsPictures]) {
+        let (mut a, na) = member(s, s.admin, "pa");
+        let utf8 = a.utf8();
+        let made = news::create_category(b"/", na.as_bytes(), utf8).unwrap();
+        assert_eq!(change(&mut a, &made), None, "{}", s.name);
+        let path = [b"/", na.as_bytes()].concat();
+        // A 1.5 post names its one part's type; GtkHx itself posts text.
+        let mut post = news::post_article(&path, 0, b"Shot", b"-", utf8).unwrap();
+        for (tag, data) in post.chunks.iter_mut() {
+            match *tag {
+                hxproto::messages::tag::NEWSTYPE => *data = b"image/png".to_vec(),
+                hxproto::messages::tag::NEWSDATA => *data = picture.clone(),
+                _ => {}
+            }
+        }
+        assert_eq!(change(&mut a, &post), None, "{}", s.name);
+        let listed = articles(&mut a, &path);
+        let [shot] = &listed[..] else {
+            panic!("{}: {listed:?}", s.name);
+        };
+        let types: Vec<_> = shot.parts.iter().map(|p| p.mime.as_slice()).collect();
+        assert_eq!(types, [b"image/png"], "{}", s.name);
+
+        let t = a.send_expecting(
+            &news::article(&path, shot.id, b"image/png").unwrap(),
+            Some(Expect::NewsPart),
+        );
+        let got = until(&mut a, |e| match e {
+            hxsession::Event::NewsPart { trans, data } if *trans == t => Some(data.clone()),
+            _ => None,
+        });
+        assert_eq!(got, picture, "{}", s.name);
+        let gone = news::delete(&path).unwrap();
+        assert_eq!(change(&mut a, &gone), None, "{}", s.name);
     }
 }
 

@@ -48,6 +48,7 @@ rust/crates/gtkhx-ui/src/msg.rs
 rust/crates/gtkhx-ui/src/news_browser.rs
 rust/crates/gtkhx-ui/src/news_compose.rs
 rust/crates/gtkhx-ui/src/news_dialogs.rs
+rust/crates/gtkhx-ui/src/news_pictures.rs
 rust/crates/gtkhx-ui/src/news_render.rs
 rust/crates/gtkhx-ui/src/news.rs
 rust/crates/gtkhx-ui/src/options_connections.rs

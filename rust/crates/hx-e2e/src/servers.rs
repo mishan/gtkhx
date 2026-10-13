@@ -27,6 +27,9 @@ pub enum Cap {
     Video,
     /// Logs the guest in over HOPE with this cipher.
     Hope(hxhope::Cipher),
+    /// Keeps a threaded-news article whose part is a picture, its type and
+    /// its bytes as they were posted.
+    NewsPictures,
 }
 
 #[derive(Debug)]
@@ -96,7 +99,7 @@ pub const SERVERS: &[Server] = &[
         // logs in from the machine running the server: over host
         // networking, every test connection.
         admin: "admin",
-        caps: &[Cap::FileAdmin],
+        caps: &[Cap::FileAdmin, Cap::NewsPictures],
         every: true,
     },
     Server {

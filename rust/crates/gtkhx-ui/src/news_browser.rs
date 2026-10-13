@@ -249,6 +249,16 @@ fn update_breadcrumb(br: &NewsBrowser) -> *mut c_void {
     }
 }
 
+/// Show `node` again if `conn`'s browser has it selected: something it shows
+/// has come in.
+pub(crate) fn rerender_if_selected(conn: ConnKey, node: *mut c_void) {
+    with_browser_on(conn, |br| {
+        if br.selected_post.get() == node {
+            render_selected_post(br);
+        }
+    });
+}
+
 fn render_selected_post(br: &NewsBrowser) {
     unsafe {
         crate::news_render::gtkhx_news_render_post(
