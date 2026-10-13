@@ -43,6 +43,9 @@
 #include "panel_registry.h"
 #include "dock_bridge.h" /* raising the queue on a new transfer */
 
+#undef _
+#include <glib/gi18n.h>
+
 /* Phase 5 task-row polish: each row is now an Adwaita-shaped
  * action-row layout — icon column on the left, then a vbox with
  * three stacked elements:
@@ -454,6 +457,15 @@ gtask_new (guint16 conn, guint32 trans, struct htxf_conn *htxf)
      * subtitle block to its right. */
     icon = gtask_make_icon (gtask_icon_for (trans, htxf));
     gtk_widget_set_valign (icon, GTK_ALIGN_CENTER);
+    /* A transfer's title is only the file name; the icon is what tells a
+     * download from an upload. Other tasks' titles already say it. */
+    if (htxf) {
+        gtk_accessible_update_property (
+            GTK_ACCESSIBLE (icon), GTK_ACCESSIBLE_PROPERTY_LABEL,
+            htxf->type == XFER_GET ? C_ ("files transfer", "Download")
+                                   : C_ ("files transfer", "Upload"),
+            -1);
+    }
 
     /* Title — bold via CSS class, ellipsize keeps it on one line,
      * expands horizontally inside the title row so the queue badge

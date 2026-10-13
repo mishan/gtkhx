@@ -23,7 +23,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void};
+use std::ffi::{c_char, c_void, CStr};
 use std::sync::Once;
 
 use glib::subclass::prelude::*;
@@ -34,7 +34,7 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 use crate::user_row::HxUserRow;
 
 /// Opaque C `session *`.
@@ -180,6 +180,8 @@ mod imp {
         /// process-lifetime, disconnected on dispose so a destroyed view
         /// leaves no dead handler behind.
         pub theme_conn: RefCell<Vec<(glib::Object, glib::SignalHandlerId)>>,
+        /// A private chat's transcript, named for who else is in the chat.
+        pub named: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     }
 
     // Manual Default: the raw `*mut Session` in a Cell can't derive it.
@@ -196,6 +198,7 @@ mod imp {
                 pending: RefCell::new(Vec::new()),
                 flush_scheduled: Cell::new(false),
                 theme_conn: RefCell::new(Vec::new()),
+                named: RefCell::new(None),
             }
         }
     }
@@ -297,6 +300,38 @@ impl HxUserListView {
         if let (Some(store), false) = (self.store(), rows.is_empty()) {
             store.splice(store.n_items(), 0, &rows);
         }
+    }
+
+    /// Name the widget `name_pchat` gave for the members other than us:
+    /// who is in it is what tells one private chat from another.
+    fn refresh_name(&self) {
+        let Some(widget) = self.imp().named.borrow().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        let htlc = unsafe { gtkhx_session_htlc(self.session().cast()) };
+        let me = (!htlc.is_null()).then(|| unsafe { gtkhx_core::conn::hx_conn_uid(htlc.cast()) });
+        let mut rows: Vec<HxUserRow> = self
+            .imp()
+            .by_uid
+            .borrow()
+            .iter()
+            .filter(|(uid, _)| Some(**uid) != me)
+            .map(|(_, row)| row.clone())
+            .collect();
+        rows.sort_by(|a, b| a.cmp_name_ci(b));
+        let nicks: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                row.with_name_ptr(|p| unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned())
+            })
+            .collect();
+        let label = if nicks.is_empty() {
+            tr("Private chat")
+        } else {
+            // TRANSLATORS: %s is a comma-separated list of nicknames.
+            tr1("Private chat with %s", &nicks.join(", "))
+        };
+        widget.update_property(&[gtk::accessible::Property::Label(&label)]);
     }
 
     /// Look up the row for `uid`, if any.
@@ -410,10 +445,20 @@ impl HxUserListView {
         // A theme change rescales a themed view, and a name's color follows
         // the list background (see name_shadow.rs), which the theme, the
         // accent and the dark style all move. Cells keep their last
-        // drawing until asked, so each is asked.
+        // drawing until asked, so each is asked. The status colors are
+        // per light/dark style and cached on each row, so they are redone
+        // first.
         let redraw = {
             let cv_weak = column_view.downgrade();
+            let view_weak = self.downgrade();
             move || {
+                if let Some(view) = view_weak.upgrade() {
+                    view.imp()
+                        .by_uid
+                        .borrow()
+                        .values()
+                        .for_each(HxUserRow::refresh_fg);
+                }
                 if let Some(cv) = cv_weak.upgrade() {
                     if themed {
                         cv.queue_resize();
@@ -786,11 +831,12 @@ pub unsafe extern "C" fn hx_user_list_view_add(
     // Already present → treat as an in-place refresh (bug-shaped double add).
     if let Some(row) = view.row_for(uid) {
         row.set_state_row(nam, icon, color, nick_color);
-        return;
+    } else {
+        let row = HxUserRow::new_row(uid, nam, icon, color, nick_color);
+        view.imp().by_uid.borrow_mut().insert(uid, row.clone());
+        view.queue_row(row);
     }
-    let row = HxUserRow::new_row(uid, nam, icon, color, nick_color);
-    view.imp().by_uid.borrow_mut().insert(uid, row.clone());
-    view.queue_row(row);
+    view.refresh_name();
 }
 
 /// Remove member `uid`'s row.
@@ -806,6 +852,7 @@ pub unsafe extern "C" fn hx_user_list_view_remove(v: *mut c_void, uid: u16) {
     let Some(row) = view.imp().by_uid.borrow_mut().remove(&uid) else {
         return;
     };
+    view.refresh_name();
     let mut pending = view.imp().pending.borrow_mut();
     if let Some(i) = pending.iter().position(|r| r == &row) {
         pending.remove(i);
@@ -837,7 +884,10 @@ pub unsafe extern "C" fn hx_user_list_view_update(
     }
     let view = borrow(v);
     match view.row_for(uid) {
-        Some(row) => row.set_state_row(nam, icon, color, nick_color),
+        Some(row) => {
+            row.set_state_row(nam, icon, color, nick_color);
+            view.refresh_name();
+        }
         // Update for an unknown uid → treat as add (missed create race).
         None => hx_user_list_view_add(v, uid, nam, icon, color, nick_color),
     }
@@ -870,6 +920,20 @@ pub unsafe extern "C" fn hx_user_list_view_clear(v: *mut c_void) {
         store.remove_all();
     }
     view.imp().by_uid.borrow_mut().clear();
+    view.refresh_name();
+}
+
+/// Name `widget` for the other members of private chat `v`, from now on.
+///
+/// # Safety
+/// `v` NULL or a valid `HxUserListView *`.
+pub(crate) unsafe fn name_pchat(v: *mut c_void, widget: &gtk::Widget) {
+    if v.is_null() {
+        return;
+    }
+    let view = borrow(v);
+    view.imp().named.replace(Some(widget.downgrade()));
+    view.refresh_name();
 }
 
 /// The uid under the live selection, or 0 (no selection). M4b.3b-ii: the

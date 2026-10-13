@@ -51,8 +51,7 @@ proto_test_deps = test_deps + [
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
   # proto_helpers.c / tracker_event.c into the self-contained
   # gtkhx-core::boxed module. Proto tests that link those
-  # producers and exercise the boxed copy/free (e.g. test_chat_event
-  # calls hx_*_event_copy/_free; the tracker tests'
+  # producers and exercise the boxed copy/free (e.g. the tracker tests'
   # meta_new/_free call sites) resolve them against this archive. It's
   # self-contained, so pulling those symbols never drags gtkhx-core's
   # C externs in.
@@ -661,20 +660,6 @@ test('agreement', test_agreement,
 # (hx_news_dirlist_parse_* / hx_newscat_parse) were retired when the 1.5 news
 # receive path moved to owned handles; the parsers are covered by hxproto's
 # native cargo tests, e.g. parse::tests::dirlist_* and catlist_*.)
-
-# chat_event — the placeholder row a chat line's inline media draws
-# (hx_chat_media_placeholder_line). The HxChatEvent itself is built in
-# Rust and tested there.
-test_chat_event = executable('test_chat_event',
-  'proto/test_chat_event.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_depends        : rust_build,
-)
-test('chat_event', test_chat_event,
-     suite : 'proto')
 
 # folder_xfer — wire-format lockdown for the 1.5 folder-transfer
 # opcodes (HTLC_HDR_FILE_GETFOLDER 0xd2, HTLC_HDR_FILE_PUTFOLDER 0xd5)

@@ -32,8 +32,8 @@
 //!
 //! They are self-contained — glib only, no undefined externs into the
 //! rest of GtkHx — and that is load-bearing, not incidental. A C target
-//! that pulls a `_copy`/`_free` symbol (the `test_chat_event` proto
-//! unit test) links the `gtkhx-core` archive directly rather than the
+//! that pulls a `_copy`/`_free` symbol (the tracker proto tests'
+//! meta_new/_free call sites) links the `gtkhx-core` archive directly rather than the
 //! `gtkhx-ffi` façade, so an extern added here becomes an unresolved
 //! reference in those tests. See the crate-level note in `lib.rs`.
 

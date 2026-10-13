@@ -198,7 +198,7 @@ impl HxUserRow {
     /// placeholder row keeps its
     /// status coloring exactly as the deleted C `hx_user_row_refresh_fg`
     /// did. NULL return → no cached fg (fall through to the theme default).
-    fn refresh_fg(&self) {
+    pub(crate) fn refresh_fg(&self) {
         let imp = self.imp();
         let mut tmp = Rgba::default();
         // Pointer-free (M4b.3b): compute from the cached nick_color, not the

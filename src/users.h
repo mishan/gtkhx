@@ -8,7 +8,6 @@
  * sensitivity is a statement about one connection's state and access bits. */
 
 extern GdkRGBA user_colors[8];
-extern GdkRGBA gdk_user_colors[4];
 
 /* Resolve a user's status colour to the GdkRGBA the user list uses
  * for that row's foreground. Returns NULL for the regular-user slot

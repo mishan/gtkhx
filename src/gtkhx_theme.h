@@ -164,16 +164,16 @@ int gtkhx_theme_get_nick_colors (gboolean dark,
  *
  * Names in the user list are colored by 2-bit status (idle / admin)
  * via a 4-slot palette: regular / idle / admin / admin-idle. The
- * historical defaults live in gtkhx.c::init_colors
- * (defaults_gdk_user_colors) and remain the fallback when a theme
- * doesn't opt in. A theme that DOES set these (Solarized does) gets
- * its values applied so names stay readable against the themed chat
- * background instead of inheriting CSS color from the row.
+ * built-in defaults live in users.c (gdk_user_colors) and remain
+ * the fallback when a theme doesn't opt in. A theme that DOES set
+ * these (Solarized does) gets its values applied so names stay
+ * readable against the themed chat background instead of inheriting
+ * CSS color from the row.
  *
  * Loaded via [users.light] / [users.dark] sections in the theme
  * file with keys `active`, `idle`, `admin`, `admin_idle`. Per-(slot,
  * variant) opt-in: a theme can set only the two it cares about and
- * the others fall back to the historical default. */
+ * the others fall back to the built-in default. */
 
 typedef enum {
     GTKHX_USER_COLOR_ACTIVE,     /* regular user */

@@ -408,34 +408,6 @@ extern GType hx_chat_event_get_type (void) G_GNUC_CONST;
 extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
 extern void hx_chat_event_free (HxChatEvent *e);
 
-/* Format-friendly helper for the placeholder row. Returns a
- * newly-allocated UTF-8 string the caller must g_free. Example
- * output with every field present:
- *
- *   [image · PNG · 800×600 · 121.1 KB · click to view]
- *
- * The trailing " · click to view]" suffix is always present (the
- * placeholder is a clickable affordance — the UX is part of the
- * line, not metadata that gets omitted). The interior columns
- * are conditional:
- *
- *   - When the MIME matches one of the spec-allowlisted types
- *     (image/png, image/jpeg, image/gif), the short label (PNG /
- *     JPEG / GIF) is used. Any other UTF-8-valid MIME is printed
- *     verbatim. UTF-8-invalid MIME bytes are replaced with "?"
- *     defensively (the Rust extractor doesn't UTF-8-validate
- *     CHAT_MEDIA_TYPE; a hostile or buggy server could otherwise
- *     interpolate arbitrary bytes into UI text).
- *   - width/height pair: only printed when BOTH *_present flags
- *     are set on the wire.
- *   - bytes: only printed when bytes_present is set; formatted
- *     short (e.g. "121.1 KB" or "1.2 MB") rather than literal.
- *
- * NULL `m` returns the bare "[image]" sentinel — used by call
- * sites that have signalled media presence but haven't extracted
- * meta yet. */
-extern char *hx_chat_media_placeholder_line (const HxChatMedia *m);
-
 /*
  * MediaTable — the per-chat token → HxChatMedia handle table (M3;
  * gtkhx-core::boxed/src/media_table.rs). Replaces gchat->media_handles

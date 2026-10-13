@@ -18,6 +18,8 @@ extern GtkWidget *hx_msgwin_inputbuf (struct msgwin *msg);
 extern void hx_msgwin_set_window (struct msgwin *msg, GtkWidget *w);
 extern void hx_msgwin_set_info_image (struct msgwin *msg, GtkWidget *w);
 extern void hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w);
+extern void hx_msgwin_name (session *sess, guint16 uid, GtkWidget *input,
+                            GtkWidget *output, const char *nick);
 /* Look up a PM window in `sess`. The uid alone is not a key: it is only
  * unique within a connection, so the session picks which table to search. */
 extern struct msgwin *msgwin_with_uid (session *sess, guint16 uid);

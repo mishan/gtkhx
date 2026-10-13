@@ -106,6 +106,7 @@ fn fitted(texture: &gdk::Texture, room: i32) -> gtk::Picture {
     let width = w.min(MAX_WIDTH).min(room.max(32));
     picture.set_size_request(width, h * width / w);
     picture.set_can_shrink(true);
+    picture.update_property(&[gtk::accessible::Property::Label(&tr("Picture"))]);
     picture
 }
 

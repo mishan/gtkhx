@@ -166,7 +166,30 @@ pub unsafe extern "C" fn create_msgwin(
     msgwin_refresh_user_info(msg);
     gtkhx_chat_tabs_raise_msg(htlc, uid);
     init_keyaccel(wptr(&outer_vbox));
-    let nick = crate::cstr(name as *const c_char);
+    input.grab_focus();
+
+    msg
+}
+
+/// Name a private message's tab, input and transcript for `nick`; called
+/// whenever its info pane is drawn, which a rename redraws.
+///
+/// # Safety
+/// `input` / `output` are valid `GtkWidget *`s; `nick` is a valid C string.
+/// Main thread.
+#[no_mangle]
+pub unsafe extern "C" fn hx_msgwin_name(
+    sess: *mut c_void,
+    uid: u16,
+    input: *mut gtk::ffi::GtkWidget,
+    output: *mut gtk::ffi::GtkWidget,
+    nick: *const c_char,
+) {
+    let nick = crate::cstr(nick);
+    let title = crate::cs(&format!("{nick} ({uid})"));
+    crate::chat_tabs::gtkhx_chat_tabs_set_title_msg(gtkhx_session_htlc(sess), uid, title.as_ptr());
+    let input: gtk::Widget = from_glib_none(input);
+    let output: gtk::Widget = from_glib_none(output);
     input.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr1(
         "Message to %s",
         &nick,
@@ -175,7 +198,4 @@ pub unsafe extern "C" fn create_msgwin(
         "Messages with %s",
         &nick,
     ))]);
-    input.grab_focus();
-
-    msg
 }

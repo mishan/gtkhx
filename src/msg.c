@@ -291,6 +291,8 @@ msg_apply_user_view (struct msgwin *msg, const char *display_name, guint16 icon,
     if (!display_name || !*display_name) {
         display_name = msg->name ? msg->name : "";
     }
+    hx_msgwin_name (msg->sess, *msg->uid, msg->inputbuf, msg->outputbuf,
+                    display_name);
 
     name_esc = g_markup_escape_text (display_name, -1);
 

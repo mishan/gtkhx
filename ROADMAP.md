@@ -117,12 +117,14 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    compose, File Info and Agreement close on Escape; F10 opens the main menu; Enter in
    the Trackers address adds it.
 4. **Labels.** *Done.* Chat views and text inputs are named (chat, private message,
-   subjects, find, paths, tracker search, the bookmark name, news compose); transfer
-   progress bars are labeled by their file; PDF pages, the media seek bar, file/folder
-   and news icons, the previewed picture, the About logo, icon-picker cells and the
-   inline-media dialog say what they are; and `preview.c`, `notify.c` and the tab-title
-   fallbacks are translated. Still unnamed: the avatar preview in Settings, inline
-   pictures in chat, and transfer thumbnails.
+   subjects, find, paths, tracker search, the bookmark name, news compose), a private
+   chat for who else is in it, and a private message's names follow a rename;
+   transfer progress bars are labeled by their file and their icons by direction; PDF
+   pages, the media seek bar, file/folder and news icons, the previewed picture, news
+   pictures, the About logo, the icon and avatar previews in Settings, icon-picker
+   cells and the inline-media dialog say what they are, and a picture in chat reads as
+   its caption; and `preview.c`, `notify.c`, that caption and the tab-title fallbacks
+   are translated.
 5. **Announcements.** *Done.* `announce.rs` (`gtkhx_announce` / `gtkhx_announce_line`
    from C) announces incoming private messages and mentions, a lost connection, an
    empty server address on Connect, a rejected push-to-talk key, find results and the

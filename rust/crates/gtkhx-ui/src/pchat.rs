@@ -38,6 +38,7 @@ extern "C" {
     fn hx_gchat_subject(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_media_btn(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_set_window(g: *mut Gchat, w: *mut gtk::ffi::GtkWidget);
+    fn hx_gchat_userlist(g: *mut Gchat) -> *mut c_void;
 
     fn hx_emoji_button_new(target: *mut gtk::ffi::GtkWidget) -> *mut gtk::ffi::GtkWidget;
     fn hx_emoji_typeahead_attach(target: *mut gtk::ffi::GtkWidget);
@@ -73,9 +74,6 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
 
     // Leaf widgets from the C helper (still floating; append/set_child sink).
     let output: gtk::Widget = from_glib_none(hx_gchat_output(gchat));
-    output.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr(
-        "Private chat",
-    ))]);
     let vscroll: gtk::Widget = from_glib_none(hx_gchat_vscroll(gchat));
     let input: gtk::Widget = from_glib_none(hx_gchat_input(gchat));
     let subject: gtk::Widget = from_glib_none(hx_gchat_subject(gchat));
@@ -146,6 +144,7 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     } else {
         from_glib_none(sidebar_ptr)
     };
+    crate::users_view::name_pchat(hx_gchat_userlist(gchat), &output);
 
     let hpane = gtk::Paned::new(gtk::Orientation::Horizontal);
     hpane.set_start_child(Some(&vbox));
