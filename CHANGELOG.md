@@ -1,5 +1,7 @@
 ## 1.6.1-dev
 
+- Transfers
+  - A folder download can be paused and resumed: Start skips the files it already has, picks up the one it stopped in, and fetches the rest
 - Users
   - The voice column's heading is an icon that follows the theme, rather than an emoji
 

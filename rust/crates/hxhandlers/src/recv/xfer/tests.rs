@@ -91,6 +91,24 @@ fn an_empty_folder_download_counts_one_byte() {
     assert_eq!(h.total_size, 1);
 }
 
+/// A folder's reply sizes the whole tree, resumed or not: what a resume
+/// already holds is counted apart.
+#[test]
+fn a_resumed_folder_download_is_sized_less_what_it_holds() {
+    test_env::reset();
+    crate::xfer::set_held(fake_htxf().cast(), Some(3000));
+    unsafe {
+        download_ready(
+            std::ptr::null_mut(),
+            fake_htxf(),
+            true,
+            &transfer(5, 5000, 0),
+        )
+    };
+    crate::xfer::set_held(fake_htxf().cast(), None);
+    assert_eq!(htxf().total_size, 2000);
+}
+
 #[test]
 fn a_refused_download_retries_when_asked() {
     test_env::reset();

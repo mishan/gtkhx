@@ -21,8 +21,8 @@ use hxnet::htxf::{
     hxnet_htxf_finish_send, hxnet_htxf_set_folder_items, HtxfAbort, HtxfConn,
 };
 use hxnet::xfer::{
-    hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
-    hxnet_xfer_folder_send_all, progress_due, HxnetFolderParams, HxnetXferParams,
+    folder_recv, hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_send_all,
+    progress_due, FolderLedger, HxnetFolderParams, HxnetXferParams,
 };
 use hxnet::xfer_handle::{
     hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
@@ -270,6 +270,7 @@ pub unsafe extern "C" fn xfer_remove_from_list(htxf: *mut HtxfHandle) {
     );
     set_pause(htxf, None);
     set_tries(htxf, None);
+    set_held(htxf, None);
     hx_htxf_unref(htxf); // drop the list's ref
     start_next();
 }
@@ -302,6 +303,7 @@ pub unsafe extern "C" fn xfers_delete_all() {
     let all: Vec<*mut HtxfHandle> = with_list(std::mem::take);
     PAUSES.with_borrow_mut(Vec::clear);
     QUEUED.with_borrow_mut(Vec::clear);
+    HELD.with_borrow_mut(Vec::clear);
     for htxf in all {
         hx_htxf_cancel(htxf);
         hxnet_htxf_abort((*htxf).abort as *const HtxfAbort);
@@ -356,9 +358,10 @@ pub unsafe extern "C" fn xfer_tasks_update(htlc: *mut c_void) {
 // ---- pause and resume ----------------------------------------------------
 
 /// Where a paused download stands. Hotline has no pause: pausing ends the
-/// download's connection, keeping its row and its partial file, and resuming
-/// asks for the rest anew from what is on disk. The server's queue slot goes
-/// with the connection.
+/// download's connection, keeping its row and what it wrote, and resuming
+/// asks for the rest anew from what is on disk: a file's from its partial
+/// file's size, a folder's file by file ([`hxnet::xfer::answer`]). The
+/// server's queue slot goes with the connection.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Pause {
     /// Its connection is closing; the worker hasn't finished.
@@ -376,6 +379,23 @@ thread_local! {
     /// The downloads the queue started and the server hasn't yet answered,
     /// with how many times a refusal has put each back.
     static QUEUED: RefCell<Vec<(*mut HtxfHandle, u8)>> = const { RefCell::new(Vec::new()) };
+    /// The bytes of each resumed folder download already on disk.
+    static HELD: RefCell<Vec<(*mut HtxfHandle, u64)>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn set_held(htxf: *mut HtxfHandle, to: Option<u64>) {
+    HELD.with_borrow_mut(|h| {
+        h.retain(|e| e.0 != htxf);
+        if let Some(to) = to {
+            h.push((htxf, to));
+        }
+    });
+}
+
+/// The bytes a resumed folder download had on disk when it was asked for
+/// again, which the size its reply brings counts.
+pub(crate) fn folder_held(htxf: *mut c_void) -> u64 {
+    HELD.with_borrow(|h| h.iter().find(|e| e.0 == htxf.cast()).map_or(0, |e| e.1))
 }
 
 fn pause_of(htxf: *mut HtxfHandle) -> Option<Pause> {
@@ -405,14 +425,13 @@ unsafe fn emit_file_update(htxf: *mut HtxfHandle) {
 }
 
 /// `int xfer_can_pause(struct htxf_conn *htxf)` — whether `htxf` is a
-/// single-file download whose worker is running.
+/// download, of a file or a folder, whose worker is running.
 ///
 /// # Safety
 /// `htxf` is a live handle. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_can_pause(htxf: *mut HtxfHandle) -> c_int {
     ((*htxf).type_ == XFER_GET
-        && hx_htxf_opt_folder(htxf as *const c_void) == 0
         && hx_htxf_opt_preview(htxf as *const c_void) == 0
         && WORKING.with_borrow(|w| w.contains(&htxf))
         && pause_of(htxf).is_none()) as c_int
@@ -420,15 +439,16 @@ pub unsafe extern "C" fn xfer_can_pause(htxf: *mut HtxfHandle) -> c_int {
 
 /// `int xfer_can_start(struct htxf_conn *htxf)` — whether Start would send
 /// `htxf`'s request: a single-file transfer not yet asked for, or a settled
-/// pause.
+/// pause. A folder's first request goes when it is made.
 ///
 /// # Safety
 /// `htxf` is a live handle. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_can_start(htxf: *mut HtxfHandle) -> c_int {
-    let fresh = (*htxf).gone == 0 && pause_of(htxf).is_none();
-    (hx_htxf_opt_folder(htxf as *const c_void) == 0
-        && (fresh || matches!(pause_of(htxf), Some(Pause::Paused { .. })))) as c_int
+    let fresh = (*htxf).gone == 0
+        && pause_of(htxf).is_none()
+        && hx_htxf_opt_folder(htxf as *const c_void) == 0;
+    (fresh || matches!(pause_of(htxf), Some(Pause::Paused { .. }))) as c_int
 }
 
 /// `int xfer_paused(struct htxf_conn *htxf)` — whether the row shows `htxf`
@@ -450,10 +470,12 @@ pub unsafe extern "C" fn xfer_paused(htxf: *mut HtxfHandle) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn xfer_resumed_bytes(htxf: *mut HtxfHandle) -> u64 {
     let h = &*htxf;
-    if h.type_ == XFER_GET {
-        h.data_pos + h.rsrc_pos
-    } else {
+    if h.type_ != XFER_GET {
         0
+    } else if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+        folder_held(htxf.cast())
+    } else {
+        h.data_pos + h.rsrc_pos
     }
 }
 
@@ -484,15 +506,26 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
     if pause_of(htxf) != Some(Pause::Winding) {
         return false;
     }
-    // Finished before the pause could stop it.
-    if hx_htxf_total_pos(htxf) >= (*htxf).total_size {
+    // Finished before the pause could stop it. A folder's progress counts
+    // the files' headers, which its size doesn't, so only its worker knows.
+    let finished = if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+        folder_finished(htxf)
+    } else {
+        hx_htxf_total_pos(htxf) >= (*htxf).total_size
+    };
+    if finished {
         set_pause(htxf, None);
         return false;
     }
     // The old token stays aborted; the next connection needs a live one.
     hxnet_htxf_abort_free((*htxf).abort as *const HtxfAbort);
     (*htxf).abort = hxnet_htxf_abort_new() as *mut c_void;
-    let kept = hx_file_size((*htxf).path.as_ptr());
+    // A folder keeps a ledger of its files instead.
+    let kept = if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+        0
+    } else {
+        hx_file_size((*htxf).path.as_ptr())
+    };
     set_pause(htxf, Some(Pause::Paused { kept }));
     emit_file_update(htxf);
     start_next();
@@ -935,6 +968,7 @@ unsafe extern "C" fn htxf_destructor(htxf: *mut HtxfHandle) {
     // A folder download's count whose worker never ran: queued, then
     // cancelled or disconnected.
     take_folder_items(htxf);
+    take_folder_get(htxf);
     // The preview window can outlive the transfer, and its close would cancel
     // this one: after a failed stream nothing ever told it the stream ended.
     // Both run on the main thread, so this can't race the close.
@@ -1074,19 +1108,72 @@ fn take_folder_items(htxf: *mut HtxfHandle) -> u32 {
     }
 }
 
+/// What each folder download's workers have written, and whether the last
+/// one finished: kept from its worker's return until the transfer is freed,
+/// for its resume.
+#[derive(Default)]
+struct FolderGet {
+    ledger: FolderLedger,
+    finished: bool,
+}
+
+static FOLDER_GETS: std::sync::Mutex<Vec<(usize, FolderGet)>> = std::sync::Mutex::new(Vec::new());
+
+fn take_folder_get(htxf: *mut HtxfHandle) -> FolderGet {
+    let mut all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
+    match all.iter().position(|(h, _)| *h == htxf as usize) {
+        Some(i) => all.swap_remove(i).1,
+        None => FolderGet::default(),
+    }
+}
+
+fn put_folder_get(htxf: *mut HtxfHandle, get: FolderGet) {
+    let mut all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
+    all.push((htxf as usize, get));
+}
+
+fn folder_finished(htxf: *mut HtxfHandle) -> bool {
+    let all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
+    all.iter().any(|(h, g)| *h == htxf as usize && g.finished)
+}
+
+/// The bytes under `htxf`'s folder a resume of it would not ask for.
+unsafe fn folder_held_on_disk(htxf: *mut HtxfHandle) -> u64 {
+    let all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
+    let Some((_, get)) = all.iter().find(|(h, _)| *h == htxf as usize) else {
+        return 0;
+    };
+    let base = std::ffi::CStr::from_ptr((*htxf).path.as_ptr()).to_bytes();
+    #[cfg(unix)]
+    let base = {
+        use std::os::unix::ffi::OsStrExt;
+        std::path::Path::new(std::ffi::OsStr::from_bytes(base))
+    };
+    #[cfg(not(unix))]
+    let Ok(base) = std::str::from_utf8(base).map(std::path::Path::new) else {
+        return 0;
+    };
+    get.ledger.held(base)
+}
+
 /// Folder download worker: connect, drive the FILE_NEXT/FILE_SEND folder-receive
-/// state machine (`hxnet_xfer_folder_recv_all` — builds each per-file path from
-/// the root internally, never mutating it), chime + stamp on success.
+/// state machine (`hxnet::xfer::folder_recv` — builds each per-file path from
+/// the root internally, never mutating it), answering each file as far as the
+/// download's earlier workers got, chime + stamp on success.
 unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
     let items = take_folder_items(htxf);
+    let mut get = take_folder_get(htxf);
+    get.finished = false;
     if htxf_connect(htxf) != glib::ffi::GFALSE {
         hxnet_htxf_set_folder_items((*htxf).hx as *mut HtxfConn, items);
         let params = xfer_folder_params(htxf);
-        if hxnet_xfer_folder_recv_all(&params) == 0 {
+        if folder_recv(&params, &mut get.ledger) == 0 {
+            get.finished = true;
             play_sound(FILE_DONE);
             hx_htxf_set_total_pos(htxf, (*htxf).total_size);
         }
     }
+    put_folder_get(htxf, get);
     // The last progress update, however it ended: the reports along the
     // way are throttled, so this one makes the row exact.
     post_file_update(htxf);
@@ -1399,6 +1486,7 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
     // A folder transfer's request is its own (GETFOLDER / PUTFOLDER), sent
     // when it was made; the queue moving on must not send it a FILE_GET.
     if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+        resume_folder(htxf);
         return;
     }
     let kept = match pause_of(htxf) {
@@ -1429,6 +1517,27 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
     } else {
         xfer_go_put(htxf);
     }
+}
+
+/// Ask again for a paused folder download, which answers each file the
+/// server offers as far as it got. Nothing for any other folder transfer.
+///
+/// # Safety
+/// `htxf` is a live folder transfer. Main thread only.
+unsafe fn resume_folder(htxf: *mut HtxfHandle) {
+    let Some(Pause::Paused { kept }) = pause_of(htxf) else {
+        return;
+    };
+    set_pause(htxf, Some(Pause::Asked { kept }));
+    set_held(htxf, Some(folder_held_on_disk(htxf)));
+    hx_htxf_set_total_pos(htxf, 0);
+    crate::send::files::ask_folder(
+        (*htxf).htlc,
+        htxf.cast(),
+        &carr_read(&(*htxf).remotedir),
+        remote_name(htxf),
+    );
+    emit_file_update(htxf);
 }
 
 /// `int xfer_go_timer(void *arg)` — the one-shot GLib-timer trampoline used by the
@@ -1859,6 +1968,90 @@ mod tests {
             download_answered(r.cast());
             assert!(!resume_refused(r.cast()));
             assert_eq!(xfer_paused(r), 0);
+        }
+    }
+
+    /// A folder download the server answered, its worker running.
+    unsafe fn running_folder() -> *mut HtxfHandle {
+        let f = xfer_new_folder(
+            std::ptr::null_mut(),
+            c"/tmp/d".as_ptr(),
+            c"/pub".as_ptr(),
+            c"d".as_ptr(),
+            1,
+            XFER_GET.into(),
+        );
+        ((*f).ref_, (*f).total_size) = (9, 5000);
+        hx_htxf_set_total_pos(f, 1200);
+        xfer_ready_write(f);
+        f
+    }
+
+    fn folder_requests() -> Vec<crate::send::files::tests::Chunks> {
+        crate::send::files::tests::sends()
+            .into_iter()
+            .filter(|(ty, _)| *ty == ClientHdr::FileGetFolder as u32)
+            .map(|(_, chunks)| chunks)
+            .collect()
+    }
+
+    #[test]
+    fn a_paused_folder_download_is_asked_for_again() {
+        reset(&[]);
+        folder_requests();
+        unsafe {
+            let f = running_folder();
+            let a = new_download();
+            assert_eq!((*a).gone, 0, "queued behind the folder");
+            assert_eq!(xfer_can_start(f), 0, "its request went when it was made");
+            assert_eq!(xfer_can_pause(f), 1);
+
+            xfer_pause(f);
+            assert_eq!(xfer_can_start(f), 0, "winding down");
+            xfer_cleanup_dispatch(f.cast());
+            assert_eq!(xfer_num(f), 0, "kept in the list");
+            assert_eq!(xfer_paused(f), 1);
+            assert_eq!(xfer_can_start(f), 1);
+            assert_eq!((*a).gone, 1, "the queue moves on");
+            assert!(folder_requests().is_empty(), "nor asked for again by it");
+
+            xfer_go(f);
+            assert_eq!(xfer_paused(f), 0);
+            assert_eq!(hx_htxf_total_pos(f), 0);
+            let asked = folder_requests();
+            assert_eq!(asked.len(), 1);
+            assert!(asked[0].iter().any(|(_, v)| v.ends_with(b"d")), "{asked:?}");
+            let workers = WORKERS.get();
+            xfer_ready_write(f);
+            assert_eq!(WORKERS.get(), workers, "not before the server answers");
+
+            // A refused resume is paused again, not queued again.
+            assert!(!queued_refused(f.cast()));
+            assert!(resume_refused(f.cast()));
+            assert_eq!(xfer_paused(f), 1);
+            xfer_go(f);
+            download_answered(f.cast());
+            assert_eq!(xfer_paused(f), 0);
+            xfer_ready_write(f);
+            assert_eq!(WORKERS.get(), workers + 1, "one worker, once answered");
+        }
+    }
+
+    #[test]
+    fn a_folder_download_that_finished_as_it_paused_is_done() {
+        reset(&[]);
+        unsafe {
+            let f = running_folder();
+            xfer_pause(f);
+            put_folder_get(
+                f,
+                FolderGet {
+                    finished: true,
+                    ..FolderGet::default()
+                },
+            );
+            xfer_cleanup_dispatch(f.cast());
+            assert_eq!(xfer_num(f), -1);
         }
     }
 }

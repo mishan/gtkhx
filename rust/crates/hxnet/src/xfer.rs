@@ -26,7 +26,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 
-use hxfiles_xfer::ffo;
+use hxfiles_xfer::{ffo, rflt};
 use hxhfs::hfs::{self, HfsInfo};
 
 use crate::htxf::HtxfConn;
@@ -418,10 +418,44 @@ pub const HXNET_XFER_STOPPED: c_int = -1;
 /// `HxnetXferParams` whose `hx` transport handle is open.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> c_int {
-    let p = match p.as_ref() {
-        Some(p) => p,
-        None => return EINVAL,
-    };
+    match p.as_ref() {
+        Some(p) => file_recv(p, &mut None),
+        None => EINVAL,
+    }
+}
+
+/// A file as its FILP described it: the data fork's whole length, and the
+/// file's modify date.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Filp {
+    pub len: u64,
+    pub modified: [u8; 4],
+}
+
+/// Where a resumed file's data fork goes: from `data_pos` when the server
+/// resumed it there, as asked, but from the start when it sent the whole
+/// fork instead, as Janus does in a folder. `was` is the file as its first
+/// FILP described it, whose length tells the two apart; a fork that is
+/// neither, or a file with another modify date, changed on the server, and
+/// can't be placed.
+fn data_from(
+    was: Option<Filp>,
+    data_pos: u64,
+    fork_len: u64,
+    modified: [u8; 4],
+) -> Result<u64, c_int> {
+    match was {
+        None => Ok(data_pos),
+        Some(was) if was.modified != modified => Err(EIO),
+        Some(was) if data_pos.checked_add(fork_len) == Some(was.len) => Ok(data_pos),
+        Some(was) if fork_len == was.len => Ok(0),
+        Some(_) => Err(EIO),
+    }
+}
+
+/// [`hxnet_xfer_file_recv_one`], for a file `*was` describes when it is
+/// resumed; `*was` is left as the FILP described it.
+unsafe fn file_recv(p: &HxnetXferParams, was: &mut Option<Filp>) -> c_int {
     let hx = p.hx;
     if hx.is_null() {
         return EINVAL;
@@ -465,6 +499,25 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
 
     // 4. Data fork.
     let fork_len = pi.data_fork_len;
+    let data_pos = match data_from(*was, p.data_pos, fork_len, pi.modify_time) {
+        Ok(at) => at,
+        Err(e) => {
+            *was = None;
+            return e;
+        }
+    };
+    *was = Some(Filp {
+        len: data_pos + fork_len,
+        modified: pi.modify_time,
+    });
+    // What a fork sent whole repeats of what was asked from `p.data_pos`:
+    // its progress was counted when it first came, and the size the server
+    // gave before the FILP left it out.
+    let again = p.data_pos - data_pos;
+    let budget = match p.file_budget {
+        0 => 0,
+        b => b.saturating_add(again),
+    };
     tot_len += fork_len;
     if is_preview {
         // Even an empty file is shown: the window waits on set_info and done.
@@ -498,21 +551,28 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         };
     }
     if fork_len != 0 {
-        // No truncate: a resumed download seeks to `data_pos` and writes
-        // into an existing partial file, so truncating would discard it.
+        // Emptied only when written from the start: a resumed download seeks
+        // to `data_pos` and writes into its partial file.
         let mut f = match std::fs::OpenOptions::new()
             .create(true)
             .write(true)
-            .truncate(false)
+            .truncate(data_pos == 0)
             .open(&path)
         {
             Ok(f) => f,
             Err(e) => return io_errno(&e),
         };
-        if p.data_pos != 0 && f.seek(SeekFrom::Start(p.data_pos)).is_err() {
+        if data_pos != 0 && f.seek(SeekFrom::Start(data_pos)).is_err() {
             return EIO;
         }
-        if let Err(e) = rd_wr_recv(hx, &mut f, fork_len, p) {
+        let quiet = HxnetXferParams {
+            progress: None,
+            ..std::ptr::read(p)
+        };
+        let again = again.min(fork_len);
+        if let Err(e) = rd_wr_recv(hx, &mut f, again, &quiet)
+            .and_then(|()| rd_wr_recv(hx, &mut f, fork_len - again, p))
+        {
             return e;
         }
         let _ = f.sync_all();
@@ -541,10 +601,10 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         // Folder-stream files never persist a resource fork, but the server may
         // have announced file_budget bytes and buffered a MACR marker. Drain up
         // to (file_budget - tot_len) with a short per-read timeout.
-        if tot_len < p.file_budget
+        if tot_len < budget
             && crate::htxf::hxnet_htxf_set_read_timeout(hx, MACR_DRAIN_TIMEOUT_MS) == 0
         {
-            let mut remaining = p.file_budget - tot_len;
+            let mut remaining = budget - tot_len;
             let mut sink = [0u8; 2048];
             while remaining > 0 {
                 let want = std::cmp::min(sink.len() as u64, remaining) as usize;
@@ -561,7 +621,7 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         }
         return finish(&cfg, &path, typecrea, &pi, 0);
     }
-    if tot_len >= p.file_budget {
+    if tot_len >= budget {
         return finish(&cfg, &path, typecrea, &pi, p.rsrc_pos);
     }
     // 16-byte MACR fork header. The server declared more than the data fork, so
@@ -839,21 +899,110 @@ fn per_file_params(
     }
 }
 
+/// A file a folder download wrote, as it was left: its data fork's length
+/// and when it was last changed, and whether it arrived whole.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Kept {
+    pub len: u64,
+    pub modified: Option<std::time::SystemTime>,
+    pub whole: bool,
+    /// The file as its FILP described it, once it has.
+    pub filp: Option<Filp>,
+}
+
+impl Kept {
+    fn of(path: &Path, whole: bool, filp: Option<Filp>) -> Option<Kept> {
+        let md = std::fs::metadata(path).ok()?;
+        md.is_file().then(|| Kept {
+            len: md.len(),
+            modified: md.modified().ok(),
+            whole,
+            filp,
+        })
+    }
+}
+
+/// What a folder download has written, file by file, so that asking for it
+/// again answers each file the server offers as far as it got. The protocol
+/// names no size or checksum before the client answers an offer, so only a
+/// file this download wrote, and nothing has changed since, is trusted:
+/// anything else on disk is asked for whole.
+#[derive(Debug, Default)]
+pub struct FolderLedger {
+    files: std::collections::HashMap<Vec<u8>, Kept>,
+}
+
+/// How a folder download answers the server's offer of a file.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Answer {
+    Send,
+    Resume { data: u32 },
+    Skip,
+}
+
+/// The answer for a file this download left as `kept`, now on disk as
+/// `now`. An RFLT offset is 32 bits.
+pub fn answer(kept: Option<Kept>, now: Option<Kept>) -> Answer {
+    match (kept, now) {
+        (Some(k), Some(n)) if (k.len, k.modified) == (n.len, n.modified) => {
+            match (k.whole, k.filp, u32::try_from(k.len)) {
+                (true, ..) => Answer::Skip,
+                (false, Some(_), Ok(data)) => Answer::Resume { data },
+                _ => Answer::Send,
+            }
+        }
+        _ => Answer::Send,
+    }
+}
+
+impl FolderLedger {
+    fn kept(&self, rel: &[u8]) -> Option<Kept> {
+        self.files.get(rel).copied()
+    }
+
+    fn note(&mut self, rel: &[u8], kept: Option<Kept>) {
+        match kept {
+            Some(k) => self.files.insert(rel.to_vec(), k),
+            None => self.files.remove(rel),
+        };
+    }
+
+    /// The bytes under `base` a download resumed now would not ask for.
+    pub fn held(&self, base: &Path) -> u64 {
+        self.files
+            .iter()
+            .filter_map(|(rel, k)| {
+                let now = Kept::of(&base.join(os_from_bytes(rel)), false, None)?;
+                (answer(Some(*k), Some(now)) != Answer::Send).then_some(k.len)
+            })
+            .sum()
+    }
+}
+
 /// `int hxnet_xfer_folder_recv_all (const HxnetFolderParams *fp)` — receive a
-/// folder tree into `fp->base_path` (was C `folder_recv_all`). Drives the
-/// FILE_NEXT/FILE_SEND loop: request the next entry, read its nfi header + path
-/// components, mkdir folders or receive files via `hxnet_xfer_file_recv_one`.
-/// Returns 0 on success (including the clean end-of-stream when the server
-/// closes the socket), an errno-like positive code on failure.
+/// folder tree into `fp->base_path` (was C `folder_recv_all`), every file
+/// asked for whole. See [`folder_recv`].
 ///
 /// # Safety
 /// C-ABI worker helper on a blocking-pool thread; `fp` valid, `fp->hx` open.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams) -> c_int {
-    let fp = match fp.as_ref() {
-        Some(f) => f,
-        None => return EINVAL,
-    };
+    match fp.as_ref() {
+        Some(fp) => folder_recv(fp, &mut FolderLedger::default()),
+        None => EINVAL,
+    }
+}
+
+/// Receive a folder tree into `fp.base_path`, noting in `ledger` what it
+/// writes. Drives the FILE_NEXT/FILE_SEND loop: request the next entry, read
+/// its nfi header + path components, mkdir folders, or answer a file as
+/// `ledger` says ([`answer`]) and receive it via `hxnet_xfer_file_recv_one`.
+/// Returns 0 on success (including the clean end-of-stream when the server
+/// closes the socket), an errno-like positive code on failure.
+///
+/// # Safety
+/// Worker helper on a blocking-pool thread; `fp.hx` open.
+pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> c_int {
     if fp.hx.is_null() || fp.progress.is_none() {
         return EINVAL;
     }
@@ -964,10 +1113,30 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
             }
         }
 
-        // Request the file fresh (data_pos/rsrc_pos zeroed → whole file).
-        if xfer_write(fp.hx, &FILE_SEND_CMD.to_be_bytes()).is_err() {
-            return EIO;
-        }
+        let kept = ledger.kept(&rel);
+        let mut was = None;
+        let data_pos = match answer(kept, Kept::of(&full, false, None)) {
+            // The FILE_NEXT the loop starts with passes over it.
+            Answer::Skip => continue,
+            Answer::Send => {
+                if xfer_write(fp.hx, &FILE_SEND_CMD.to_be_bytes()).is_err() {
+                    return EIO;
+                }
+                0
+            }
+            // A folder's files keep no resource fork: the one that comes is
+            // read past, so it is asked for whole.
+            Answer::Resume { data } => {
+                let mut cmd = FILE_RESUME_CMD.to_be_bytes().to_vec();
+                cmd.extend_from_slice(&(rflt::CANONICAL_LEN as u16).to_be_bytes());
+                cmd.extend_from_slice(&rflt::encode(rflt::Resume { data, resource: 0 }));
+                if xfer_write(fp.hx, &cmd).is_err() {
+                    return EIO;
+                }
+                was = kept.and_then(|k| k.filp);
+                u64::from(data)
+            }
+        };
         let mut sz = [0u8; 4];
         if htxf_read_full(fp.hx, &mut sz) != 4 {
             return EIO;
@@ -978,8 +1147,9 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
             Some(c) => c,
             None => return EINVAL,
         };
-        let per = per_file_params(fp, path_c.as_ptr(), file_size, 0, 0, 0, 0);
-        let rv = hxnet_xfer_file_recv_one(&per);
+        let per = per_file_params(fp, path_c.as_ptr(), file_size, data_pos, 0, 0, 0);
+        let rv = file_recv(&per, &mut was);
+        ledger.note(&rel, Kept::of(&full, rv == 0, was));
         if rv != 0 {
             return rv;
         }
@@ -1915,6 +2085,291 @@ mod folder_loopback_tests {
         let long: Vec<u8> = vec![b'x'; 250];
         let many: Vec<&[u8]> = std::iter::repeat_n(long.as_slice(), 20).collect();
         assert_eq!(recv_first_entry(1, &many), ENAMETOOLONG);
+    }
+
+    #[test]
+    fn a_file_is_skipped_or_resumed_only_as_this_download_left_it() {
+        let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000);
+        let kept = |len, whole| Kept {
+            len,
+            modified: Some(t),
+            whole,
+            filp: Some(Filp {
+                len: len * 2,
+                modified: [0; 4],
+            }),
+        };
+        let later = Kept {
+            modified: Some(t + std::time::Duration::from_secs(1)),
+            ..kept(10, false)
+        };
+        let unread = Kept {
+            filp: None,
+            ..kept(10, false)
+        };
+        for (left, now, want) in [
+            (None, None, Answer::Send),
+            // Not this download's: asked for whole.
+            (None, Some(kept(10, false)), Answer::Send),
+            (Some(kept(10, true)), Some(kept(10, false)), Answer::Skip),
+            (
+                Some(kept(10, false)),
+                Some(kept(10, false)),
+                Answer::Resume { data: 10 },
+            ),
+            // Changed since, or gone.
+            (Some(kept(10, true)), Some(kept(11, false)), Answer::Send),
+            (Some(kept(10, true)), Some(later), Answer::Send),
+            (Some(kept(10, false)), Some(later), Answer::Send),
+            (Some(kept(10, true)), None, Answer::Send),
+            // Cut off before its FILP described it.
+            (Some(unread), Some(kept(10, false)), Answer::Send),
+            // Past what an RFLT can say.
+            (
+                Some(kept(1 << 32, false)),
+                Some(kept(1 << 32, false)),
+                Answer::Send,
+            ),
+        ] {
+            assert_eq!(answer(left, now), want, "{left:?} {now:?}");
+        }
+    }
+
+    #[test]
+    fn a_resumed_fork_goes_where_the_server_sent_it_from() {
+        const DATE: [u8; 4] = [1, 2, 3, 4];
+        let was = Some(Filp {
+            len: 9,
+            modified: DATE,
+        });
+        // (as first described, asked from, fork length sent, its date, written from)
+        for (was, from, sent, date, want) in [
+            (None, 0, 9, DATE, Ok(0)),
+            (None, 4, 5, DATE, Ok(4)),
+            (was, 4, 5, DATE, Ok(4)),
+            (was, 0, 9, DATE, Ok(0)),
+            // Sent whole, the resume ignored.
+            (was, 4, 9, DATE, Ok(0)),
+            // Changed on the server since.
+            (was, 4, 7, DATE, Err(EIO)),
+            (was, 4, 12, DATE, Err(EIO)),
+            (was, 4, 5, [1, 2, 3, 5], Err(EIO)),
+        ] {
+            assert_eq!(
+                data_from(was, from, sent, date),
+                want,
+                "{was:?} {from} {sent}"
+            );
+        }
+    }
+
+    /// How the scripted server answers a resume.
+    #[derive(Clone, Copy)]
+    enum Resumes {
+        /// From the RFLT's offset, as mhxd and hxd-ng do.
+        Honored,
+        /// With the whole file, as Janus does in a folder.
+        Ignored,
+    }
+
+    /// Play a folder download's server for `files`, each modified at
+    /// `date`, answering a resume as `resumes` says and cutting off file
+    /// `cut` halfway, closing the connection. The answers, in order.
+    fn serve_answers(
+        files: Vec<(&'static str, Vec<u8>)>,
+        date: [u8; 4],
+        resumes: Resumes,
+        cut: Option<usize>,
+    ) -> (u16, std::thread::JoinHandle<Vec<Answer>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut answers = Vec::new();
+            let mut cmd = [0u8; 2];
+            s.read_exact(&mut cmd).unwrap();
+            for (i, (name, body)) in files.iter().enumerate() {
+                assert_eq!(u16::from_be_bytes(cmd), FILE_NEXT_CMD);
+                s.write_all(&entry_header(name, 0)).unwrap();
+                s.read_exact(&mut cmd).unwrap();
+                let from = match u16::from_be_bytes(cmd) {
+                    FILE_NEXT_CMD => {
+                        answers.push(Answer::Skip);
+                        continue;
+                    }
+                    FILE_SEND_CMD => {
+                        answers.push(Answer::Send);
+                        0
+                    }
+                    FILE_RESUME_CMD => {
+                        let mut len = [0u8; 2];
+                        s.read_exact(&mut len).unwrap();
+                        let mut r = vec![0u8; u16::from_be_bytes(len).into()];
+                        s.read_exact(&mut r).unwrap();
+                        let at = rflt::parse_compatible(&r);
+                        assert_eq!(at.resource, 0);
+                        answers.push(Answer::Resume { data: at.data });
+                        at.data as usize
+                    }
+                    other => panic!("action {other}"),
+                };
+                let from = from.min(body.len());
+                let mut filp = with_rsrc(gen_filp(&body[from..]), date);
+                // The size of what is left, however much comes.
+                s.write_all(&(filp.len() as u32).to_be_bytes()).unwrap();
+                if let Resumes::Ignored = resumes {
+                    filp = with_rsrc(gen_filp(body), date);
+                }
+                if cut == Some(i) {
+                    s.write_all(&filp[..filp.len() - body[from..].len() / 2])
+                        .unwrap();
+                    return answers;
+                }
+                s.write_all(&filp).unwrap();
+                if s.read_exact(&mut cmd).is_err() {
+                    break;
+                }
+            }
+            answers
+        });
+        (port, server)
+    }
+
+    /// `filp` modified at `date`, with a resource fork, which a folder's
+    /// files read past.
+    fn with_rsrc(mut filp: Vec<u8>, date: [u8; 4]) -> Vec<u8> {
+        filp[104..108].copy_from_slice(&date);
+        filp[22..24].copy_from_slice(&3u16.to_be_bytes());
+        let macr = filp.len() - ffo::FORK_HEADER_LEN;
+        assert_eq!(&filp[macr..macr + 4], b"MACR");
+        filp[macr + 12..macr + 16].copy_from_slice(&(RSRC.len() as u32).to_be_bytes());
+        filp.extend_from_slice(RSRC);
+        filp
+    }
+
+    const RSRC: &[u8; 10] = b"rsrc-bytes";
+
+    fn recv_into(port: u16, dest: &Path, ledger: &mut FolderLedger) -> c_int {
+        recv_counted(port, dest, ledger).0
+    }
+
+    /// [`recv_into`], and the bytes its progress reported.
+    fn recv_counted(port: u16, dest: &Path, ledger: &mut FolderLedger) -> (c_int, u64) {
+        unsafe extern "C" fn count(user: *mut c_void, delta: u64) {
+            *(user as *mut u64) += delta;
+        }
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
+        let mut reported = 0u64;
+        let mut fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        fp.user_data = (&mut reported as *mut u64).cast();
+        fp.progress = Some(count);
+        let rv = unsafe { folder_recv(&fp, ledger) };
+        (rv, reported)
+    }
+
+    fn body(n: usize, k: u8) -> Vec<u8> {
+        (0..n).map(|i| (i as u8).wrapping_mul(k)).collect()
+    }
+
+    /// A fresh local folder for a test.
+    fn dest(tag: &str) -> PathBuf {
+        let dest = std::env::temp_dir().join(format!("hxnet_fresume_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&dest).unwrap();
+        dest
+    }
+
+    const DATE: [u8; 4] = [0xb0, 1, 2, 3];
+
+    /// A folder download stopped partway, asked for again, skips what
+    /// arrived, resumes what was cut off, and asks whole for the rest and
+    /// for what was on disk before it, which it can't vouch for — whether
+    /// the server resumes from the offset asked or sends the file whole.
+    #[test]
+    fn a_folder_download_asked_again_asks_only_for_what_is_missing() {
+        let files = vec![
+            ("a", body(3000, 3)),
+            ("b", body(5000, 7)),
+            ("c", body(700, 11)),
+        ];
+        for (resumes, tag) in [(Resumes::Honored, "honored"), (Resumes::Ignored, "ignored")] {
+            let dest = dest(tag);
+            std::fs::write(dest.join("c"), vec![b'x'; 9000]).unwrap();
+            let mut ledger = FolderLedger::default();
+
+            let (port, server) = serve_answers(files.clone(), DATE, resumes, Some(1));
+            assert_ne!(recv_into(port, &dest, &mut ledger), 0, "cut off");
+            assert_eq!(server.join().unwrap(), [Answer::Send, Answer::Send]);
+            let had = std::fs::metadata(dest.join("b")).unwrap().len();
+            assert!(0 < had && had < 5000, "b kept {had}");
+            assert_eq!(ledger.held(&dest), 3000 + had);
+
+            // The whole tree's size, as a server counts it: each file's FILP.
+            let size: u64 = files
+                .iter()
+                .map(|f| with_rsrc(gen_filp(&f.1), DATE).len() as u64)
+                .sum();
+            let held = ledger.held(&dest);
+            let (port, server) = serve_answers(files.clone(), DATE, resumes, None);
+            let (rv, reported) = recv_counted(port, &dest, &mut ledger);
+            assert_eq!(rv, 0, "{tag}");
+            assert!(
+                held + reported <= size,
+                "{tag}: {held} held and {reported} more of {size}"
+            );
+            assert_eq!(
+                server.join().unwrap(),
+                [
+                    Answer::Skip,
+                    Answer::Resume { data: had as u32 },
+                    Answer::Send
+                ]
+            );
+            for (name, want) in &files {
+                assert!(
+                    std::fs::read(dest.join(name)).unwrap() == *want,
+                    "{tag}: {name}"
+                );
+            }
+            let _ = std::fs::remove_dir_all(&dest);
+        }
+    }
+
+    /// A file that changed on the server while its download was paused,
+    /// its length or its date, can't be resumed: the resume fails, and the
+    /// next asks for it whole.
+    #[test]
+    fn a_file_changed_on_the_server_is_asked_for_whole() {
+        for (changed, date, tag) in [
+            (body(6000, 5), DATE, "longer"),
+            (body(5000, 5), [0xb0, 1, 2, 4], "redated"),
+        ] {
+            let dest = dest(tag);
+            let mut ledger = FolderLedger::default();
+            let (port, server) =
+                serve_answers(vec![("b", body(5000, 7))], DATE, Resumes::Honored, Some(0));
+            assert_ne!(recv_into(port, &dest, &mut ledger), 0);
+            server.join().unwrap();
+
+            let changed = vec![("b", changed)];
+            let (port, server) = serve_answers(changed.clone(), date, Resumes::Honored, None);
+            assert_eq!(recv_into(port, &dest, &mut ledger), EIO, "{tag}");
+            assert!(matches!(
+                server.join().unwrap()[..],
+                [Answer::Resume { .. }]
+            ));
+
+            let (port, server) = serve_answers(changed.clone(), date, Resumes::Honored, None);
+            assert_eq!(recv_into(port, &dest, &mut ledger), 0, "{tag}");
+            assert_eq!(server.join().unwrap(), [Answer::Send]);
+            assert!(
+                std::fs::read(dest.join("b")).unwrap() == changed[0].1,
+                "{tag}"
+            );
+            let _ = std::fs::remove_dir_all(&dest);
+        }
     }
 }
 

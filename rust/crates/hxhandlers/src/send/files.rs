@@ -306,11 +306,19 @@ pub unsafe extern "C" fn hx_get_folder(
     let rdir = c_string(rdir_bytes);
 
     let htxf = xfer_new_folder(htlc, lpath, rdir.as_ptr(), name, name_len, XFER_GET);
-    if let Some(req) = files::get_folder(rdir_bytes, raw_name) {
+    ask_folder(htlc, htxf.cast(), rdir_bytes, raw_name);
+}
+
+/// FILE_GETFOLDER for the folder `name` in `dir`, its reply to `htxf`.
+///
+/// # Safety
+/// `htlc` is a live connection, `htxf` its folder download. Main thread only.
+pub(crate) unsafe fn ask_folder(htlc: *mut c_void, htxf: *mut c_void, dir: &[u8], name: &[u8]) {
+    if let Some(req) = files::get_folder(dir, name) {
         expect_transfer(
             htlc,
             Asked::Download {
-                htxf: crate::recv::files::Xfer::new(htxf.cast()),
+                htxf: crate::recv::files::Xfer::new(htxf),
                 folder: true,
             },
         );
@@ -452,4 +460,4 @@ pub unsafe extern "C" fn hx_file_move(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

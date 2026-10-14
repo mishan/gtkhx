@@ -894,6 +894,18 @@ loop:
   the user can't see, and in the "waiting for next" state silently discards codes other
   than 3.
 - mhxd does not recurse: subfolders arrive as empty folder items.
+- A client chooses before it learns an item's size, so nothing in the exchange says
+  whether a file on disk is the one offered. GtkHx resumes or skips only the files a
+  paused download of its own wrote and nothing has touched since, and asks for anything
+  else whole (`hxnet::xfer::FolderLedger`). A file finished before the pause is skipped
+  even if it has since changed on the server, which nothing would say.
+- mhxd, hxd-ng and the 1.9 server (hlservd) honor resume (2), sending the size left and
+  a FILP from the RFLT's offsets. **Janus** answers with the size left but sends the
+  whole file, its DATA fork header saying so, so a receiver tells the two apart by the
+  data fork's length against the whole one it saw first; a length that fits neither, or
+  another modify date in the INFO fork, means the file changed, and GtkHx ends the
+  download there rather than place it. An offset past the end makes mhxd's sizes wrap
+  and hxd-ng end the transfer.
 - The large-file spec describes the folder download with the server speaking first.
   Every implementation, and the official document, do what is described here. Its path
   encoding now matches the one above.

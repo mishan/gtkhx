@@ -185,9 +185,15 @@ pub(crate) unsafe fn download_ready(
         return;
     }
     crate::xfer::download_answered(htxf);
-    // A folder is legal at size 0; the progress bar reads better at 1.
+    // A folder is legal at size 0; the progress bar reads better at 1. A
+    // folder's size is the whole tree's, resumed or not.
     hx_htxf_set_ref(htxf, t.reference);
-    hx_htxf_set_total_size(htxf, t.size.max(1));
+    let left = if folder {
+        t.size.saturating_sub(crate::xfer::folder_held(htxf))
+    } else {
+        t.size
+    };
+    hx_htxf_set_total_size(htxf, left.max(1));
     hx_htxf_set_queue(htxf, t.queue);
     if folder {
         // How the download knows it's done without waiting on a server that
