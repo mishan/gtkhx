@@ -12,7 +12,7 @@ use hxsession::Transfer;
 
 const TAG_HTXF_SIZE: u16 = 0x006c;
 
-type Chunks = Vec<(u16, Vec<u8>)>;
+pub(crate) type Chunks = Vec<(u16, Vec<u8>)>;
 
 #[derive(Debug)]
 struct Xfer {
@@ -116,7 +116,7 @@ fn reset() {
     });
 }
 
-fn sends() -> Vec<(u32, Chunks)> {
+pub(crate) fn sends() -> Vec<(u32, Chunks)> {
     SENDS.with_borrow_mut(std::mem::take)
 }
 

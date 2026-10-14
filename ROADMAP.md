@@ -204,8 +204,11 @@ place in the server's queue, and waits behind whoever took it.
    a resumed download already did, and falls back to that same resume-or-rename choice
    when the file changed while paused. A paused download leaves the queue to the next
    one, and a refused resume (mhxd's one at a time) stays paused (`hxhandlers::xfer`).
-2. **Folder downloads.** The folder loop answers each item with SEND; resuming needs it to
-   answer RESUME with an RFLT for an item already partly on disk.
+2. **Folder downloads.** *Done.* Pause works on a folder download as on a file's, and
+   Start asks for the folder again: each file the paused download finished is skipped,
+   the one it was cut off in resumed, and the rest asked for whole. Only what the
+   download itself wrote, unchanged since, is trusted; a folder downloaded again after a
+   crash is fetched whole (`hxnet::xfer::FolderLedger`).
 3. **Uploads.** The 1.5 upload-resume handshake: claim FILE_PREVIEW on the FILE_PUT and
    send from the offset the server's reply names, tested against each rig server, whose
    handling of it differs.

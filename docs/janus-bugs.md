@@ -34,6 +34,22 @@ before decompressing.
 **GtkHx:** does not offer LZ4 with Blowfish; that login runs uncompressed
 (`HopeOpenRequest::session` in `hxnet`).
 
+## A folder download's resume sends the whole file
+
+**Verified; 2.0.23.**
+
+- **Sends:** in a folder download (210), answering a file's item header with
+  resume (2) and an RFLT holding the bytes the client has.
+- **Gets:** the size of what is left, then a FILP whose DATA fork is the whole
+  file, from its first byte. A client that appends it at the offset corrupts
+  the file.
+- **Should get:** the FILP from the RFLT's offsets, as a single-file download
+  resumed with 203 already gets, and as mhxd, hxd-ng and the 1.9 server send.
+
+GtkHx tells the two apart by the data fork's length and writes a whole one
+from the start (`hxnet::xfer::data_from`), counting only what it hadn't
+already had toward the download's progress.
+
 ## Fixed upstream
 
 Older servers still behave this way, which is worth knowing when a report

@@ -498,7 +498,13 @@ fn download_folder(c: &mut Client, dir: &str, name: &[u8]) -> (i32, std::time::D
     let rv = unsafe { hxnet_xfer_folder_recv_all(&fp) };
     let took = t0.elapsed();
     unsafe { hxnet_htxf_close(h) };
+    let got = arrived(&dest);
+    let _ = std::fs::remove_dir_all(&dest);
+    (rv, took, got)
+}
 
+/// What is in the local folder `dest`, less the sidecars.
+fn arrived(dest: &std::path::Path) -> Arrived {
     fn walk(root: &std::path::Path, at: &std::path::Path, out: &mut Arrived) {
         for e in std::fs::read_dir(at).into_iter().flatten().flatten() {
             let n = e.file_name().to_string_lossy().into_owned();
@@ -512,10 +518,52 @@ fn download_folder(c: &mut Client, dir: &str, name: &[u8]) -> (i32, std::time::D
         }
     }
     let mut got = Vec::new();
-    walk(&dest, &dest, &mut got);
+    walk(dest, dest, &mut got);
     got.sort();
-    let _ = std::fs::remove_dir_all(&dest);
-    (rv, took, got)
+    got
+}
+
+/// Download the folder `name` in `dir` into `dest` as the app's worker does,
+/// answering each file as `ledger` says, and stop as a pause does once
+/// `pause_at` bytes have come. The worker's result, and the bytes that came.
+fn download_folder_into(
+    c: &mut Client,
+    dir: &str,
+    name: &[u8],
+    dest: &std::path::Path,
+    ledger: &mut hxnet::xfer::FolderLedger,
+    pause_at: u64,
+) -> (i32, u64) {
+    use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close, hxnet_htxf_set_folder_items};
+    let r = granted(
+        c,
+        &files::get_folder(dir.as_bytes(), name).unwrap(),
+        "folder download",
+    );
+    let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
+    let (h, abort) = open_transfer(c, get.ref_, u64::from(get.size), true);
+    unsafe { hxnet_htxf_set_folder_items(h, get.nfiles) };
+    let mut at = PauseAt {
+        abort,
+        received: 0,
+        at: pause_at,
+    };
+    let dest_c = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
+    let fp = hxnet::xfer::HxnetFolderParams {
+        hx: h,
+        base_path: dest_c.as_ptr(),
+        opt_preview: 0,
+        opt_folder: 1,
+        opt_large: 0,
+        user_data: (&mut at as *mut PauseAt).cast(),
+        progress: Some(pause_when_due),
+    };
+    let rv = unsafe { hxnet::xfer::folder_recv(&fp, ledger) };
+    unsafe {
+        hxnet_htxf_close(h);
+        hxnet_htxf_abort_free(abort);
+    }
+    (rv, at.received)
 }
 
 /// A folder download ends when the tree has arrived — however the server
@@ -669,9 +717,10 @@ fn open_transfer(
     c: &Client,
     ref_: u32,
     size: u64,
+    folder: bool,
 ) -> (*mut hxnet::htxf::HtxfConn, *const hxnet::htxf::HtxfAbort) {
     use hxnet::htxf::{hxnet_htxf_abort_arm, hxnet_htxf_abort_new};
-    let h = open_xfer(c, ref_, size, false);
+    let h = open_xfer(c, ref_, size, folder);
     let abort = hxnet_htxf_abort_new();
     unsafe { hxnet_htxf_abort_arm(h, abort) };
     (h, abort)
@@ -684,7 +733,7 @@ fn upload(c: &mut Client, dir: &str, name: &[u8], path: &std::ffi::CStr, len: u6
     ok(c, &r, "an upload");
     let ref_ = hxproto::parse::parse_file_put_reply(&r.raw, r.raw.len()).ref_;
     // The FILP header and the data fork's marker, then the data.
-    let (h, abort) = open_transfer(c, ref_, 133 + len);
+    let (h, abort) = open_transfer(c, ref_, 133 + len, false);
     let mut p = xfer_params(h, path, 0);
     p.data_size = len;
     assert_eq!(
@@ -742,7 +791,7 @@ fn download_from(
     }
     ok(c, &r, "a download");
     let get = hxproto::parse::parse_file_get_reply(&r.raw, r.raw.len());
-    let (h, abort) = open_transfer(c, get.ref_, u64::from(get.size));
+    let (h, abort) = open_transfer(c, get.ref_, u64::from(get.size), false);
     let mut at = PauseAt {
         abort,
         received: 0,
@@ -821,6 +870,91 @@ fn a_paused_download_resumes_to_the_same_bytes() {
         );
         drop(s);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// `len` bytes that differ from one file to the next by `seed`.
+fn pattern(len: usize, seed: u32) -> Vec<u8> {
+    (0..len as u32)
+        .map(|i| (i.wrapping_add(seed).wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect()
+}
+
+/// A folder download paused partway, asked for again, skips the files it
+/// has, resumes the one it was cut off in, and arrives whole, byte for byte.
+/// The pause is this test's own, as in `a_paused_download_resumes_to_the_same_bytes`.
+#[test]
+fn a_paused_folder_download_resumes_to_the_same_bytes() {
+    let _turn = transfer_turn();
+    // No one-letter names: hxfiles-xfer can't read hlservd's FILP for one.
+    let files = [
+        ("one", 1 << 20, 1),
+        ("sub/two", 3 << 20, 2),
+        ("three", 5000, 3),
+    ];
+    let total: u64 = files.iter().map(|f| f.1 as u64).sum();
+    for mut c in admins() {
+        let name = c.server().name;
+        let mut s = Scratch::new(&mut c, "fpause");
+        let (dir, tree) = (s.path().to_string(), s.join("tree"));
+        mkdir(s.client(), &tree);
+        mkdir(s.client(), &format!("{tree}/sub"));
+        let mut want: Arrived = vec![("sub".to_string(), None)];
+        for (path, len, seed) in files {
+            let (parent, leaf) = path.rsplit_once('/').unwrap_or(("", path));
+            let bytes = pattern(len, seed);
+            upload_file(s.client(), &format!("{tree}/{parent}"), leaf, &bytes);
+            want.push((path.to_string(), Some(bytes)));
+        }
+        want.sort();
+        let c = s.client();
+        let dest = local_dir(c, "fpause");
+        let mut ledger = hxnet::xfer::FolderLedger::default();
+
+        let (rv, _) = download_folder_into(c, &dir, b"tree", &dest, &mut ledger, total * 6 / 10);
+        assert_ne!(rv, 0, "{name}: the pause didn't stop the download");
+        let held = ledger.held(&dest);
+        let (rv, moved) = download_folder_into(c, &dir, b"tree", &dest, &mut ledger, u64::MAX);
+        assert_eq!(rv, 0, "{name}: the resumed download failed");
+        assert!(arrived(&dest) == want, "{name}: the tree differs");
+        // What a resume from each offset brings, give or take the files'
+        // headers: Janus resends the cut-off file whole, and what it repeats
+        // isn't progress, which would pass the tree's size. (The reply's
+        // size can't say: mhxd's counts the top level alone.)
+        assert!(
+            held + moved <= total + 4096,
+            "{name}: {held} held and {moved} more of {total}"
+        );
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+}
+
+/// The seed folder, paused at its first byte and asked for again, arrives
+/// whole; asked for once more, every file it has is skipped. As a guest, on
+/// every server with the seed folder.
+#[test]
+fn a_paused_seed_folder_resumes_and_then_skips_what_it_has() {
+    let _turn = transfer_turn();
+    for s in servers_with(&[Cap::SeedFolder]) {
+        let mut c = Client::guest(s, 0);
+        let dest = local_dir(&c, "fseed");
+        let mut ledger = hxnet::xfer::FolderLedger::default();
+        let file = |p: &str, b: &[u8]| (p.to_string(), Some(b.to_vec()));
+        let want = [
+            file("leaf_a.txt", b"folder-leaf-A\n"),
+            file("leaf_b.txt", b"folder-leaf-B\n"),
+        ];
+        let (rv, _) = download_folder_into(&mut c, "/", b"test_folder", &dest, &mut ledger, 1);
+        assert_ne!(rv, 0, "{}: the pause didn't stop the download", s.name);
+        let (rv, _) =
+            download_folder_into(&mut c, "/", b"test_folder", &dest, &mut ledger, u64::MAX);
+        assert_eq!(rv, 0, "{}: the resumed download failed", s.name);
+        assert_eq!(arrived(&dest), want, "{}", s.name);
+        let (rv, moved) =
+            download_folder_into(&mut c, "/", b"test_folder", &dest, &mut ledger, u64::MAX);
+        assert_eq!((rv, moved), (0, 0), "{}: asked for again", s.name);
+        assert_eq!(arrived(&dest), want, "{}", s.name);
+        let _ = std::fs::remove_dir_all(&dest);
     }
 }
 
