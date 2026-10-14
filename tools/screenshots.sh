@@ -4,7 +4,8 @@
 #   tools/screenshots.sh                 every scene, into data/screenshots/
 #   tools/screenshots.sh chat news       just these
 #   tools/screenshots.sh --check         take them afresh and compare with
-#                                        the committed ones; fails on a change
+#                                        the committed ones, and the
+#                                        accessible trees; fails on a change
 #
 # Everything runs in the image tools/screenshots/Dockerfile describes, which
 # pins the toolkit, the fonts and the servers. GtkHx is built there from this
@@ -89,7 +90,8 @@ if [ "$status" != 0 ]; then
 elif [ -n "$check" ]; then
     echo "screenshots: the committed pictures are current"
 else
-    for f in "$fresh"/*.png; do
+    for f in "$fresh"/*.png "$fresh"/*.a11y.txt; do
+        [ -e "$f" ] || continue
         case $f in
         */explore-*.png | *-failed.png)
             # Not pictures for the README: for looking at.

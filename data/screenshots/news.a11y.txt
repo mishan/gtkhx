@@ -1,0 +1,275 @@
+frame "GtkHx (Northwind Commons)"
+  grouping ""
+    grouping ""
+      panel ""
+        panel "Users"
+          grouping ""
+            panel ""
+              panel ""
+                panel ""
+                  button "Private Message" [focusable]
+                    image ""
+                  button "Private Chat" [focusable]
+                    image ""
+                  label ""
+                  button "User Info" [focusable]
+                    image ""
+                  button "Ignore" [focusable]
+                    image ""
+                scroll pane "" [focusable]
+                  tree table "Users"
+                    table row "UID Voice Name" [focusable]
+                      filler "UID"
+                        panel ""
+                          label "UID"
+                          panel ""
+                      filler "Voice"
+                        panel ""
+                      filler "Name"
+                        panel ""
+                          label "Name"
+                          panel ""
+                    list "Users" [focusable]
+                      table row "1 ada" [focusable]
+                        table cell "1"
+                          label "1"
+                        table cell ""
+                          panel ""
+                        table cell "ada"
+                          label "ada"
+                      table row "2 marco" [focusable]
+                        table cell "2"
+                          label "2"
+                        table cell ""
+                          panel ""
+                        table cell "marco"
+                          label "marco"
+                      table row "3 priya" [focusable]
+                        table cell "3"
+                          label "3"
+                        table cell ""
+                          panel ""
+                        table cell "priya"
+                          label "priya"
+                      table row "4 jonas" [focusable]
+                        table cell "4"
+                          label "4"
+                        table cell ""
+                          panel ""
+                        table cell "jonas"
+                          label "jonas"
+                      table row "5 lena" [focusable]
+                        table cell "5"
+                          label "5"
+                        table cell ""
+                          panel ""
+                        table cell "lena"
+                          label "lena"
+                      table row "6 sam" [focusable]
+                        table cell "6"
+                          label "6"
+                        table cell ""
+                          panel ""
+                        table cell "sam"
+                          label "sam"
+                      table row "7 Robin" [focusable]
+                        table cell "7"
+                          label "7"
+                        table cell ""
+                          panel ""
+                        table cell "Robin"
+                          label "Robin"
+                  scroll bar ""
+                    panel ""
+        panel "News"
+          grouping ""
+            panel ""
+              panel ""
+                panel ""
+                  button "Post News" [focusable]
+                    image ""
+                  label ""
+                  button "Find in News" description="Find in News (Ctrl+F)" [focusable]
+                  button "Reload News" [focusable]
+                    image ""
+                form ""
+                  grouping ""
+                scroll pane "" [focusable]
+                  text "News" [focusable, read-only]
+                  scroll bar ""
+                    panel ""
+        panel "Chat"
+          grouping ""
+            panel ""
+              panel ""
+                grouping ""
+                  panel "Chat"
+                    panel ""
+                      panel ""
+                        text "Chat subject" [focusable, editable]
+                        panel ""
+                          form ""
+                            grouping ""
+                          grouping ""
+                            panel ""
+                              log "Public chat" [focusable]
+                              scroll bar ""
+                                panel ""
+                          grouping ""
+                            panel ""
+                              scroll pane "" [focusable]
+                                text "Chat message" [focusable, editable]
+                              button "Insert emoji"
+                                toggle button "Insert emoji" [focusable]
+                                  panel ""
+                              button "Attach Image" [focusable]
+        separator "Resize columns" [focusable]
+        separator "Resize columns" [focusable]
+        page tab list "Panes: News"
+          page tab "News" [focusable, selected]
+            image ""
+            button "Close News" [focusable]
+          page tab "Transfers"
+            image ""
+          button "Pane menu" [focusable]
+        page tab list "Panes: Chat"
+          page tab "Chat" [focusable, selected]
+            image ""
+            button "Close Chat" [focusable]
+          button "Pane menu" [focusable]
+        page tab list "Panes: Users"
+          page tab "Users" [focusable, selected]
+            image ""
+            button "Close Users" [focusable]
+          page tab "Video"
+            image ""
+          button "Pane menu" [focusable]
+      grouping ""
+        panel ""
+          panel ""
+            grouping ""
+              grouping ""
+            panel ""
+              grouping ""
+                grouping ""
+              grouping "You are sharing your screen"
+                grouping ""
+            panel ""
+              panel ""
+                grouping ""
+      grouping ""
+        panel ""
+          panel ""
+  grouping ""
+    panel ""
+      panel ""
+        panel ""
+          panel ""
+            grouping "Connect"
+              button "Connect" [focusable]
+              separator ""
+              button "More Options"
+                toggle button "More Options" [focusable]
+                  panel ""
+            button "Disconnect" [focusable]
+        panel ""
+          panel ""
+            link "Server banner"
+              image "Server banner"
+        panel ""
+          panel ""
+            button "Main menu"
+              toggle button "Main menu" [focusable]
+                panel ""
+            grouping ""
+              button "Minimize" description="Minimize the window" [focusable]
+              button "Maximize" description="Maximize the window" [focusable]
+              button "Close" description="Close the window" [focusable]
+frame "News — Northwind Commons"
+  panel ""
+    panel ""
+      panel ""
+        grouping ""
+          panel ""
+            grouping "Not connected to a server."
+              grouping ""
+            label "/Photography/Settings for low light?/Tripod and a slow shutter"
+            separator ""
+            panel "" [focusable]
+              scroll pane "" [focusable]
+                list "News" [focusable]
+                  list item ""
+                    button "Category Announcements" [focusable, collapsed]
+                      panel ""
+                        image "Category"
+                        label "Announcements"
+                  list item ""
+                    button "Category Events" [focusable, collapsed]
+                      panel ""
+                        image "Category"
+                        label "Events"
+                  list item ""
+                    button "Category Photography" [focusable, expanded]
+                      panel ""
+                        image "Category"
+                        label "Photography"
+                  list item ""
+                    button "Post Settings for low light?" [focusable, expanded]
+                      panel ""
+                        image "Post"
+                        label "Settings for low light?"
+                  list item "" [selected]
+                    button "Post Tripod and a slow shutter" [focusable, focused, expanded]
+                      panel ""
+                        image "Post"
+                        label "Tripod and a slow shutter"
+                  list item ""
+                    button "Post Re: Tripod and a slow shutter" [focusable]
+                      panel ""
+                        image "Post"
+                        label "Re: Tripod and a slow shutter"
+                  list item ""
+                    button "Post Shoot RAW" [focusable]
+                      panel ""
+                        image "Post"
+                        label "Shoot RAW"
+                  list item ""
+                    button "Post Favorite walk routes" [focusable]
+                      panel ""
+                        image "Post"
+                        label "Favorite walk routes"
+              panel ""
+              panel ""
+                panel ""
+                  label "Tripod and a slow shutter"
+                  label "marco — Fri Jun 12 21:40:00 2026"
+                separator ""
+                scroll pane "" [focusable]
+                  text "Article" [focusable, read-only]
+          grouping ""
+            panel ""
+              panel ""
+                grouping ""
+                  panel ""
+                    panel ""
+                      panel ""
+                        panel ""
+                          button "Refresh" [focusable]
+                            image ""
+                          button "New Post" [focusable]
+                            image ""
+                      panel ""
+                        label "News — Northwind Commons"
+                      panel ""
+                        panel ""
+                          button "Reply" [focusable]
+                            image ""
+                          button "Delete" [focusable, disabled]
+                            image ""
+                          grouping ""
+                            button "Minimize" description="Minimize the window" [focusable]
+                            button "Maximize" description="Maximize the window" [focusable]
+                            button "Close" description="Close the window" [focusable]
+          grouping ""
+            panel ""
+              panel ""

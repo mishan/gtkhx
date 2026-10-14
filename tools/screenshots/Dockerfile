@@ -18,17 +18,20 @@ FROM ${JANUS} AS janus
 FROM ${HXD_NG} AS hxd-ng
 
 FROM ${CI_BASE}
-# ImageMagick and xwininfo for shotbox's pictures; sqlite to seed the news
-# and chat history; procps for the scene runner's process checks.
+# ImageMagick and xwininfo for shotbox's pictures; PyGObject for its
+# accessibility reader (libatspi and at-spi2-core are in the base); sqlite
+# to seed the news and chat history; procps for the scene runner's process
+# checks.
 RUN dnf -y install --setopt=tsflags=nodocs \
-        ImageMagick xwininfo sqlite procps-ng python3-pip \
+        ImageMagick xwininfo sqlite procps-ng python3-pip python3-gobject \
     && dnf clean all \
     && rm -rf /var/cache/dnf
-# shotbox takes the pictures and drives the display. It is the standard
-# library only, so pip's system install (into /usr/local; Fedora doesn't
+# shotbox takes the pictures, drives the display and reads the accessible
+# tree. Its wheel declares no dependencies (PyGObject, for the tree, comes
+# from dnf above), so pip's system install (into /usr/local; Fedora doesn't
 # mark its Python externally managed) has nothing else to bring in.
-RUN printf 'shotbox==0.3.0 --hash=sha256:%s\n' \
-        86dab4b038c790c44d97a487acca927539d614973068ff6cff9cc4eebb151599 \
+RUN printf 'shotbox==0.4.3 --hash=sha256:%s\n' \
+        2c3e7c4cd9f1bdc2476c67cc40faa3ba87c45db5ff85c16f81ce8e9d30d3ebf3 \
         >/tmp/shotbox.txt \
     && python3 -m pip install --no-cache-dir --require-hashes -r /tmp/shotbox.txt \
     && rm /tmp/shotbox.txt

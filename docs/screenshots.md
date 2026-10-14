@@ -9,7 +9,7 @@ else: a quick picture of a theme, a PR description, a look at a change.
 ```sh
 tools/screenshots.sh              # every scene, into data/screenshots/
 tools/screenshots.sh chat news    # just these
-tools/screenshots.sh --check      # take them afresh; fail if any changed
+tools/screenshots.sh --check      # take them afresh; fail if any, or its tree, changed
 ```
 
 A release's AppStream metadata points its screenshots at its own tag, so the pictures a tag
@@ -99,6 +99,30 @@ line per picture, with the differences of any that fail beside them as `NAME-dif
   forgives exactly one level.
 - The video tiles are VP8 at a constant bitrate, and how the encoder spends its bits depends on
   live timing. The check forgives up to 5%; the differences seen stay under 4%.
+
+### What a screen reader hears
+
+Every scene runs with an accessibility bus of its own (shotbox's `--a11y`), which leaves the
+pictures as they were. Once a scene has taken its picture, it writes GtkHx's accessible tree, all
+its windows, beside the picture as `data/screenshots/NAME.a11y.txt`, and runs shotbox's
+accessibility lint over the same windows: a control, image or focusable node with no name fails
+the scene, and so the run, in CI as anywhere. `--check` compares the trees line for line and
+prints any difference, so a change to what a screen reader hears shows up in review beside the
+pictures; a failed check leaves the fresh trees in `build-screenshots/` too. A change meant to
+make one regenerates the trees with the pictures.
+
+A tree has a node a line: its role, its name, its description and the states a screen reader
+says (focusable, focused, selected, expanded...), indented by depth. No bounds, object paths,
+process ids or times, and the scenes fix everything they show, so the trees come out the same
+text on every run. The role names are at-spi2-core's, and differ between its releases: a push
+button is `push button` in 2.52 (Ubuntu 24.04's) and `button` in 2.58 (the image's). The trees
+are taken inside the pinned image, so they read as its at-spi2-core does; one taken elsewhere,
+with another release, can differ in its roles alone. The lint compares roles by their enum, not
+their names, and holds either way.
+
+shotbox walks the nodes GTK marks visible, not only those on screen, so a tree also lists a
+widget that is visible but collapsed out of sight, such as the screen-sharing banner in every
+main window, which nobody in the scenes is sharing. The lint covers those nodes too.
 
 ## Quick pictures
 
