@@ -87,12 +87,12 @@ rust-version = "1.92"
 # for magnifiers.
 rotulus = { version = "0.2", features = ["v4_16"] }
 rotulus-layout = "0.2"
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "ffb0abc60eab833f46ee25a513101c6bf41a54d6" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "ffb0abc60eab833f46ee25a513101c6bf41a54d6" }
-hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "ffb0abc60eab833f46ee25a513101c6bf41a54d6" }
-hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "ffb0abc60eab833f46ee25a513101c6bf41a54d6" }
-hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "ffb0abc60eab833f46ee25a513101c6bf41a54d6" }
-hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "ffb0abc60eab833f46ee25a513101c6bf41a54d6" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "01856377a8658a32dd55aed35fa2cc15285a3428" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "01856377a8658a32dd55aed35fa2cc15285a3428" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "01856377a8658a32dd55aed35fa2cc15285a3428" }
+hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "01856377a8658a32dd55aed35fa2cc15285a3428" }
+hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "01856377a8658a32dd55aed35fa2cc15285a3428" }
+hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "01856377a8658a32dd55aed35fa2cc15285a3428" }
 glib = "0.22"
 gio = "0.22"
 gtk4 = "0.11"

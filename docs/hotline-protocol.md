@@ -838,10 +838,23 @@ The canonical form has two entries, DATA and MACR, and is 74 bytes.
 - **Download resume:** the client sends RFLT in field 203 with the bytes it already has.
   The server sends the FILP header, the whole INFO fork, and each fork's remainder.
 - **Upload resume:** the client sets 204 = 1 and the server's reply carries RFLT
-  describing its partial file.
+  describing its partial file. mhxd, Janus and the 1.9 server (hlservd) refuse it when
+  they hold nothing by that name, and refuse an upload without it over a partial file,
+  except Janus, which takes one. mhxd keeps the partial file under its own name, the
+  1.9 server as `.hpf` until it is whole, and hxd-ng out of sight; the 1.9 server
+  counts what arrived a moment after the connection closes, and until then says 0 and
+  takes the whole file again from its start.
+  **Mobius** keeps the partial file as `.incomplete` and adds an upload without the
+  flag to it, so a new upload over a partial file comes out as the two joined.
+  GtkHx claims a resume only for an upload it paused, and only while its file is as
+  the pause left it; changed, the upload stays paused, as a resume would splice two
+  files and a new upload Mobius would join to the old. A refused resume, the server
+  holding nothing of it, starts over; refused again, it stays paused.
 - The **Windows server's upload-resume RFLT is malformed**: it says two entries and
-  carries one, so it is 16 bytes short. mhxd's folder-upload resume reply sends an
-  uninitialized RFLT. Parse by fixed offset (DATA at byte 46, MACR at 62), as mhxd does.
+  carries one, so it is 16 bytes short. Janus, Mobius and the 1.9 server send one entry,
+  DATA, and say so: 58 bytes. mhxd's folder-upload resume reply sends an
+  uninitialized RFLT. Parse by fixed offset (DATA at byte 46, MACR at 62), each where the
+  record reaches it, as mhxd does.
 - A partial upload is stored with type `HTft` and creator `HTLC`, the Hotline
   partial-file type, and shown as such in listings. The Windows server also appends
   `.hpf` to the on-disk name.

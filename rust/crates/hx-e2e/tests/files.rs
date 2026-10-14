@@ -729,7 +729,7 @@ fn open_transfer(
 /// Upload the local file `path` into `dir` as `name`, as the app's upload does.
 fn upload(c: &mut Client, dir: &str, name: &[u8], path: &std::ffi::CStr, len: u64) {
     use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close, hxnet_htxf_finish_send};
-    let r = c.request(&files::put(dir.as_bytes(), name, len as u32).unwrap());
+    let r = c.request(&files::put(dir.as_bytes(), name, len as u32, false).unwrap());
     ok(c, &r, "an upload");
     let ref_ = hxproto::parse::parse_file_put_reply(&r.raw, r.raw.len()).ref_;
     // The FILP header and the data fork's marker, then the data.
@@ -886,20 +886,16 @@ fn pattern(len: usize, seed: u32) -> Vec<u8> {
 #[test]
 fn a_paused_folder_download_resumes_to_the_same_bytes() {
     let _turn = transfer_turn();
-    // No one-letter names: hxfiles-xfer can't read hlservd's FILP for one.
-    let files = [
-        ("one", 1 << 20, 1),
-        ("sub/two", 3 << 20, 2),
-        ("three", 5000, 3),
-    ];
+    // One-letter names, whose INFO fork hlservd ends short of 74 bytes.
+    let files = [("a", 1 << 20, 1), ("b/c", 3 << 20, 2), ("d", 5000, 3)];
     let total: u64 = files.iter().map(|f| f.1 as u64).sum();
     for mut c in admins() {
         let name = c.server().name;
         let mut s = Scratch::new(&mut c, "fpause");
         let (dir, tree) = (s.path().to_string(), s.join("tree"));
         mkdir(s.client(), &tree);
-        mkdir(s.client(), &format!("{tree}/sub"));
-        let mut want: Arrived = vec![("sub".to_string(), None)];
+        mkdir(s.client(), &format!("{tree}/b"));
+        let mut want: Arrived = vec![("b".to_string(), None)];
         for (path, len, seed) in files {
             let (parent, leaf) = path.rsplit_once('/').unwrap_or(("", path));
             let bytes = pattern(len, seed);
@@ -955,6 +951,105 @@ fn a_paused_seed_folder_resumes_and_then_skips_what_it_has() {
         assert_eq!((rv, moved), (0, 0), "{}: asked for again", s.name);
         assert_eq!(arrived(&dest), want, "{}", s.name);
         let _ = std::fs::remove_dir_all(&dest);
+    }
+}
+
+/// Upload the local file `path`, `len` bytes, into `dir` as `name` through
+/// the app's upload worker, as the app asks for a new one or, with `resume`,
+/// resumes one it paused, stopping as a pause does once `pause_at` bytes
+/// have gone. The worker's result, and where the server said to resume.
+fn upload_from(
+    c: &mut Client,
+    dir: &str,
+    name: &[u8],
+    path: &std::ffi::CStr,
+    len: u64,
+    resume: bool,
+    pause_at: u64,
+) -> (i32, u32) {
+    use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close, hxnet_htxf_finish_send};
+    // The FILP header and the data fork's marker, then the data.
+    let whole = 133 + len;
+    let req = files::put(dir.as_bytes(), name, whole as u32, resume).unwrap();
+    let r = c.request(&req);
+    ok(c, &r, "an upload");
+    let put = hxproto::parse::parse_file_put_reply(&r.raw, r.raw.len());
+    let from = u64::from(put.data_pos);
+    let (h, abort) = open_transfer(c, put.ref_, whole - from, false);
+    let mut at = PauseAt {
+        abort,
+        received: 0,
+        at: pause_at,
+    };
+    let mut p = xfer_params(h, path, 0);
+    (p.data_size, p.data_pos) = (len, from);
+    p.user_data = (&mut at as *mut PauseAt).cast();
+    p.progress = Some(pause_when_due);
+    let rv = unsafe { hxnet::xfer::hxnet_xfer_file_send_one(&p) };
+    unsafe {
+        if rv == 0 {
+            hxnet_htxf_finish_send(h);
+        }
+        hxnet_htxf_close(h);
+        hxnet_htxf_abort_free(abort);
+    }
+    (rv, put.data_pos)
+}
+
+/// An upload paused partway, resumed, arrives whole, byte for byte, under
+/// its own name, the server sending back how much it had; and a resume of
+/// one the server has nothing of is refused, which the app answers by
+/// starting the upload over.
+#[test]
+fn a_paused_upload_resumes_to_the_same_bytes() {
+    let _turn = transfer_turn();
+    const LEN: usize = 3 << 20;
+    let bytes = pattern(LEN, 7);
+    for mut c in admins() {
+        let name = c.server().name;
+        let tmp = local_dir(&c, "uppause");
+        let (src, dst) = (tmp.join("src"), tmp.join("dst"));
+        std::fs::write(&src, &bytes).unwrap();
+        let src_c = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
+        let dst_c = std::ffi::CString::new(dst.to_str().unwrap()).unwrap();
+        let mut s = Scratch::new(&mut c, "uppause");
+        let dir = s.path().to_string();
+        let len = LEN as u64;
+
+        let (rv, _) = upload_from(s.client(), &dir, b"big", &src_c, len, false, len / 3);
+        assert_ne!(rv, 0, "{name}: the pause didn't stop the upload");
+        // hlservd takes a moment after the connection closes to count what
+        // arrived, and says 0, taking the whole file again, until then.
+        for _ in 0..30 {
+            if s.client().list(&dir).iter().any(|e| e.size > 0) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let (rv, from) = upload_from(s.client(), &dir, b"big", &src_c, len, true, u64::MAX);
+        assert_eq!(rv, 0, "{name}: the resumed upload failed");
+        assert!(
+            0 < from && u64::from(from) < len,
+            "{name}: resumed at {from}"
+        );
+        assert_eq!(names(s.client(), &dir), ["big"], "{name}");
+
+        let rv = download_from(s.client(), &dir, b"big", &dst_c, u64::MAX, PATIENT);
+        assert_eq!(rv, 0, "{name}: the download failed");
+        assert!(
+            std::fs::read(&dst).unwrap() == bytes,
+            "{name}: bytes differ"
+        );
+
+        let r = s
+            .client()
+            .request(&files::put(dir.as_bytes(), b"none", 133 + LEN as u32, true).unwrap());
+        refused(s.client(), &r, "resuming an upload the server has none of");
+        let (rv, from) = upload_from(s.client(), &dir, b"none", &src_c, len, false, u64::MAX);
+        assert_eq!((rv, from), (0, 0), "{name}: the upload started over");
+        assert_eq!(names(s.client(), &dir), ["big", "none"], "{name}");
+        drop(s);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 

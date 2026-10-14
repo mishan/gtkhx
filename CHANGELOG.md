@@ -2,8 +2,11 @@
 
 - Transfers
   - A folder download can be paused and resumed: Start skips the files it already has, picks up the one it stopped in, and fetches the rest
+  - A file's upload, up to 4 GiB, can be paused and resumed: Start sends the rest of the file from what the server already has, or, when the server can't resume it, the whole file again; an upload whose file changed while it was paused, or that the server refuses, stays paused, saying why
 - Users
   - The voice column's heading is an icon that follows the theme, rather than an emoji
+- Files
+  - Fixed downloading a file whose name is one character long from hlservd
 
 ## 1.6.0
 

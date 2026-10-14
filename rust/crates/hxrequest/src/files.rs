@@ -182,14 +182,15 @@ pub fn get_folder(dir: &[u8], name: &[u8]) -> Option<Request> {
     Request::from_built(ClientHdr::FileGetFolder as u32, &chunks, hc)
 }
 
-/// FILE_PUT for a new file `name` of `size` bytes uploaded into `dir`, with
-/// no resume and no 64-bit size.
-pub fn put(dir: &[u8], name: &[u8], size: u32) -> Option<Request> {
+/// FILE_PUT for the file `name` of `size` bytes uploaded into `dir`, with no
+/// 64-bit size: a new file, or with `resume` the rest of one the server holds
+/// part of, whose reply says how much.
+pub fn put(dir: &[u8], name: &[u8], size: u32, resume: bool) -> Option<Request> {
     let enc = below_root(dir).then(|| encode_dir(dir, false));
     let req = FilePutRequest {
         name,
         dir: enc.as_deref(),
-        has_preview: false,
+        has_preview: resume,
         size,
         size64: None,
     };

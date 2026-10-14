@@ -209,9 +209,16 @@ place in the server's queue, and waits behind whoever took it.
    the one it was cut off in resumed, and the rest asked for whole. Only what the
    download itself wrote, unchanged since, is trusted; a folder downloaded again after a
    crash is fetched whole (`hxnet::xfer::FolderLedger`).
-3. **Uploads.** The 1.5 upload-resume handshake: claim FILE_PREVIEW on the FILE_PUT and
-   send from the offset the server's reply names, tested against each rig server, whose
-   handling of it differs.
+3. **Single-file uploads.** *Done.* Pause ends an upload's connection, leaving the
+   server its partial file; Start claims FILE_PREVIEW on the FILE_PUT and sends from the
+   offset the server's RFLT names. It starts over when the server refuses the resume,
+   and stays paused when that is refused too, or when the file changed while paused.
+   An upload past 4 GiB doesn't pause, its offsets being past what an RFLT says.
+4. **Folder uploads.** The server drives these, answering each file with SEND or
+   RESUME itself, and a resumed one has to ask with 204 on the FILE_PUTFOLDER, which
+   hxproto's builder can't say yet. mhxd then resumes every file it finds but ends the
+   transfer at a subfolder that exists, and hxd-ng resumes none: it reads the rest and
+   keeps its partial file.
 
 ### Code modernization
 

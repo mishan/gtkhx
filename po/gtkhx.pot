@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-13 13:43-0700\n"
+"POT-Creation-Date: 2026-10-13 18:43-0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -461,42 +461,42 @@ msgstr ""
 msgid "unknown header type 0x%08x\n"
 msgstr ""
 
-#: src/tasks.c:287 src/toolbar.c:811 src/toolbar.c:1194
+#: src/tasks.c:284 src/toolbar.c:811 src/toolbar.c:1194
 msgid "Transfers"
 msgstr ""
 
-#: src/tasks.c:342
+#: src/tasks.c:341
 #, c-format
 msgid "Queued #%u"
 msgstr ""
 
-#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:415
+#: src/tasks.c:400 rust/crates/gtkhx-ui/src/files/browser.rs:415
 msgctxt "files transfer"
 msgid "Download"
 msgstr ""
 
-#: src/tasks.c:402 rust/crates/gtkhx-ui/src/files/browser.rs:416
+#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:416
 msgctxt "files transfer"
 msgid "Upload"
 msgstr ""
 
-#: src/tasks.c:911
+#: src/tasks.c:910
 msgid "Stop Transfer"
 msgstr ""
 
-#: src/tasks.c:914
+#: src/tasks.c:913
 msgid "Pause Transfer"
 msgstr ""
 
-#: src/tasks.c:918
+#: src/tasks.c:917
 msgid "Start Transfer"
 msgstr ""
 
-#: src/tasks.c:923
+#: src/tasks.c:922
 msgid "Move Transfer Up in Queue"
 msgstr ""
 
-#: src/tasks.c:926
+#: src/tasks.c:925
 msgid "Move Transfer Down in Queue"
 msgstr ""
 
@@ -2867,19 +2867,23 @@ msgstr ""
 msgid "A file's menu"
 msgstr ""
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:67
+#: rust/crates/gtkhx-ui/src/tasks.rs:85
+msgid "%1$s of %2$s · Paused: the file has changed"
+msgstr ""
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:87
 msgid "%1$s of %2$s · Paused"
 msgstr ""
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:70
+#: rust/crates/gtkhx-ui/src/tasks.rs:90
 msgid "%1$s of %2$s"
 msgstr ""
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:79
+#: rust/crates/gtkhx-ui/src/tasks.rs:99
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
 msgstr ""
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:84
+#: rust/crates/gtkhx-ui/src/tasks.rs:104
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr ""
 

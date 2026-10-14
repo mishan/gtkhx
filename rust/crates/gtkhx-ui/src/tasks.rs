@@ -51,9 +51,9 @@ fn human(size: u64) -> String {
 }
 
 /// The line under a transfer's name: how far it has got of how much, and
-/// either how fast and how long to go or that it is paused. `run` is what
-/// its connection has brought, over `elapsed` seconds. A newly allocated
-/// string, for the caller to `g_free`.
+/// either how fast and how long to go or that it is paused, `paused` being
+/// `xfer_paused`'s answer. `run` is what its connection has brought, over
+/// `elapsed` seconds. A newly allocated string, for the caller to `g_free`.
 #[no_mangle]
 pub extern "C" fn gtkhx_tasks_subtitle(
     pos: u64,
@@ -62,7 +62,7 @@ pub extern "C" fn gtkhx_tasks_subtitle(
     elapsed: i64,
     paused: c_int,
 ) -> *mut c_char {
-    let text = subtitle(pos, size, run, elapsed, paused != 0, human);
+    let text = subtitle(pos, size, run, elapsed, paused, human);
     let text = CString::new(text).unwrap_or_default();
     unsafe { gtk4::glib::ffi::g_strdup(text.as_ptr()) }
 }
@@ -73,15 +73,17 @@ fn subtitle(
     size: u64,
     run: u64,
     elapsed: i64,
-    paused: bool,
+    paused: c_int,
     human: impl Fn(u64) -> String,
 ) -> String {
     let (p, s) = (human(pos), human(size));
-    if size <= 1 && pos == 0 && !paused {
+    if size <= 1 && pos == 0 && paused == 0 {
         // A size of 1 is the stand-in for one not known yet (an upload the
         // server hasn't answered): nothing to tell.
         String::new()
-    } else if paused {
+    } else if paused == 2 {
+        tr_argv("%1$s of %2$s · Paused: the file has changed", &[&p, &s])
+    } else if paused != 0 {
         tr_argv("%1$s of %2$s · Paused", &[&p, &s])
     } else if run == 0 {
         // No speed to tell yet: waiting on the server, or queued by it.
@@ -158,23 +160,24 @@ mod tests {
     fn subtitle_tells_what_the_row_knows() {
         // (pos, size, run, elapsed, paused, the line)
         for (pos, size, run, elapsed, paused, want) in [
-            (0, 1, 0, 0, false, ""),              // size not known yet
-            (0, 5_000, 0, 3, false, "0 of 5000"), // waiting its turn
-            (1_200, 5_000, 0, 0, true, "1200 of 5000 · Paused"),
+            (0, 1, 0, 0, 0, ""),              // size not known yet
+            (0, 5_000, 0, 3, 0, "0 of 5000"), // waiting its turn
+            (1_200, 5_000, 0, 0, 1, "1200 of 5000 · Paused"),
             (
-                1_000,
+                1_200,
                 5_000,
-                1_000,
+                0,
+                0,
                 2,
-                false,
-                "1000 of 5000 · 500/s · ETA 0:08",
+                "1200 of 5000 · Paused: the file has changed",
             ),
+            (1_000, 5_000, 1_000, 2, 0, "1000 of 5000 · 500/s · ETA 0:08"),
             (
                 0,
                 4_000_000,
                 100,
                 1,
-                false,
+                0,
                 "0 of 4000000 · 100/s · ETA 11:06:40",
             ),
         ] {
