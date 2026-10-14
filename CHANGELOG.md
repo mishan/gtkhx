@@ -1,5 +1,8 @@
 ## 1.6.1-dev
 
+- Users
+  - The voice column's heading is an icon that follows the theme, rather than an emoji
+
 ## 1.6.0
 
 - Accessibility

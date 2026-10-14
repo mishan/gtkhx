@@ -37,7 +37,7 @@ pub extern "C" fn gtkhx_users_voice_column_new(
 // ---------------------------------------------------------------------
 
 #[cfg(feature = "voice")]
-mod voice_impl {
+pub(crate) mod voice_impl {
     use super::*;
 
     use std::cell::Cell;
@@ -208,6 +208,33 @@ mod voice_impl {
         }
     }
 
+    /// A column's title can only be text, and "Voice" is too wide for this
+    /// column, so the icon goes into the header GTK builds for it. Should GTK ever build that
+    /// header differently, the title shows as text instead.
+    fn show_title_as_icon(col: &gtk::ColumnViewColumn) {
+        let (Some(view), Some(title)) = (col.column_view(), col.title()) else {
+            return;
+        };
+        let mut header = view.first_child().and_then(|h| h.first_child());
+        while let Some(h) = header {
+            let label = h
+                .first_child()
+                .and_then(|b| b.first_child())
+                .and_downcast::<gtk::Label>();
+            if let Some(label) = label.filter(|l| l.label() == title) {
+                let icon = glib::Object::builder::<gtk::Image>()
+                    .property("icon-name", "audio-speakers-symbolic")
+                    .property("accessible-role", gtk::AccessibleRole::Presentation)
+                    .build();
+                icon.insert_after(&label.parent().unwrap(), Some(&label));
+                label.set_visible(false);
+                crate::set_name_tip(&h, &title);
+                return;
+            }
+            header = h.next_sibling();
+        }
+    }
+
     pub(super) unsafe fn build_column(sess: *mut c_void) -> *mut gtk::ffi::GtkColumnViewColumn {
         if sess.is_null() {
             return std::ptr::null_mut();
@@ -314,16 +341,46 @@ mod voice_impl {
             }
         });
 
-        // Header glyph: a single speaker emoji as a compact column label.
         let col = gtk::ColumnViewColumn::new(
-            Some("\u{1F508}"),
+            Some(&crate::tr::tr("Voice")),
             Some(factory.upcast::<gtk::ListItemFactory>()),
         );
+        col.connect_column_view_notify(show_title_as_icon);
         // Room for the speaker and a camera beside it.
         col.set_fixed_width(36);
         col.set_resizable(false);
         // Transfer full — users_view.rs consumes the ref via from_glib_full.
         ToGlibPtr::to_glib_full(&col)
+    }
+
+    #[cfg(test)]
+    pub(crate) mod tests {
+        use super::*;
+
+        /// The header shows the icon in place of the title text, and still
+        /// names the column, which catches GTK building its headers some
+        /// other way.
+        pub(crate) fn check_header_is_an_icon() {
+            let col = gtk::ColumnViewColumn::new(Some("Voice"), None::<gtk::ListItemFactory>);
+            col.connect_column_view_notify(show_title_as_icon);
+            let view = gtk::ColumnView::new(None::<gtk::NoSelection>);
+            view.append_column(&col);
+
+            let mut found = None;
+            let mut header = view.first_child().and_then(|h| h.first_child());
+            while let Some(h) = header {
+                if h.tooltip_text().as_deref() == Some("Voice") {
+                    found = Some(h.clone());
+                }
+                header = h.next_sibling();
+            }
+            let title = found.expect("the voice column's header is named");
+            let content = title.first_child().unwrap();
+            let label = content.first_child().and_downcast::<gtk::Label>().unwrap();
+            assert!(!label.is_visible());
+            let icon = label.next_sibling().and_downcast::<gtk::Image>().unwrap();
+            assert_eq!(icon.icon_name().as_deref(), Some("audio-speakers-symbolic"));
+        }
     }
 }
 

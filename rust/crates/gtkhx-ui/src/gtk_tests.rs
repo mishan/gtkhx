@@ -39,6 +39,8 @@ fn display_backed() {
     crate::updates::tests::check_banner_starts_hidden();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
+    crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();
+    #[cfg(feature = "voice")]
     crate::video_panel::tests::check_tile_shows_a_frame();
     #[cfg(feature = "voice")]
     crate::video_panel::tests::check_relabel_follows_a_nick_change();

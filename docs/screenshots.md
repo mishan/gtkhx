@@ -90,7 +90,7 @@ up waiting for something (`NAME-failed.png`, shotbox's `$SHOTBOX_FAILED`).
 
 ### How identical is identical
 
-The scenes come out byte for byte the same run after run, with three known exceptions, which is
+The scenes come out byte for byte the same run after run, with two known exceptions, which is
 why `--check` compares pixels with a small tolerance rather than bytes (`shotbox compare`, a
 line per picture, with the differences of any that fail beside them as `NAME-diff.png`):
 
@@ -99,10 +99,6 @@ line per picture, with the differences of any that fail beside them as `NAME-dif
   forgives exactly one level.
 - The video tiles are VP8 at a constant bitrate, and how the encoder spends its bits depends on
   live timing. The check forgives up to 5%; the differences seen stay under 4%.
-- The color-emoji speaker heading the users list's voice column is drawn one of two ways from
-  run to run, differing by up to a tenth in a few pixels, two of them past the tolerance above.
-  The check forgives those two pixels in the pictures that show the users list: chat, classic,
-  video and transfers.
 
 ## Quick pictures
 
