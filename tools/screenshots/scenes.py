@@ -831,11 +831,8 @@ def inner(scene, out):
 # of pixels, a rounding difference that depends on the order the window
 # was laid out in. 0.5% forgives exactly that one level. The video tiles
 # are VP8 at a constant bitrate, and how the encoder spends its bits
-# depends on live timing: never more than 4% in any channel. And the
-# color-emoji speaker heading the users list's voice column comes out one
-# of two ways, two pixels apart past that, in the scenes that show it.
-FUZZ = ["--fuzz", "0.5%", "--fuzz", "video=5%",
-        *[a for n in ("chat", "classic", "video", "transfers") for a in ("--max", f"{n}=2")]]
+# depends on live timing: never more than 4% in any channel.
+FUZZ = ["--fuzz", "0.5%", "--fuzz", "video=5%"]
 
 
 def compare(ref, new, names):
