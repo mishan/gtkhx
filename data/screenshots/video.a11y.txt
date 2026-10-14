@@ -1,0 +1,114 @@
+frame "GtkHx (Northwind Commons)"
+  grouping ""
+    grouping ""
+      panel ""
+        panel "Chat"
+          grouping ""
+            panel ""
+              panel ""
+                grouping ""
+                  panel "Chat"
+                    panel ""
+                      panel ""
+                        text "Chat subject" [focusable, editable]
+                        panel ""
+                          form ""
+                            grouping ""
+                          grouping ""
+                            panel ""
+                              log "Public chat" [focusable]
+                              scroll bar ""
+                                panel ""
+                          grouping ""
+                            panel ""
+                              scroll pane "" [focusable]
+                                text "Chat message" [focusable, editable]
+                              button "Insert emoji"
+                                toggle button "Insert emoji" [focusable]
+                                  panel ""
+        panel "Video"
+          grouping ""
+            panel ""
+              panel ""
+                grouping ""
+                  panel ""
+                    scroll pane "" [focusable]
+                      panel ""
+                        panel ""
+                          grouping "ada"
+                            image "Camera"
+                            label "ada"
+                            panel ""
+                              button "Mute" [focusable]
+                              button "Focus" [focusable]
+                              button "Stop watching" [focusable]
+                          grouping "ada"
+                            image "Shared screen"
+                            label "ada"
+                            panel ""
+                              button "Mute" [focusable]
+                              button "Show all" [focusable]
+                              button "Stop watching" [focusable]
+                          grouping "marco"
+                            image "Camera"
+                            label "marco"
+                            panel ""
+                              button "Mute" [focusable]
+                              button "Focus" [focusable]
+                              button "Stop watching" [focusable]
+        separator "Resize columns" [focusable]
+        page tab list "Panes: Chat"
+          page tab "Chat" [focusable, selected]
+            image ""
+            button "Close Chat" [focusable]
+          button "Pane menu" [focusable]
+        page tab list "Panes: Video"
+          page tab "Users"
+            image ""
+          page tab "Video" [focusable, focused, selected]
+            image ""
+            button "Close Video" [focusable]
+          button "Pane menu" [focusable]
+      grouping ""
+        panel ""
+          panel ""
+            grouping ""
+              grouping ""
+            panel ""
+              grouping ""
+                grouping ""
+              grouping "You are sharing your screen"
+                grouping ""
+            panel ""
+              panel ""
+                grouping ""
+      grouping ""
+        panel ""
+          panel ""
+  grouping ""
+    panel ""
+      panel ""
+        panel ""
+          panel ""
+            grouping "Connect"
+              button "Connect" [focusable]
+              separator ""
+              button "More Options"
+                toggle button "More Options" [focusable]
+                  panel ""
+            button "Disconnect" [focusable]
+        panel ""
+          panel ""
+            panel ""
+              panel ""
+                label "GtkHx (Northwind Commons)"
+                label "Logged in to Northwind Commons"
+        panel ""
+          panel ""
+            button "Main menu"
+              toggle button "Main menu" [focusable]
+                panel ""
+            grouping ""
+              button "Minimize" description="Minimize the window" [focusable]
+              button "Maximize" description="Maximize the window" [focusable]
+              button "Close" description="Close the window" [focusable]

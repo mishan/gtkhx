@@ -13,6 +13,7 @@ can't, the wait is for something that has certainly finished by then.
 """
 
 import datetime
+import difflib
 import json
 import os
 import shutil
@@ -500,10 +501,23 @@ def board_to_top():
     display.wait_stable(window="GtkHx.*")
 
 
-def capture_window(out, since):
-    """Capture the main window once the login toast has gone."""
+def capture_window(out, since, window="GtkHx.*"):
+    """Capture a window once the login toast has gone."""
     toast_gone(since)
-    display.capture(out, window="GtkHx.*", park=True)
+    display.capture(out, window=window, park=True)
+    accessible(out)
+
+
+def accessible(out):
+    """Write what a screen reader would hear, every window on the scene's
+    accessibility bus, beside the picture as NAME.a11y.txt, and fail on what shotbox's lint
+    finds there."""
+    nodes = display.a11y_tree()
+    Path(out).with_suffix(".a11y.txt").write_text(
+        "".join("  " * n.depth + n.line() + "\n" for n in nodes))
+    problems = display.a11y_lint()
+    if problems:
+        display.fail("accessibility lint: " + "; ".join(f"{n.path}: {n.problem}" for n in problems))
 
 
 def say_lines(bots, script, assets):
@@ -547,8 +561,7 @@ def scene_files(out, bots, assets):
     display.click(558, 158, window=win, double=True)  # Harbor
     display.wait_stable(window=win)
     display.click(600, 183, window=win)         # fog-over-the-pier.jpg
-    toast_gone(since)
-    display.capture(out, window=win, park=True)
+    capture_window(out, since, win)
     app.terminate()
 
 
@@ -569,8 +582,7 @@ def scene_news(out, bots, assets):
     display.wait_stable(window=win)
     # Room for the nested reply's title.
     display.drag(286, 450, 370, 450, window=win)
-    toast_gone(since)
-    display.capture(out, window=win, park=True)
+    capture_window(out, since, win)
     app.terminate()
 
 
@@ -581,8 +593,7 @@ def scene_tracker(out, bots, assets):
     display.wait_window("Tracker")
     # The listing arrives in one burst; the count in the header says so.
     display.wait_stable(window="Tracker")
-    toast_gone(since)
-    display.capture(out, window="Tracker", park=True)
+    capture_window(out, since, "Tracker")
     app.terminate()
 
 
@@ -673,8 +684,7 @@ def scene_transfers(out, bots, assets):
     # Janus takes one download at a time here: this one waits in its
     # queue behind the one resumed.
     download(183, 158, 208)                     # Photos/Harbor/lighthouse.jpg
-    toast_gone(since)
-    display.capture(out, window="GtkHx.*", park=True)
+    capture_window(out, since)
     app.terminate()
 
 
@@ -748,6 +758,7 @@ def scene_video(out, bots, assets):
         display.move(690, 700, window="GtkHx.*")
         time.sleep(1)
         display.capture(out, window="GtkHx.*")
+        accessible(out)
         app.terminate()
     finally:
         for p in pubs:
@@ -837,8 +848,18 @@ FUZZ = ["--fuzz", "0.5%", "--fuzz", "video=5%"]
 
 def compare(ref, new, names):
     """Compare fresh pictures against committed ones; the failing ones'
-    differences go beside them as NAME-diff.png."""
-    return subprocess.run([SHOTBOX, "compare", ref, new, *names, "--diff", new, *FUZZ]).returncode
+    differences go beside them as NAME-diff.png. And the accessible trees,
+    which must be the same text."""
+    status = subprocess.run([SHOTBOX, "compare", ref, new, *names, "--diff", new, *FUZZ]).returncode
+    for name in names:
+        old, fresh = (Path(d) / f"{name}.a11y.txt" for d in (ref, new))
+        before = old.read_text().splitlines(keepends=True) if old.exists() else []
+        diff = list(difflib.unified_diff(before, fresh.read_text().splitlines(keepends=True),
+                                         str(old), str(fresh)))
+        print(f"{name}.a11y.txt: " + ("changed" if diff else "the same"))
+        sys.stdout.writelines(diff)
+        status = status or (1 if diff else 0)
+    return status
 
 
 def main(argv):
@@ -865,7 +886,7 @@ def main(argv):
         log(f"{name}...")
         # A wait that gives up leaves a picture of the screen as
         # NAME-failed.png, which tools/screenshots.sh keeps.
-        subprocess.run([SHOTBOX, "run", "--screen", f"{SCREEN[0]}x{SCREEN[1]}",
+        subprocess.run([SHOTBOX, "run", "--a11y", "--screen", f"{SCREEN[0]}x{SCREEN[1]}",
                         "--env", f"GTKHX_PATH={conf}",
                         "--env", f"GTKHX_DEBUG={os.environ.get('GTKHX_DEBUG', '')}",
                         "--env", f"EXPLORE={os.environ.get('EXPLORE', '')}",

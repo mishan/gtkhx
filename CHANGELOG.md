@@ -1,5 +1,7 @@
 ## 1.6.1-dev
 
+- Accessibility
+  - A video tile's picture is named for what it shows, a camera or a shared screen, so a screen reader can tell apart the two tiles of a user sharing both
 - Transfers
   - A folder download can be paused and resumed: Start skips the files it already has, picks up the one it stopped in, and fetches the rest
   - A file's upload, up to 4 GiB, can be paused and resumed: Start sends the rest of the file from what the server already has, or, when the server can't resume it, the whole file again; an upload whose file changed while it was paused, or that the server refuses, stays paused, saying why

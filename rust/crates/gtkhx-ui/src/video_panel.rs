@@ -209,6 +209,11 @@ impl Tile {
         picture.set_can_shrink(true);
         picture.set_content_fit(gtk::ContentFit::Contain);
         picture.add_css_class("hx-video-picture");
+        // A user can have two tiles, both named for them: this tells them apart.
+        picture.update_property(&[gtk::accessible::Property::Label(&match key.kind {
+            VideoKind::Camera => tr("Camera"),
+            VideoKind::Screen => tr("Shared screen"),
+        })]);
 
         // A named group, so a screen reader says whose tile its controls
         // belong to (see `set_name`).

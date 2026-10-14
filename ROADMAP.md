@@ -146,9 +146,11 @@ the C side, with a `C-Growth` trailer, rather than wait for a port.
    every window, found the flat news view, the news browser's tree and article,
    the Tasks list and the users list unnamed, the Settings sidebar's icons read as
    "image", and a tracker's section named with every server in it. Each is fixed, and
-   the lint passes; Ctrl+Tab goes round the main window and F6 round its panes. Running
-   the lint and keeping the accessible tree in `tools/screenshots` waits for a shotbox
-   release with it.
+   the lint passes; Ctrl+Tab goes round the main window and F6 round its panes. The
+   screenshot scenes run the lint over every window they show, failing on what it finds,
+   and keep each scene's accessible tree beside its picture, for `--check` to compare
+   (see docs/screenshots.md). Run there, it found the video tiles' pictures unnamed; they
+   are named now, for the camera or screen each shows.
 
 ### Help
 
