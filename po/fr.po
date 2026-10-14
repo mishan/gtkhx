@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-13 13:43-0700\n"
+"POT-Creation-Date: 2026-10-13 18:43-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: French <misha@nasledov.com>\n"
@@ -477,42 +477,42 @@ msgstr "Chargement…"
 msgid "unknown header type 0x%08x\n"
 msgstr "type d'en-tête inconnu 0x%08x\n"
 
-#: src/tasks.c:287 src/toolbar.c:811 src/toolbar.c:1194
+#: src/tasks.c:284 src/toolbar.c:811 src/toolbar.c:1194
 msgid "Transfers"
 msgstr "Transferts"
 
-#: src/tasks.c:342
+#: src/tasks.c:341
 #, c-format
 msgid "Queued #%u"
 msgstr "File d'attente n° %u"
 
-#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:415
+#: src/tasks.c:400 rust/crates/gtkhx-ui/src/files/browser.rs:415
 msgctxt "files transfer"
 msgid "Download"
 msgstr "Télécharger"
 
-#: src/tasks.c:402 rust/crates/gtkhx-ui/src/files/browser.rs:416
+#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:416
 msgctxt "files transfer"
 msgid "Upload"
 msgstr "Téléverser"
 
-#: src/tasks.c:911
+#: src/tasks.c:910
 msgid "Stop Transfer"
 msgstr "Arrêter le transfert"
 
-#: src/tasks.c:914
+#: src/tasks.c:913
 msgid "Pause Transfer"
 msgstr "Mettre le transfert en pause"
 
-#: src/tasks.c:918
+#: src/tasks.c:917
 msgid "Start Transfer"
 msgstr "Démarrer le transfert"
 
-#: src/tasks.c:923
+#: src/tasks.c:922
 msgid "Move Transfer Up in Queue"
 msgstr "Monter le transfert dans la file d'attente"
 
-#: src/tasks.c:926
+#: src/tasks.c:925
 msgid "Move Transfer Down in Queue"
 msgstr "Descendre le transfert dans la file d'attente"
 
@@ -3024,19 +3024,23 @@ msgstr "Obtenir les infos"
 msgid "A file's menu"
 msgstr "Menu d'un fichier"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:67
+#: rust/crates/gtkhx-ui/src/tasks.rs:85
+msgid "%1$s of %2$s · Paused: the file has changed"
+msgstr "%1$s sur %2$s · En pause : le fichier a changé"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:87
 msgid "%1$s of %2$s · Paused"
 msgstr "%1$s sur %2$s · En pause"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:70
+#: rust/crates/gtkhx-ui/src/tasks.rs:90
 msgid "%1$s of %2$s"
 msgstr "%1$s sur %2$s"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:79
+#: rust/crates/gtkhx-ui/src/tasks.rs:99
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
 msgstr "%1$s sur %2$s · %3$s/s · restant %4$d:%5$02d:%6$02d"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:84
+#: rust/crates/gtkhx-ui/src/tasks.rs:104
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr "%1$s sur %2$s · %3$s/s · restant %4$d:%5$02d"
 

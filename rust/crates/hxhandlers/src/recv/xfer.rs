@@ -184,7 +184,7 @@ pub(crate) unsafe fn download_ready(
     if hx_htxf_in_list(htxf) == 0 || t.reference == 0 || (!folder && t.size == 0) {
         return;
     }
-    crate::xfer::download_answered(htxf);
+    crate::xfer::answered(htxf);
     // A folder is legal at size 0; the progress bar reads better at 1. A
     // folder's size is the whole tree's, resumed or not.
     hx_htxf_set_ref(htxf, t.reference);
@@ -277,6 +277,14 @@ pub(crate) unsafe fn upload_ready(
         }
         let rsrc_size = resource_len(path) as u64;
         hx_htxf_set_rsrc_size(htxf, rsrc_size);
+        // The server holds more than the file has: sent from there, it
+        // would come out neither.
+        if data_pos > data_size || rsrc_pos > rsrc_size {
+            if !crate::xfer::upload_file_changed(htxf) {
+                upload_refused(htlc, htxf);
+            }
+            return;
+        }
 
         // Wrapping, as the C guint64 arithmetic was: a resume past the end
         // must not panic.
@@ -291,21 +299,28 @@ pub(crate) unsafe fn upload_ready(
             + rsrc_size.wrapping_sub(rsrc_pos);
         hx_htxf_set_total_size(htxf, total);
     }
+    crate::xfer::answered(htxf);
     hx_htxf_set_ref(htxf, t.reference);
     stamp_subchannel(htlc, htxf);
     hx_xfer_announce(htlc, htxf, t.queue);
 }
 
-/// An upload the server refused: drop it.
+/// An upload the server refused: one asked for again after a pause is
+/// started over or paused again (`crate::xfer::upload_resume_refused`),
+/// another dropped. True keeps the server's reason quiet.
 ///
 /// # Safety
 /// As [`download_ready`].
-pub(crate) unsafe fn upload_refused(htlc: *mut c_void, htxf: *mut c_void) {
+pub(crate) unsafe fn upload_refused(htlc: *mut c_void, htxf: *mut c_void) -> bool {
     if hx_htxf_in_list(htxf) == 0 {
-        return;
+        return false;
+    }
+    if let Some(quiet) = crate::xfer::upload_resume_refused(htxf) {
+        return quiet;
     }
     gtask_delete_htxf(hx_sess_from_htlc(htlc), htxf);
     xfer_delete(htxf);
+    false
 }
 
 /// A queued transfer moved up the server's queue; at 0 it goes.

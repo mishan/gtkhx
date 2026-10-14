@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-13 13:43-0700\n"
+"POT-Creation-Date: 2026-10-13 18:43-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: Japanese <misha@nasledov.com>\n"
@@ -469,42 +469,42 @@ msgstr "読み込み中…"
 msgid "unknown header type 0x%08x\n"
 msgstr "不明なヘッダー種別 0x%08x\n"
 
-#: src/tasks.c:287 src/toolbar.c:811 src/toolbar.c:1194
+#: src/tasks.c:284 src/toolbar.c:811 src/toolbar.c:1194
 msgid "Transfers"
 msgstr "転送"
 
-#: src/tasks.c:342
+#: src/tasks.c:341
 #, c-format
 msgid "Queued #%u"
 msgstr "キュー待ち #%u"
 
-#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:415
+#: src/tasks.c:400 rust/crates/gtkhx-ui/src/files/browser.rs:415
 msgctxt "files transfer"
 msgid "Download"
 msgstr "ダウンロード"
 
-#: src/tasks.c:402 rust/crates/gtkhx-ui/src/files/browser.rs:416
+#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:416
 msgctxt "files transfer"
 msgid "Upload"
 msgstr "アップロード"
 
-#: src/tasks.c:911
+#: src/tasks.c:910
 msgid "Stop Transfer"
 msgstr "転送を停止"
 
-#: src/tasks.c:914
+#: src/tasks.c:913
 msgid "Pause Transfer"
 msgstr "転送を一時停止"
 
-#: src/tasks.c:918
+#: src/tasks.c:917
 msgid "Start Transfer"
 msgstr "転送を開始"
 
-#: src/tasks.c:923
+#: src/tasks.c:922
 msgid "Move Transfer Up in Queue"
 msgstr "転送をキューの上へ移動"
 
-#: src/tasks.c:926
+#: src/tasks.c:925
 msgid "Move Transfer Down in Queue"
 msgstr "転送をキューの下へ移動"
 
@@ -2979,19 +2979,23 @@ msgstr "情報を見る"
 msgid "A file's menu"
 msgstr "ファイルのメニュー"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:67
+#: rust/crates/gtkhx-ui/src/tasks.rs:85
+msgid "%1$s of %2$s · Paused: the file has changed"
+msgstr "%1$s / %2$s · 一時停止中: ファイルが変更されました"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:87
 msgid "%1$s of %2$s · Paused"
 msgstr "%1$s / %2$s · 一時停止中"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:70
+#: rust/crates/gtkhx-ui/src/tasks.rs:90
 msgid "%1$s of %2$s"
 msgstr "%1$s / %2$s"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:79
+#: rust/crates/gtkhx-ui/src/tasks.rs:99
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
 msgstr "%1$s / %2$s · %3$s/s · 残り %4$d:%5$02d:%6$02d"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:84
+#: rust/crates/gtkhx-ui/src/tasks.rs:104
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr "%1$s / %2$s · %3$s/s · 残り %4$d:%5$02d"
 

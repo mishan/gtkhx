@@ -289,8 +289,8 @@ pub(crate) unsafe fn changed(htlc: *mut c_void, trans: u32) {
 }
 
 /// A request on `trans` was refused, or its reply cut short. The reason, if
-/// any, is `request-failed`'s to show, except a range's: its reader says,
-/// and true keeps it quiet.
+/// any, is `request-failed`'s to show, except a range's, whose reader says,
+/// and a resumed upload's that starts over: true keeps it quiet.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -305,7 +305,7 @@ pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>)
             hx_cfl_free(cfl);
         }
         Some(Asked::Download { htxf, .. }) => xfer::download_refused(htlc, htxf.0),
-        Some(Asked::Upload { htxf, .. }) => xfer::upload_refused(htlc, htxf.0),
+        Some(Asked::Upload { htxf, .. }) => return xfer::upload_refused(htlc, htxf.0),
         Some(Asked::Range(done)) => {
             done(Err(match reason {
                 Some(super::chat::CUT_SHORT) => None,

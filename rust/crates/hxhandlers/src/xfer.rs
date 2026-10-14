@@ -357,19 +357,53 @@ pub unsafe extern "C" fn xfer_tasks_update(htlc: *mut c_void) {
 
 // ---- pause and resume ----------------------------------------------------
 
-/// Where a paused download stands. Hotline has no pause: pausing ends the
-/// download's connection, keeping its row and what it wrote, and resuming
-/// asks for the rest anew from what is on disk: a file's from its partial
-/// file's size, a folder's file by file ([`hxnet::xfer::answer`]). The
-/// server's queue slot goes with the connection.
+/// Where a paused transfer stands. Hotline has no pause: pausing ends the
+/// transfer's connection, keeping its row and what it moved, and resuming
+/// asks anew for the rest: a download's from what is on disk, a file's from
+/// its partial file's size and a folder's file by file
+/// ([`hxnet::xfer::answer`]); an upload's from what the server says it has.
+/// The server's queue slot goes with the connection.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Pause {
     /// Its connection is closing; the worker hasn't finished.
     Winding,
-    /// Settled, its partial file `kept` bytes long.
-    Paused { kept: i64 },
+    /// Settled, its local file as `kept`: a download's partial file, an
+    /// upload's source.
+    Paused { kept: Disk },
     /// Resumed, the server's reply not yet in.
-    Asked { kept: i64 },
+    Asked { kept: Disk },
+    /// An upload asked for again from the start, as it couldn't resume; the
+    /// server's reply not yet in.
+    Restarted { kept: Disk },
+    /// An upload paused, its file changed since: resumed, it would splice two
+    /// files on the server, and asked for from the start, some servers would
+    /// add it to what they hold.
+    Changed { kept: Disk },
+}
+
+/// A local file as a pause left it: its data fork's size (-1 for none) and
+/// when it was last changed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Disk {
+    len: i64,
+    modified: Option<std::time::SystemTime>,
+}
+
+unsafe fn disk(path: *const c_char) -> Disk {
+    let bytes = std::ffi::CStr::from_ptr(path).to_bytes();
+    #[cfg(unix)]
+    let modified = {
+        use std::os::unix::ffi::OsStrExt;
+        std::fs::metadata(std::ffi::OsStr::from_bytes(bytes))
+    };
+    #[cfg(not(unix))]
+    let modified = std::str::from_utf8(bytes)
+        .map_err(std::io::Error::other)
+        .and_then(std::fs::metadata);
+    Disk {
+        len: hx_file_size(path),
+        modified: modified.and_then(|m| m.modified()).ok(),
+    }
 }
 
 thread_local! {
@@ -413,7 +447,10 @@ fn set_pause(htxf: *mut HtxfHandle, to: Option<Pause>) {
 
 /// Paused, as the row shows it: from the click until it is resumed.
 fn paused(htxf: *mut HtxfHandle) -> bool {
-    matches!(pause_of(htxf), Some(Pause::Winding | Pause::Paused { .. }))
+    matches!(
+        pause_of(htxf),
+        Some(Pause::Winding | Pause::Paused { .. } | Pause::Changed { .. })
+    )
 }
 
 unsafe fn emit_file_update(htxf: *mut HtxfHandle) {
@@ -425,16 +462,20 @@ unsafe fn emit_file_update(htxf: *mut HtxfHandle) {
 }
 
 /// `int xfer_can_pause(struct htxf_conn *htxf)` — whether `htxf` is a
-/// download, of a file or a folder, whose worker is running.
+/// download, of a file or a folder, or a file's upload, whose worker is
+/// running.
 ///
 /// # Safety
 /// `htxf` is a live handle. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_can_pause(htxf: *mut HtxfHandle) -> c_int {
-    ((*htxf).type_ == XFER_GET
-        && hx_htxf_opt_preview(htxf as *const c_void) == 0
-        && WORKING.with_borrow(|w| w.contains(&htxf))
-        && pause_of(htxf).is_none()) as c_int
+    let kind = if (*htxf).type_ == XFER_GET {
+        hx_htxf_opt_preview(htxf as *const c_void) == 0
+    } else {
+        // An upload resumes from offsets an RFLT says in 32 bits.
+        hx_htxf_opt_folder(htxf as *const c_void) == 0 && (*htxf).total_size <= u64::from(u32::MAX)
+    };
+    (kind && WORKING.with_borrow(|w| w.contains(&htxf)) && pause_of(htxf).is_none()) as c_int
 }
 
 /// `int xfer_can_start(struct htxf_conn *htxf)` — whether Start would send
@@ -452,36 +493,40 @@ pub unsafe extern "C" fn xfer_can_start(htxf: *mut HtxfHandle) -> c_int {
 }
 
 /// `int xfer_paused(struct htxf_conn *htxf)` — whether the row shows `htxf`
-/// paused.
+/// paused: 1, or 2 for an upload whose file has changed since.
 ///
 /// # Safety
 /// Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_paused(htxf: *mut HtxfHandle) -> c_int {
-    paused(htxf) as c_int
+    match pause_of(htxf) {
+        Some(Pause::Changed { .. }) => 2,
+        _ => paused(htxf) as c_int,
+    }
 }
 
 /// `guint64 xfer_resumed_bytes(struct htxf_conn *htxf)` — the bytes a
-/// download already had on disk when it was asked for, which its progress
-/// counts on top of what this connection brings.
+/// download already had on disk when it was asked for, or the server had of
+/// an upload, which its progress counts on top of what this connection
+/// moves.
 ///
 /// # Safety
 /// `htxf` is a live handle.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_resumed_bytes(htxf: *mut HtxfHandle) -> u64 {
     let h = &*htxf;
-    if h.type_ != XFER_GET {
-        0
-    } else if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+    if hx_htxf_opt_folder(htxf as *const c_void) == 0 {
+        h.data_pos + h.rsrc_pos
+    } else if h.type_ == XFER_GET {
         folder_held(htxf.cast())
     } else {
-        h.data_pos + h.rsrc_pos
+        0
     }
 }
 
-/// `void xfer_pause(struct htxf_conn *htxf)` — pause a running download:
+/// `void xfer_pause(struct htxf_conn *htxf)` — pause a running transfer:
 /// end its connection, and let the next queued transfer go once it has
-/// ended. The row and the partial file stay; [`xfer_go`] resumes it once the
+/// ended. The row and what it moved stay; [`xfer_go`] resumes it once the
 /// worker has finished.
 ///
 /// # Safety
@@ -522,9 +567,12 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
     (*htxf).abort = hxnet_htxf_abort_new() as *mut c_void;
     // A folder keeps a ledger of its files instead.
     let kept = if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
-        0
+        Disk {
+            len: 0,
+            modified: None,
+        }
     } else {
-        hx_file_size((*htxf).path.as_ptr())
+        disk((*htxf).path.as_ptr())
     };
     set_pause(htxf, Some(Pause::Paused { kept }));
     emit_file_update(htxf);
@@ -532,11 +580,14 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
     true
 }
 
-/// The server answered a download's request: it is no longer paused, nor
+/// The server answered a transfer's request: it is no longer paused, nor
 /// owed another try.
-pub(crate) fn download_answered(htxf: *mut c_void) {
+pub(crate) fn answered(htxf: *mut c_void) {
     let htxf = htxf as *mut HtxfHandle;
-    if matches!(pause_of(htxf), Some(Pause::Asked { .. })) {
+    if matches!(
+        pause_of(htxf),
+        Some(Pause::Asked { .. } | Pause::Restarted { .. })
+    ) {
         set_pause(htxf, None);
     }
     set_tries(htxf, None);
@@ -553,6 +604,50 @@ pub(crate) unsafe fn resume_refused(htxf: *mut c_void) -> bool {
         return false;
     };
     set_pause(htxf, Some(Pause::Paused { kept }));
+    emit_file_update(htxf);
+    start_next();
+    true
+}
+
+/// The server refused an upload asked for again after a pause. A refused
+/// resume (the server holds nothing of it, or takes no resume) is asked for
+/// again from the start, and the refusal kept quiet: `Some(true)`. One
+/// refused from the start too (a server holding a file by that name refuses
+/// it, as it would any upload) is paused again, and the server's reason
+/// shown: `Some(false)`. `None` for any other upload.
+///
+/// # Safety
+/// Main thread only; `htxf` is live if it is a resumed upload.
+pub(crate) unsafe fn upload_resume_refused(htxf: *mut c_void) -> Option<bool> {
+    let htxf = htxf as *mut HtxfHandle;
+    match pause_of(htxf)? {
+        Pause::Asked { kept } => {
+            set_pause(htxf, Some(Pause::Restarted { kept }));
+            xfer_go_put(htxf, None);
+            Some(true)
+        }
+        Pause::Restarted { kept } => {
+            set_pause(htxf, Some(Pause::Paused { kept }));
+            emit_file_update(htxf);
+            start_next();
+            Some(false)
+        }
+        _ => None,
+    }
+}
+
+/// The server holds more of a resumed upload than its file has: the file
+/// changed since it was paused. Paused again, saying so. False for an
+/// upload that wasn't resumed.
+///
+/// # Safety
+/// Main thread only; `htxf` is live if it is a resumed upload.
+pub(crate) unsafe fn upload_file_changed(htxf: *mut c_void) -> bool {
+    let htxf = htxf as *mut HtxfHandle;
+    let Some(Pause::Asked { kept } | Pause::Restarted { kept }) = pause_of(htxf) else {
+        return false;
+    };
+    set_pause(htxf, Some(Pause::Changed { kept }));
     emit_file_update(htxf);
     start_next();
     true
@@ -1349,7 +1444,7 @@ unsafe fn hldir_dir_bytes(hldir: &*mut u8, hldirlen: u16, has_dir: bool) -> Opti
 
 /// The download half of [`xfer_go`]: resume-vs-rename decision, then the
 /// FILE_NAME / DIR / (resume) RFLT chunk build + FILE_GET request.
-unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<i64>) {
+unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<Disk>) {
     let mut resuming = false;
 
     // Resume vs rename (skipped for previews, which don't write to disk):
@@ -1360,7 +1455,7 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<i64>) {
         let sz = hx_file_size((*htxf).path.as_ptr());
         if sz >= 0 {
             let local_data = sz as u32; // C's (guint32)sb.st_size truncation
-            let ours = kept == Some(sz) && sz <= i64::from(u32::MAX);
+            let ours = kept.map(|k| k.len) == Some(sz) && sz <= i64::from(u32::MAX);
             if ours && sz == 0 {
                 // Paused before any data came: start over into the same file.
             } else if ours
@@ -1421,11 +1516,13 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<i64>) {
 }
 
 /// The upload half of [`xfer_go`]: FILE_NAME / DIR / FILE_PREVIEW / HTXF_SIZE /
-/// (large) XFERSIZE64 chunk build + FILE_PUT request.
-unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
+/// (large) XFERSIZE64 chunk build + FILE_PUT request. `resume` is the whole
+/// upload's size when it resumes one the server holds part of.
+unsafe fn xfer_go_put(htxf: *mut HtxfHandle, resume: Option<u64>) {
+    let size = resume.unwrap_or((*htxf).total_size);
     // Legacy 32-bit HTXF_SIZE clamps to 0xFFFFFFFF; the 64-bit companion carries
     // the true size when CAP_LARGE_FILES was negotiated.
-    let size_host = (*htxf).total_size.min(0xFFFF_FFFF) as u32;
+    let size_host = size.min(0xFFFF_FFFF) as u32;
     let htlc = (*htxf).htlc;
     let large = hx_conn_has_cap(htlc.cast(), HTLC_CAP_LARGE_FILES) != glib::ffi::GFALSE;
     let has_dir = remotedir_present(htxf);
@@ -1440,12 +1537,10 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
             name: nm_wire,
             dir: hldir_dir_bytes(&hldir, hldirlen, has_dir),
             // FILE_PREVIEW marks an upload that resumes a file already on the
-            // server. Nothing keeps a record of what the server holds to answer
-            // that, so an upload never claims it; the server renames on a
-            // collision instead.
-            has_preview: false,
+            // server: only one this upload left there when it was paused.
+            has_preview: resume.is_some(),
             size: size_host,
-            size64: large.then_some((*htxf).total_size),
+            size64: large.then_some(size),
         };
         let mut chunks = [HxChunk::EMPTY; 5];
         let mut scratch = [0u8; 12];
@@ -1494,6 +1589,13 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
         Some(_) => return,
         None => None,
     };
+    if let Some(kept) = kept {
+        if (*htxf).type_ != XFER_GET && kept != disk((*htxf).path.as_ptr()) {
+            set_pause(htxf, Some(Pause::Changed { kept }));
+            emit_file_update(htxf);
+            return;
+        }
+    }
     // The whole file's size, which a resume's estimate is cut from until the
     // server says what is left.
     let full = kept.map(|_| (*htxf).total_size + xfer_resumed_bytes(htxf));
@@ -1515,7 +1617,11 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
             emit_file_update(htxf);
         }
     } else {
-        xfer_go_put(htxf);
+        xfer_go_put(htxf, full);
+        if let Some(full) = full {
+            (*htxf).total_size = full.max(1);
+            emit_file_update(htxf);
+        }
     }
 }
 
@@ -1687,6 +1793,7 @@ unsafe fn hx_htxf_opt_large(_htxf: *const c_void) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::send::files::XFER_PUT;
 
     // Dummy, never-dereferenced handles for the pure reorder/index logic (up /
     // down / num operate on pointer identity only — no field reads / externs).
@@ -1874,7 +1981,7 @@ mod tests {
             let b = new_download();
             xfer_remove_from_list(a);
             assert_eq!((*b).gone, 1);
-            download_answered(b.cast());
+            answered(b.cast());
             assert!(!queued_refused(b.cast()));
             // Nor one the user started.
             let c = new_download();
@@ -1965,7 +2072,7 @@ mod tests {
             assert_eq!((*a).gone, 1, "the queue moves on");
 
             xfer_go(r);
-            download_answered(r.cast());
+            answered(r.cast());
             assert!(!resume_refused(r.cast()));
             assert_eq!(xfer_paused(r), 0);
         }
@@ -2030,10 +2137,130 @@ mod tests {
             assert!(resume_refused(f.cast()));
             assert_eq!(xfer_paused(f), 1);
             xfer_go(f);
-            download_answered(f.cast());
+            answered(f.cast());
             assert_eq!(xfer_paused(f), 0);
             xfer_ready_write(f);
             assert_eq!(WORKERS.get(), workers + 1, "one worker, once answered");
+        }
+    }
+
+    /// An upload the server answered, its worker running partway.
+    unsafe fn running_upload() -> *mut HtxfHandle {
+        let u = xfer_new(
+            std::ptr::null_mut(),
+            c"/tmp/u".as_ptr(),
+            c"/up".as_ptr(),
+            c"u".as_ptr(),
+            1,
+            XFER_PUT,
+            0,
+            0,
+        );
+        ((*u).ref_, (*u).total_size) = (8, 5133);
+        hx_htxf_set_total_pos(u, 1200);
+        xfer_ready_write(u);
+        u
+    }
+
+    /// Whether the last request claims a resume, and the size it gives:
+    /// FILE_PREVIEW, when there, after the name and the folder, and the size
+    /// last, with no 64-bit size.
+    fn put_claims() -> (bool, u32) {
+        WRITTEN.with_borrow(|w| {
+            let req = w.last().unwrap();
+            let size = req.last().unwrap()[..].try_into().unwrap();
+            let claims = match req.len() {
+                3 => false,
+                4 => req[2] == [0, 1],
+                n => panic!("{n} chunks"),
+            };
+            (claims, u32::from_be_bytes(size))
+        })
+    }
+
+    #[test]
+    fn a_paused_upload_is_asked_to_resume_and_a_new_one_is_not() {
+        reset(&[]);
+        unsafe {
+            let u = running_upload();
+            assert_eq!(put_claims(), (false, 1), "a new upload, as before");
+            assert_eq!(xfer_can_pause(u), 1);
+            pause_settled(u, 0);
+            assert_eq!(xfer_paused(u), 1);
+            assert_eq!(xfer_can_start(u), 1);
+
+            xfer_go(u);
+            assert_eq!(put_claims(), (true, 5133), "the whole upload's size");
+            assert_eq!(xfer_paused(u), 0);
+            assert_eq!((*u).total_size, 5133);
+            answered(u.cast());
+            assert_eq!(upload_resume_refused(u.cast()), None, "answered");
+        }
+    }
+
+    #[test]
+    fn a_refused_upload_resume_starts_over_and_then_waits_paused() {
+        reset(&[]);
+        unsafe {
+            let u = running_upload();
+            pause_settled(u, 0);
+            xfer_go(u);
+            let asked = requests();
+            assert_eq!(upload_resume_refused(u.cast()), Some(true), "quietly");
+            assert_eq!(requests(), asked + 1);
+            assert_eq!(put_claims(), (false, 5133), "a new upload, from the start");
+            assert_eq!(xfer_paused(u), 0);
+            let workers = WORKERS.get();
+            xfer_ready_write(u);
+            assert_eq!(WORKERS.get(), workers, "not on the old reference");
+
+            assert_eq!(upload_resume_refused(u.cast()), Some(false), "said why");
+            assert_eq!(xfer_num(u), 0, "kept in the list");
+            assert_eq!(xfer_paused(u), 1);
+            assert_eq!(xfer_can_start(u), 1);
+        }
+    }
+
+    #[test]
+    fn an_upload_whose_file_changed_while_paused_stays_paused_saying_so() {
+        reset(&[]);
+        unsafe {
+            let u = running_upload();
+            pause_settled(u, 4000);
+            LOCAL_SIZE.set(4100);
+            let asked = requests();
+            xfer_go(u);
+            assert_eq!(requests(), asked, "neither resumed nor started over");
+            assert_eq!(xfer_paused(u), 2);
+            assert_eq!(xfer_can_start(u), 0);
+
+            // Or the server holds more than the file has.
+            let v = running_upload();
+            pause_settled(v, 4000);
+            xfer_go(v);
+            assert!(upload_file_changed(v.cast()));
+            assert_eq!(xfer_paused(v), 2);
+            assert!(!upload_file_changed(v.cast()), "only a resumed upload");
+        }
+    }
+
+    #[test]
+    fn only_a_file_upload_an_rflt_can_place_pauses() {
+        reset(&[]);
+        unsafe {
+            let u = running_upload();
+            (*u).total_size = 5 << 30;
+            assert_eq!(xfer_can_pause(u), 0, "past 4 GiB");
+            let f = xfer_new_folder(
+                std::ptr::null_mut(),
+                c"/tmp/d".as_ptr(),
+                c"/up".as_ptr(),
+                c"d".as_ptr(),
+                1,
+                XFER_PUT,
+            );
+            xfer_ready_write(f);
+            assert_eq!(xfer_can_pause(f), 0, "a folder's upload");
         }
     }
 

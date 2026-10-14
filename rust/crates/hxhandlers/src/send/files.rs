@@ -29,7 +29,7 @@ use crate::recv::files::{asked, Asked};
 const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
 /// `XFER_GET` / `XFER_PUT` (protocol.h).
 const XFER_GET: u16 = 0;
-const XFER_PUT: u16 = 1;
+pub(crate) const XFER_PUT: u16 = 1;
 /// `MAXPATHLEN` (compat.h) — the fixed path fields on the transfer handle.
 const MAXPATHLEN: usize = 4095;
 

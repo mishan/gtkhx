@@ -125,7 +125,7 @@ fn a_refused_transfer_is_deleted() {
         test_env::reset();
         unsafe {
             if upload {
-                upload_refused(std::ptr::null_mut(), fake_htxf())
+                assert!(!upload_refused(std::ptr::null_mut(), fake_htxf()));
             } else {
                 download_refused(std::ptr::null_mut(), fake_htxf())
             }
@@ -174,6 +174,26 @@ fn a_file_upload_is_sized_from_the_disk_and_where_it_resumes() {
     // 133 + 16 (rsrc remaining) + 10 (comment) + 900 (data remaining) + 30 (rsrc remaining)
     assert_eq!(h.total_size, 133 + 16 + 10 + 900 + 30);
     assert!(!test_env::STARTED.with(|c| c.get()));
+}
+
+/// A server that says it holds more than the file has is refused, not sent
+/// to.
+#[test]
+fn an_upload_resumed_past_the_file_is_not_sent() {
+    for (data_from, rsrc_from) in [(1001, 0), (0, 51)] {
+        test_env::reset();
+        test_env::STAT_SIZE.with(|c| c.set(1000));
+        test_env::RSRC_LEN.with(|c| c.set(50));
+        let t = Transfer {
+            data_from,
+            rsrc_from,
+            ..transfer(11, 0, 0)
+        };
+        unsafe { upload_ready(std::ptr::null_mut(), fake_htxf(), false, &t) };
+        assert_eq!(htxf().ref_, 0);
+        assert!(!test_env::STARTED.with(|c| c.get()));
+        assert!(test_env::XFER_DELETED.with(|c| c.get()));
+    }
 }
 
 #[test]
