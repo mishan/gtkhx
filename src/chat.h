@@ -61,8 +61,8 @@ extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
  * `cid` is the conversation being rendered into, and is what a nick
  * lookup resolves against — a private chat has its own membership, so
  * assuming the public room here misidentifies speakers in pchats. */
-extern void xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
-                        const char *tag, gint16 tag_color);
+extern void xprintline (session *sess, GtkWidget *text, guint32 cid, char *chat,
+                        size_t len, const char *tag, gint16 tag_color);
 
 /* chat-signal renderer. Takes a pre-parsed HxChatEvent
  * (sender/body slices + is_info/is_self flags from
@@ -87,11 +87,13 @@ extern void output_chat_from_event (struct htlc_conn *htlc,
 extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                        GPtrArray *entries, gboolean has_more);
 
-/* A chat output, configured for GtkHx (gtkhx-ui's chat_view.rs): the
- * chat preferences, the hotline:// scheme, the avatar resolver, the URL
- * menu. `palette` holds ROTULUS_PAL_COLS colors. Returned floating. */
-extern GtkWidget *gtkhx_chat_view_new (const GdkRGBA *palette,
-                                       const char *font);
+/* A chat output for connection `conn`, configured for GtkHx (gtkhx-ui's
+ * chat_view.rs): the chat preferences, the hotline:// scheme, the avatar
+ * resolver, the URL menu. `palette` holds ROTULUS_PAL_COLS colors. Returned
+ * floating. gtkhx_chat_view_session is the session it belongs to. */
+extern GtkWidget *gtkhx_chat_view_new (const GdkRGBA *palette, const char *font,
+                                       guint16 conn);
+extern session *gtkhx_chat_view_session (GtkWidget *view);
 /* Re-apply the chat preferences to a view gtkhx_chat_view_new built. */
 extern void gtkhx_chat_view_configure (GtkWidget *view);
 

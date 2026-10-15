@@ -449,11 +449,8 @@ changed_theme_name (void)
  * PREF_HOOK_CONN    pushes the value onto a connection, which means onto the
  *                   wire. Takes the connection explicitly so the "which one?"
  *                   question is asked once, at the dispatch site, instead of
- *                   eight times inside the bodies. Today the answer is always
- *                   the focused connection and there is only one; when there
- *                   is more than one, this is the seam that has to change, and
- *                   the type makes it findable rather than a grep for
- *                   hx_active_session.
+ *                   eight times inside the bodies. The answer is every
+ *                   connection: see pref_hook_run.
  */
 enum pref_hook_kind {
     PREF_HOOK_VIEW,
@@ -538,47 +535,27 @@ pref_hook_for (const char *name)
     return NULL;
 }
 
-/* Run one hook against the session the user is looking at.
+/* Run one hook: once if it is global, else against every connection.
  *
- * The only place that decides which session and which connection a preference
- * change applies to. At one connection `hx_active_session` and "the session
- * that owns this connection" coincide; the distinction is in session.h and
- * matters to multi-connection, which will have to give this function a
- * connection rather than let it pick. */
+ * The only place that decides which sessions and connections a preference
+ * change applies to. A preference is the same for every connection, so a
+ * view hook repaints each one's widgets and a connection hook tells each
+ * server, rather than only the one in focus. The nickname and icon hooks pass
+ * by a connection whose field is its own (changed_nick, changed_icon). */
 static void
 pref_hook_run (const struct pref_hook *hook)
 {
-    session *sess = hx_active_session ();
-
-    /* A global hook takes nothing and so is always runnable. The other two
-     * both need a session and neither tolerates a NULL one — the view hooks
-     * reach the session's widgets, the connection hooks its htlc — so the
-     * check belongs here, once, rather than in whichever flavour was written
-     * most recently.
-     *
-     * The session is built rather than statically present now, so this can be
-     * NULL before startup has made one. `fe_init` builds it ahead of
-     * `prefs_read` for exactly this reason, which is why it should never
-     * fire — but "should never" is worth saying out loud rather than
-     * discovering as a NULL deref inside whichever hook the table happened to
-     * reach first. */
-    if (hook->kind != PREF_HOOK_GLOBAL && sess == NULL) {
-        g_critical ("preference '%s' applied before a session exists — "
-                    "startup has been reordered ahead of hx_session_new",
-                    hook->name);
+    if (hook->kind == PREF_HOOK_GLOBAL) {
+        hook->fn.global ();
         return;
     }
-
-    switch (hook->kind) {
-    case PREF_HOOK_VIEW:
-        hook->fn.view (sess);
-        break;
-    case PREF_HOOK_GLOBAL:
-        hook->fn.global ();
-        break;
-    case PREF_HOOK_CONN:
-        hook->fn.conn (sess->htlc);
-        break;
+    for (guint i = 0; i < hx_session_count (); i++) {
+        session *sess = hx_session_at (i);
+        if (hook->kind == PREF_HOOK_VIEW) {
+            hook->fn.view (sess);
+        } else {
+            hook->fn.conn (sess->htlc);
+        }
     }
 }
 

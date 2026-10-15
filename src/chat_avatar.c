@@ -58,16 +58,17 @@ hx_chat_avatar_for_key (GtkWidget *anchor, guint64 key, gpointer data)
     struct hx_member_info info;
     struct chat *conv;
     guint16 uid = (guint16)key;
+    session *sess = anchor ? gtkhx_chat_view_session (anchor) : NULL;
     (void)data;
 
-    if (uid == 0 || key > G_MAXUINT16 || !anchor) {
+    if (uid == 0 || key > G_MAXUINT16 || !sess) {
         return NULL;
     }
 
     /* Same precedence as users_cell.c: the GIF avatar wins. Re-fetched
      * every call because it advances on a shared frame timer, so a
      * cached texture would freeze the animation. */
-    avatar = gtkhx_avatar_get (hx_active_session ()->htlc, uid);
+    avatar = gtkhx_avatar_get (sess->htlc, uid);
     if (avatar) {
         return GDK_PAINTABLE (avatar);
     }
@@ -77,7 +78,7 @@ hx_chat_avatar_for_key (GtkWidget *anchor, guint64 key, gpointer data)
      * one person. Public chat holds every connected user, which is where
      * a chat speaker's icon lives regardless of which room they spoke
      * in. */
-    conv = chat_with_cid (hx_active_session (), 0);
+    conv = chat_with_cid (sess, 0);
     if (!conv) {
         return NULL;
     }

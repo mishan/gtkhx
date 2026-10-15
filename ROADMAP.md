@@ -59,18 +59,24 @@ Several simultaneous connections shipped in 1.3.0, under the tab-switched layout
 Settings → Connections, and an arbiter deciding which connection owns the microphone.
 The transport, the signals and the connection-scoped keys all carry the connection now.
 
-What is left is making the rest of the UI stop asking "which connection has focus?" when
-it means "which connection is this for?":
+*Done:* the UI no longer asks "which connection has focus?" when it means "which
+connection is this for?".
 
-- **Readers that still route through `hx_active_session()`.** The chat input and its
-  commands, the user editor, file info, the voice panel and the users list's actions reach
-  their own connection, and a connection's editor and File Info windows close with it.
-  Left: the chat view's renderers, which test mentions and look up speakers and avatars
-  on the focused connection.
-- ~~**`thread_local` singletons in `gtkhx-ui`**~~ — done. The flat news view, the
-  banner's fetches and the create-post window are each keyed by connection; the
-  create-post window posts to the board it was opened from and closes with its tab.
+- **Readers.** The chat input and its commands, the user editor, File Info, the
+  create-post window, the users list's actions, and the chat view — its mention test,
+  speaker lookup, avatars and click handlers — reach their own connection. Preference
+  changes apply to every connection, not only the focused one, except that a global
+  nickname or icon change passes by a connection whose nickname or icon is its own (a
+  Connections override, `/nick` or `/icon`), field by field. A connection's editors,
+  File Info and Post News windows close with its tab. The voice panel already followed
+  its own connection and the arbiter, and needed nothing.
+- **`thread_local` singletons in `gtkhx-ui`.** The flat news view, the banner's fetches
+  and the create-post window are each keyed by connection.
 
+What still asks for the focus does so on purpose: the toolbar, the menus, the tray, the
+tracker's connect and the chat subject entry act on the visible tab, and the chrome
+(status bar, titles, banner row) and the Transfers panel's show-on-first-transfer test
+follow it.
 Coexisting per-connection panels (Model B) remain undecided. Full survey:
 [docs/multi-connection.md](docs/multi-connection.md).
 

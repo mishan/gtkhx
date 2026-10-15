@@ -429,7 +429,8 @@ create_msg (session *sess, guint16 _uid, char *name)
      * sub-widgets (xtext + input + ctrl). */
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        msg->outputbuf = gtkhx_chat_view_new (colors, fontname);
+        msg->outputbuf = gtkhx_chat_view_new (colors, fontname,
+                                              hx_conn_serial (sess->htlc));
         g_free (fontname);
     }
 
