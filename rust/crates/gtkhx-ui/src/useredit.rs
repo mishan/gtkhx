@@ -437,12 +437,13 @@ unsafe fn open_editor(conn: Bound, login: &str, is_new: bool) {
         id,
     });
     EDITORS.with_borrow_mut(|m| m.insert(id, state.clone()));
-    // Out of the map when it closes: the map's Rc holds the window, so
-    // nothing else lets go of it.
+    // Out of the map when it closes, by hand or with its connection: the
+    // map's Rc holds the window, so nothing else lets go of it.
     window.connect_close_request(move |_| {
         EDITORS.with_borrow_mut(|m| m.remove(&id));
         glib::Propagation::Proceed
     });
+    dock::close_with(conn.conn(), &window);
 
     for (bitno, sw) in &state.switches {
         let bitno = *bitno;

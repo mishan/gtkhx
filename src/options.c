@@ -169,92 +169,25 @@ changed_chat_view (void)
     }
 }
 
-/* The identity a connection should present, resolved and copied.
- *
- * The nickname and icon preferences used to *be* the connection's wire name
- * buffer and icon field — a startup binder patched their two table slots with
- * raw interior pointers, so a write to either went straight onto the wire
- * struct. They are ordinary settings with their own storage now, and this is
- * the one-way copy that replaces the aliasing.
- *
- * Resolution is `override ?? global ?? startup`, three deep because each level
- * answers a different question:
- *
- *   override  what this connection is configured to show, if anything
- *   global    what everything unspecialised shows
- *   startup   what a profile that has never set a nickname shows: $USER,
- *             stamped onto the connection before the settings file is read.
- *             Kept here so a reconnect can restore it — otherwise a /nick
- *             would survive one, which is exactly what this is meant to undo.
- *
- * Copied, never aliased: `/nick` changes the running connection and nothing
- * else, and the next connect puts the configured identity back "as if the
- * command had never been typed". */
-static char *pending_nick;
-static int pending_icon = -1;
-static char *startup_nick;
-
-void
-hx_identity_set_startup_default (const char *nick)
-{
-    g_free (startup_nick);
-    startup_nick = g_strdup (nick != NULL ? nick : "");
-}
-
-void
-hx_identity_set_pending_override (const char *nick, int icon)
-{
-    g_free (pending_nick);
-    pending_nick = (nick != NULL && *nick) ? g_strdup (nick) : NULL;
-    /* Negative means "no override". Zero cannot: it is a real, blank icon
-     * that someone can legitimately choose. */
-    pending_icon = icon;
-}
-
-void
-hx_identity_apply (struct htlc_conn *htlc)
-{
-    char *global_nick = gtkhx_prefs_get_string (CFG_NICK);
-    const char *nick = pending_nick;
-
-    if (nick == NULL) {
-        nick = *global_nick ? global_nick : startup_nick;
-    }
-    if (nick != NULL && *nick) {
-        hx_conn_set_name (htlc, nick);
-    }
-    g_free (global_nick);
-
-    /* Set unconditionally. This used to skip a zero, treating it as "nothing
-     * stored" — but zero is a real (blank) icon and the Settings spin row
-     * offers it, so choosing it silently did nothing. */
-    hx_conn_set_icon (htlc, (guint16)(pending_icon >= 0
-                                          ? pending_icon
-                                          : gtkhx_prefs_get_int (CFG_ICON)));
-
-    /* One connect, one override. Anything that wants it again says so again,
-     * so a bookmark's nickname can't leak onto a later /server or a tracker
-     * double-click. */
-    g_clear_pointer (&pending_nick, g_free);
-    pending_icon = -1;
-}
-
-/* The load-time and Settings-edit path, which has no override in play. */
-static void
-identity_copy_to_conn (struct htlc_conn *htlc)
-{
-    hx_identity_apply (htlc);
-}
-
 /* The Settings nick/icon controls used to be inert — changing them updated the
  * session's htlc but never told the server, so the user list still showed your
  * old nick/icon until reconnect. The send is a no-op while the connection has
  * no socket, so this is safe to call before connect too. */
 static void
-changed_nickoricon (struct htlc_conn *htlc)
+changed_nick (struct htlc_conn *htlc)
 {
-    identity_copy_to_conn (htlc);
-    hx_change_name_icon (htlc);
+    /* A nickname of the connection's own is kept, and nothing is sent. */
+    if (hx_identity_apply_global (htlc, HX_IDENTITY_NICK)) {
+        hx_change_name_icon (htlc);
+    }
+}
+
+static void
+changed_icon (struct htlc_conn *htlc)
+{
+    if (hx_identity_apply_global (htlc, HX_IDENTITY_ICON)) {
+        hx_change_name_icon (htlc);
+    }
 }
 
 /* Colored-Nicknames extension — mirror the pref onto the
@@ -568,9 +501,9 @@ static const struct pref_hook pref_hooks[] = {
     PREF_GLOBAL (CFG_DOWNLOAD, changed_downloadpath),
     PREF_GLOBAL (CFG_EMOJI_SHORTCODES, changed_emoji_shortcodes),
     PREF_VIEW (CFG_FONT, changed_font),
-    PREF_CONN (CFG_ICON, changed_nickoricon),
+    PREF_CONN (CFG_ICON, changed_icon),
     PREF_GLOBAL (CFG_MARKDOWN, changed_chat_view),
-    PREF_CONN (CFG_NICK, changed_nickoricon),
+    PREF_CONN (CFG_NICK, changed_nick),
     PREF_CONN (CFG_NICK_COLOR, changed_nick_color),
     PREF_GLOBAL (CFG_SINGLE_CLICK_LINKS, changed_chat_view),
     PREF_GLOBAL (CFG_STAMP_FORMAT, changed_chat_view),
@@ -819,7 +752,8 @@ prefs_read (void)
      * replaces the old aliasing, and it is why /nick no longer rewrites the
      * saved global nickname: /nick writes the connection, which nothing reads
      * back. */
-    identity_copy_to_conn (hx_active_session ()->htlc);
+    hx_identity_apply_global (hx_active_session ()->htlc,
+                              HX_IDENTITY_NICK | HX_IDENTITY_ICON);
 
     /* Apply every hook, not just the ones whose stored value differs from a
      * compiled-in default. The old loader did the latter by accident — the

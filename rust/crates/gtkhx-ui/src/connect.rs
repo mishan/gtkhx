@@ -28,11 +28,13 @@ use crate::{cs, cstr};
 use gtk4 as gtk;
 use libadwaita as adw;
 
+use crate::dock::{self, ConnKey};
 use adw::prelude::*;
 use glib::translate::IntoGlibPtr;
 use gtk::gio;
 use gtk::glib;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_char;
 use std::os::raw::{c_int, c_void};
 
@@ -101,7 +103,7 @@ struct ConnectUi {
     tls: Option<adw::SwitchRow>,
 }
 
-/// Parameters of the most-recent connect, surviving past hx_htlc_close.
+/// Parameters of a connection's last connect, surviving past hx_htlc_close.
 /// `compress` is a dropdown index (0 = NONE); `cipher` is a stable
 /// bookmark byte — matching what connect_with_args takes, so the reconnect
 /// / dialog-preload round-trip is lossless.
@@ -119,7 +121,70 @@ struct LastConn {
 
 thread_local! {
     static UI: RefCell<ConnectUi> = RefCell::new(ConnectUi::default());
-    static LAST_CONN: RefCell<Option<LastConn>> = const { RefCell::new(None) };
+    /// Per connection, so Reconnect puts back the server *that* tab lost
+    /// rather than whichever one some other tab connected to since.
+    static LAST_CONN: RefCell<HashMap<ConnKey, LastConn>> = RefCell::new(HashMap::new());
+    /// The most recent connect anywhere, which the dialog offers. Apart from
+    /// the map, so closing that connection's tab doesn't take it away.
+    static LAST: RefCell<Option<LastConn>> = const { RefCell::new(None) };
+}
+
+fn note(key: ConnKey, params: LastConn) {
+    LAST.replace(Some(params.clone()));
+    LAST_CONN.with_borrow_mut(|lc| lc.insert(key, params));
+}
+
+/// Remember a tracker connect for Reconnect. It went to the focused tab: a
+/// reused one, or a new one, which adding selects.
+pub(crate) fn note_tracker_connect(server: &str, port: u16, secure: bool, cipher: u8, tls: bool) {
+    let params = LastConn {
+        server: server.to_owned(),
+        port,
+        login: String::new(),
+        pass: String::new(),
+        secure: secure.into(),
+        compress: 0,
+        cipher,
+        tls: tls.into(),
+    };
+    note(dock::active_key(), params);
+}
+
+/// `void connect_note_server (struct htlc_conn *htlc, const char *server,
+/// guint16 port, const char *login, const char *pass)` — remember a
+/// `/server` or `--server` connect for Reconnect, as the dialog's are
+/// remembered. Plain Hotline: neither has HOPE or TLS options.
+///
+/// # Safety
+/// `htlc` is a live connection; the strings are NULL or C strings.
+#[no_mangle]
+pub unsafe extern "C" fn connect_note_server(
+    htlc: *mut c_void,
+    server: *const c_char,
+    port: u16,
+    login: *const c_char,
+    pass: *const c_char,
+) {
+    let params = LastConn {
+        server: cstr(server),
+        port,
+        login: cstr(login),
+        pass: cstr(pass),
+        secure: 0,
+        compress: 0,
+        cipher: 0,
+        tls: 0,
+    };
+    note(dock::conn_key(htlc), params);
+}
+
+fn last_conn(key: ConnKey) -> Option<LastConn> {
+    LAST_CONN.with_borrow(|l| l.get(&key).cloned())
+}
+
+/// Forget what `sess` last connected to, as its tab closes.
+pub(crate) fn forget_session(sess: *mut c_void) {
+    LAST_CONN.with_borrow_mut(|l| l.remove(&dock::key_for_session(sess)));
 }
 
 /// Snapshot the live widgets (short borrow) so callers can operate on them
@@ -274,19 +339,6 @@ fn connect_with_args(
         .map(|c| c.as_ptr())
         .unwrap_or(std::ptr::null());
 
-    LAST_CONN.with_borrow_mut(|lc| {
-        *lc = Some(LastConn {
-            server: server.to_owned(),
-            port,
-            login: login.to_owned(),
-            pass: pass.to_owned(),
-            secure,
-            compress,
-            cipher,
-            tls,
-        });
-    });
-
     arm_identity(identity, server, port);
 
     // Connecting while already connected opens a *new* connection rather than
@@ -310,6 +362,20 @@ fn connect_with_args(
         Target::NewTabIfBusy => sess,
     };
 
+    note(
+        dock::key_for_session(sess),
+        LastConn {
+            server: server.to_owned(),
+            port,
+            login: login.to_owned(),
+            pass: pass.to_owned(),
+            secure,
+            compress,
+            cipher,
+            tls,
+        },
+    );
+
     let cserver = cs(server);
     let clogin = cs(login);
     let cpass = cs(pass);
@@ -332,10 +398,11 @@ fn connect_with_args(
 /// opening the Connect dialog if nothing has connected yet this run.
 #[no_mangle]
 pub extern "C" fn connect_reconnect_last() {
-    let lc = LAST_CONN.with_borrow(|l| l.clone());
-    match lc {
+    // The banner shows the focused connection's state, so it is the focused
+    // connection that dropped.
+    let sess = unsafe { cffi::hx_active_session() };
+    match last_conn(dock::key_for_session(sess)) {
         Some(lc) if !lc.server.is_empty() => {
-            let sess = unsafe { cffi::hx_active_session() };
             connect_with_args(
                 sess,
                 &lc.server,
@@ -783,7 +850,7 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
     // Pre-populate from the last connection this run (reconnect-after-
     // disconnect UX). Route through set_the_entries_impl so the legacy
     // normalization applies.
-    if let Some(lc) = LAST_CONN.with_borrow(|l| l.clone()) {
+    if let Some(lc) = LAST.with_borrow(Clone::clone) {
         if !lc.server.is_empty() {
             set_the_entries_impl(
                 &lc.server,

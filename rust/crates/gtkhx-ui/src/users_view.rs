@@ -501,9 +501,11 @@ impl HxUserListView {
         if uid == 0 {
             return;
         }
-        // The user list the click came from belongs to the focused session,
-        // so that is the session the PM window belongs to as well.
-        let sess = unsafe { crate::ffi::hx_active_session() };
+        // The PM window belongs to the session this list shows.
+        let sess = self.session();
+        if sess.is_null() {
+            return;
+        }
         if unsafe { msgwin_with_uid(sess, uid) }.is_null() {
             // The row's cached name; create_msgwin copies it, so a borrowed
             // pointer valid for the call is enough (no hx_user* deref).

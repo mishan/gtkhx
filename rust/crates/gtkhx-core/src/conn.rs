@@ -25,6 +25,11 @@ const FLAG_LOGGED_IN: u32 = 1 << 0;
 const FLAG_POST_LOGIN_FETCHED: u32 = 1 << 1;
 /// A nick color has gone out on this connection, so clearing it must say so.
 const FLAG_NICK_COLOR_SENT: u32 = 1 << 2;
+/// The connection shows a nickname of its own (a bookmark's override, or
+/// `/nick`), so a change to the global one passes it by.
+const FLAG_OWN_NICK: u32 = 1 << 3;
+/// The same for the icon (a bookmark's override, or `/icon`).
+const FLAG_OWN_ICON: u32 = 1 << 4;
 
 /// `#[repr(C)]` mirror of `struct htlc_conn` (was `protocol.h`). Field order,
 /// types, and sizes match the C definition exactly; the layout is pinned by the
@@ -515,6 +520,8 @@ flag!(
     hx_conn_set_nick_color_sent,
     FLAG_NICK_COLOR_SENT
 );
+flag!(hx_conn_own_nick, hx_conn_set_own_nick, FLAG_OWN_NICK);
+flag!(hx_conn_own_icon, hx_conn_set_own_icon, FLAG_OWN_ICON);
 
 // ---- Access bitmap --------------------------------------------------------
 

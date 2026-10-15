@@ -9,10 +9,9 @@
 //! Everything the dialog needs is native Rust now: the two Hotline date stamps
 //! format through [`crate::hl_date::format_wire`] (no raw-bytes → C round-trip),
 //! and the Save button sends FILE_SETINFO through `hxhandlers::send::files`.
-//! What stays on the C ABI is leaf glue: the active-connection accessor and
-//! `human_size`.
+//! What stays on the C ABI is leaf glue: `human_size`.
 
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{c_char, c_void, CStr};
 
 use adw::prelude::*;
 use gtk::glib;
@@ -23,10 +22,6 @@ use crate::ffi as cffi;
 use crate::tr::tr;
 
 extern "C" {
-    // session_registry.c — the connection a key names, if it is still open.
-    fn hx_session_with_serial(serial: u16) -> *mut c_void;
-    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
-    fn hx_conn_fd(htlc: *const c_void) -> c_int;
     // human_readable.c — fileutils-vintage byte-count string into `sizstr`,
     // returning a pointer into it (may be right-justified).
     fn human_size(sizstr: *mut c_char, size: u64) -> *mut c_char;
@@ -75,22 +70,16 @@ fn info_row(title: &str, value: &str) -> adw::ActionRow {
 /// `path` is the file's full path, as the server knows it; `rename` the name
 /// the user typed, when it changed; `comments` the dialog's comment.
 unsafe fn save_file_info(
-    conn: crate::dock::ConnKey,
+    conn: crate::dock::Bound,
     path: &[u8],
     rename: Option<&str>,
     comments: &str,
 ) {
-    // To the server the file is on, not the one in focus. The dialog can
-    // outlive that connection (left open across a disconnect or a closed tab).
-    let sess = hx_session_with_serial(conn);
-    if sess.is_null() {
-        return;
+    // To the server the file is on, not the one in focus — and not to the
+    // server its tab may have connected to since.
+    if let Some(htlc) = crate::dock::live_htlc(conn) {
+        hxhandlers::send::files::set_info(htlc, path, rename, comments);
     }
-    let htlc = gtkhx_session_htlc(sess);
-    if htlc.is_null() || hx_conn_fd(htlc) == 0 {
-        return;
-    }
-    hxhandlers::send::files::set_info(htlc, path, rename, comments);
 }
 
 /// `void output_file_info(struct htlc_conn *htlc, char *path, char *name,
@@ -115,7 +104,7 @@ pub unsafe extern "C" fn output_file_info(
     size: u64,
 ) {
     crate::ensure_gtk_init();
-    let conn = crate::dock::conn_key(htlc);
+    let conn = crate::dock::bind(crate::dock::conn_key(htlc));
 
     // `path` ownership transfers here (the signal passes it as a raw pointer and
     // the receive handler doesn't free it on success). Copy it for the dialog's
@@ -203,5 +192,6 @@ pub unsafe extern "C" fn output_file_info(
     // Escape closes it unsaved; present keeps the mapped toplevel alive after
     // the Rust wrappers drop here.
     cffi::init_keyaccel_dialog(window.as_ptr() as *mut cffi::GtkWidget);
+    crate::dock::close_with(conn.conn(), &window);
     window.present();
 }

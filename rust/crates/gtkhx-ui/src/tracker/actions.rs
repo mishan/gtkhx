@@ -107,6 +107,7 @@ pub(super) fn on_section_activate(url: &str, pos: u32) {
             listed.as_ptr(),
         )
     };
+    crate::connect::note_tracker_connect(&row.address(), port, secure, cipher_byte, tls);
 }
 
 // ---------------------------------------------------------------------

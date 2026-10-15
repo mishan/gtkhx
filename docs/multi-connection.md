@@ -247,12 +247,18 @@ site-by-site:
   to whatever is focused. What remains is the tab strip's bare-uid key: the
   close dispatcher receives a uid and nothing else, so it still has to ask the
   active session.
-- **The Rust UI reaches for a connection through C shims** —
-  `gtkhx_active_htlc()` and friends in `gtkhx_ui_bridge.c` and
-  `tracker_bridge.c`. Consumers are the user editor, chat input, file info,
-  the voice panel and the create-post window. The
-  correct pattern is in the same file: `gtkhx_htlc_chat_window(htlc)` routes by
-  connection and its comment says why.
+- **The Rust UI reaches for a connection through C shims** — mostly fixed.
+  The chat input sends on the session it was attached to, and `hx_command`
+  takes that connection rather than asking for the focused one. The user
+  editor, File Info and a chat invitation hold a `dock::Bound` — the
+  connection *and* which connect of it — so a window left open across a
+  reconnect to another server goes quiet rather than acting there, and
+  `dock::close_with` closes the editor and File Info windows with their tab.
+  The avatar in Settings goes to every connection, as the saved one does at
+  login, since no connection has one of its own. Reconnect replays what the
+  dropped tab last connected to — the dialog, a bookmark, a link, a tracker,
+  `/server` or `--server` — not the last connect anywhere.
+  `gtkhx_active_htlc()` is left only in the create-post window.
 
 ### UI singletons that hold per-connection state
 
@@ -354,6 +360,14 @@ The identity model follows directly:
   that clears the override and returns to inheriting — without one the
   decision is one-way, and for the icon there would have been no way back at
   all, since 0 is a real (blank) icon and so cannot double as "unset".
+
+**Built** (`gtkhx-ui`'s `identity.rs`). Each connection records, per field,
+whether its nickname and its icon are its own. A connect sets each from the
+override it resolved — a nickname-only entry owns its nickname and follows the
+global icon — and `/nick` and `/icon` set theirs; a connect without an
+override clears both. A Settings change to the global nickname or icon reaches
+only the connections that follow that field. The avatar has no per-connection
+override, so it goes to every connection.
 
 Note the deliberate choice between two readings of "inherit". *Copy on create*
 snapshots the global into each new connection; *live fallback* stores nothing

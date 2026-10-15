@@ -41,6 +41,7 @@
 #include "users.h"
 #include "msg.h"
 #include "commands.h"
+#include "connect.h"  /* connect_note_server */
 #include "cmd_exec.h" /* cmd_exec — /exec handler (Unix-only module) */
 
 void
@@ -105,6 +106,7 @@ COMMAND (nick)
         return;
     }
     hx_conn_set_name (htlc, argv[1]);
+    hx_conn_set_own_nick (htlc, TRUE);
     hx_change_name_icon (htlc);
 }
 
@@ -115,6 +117,7 @@ COMMAND (icon)
         return;
     }
     hx_conn_set_icon (htlc, atou16 (argv[1]));
+    hx_conn_set_own_icon (htlc, TRUE);
     hx_change_name_icon (htlc);
 }
 
@@ -178,6 +181,7 @@ COMMAND (server)
     /* commands.c::cmd_connect drives connect from the in-app /connect
      * shell command — Phase 4 will add a /tls flag; for now this
      * inherits the GTKHX_TLS env var like the rest of the callers. */
+    connect_note_server (htlc, serverstr, port, login, pass);
     hx_connect (htlc, serverstr, port, login, pass, 0, /*tls=*/0);
 }
 
@@ -458,7 +462,7 @@ gen_command_hash (void)
     } while (0)
 
 void
-hx_command (char *str, guint32 cid)
+hx_command (struct htlc_conn *htlc, char *str, guint32 cid)
 {
     int i;
     struct hx_command *cmd = 0;
@@ -509,7 +513,7 @@ hx_command (char *str, guint32 cid)
             }
             argv[argc] = 0;
 
-            cmd->fun (argc, argv, str, hx_active_session ()->htlc, cid);
+            cmd->fun (argc, argv, str, htlc, cid);
             g_free (s);
             if (argv != auto_argv) {
                 g_free (argv);
@@ -520,6 +524,6 @@ hx_command (char *str, guint32 cid)
     } while (cmd <= last_command && cmd->name[0] == *str);
 
 notfound:
-    hx_printf_prefix (hx_active_session ()->htlc, cid, INFOPREFIX,
-                      "%.*s: command not found\n", (int)(p - str), str);
+    hx_printf_prefix (htlc, cid, INFOPREFIX, "%.*s: command not found\n",
+                      (int)(p - str), str);
 }

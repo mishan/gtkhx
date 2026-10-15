@@ -22,20 +22,15 @@ extern void hx_prefs_save_soon (void);
 extern void hx_prefs_save_now (void);
 
 /* Identity, resolved `override ?? global ?? startup` and copied onto a
- * connection. See the block comment in options.c for what each level answers.
- *
- * hx_identity_set_pending_override arms a one-shot override for the next
- * connect — a bookmark's per-connection nickname and icon. A NULL or empty
- * nick and a negative icon each mean "no override" (zero cannot mean it: zero
- * is a real, blank icon). hx_identity_apply consumes it, so a connect that
- * doesn't arm one gets the global, which is also what puts a /nick-dirtied
- * name back on reconnect.
- *
- * hx_identity_set_startup_default records what the connection was stamped
- * with before any settings file was read, so that reconnect restore works for
- * a profile that has never set a nickname. */
+ * connection: gtkhx-ui's identity.rs, which says what each level answers and
+ * when a field is the connection's own. hx_identity_apply resolves a connect,
+ * consuming an override hx_identity_set_pending_override armed;
+ * hx_identity_apply_global puts the global on those of `fields` the
+ * connection follows, TRUE when it applied any. */
+enum { HX_IDENTITY_NICK = 1, HX_IDENTITY_ICON = 2 };
 extern void hx_identity_set_pending_override (const char *nick, int icon);
 extern void hx_identity_apply (struct htlc_conn *htlc);
+extern gboolean hx_identity_apply_global (struct htlc_conn *htlc, int fields);
 extern void hx_identity_set_startup_default (const char *nick);
 extern void reinit_gtktexts (session *sess);
 

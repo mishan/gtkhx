@@ -32,6 +32,7 @@ fn display_backed() {
     crate::conn_tabs::tests::check_strip_indexes_connections();
     crate::conn_tabs::tests::check_live_connection_asks_before_closing();
     crate::conn_tabs::tests::check_wheel_is_wired_to_the_bar();
+    crate::dock::tests::check_windows_close_with_their_connection();
     crate::files::complete::tests::check_completes_and_survives_entry_destroy();
     crate::emoji::tests::check_chooser_is_built_on_first_open();
     crate::users_view::tests::check_rows_land_in_one_batch();

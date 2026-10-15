@@ -54,11 +54,15 @@ pub unsafe extern "C" fn output_chat_invitation(htlc: *mut c_void, cid: u32, nam
 
     gtkhx_dialog_add_close_shortcuts(dialog.as_ptr() as *mut gtk::ffi::GtkWidget);
 
-    // `htlc` is a stable session-embedded pointer; capture it + cid for the
-    // deferred response. AdwAlertDialog fires "response" exactly once (the
-    // close response on Esc / dismiss), so there's no separate free bookkeeping
-    // — the old C ctx heap struct is gone.
+    // The answer goes to the connect the invite came in on, and nowhere once
+    // that is gone: the connection may close, or reconnect elsewhere, before
+    // the user answers. AdwAlertDialog fires "response" exactly once (the
+    // close response on Esc / dismiss), so there's no free bookkeeping.
+    let conn = crate::dock::bind(crate::dock::conn_key(htlc));
     dialog.connect_response(None, move |_dlg, response| unsafe {
+        let Some(htlc) = crate::dock::live_htlc(conn) else {
+            return;
+        };
         if response == "join" {
             hx_chat_join(htlc, cid);
         } else {

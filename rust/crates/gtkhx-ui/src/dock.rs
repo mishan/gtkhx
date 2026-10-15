@@ -223,6 +223,13 @@ pub fn bind(conn: ConnKey) -> Bound {
     Bound { conn, generation }
 }
 
+impl Bound {
+    /// The connection, whichever connect it is on now.
+    pub fn conn(&self) -> ConnKey {
+        self.conn
+    }
+}
+
 /// The connection `bound` named, while it is still that connect.
 pub fn live_htlc(bound: Bound) -> Option<*mut c_void> {
     unsafe {
@@ -407,6 +414,47 @@ pub unsafe extern "C" fn gtkhx_dock_remove_session_pages(sess: *mut c_void) {
     // on destroy.
     crate::files::close_for_session(sess);
     crate::news_browser::close_for_session(sess);
+    close_owned(key_for_session(sess));
+    crate::connect::forget_session(sess);
+}
+
+thread_local! {
+    /// The windows [`close_with`] tied to a connection, weakly: one closed by
+    /// hand just reads as gone.
+    static OWNED: std::cell::RefCell<Vec<(ConnKey, glib::WeakRef<gtk4::Window>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Close `win` when `conn`'s tab closes.
+///
+/// For a window that edits something on one server — an account, a file's
+/// info, a post. Left open, it would go on offering to save to a connection
+/// that is gone, or that has since connected somewhere else.
+pub fn close_with(conn: ConnKey, win: &impl glib::prelude::IsA<gtk4::Window>) {
+    use glib::prelude::*;
+    OWNED.with_borrow_mut(|v| {
+        v.retain(|(_, w)| w.upgrade().is_some());
+        v.push((conn, win.upcast_ref::<gtk4::Window>().downgrade()));
+    });
+}
+
+/// Close every window [`close_with`] tied to `conn`.
+///
+/// A close rather than a destroy, so a window's own close handler runs: the
+/// user editor drops its state there, and a destroy alone would leave that
+/// holding the window.
+pub(crate) fn close_owned(conn: ConnKey) {
+    use gtk4::prelude::*;
+    // Out of the cell before closing: a close handler may open or close
+    // another window, which would re-enter it.
+    let dying: Vec<_> = OWNED.with_borrow_mut(|v| {
+        let (dying, keep) = std::mem::take(v).into_iter().partition(|(c, _)| *c == conn);
+        *v = keep;
+        dying
+    });
+    for win in dying.into_iter().filter_map(|(_, w)| w.upgrade()) {
+        win.close();
+    }
 }
 
 /// Make `page` the visible one in panel `id`, for a caller switching every
@@ -417,4 +465,43 @@ pub fn show_page(id: &str, page: &str) -> bool {
     let cid = crate::cs(id);
     let cpage = crate::cs(page);
     unsafe { gtkhx_dock_show_page(cid.as_ptr(), cpage.as_ptr()) != glib::ffi::GFALSE }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use gtk4::prelude::*;
+
+    pub fn check_windows_close_with_their_connection() {
+        let (a, b) = (gtk4::Window::new(), gtk4::Window::new());
+        // An unrealized window ignores a close.
+        WidgetExt::realize(&a);
+        WidgetExt::realize(&b);
+        let closed = std::rc::Rc::new(std::cell::Cell::new((false, false)));
+        let c = closed.clone();
+        a.connect_close_request(move |_| {
+            c.set((true, c.get().1));
+            glib::Propagation::Proceed
+        });
+        let c = closed.clone();
+        b.connect_close_request(move |_| {
+            c.set((c.get().0, true));
+            glib::Propagation::Proceed
+        });
+        close_with(1, &a);
+        close_with(2, &b);
+
+        close_owned(1);
+        assert_eq!(
+            closed.get(),
+            (true, false),
+            "only connection 1's window goes"
+        );
+
+        OWNED.with_borrow(|v| assert!(v.iter().all(|(c, _)| *c == 2), "and its entry"));
+
+        close_owned(2);
+        assert_eq!(closed.get(), (true, true));
+        OWNED.with_borrow(|v| assert!(v.is_empty()));
+    }
 }

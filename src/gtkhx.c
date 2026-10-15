@@ -76,6 +76,7 @@
 #include "cfgkeys.h"
 #include "xfers.h"
 #include "commands.h"
+#include "connect.h" /* connect_note_server */
 #include "gtkhx.h"
 
 char *g_user_colors[4] = { WHITE_BOLD, WHITE, RED_BOLD, RED };
@@ -2370,7 +2371,7 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
                 str--;
                 hx_send_chat (htlc, str, cid, style);
             } else {
-                hx_command (str, cid);
+                hx_command (htlc, str, cid);
             }
         } else {
             hx_send_chat (htlc, str, cid, style);
@@ -2637,6 +2638,8 @@ hotline_client_init (int argc, char **argv)
          * override applies (Phase 4 adds a --tls CLI flag). */
         hx_connect (boot->htlc, a.server, a.port, a.login ? a.login : "guest",
                     pass ? pass : "", 0, /*tls=*/0);
+        connect_note_server (boot->htlc, a.server, a.port,
+                             a.login ? a.login : "guest", pass ? pass : "");
         g_free (pass);
     } else if (a.bookmark) {
         connect_bookmark_name (a.bookmark);
