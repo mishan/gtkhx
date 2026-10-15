@@ -57,12 +57,6 @@ gtkhx_session_set_agreementwin (session *sess, GtkWidget *win)
     }
 }
 
-struct htlc_conn *
-gtkhx_active_htlc (void)
-{
-    return hx_active_session ()->htlc;
-}
-
 /* The chat window/panel widget of the session that owns `htlc` (NULL if none).
  * The Rust chat-invitation dialog parents itself here: an invite belongs to the
  * session that received it, so it's scoped by htlc rather than the active

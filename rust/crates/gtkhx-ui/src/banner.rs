@@ -12,6 +12,9 @@
 //!     the bytes are decoded and shown. A fetch-generation counter drops stale
 //!     completions after `banner_clear`.
 //!
+//! Each connection fetches its own, so two servers logging in at once each
+//! get their banner; the one row shows the focused connection's.
+//!
 //! What's native Rust here (no C round-trip): the image decode
 //! ([`hx_image_decode::decode_first_frame_async`] → a `gdk::Texture` directly),
 //! the connection-state snapshot ([`gtkhx_core::conn`] accessors), and the TLS
@@ -22,7 +25,7 @@
 //! gtkhx-ui↔hxhandlers Cargo cycle blocks importing it), whose reply comes
 //! back through `banner_handle_htxf_reply`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
@@ -156,8 +159,8 @@ extern "C" {
 }
 
 // ------------------------------------------------------------------- //
-// Module state — one banner *widget* per process, content per connection,
-// main-thread only.
+// Module state — one banner *widget* per process, content and fetches per
+// connection, main-thread only.
 
 /// What a connection's banner says, kept apart from the widget that shows it.
 ///
@@ -189,41 +192,52 @@ struct BannerUi {
     root: gtk::Box,
     picture: gtk::Picture,
     caption: gtk::Label,
-    /// The connection whose banner is being worked on, if any — set when a
-    /// message arrives and cleared when the attempt reaches an end, success or
-    /// failure. Every result files itself under this.
-    ///
-    /// One slot, because there is one of each fetch handle below: the module
-    /// works on one banner at a time and a new message pre-empts the last. A
-    /// server sends its banner once, at login, so the only way to collide is
-    /// two connections logging in within a fetch of each other — and the
-    /// pre-empted one then has *no* banner rather than a half-finished one,
-    /// which is why this is an `Option` rather than a bare key. Knowing whether
-    /// an attempt is still running is what lets the pre-emption throw away the
-    /// loser's partial content instead of leaving a "loading…" on its tab that
-    /// nothing will ever replace.
-    pending: Option<dock::ConnKey>,
-    /// In-flight URL-mode fetch handle (NULL when none) + its drain timer.
-    url_fetch: *mut HxnetBannerFetch,
+}
+
+/// One connection's banner attempt. Its entry in `FETCHES` exists exactly
+/// while the attempt runs — from the server's message until a result, success
+/// or failure — so a result for a connection with no entry belongs to an
+/// attempt that was cancelled, and is dropped.
+#[derive(Default)]
+struct Fetch {
+    /// URL mode: the hxnet fetch and the timer draining it.
+    url_fetch: Option<*mut HxnetBannerFetch>,
     url_drain_source: Option<glib::SourceId>,
-    /// Bumped whenever a fetch is cancelled; a file-mode worker captures the
-    /// value it was spawned with, and its completion drops the result on a
-    /// mismatch.
+    /// File mode: the generation the HTXF worker was spawned with; its
+    /// completion is dropped unless the attempt still carries it.
     htxf_generation: u32,
-    /// In-flight glycin decode; cancelled on clear / replacement.
+    /// The image decode, either mode.
     decode_handle: Option<ImageDecodeHandle>,
+}
+
+impl Fetch {
+    fn cancel(self) {
+        if let Some(src) = self.url_drain_source {
+            src.remove();
+        }
+        if let Some(h) = self.url_fetch {
+            unsafe { hxnet_banner_fetch_close(h) };
+        }
+        if let Some(h) = self.decode_handle {
+            h.cancel();
+        }
+    }
 }
 
 thread_local! {
     static BANNER: RefCell<Option<BannerUi>> = const { RefCell::new(None) };
     static CONTENT: RefCell<HashMap<dock::ConnKey, BannerContent>> =
         RefCell::new(HashMap::new());
+    static FETCHES: RefCell<HashMap<dock::ConnKey, Fetch>> = RefCell::new(HashMap::new());
+    /// Process-wide, so no two HTXF workers ever share a generation.
+    static HTXF_GENERATION: Cell<u32> = const { Cell::new(0) };
 }
 
 /// Heap-boxed file-mode fetch, handed to the blocking worker via `user_data`.
 /// The worker (off the main thread) fills `bytes`/`ok`; the completion (main
 /// thread) reclaims + frees it.
 struct HtxfFetch {
+    conn: dock::ConnKey,
     ref_: u32,
     size: u32,
     generation: u32,
@@ -365,11 +379,6 @@ pub unsafe extern "C" fn banner_widget_new() -> *mut gtk::ffi::GtkWidget {
             root: root.clone(),
             picture,
             caption,
-            pending: None,
-            url_fetch: std::ptr::null_mut(),
-            url_drain_source: None,
-            htxf_generation: 0,
-            decode_handle: None,
         });
     });
 
@@ -394,24 +403,11 @@ pub unsafe extern "C" fn banner_handle_message(
         return;
     }
 
-    // Take the fetch machine — there is only the one. An attempt already
-    // running loses, and loses *completely*: its half-written content goes with
-    // it, so its tab shows no banner rather than a "loading…" that nothing will
-    // ever finish. A finished banner is left alone; only an attempt still in
-    // flight is discardable.
+    // A new banner replaces this connection's last, and any attempt of its
+    // still running; another connection's is none of its business.
     let key = dock::conn_key(htlc);
-    let preempted = BANNER.with(|b| b.borrow().as_ref().and_then(|ui| ui.pending));
-    cancel_in_flight();
-    if let Some(loser) = preempted.filter(|l| *l != key) {
-        CONTENT.with(|c| {
-            c.borrow_mut().remove(&loser);
-        });
-    }
-    BANNER.with(|b| {
-        if let Some(ui) = b.borrow_mut().as_mut() {
-            ui.pending = Some(key);
-        }
-    });
+    cancel_fetch(key);
+    FETCHES.with_borrow_mut(|f| f.insert(key, Fetch::default()));
     CONTENT.with(|c| {
         c.borrow_mut().insert(key, BannerContent::default());
     });
@@ -433,15 +429,15 @@ pub unsafe extern "C" fn banner_handle_message(
         match url_str {
             Some(u) => {
                 let cached = u.clone();
-                with_owner_content(move |c| {
+                with_content(key, move |c| {
                     c.url = Some(cached.clone());
                     c.caption = cached;
                 });
-                start_url_fetch(&u);
+                start_url_fetch(key, &u);
             }
             None => {
                 // URL mode advertised but no URL — server misconfigured.
-                finish_caption(&tr("Server banner: URL mode without URL"));
+                finish_caption(key, &tr("Server banner: URL mode without URL"));
             }
         }
         return;
@@ -450,36 +446,16 @@ pub unsafe extern "C" fn banner_handle_message(
     // File mode: TYPE is a binary image-format tag. Ask the server for the
     // bytes over HTXF; show a loading caption meanwhile.
     let loading = crate::tr::tr1("Server banner [%s] — loading…", &type_str);
-    show_caption(&loading);
+    show_caption(key, &loading);
     send_download_request(htlc);
 }
 
-/// Abandon whatever fetch is in flight, whoever it belongs to. There is one of
-/// each handle, so starting a banner and cancelling one are the same act.
-unsafe fn cancel_in_flight() {
-    BANNER.with(|b| {
-        let mut br = b.borrow_mut();
-        let Some(ui) = br.as_mut() else {
-            return;
-        };
-
-        // The URL-mode fetch: drop the drain timer + close the handle.
-        if let Some(src) = ui.url_drain_source.take() {
-            src.remove();
-        }
-        if !ui.url_fetch.is_null() {
-            hxnet_banner_fetch_close(ui.url_fetch);
-            ui.url_fetch = std::ptr::null_mut();
-        }
-
-        // Bump the HTXF generation so any in-flight worker's completion drops.
-        ui.htxf_generation = ui.htxf_generation.wrapping_add(1);
-
-        // Any in-flight decode (covers both modes).
-        if let Some(h) = ui.decode_handle.take() {
-            h.cancel();
-        }
-    });
+/// Abandon `conn`'s attempt, if one is running. Out of the map first: the
+/// cancels can run GLib code that re-enters it.
+fn cancel_fetch(conn: dock::ConnKey) {
+    if let Some(f) = FETCHES.with_borrow_mut(|f| f.remove(&conn)) {
+        f.cancel();
+    }
 }
 
 /// `void banner_clear(struct htlc_conn *htlc)` — forget this connection's
@@ -496,22 +472,7 @@ unsafe fn cancel_in_flight() {
 #[no_mangle]
 pub unsafe extern "C" fn banner_clear(htlc: *mut c_void) {
     let key = dock::conn_key(htlc);
-
-    // Only stop a fetch that belongs to this connection — another's is none of
-    // our business.
-    if BANNER.with(|b| {
-        b.borrow()
-            .as_ref()
-            .is_some_and(|ui| ui.pending == Some(key))
-    }) {
-        cancel_in_flight();
-        BANNER.with(|b| {
-            if let Some(ui) = b.borrow_mut().as_mut() {
-                ui.pending = None;
-            }
-        });
-    }
-
+    cancel_fetch(key);
     CONTENT.with(|c| c.borrow_mut().remove(&key));
     paint_active();
 }
@@ -528,25 +489,21 @@ pub unsafe extern "C" fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, 
         return;
     }
 
-    // The reply has to belong to the attempt that is actually running. It
-    // is matched to its connection, so this is always the right `htlc`, but
-    // between the request and the reply another connection may have taken
-    // the fetch machine — and starting a second HTXF worker here would break
-    // the one-at-a-time invariant the whole routing rests on, landing this
-    // connection's image on the other one's tab.
-    if BANNER.with(|b| b.borrow().as_ref().and_then(|ui| ui.pending)) != Some(dock::conn_key(htlc))
-    {
+    // Only while this connection's attempt is still running: a clear or a
+    // newer banner between the request and the reply has ended it.
+    let key = dock::conn_key(htlc);
+    if !FETCHES.with_borrow(|f| f.contains_key(&key)) {
         return;
     }
 
     match validate_htxf_reply(ref_, size) {
         HtxfValidation::Ok => {}
         HtxfValidation::ZeroRef | HtxfValidation::ZeroSize => {
-            finish_caption(&tr("Server banner: empty transfer"));
+            finish_caption(key, &tr("Server banner: empty transfer"));
             return;
         }
         HtxfValidation::TooLarge => {
-            finish_caption(&tr("Server banner: image too large"));
+            finish_caption(key, &tr("Server banner: image too large"));
             return;
         }
     }
@@ -564,14 +521,16 @@ pub unsafe extern "C" fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, 
     // the worker can outlive a disconnect that frees htlc->hope_aead).
     let hope_aead = hxnet_hope_aead_clone(hx_conn_hope_aead(htlc.cast()) as *const HxnetHopeAead);
 
-    let generation = BANNER.with(|b| {
-        let mut br = b.borrow_mut();
-        let ui = br.as_mut().unwrap();
-        ui.htxf_generation = ui.htxf_generation.wrapping_add(1);
-        ui.htxf_generation
+    let generation = HTXF_GENERATION.get().wrapping_add(1);
+    HTXF_GENERATION.set(generation);
+    FETCHES.with_borrow_mut(|f| {
+        if let Some(f) = f.get_mut(&key) {
+            f.htxf_generation = generation;
+        }
     });
 
     let fetch = Box::new(HtxfFetch {
+        conn: key,
         ref_,
         size,
         generation,
@@ -594,53 +553,47 @@ pub unsafe extern "C" fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, 
 // ------------------------------------------------------------------- //
 // Internals.
 
-/// Amend the in-flight connection's banner content, and repaint if that is the
-/// connection the user is looking at.
+/// Amend `conn`'s banner content while its attempt runs, and repaint if that
+/// is the connection the user is looking at.
 ///
 /// Every result path goes through here rather than touching the widgets, so a
 /// background connection's fetch finishing updates what its tab will show
 /// without disturbing the tab that is up.
-fn with_owner_content(f: impl FnOnce(&mut BannerContent)) {
-    let Some(owner) = BANNER.with(|b| b.borrow().as_ref().and_then(|ui| ui.pending)) else {
+fn with_content(conn: dock::ConnKey, f: impl FnOnce(&mut BannerContent)) {
+    // A result for an attempt that has ended was cancelled: its connection
+    // closed or sent a newer banner, and writing it would put it back.
+    if !FETCHES.with_borrow(|f| f.contains_key(&conn)) {
         return;
-    };
-    // `get_mut`, not `entry().or_default()`: a result that arrives for a
-    // connection with no entry belongs to one that has been closed or
-    // pre-empted, and re-creating its row here would resurrect a connection
-    // nothing will ever clear again.
+    }
     CONTENT.with(|c| {
-        if let Some(content) = c.borrow_mut().get_mut(&owner) {
+        if let Some(content) = c.borrow_mut().get_mut(&conn) {
             f(content);
         }
     });
-    if owner == dock::active_key() {
+    if conn == dock::active_key() {
         paint_active();
     }
 }
 
-/// Record a result and end the attempt: nothing more is coming for this
-/// connection, so the fetch machine is free for another.
-fn finish_content(f: impl FnOnce(&mut BannerContent)) {
-    with_owner_content(f);
-    BANNER.with(|b| {
-        if let Some(ui) = b.borrow_mut().as_mut() {
-            ui.pending = None;
-        }
-    });
+/// Record a result and end `conn`'s attempt: nothing more is coming for it.
+fn finish_content(conn: dock::ConnKey, f: impl FnOnce(&mut BannerContent)) {
+    with_content(conn, f);
+    // Ended, not cancelled: whatever was running has run.
+    FETCHES.with_borrow_mut(|f| f.remove(&conn));
 }
 
 /// A caption that is the end of the attempt — an error, or a banner that turned
 /// out to be nothing.
-fn finish_caption(text: &str) {
+fn finish_caption(conn: dock::ConnKey, text: &str) {
     let text = text.to_owned();
-    finish_content(move |c| c.caption = text);
+    finish_content(conn, move |c| c.caption = text);
 }
 
 /// A caption while the attempt is still running: the URL before its image
 /// lands, or "loading…".
-fn show_caption(text: &str) {
+fn show_caption(conn: dock::ConnKey, text: &str) {
     let text = text.to_owned();
-    with_owner_content(move |c| c.caption = text);
+    with_content(conn, move |c| c.caption = text);
 }
 
 /// Paint `content` (or blank, for a connection that has none) onto the one
@@ -799,15 +752,13 @@ pub unsafe extern "C" fn banner_show_active() {
 
 /// Kick off the shared glycin decode for freshly-fetched bytes. Caps mirror
 /// banner.c: 256 KiB max, BANNER_MAX_W each axis, single frame.
-fn start_image_decode(bytes: &[u8]) {
+fn start_image_decode(conn: dock::ConnKey, bytes: &[u8]) {
     // Cancel any prior in-flight decode.
-    BANNER.with(|b| {
-        if let Some(ui) = b.borrow_mut().as_mut() {
-            if let Some(h) = ui.decode_handle.take() {
-                h.cancel();
-            }
-        }
-    });
+    if let Some(h) =
+        FETCHES.with_borrow_mut(|f| f.get_mut(&conn).and_then(|f| f.decode_handle.take()))
+    {
+        h.cancel();
+    }
 
     let caps = HxInlineMediaCaps {
         max_bytes: 256 * 1024,
@@ -817,63 +768,53 @@ fn start_image_decode(bytes: &[u8]) {
         max_duration_ms: 1,
     };
 
-    let handle = decode_first_frame_async(bytes, caps, move |outcome| {
-        BANNER.with(|b| {
-            if let Some(ui) = b.borrow_mut().as_mut() {
-                ui.decode_handle = None;
-            }
-        });
-        match outcome {
-            ImageDecodeOutcome::Ok(tex) => finish_content(move |c| {
-                c.texture = Some(tex);
-                // The image is up; the URL-as-caption is redundant now that
-                // the tooltip and the click carry it.
-                c.caption.clear();
-            }),
-            ImageDecodeOutcome::Err { .. } => {
-                finish_caption(&tr("Server banner: image not decodable"))
-            }
+    let handle = decode_first_frame_async(bytes, caps, move |outcome| match outcome {
+        ImageDecodeOutcome::Ok(tex) => finish_content(conn, move |c| {
+            c.texture = Some(tex);
+            // The image is up; the URL-as-caption is redundant now that
+            // the tooltip and the click carry it.
+            c.caption.clear();
+        }),
+        ImageDecodeOutcome::Err { .. } => {
+            finish_caption(conn, &tr("Server banner: image not decodable"))
         }
     });
 
     // Store the handle for cancellation (on async decodes; a sync reject already
-    // ran the closure and left decode_handle None).
-    BANNER.with(|b| {
-        if let Some(ui) = b.borrow_mut().as_mut() {
-            ui.decode_handle = handle;
+    // ran the closure and ended the attempt).
+    FETCHES.with_borrow_mut(|f| {
+        if let Some(f) = f.get_mut(&conn) {
+            f.decode_handle = handle;
         }
     });
 }
 
 // URL-mode fetch --------------------------------------------------- //
 
-fn start_url_fetch(url: &str) {
+fn start_url_fetch(conn: dock::ConnKey, url: &str) {
     unsafe {
         let handle = hxnet_banner_fetch_open(url.as_ptr(), url.len());
         if handle.is_null() {
             return; // bad URL — the caption (the URL itself) stays up
         }
         // 50 ms drain — a small banner image lands quickly.
-        let source =
-            glib::timeout_add_local(std::time::Duration::from_millis(50), banner_url_drain);
-        BANNER.with(|b| {
-            if let Some(ui) = b.borrow_mut().as_mut() {
-                ui.url_fetch = handle;
-                ui.url_drain_source = Some(source);
+        let source = glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            banner_url_drain(conn)
+        });
+        FETCHES.with_borrow_mut(|f| {
+            if let Some(f) = f.get_mut(&conn) {
+                f.url_fetch = Some(handle);
+                f.url_drain_source = Some(source);
             }
         });
     }
 }
 
-/// Poll the one-shot URL fetch result. Returns whether to keep draining.
-fn banner_url_drain() -> glib::ControlFlow {
-    let handle = BANNER.with(|b| b.borrow().as_ref().map(|ui| ui.url_fetch));
-    let Some(handle) = handle else {
+/// Poll `conn`'s one-shot URL fetch. Returns whether to keep draining.
+fn banner_url_drain(conn: dock::ConnKey) -> glib::ControlFlow {
+    let Some(handle) = FETCHES.with_borrow(|f| f.get(&conn).and_then(|f| f.url_fetch)) else {
         return glib::ControlFlow::Break;
     };
-    if handle.is_null() {
-        return glib::ControlFlow::Break;
-    }
 
     let mut out = HxnetBannerOut {
         bytes_ptr: std::ptr::null(),
@@ -887,29 +828,26 @@ fn banner_url_drain() -> glib::ControlFlow {
         return glib::ControlFlow::Continue;
     }
 
+    // One-shot: the attempt lets go of the handle and the source (which
+    // removes itself by returning Break), so nothing cancels them twice.
+    FETCHES.with_borrow_mut(|f| {
+        if let Some(f) = f.get_mut(&conn) {
+            f.url_fetch = None;
+            f.url_drain_source = None;
+        }
+    });
     if rc == HXNET_BANNER_DONE {
         if !out.bytes_ptr.is_null() && out.bytes_len > 0 {
             // The decode copies synchronously, so it's safe to close after.
             let bytes = unsafe { std::slice::from_raw_parts(out.bytes_ptr, out.bytes_len) };
-            start_image_decode(bytes);
+            start_image_decode(conn, bytes);
         } else {
-            finish_caption(&tr("Server banner: empty response"));
+            finish_caption(conn, &tr("Server banner: empty response"));
         }
     } else {
-        finish_caption(&tr("Server banner: fetch failed"));
+        finish_caption(conn, &tr("Server banner: fetch failed"));
     }
-
-    // One-shot: clear our source id + close the handle. (The source removes
-    // itself by returning Break.)
-    BANNER.with(|b| {
-        if let Some(ui) = b.borrow_mut().as_mut() {
-            ui.url_drain_source = None;
-            if !ui.url_fetch.is_null() {
-                unsafe { hxnet_banner_fetch_close(ui.url_fetch) };
-                ui.url_fetch = std::ptr::null_mut();
-            }
-        }
-    });
+    unsafe { hxnet_banner_fetch_close(handle) };
     glib::ControlFlow::Break
 }
 
@@ -997,19 +935,19 @@ unsafe extern "C" fn htxf_worker(arg: *mut c_void) {
 unsafe extern "C" fn htxf_completion(arg: *mut c_void) {
     let f = Box::from_raw(arg as *mut HtxfFetch); // reclaim; Drop frees hope_aead
 
-    let current = BANNER.with(|b| b.borrow().as_ref().map(|ui| ui.htxf_generation));
+    let current = FETCHES.with_borrow(|m| m.get(&f.conn).map(|a| a.htxf_generation));
     if current != Some(f.generation) {
-        return; // user moved on (reconnect / clear / new banner)
+        return; // the attempt ended (a clear, a close, a newer banner)
     }
 
     if !f.ok || f.bytes.is_empty() {
-        finish_caption(&tr("Server banner: HTXF fetch failed"));
+        finish_caption(f.conn, &tr("Server banner: HTXF fetch failed"));
         return;
     }
 
     // decode_first_frame_async copies the bytes synchronously, so `f` may drop
     // right after.
-    start_image_decode(&f.bytes);
+    start_image_decode(f.conn, &f.bytes);
 }
 
 // Click handler ---------------------------------------------------- //
