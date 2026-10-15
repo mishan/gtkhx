@@ -117,8 +117,8 @@ fn contains_ascii_ci(haystack: &[u8], needle: &[u8]) -> bool {
 /// Returns a static, NUL-terminated English label for a known type, or
 /// `None` for an unknown/short/missing type. The caller translates the
 /// result and formats the unknown-FourCC fallback ("<XXXX> file"), so this
-/// stays pure logic. The English strings match the old C table
-/// byte-for-byte so any existing translation catalog keys still resolve.
+/// stays pure logic. The labels are in sentence case, as GIO describes a
+/// local file's type, so the local and remote panes read alike.
 pub fn kind_label_for(ftype: Option<&[u8]>) -> Option<&'static core::ffi::CStr> {
     let f = match ftype {
         Some(f) if f.len() >= 4 => &f[..4],
@@ -126,34 +126,34 @@ pub fn kind_label_for(ftype: Option<&[u8]>) -> Option<&'static core::ffi::CStr> 
     };
     Some(match f {
         b"fldr" => c"Folder",
-        b"TEXT" => c"Text Document",
-        b"PDF " => c"PDF Document",
-        b"JPEG" => c"JPEG Image",
-        b"GIFf" | b"GIF " => c"GIF Image",
-        b"PNGf" | b"PNG " => c"PNG Image",
-        b"PICT" => c"PICT Image",
-        b"TIFF" => c"TIFF Image",
-        b"BMP " => c"BMP Image",
-        b"MP3 " | b"MPG3" | b"Mp3 " => c"MP3 Audio",
-        b"AIFF" | b"AIFC" => c"AIFF Audio",
-        b"WAVE" => c"WAV Audio",
-        b"MooV" => c"QuickTime Movie",
-        b"MPEG" | b"MPG " => c"MPEG Video",
-        b"M4V " => c"MPEG-4 Video",
-        b"AVI " => c"AVI Video",
-        b"MKV " => c"Matroska Video",
-        b"ZIP " => c"ZIP Archive",
-        b"SIT!" | b"SITD" | b"SIT5" => c"StuffIt Archive",
-        b"BINA" => c"MacBinary Archive",
-        b"TARF" | b"Tar " => c"TAR Archive",
-        b"GZIP" | b"GZip" => c"Gzip Archive",
-        b"BZIP" => c"Bzip2 Archive",
+        b"TEXT" => c"Text document",
+        b"PDF " => c"PDF document",
+        b"JPEG" => c"JPEG image",
+        b"GIFf" | b"GIF " => c"GIF image",
+        b"PNGf" | b"PNG " => c"PNG image",
+        b"PICT" => c"PICT image",
+        b"TIFF" => c"TIFF image",
+        b"BMP " => c"BMP image",
+        b"MP3 " | b"MPG3" | b"Mp3 " => c"MP3 audio",
+        b"AIFF" | b"AIFC" => c"AIFF audio",
+        b"WAVE" => c"WAV audio",
+        b"MooV" => c"QuickTime movie",
+        b"MPEG" | b"MPG " => c"MPEG video",
+        b"M4V " => c"MPEG-4 video",
+        b"AVI " => c"AVI video",
+        b"MKV " => c"Matroska video",
+        b"ZIP " => c"ZIP archive",
+        b"SIT!" | b"SITD" | b"SIT5" => c"StuffIt archive",
+        b"BINA" => c"MacBinary archive",
+        b"TARF" | b"Tar " => c"TAR archive",
+        b"GZIP" | b"GZip" => c"Gzip archive",
+        b"BZIP" => c"Bzip2 archive",
         b"APPL" => c"Application",
-        b"rohd" | b"IMG " | b"DMG " => c"Disk Image",
-        b"ISO " => c"ISO Disk Image",
-        b"HTft" | b"HTML" => c"HTML Document",
+        b"rohd" | b"IMG " | b"DMG " => c"Disk image",
+        b"ISO " => c"ISO disk image",
+        b"HTft" | b"HTML" => c"HTML document",
         b"alis" => c"Alias",
-        b"SLNK" => c"Symbolic Link",
+        b"SLNK" => c"Symbolic link",
         _ => return None,
     })
 }
@@ -251,10 +251,10 @@ mod tests {
     #[test]
     fn kind_known_types() {
         assert_eq!(kind(b"fldr"), Some("Folder"));
-        assert_eq!(kind(b"TEXT"), Some("Text Document"));
-        assert_eq!(kind(b"JPEG"), Some("JPEG Image"));
-        assert_eq!(kind(b"MP3 "), Some("MP3 Audio"));
-        assert_eq!(kind(b"MooV"), Some("QuickTime Movie"));
+        assert_eq!(kind(b"TEXT"), Some("Text document"));
+        assert_eq!(kind(b"JPEG"), Some("JPEG image"));
+        assert_eq!(kind(b"MP3 "), Some("MP3 audio"));
+        assert_eq!(kind(b"MooV"), Some("QuickTime movie"));
         assert_eq!(kind(b"APPL"), Some("Application"));
         assert_eq!(kind(b"alis"), Some("Alias"));
     }
@@ -262,16 +262,16 @@ mod tests {
     #[test]
     fn kind_aliased_codes_share_a_label() {
         for t in [b"MP3 ", b"MPG3", b"Mp3 "] {
-            assert_eq!(kind(t), Some("MP3 Audio"), "{t:?}");
+            assert_eq!(kind(t), Some("MP3 audio"), "{t:?}");
         }
         for t in [b"SIT!", b"SITD", b"SIT5"] {
-            assert_eq!(kind(t), Some("StuffIt Archive"), "{t:?}");
+            assert_eq!(kind(t), Some("StuffIt archive"), "{t:?}");
         }
         for t in [b"rohd", b"IMG ", b"DMG "] {
-            assert_eq!(kind(t), Some("Disk Image"), "{t:?}");
+            assert_eq!(kind(t), Some("Disk image"), "{t:?}");
         }
         for t in [b"HTft", b"HTML"] {
-            assert_eq!(kind(t), Some("HTML Document"), "{t:?}");
+            assert_eq!(kind(t), Some("HTML document"), "{t:?}");
         }
     }
 

@@ -27,7 +27,7 @@ G_DECLARE_FINAL_TYPE (HxFileEntry, hx_file_entry, HX, FILE_ENTRY, GObject)
  *               as "(N items)". Ignored if is_dir is FALSE and the
  *               provider doesn't know the size yet (pass 0).
  *   modified  — Unix timestamp (seconds), or 0 if unknown.
- *   kind      — short human description ("Folder", "MP3 Audio",
+ *   kind      — short human description ("Folder", "MP3 audio",
  *               etc.). Local provider derives from the GIO content
  *               type; remote provider passes the Hotline 4-byte
  *               file-type code translated through a name table.

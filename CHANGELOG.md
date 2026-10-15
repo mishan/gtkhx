@@ -1,7 +1,8 @@
 ## 1.6.1-dev
 
 - Accessibility
-  - A video tile's picture is named for what it shows, a camera or a shared screen, so a screen reader can tell apart the two tiles of a user sharing both
+  - A video tile's picture is named for what it shows, a camera or a shared screen, so a screen reader can tell apart the two tiles of a user sharing both; a tile says its user's name once rather than twice
+  - A transfer reads as its file, its place in the queue and its progress; the Files window's two lists say which is local and which is remote, and a tracker's server list is named for its tracker
 - Transfers
   - A folder download can be paused and resumed: Start skips the files it already has, picks up the one it stopped in, and fetches the rest
   - A file's upload, up to 4 GiB, can be paused and resumed: Start sends the rest of the file from what the server already has, or, when the server can't resume it, the whole file again; an upload whose file changed while it was paused, or that the server refuses, stays paused, saying why

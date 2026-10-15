@@ -207,7 +207,7 @@ frame "Files — Northwind Commons"
                     text "Location" [focusable, editable]
                   grouping ""
                     scroll pane "" [focusable]
-                      tree table ""
+                      tree table "Local files"
                         table row "Name Size Modified" [focusable]
                           filler "Name"
                             panel ""
@@ -221,7 +221,7 @@ frame "Files — Northwind Commons"
                             panel ""
                               label "Modified"
                               panel ""
-                        list "" [focusable]
+                        list "Local files" [focusable]
                           table row "JPEG image harbor-edit-01.jpg 3.3 MiB Jun 13" description="3.3 MiB (3412877 bytes)" [focusable]
                             table cell "JPEG image harbor-edit-01.jpg"
                               panel ""
@@ -288,7 +288,7 @@ frame "Files — Northwind Commons"
                     text "Location" [focusable, editable]
                   grouping ""
                     scroll pane "" [focusable]
-                      tree table ""
+                      tree table "Remote files"
                         table row "Name Size Modified" [focusable]
                           filler "Name"
                             panel ""
@@ -302,47 +302,47 @@ frame "Files — Northwind Commons"
                             panel ""
                               label "Modified"
                               panel ""
-                        list "" [focusable]
-                          table row "JPEG Image dawn-01.jpg 5.9 MiB" description="5.9 MiB (6211870 bytes)" [focusable]
-                            table cell "JPEG Image dawn-01.jpg"
+                        list "Remote files" [focusable]
+                          table row "JPEG image dawn-01.jpg 5.9 MiB" description="5.9 MiB (6211870 bytes)" [focusable]
+                            table cell "JPEG image dawn-01.jpg"
                               panel ""
-                                image "JPEG Image"
+                                image "JPEG image"
                                 label "dawn-01.jpg"
                             table cell "5.9 MiB" description="5.9 MiB (6211870 bytes)"
                               label "5.9 MiB" description="5.9 MiB (6211870 bytes)"
                             table cell ""
                               label ""
-                          table row "JPEG Image dawn-02.jpg 5.7 MiB" description="5.7 MiB (5930421 bytes)" [focusable]
-                            table cell "JPEG Image dawn-02.jpg"
+                          table row "JPEG image dawn-02.jpg 5.7 MiB" description="5.7 MiB (5930421 bytes)" [focusable]
+                            table cell "JPEG image dawn-02.jpg"
                               panel ""
-                                image "JPEG Image"
+                                image "JPEG image"
                                 label "dawn-02.jpg"
                             table cell "5.7 MiB" description="5.7 MiB (5930421 bytes)"
                               label "5.7 MiB" description="5.7 MiB (5930421 bytes)"
                             table cell ""
                               label ""
-                          table row "JPEG Image fog-over-the-pier.jpg 7.1 MiB" description="7.1 MiB (7402311 bytes)" [focusable, focused, selected]
-                            table cell "JPEG Image fog-over-the-pier.jpg" [selected]
+                          table row "JPEG image fog-over-the-pier.jpg 7.1 MiB" description="7.1 MiB (7402311 bytes)" [focusable, focused, selected]
+                            table cell "JPEG image fog-over-the-pier.jpg" [selected]
                               panel ""
-                                image "JPEG Image"
+                                image "JPEG image"
                                 label "fog-over-the-pier.jpg"
                             table cell "7.1 MiB" description="7.1 MiB (7402311 bytes)" [selected]
                               label "7.1 MiB" description="7.1 MiB (7402311 bytes)"
                             table cell "" [selected]
                               label ""
-                          table row "JPEG Image lighthouse.jpg 5.3 MiB" description="5.3 MiB (5518203 bytes)" [focusable]
-                            table cell "JPEG Image lighthouse.jpg"
+                          table row "JPEG image lighthouse.jpg 5.3 MiB" description="5.3 MiB (5518203 bytes)" [focusable]
+                            table cell "JPEG image lighthouse.jpg"
                               panel ""
-                                image "JPEG Image"
+                                image "JPEG image"
                                 label "lighthouse.jpg"
                             table cell "5.3 MiB" description="5.3 MiB (5518203 bytes)"
                               label "5.3 MiB" description="5.3 MiB (5518203 bytes)"
                             table cell ""
                               label ""
-                          table row "JPEG Image nets.jpg 4.7 MiB" description="4.7 MiB (4920117 bytes)" [focusable]
-                            table cell "JPEG Image nets.jpg"
+                          table row "JPEG image nets.jpg 4.7 MiB" description="4.7 MiB (4920117 bytes)" [focusable]
+                            table cell "JPEG image nets.jpg"
                               panel ""
-                                image "JPEG Image"
+                                image "JPEG image"
                                 label "nets.jpg"
                             table cell "4.7 MiB" description="4.7 MiB (4920117 bytes)"
                               label "4.7 MiB" description="4.7 MiB (4920117 bytes)"

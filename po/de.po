@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-13 18:43-0700\n"
+"POT-Creation-Date: 2026-10-15 10:28-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: German <misha@nasledov.com>\n"
@@ -483,33 +483,33 @@ msgstr "Übertragungen"
 msgid "Queued #%u"
 msgstr "In Warteschlange #%u"
 
-#: src/tasks.c:400 rust/crates/gtkhx-ui/src/files/browser.rs:415
+#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:415
 msgctxt "files transfer"
 msgid "Download"
 msgstr "Herunterladen"
 
-#: src/tasks.c:401 rust/crates/gtkhx-ui/src/files/browser.rs:416
+#: src/tasks.c:402 rust/crates/gtkhx-ui/src/files/browser.rs:416
 msgctxt "files transfer"
 msgid "Upload"
 msgstr "Hochladen"
 
-#: src/tasks.c:910
+#: src/tasks.c:916
 msgid "Stop Transfer"
 msgstr "Übertragung stoppen"
 
-#: src/tasks.c:913
+#: src/tasks.c:919
 msgid "Pause Transfer"
 msgstr "Übertragung pausieren"
 
-#: src/tasks.c:917
+#: src/tasks.c:923
 msgid "Start Transfer"
 msgstr "Übertragung starten"
 
-#: src/tasks.c:922
+#: src/tasks.c:928
 msgid "Move Transfer Up in Queue"
 msgstr "Übertragung in der Warteschlange nach oben verschieben"
 
-#: src/tasks.c:925
+#: src/tasks.c:931
 msgid "Move Transfer Down in Queue"
 msgstr "Übertragung in der Warteschlange nach unten verschieben"
 
@@ -559,7 +559,7 @@ msgstr "Chat"
 
 #: src/toolbar.c:809 src/toolbar.c:1184
 #: rust/crates/gtkhx-ui/src/shortcuts.rs:122
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:306
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:307
 #: rust/crates/gtkhx-ui/src/users_view.rs:368
 msgid "Users"
 msgstr "Benutzer"
@@ -915,7 +915,7 @@ msgstr ""
 "eintragen; andernfalls beide Felder leer lassen."
 
 #: rust/crates/gtkhx-ui/src/connect.rs:692
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:333
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:334
 msgid "Port"
 msgstr "Port"
 
@@ -1091,8 +1091,8 @@ msgstr "Speichern"
 #: rust/crates/gtkhx-ui/src/files/panel.rs:258
 #: rust/crates/gtkhx-ui/src/options_connections.rs:605
 #: rust/crates/gtkhx-ui/src/tracker/actions.rs:471
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:297
-#: rust/crates/gtkhx-ui/src/users_view.rs:703
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:298
+#: rust/crates/gtkhx-ui/src/users_view.rs:694
 msgid "Name"
 msgstr "Name"
 
@@ -1389,21 +1389,29 @@ msgstr "Art"
 msgid "Show Kind Column"
 msgstr "Spalte „Art“ anzeigen"
 
-#: rust/crates/gtkhx-ui/src/files/panel.rs:636
+#: rust/crates/gtkhx-ui/src/files/panel.rs:521
+msgid "Local files"
+msgstr "Lokale Dateien"
+
+#: rust/crates/gtkhx-ui/src/files/panel.rs:523
+msgid "Remote files"
+msgstr "Entfernte Dateien"
+
+#: rust/crates/gtkhx-ui/src/files/panel.rs:643
 msgid "Folder is upload-only — drop files here to upload"
 msgstr "Ordner nimmt nur Uploads an — Dateien zum Hochladen hier ablegen"
 
-#: rust/crates/gtkhx-ui/src/files/panel.rs:638
+#: rust/crates/gtkhx-ui/src/files/panel.rs:645
 msgid "Can't list this folder."
 msgstr "Dieser Ordner kann nicht aufgelistet werden."
 
-#: rust/crates/gtkhx-ui/src/files/panel.rs:645
+#: rust/crates/gtkhx-ui/src/files/panel.rs:652
 msgid "%u item"
 msgid_plural "%u items"
 msgstr[0] "%u Objekt"
 msgstr[1] "%u Objekte"
 
-#: rust/crates/gtkhx-ui/src/files/panel.rs:647
+#: rust/crates/gtkhx-ui/src/files/panel.rs:654
 msgid "%1$u of %2$u selected"
 msgstr "%1$u von %2$u ausgewählt"
 
@@ -1891,7 +1899,7 @@ msgstr "Neue Verbindung"
 
 #: rust/crates/gtkhx-ui/src/options_connections.rs:609
 #: rust/crates/gtkhx-ui/src/tracker/actions.rs:479
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:324
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:325
 msgid "Address"
 msgstr "Adresse"
 
@@ -2629,6 +2637,7 @@ msgid "First camera found"
 msgstr "Erste gefundene Kamera"
 
 #: rust/crates/gtkhx-ui/src/options_voice.rs:152
+#: rust/crates/gtkhx-ui/src/video_panel.rs:214
 #: rust/crates/gtkhx-ui/src/voice_panel.rs:1186
 msgid "Camera"
 msgstr "Kamera"
@@ -2751,6 +2760,7 @@ msgstr "Klang"
 
 #: rust/crates/gtkhx-ui/src/options_window.rs:129
 #: rust/crates/gtkhx-ui/src/tracker/actions.rs:553
+#: rust/crates/gtkhx-ui/src/users_voice_col.rs:345
 msgid "Voice"
 msgstr "Sprachchat"
 
@@ -3178,7 +3188,7 @@ msgid "Server details"
 msgstr "Serverdetails"
 
 #: rust/crates/gtkhx-ui/src/tracker/actions.rs:481
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:351
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:352
 msgid "Description"
 msgstr "Beschreibung"
 
@@ -3203,7 +3213,7 @@ msgid "Software"
 msgstr "Software"
 
 #: rust/crates/gtkhx-ui/src/tracker/actions.rs:499
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:315
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:316
 msgid "Country"
 msgstr "Land"
 
@@ -3355,20 +3365,20 @@ msgstr "Erstmals gesehen"
 msgid "Last heartbeat"
 msgstr "Letztes Lebenszeichen"
 
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:342
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:343
 msgid "Caps"
 msgstr "Fähigkeiten"
 
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:451
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:452
 msgid "expecting"
 msgstr "erwartet"
 
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:459
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:460
 msgid "no servers"
 msgstr "keine Server"
 
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:468
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:477
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:469
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:478
 msgid "server"
 msgid_plural "servers"
 msgstr[0] "Server"
@@ -3403,8 +3413,8 @@ msgstr "Ausgewählten Server als Lesezeichen speichern"
 msgid "Show details for selected server"
 msgstr "Details zum ausgewählten Server anzeigen"
 
-#: rust/crates/gtkhx-ui/src/tracker/mod.rs:881
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:884
+#: rust/crates/gtkhx-ui/src/tracker/mod.rs:887
 msgid "Fetching the server list"
 msgstr "Serverliste wird abgerufen"
 
@@ -3538,7 +3548,7 @@ msgstr "%s, Admin, abwesend"
 msgid "Private chat with %s"
 msgstr "Privatchat mit %s"
 
-#: rust/crates/gtkhx-ui/src/users_view.rs:633
+#: rust/crates/gtkhx-ui/src/users_view.rs:624
 msgid "UID"
 msgstr "UID"
 
@@ -3563,7 +3573,7 @@ msgid "Sharing their screen"
 msgstr "Gibt den Bildschirm frei"
 
 #: rust/crates/gtkhx-ui/src/users_voice_col.rs:175
-#: rust/crates/gtkhx-ui/src/video_panel.rs:235
+#: rust/crates/gtkhx-ui/src/video_panel.rs:243
 msgid "Camera paused"
 msgstr "Kamera pausiert"
 
@@ -3575,86 +3585,90 @@ msgstr "Kamera an"
 msgid "User %s"
 msgstr "Benutzer %s"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:236
+#: rust/crates/gtkhx-ui/src/video_panel.rs:215
+msgid "Shared screen"
+msgstr "Freigegebener Bildschirm"
+
+#: rust/crates/gtkhx-ui/src/video_panel.rs:244
 msgid "Sharing paused"
 msgstr "Freigabe pausiert"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:244
+#: rust/crates/gtkhx-ui/src/video_panel.rs:252
 msgid "Paused on a metered connection · click to watch"
 msgstr "Pausiert wegen getakteter Verbindung · zum Ansehen klicken"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:256
-#: rust/crates/gtkhx-ui/src/video_panel.rs:350
+#: rust/crates/gtkhx-ui/src/video_panel.rs:264
+#: rust/crates/gtkhx-ui/src/video_panel.rs:358
 msgid "Focus"
 msgstr "Hervorheben"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:257
-#: rust/crates/gtkhx-ui/src/video_panel.rs:361
+#: rust/crates/gtkhx-ui/src/video_panel.rs:265
+#: rust/crates/gtkhx-ui/src/video_panel.rs:369
 msgid "Mute"
 msgstr "Stummschalten"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:262
+#: rust/crates/gtkhx-ui/src/video_panel.rs:270
 msgid "Hide"
 msgstr "Ausblenden"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:264
+#: rust/crates/gtkhx-ui/src/video_panel.rs:272
 msgid "Stop watching"
 msgstr "Nicht mehr ansehen"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:347
+#: rust/crates/gtkhx-ui/src/video_panel.rs:355
 msgid "Show all"
 msgstr "Alle anzeigen"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:357
+#: rust/crates/gtkhx-ui/src/video_panel.rs:365
 msgid "Unmute"
 msgstr "Stummschaltung aufheben"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:599
+#: rust/crates/gtkhx-ui/src/video_panel.rs:607
 msgid "You"
 msgstr "Sie"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:600
+#: rust/crates/gtkhx-ui/src/video_panel.rs:608
 msgid "Your screen"
 msgstr "Ihr Bildschirm"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:734
+#: rust/crates/gtkhx-ui/src/video_panel.rs:742
 msgid "Watch"
 msgstr "Ansehen"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:784
+#: rust/crates/gtkhx-ui/src/video_panel.rs:792
 msgid "This server doesn't support video."
 msgstr "Dieser Server unterstützt kein Video."
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:786
+#: rust/crates/gtkhx-ui/src/video_panel.rs:794
 msgid "Join voice to see who has a camera or screen on."
 msgstr ""
 "Dem Sprachchat beitreten, um zu sehen, wer Kamera oder Bildschirmfreigabe "
 "eingeschaltet hat."
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:788
-#: rust/crates/gtkhx-ui/src/video_panel.rs:1689
+#: rust/crates/gtkhx-ui/src/video_panel.rs:796
+#: rust/crates/gtkhx-ui/src/video_panel.rs:1697
 msgid "You aren't watching anyone. Pick someone below to watch."
 msgstr "Sie sehen niemandem zu. Unten jemanden zum Ansehen auswählen."
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:790
+#: rust/crates/gtkhx-ui/src/video_panel.rs:798
 msgid "Nobody in this voice chat has a camera or screen on."
 msgstr ""
 "In diesem Sprachchat hat niemand Kamera oder Bildschirmfreigabe "
 "eingeschaltet."
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:1012
+#: rust/crates/gtkhx-ui/src/video_panel.rs:1020
 msgid "No Video"
 msgstr "Kein Video"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:1032
+#: rust/crates/gtkhx-ui/src/video_panel.rs:1040
 msgid "Not watching"
 msgstr "Nicht angesehen"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:1315
+#: rust/crates/gtkhx-ui/src/video_panel.rs:1323
 msgid "%s started sharing their screen"
 msgstr "%s hat die Bildschirmfreigabe gestartet"
 
-#: rust/crates/gtkhx-ui/src/video_panel.rs:1317
+#: rust/crates/gtkhx-ui/src/video_panel.rs:1325
 msgid "%s turned their camera on"
 msgstr "%s hat die Kamera eingeschaltet"
 

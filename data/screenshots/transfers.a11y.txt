@@ -100,7 +100,7 @@ frame "GtkHx (Northwind Commons)"
                 scroll pane "" [focusable]
                   panel ""
                     list "Transfers" [focusable]
-                      list item "" [focusable, selected]
+                      list item "Harbor Session 01.flac 16.5M of 36.6M" [focusable, selected]
                         panel ""
                           image "Download"
                           panel ""
@@ -108,7 +108,7 @@ frame "GtkHx (Northwind Commons)"
                               label "Harbor Session 01.flac" description="./Harbor Session 01.flac"
                             label "16.5M of 36.6M"
                             progress bar "Harbor Session 01.flac"
-                      list item "" [focusable]
+                      list item "dawn-02.jpg 1.7M of 5.7M · Paused" [focusable]
                         panel ""
                           image "Download"
                           panel ""
@@ -116,7 +116,7 @@ frame "GtkHx (Northwind Commons)"
                               label "dawn-02.jpg" description="./dawn-02.jpg"
                             label "1.7M of 5.7M · Paused"
                             progress bar "dawn-02.jpg"
-                      list item "" [focusable]
+                      list item "lighthouse.jpg Queued #1 0 of 5.3M" [focusable]
                         panel ""
                           image "Download"
                           panel ""
