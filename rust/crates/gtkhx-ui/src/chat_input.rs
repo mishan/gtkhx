@@ -34,11 +34,9 @@ use hxmodel::chat_members::{hx_input_history_down, hx_input_history_record, hx_i
 use hxmodel::conversation::hx_chat_member_model;
 
 extern "C" {
-    // The session's htlc. gtkhx_active_htlc (gtkhx_ui_bridge.c) is always
-    // compiled — unlike voice_bridge.c's hx_session_htlc, which is gated on
-    // HAVE_VOICE and would leave this undefined in -Dvoice=disabled builds.
-    // Single-session, so the active htlc *is* this input's session's htlc.
-    fn gtkhx_active_htlc() -> *mut c_void;
+    // gtkhx_ui_bridge.c, always compiled — unlike voice_bridge.c's
+    // hx_session_htlc, which is gated on HAVE_VOICE.
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
     fn hotline_client_input(htlc: *mut c_void, s: *mut c_char, cid: u32, style: u16);
 
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
@@ -304,7 +302,9 @@ fn on_key(
             let mut line = buffer_cbytes(&buf);
             unsafe {
                 hx_input_history_record(history, line.as_ptr() as *const c_char);
-                let htlc = gtkhx_active_htlc();
+                // The input's own connection, which a line typed just as the
+                // focus moves to another tab still belongs to.
+                let htlc = gtkhx_session_htlc(sess);
                 hotline_client_input(htlc, line.as_mut_ptr() as *mut c_char, cid, 0);
             }
             let (mut s, mut e) = (buf.start_iter(), buf.end_iter());

@@ -62,9 +62,11 @@ The transport, the signals and the connection-scoped keys all carry the connecti
 What is left is making the rest of the UI stop asking "which connection has focus?" when
 it means "which connection is this for?":
 
-- **Readers that still route through `hx_active_session()`.** The Rust UI reaches its
-  connection through `gtkhx_active_htlc()` and friends in the user editor, chat input,
-  file info, the voice panel and the create-post window.
+- **Readers that still route through `hx_active_session()`.** The chat input and its
+  commands, the user editor, file info, the voice panel and the users list's actions reach
+  their own connection, and a connection's editor and File Info windows close with it.
+  Left: the create-post window, and the chat view's renderers, which test mentions and
+  look up speakers and avatars on the focused connection.
 - **`thread_local` singletons in `gtkhx-ui`** that hold per-connection state: the flat
   news view, the banner and the create-post window. `useredit.rs`, an id-keyed map, is
   the shape they all want, and the one the threaded news browser now has.

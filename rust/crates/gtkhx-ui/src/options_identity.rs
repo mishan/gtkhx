@@ -40,9 +40,12 @@ extern "C" {
     fn hx_icon_forget() -> glib::ffi::gboolean;
     fn hx_icon_load_saved() -> *mut glib::ffi::GBytes;
 
-    // gtkhx_ui_bridge.c / gtkhx-core — the live connection, and whether the
-    // server on it speaks the GIF-icons extension.
-    fn gtkhx_active_htlc() -> *mut c_void;
+    // session_registry.c / gtkhx_ui_bridge.c / gtkhx-core — the open
+    // connections, and whether the server on each speaks the GIF-icons
+    // extension.
+    fn hx_session_count() -> u32;
+    fn hx_session_at(i: u32) -> *mut c_void;
+    fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
     fn hx_conn_gif_icons_state(htlc: *mut c_void) -> c_int;
 
     // toolbar.c
@@ -56,6 +59,17 @@ extern "C" {
 /// sending `ICON_SET` to a server in either other state means sending an
 /// opcode it may reject.
 const GIF_ICONS_SUPPORTED: c_int = 1;
+
+/// Every open connection whose server speaks the GIF-icons extension. The
+/// avatar is one setting for all of them — no connection has its own — so a
+/// change goes to each rather than to whichever tab happened to be focused,
+/// as the saved one goes to each at login.
+fn gif_icon_conns() -> Vec<*mut c_void> {
+    (0..unsafe { hx_session_count() })
+        .map(|i| unsafe { gtkhx_session_htlc(hx_session_at(i)) })
+        .filter(|&h| !h.is_null() && unsafe { hx_conn_gif_icons_state(h) } == GIF_ICONS_SUPPORTED)
+        .collect()
+}
 
 fn toast(text: &str) {
     unsafe { toolbar_show_toast(crate::cs(text).as_ptr()) };
@@ -176,9 +190,11 @@ fn accept_avatar(preview: &gtk::Picture, gif: &[u8]) {
     }
     avatar_preview(preview, gif);
 
-    let htlc = unsafe { gtkhx_active_htlc() };
-    if !htlc.is_null() && unsafe { hx_conn_gif_icons_state(htlc) } == GIF_ICONS_SUPPORTED {
+    let conns = gif_icon_conns();
+    for &htlc in &conns {
         unsafe { hx_icon_set(htlc, gif.as_ptr(), gif.len()) };
+    }
+    if !conns.is_empty() {
         toast(&tr("Avatar updated."));
     } else {
         toast(&tr(
@@ -315,8 +331,7 @@ fn avatar_group(page: &adw::PreferencesPage) {
         if let Some(preview) = preview_weak.upgrade() {
             preview.set_paintable(gtk::gdk::Texture::NONE);
         }
-        let htlc = unsafe { gtkhx_active_htlc() };
-        if !htlc.is_null() && unsafe { hx_conn_gif_icons_state(htlc) } == GIF_ICONS_SUPPORTED {
+        for htlc in gif_icon_conns() {
             unsafe { hx_icon_clear(htlc) };
         }
         // Don't claim a clear that didn't persist: a file that survived

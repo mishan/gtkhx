@@ -130,15 +130,6 @@ pub unsafe extern "C" fn gtkhx_config_dir() -> *const c_char {
     .as_ptr()
 }
 
-// ---- the live connection (gtkhx_ui_bridge.c) ----------------------------
-
-/// NULL means "not connected", which is the state every avatar path already
-/// has to handle.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_active_htlc() -> *mut c_void {
-    std::ptr::null_mut()
-}
-
 // ---- icons and avatars (icon_enum.c, gif_icons.c) -----------------------
 
 /// The image decoder's log line (inline_media_decode.c), reachable from

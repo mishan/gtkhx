@@ -179,7 +179,7 @@ pub unsafe extern "C" fn hlwrite_chunks(
             mine.into_iter().map(|(_, f)| f).collect()
         });
         for f in &held {
-            trace_frame(f);
+            trace_frame(htlc, f);
             if !send_frame(htlc, f) {
                 return;
             }
@@ -190,6 +190,7 @@ pub unsafe extern "C" fn hlwrite_chunks(
     // block), walking the caller's original chunk array — the attempt is visible
     // in a proto trace even when the pack was rejected below.
     proto_trace_send_begin(ty, my_trans, hc as u16);
+    trace_conn(htlc);
     for i in 0..hc as isize {
         let c = &*chunks.offset(i);
         proto_trace_send_chunk(c.tag, c.len, c.data);
@@ -230,12 +231,41 @@ pub fn drop_held(htlc: *mut HtlcConn) {
     HELD.with_borrow_mut(|h| h.retain(|(c, _)| *c != htlc as usize));
 }
 
+/// Name the connection a traced request goes out on, which with more than
+/// one open is the half of the trace a wrong-server bug hides in.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+#[cfg(not(test))]
+unsafe fn trace_conn(htlc: *mut HtlcConn) {
+    extern "C" {
+        fn debug_category_enabled(cat: *const c_char) -> glib::ffi::gboolean;
+        fn hx_conn_serial(h: *const HtlcConn) -> u16;
+        fn hx_conn_serverhost(h: *const HtlcConn) -> *const c_char;
+        fn hx_conn_serverport(h: *const HtlcConn) -> u16;
+    }
+    if debug_category_enabled(c"proto".as_ptr()) == glib::ffi::GFALSE {
+        return;
+    }
+    let host = std::ffi::CStr::from_ptr(hx_conn_serverhost(htlc)).to_string_lossy();
+    let line = format!(
+        "  on connection #{} ({host}:{})",
+        hx_conn_serial(htlc),
+        hx_conn_serverport(htlc)
+    );
+    if let Ok(msg) = std::ffi::CString::new(line) {
+        debug_log_str(c"proto".as_ptr(), msg.as_ptr());
+    }
+}
+#[cfg(test)]
+unsafe fn trace_conn(_htlc: *mut HtlcConn) {}
+
 /// Trace a held frame as it goes out, from its own bytes: the chunks it was
 /// built from are gone.
 ///
 /// # Safety
 /// Main thread.
-unsafe fn trace_frame(frame: &[u8]) {
+unsafe fn trace_frame(htlc: *mut HtlcConn, frame: &[u8]) {
     let be16 = |at: usize| u16::from_be_bytes([frame[at], frame[at + 1]]);
     let be32 =
         |at: usize| u32::from_be_bytes([frame[at], frame[at + 1], frame[at + 2], frame[at + 3]]);
@@ -244,6 +274,7 @@ unsafe fn trace_frame(frame: &[u8]) {
     }
     let count = be16(20);
     proto_trace_send_begin(u32::from(be16(2)), be32(4), count);
+    trace_conn(htlc);
     let mut at = 22;
     for _ in 0..count {
         if at + 4 > frame.len() {

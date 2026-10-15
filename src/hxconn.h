@@ -168,6 +168,10 @@ extern void hx_conn_set_logged_in (struct htlc_conn *h, gboolean v);
 extern gboolean hx_conn_post_login_fetched (const struct htlc_conn *h);
 extern void hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v);
 extern void hx_conn_set_nick_color_sent (struct htlc_conn *h, gboolean v);
+/* own_nick / own_icon: set on this connection alone (see gtkhx-ui's
+ * identity.rs), which a Settings change passes by. */
+extern void hx_conn_set_own_nick (struct htlc_conn *h, gboolean v);
+extern void hx_conn_set_own_icon (struct htlc_conn *h, gboolean v);
 
 /* ---- GIF-icons capability probe ------------------------------------------
  *
