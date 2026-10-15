@@ -342,6 +342,7 @@ gtask_refresh_queue_badge (struct gtask *gtsk)
         gtk_label_set_text (GTK_LABEL (gtsk->queue), qid);
         gtk_widget_set_visible (gtsk->queue, TRUE);
     } else {
+        gtk_label_set_text (GTK_LABEL (gtsk->queue), "");
         gtk_widget_set_visible (gtsk->queue, FALSE);
     }
 }
@@ -492,6 +493,11 @@ gtask_new (guint16 conn, struct htxf_conn *htxf)
     gtkhx_box_pack (row_box, content_box, 1, 1, 0);
 
     listitem = gtk_list_box_row_new ();
+    /* By reference, so the name follows the progress without announcing it.
+     * A hidden label still counts, so the queue badge is emptied as it hides. */
+    gtk_accessible_update_relation (GTK_ACCESSIBLE (listitem),
+                                    GTK_ACCESSIBLE_RELATION_LABELLED_BY, title,
+                                    queue, subtitle, NULL, -1);
     g_object_set_data (G_OBJECT (listitem), "gtsk", gtsk);
     gtkhx_widget_set_child (listitem, row_box);
 

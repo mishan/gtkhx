@@ -37,21 +37,18 @@ frame "GtkHx (Northwind Commons)"
                         panel ""
                           grouping "ada"
                             image "Camera"
-                            label "ada"
                             panel ""
                               button "Mute" [focusable]
                               button "Focus" [focusable]
                               button "Stop watching" [focusable]
                           grouping "ada"
                             image "Shared screen"
-                            label "ada"
                             panel ""
                               button "Mute" [focusable]
                               button "Show all" [focusable]
                               button "Stop watching" [focusable]
                           grouping "marco"
                             image "Camera"
-                            label "marco"
                             panel ""
                               button "Mute" [focusable]
                               button "Focus" [focusable]

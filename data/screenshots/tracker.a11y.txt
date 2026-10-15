@@ -200,7 +200,7 @@ frame "Tracker"
                 panel ""
                 label "tracker.example.org:5498  v1 · 8 servers"
               scroll pane "" [focusable]
-                tree table ""
+                tree table "tracker.example.org:5498"
                   table row "Name Users Address Port Description" [focusable]
                     filler "Name"
                       panel ""
@@ -222,7 +222,7 @@ frame "Tracker"
                       panel ""
                         label "Description"
                         panel ""
-                  list "" [focusable]
+                  list "tracker.example.org:5498" [focusable]
                     table row "Northwind Commons 18 198.51.100.24 5500 A friendly server for photographers, musicians and makers" [focusable]
                       table cell "Northwind Commons"
                         label "Northwind Commons"
@@ -328,8 +328,8 @@ frame "Tracker"
         panel ""
           panel ""
             panel ""
-              label "  8"
-              label " / 8"
+              label "8"
+              label "/ 8"
             grouping ""
               button "Minimize" description="Minimize the window" [focusable]
               button "Maximize" description="Maximize the window" [focusable]

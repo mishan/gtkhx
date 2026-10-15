@@ -46,7 +46,7 @@ fn tr(s: &str) -> String {
 /// catalog; otherwise `"XXXX file"` with non-printable bytes shown as `?`.
 fn kind_for(ftype_be: [u8; 4]) -> String {
     match crate::files::kind_label_for(Some(&ftype_be)) {
-        // Static ASCII English label (e.g. "MP3 Audio") → translate.
+        // Static ASCII English label (e.g. "MP3 audio") → translate.
         Some(label) => tr(label.to_str().unwrap_or("")),
         None => {
             let mut safe = String::with_capacity(4);

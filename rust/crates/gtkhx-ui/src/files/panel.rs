@@ -517,6 +517,13 @@ impl Panel {
             *self.complete.borrow_mut() = Some(PathComplete::attach(&self.path_entry));
         }
 
+        let name = if provider.is_local() {
+            tr("Local files")
+        } else {
+            tr("Remote files")
+        };
+        crate::name_column_view(&self.column_view, &name);
+
         // The selector follows the provider rather than driving it.
         if let Some((dd, id)) = &self.side {
             dd.block_signal(id);

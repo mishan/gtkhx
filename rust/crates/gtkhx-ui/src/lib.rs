@@ -459,6 +459,20 @@ pub(crate) fn set_name_tip(w: &impl gtk4::prelude::IsA<gtk4::Widget>, text: &str
         .update_property(&[gtk4::accessible::Property::Label(text)]);
 }
 
+/// Name a column view and the list inside it, which is what takes the focus:
+/// empty, it has no rows to say.
+pub(crate) fn name_column_view(cv: &gtk4::ColumnView, label: &str) {
+    use gtk4::prelude::*;
+    cv.update_property(&[gtk4::accessible::Property::Label(label)]);
+    let mut child = cv.first_child();
+    while let Some(w) = child {
+        if w.is::<gtk4::ListView>() {
+            w.update_property(&[gtk4::accessible::Property::Label(label)]);
+        }
+        child = w.next_sibling();
+    }
+}
+
 /// `&str` → `CString`, dropping any interior NUL (never fails).
 pub(crate) fn cs(s: &str) -> std::ffi::CString {
     std::ffi::CString::new(s).unwrap_or_else(|e| {

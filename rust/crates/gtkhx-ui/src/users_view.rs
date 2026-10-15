@@ -365,16 +365,7 @@ impl HxUserListView {
         selection.set_selected(INVALID);
 
         let column_view = gtk::ColumnView::new(Some(selection.clone()));
-        let label = tr("Users");
-        column_view.update_property(&[gtk::accessible::Property::Label(&label)]);
-        // The list inside takes the focus: empty, it has no rows to say.
-        let mut child = column_view.first_child();
-        while let Some(w) = child {
-            if w.is::<gtk::ListView>() {
-                w.update_property(&[gtk::accessible::Property::Label(&label)]);
-            }
-            child = w.next_sibling();
-        }
+        crate::name_column_view(&column_view, &tr("Users"));
         column_view.set_show_column_separators(false);
         column_view.set_show_row_separators(false);
 

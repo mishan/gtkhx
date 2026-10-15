@@ -174,7 +174,7 @@ impl HxFileEntry {
             .get_or_init(|| collate_key_of(&imp.kind.borrow()))
     }
 
-    /// The short kind description ("Folder", "MP3 Audio"), empty if unknown.
+    /// The short kind description ("Folder", "MP3 audio"), empty if unknown.
     pub fn kind(&self) -> String {
         self.imp().kind.borrow().to_string_lossy().into_owned()
     }

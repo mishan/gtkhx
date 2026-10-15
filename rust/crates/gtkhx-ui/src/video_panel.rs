@@ -225,7 +225,10 @@ impl Tile {
         root.add_css_class("hx-video-tile");
         root.set_overflow(gtk::Overflow::Hidden);
 
-        let name = gtk::Label::new(None);
+        // The group already says the name.
+        let name = gtk::Label::builder()
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
         name.set_halign(gtk::Align::Start);
         name.set_valign(gtk::Align::End);
         name.set_margin_start(6);

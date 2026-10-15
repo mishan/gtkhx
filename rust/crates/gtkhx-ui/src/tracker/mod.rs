@@ -287,6 +287,7 @@ fn section_new(url: &str, version: u8, expected: u16, filter: &gtk::CustomFilter
     selection.set_selected(INVALID);
 
     let column_view = gtk::ColumnView::new(Some(selection.clone()));
+    crate::name_column_view(&column_view, url);
     unsafe { cffi::gtkhx_apply_listview_style(wptr(&column_view)) };
     column_view.set_show_column_separators(true);
     column_view.set_show_row_separators(false);
@@ -487,10 +488,9 @@ fn update_title(sec: &Section) {
 }
 
 fn set_count_labels(win: &Win) {
-    win.lbl_found
-        .set_text(&format!("  {}", win.num_found_total));
+    win.lbl_found.set_text(&win.num_found_total.to_string());
     win.lbl_total
-        .set_text(&format!(" / {}", win.num_total_total));
+        .set_text(&format!("/ {}", win.num_total_total));
 }
 
 // ---------------------------------------------------------------------
@@ -597,7 +597,7 @@ fn rerun_search() {
     WIN.with_borrow_mut(|w| {
         if let Some(win) = w.as_mut() {
             win.num_found_total = found;
-            win.lbl_found.set_text(&format!("  {}", found));
+            win.lbl_found.set_text(&found.to_string());
         }
     });
 }
@@ -841,7 +841,7 @@ fn build_window(sess: *mut c_void) {
     });
 
     let lbl_found = gtk::Label::new(Some("0"));
-    let lbl_total = gtk::Label::new(Some(" / 0"));
+    let lbl_total = gtk::Label::new(Some("/ 0"));
     lbl_found.add_css_class("dim-label");
     lbl_total.add_css_class("dim-label");
 
@@ -873,7 +873,10 @@ fn build_window(sess: *mut c_void) {
     header.pack_start(&bookmarkbtn);
     header.pack_start(&detailsbtn);
 
-    let count_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    // The space a separator would take, so the labels read as bare numbers.
+    let space = lbl_total.create_pango_layout(Some(" ")).pixel_size().0;
+    let count_box = gtk::Box::new(gtk::Orientation::Horizontal, space);
+    count_box.set_margin_start(2 * space);
     count_box.append(&lbl_found);
     count_box.append(&lbl_total);
     header.pack_end(&count_box);
@@ -998,8 +1001,8 @@ fn tracker_getlist() {
     tracker_clear();
     WIN.with_borrow(|w| {
         if let Some(win) = w.as_ref() {
-            win.lbl_found.set_text("  0");
-            win.lbl_total.set_text(" / 0");
+            win.lbl_found.set_text("0");
+            win.lbl_total.set_text("/ 0");
         }
     });
     if let Some(sess) = sess {
