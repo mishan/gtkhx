@@ -9,7 +9,6 @@
 - Users
   - The voice column's heading is an icon that follows the theme, rather than an emoji
 - Files
-  - A server's file kinds are written as the local ones are, "JPEG image" rather than "JPEG Image"
   - Fixed downloading a file whose name is one character long from hlservd
 
 ## 1.6.0
