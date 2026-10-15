@@ -31,9 +31,7 @@ extern void gtkhx_agreement_disagree (struct _session *sess);
 extern void gtkhx_session_set_agreementwin (struct _session *sess,
                                             GtkWidget *win);
 
-/* &hx_active_session()->htlc — the focused connection's htlc_conn. */
 struct htlc_conn;
-extern struct htlc_conn *gtkhx_active_htlc (void);
 
 /* gtkhx_prefs.queuedl (queue-downloads pref) for the Rust xfers shell. */
 extern int hx_prefs_queuedl (void);

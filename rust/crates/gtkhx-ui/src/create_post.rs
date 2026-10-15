@@ -2,14 +2,15 @@
 //!
 //! The "Post News" window for the flat (1.0/1.2) news board: a modal
 //! GtkTextView with a Cancel/Post header bar. Cancel or Esc close it;
-//! Post or Ctrl+Enter send the body via the C wire sender `hx_post_news`
-//! and close. `create_post_window` keeps its C ABI so the toolbar's Post
-//! button links unchanged.
+//! Post or Ctrl+Enter send the body via `hx_post_news` and close.
 //!
-//! The wire sender (`hx_post_news`) stays C — it builds the chunks + drives
-//! the task/write path, same seam the voice senders use.
+//! One per connection, posting to the board it was opened from: the focus
+//! can move to another tab while it is open (a second launch's `--server`,
+//! a tracker connect), and the post still belongs to the first. It closes
+//! with its connection's tab.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 
 use glib::translate::from_glib_none;
@@ -18,44 +19,41 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
 
+use crate::dock::{self, Bound, ConnKey};
 use crate::ffi as cffi;
 use crate::tr::tr;
 
-/// Opaque C `session *` (unused — single-session; the post uses the active
-/// htlc, matching the C which took `&sess->htlc`).
+/// Opaque C `session *`.
 type Session = c_void;
 
 thread_local! {
-    /// The open Post window + its body view, or None. Mirrors the C
-    /// `post_window` / `postprompt` globals + the single-instance guard.
-    static POST: RefCell<Option<(gtk::Window, gtk::TextView)>> = const { RefCell::new(None) };
+    /// Each connection's open Post window and its body view.
+    static POST: RefCell<HashMap<ConnKey, (gtk::Window, gtk::TextView)>> =
+        RefCell::new(HashMap::new());
 }
 
 use hxhandlers::send::news::hx_post_news;
 
 extern "C" {
-    /// gtkhx_ui_bridge.c — the focused session's `&htlc` (single-session).
-    fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx.c — apply the themed `.gtkhx-text` CSS class + font.
     fn gtkhx_apply_text_style(w: *mut gtk::ffi::GtkWidget);
     /// toolbar.c — the toolbar window (transient-for parent). May be NULL.
     static toolbar_window: *mut gtk::ffi::GtkWidget;
 }
 
-/// Close + forget the Post window.
-fn close_post() {
-    if let Some((win, _)) = POST.with(|p| p.borrow_mut().take()) {
-        win.destroy();
+/// Close `conn`'s Post window; its close handler forgets it.
+fn close_post(conn: ConnKey) {
+    if let Some((win, _)) = POST.with_borrow(|p| p.get(&conn).cloned()) {
+        win.close();
     }
 }
 
 /// Read the body, send it, and close. Mirrors `news.c::post_news`: LF→CR, and
 /// a trailing CR is zeroed in place (length unchanged — the historical
 /// behaviour), then handed to `hx_post_news`.
-fn do_post() {
-    let tv = match POST.with(|p| p.borrow().clone()) {
-        Some((_, tv)) => tv,
-        None => return,
+fn do_post(conn: Bound) {
+    let Some((_, tv)) = POST.with_borrow(|p| p.get(&conn.conn()).cloned()) else {
+        return;
     };
     let buf = tv.buffer();
     let (start, end) = buf.bounds();
@@ -69,30 +67,31 @@ fn do_post() {
     if len > 0 && bytes[len - 1] == b'\r' {
         bytes[len - 1] = 0;
     }
-    unsafe {
-        hx_post_news(
-            gtkhx_active_htlc(),
-            bytes.as_ptr() as *const c_char,
-            len as u16,
-        );
-    }
-    close_post();
+    // Not once the connection has gone, or connected to another server; the
+    // window stays, with the draft, rather than throwing it away.
+    let Some(htlc) = dock::live_htlc(conn) else {
+        let text = crate::cs(&tr("Not posted: the connection this was for has closed"));
+        unsafe { cffi::toolbar_show_toast(text.as_ptr()) };
+        return;
+    };
+    unsafe { hx_post_news(htlc, bytes.as_ptr() as *const c_char, len as u16) };
+    close_post(conn.conn());
 }
 
 /// `void create_post_window(GtkWidget *widget, gpointer data)` — open (or
-/// re-present) the Post News composer. Toolbar "Post" button callback.
+/// re-present) `data`'s Post News composer.
 ///
 /// # Safety
-/// Called on the GTK main thread as a GTK signal callback.
+/// Called on the GTK main thread as a GTK signal callback; `data` is a
+/// `session *`.
 #[no_mangle]
-pub unsafe extern "C" fn create_post_window(
-    _widget: *mut gtk::ffi::GtkWidget,
-    _data: *mut Session,
-) {
+pub unsafe extern "C" fn create_post_window(_widget: *mut gtk::ffi::GtkWidget, data: *mut Session) {
     crate::ensure_gtk_init();
 
-    // Single instance: re-present rather than stacking a second window.
-    if let Some((win, _)) = POST.with(|p| p.borrow().clone()) {
+    let conn = dock::bind(dock::key_for_session(data));
+    let key = conn.conn();
+    // One per connection: re-present rather than stacking a second window.
+    if let Some((win, _)) = POST.with_borrow(|p| p.get(&key).cloned()) {
         win.present();
         return;
     }
@@ -112,10 +111,10 @@ pub unsafe extern "C" fn create_post_window(
     header.set_show_start_title_buttons(false);
     header.set_show_end_title_buttons(false);
     let cancel = gtk::Button::with_mnemonic(&tr("_Cancel"));
-    cancel.connect_clicked(|_| close_post());
+    cancel.connect_clicked(move |_| close_post(key));
     let post_btn = gtk::Button::with_mnemonic(&tr("_Post"));
     post_btn.add_css_class("suggested-action");
-    post_btn.connect_clicked(|_| do_post());
+    post_btn.connect_clicked(move |_| do_post(conn));
     header.pack_start(&cancel);
     header.pack_end(&post_btn);
     window.set_titlebar(Some(&header));
@@ -148,28 +147,30 @@ pub unsafe extern "C" fn create_post_window(
 
     // Esc = Cancel, Ctrl+Enter = Post.
     let kc = gtk::EventControllerKey::new();
-    kc.connect_key_pressed(|_, keyval, _, state| {
+    kc.connect_key_pressed(move |_, keyval, _, state| {
         if keyval == gtk::gdk::Key::Escape {
-            close_post();
+            close_post(key);
             return glib::Propagation::Stop;
         }
         if (keyval == gtk::gdk::Key::Return || keyval == gtk::gdk::Key::KP_Enter)
             && state.contains(gtk::gdk::ModifierType::CONTROL_MASK)
         {
-            do_post();
+            do_post(conn);
             return glib::Propagation::Stop;
         }
         glib::Propagation::Proceed
     });
     window.add_controller(kc);
 
-    // WM-close (X) clears the single-instance guard.
-    window.connect_close_request(|_| {
-        POST.with(|p| *p.borrow_mut() = None);
+    // Every way it closes — Cancel, Post, the window's own close, or its
+    // connection's tab — comes through here.
+    window.connect_close_request(move |_| {
+        POST.with_borrow_mut(|p| p.remove(&key));
         glib::Propagation::Proceed
     });
 
-    POST.with(|p| *p.borrow_mut() = Some((window.clone(), tv.clone())));
+    POST.with_borrow_mut(|p| p.insert(key, (window.clone(), tv.clone())));
+    dock::close_with(key, &window);
 
     cffi::init_keyaccel(window.as_ptr() as *mut cffi::GtkWidget);
     window.present();

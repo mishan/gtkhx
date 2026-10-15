@@ -360,7 +360,7 @@ unsafe fn threaded_news_available(htlc: *mut c_void) -> bool {
 /// Fire NEWSDIRLIST on `htlc`. `target` NULL = root fetch (populate that
 /// connection's `root_store`).
 ///
-/// The connection is a parameter rather than `gtkhx_active_htlc()`, and that
+/// The connection is a parameter rather than the focused one, and that
 /// is the whole point: a fetch triggered by a *wire* event — a background
 /// server reaching LOGIN_READY — belongs to that server, not to whichever one
 /// the user happens to be looking at. Sending it on the focused connection

@@ -15,6 +15,8 @@
   - Reconnect, on the banner after a lost connection, reconnects that tab to the server it lost, however it connected (the Connect dialog, a bookmark, a link, the tracker, `/server` or `--server`), rather than to whichever server some other tab connected to last
   - A new avatar chosen in Settings goes to every connected server that takes one, not only to the one in focus
   - Closing a connection's tab closes its user editors and File Info windows; one left open across a reconnect to another server no longer saves there, and neither does the answer to a chat invitation
+  - Post News posts to the server it was opened for, even when another connection opens and takes the focus while you write; it closes with its tab, and if that connection drops first it keeps what you wrote rather than closing
+  - Two servers logging in at the same moment each show their banner, where the first could be left with none
 
 ## 1.6.0
 

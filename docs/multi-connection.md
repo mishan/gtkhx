@@ -258,16 +258,24 @@ site-by-site:
   login, since no connection has one of its own. Reconnect replays what the
   dropped tab last connected to — the dialog, a bookmark, a link, a tracker,
   `/server` or `--server` — not the last connect anywhere.
-  `gtkhx_active_htlc()` is left only in the create-post window.
+  `gtkhx_active_htlc()` is gone.
 
 ### UI singletons that hold per-connection state
 
-Beyond the tab strip: the flat news view, the banner, and the create-post
-window are all `thread_local` singletons in `gtkhx-ui`. The threaded news
-browser, a window per connection keyed on it with its fetches tagged by the
-connection they went out on, no longer is. `useredit.rs` is the in-tree
-counter-example — an id-keyed map with closures capturing the id by value — and
-is the shape all of them want, keyed by connection instead of by dialog.
+Done. Each is a map keyed by connection now, the shape `useredit.rs` has:
+
+- **The flat news view** and **the threaded news browser** (M4g), each with its
+  fetches tagged by the connection they went out on.
+- **The banner.** Its content was already per connection; its fetch — one URL
+  fetch, one HTXF worker, one decode — was a single slot, so two servers logging
+  in within a fetch of each other left the first with no banner. Each
+  connection's attempt is its own entry now, and a result for an attempt that
+  has ended is dropped. The *widget* is still one, and follows the focus like the
+  rest of the chrome.
+- **The create-post window.** It posted to whichever connection had focus when
+  Post was clicked, which a second launch's `--server` or a tracker connect can
+  move while it is open. It binds its connection when built, posts there or
+  nowhere, and closes with its tab.
 
 Genuinely app-level, and correctly so: the tracker window, the connect dialog,
 bookmarks, about, and the settings pages.
