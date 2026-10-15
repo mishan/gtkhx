@@ -494,10 +494,11 @@ gtask_new (guint16 conn, struct htxf_conn *htxf)
 
     listitem = gtk_list_box_row_new ();
     /* By reference, so the name follows the progress without announcing it.
-     * A hidden label still counts, so the queue badge is emptied as it hides. */
+     * A hidden label still counts, so the badge and tag are emptied as they
+     * hide. The tag reads best beside the file name, not after the badge. */
     gtk_accessible_update_relation (GTK_ACCESSIBLE (listitem),
                                     GTK_ACCESSIBLE_RELATION_LABELLED_BY, title,
-                                    queue, subtitle, NULL, -1);
+                                    tag, queue, subtitle, NULL, -1);
     g_object_set_data (G_OBJECT (listitem), "gtsk", gtsk);
     gtkhx_widget_set_child (listitem, row_box);
 
@@ -603,6 +604,7 @@ gtkhx_tasks_refresh_tags (void)
 
         gtk_widget_set_visible (gtsk->tag, show);
         if (!show) {
+            gtk_label_set_text (GTK_LABEL (gtsk->tag), "");
             continue;
         }
         /* NULL for a row whose connection is on its way out — it will be
