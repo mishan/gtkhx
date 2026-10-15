@@ -571,8 +571,8 @@ makes the remaining port bigger. The rules below exist to reverse that.
    adds exports for the C left behind has moved the problem, not solved it.
 
 4. **Route by connection while porting.** Each reader that ports takes its
-   connection explicitly instead of asking `hx_active_session()` or
-   `gtkhx_active_htlc()` which one has focus, and each `thread_local`
+   connection explicitly instead of asking `hx_active_session()` which one
+   has focus, and each `thread_local`
    singleton holding per-connection state becomes an id-keyed map, the shape
    `useredit.rs` already has. That is the
    [multi-connection follow-through](#multi-connection--tabbed-ui), and doing
@@ -645,13 +645,12 @@ connection-scoped keys all carry the connection. The design and the open
 question of coexisting per-connection panels are in
 [`../multi-connection.md`](../multi-connection.md).
 
-What it leaves for the port is the code that still asks "which connection has
-focus?" when it means "which connection is this for?": readers that route
-through `hx_active_session()` or `gtkhx_active_htlc()`, and the
-`thread_local` singletons in `gtkhx-ui` that hold per-connection state. The
-root [`ROADMAP.md`](../../ROADMAP.md) lists them. Rule 4 of
-[How the rest of the port gets done](#how-the-rest-of-the-port-gets-done) is
-the plan: fix each one as the code around it ports.
+The code that asked "which connection has focus?" when it meant "which
+connection is this for?" — readers routed through `hx_active_session()`, and
+`thread_local` singletons in `gtkhx-ui` holding per-connection state — has been
+swept; the root [`ROADMAP.md`](../../ROADMAP.md) says what was done. Rule 4 of
+[How the rest of the port gets done](#how-the-rest-of-the-port-gets-done)
+keeps new code from bringing it back.
 
 ---
 

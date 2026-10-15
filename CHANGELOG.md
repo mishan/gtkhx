@@ -17,6 +17,8 @@
   - Closing a connection's tab closes its user editors and File Info windows; one left open across a reconnect to another server no longer saves there, and neither does the answer to a chat invitation
   - Post News posts to the server it was opened for, even when another connection opens and takes the focus while you write; it closes with its tab, and if that connection drops first it keeps what you wrote rather than closing
   - Two servers logging in at the same moment each show their banner, where the first could be left with none
+  - A chat line arriving on a connection you aren't looking at is checked for a mention against your name on that server, and its speaker and avatar come from that server's user list, rather than the one in focus
+  - Changing the theme or font in Settings applies to every open connection, not only the one in focus, and so do the nickname and the icon, each except where a connection has its own: from its entry in Settings → Connections, or set there with `/nick` or `/icon`, kept until it connects again without one
 
 ## 1.6.0
 

@@ -32,7 +32,13 @@ extern "C" {
     fn gtkurl_show_popup(anchor: *mut gtk::ffi::GtkWidget, url: *const c_char, x: f64, y: f64);
     /// `connect.c` — connect to the server a `hotline://` URL names.
     fn connect_open_hotline_url(url: *const c_char) -> glib::ffi::gboolean;
+    /// `session_registry.c` — the session a connection key names, NULL once
+    /// it has closed.
+    fn hx_session_with_serial(serial: u16) -> *mut c_void;
 }
+
+/// Where a chat view keeps the connection it belongs to.
+const CONN_KEY: &str = "gtkhx-conn";
 
 /// The schemes GtkHx links: the usual set, plus its own.
 static LINKS: LazyLock<Linkifier> = LazyLock::new(|| {
@@ -44,8 +50,8 @@ static LINKS: LazyLock<Linkifier> = LazyLock::new(|| {
     )
 });
 
-/// Build a chat output: a Rotulus view, configured for GtkHx and handed
-/// to C floating, like any GTK constructor's result.
+/// Build a chat output for connection `conn`: a Rotulus view, configured for
+/// GtkHx and handed to C floating, like any GTK constructor's result.
 ///
 /// # Safety
 /// `palette` points to `ROTULUS_PAL_COLS` colors; `font` is a
@@ -54,6 +60,7 @@ static LINKS: LazyLock<Linkifier> = LazyLock::new(|| {
 pub unsafe extern "C" fn gtkhx_chat_view_new(
     palette: *const gtk::gdk::ffi::GdkRGBA,
     font: *const c_char,
+    conn: crate::dock::ConnKey,
 ) -> *mut gtk::ffi::GtkWidget {
     let raw = rotulus::ffi::rotulus_view_new();
     rotulus::ffi::rotulus_view_set_palette(raw, palette);
@@ -65,10 +72,28 @@ pub unsafe extern "C" fn gtkhx_chat_view_new(
     let obj: glib::Object =
         glib::translate::from_glib_full(glib::gobject_ffi::g_object_ref(raw as *mut _));
     if let Ok(view) = obj.downcast::<RotulusView>() {
+        view.set_data(CONN_KEY, conn);
         setup(&view);
         configure(&view);
     }
     raw
+}
+
+/// `session *gtkhx_chat_view_session (GtkWidget *view)` — the session a chat
+/// view belongs to, for what it draws and what a click on it does: a
+/// background connection's view renders and lays out while another tab is
+/// in focus. NULL once that connection has closed, or for a widget
+/// `gtkhx_chat_view_new` didn't build.
+///
+/// # Safety
+/// `view` is a live `GtkWidget *`. Main thread.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_chat_view_session(view: *mut gtk::ffi::GtkWidget) -> *mut c_void {
+    let view: gtk::Widget = glib::translate::from_glib_none(view);
+    match view.data::<crate::dock::ConnKey>(CONN_KEY) {
+        Some(conn) => hx_session_with_serial(*conn.as_ref()),
+        None => std::ptr::null_mut(),
+    }
 }
 
 /// What every GtkHx chat view has, whatever the preferences say.

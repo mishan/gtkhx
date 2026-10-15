@@ -3,8 +3,8 @@
 This began as a design survey for `MAX_CONN > 1` — the long-deferred ability
 to be connected to several Hotline servers at once — and most of it has since
 shipped: several connections at once, one tab each, under Model A. Struck-through
-headings below are done. What is still open is the `hx_active_session()` sweep,
-the `gtkhx-ui` singletons, and the Model B question.
+headings below are done, and so are the `hx_active_session()` sweep and the
+`gtkhx-ui` singletons. What is still open is the Model B question.
 
 Companion reading: [docking.md](docking.md) (the dock the UI would extend),
 [preferences.md](preferences.md) (which owns the connection collection and the
@@ -199,8 +199,8 @@ tables are keyed on those with no connection dimension:
   pause, through it; a decoded or dropped avatar refreshes only that
   connection's lists. Otherwise a background connection's rows would show the
   *focused* connection's face for a colliding uid — the wrong image, which is
-  worse than none. The chat view's avatar lookup (`chat_avatar.c`) still goes
-  through `hx_active_session()`.
+  worse than none. The chat view's avatar lookup (`chat_avatar.c`) asks the
+  view's own connection.
 - ~~**Notification IDs**~~ — fixed. The four connection-scoped classes carry
   the serial, so `msg-3-5` and `msg-7-5` are two notifications rather than one
   replacing the other. `news`, `xfer` and `broadcast` keep constant ids on
@@ -221,7 +221,7 @@ the durable identity Model B needs for saved layouts: that has to survive a
 restart, and this doesn't. It fits in what was tail padding on `htlc_conn`,
 so the struct is the same size and neither layout pin moved.
 
-### The `hx_active_session()` idiom
+### ~~The `hx_active_session()` idiom~~ — done
 
 The single largest mechanical item. Call sites are spread across most of the
 UI-facing C files and a smaller set of Rust modules, the large majority
@@ -231,10 +231,13 @@ site-by-site:
 
 - **`HxUserListView` is the pattern to copy** — it already carries its session
   and cid and exposes accessors for both.
-- **The chat render path** routes correctly at the top (`output_chat_from_event`
-  uses `sess_from_htlc`) but the renderers beneath it reach for the active
-  session to resolve self-identity for the highlight-me test. Each has a view
-  pointer in hand.
+- ~~**The chat render path**~~ — fixed. The renderers take the session they
+  render for, so a line arriving on a background connection is tested against
+  *that* connection's nickname for the mention highlight, and its speaker is
+  looked up in that connection's membership. A chat view carries its
+  connection (`gtkhx_chat_view_new` takes it, `gtkhx_chat_view_session` reads
+  it back), which is what the avatar resolver and the view's click handlers
+  ask now.
 - ~~**The file browser**~~ — bound. The browser carries the session it lists,
   the remote provider carries its own, and every send, task and access check
   routes through them. A copy takes its connection from whichever of the two
@@ -244,10 +247,9 @@ site-by-site:
 - ~~**The private-message path**~~ — fixed. The `msg` signal carries its
   connection, `msgwin_with_uid` takes the session to search, and a `msgwin`
   remembers which session's table owns it, so a close routes there rather than
-  to whatever is focused. What remains is the tab strip's bare-uid key: the
-  close dispatcher receives a uid and nothing else, so it still has to ask the
-  active session.
-- **The Rust UI reaches for a connection through C shims** — mostly fixed.
+  to whatever is focused. The tab strip's close dispatchers are handed the
+  connection the tab belonged to too (M4d).
+- ~~**The Rust UI reaches for a connection through C shims**~~ — fixed.
   The chat input sends on the session it was attached to, and `hx_command`
   takes that connection rather than asking for the focused one. The user
   editor, File Info and a chat invitation hold a `dock::Bound` — the
@@ -259,6 +261,21 @@ site-by-site:
   dropped tab last connected to — the dialog, a bookmark, a link, a tracker,
   `/server` or `--server` — not the last connect anywhere.
   `gtkhx_active_htlc()` is gone.
+- ~~**Preferences**~~ — fixed. A change used to run its hook against the
+  focused session only, so a theme or font change left a background
+  connection's chat views as they were, and a nickname change reached one
+  server. `pref_hook_run` runs view and connection hooks for every session,
+  and the nickname and icon hook passes by a connection with an identity of
+  its own (see "Identity" below), which keeps its override or its `/nick`.
+
+What still asks `hx_active_session()` does so because it means the focus: the
+toolbar and its panel buttons, the main menu's actions, the tray, Ctrl+K, the
+chrome that follows the focus (status bar, window titles, banner row), the
+Transfers panel's show-on-first-transfer test, the tracker's connect (which
+opens a new tab beside the focused one), and the chat subject entry
+(`change_subject`), which can only be typed into on the visible page. `/exec`
+output goes to the chat of the connection the command was typed on, whichever
+is focused when it arrives.
 
 ### UI singletons that hold per-connection state
 

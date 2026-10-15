@@ -30,6 +30,7 @@
 #include "hx.h"
 #include "hxconn.h"
 #include "gtkhx_session.h"
+#include "session_registry.h" /* hx_session_count, hx_session_at */
 #include "gtkhx_theme.h"
 #include "gtkhx_log.h"
 #include "panel_registry.h"
@@ -303,25 +304,23 @@ gtkhx_apply_theme_palette (gboolean dark)
         }
     }
 
-    /* Push the new palette into every live xtext widget. Chat /
-     * private-chat outputs hang off each model's view (hx_chat_view (chat)) in sess->chats;
-     * private-message outputs hang off msgwin in sess->msg_windows.
-     * News uses a plain GtkTextView (theme-driven CSS), not an
-     * xtext, so it picks up the system theme without help. */
-    session *sess = hx_active_session ();
-    if (sess->chats) {
+    /* Push the new palette into every live chat view, of every connection:
+     * chat and private-chat outputs in each session's chats, private-message
+     * outputs in its msg_windows. News is a plain GtkTextView and follows
+     * the theme's CSS without help. */
+    for (guint s = 0; s < hx_session_count (); s++) {
+        session *sess = hx_session_at (s);
         guint n = hx_chats_count (sess->chats);
+        GHashTableIter iter;
+        gpointer val;
+
         for (guint i = 0; i < n; i++) {
-            struct chat *c = hx_chats_get_at (sess->chats, i);
-            struct gtkhx_chat *gchat = hx_chat_view (c);
+            struct gtkhx_chat *gchat
+                = hx_chat_view (hx_chats_get_at (sess->chats, i));
             if (gchat && gchat->output) {
                 rotulus_view_set_palette (ROTULUS_VIEW (gchat->output), colors);
             }
         }
-    }
-    if (sess->msg_windows) {
-        GHashTableIter iter;
-        gpointer val;
         g_hash_table_iter_init (&iter, sess->msg_windows);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
@@ -516,9 +515,10 @@ hx_chat_nick_color (const char *nick, gsize nick_len, gboolean is_self)
  * either because hx_chat_split_nick_body didn't match (emote,
  * raw server prose) or the caller wanted a plain append. */
 static void
-xprintline_render_parts (RotulusView *text, const char *name, gsize name_len,
-                         const char *body_text, gsize body_text_len,
-                         gboolean is_info, gboolean is_self, gint16 info_color,
+xprintline_render_parts (session *sess, RotulusView *text, const char *name,
+                         gsize name_len, const char *body_text,
+                         gsize body_text_len, gboolean is_info,
+                         gboolean is_self, gint16 info_color,
                          RotulusSpeaker speaker)
 {
     /* Gutter runs. At most three: "<", the name, ">". The old code
@@ -532,7 +532,6 @@ xprintline_render_parts (RotulusView *text, const char *name, gsize name_len,
     const char *display_body = NULL;
     gsize display_body_len = 0;
     gboolean have_nick = FALSE;
-    session *sess = hx_active_session ();
     const char *self_nick = (hx_conn_name (sess->htlc)[0] != '\0')
                                 ? (const char *)hx_conn_name (sess->htlc)
                                 : NULL;
@@ -637,18 +636,19 @@ xprintline_render_parts (RotulusView *text, const char *name, gsize name_len,
 /* Offsets-into-one-line wrapper, for the log-line path where the name
  * and body really are slices of the same buffer. */
 static void
-xprintline_render (RotulusView *text, const char *line, gsize line_len,
-                   gsize name_off, gsize name_len, gsize body_off,
-                   gsize body_len, gboolean is_info, gboolean is_self,
-                   gint16 info_color, RotulusSpeaker speaker)
+xprintline_render (session *sess, RotulusView *text, const char *line,
+                   gsize line_len, gsize name_off, gsize name_len,
+                   gsize body_off, gsize body_len, gboolean is_self,
+                   RotulusSpeaker speaker)
 {
     if (name_len == 0) {
-        xprintline_render_parts (text, NULL, 0, line, line_len, is_info,
-                                 is_self, info_color, speaker);
+        xprintline_render_parts (sess, text, NULL, 0, line, line_len, FALSE,
+                                 is_self, HX_CHAT_INFO_COLOR, speaker);
         return;
     }
-    xprintline_render_parts (text, line + name_off, name_len, line + body_off,
-                             body_len, is_info, is_self, info_color, speaker);
+    xprintline_render_parts (sess, text, line + name_off, name_len,
+                             line + body_off, body_len, FALSE, is_self,
+                             HX_CHAT_INFO_COLOR, speaker);
 }
 
 /* Strip a repeated "<sender>:  " prefix off a continuation line.
@@ -768,7 +768,8 @@ chat_speaker_menu (GtkWidget *view, guint64 uid, double x, double y,
     if (uid == 0 || uid > G_MAXUINT16) {
         return;
     }
-    user_popup_show (view, hx_active_session (), cid, (guint16)uid, x, y);
+    user_popup_show (view, gtkhx_chat_view_session (view), cid, (guint16)uid, x,
+                     y);
 }
 
 /* Identify who said a line.
@@ -790,8 +791,8 @@ chat_speaker_menu (GtkWidget *view, guint64 uid, double x, double y,
  * attach someone else's avatar and group two people's messages together,
  * which is worse than showing neither. */
 static RotulusSpeaker
-chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
-                  gsize nick_len)
+chat_speaker_for (session *sess, guint32 cid, guint16 wire_uid,
+                  const char *nick, gsize nick_len)
 {
     RotulusSpeaker sp = ROTULUS_SPEAKER_NONE;
     struct chat *conv;
@@ -806,7 +807,7 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
         sp.nick_len = (int)nick_len;
         return sp;
     }
-    conv = chat_with_cid (hx_active_session (), cid);
+    conv = chat_with_cid (sess, cid);
     if (!conv) {
         return sp;
     }
@@ -862,7 +863,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     if (!e) {
         return;
     }
-    struct chat *conv = chat_with_cid (sess_from_htlc (htlc), e->cid);
+    session *sess = sess_from_htlc (htlc);
+    struct chat *conv = chat_with_cid (sess, e->cid);
     gchat = hx_chat_view (conv);
     if (!gchat) {
         return;
@@ -920,10 +922,10 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     }
 
     xprintline_render_parts (
-        ROTULUS_VIEW (gchat->output), e->line + e->sender_off, e->sender_len,
-        joined ? joined : "", first_body_len, FALSE, e->is_self,
+        sess, ROTULUS_VIEW (gchat->output), e->line + e->sender_off,
+        e->sender_len, joined ? joined : "", first_body_len, FALSE, e->is_self,
         HX_CHAT_INFO_COLOR,
-        chat_speaker_for (e->cid, e->uid, e->line + e->sender_off,
+        chat_speaker_for (sess, e->cid, e->uid, e->line + e->sender_off,
                           e->sender_len));
     g_free (joined);
     joined = NULL;
@@ -1199,7 +1201,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 static struct gtkhx_chat *
 find_gchat_by_output (GtkWidget *view)
 {
-    HxChatRegistry *chats = hx_active_session ()->chats;
+    session *sess = gtkhx_chat_view_session (view);
+    HxChatRegistry *chats = sess ? sess->chats : NULL;
     if (!chats) {
         return NULL;
     }
@@ -1233,7 +1236,7 @@ chat_history_load_more (RotulusView *view, RotulusLoadDirection direction,
                    "Load-older click: no gchat matches the view");
         return;
     }
-    htlc = hx_active_session ()->htlc;
+    htlc = gtkhx_chat_view_session (GTK_WIDGET (view))->htlc;
     /* Guard: don't fire a second request while the first is
      * still in flight. The receive path (output_chat_history_batch)
      * clears render.loading on every batch — including empty ones,
@@ -1290,7 +1293,8 @@ inline_media_chat_activated (GtkWidget *view, guint token, gpointer data)
     (void)data;
     struct gtkhx_chat *gchat = find_gchat_by_output (view);
     struct chat *conv
-        = gchat ? chat_with_cid (hx_active_session (), gchat->cid) : NULL;
+        = gchat ? chat_with_cid (gtkhx_chat_view_session (view), gchat->cid)
+                : NULL;
     if (!conv) {
         return;
     }
@@ -1307,13 +1311,13 @@ inline_media_chat_activated (GtkWidget *view, guint token, gpointer data)
                "inline-media click: dispatch token=%u mime=%s id_len=%zu",
                token, m->mime ? m->mime : "?", m->id_len);
     inline_media_show_dialog (
-        view, hx_active_session ()->htlc, m->id, m->id_len, m->mime,
+        view, gtkhx_chat_view_session (view)->htlc, m->id, m->id_len, m->mime,
         m->width_present ? m->width : 0, m->height_present ? m->height : 0,
         m->bytes_present ? m->bytes : 0);
 }
 
 void
-xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
+xprintline (session *sess, GtkWidget *text, guint32 cid, char *chat, size_t len,
             const char *tag, gint16 tag_color)
 {
     char *valid;
@@ -1371,7 +1375,6 @@ xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
     gboolean is_info = FALSE;
     gboolean said_by_self = FALSE;
     gint16 info_color = HX_CHAT_INFO_COLOR;
-    session *sess = hx_active_session ();
     const char *self_nick = (hx_conn_name (sess->htlc)[0] != '\0')
                                 ? (const char *)hx_conn_name (sess->htlc)
                                 : NULL;
@@ -1407,14 +1410,14 @@ xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
                                   info_color, valid, valid_len);
     } else {
         xprintline_render (
-            ROTULUS_VIEW (text), valid, valid_len, name_off, name_len, body_off,
-            body_len, FALSE, said_by_self, info_color,
+            sess, ROTULUS_VIEW (text), valid, valid_len, name_off, name_len,
+            body_off, body_len, said_by_self,
             /* No wire uid: a log line never came from a
                             * chat message, so the nick can only be
                             * resolved by lookup — and it has to be
                             * looked up in *this* conversation, not
                             * always the public one. */
-            chat_speaker_for (cid, 0, valid + name_off, name_len));
+            chat_speaker_for (sess, cid, 0, valid + name_off, name_len));
     }
 
     g_free (valid);
@@ -1435,19 +1438,20 @@ xoutput_chat (session *sess, guint32 cid, char *chat, const char *tag,
     cr = strchr (chat, '\n');
     if (cr) {
         while (1) {
-            xprintline (gchat->output, cid, chat, cr - chat, tag, tag_color);
+            xprintline (sess, gchat->output, cid, chat, cr - chat, tag,
+                        tag_color);
             chat = cr + 1;
             if (*chat == 0) {
                 break;
             }
             cr = strchr (chat, '\n');
             if (!cr) {
-                xprintline (gchat->output, cid, chat, -1, tag, tag_color);
+                xprintline (sess, gchat->output, cid, chat, -1, tag, tag_color);
                 break;
             }
         }
     } else {
-        xprintline (gchat->output, cid, chat, -1, tag, tag_color);
+        xprintline (sess, gchat->output, cid, chat, -1, tag, tag_color);
     }
 }
 
@@ -1557,7 +1561,8 @@ create_chat (session *sess)
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        text = gtkhx_chat_view_new (colors, fontname);
+        text = gtkhx_chat_view_new (colors, fontname,
+                                    hx_conn_serial (sess->htlc));
         g_free (fontname);
     }
     g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
@@ -1739,7 +1744,8 @@ pchat_new (session *sess, struct chat *chat)
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        text = gtkhx_chat_view_new (colors, fontname);
+        text = gtkhx_chat_view_new (colors, fontname,
+                                    hx_conn_serial (sess->htlc));
         g_free (fontname);
     }
     g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
