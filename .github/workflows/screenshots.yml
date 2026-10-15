@@ -5,7 +5,9 @@
 # (meson.build, SCREENSHOT_REF), so pictures that are stale when the tag is
 # cut stay stale in software centers for that whole release. The check runs
 # on a pull request whose meson.build names a release version (no -dev), the
-# release-prep PR, and by hand. Taking every scene is too slow for every PR.
+# release-prep PR, and by hand. Taking every scene is too slow for every PR,
+# so main is also checked once a week: the check lints each scene's
+# accessible tree, and a lost name should surface well before release prep.
 # See docs/screenshots.md.
 
 name: screenshots
@@ -17,6 +19,8 @@ on:
   pull_request:
     branches: [main]
     paths: [meson.build]
+  schedule:
+    - cron: '47 8 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -38,9 +42,9 @@ jobs:
       # needs the user namespaces Ubuntu's runners refuse by default. Without
       # them the classic theme's pixmaps don't load and its pane tabs fall back
       # to titles.
-      - if: steps.version.outputs.release || github.event_name == 'workflow_dispatch'
+      - if: steps.version.outputs.release || github.event_name != 'pull_request'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - if: steps.version.outputs.release || github.event_name == 'workflow_dispatch'
+      - if: steps.version.outputs.release || github.event_name != 'pull_request'
         run: tools/screenshots.sh --check
       - if: failure()
         uses: actions/upload-artifact@v4
