@@ -83,6 +83,13 @@ fn subtitle(
         String::new()
     } else if paused == 2 {
         tr_argv("%1$s of %2$s · Paused: the file has changed", &[&p, &s])
+    } else if paused == 3 {
+        tr_argv("%1$s of %2$s · Paused: a file in it has changed", &[&p, &s])
+    } else if paused == 4 {
+        tr_argv(
+            "%1$s of %2$s · Paused: the folder on the server has changed",
+            &[&p, &s],
+        )
     } else if paused != 0 {
         tr_argv("%1$s of %2$s · Paused", &[&p, &s])
     } else if run == 0 {
@@ -170,6 +177,22 @@ mod tests {
                 0,
                 2,
                 "1200 of 5000 · Paused: the file has changed",
+            ),
+            (
+                1_200,
+                5_000,
+                0,
+                0,
+                3,
+                "1200 of 5000 · Paused: a file in it has changed",
+            ),
+            (
+                1_200,
+                5_000,
+                0,
+                0,
+                4,
+                "1200 of 5000 · Paused: the folder on the server has changed",
             ),
             (1_000, 5_000, 1_000, 2, 0, "1000 of 5000 · 500/s · ETA 0:08"),
             (

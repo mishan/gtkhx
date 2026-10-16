@@ -5,6 +5,7 @@ use super::*;
 const TAG_HTXF_SIZE: u16 = 0x006c;
 const TAG_FILE_NAME: u16 = 0x00c9;
 const TAG_DIR: u16 = 0x00ca;
+const TAG_FILE_PREVIEW: u16 = 0x00cc;
 const TAG_FILE_COMMENT: u16 = 0x00d2;
 const TAG_FILE_RENAME: u16 = 0x00d3;
 const TAG_DIR_RENAME: u16 = 0x00d4;
@@ -212,7 +213,7 @@ fn folder_get_names_the_parent() {
 #[test]
 fn folder_put_carries_the_totals_and_clamps_the_size() {
     assert_eq!(
-        put_folder(b"/up", b"Tree", 15, 2).unwrap(),
+        put_folder(b"/up", b"Tree", 15, 2, false).unwrap(),
         req(
             ClientHdr::FilePutFolder,
             &[
@@ -223,7 +224,20 @@ fn folder_put_carries_the_totals_and_clamps_the_size() {
             ]
         )
     );
-    let r = put_folder(b"/", b"Big", 5 << 32, 1).unwrap();
+    assert_eq!(
+        put_folder(b"/up", b"Tree", 15, 2, true).unwrap(),
+        req(
+            ClientHdr::FilePutFolder,
+            &[
+                (TAG_FILE_NAME, b"Tree"),
+                (TAG_DIR, &dir("/up")),
+                (TAG_FILE_PREVIEW, &[0, 1]),
+                (TAG_HTXF_SIZE, &15u32.to_be_bytes()),
+                (TAG_FILE_NFILES, &2u32.to_be_bytes()),
+            ]
+        )
+    );
+    let r = put_folder(b"/", b"Big", 5 << 32, 1, false).unwrap();
     assert_eq!(r.chunk(TAG_HTXF_SIZE).unwrap(), u32::MAX.to_be_bytes());
 }
 

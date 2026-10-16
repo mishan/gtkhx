@@ -780,7 +780,8 @@ Forks are `INFO`, `DATA` and `MACR` (the resource fork). The **Mac server** alwa
 sends three forks in that order, MACR even when empty. The **Windows server** sends two,
 INFO and DATA. Receivers must accept forks in any order, skip unknown fork types, and
 treat a non-zero compression type as an error. Period clients expect a zero-length MACR
-header even when the count says 2, so writers should include one.
+header even when the count says 2, so a server sending a download should include one. An
+upload is the other way about: see the folder transfers below.
 
 The INFO fork:
 
@@ -902,7 +903,48 @@ loop:
 ```
 
 - The request's 220 counts every file and folder below the root; 108 is the sum of the
-  raw fork sizes, not the flattened sizes.
+  raw fork sizes, not the flattened sizes. The 1.9 server and Janus end the upload once
+  they have read that many items.
+- An uploaded file's FILP declares two forks unless it has a resource fork, and its
+  size ends at the data fork: no empty MACR header follows. Janus reads only the forks
+  the FILP declares, and waits on the bytes of one it doesn't for good.
+- **Folder upload resume:** the client sets 204 = 1 on the FILE_PUTFOLDER, and the server
+  takes the folder it holds rather than refusing it as taken (mhxd, hxd-ng and the 1.9
+  server refuse one without the flag; Janus takes it either way). Each file is then
+  answered as far as the server has it:
+
+  | Server | A file it has whole | Its partial file | Neither |
+  |---|---|---|---|
+  | mhxd | 2, at its size | 2, at its size | 1 |
+  | Janus | 3 | 2, at its size | 1 |
+  | 1.9 server (hlservd) | 3 | 1: takes it whole again, over the `.hpf` | 1 |
+  | hxd-ng | 2, at its size | 1, keeping the partial out of sight | 1 |
+
+  That is hxd-ng as the rig pins it; its main answers 2 for the partial file
+  (mishan/hxd-ng#258), which GtkHx takes as it does mhxd's.
+
+  **mhxd** makes each folder item with `mkdir` and ends the transfer when one already
+  exists, so a resumed upload offers no folder the server has made; every server here
+  takes a file into a folder that exists without its item. A file the client sent from
+  before that has changed since, or one whose RFLT names more than it holds, would
+  come out as two files spliced, so GtkHx sends nothing more and the upload stays
+  paused, saying so (`hxnet::xfer::UploadLedger`). A server that refuses the flag is
+  asked again without it, from the start; refused again, the upload stays paused with
+  its reason.
+
+  A folder is taken as made only once the server asks for the item after it. A pause
+  between the two loses that answer, and the folder is offered again on the resume;
+  only if the server then ends the upload at it, as mhxd does at one that exists, is
+  it taken as made, and the upload asked for again by itself, a few times at most, to
+  go on past it. Taking it
+  as made the first time would send its files into a folder a server that never read
+  the item doesn't have. The server's folder can also be a new one, the paused one
+  deleted meanwhile or hxd-ng taking it as a drop box. A file sent into a folder not
+  offered then fails where the server makes no folder for it (mhxd), the server ends
+  the upload, and GtkHx offers every folder again on the next Start, staying paused in
+  between, its row saying the folder on the server has changed. A local file that
+  can't be read fails the upload as it would a new one. Nothing in the exchange says which
+  folder a server holds; a FILE_LIST first would, at a request per folder.
 - The official server skips items whose path exceeds 1024 bytes, excludes drop boxes
   the user can't see, and in the "waiting for next" state silently discards codes other
   than 3.

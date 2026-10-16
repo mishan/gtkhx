@@ -300,7 +300,7 @@ fn folder_transfers_are_granted_a_reference() {
         assert_ne!(get.ref_, 0);
         c.cancel_transfer(get.ref_);
 
-        let r = c.request(&files::put_folder(dir.as_bytes(), b"up", 15, 2).unwrap());
+        let r = c.request(&files::put_folder(dir.as_bytes(), b"up", 15, 2, false).unwrap());
         ok(c, &r, "folder upload");
         let put = hxproto::parse::parse_folder_put_reply(&r.raw, r.raw.len());
         assert_ne!(put.ref_, 0);
@@ -1050,6 +1050,114 @@ fn a_paused_upload_resumes_to_the_same_bytes() {
         assert_eq!(names(s.client(), &dir), ["big", "none"], "{name}");
         drop(s);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// Upload the local folder `root` into `dir` under its own name through the
+/// app's folder-upload worker, as the app asks for a new one or, with
+/// `resume`, one it paused, offering what `sent` says the server lacks and
+/// stopping as a pause does once `pause_at` bytes have gone. The worker's
+/// result, or the server's refusal.
+fn upload_folder_from(
+    c: &mut Client,
+    dir: &str,
+    root: &std::path::Path,
+    sent: &mut hxnet::xfer::UploadLedger,
+    resume: bool,
+    pause_at: u64,
+) -> Result<i32, String> {
+    use hxnet::htxf::{hxnet_htxf_abort_free, hxnet_htxf_close, hxnet_htxf_finish_send};
+    let (bytes, items) = hxnet::xfer::put_totals(root, resume.then_some(&*sent));
+    let name = root.file_name().unwrap().to_str().unwrap().as_bytes();
+    let r = c.request(&files::put_folder(dir.as_bytes(), name, bytes, items, resume).unwrap());
+    if r.is_error() {
+        return Err(r.error_text());
+    }
+    let put = hxproto::parse::parse_folder_put_reply(&r.raw, r.raw.len());
+    let (h, abort) = open_transfer(c, put.ref_, bytes, true);
+    let mut at = PauseAt {
+        abort,
+        received: 0,
+        at: pause_at,
+    };
+    let root_c = std::ffi::CString::new(root.to_str().unwrap()).unwrap();
+    let fp = hxnet::xfer::HxnetFolderParams {
+        hx: h,
+        base_path: root_c.as_ptr(),
+        opt_preview: 0,
+        opt_folder: 1,
+        opt_large: 0,
+        user_data: (&mut at as *mut PauseAt).cast(),
+        progress: Some(pause_when_due),
+    };
+    let rv = unsafe { hxnet::xfer::folder_send(&fp, sent) };
+    unsafe {
+        if rv == 0 {
+            hxnet_htxf_finish_send(h);
+        }
+        hxnet_htxf_close(h);
+        hxnet_htxf_abort_free(abort);
+    }
+    Ok(rv)
+}
+
+/// A folder upload paused partway, asked for again with the resume flag,
+/// arrives whole, byte for byte, with nothing renamed or left beside it:
+/// mhxd resumes every file it holds, and is offered no folder it made, at
+/// which it would end the upload; Janus passes over a whole file and resumes
+/// the partial one; the 1.9 server passes over a whole file and takes the
+/// partial one again from its start. Asked for without the flag, mhxd and
+/// the 1.9 server refuse the folder that exists; Janus takes it either way.
+#[test]
+fn a_paused_folder_upload_resumes_to_the_same_bytes() {
+    let _turn = transfer_turn();
+    let files = [
+        ("a", 1 << 20, 1),
+        ("b/c", 3 << 20, 2),
+        ("d", 5000, 3),
+        ("e/f", 7000, 4),
+    ];
+    let total: u64 = files.iter().map(|f| f.1 as u64).sum();
+    for mut c in admins() {
+        let name = c.server().name;
+        let local = local_dir(&c, "fuppause");
+        let root = local.join("tree");
+        let mut want: Arrived = vec![("b".to_string(), None), ("e".to_string(), None)];
+        for (path, len, seed) in files {
+            let bytes = pattern(len, seed);
+            std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            std::fs::write(root.join(path), &bytes).unwrap();
+            want.push((path.to_string(), Some(bytes)));
+        }
+        want.sort();
+        let mut s = Scratch::new(&mut c, "fuppause");
+        let dir = s.path().to_string();
+        let mut sent = hxnet::xfer::UploadLedger::default();
+        let items = hxnet::xfer::put_totals(&root, None).1;
+
+        let rv = upload_folder_from(s.client(), &dir, &root, &mut sent, false, total * 6 / 10);
+        assert_ne!(rv, Ok(0), "{name}: the pause didn't stop the upload");
+        // The 1.9 server counts what arrived a moment after the connection
+        // closes.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let r = s
+            .client()
+            .request(&files::put_folder(dir.as_bytes(), b"tree", total, items, false).unwrap());
+        if name == "janus" {
+            ok(s.client(), &r, "an existing folder without the flag");
+            let put = hxproto::parse::parse_folder_put_reply(&r.raw, r.raw.len());
+            s.client().cancel_transfer(put.ref_);
+        } else {
+            refused(s.client(), &r, "an existing folder without the flag");
+        }
+        let rv = upload_folder_from(s.client(), &dir, &root, &mut sent, true, u64::MAX);
+        assert_eq!(rv, Ok(0), "{name}: the resumed upload failed");
+        assert_eq!(names(s.client(), &dir), ["tree"], "{name}");
+        let (rv, _, got) = download_folder(s.client(), &dir, b"tree");
+        assert_eq!(rv, 0, "{name}: the download failed");
+        assert!(got == want, "{name}: the tree differs");
+        drop(s);
+        let _ = std::fs::remove_dir_all(&local);
     }
 }
 

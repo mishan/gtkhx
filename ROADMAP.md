@@ -205,9 +205,10 @@ only the video tests use it so far. What is left:
 
 ### Transfer pause and resume
 
-Hotline has no pause in the protocol. Pausing ends a transfer's connection and keeps its
-row and what has arrived; resuming asks again from there. A paused transfer gives up its
-place in the server's queue, and waits behind whoever took it.
+*Done.* Every transfer but a preview, and a file's upload past 4 GiB, pauses: Pause in
+the Transfers panel ends its connection and keeps its row and what it moved, and Start
+asks again from there. Hotline has no pause in the protocol, so a paused transfer gives
+up its place in the server's queue, and waits behind whoever took it.
 
 1. **Single-file downloads.** *Done.* Pause in the Transfers panel ends the download's
    connection and keeps its partial file; Start asks for the rest from the file's size, as
@@ -224,11 +225,12 @@ place in the server's queue, and waits behind whoever took it.
    offset the server's RFLT names. It starts over when the server refuses the resume,
    and stays paused when that is refused too, or when the file changed while paused.
    An upload past 4 GiB doesn't pause, its offsets being past what an RFLT says.
-4. **Folder uploads.** The server drives these, answering each file with SEND or
-   RESUME itself, and a resumed one has to ask with 204 on the FILE_PUTFOLDER, which
-   hxproto's builder can't say yet. mhxd then resumes every file it finds but ends the
-   transfer at a subfolder that exists, and hxd-ng resumes none: it reads the rest and
-   keeps its partial file.
+4. **Folder uploads.** *Done.* Start asks for the folder again with 204 on the
+   FILE_PUTFOLDER, and sends each file as far as the server answers: from its RFLT on a
+   RESUME, nothing on a NEXT, whole on a SEND. No folder the server already made is
+   offered again, as mhxd ends the transfer at one that exists. A file the upload sent
+   from that has changed since, or that the server holds more of than it has, keeps the
+   upload paused, saying so (`hxnet::xfer::UploadLedger`).
 
 ### Code modernization
 

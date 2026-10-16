@@ -74,6 +74,11 @@ unsafe fn record_xfer(
         })
     });
     let h = hxnet::xfer_handle::hx_htxf_new();
+    // The local path, as xfer_init keeps it.
+    let path = CStr::from_ptr(lpath).to_bytes();
+    for (d, &b) in (*h).path.iter_mut().zip(path) {
+        *d = b as c_char;
+    }
     HANDLES.with_borrow_mut(|v| v.push(h));
     h
 }
@@ -263,7 +268,7 @@ fn get_folder_with_no_name_does_nothing() {
 }
 
 #[test]
-fn put_folder_reports_the_tree_size_and_file_count() {
+fn put_folder_reports_the_tree_size_and_item_count() {
     reset();
     let tmp = std::env::temp_dir().join(format!("hx-put-folder-{}", std::process::id()));
     let tree = tmp.join("Tree");
@@ -278,10 +283,10 @@ fn put_folder_reports_the_tree_size_and_file_count() {
     unsafe { hx_put_folder(htlc(), l.as_ptr(), rdir.as_ptr()) };
     std::fs::remove_dir_all(&tmp).unwrap();
 
-    // The symlink is neither followed nor counted.
+    // The symlink is neither followed nor counted; the folder is.
     assert_eq!(
         sends(),
-        vec![sent(files::put_folder(b"/up", b"Tree", 15, 2))]
+        vec![sent(files::put_folder(b"/up", b"Tree", 15, 3, false))]
     );
     assert_eq!(expected(), [Expect::Transfer]);
     HANDLES.with_borrow(|h| assert_eq!(unsafe { (*h[0]).total_size }, 15));

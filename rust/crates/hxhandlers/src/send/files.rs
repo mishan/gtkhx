@@ -334,30 +334,6 @@ pub(crate) unsafe fn ask_folder(htlc: *mut c_void, htxf: *mut c_void, dir: &[u8]
     }
 }
 
-/// Byte total and file count of the regular files under `root`, recursively.
-/// Symlinks are neither followed nor counted.
-fn folder_aggregate(root: &std::path::Path) -> (u64, u32) {
-    let mut bytes = 0u64;
-    let mut files = 0u32;
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return (0, 0);
-    };
-    for entry in entries.flatten() {
-        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
-            continue;
-        };
-        if meta.is_dir() {
-            let (b, n) = folder_aggregate(&entry.path());
-            bytes = bytes.saturating_add(b);
-            files = files.saturating_add(n);
-        } else if meta.is_file() {
-            bytes = bytes.saturating_add(meta.len());
-            files = files.saturating_add(1);
-        }
-    }
-    (bytes, files)
-}
-
 /// A local path from its C-string bytes.
 fn local_path(bytes: &[u8]) -> std::path::PathBuf {
     #[cfg(unix)]
@@ -392,7 +368,6 @@ pub unsafe extern "C" fn hx_put_folder(
         return;
     }
 
-    let (total_bytes, nfiles) = folder_aggregate(&local_path(cstr_bytes(lpath)));
     let rdir_bytes = clamp_path(cstr_bytes(rdir));
     let rdir = c_string(rdir_bytes);
 
@@ -404,13 +379,36 @@ pub unsafe extern "C" fn hx_put_folder(
         name.len(),
         XFER_PUT,
     );
+    ask_put_folder(htlc, htxf, rdir_bytes, &name, None);
+}
+
+/// FILE_PUTFOLDER for the folder upload `htxf` of `name` into `dir`, its reply
+/// to `htxf`: a new one, or with `sent` one asked for again with the resume
+/// flag, which offers none of the folders `sent` says the server has made.
+/// False when nothing is left to offer, and nothing is asked.
+///
+/// # Safety
+/// `htlc` is a live connection, `htxf` its folder upload. Main thread only.
+pub(crate) unsafe fn ask_put_folder(
+    htlc: *mut c_void,
+    htxf: *mut HtxfHandle,
+    dir: &[u8],
+    name: &[u8],
+    sent: Option<&hxnet::xfer::UploadLedger>,
+) -> bool {
+    let root = local_path(CStr::from_ptr((*htxf).path.as_ptr()).to_bytes());
+    let (total_bytes, items) = hxnet::xfer::put_totals(&root, sent);
+    // A server answers a count of 0 with no transfer at all.
+    if sent.is_some() && items == 0 {
+        return false;
+    }
     // The progress denominator until the stream fills total_pos; never 0, which
     // the tasks window would divide by.
     (*htxf).total_size = total_bytes.clamp(1, u64::from(u32::MAX));
 
     // On a builder failure nothing is written; the transfer just created sits
     // idle, since only the server's reply starts it.
-    if let Some(req) = files::put_folder(rdir_bytes, &name, total_bytes, nfiles) {
+    if let Some(req) = files::put_folder(dir, name, total_bytes, items, sent.is_some()) {
         expect_transfer(
             htlc,
             Asked::Upload {
@@ -428,6 +426,7 @@ pub unsafe extern "C" fn hx_put_folder(
             )
         });
     }
+    true
 }
 
 /// `void hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)`
