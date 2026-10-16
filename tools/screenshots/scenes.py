@@ -494,11 +494,12 @@ def board_to_top():
     """Scroll the message board to its first post. Where it comes to rest
     after loading depends on when the text arrived relative to its
     layout, a pixel either way from run to run."""
-    display.click(150, 400, window="GtkHx.*")
-    display.key("ctrl+Home")
-    display.park()
-    time.sleep(SCROLLBAR_GONE)
-    display.wait_stable(window="GtkHx.*")
+    display.play(f"""
+        click 150 400 --window GtkHx.*
+        key ctrl+Home
+        park
+        +{SCROLLBAR_GONE} wait stable --window GtkHx.*
+    """)
 
 
 def capture_window(out, since, window="GtkHx.*"):
@@ -553,15 +554,16 @@ def scene_files(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
     menu(175)                                   # Files
-    win = "Files.*"
-    display.wait_window(win)
-    display.wait_stable(window=win)
-    display.click(558, 183, window=win, double=True)  # Photos
-    display.wait_stable(window=win)
-    display.click(558, 158, window=win, double=True)  # Harbor
-    display.wait_stable(window=win)
-    display.click(600, 183, window=win)         # fog-over-the-pier.jpg
-    capture_window(out, since, win)
+    display.play("""
+        wait window Files.*
+        wait stable --window Files.*
+        click 558 183 --double --window Files.*     # Photos
+        wait stable --window Files.*
+        click 558 158 --double --window Files.*     # Harbor
+        wait stable --window Files.*
+        click 600 183 --window Files.*              # fog-over-the-pier.jpg
+    """)
+    capture_window(out, since, "Files.*")
     app.terminate()
 
 
@@ -569,20 +571,20 @@ def scene_news(out, bots, assets):
     app = log_in(bots)
     since = time.monotonic()
     menu(207)                                   # News (1.5+)
-    win = "News.*"
-    display.wait_window(win)
-    display.wait_stable(window=win)
-    display.click(16, 133, window=win)          # Photography
-    display.wait_stable(window=win)
-    display.click(36, 156, window=win)          # Settings for low light?
-    display.wait_stable(window=win)
-    display.click(56, 179, window=win)          # Tripod and a slow shutter
-    display.wait_stable(window=win)
-    display.click(160, 179, window=win)
-    display.wait_stable(window=win)
-    # Room for the nested reply's title.
-    display.drag(286, 450, 370, 450, window=win)
-    capture_window(out, since, win)
+    display.play("""
+        wait window News.*
+        wait stable --window News.*
+        click 16 133 --window News.*                # Photography
+        wait stable --window News.*
+        click 36 156 --window News.*                # Settings for low light?
+        wait stable --window News.*
+        click 56 179 --window News.*                # Tripod and a slow shutter
+        wait stable --window News.*
+        click 160 179 --window News.*
+        wait stable --window News.*
+        drag 286 450 370 450 --window News.*        # room for the nested reply's title
+    """)
+    capture_window(out, since, "News.*")
     app.terminate()
 
 
@@ -752,12 +754,12 @@ def scene_video(out, bots, assets):
         # GtkHx is uid 6, after ada, marco and the three in the chat.
         display.until("GtkHx to join voice", lambda: in_voice(6), timeout=60)
         # The offer and answer, the first keyframes. The tiles never hold
-        # still, so this one is on the clock.
-        time.sleep(VIDEO_SETTLE)
-        # Over ada's camera, below the stage, so its controls show.
-        display.move(690, 700, window="GtkHx.*")
-        time.sleep(1)
-        display.capture(out, window="GtkHx.*")
+        # still, so this one is on the clock. The pointer goes over ada's
+        # camera, below the stage, so its controls show.
+        display.play("""
+            +${SETTLE}  move 690 700 --window GtkHx.*
+            +1          capture ${OUT} --window GtkHx.*
+        """, vars={"SETTLE": VIDEO_SETTLE, "OUT": out})
         accessible(out)
         app.terminate()
     finally:
@@ -767,31 +769,14 @@ def scene_video(out, bots, assets):
 
 def scene_explore(out, bots, assets):
     """Not a picture for the README: for finding where things are. Logs
-    in, then for each step in $EXPLORE (`click:X,Y`, `dclick:X,Y`,
-    `drag:X1,Y1,X2,Y2`, `key:CHORD`, `type:TEXT`, `wait:SECS`, each optionally `@WINDOW-RE`)
-    takes a picture of the whole screen, numbered after the output."""
+    in, takes a picture of the whole screen as explore-0.png, then plays
+    $EXPLORE, a `shotbox play` script, beside it: its captures named
+    explore-*.png are kept."""
     app = log_in(bots)
     toast_gone(time.monotonic())
-    stem = Path(out).with_suffix("")
-    display.capture(f"{stem}-0.png")
-    for n, step in enumerate(filter(None, os.environ.get("EXPLORE", "").split(";")), 1):
-        step, _, window = step.partition("@")
-        kind, _, arg = step.partition(":")
-        window = window or None
-        if kind in ("click", "dclick"):
-            x, y = map(int, arg.split(","))
-            display.click(x, y, window=window, double=kind == "dclick")
-        elif kind == "drag":
-            display.drag(*map(int, arg.split(",")), window=window)
-        elif kind == "key":
-            display.key(arg)
-        elif kind == "type":
-            display.type(arg)
-        elif kind == "wait":
-            time.sleep(float(arg))
-        display.park()
-        display.wait_stable()
-        display.capture(f"{stem}-{n}.png")
+    display.capture(out.with_name("explore-0.png"))
+    os.chdir(out.parent)
+    display.play(os.environ.get("EXPLORE", ""), name="$EXPLORE")
     app.terminate()
 
 

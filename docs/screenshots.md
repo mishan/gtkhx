@@ -79,12 +79,13 @@ that aren't obvious: the login toast, which pauses while the pointer rests on it
 sign before it goes; the message board, whose resting scroll position depends on timing until
 it is sent to the top.
 
-To find where something is on screen, the `explore` scene logs in and then runs `$EXPLORE`, a
-`;`-separated list of `click:X,Y`, `dclick:X,Y`, `drag:X1,Y1,X2,Y2`, `key:CHORD`, `type:TEXT`
-or `wait:SECS` steps, each optionally `@WINDOW-RE`, capturing the screen after each:
+To find where something is on screen, the `explore` scene logs in, captures the screen as
+`explore-0.png`, and then plays `$EXPLORE`, a script for
+[`shotbox play`](https://github.com/mishan/shotbox/blob/main/docs/commands.md#play), a step a
+line. Its captures named `explore-N.png` are kept:
 
 ```sh
-EXPLORE='click:1138,28@GtkHx.*;wait:1' tools/screenshots.sh explore
+EXPLORE=$'click 1138 28 --window GtkHx.*\ncapture explore-1.png --park' tools/screenshots.sh explore
 ```
 
 The captures land in `build-screenshots/`, as does a picture of the screen when a scene gives
