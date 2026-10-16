@@ -152,6 +152,17 @@
   </content_rating>
 
   <releases>
+    <release version="1.6.1" date="2026-10-16">
+      <description>
+        <p>Every kind of transfer can now be paused and resumed, and each connection's windows act on that connection.</p>
+        <ul>
+          <li>Folder downloads, file uploads and folder uploads can be paused and resumed, as single downloads already could</li>
+          <li>Fixed folder uploads to Janus and the 1.9 server stalling or ending early</li>
+          <li>With several servers open, chat, Post News, Reconnect and Settings changes act on the right connection</li>
+          <li>Screen readers can tell transfers, file lists and video tiles apart</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.6.0" date="2026-10-13">
       <description>
         <p>Accessibility throughout, audio and video previews that play as they download, and threaded news in a window of its own.</p>
