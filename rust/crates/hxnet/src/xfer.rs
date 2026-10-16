@@ -1010,7 +1010,10 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
 /// # Safety
 /// Worker helper on a blocking-pool thread; `fp.hx` open.
 pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> c_int {
-    if fp.hx.is_null() || fp.progress.is_none() {
+    // Checked as a local, not as the field: CodeQL's null check doesn't
+    // reach a field read again.
+    let hx = fp.hx;
+    if hx.is_null() || fp.progress.is_none() {
         return EINVAL;
     }
     let base = match path_from(fp.base_path) {
@@ -1021,7 +1024,7 @@ pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> 
         return io_errno(&e);
     }
 
-    let expected = (*fp.hx).folder_items();
+    let expected = (*hx).folder_items();
     let mut received: u32 = 0;
     // The longest the server has taken to answer a FILE_NEXT so far.
     let mut slowest = std::time::Duration::ZERO;
@@ -1040,7 +1043,7 @@ pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> 
             // does come is read as any other, and the grace is several
             // times the slowest answer yet, for a slow link.
             let grace = FOLDER_END_GRACE.max(slowest * 3);
-            match read_entry_within(&mut *fp.hx, &mut nfi, grace) {
+            match read_entry_within(&mut *hx, &mut nfi, grace) {
                 EntryRead::Entry => {}
                 EntryRead::Closed | EntryRead::Silent => return 0,
                 EntryRead::Failed => return EIO,
