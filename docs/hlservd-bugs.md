@@ -23,6 +23,18 @@ An entry marked *verified* was reproduced against the rig's container.
 - **Should get:** the folder's name between them, as the delete error does:
   "Cannot delete «nope» because it does not exist or cannot be found."
 
+## A folder upload's partial file is taken again from its start
+
+**Verified.**
+
+- **Sends:** FILE_PUTFOLDER (213) with the resume flag (204) for a folder
+  an earlier upload left a partial file in, then that file's item.
+- **Gets:** SEND (1), and the whole file again, over the partial `.hpf`.
+- **Should get:** RESUME (2) with an RFLT of the partial file, as a resumed
+  file upload (203 with 204) already gets.
+
+The result is right, only slower: the file arrives whole.
+
 ## A download leaves the file's comment out
 
 **Verified.**

@@ -21,8 +21,9 @@ use hxnet::htxf::{
     hxnet_htxf_finish_send, hxnet_htxf_set_folder_items, HtxfAbort, HtxfConn,
 };
 use hxnet::xfer::{
-    folder_recv, hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_send_all,
-    progress_due, FolderLedger, HxnetFolderParams, HxnetXferParams,
+    folder_recv, folder_send, hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, progress_due,
+    FolderLedger, HxnetFolderParams, HxnetXferParams, UploadLedger, HXNET_XFER_AGAIN,
+    HXNET_XFER_CHANGED, HXNET_XFER_REOFFER,
 };
 use hxnet::xfer_handle::{
     hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
@@ -361,7 +362,8 @@ pub unsafe extern "C" fn xfer_tasks_update(htlc: *mut c_void) {
 /// transfer's connection, keeping its row and what it moved, and resuming
 /// asks anew for the rest: a download's from what is on disk, a file's from
 /// its partial file's size and a folder's file by file
-/// ([`hxnet::xfer::answer`]); an upload's from what the server says it has.
+/// ([`hxnet::xfer::answer`]); an upload's from what the server says it has,
+/// a folder's file by file ([`hxnet::xfer::folder_send`]).
 /// The server's queue slot goes with the connection.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Pause {
@@ -375,9 +377,10 @@ enum Pause {
     /// An upload asked for again from the start, as it couldn't resume; the
     /// server's reply not yet in.
     Restarted { kept: Disk },
-    /// An upload paused, its file changed since: resumed, it would splice two
-    /// files on the server, and asked for from the start, some servers would
-    /// add it to what they hold.
+    /// An upload paused, its file (or one in its folder that it has sent
+    /// from) changed since: resumed, it would splice two files on the
+    /// server, and asked for from the start, some servers would add it to
+    /// what they hold.
     Changed { kept: Disk },
 }
 
@@ -388,6 +391,12 @@ struct Disk {
     len: i64,
     modified: Option<std::time::SystemTime>,
 }
+
+/// A folder keeps a ledger of its files instead.
+const FOLDER_KEPT: Disk = Disk {
+    len: 0,
+    modified: None,
+};
 
 unsafe fn disk(path: *const c_char) -> Disk {
     let bytes = std::ffi::CStr::from_ptr(path).to_bytes();
@@ -462,8 +471,7 @@ unsafe fn emit_file_update(htxf: *mut HtxfHandle) {
 }
 
 /// `int xfer_can_pause(struct htxf_conn *htxf)` — whether `htxf` is a
-/// download, of a file or a folder, or a file's upload, whose worker is
-/// running.
+/// transfer other than a preview whose worker is running.
 ///
 /// # Safety
 /// `htxf` is a live handle. Main thread only.
@@ -472,8 +480,9 @@ pub unsafe extern "C" fn xfer_can_pause(htxf: *mut HtxfHandle) -> c_int {
     let kind = if (*htxf).type_ == XFER_GET {
         hx_htxf_opt_preview(htxf as *const c_void) == 0
     } else {
-        // An upload resumes from offsets an RFLT says in 32 bits.
-        hx_htxf_opt_folder(htxf as *const c_void) == 0 && (*htxf).total_size <= u64::from(u32::MAX)
+        // An upload resumes from offsets an RFLT says in 32 bits; a folder's
+        // stream already sizes each of its files so.
+        hx_htxf_opt_folder(htxf as *const c_void) != 0 || (*htxf).total_size <= u64::from(u32::MAX)
     };
     (kind && WORKING.with_borrow(|w| w.contains(&htxf)) && pause_of(htxf).is_none()) as c_int
 }
@@ -493,14 +502,16 @@ pub unsafe extern "C" fn xfer_can_start(htxf: *mut HtxfHandle) -> c_int {
 }
 
 /// `int xfer_paused(struct htxf_conn *htxf)` — whether the row shows `htxf`
-/// paused: 1, or 2 for an upload whose file has changed since.
+/// paused: 1, or for an upload whose file has changed since 2, or 3 for a
+/// folder's, or 4 for a folder upload whose folder on the server has.
 ///
 /// # Safety
 /// Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_paused(htxf: *mut HtxfHandle) -> c_int {
     match pause_of(htxf) {
-        Some(Pause::Changed { .. }) => 2,
+        Some(Pause::Changed { .. }) => 2 + hx_htxf_opt_folder(htxf as *const c_void).min(1),
+        Some(Pause::Paused { .. }) if with_folder_run(htxf, |r| r.reoffered) == Some(true) => 4,
         _ => paused(htxf) as c_int,
     }
 }
@@ -549,7 +560,41 @@ pub unsafe extern "C" fn xfer_pause(htxf: *mut HtxfHandle) {
 /// `htxf` is a live handle whose worker has returned. Main thread only.
 unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
     if pause_of(htxf) != Some(Pause::Winding) {
-        return false;
+        // A resumed folder upload ends itself at a file the server holds
+        // more of, or that changed since it sent from it, or where it can
+        // get further asked for again; one cancelled meanwhile is gone.
+        let Some(stop) = take_folder_stop(htxf) else {
+            return false;
+        };
+        if xfer_num(htxf) < 0 || hx_htxf_is_canceled(htxf) != 0 {
+            return false;
+        }
+        let kept = FOLDER_KEPT;
+        // Past a folder each time, so a few in a row; more, and the server
+        // isn't doing what that assumes.
+        let again = stop == Stop::Again
+            && with_folder_run(htxf, |r| {
+                r.again += 1;
+                r.again <= AGAIN_TRIES
+            }) == Some(true);
+        set_pause(
+            htxf,
+            Some(if stop == Stop::Changed {
+                Pause::Changed { kept }
+            } else {
+                Pause::Paused { kept }
+            }),
+        );
+        if again {
+            resume_folder(htxf);
+            return true;
+        }
+        with_folder_run(htxf, |r| {
+            (r.again, r.reoffered) = (0, stop == Stop::Reoffer)
+        });
+        emit_file_update(htxf);
+        start_next();
+        return true;
     }
     // Finished before the pause could stop it. A folder's progress counts
     // the files' headers, which its size doesn't, so only its worker knows.
@@ -565,12 +610,8 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
     // The old token stays aborted; the next connection needs a live one.
     hxnet_htxf_abort_free((*htxf).abort as *const HtxfAbort);
     (*htxf).abort = hxnet_htxf_abort_new() as *mut c_void;
-    // A folder keeps a ledger of its files instead.
     let kept = if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
-        Disk {
-            len: 0,
-            modified: None,
-        }
+        FOLDER_KEPT
     } else {
         disk((*htxf).path.as_ptr())
     };
@@ -584,11 +625,13 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
 /// owed another try.
 pub(crate) fn answered(htxf: *mut c_void) {
     let htxf = htxf as *mut HtxfHandle;
-    if matches!(
-        pause_of(htxf),
-        Some(Pause::Asked { .. } | Pause::Restarted { .. })
-    ) {
+    let was = pause_of(htxf);
+    if matches!(was, Some(Pause::Asked { .. } | Pause::Restarted { .. })) {
         set_pause(htxf, None);
+    }
+    // A folder upload started over builds on nothing the server held.
+    if matches!(was, Some(Pause::Restarted { .. })) {
+        take_folder_run(htxf);
     }
     set_tries(htxf, None);
 }
@@ -623,7 +666,11 @@ pub(crate) unsafe fn upload_resume_refused(htxf: *mut c_void) -> Option<bool> {
     match pause_of(htxf)? {
         Pause::Asked { kept } => {
             set_pause(htxf, Some(Pause::Restarted { kept }));
-            xfer_go_put(htxf, None);
+            if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
+                ask_put_folder(htxf, None);
+            } else {
+                xfer_go_put(htxf, None);
+            }
             Some(true)
         }
         Pause::Restarted { kept } => {
@@ -1063,7 +1110,7 @@ unsafe extern "C" fn htxf_destructor(htxf: *mut HtxfHandle) {
     // A folder download's count whose worker never ran: queued, then
     // cancelled or disconnected.
     take_folder_items(htxf);
-    take_folder_get(htxf);
+    take_folder_run(htxf);
     // The preview window can outlive the transfer, and its close would cancel
     // this one: after a failed stream nothing ever told it the stream ended.
     // Both run on the main thread, so this can't race the close.
@@ -1203,41 +1250,79 @@ fn take_folder_items(htxf: *mut HtxfHandle) -> u32 {
     }
 }
 
-/// What each folder download's workers have written, and whether the last
-/// one finished: kept from its worker's return until the transfer is freed,
-/// for its resume.
-#[derive(Default)]
-struct FolderGet {
-    ledger: FolderLedger,
-    finished: bool,
+/// Why a resumed folder upload's worker stopped short, the upload staying
+/// paused: at a file changed since, past a folder the server turned out to
+/// have, or at a folder on the server that isn't as the upload left it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Stop {
+    Changed,
+    Again,
+    Reoffer,
 }
 
-static FOLDER_GETS: std::sync::Mutex<Vec<(usize, FolderGet)>> = std::sync::Mutex::new(Vec::new());
+/// How many times in a row a folder upload stopped past a folder is asked for
+/// again by itself.
+const AGAIN_TRIES: u8 = 8;
 
-fn take_folder_get(htxf: *mut HtxfHandle) -> FolderGet {
-    let mut all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
+/// What each folder transfer's workers have moved, whether the last one
+/// finished or why it stopped short, how many times in a row it has been
+/// asked for again by itself, and whether its row says the folder on the
+/// server has changed. Kept from its worker's return until the transfer is
+/// freed, for its resume.
+#[derive(Default)]
+struct FolderRun {
+    ledger: FolderLedger,
+    sent: UploadLedger,
+    finished: bool,
+    resumed: bool,
+    stop: Option<Stop>,
+    again: u8,
+    reoffered: bool,
+}
+
+static FOLDER_RUNS: std::sync::Mutex<Vec<(usize, FolderRun)>> = std::sync::Mutex::new(Vec::new());
+
+fn folder_runs() -> std::sync::MutexGuard<'static, Vec<(usize, FolderRun)>> {
+    FOLDER_RUNS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn take_folder_run(htxf: *mut HtxfHandle) -> FolderRun {
+    let mut all = folder_runs();
     match all.iter().position(|(h, _)| *h == htxf as usize) {
         Some(i) => all.swap_remove(i).1,
-        None => FolderGet::default(),
+        None => FolderRun::default(),
     }
 }
 
-fn put_folder_get(htxf: *mut HtxfHandle, get: FolderGet) {
-    let mut all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
-    all.push((htxf as usize, get));
+fn put_folder_run(htxf: *mut HtxfHandle, run: FolderRun) {
+    folder_runs().push((htxf as usize, run));
+}
+
+fn with_folder_run<R>(htxf: *mut HtxfHandle, f: impl FnOnce(&mut FolderRun) -> R) -> Option<R> {
+    folder_runs()
+        .iter_mut()
+        .find(|(h, _)| *h == htxf as usize)
+        .map(|(_, r)| f(r))
 }
 
 fn folder_finished(htxf: *mut HtxfHandle) -> bool {
-    let all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
-    all.iter().any(|(h, g)| *h == htxf as usize && g.finished)
+    with_folder_run(htxf, |r| r.finished).unwrap_or(false)
+}
+
+fn take_folder_stop(htxf: *mut HtxfHandle) -> Option<Stop> {
+    with_folder_run(htxf, |r| r.stop.take()).flatten()
 }
 
 /// The bytes under `htxf`'s folder a resume of it would not ask for.
 unsafe fn folder_held_on_disk(htxf: *mut HtxfHandle) -> u64 {
-    let all = FOLDER_GETS.lock().unwrap_or_else(|p| p.into_inner());
-    let Some((_, get)) = all.iter().find(|(h, _)| *h == htxf as usize) else {
-        return 0;
-    };
+    with_folder_base(htxf, |run, base| run.ledger.held(base)).unwrap_or(0)
+}
+
+/// `f` of `htxf`'s folder run and its local root, if it has run.
+unsafe fn with_folder_base<R>(
+    htxf: *mut HtxfHandle,
+    f: impl FnOnce(&FolderRun, &std::path::Path) -> R,
+) -> Option<R> {
     let base = std::ffi::CStr::from_ptr((*htxf).path.as_ptr()).to_bytes();
     #[cfg(unix)]
     let base = {
@@ -1245,10 +1330,8 @@ unsafe fn folder_held_on_disk(htxf: *mut HtxfHandle) -> u64 {
         std::path::Path::new(std::ffi::OsStr::from_bytes(base))
     };
     #[cfg(not(unix))]
-    let Ok(base) = std::str::from_utf8(base).map(std::path::Path::new) else {
-        return 0;
-    };
-    get.ledger.held(base)
+    let base = std::path::Path::new(std::str::from_utf8(base).ok()?);
+    with_folder_run(htxf, |run| f(run, base))
 }
 
 /// Folder download worker: connect, drive the FILE_NEXT/FILE_SEND folder-receive
@@ -1257,7 +1340,7 @@ unsafe fn folder_held_on_disk(htxf: *mut HtxfHandle) -> u64 {
 /// download's earlier workers got, chime + stamp on success.
 unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
     let items = take_folder_items(htxf);
-    let mut get = take_folder_get(htxf);
+    let mut get = take_folder_run(htxf);
     get.finished = false;
     if htxf_connect(htxf) != glib::ffi::GFALSE {
         hxnet_htxf_set_folder_items((*htxf).hx as *mut HtxfConn, items);
@@ -1268,7 +1351,7 @@ unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
             hx_htxf_set_total_pos(htxf, (*htxf).total_size);
         }
     }
-    put_folder_get(htxf, get);
+    put_folder_run(htxf, get);
     // The last progress update, however it ended: the reports along the
     // way are throttled, so this one makes the row exact.
     post_file_update(htxf);
@@ -1314,12 +1397,24 @@ unsafe fn put_thread(htxf: *mut HtxfHandle) {
 }
 
 /// Folder upload worker: connect, walk the local tree responding to the server's
-/// FILE_NEXT loop (`hxnet_xfer_folder_send_all`), chime + stamp on success.
+/// FILE_NEXT loop (`hxnet::xfer::folder_send`), sending each file as far as
+/// the server says it holds it, chime + stamp on success.
 unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
-    let sent = htxf_connect(htxf) != glib::ffi::GFALSE && {
-        let params = xfer_folder_params(htxf);
-        hxnet_xfer_folder_send_all(&params) == 0
+    let mut run = take_folder_run(htxf);
+    let rv = if htxf_connect(htxf) != glib::ffi::GFALSE {
+        folder_send(&xfer_folder_params(htxf), &mut run.sent)
+    } else {
+        -1
     };
+    let sent = rv == 0;
+    run.finished = sent;
+    run.stop = match rv {
+        HXNET_XFER_CHANGED if run.resumed => Some(Stop::Changed),
+        HXNET_XFER_AGAIN => Some(Stop::Again),
+        HXNET_XFER_REOFFER => Some(Stop::Reoffer),
+        _ => None,
+    };
+    put_folder_run(htxf, run);
     if sent {
         hx_htxf_set_total_pos(htxf, (*htxf).total_size);
     }
@@ -1625,8 +1720,10 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
     }
 }
 
-/// Ask again for a paused folder download, which answers each file the
-/// server offers as far as it got. Nothing for any other folder transfer.
+/// Ask again for a paused folder transfer: a download answers each file the
+/// server offers as far as it got, an upload sends each file as far as the
+/// server has it, unless one it has sent from has changed since. Nothing for
+/// a folder transfer that isn't paused.
 ///
 /// # Safety
 /// `htxf` is a live folder transfer. Main thread only.
@@ -1634,6 +1731,26 @@ unsafe fn resume_folder(htxf: *mut HtxfHandle) {
     let Some(Pause::Paused { kept }) = pause_of(htxf) else {
         return;
     };
+    if (*htxf).type_ != XFER_GET {
+        if with_folder_base(htxf, |run, base| run.sent.changed(base)) == Some(true) {
+            set_pause(htxf, Some(Pause::Changed { kept }));
+        } else {
+            set_pause(htxf, Some(Pause::Asked { kept }));
+            hx_htxf_set_total_pos(htxf, 0);
+            let asked = with_folder_run(htxf, |run| {
+                (run.resumed, run.reoffered) = (true, false);
+                ask_put_folder(htxf, Some(&run.sent))
+            });
+            if !asked.unwrap_or_else(|| ask_put_folder(htxf, Some(&UploadLedger::default()))) {
+                // Every folder left made, and no file: done.
+                set_pause(htxf, None);
+                xfer_remove_from_list(htxf);
+                return;
+            }
+        }
+        emit_file_update(htxf);
+        return;
+    }
     set_pause(htxf, Some(Pause::Asked { kept }));
     set_held(htxf, Some(folder_held_on_disk(htxf)));
     hx_htxf_set_total_pos(htxf, 0);
@@ -1644,6 +1761,22 @@ unsafe fn resume_folder(htxf: *mut HtxfHandle) {
         remote_name(htxf),
     );
     emit_file_update(htxf);
+}
+
+/// FILE_PUTFOLDER for the folder upload `htxf` again: with `sent`, a resume
+/// that offers none of the folders the server has made. False when there is
+/// nothing left to offer.
+///
+/// # Safety
+/// `htxf` is a live folder upload. Main thread only.
+unsafe fn ask_put_folder(htxf: *mut HtxfHandle, sent: Option<&UploadLedger>) -> bool {
+    crate::send::files::ask_put_folder(
+        (*htxf).htlc,
+        htxf,
+        &carr_read(&(*htxf).remotedir),
+        remote_name(htxf),
+        sent,
+    )
 }
 
 /// `int xfer_go_timer(void *arg)` — the one-shot GLib-timer trampoline used by the
@@ -2245,22 +2378,157 @@ mod tests {
     }
 
     #[test]
-    fn only_a_file_upload_an_rflt_can_place_pauses() {
+    fn an_upload_past_what_an_rflt_can_place_does_not_pause_and_a_folders_does() {
         reset(&[]);
         unsafe {
             let u = running_upload();
             (*u).total_size = 5 << 30;
             assert_eq!(xfer_can_pause(u), 0, "past 4 GiB");
-            let f = xfer_new_folder(
-                std::ptr::null_mut(),
-                c"/tmp/d".as_ptr(),
-                c"/up".as_ptr(),
-                c"d".as_ptr(),
-                1,
-                XFER_PUT,
-            );
+            let f = running_folder_upload();
+            (*f).total_size = 5 << 30;
+            assert_eq!(xfer_can_pause(f), 1, "each file sized in 32 bits");
+        }
+    }
+
+    /// A folder upload the server answered, its worker running.
+    unsafe fn running_folder_upload() -> *mut HtxfHandle {
+        running_folder_upload_of(c"/nonexistent/hxh-fput")
+    }
+
+    /// The same, of the local folder `local`.
+    unsafe fn running_folder_upload_of(local: &std::ffi::CStr) -> *mut HtxfHandle {
+        let f = xfer_new_folder(
+            std::ptr::null_mut(),
+            local.as_ptr(),
+            c"/up".as_ptr(),
+            c"d".as_ptr(),
+            1,
+            XFER_PUT,
+        );
+        ((*f).ref_, (*f).total_size) = (10, 5000);
+        hx_htxf_set_total_pos(f, 1200);
+        xfer_ready_write(f);
+        f
+    }
+
+    /// Whether each FILE_PUTFOLDER sent since the last call asks to resume.
+    fn put_folder_resumes() -> Vec<bool> {
+        crate::send::files::tests::sends()
+            .into_iter()
+            .filter(|(ty, _)| *ty == ClientHdr::FilePutFolder as u32)
+            .map(|(_, chunks)| chunks.iter().any(|c| *c == (0x00cc, vec![0, 1])))
+            .collect()
+    }
+
+    #[test]
+    fn a_paused_folder_upload_asks_to_resume_and_then_starts_over() {
+        reset(&[]);
+        put_folder_resumes();
+        let local = std::env::temp_dir().join(format!("hxh-fput-{}", std::process::id()));
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("a"), b"a").unwrap();
+        let local_c = std::ffi::CString::new(local.to_str().unwrap()).unwrap();
+        unsafe {
+            let f = running_folder_upload_of(&local_c);
+            let a = new_download();
+            assert_eq!((*a).gone, 0, "queued behind the folder");
+            assert_eq!(xfer_can_pause(f), 1);
+            xfer_pause(f);
+            assert_eq!(xfer_can_start(f), 0, "winding down");
+            xfer_cleanup_dispatch(f.cast());
+            assert_eq!(xfer_num(f), 0, "kept in the list");
+            assert_eq!(xfer_paused(f), 1);
+            assert_eq!(xfer_can_start(f), 1);
+            assert_eq!((*a).gone, 1, "the queue moves on");
+            assert!(put_folder_resumes().is_empty());
+
+            xfer_go(f);
+            assert_eq!(put_folder_resumes(), [true]);
+            assert_eq!(xfer_paused(f), 0);
+            assert_eq!(hx_htxf_total_pos(f), 0);
+            let workers = WORKERS.get();
             xfer_ready_write(f);
-            assert_eq!(xfer_can_pause(f), 0, "a folder's upload");
+            assert_eq!(WORKERS.get(), workers, "not before the server answers");
+            assert!(!queued_refused(f.cast()), "not the queue's to retry");
+
+            put_folder_run(f, FolderRun::default());
+            assert_eq!(upload_resume_refused(f.cast()), Some(true), "quietly");
+            assert_eq!(put_folder_resumes(), [false], "a new upload");
+            assert_eq!(upload_resume_refused(f.cast()), Some(false), "said why");
+            assert!(
+                with_folder_run(f, |_| ()).is_some(),
+                "what it sent kept for the next resume"
+            );
+            assert_eq!(xfer_num(f), 0, "kept in the list");
+            assert_eq!(xfer_paused(f), 1);
+
+            xfer_go(f);
+            answered(f.cast());
+            xfer_ready_write(f);
+            assert_eq!(WORKERS.get(), workers + 1, "one worker, once answered");
+        }
+        std::fs::remove_dir_all(&local).unwrap();
+    }
+
+    #[test]
+    fn a_folder_upload_stopped_past_a_folder_is_asked_for_again_a_few_times() {
+        reset(&[]);
+        put_folder_resumes();
+        let local = std::env::temp_dir().join(format!("hxh-fagain-{}", std::process::id()));
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("a"), b"a").unwrap();
+        let local_c = std::ffi::CString::new(local.to_str().unwrap()).unwrap();
+        unsafe {
+            let f = running_folder_upload_of(&local_c);
+            put_folder_run(f, FolderRun::default());
+            for n in 0..=AGAIN_TRIES {
+                with_folder_run(f, |r| r.stop = Some(Stop::Again));
+                xfer_cleanup_dispatch(f.cast());
+                if n < AGAIN_TRIES {
+                    assert_eq!(put_folder_resumes(), [true], "asked again, {n}");
+                    answered(f.cast());
+                    xfer_ready_write(f);
+                } else {
+                    assert!(put_folder_resumes().is_empty(), "not past the tries");
+                    assert_eq!((xfer_paused(f), xfer_can_start(f)), (1, 1));
+                }
+            }
+        }
+        std::fs::remove_dir_all(&local).unwrap();
+    }
+
+    #[test]
+    fn a_paused_folder_upload_with_nothing_left_to_offer_is_done() {
+        reset(&[]);
+        put_folder_resumes();
+        unsafe {
+            let f = running_folder_upload();
+            pause_settled(f, 0);
+            xfer_go(f);
+            assert!(put_folder_resumes().is_empty(), "a count of 0 asks nothing");
+            assert_eq!(xfer_num(f), -1);
+        }
+    }
+
+    #[test]
+    fn a_resumed_folder_upload_that_stops_itself_stays_paused() {
+        // (why it stopped; the row's pause, and whether Start goes)
+        for (stop, paused, start) in [(Stop::Changed, 3, 0), (Stop::Reoffer, 4, 1)] {
+            reset(&[]);
+            unsafe {
+                let f = running_folder_upload();
+                put_folder_run(
+                    f,
+                    FolderRun {
+                        stop: Some(stop),
+                        ..FolderRun::default()
+                    },
+                );
+                xfer_cleanup_dispatch(f.cast());
+                assert_eq!(xfer_num(f), 0, "kept in the list");
+                assert_eq!((xfer_paused(f), xfer_can_start(f)), (paused, start));
+                assert!(put_folder_resumes().is_empty(), "nor asked for again");
+            }
         }
     }
 
@@ -2270,11 +2538,11 @@ mod tests {
         unsafe {
             let f = running_folder();
             xfer_pause(f);
-            put_folder_get(
+            put_folder_run(
                 f,
-                FolderGet {
+                FolderRun {
                     finished: true,
-                    ..FolderGet::default()
+                    ..FolderRun::default()
                 },
             );
             xfer_cleanup_dispatch(f.cast());

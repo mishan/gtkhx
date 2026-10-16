@@ -71,12 +71,12 @@ open_folder_channel (guint32 ref, guint64 total_size)
 }
 
 /* Fixed FILP-wrapper overhead per file for the HTXF_SIZE aggregate: the
- * 133-byte header + the 16-byte MACR marker file_send_one always writes
- * (no comment, no rsrc fork). */
-#define FILP_OVERHEAD (133 + 16)
+ * 133-byte header, and no MACR marker after a file with no resource fork
+ * (no comment, no rsrc fork here). */
+#define FILP_OVERHEAD 133
 
-/* Recursively count regular files and sum (FILP_OVERHEAD + size) for the
- * PUTFOLDER aggregate. */
+/* Recursively count the files and folders (220) and sum (FILP_OVERHEAD +
+ * size) for the PUTFOLDER aggregate. */
 static void
 tree_totals (const char *dir, guint32 *nfiles, guint64 *total)
 {
@@ -94,9 +94,9 @@ tree_totals (const char *dir, guint32 *nfiles, guint64 *total)
         if (S_ISDIR (sb.st_mode)) {
             tree_totals (full, nfiles, total);
         } else if (S_ISREG (sb.st_mode)) {
-            (*nfiles)++;
             *total += FILP_OVERHEAD + (guint64)sb.st_size;
         }
+        *nfiles += S_ISDIR (sb.st_mode) || S_ISREG (sb.st_mode);
     }
     g_dir_close (d);
 }

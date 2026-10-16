@@ -202,16 +202,24 @@ pub fn put(dir: &[u8], name: &[u8], size: u32, resume: bool) -> Option<Request> 
 
 /// FILE_PUTFOLDER for a folder `name` uploaded into `dir`, carrying the tree's
 /// byte total (clamped to the wire's 32 bits) and file count, which the server
-/// shows in its queue.
-pub fn put_folder(dir: &[u8], name: &[u8], total_bytes: u64, nfiles: u32) -> Option<Request> {
+/// shows in its queue: a new folder, or with `resume` one the server holds
+/// part of, each file of which it answers as far as it has it.
+pub fn put_folder(
+    dir: &[u8],
+    name: &[u8],
+    total_bytes: u64,
+    nfiles: u32,
+    resume: bool,
+) -> Option<Request> {
     let enc = below_root(dir).then(|| encode_dir(dir, false));
     let req = FilePutFolderRequest {
         name,
         dir: enc.as_deref(),
+        resume,
         size: total_bytes.min(u64::from(u32::MAX)) as u32,
         nfiles,
     };
-    let mut chunks = [HxChunk::EMPTY; 4];
+    let mut chunks = [HxChunk::EMPTY; 5];
     let mut scratch = [0u8; 8];
     let hc = build::build_file_putfolder_chunks(&req, &mut chunks, &mut scratch);
     Request::from_built(ClientHdr::FilePutFolder as u32, &chunks, hc)

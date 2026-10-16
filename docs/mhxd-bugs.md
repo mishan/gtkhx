@@ -155,10 +155,25 @@ mhxd has to hang up the transfer instead.
 
 ## A folder-upload resume reply carries garbage resume data
 
-**From the source.** When a folder upload asks to resume (a non-zero transfer
+**Verified.** When a folder upload asks to resume (a non-zero transfer
 option on FILE_PUTFOLDER), `rcv_folder_put` answers with a 74-byte RFLT taken
 from a stack buffer it never fills, so the client is told arbitrary offsets.
-GtkHx never asks to resume a folder upload, so it never sees this.
+GtkHx reads no RFLT from a folder upload's reply: each file's offsets come in
+its own RESUME.
+
+## A resumed folder upload ends at a folder that exists
+
+**Verified.**
+
+`folder_recv` (`htxf.c`) makes each folder item with `mkdir` and ends the
+transfer when that fails, so a folder upload asked for again, which mhxd
+takes into the folder it holds, stops at the first subfolder the earlier
+upload made, its files after that unsent. It answers every file it finds on
+disk, whole or partial, with RESUME at its size, and never with NEXT.
+
+**GtkHx:** a resumed folder upload offers no folder item the server has made
+(`hxnet::xfer::UploadLedger`), and sends a file into it by its path, which
+mhxd opens in the folder that is there.
 
 ## A folder download's item count covers the top level only
 

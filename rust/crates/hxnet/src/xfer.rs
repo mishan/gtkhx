@@ -33,6 +33,7 @@ use crate::htxf::HtxfConn;
 
 // errno-ish return codes (the C returned raw errno; callers only test != 0).
 const EIO: c_int = 5;
+const EPIPE: c_int = 32;
 const EINVAL: c_int = 22;
 const EFBIG: c_int = 27;
 const ENAMETOOLONG: c_int = 36;
@@ -684,12 +685,21 @@ const FILP_TEMPLATE: [u8; 115] = [
 
 /// One blocking write of the whole buffer to the subchannel (mirrors C
 /// `htxf_io_write`, which returns the full logical length on success — the hxnet
-/// channel writes it all, one AEAD frame when armed). `!= len` is failure.
+/// channel writes it all, one AEAD frame when armed). `!= len` is failure,
+/// EPIPE, which a local read's EIO isn't.
 unsafe fn xfer_write(hx: *mut HtxfConn, buf: &[u8]) -> Result<(), c_int> {
     if crate::htxf::hxnet_htxf_write(hx, buf.as_ptr(), buf.len()) != buf.len() as isize {
-        return Err(EIO);
+        return Err(EPIPE);
     }
     Ok(())
+}
+
+/// Whether `hx`'s transfer was aborted; a null `hx` was not.
+unsafe fn aborted(hx: *mut HtxfConn) -> bool {
+    if hx.is_null() {
+        return false;
+    }
+    (*hx).is_aborted()
 }
 
 /// Copy `data_len` bytes from a local fork file to the subchannel (C
@@ -783,8 +793,8 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         Err(_) => return EFBIG,
     };
     hdr[117 + comlen..FILP_HEADER_LEN + comlen].copy_from_slice(&data_hdr);
-    if xfer_write(hx, &hdr).is_err() {
-        return EIO;
+    if let Err(e) = xfer_write(hx, &hdr) {
+        return e;
     }
     p.report((FILP_HEADER_LEN + comlen) as u64);
 
@@ -805,11 +815,11 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         }
     }
 
-    // A lone file with no resource fork left declared two forks and a size
-    // ending at the data fork; a marker past it is bytes the server never
-    // reads, and one that closes on them resets the upload. A folder's
-    // per-file size counts the marker.
-    if !is_folder && p.rsrc_size.wrapping_sub(p.rsrc_pos) == 0 {
+    // With no resource fork left the FILP declared two forks, and its size
+    // ends at the data fork; a marker past it is bytes the server never
+    // reads. One that closes on them resets the upload, and Janus, reading
+    // a folder's next item, waits on them for good.
+    if p.rsrc_size.wrapping_sub(p.rsrc_pos) == 0 {
         return 0;
     }
 
@@ -826,9 +836,6 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         return 0;
     }
     p.report(16);
-    if p.rsrc_size.wrapping_sub(p.rsrc_pos) == 0 {
-        return 0;
-    }
     let mut ropts = hfs::ResourceOpenOptions::new();
     ropts.read(true);
     let mut rf = match hfs::resource_open(&cfg, &path, &ropts) {
@@ -1215,21 +1222,106 @@ fn os_bytes(s: &std::ffi::OsStr) -> Vec<u8> {
     }
 }
 
+/// A file a folder upload began sending, as it was then.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Offered {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl Offered {
+    fn of(md: &std::fs::Metadata) -> Offered {
+        Offered {
+            len: md.len(),
+            modified: md.modified().ok(),
+        }
+    }
+}
+
+/// What a folder upload has sent, so that asking for it again can trust what
+/// the server says it holds: the files it began sending, as each was then,
+/// the folders the server has made, and those it may have: offered, but
+/// not seen made before the connection ended.
+#[derive(Debug, Default)]
+pub struct UploadLedger {
+    files: std::collections::HashMap<Vec<u8>, Offered>,
+    folders: std::collections::HashSet<Vec<u8>>,
+    unsure: std::collections::HashSet<Vec<u8>>,
+}
+
+impl UploadLedger {
+    /// Whether a file under `base` this upload has sent from has changed
+    /// since: resumed, the server would splice the two. One removed since
+    /// isn't offered again.
+    pub fn changed(&self, base: &Path) -> bool {
+        self.files.iter().any(|(rel, was)| {
+            std::fs::metadata(base.join(os_from_bytes(rel)))
+                .is_ok_and(|md| Offered::of(&md) != *was)
+        })
+    }
+}
+
+/// The bytes of the regular files under `base`, and how many files and
+/// folders a folder upload of it offers, resumed from `sent` or new: what
+/// FILE_PUTFOLDER's 108 and 220 say, the 1.9 server and Janus ending the
+/// upload after that many items.
+pub fn put_totals(base: &Path, sent: Option<&UploadLedger>) -> (u64, u32) {
+    let mut entries = Vec::new();
+    collect_put_entries(base, &[], &mut entries);
+    let bytes = entries
+        .iter()
+        .filter(|e| !e.is_folder)
+        .filter_map(|e| std::fs::symlink_metadata(&e.full).ok())
+        .map(|md| md.len())
+        .fold(0u64, u64::saturating_add);
+    let made = |e: &PutEntry| {
+        e.is_folder && sent.is_some_and(|s| s.folders.contains(&e.components.join(&b'/')))
+    };
+    let items = entries.iter().filter(|e| !made(e)).count();
+    (bytes, items.try_into().unwrap_or(u32::MAX))
+}
+
+/// What [`folder_send`] returns when the server holds more of a file than it
+/// has, or holds part of one that has changed since this upload sent it.
+pub const HXNET_XFER_CHANGED: c_int = -2;
+
+/// What [`folder_send`] returns when the server ended the upload at a folder
+/// it has, which the ledger now says it made: asked for again, the upload
+/// gets past it.
+pub const HXNET_XFER_AGAIN: c_int = -3;
+
+/// What [`folder_send`] returns when the server ended the upload at a file in
+/// a folder it wasn't offered: its folder may not be the one the upload left,
+/// and asked for again, every folder is offered.
+pub const HXNET_XFER_REOFFER: c_int = -4;
+
 /// `int hxnet_xfer_folder_send_all (const HxnetFolderParams *fp)` — send the
-/// local folder tree at `fp->base_path` (was C `folder_send_all`). For each
-/// server FILE_NEXT, replies with one entry's nfi header + path components, then
-/// for files the per-file size + FILP body via `hxnet_xfer_file_send_one`. The
-/// server closes when done; our next FILE_NEXT read short-reads and we stop.
-/// Returns 0 on success, an errno-like positive code on failure.
+/// local folder tree at `fp->base_path` (was C `folder_send_all`). See
+/// [`folder_send`].
 ///
 /// # Safety
 /// C-ABI worker helper on a blocking-pool thread; `fp` valid, `fp->hx` open.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams) -> c_int {
-    let fp = match fp.as_ref() {
-        Some(f) => f,
-        None => return EINVAL,
-    };
+    match fp.as_ref() {
+        Some(fp) => folder_send(fp, &mut UploadLedger::default()),
+        None => EINVAL,
+    }
+}
+
+/// Send the local folder tree at `fp.base_path`, noting in `ledger` what it
+/// sends. For each server FILE_NEXT, replies with one entry's nfi header and
+/// path components; the server answers a file with FILE_SEND, FILE_RESUME and
+/// an RFLT of what it holds, or FILE_NEXT to pass over it and ask for the
+/// next. A folder `ledger` says the server has made is not offered again:
+/// mhxd ends the upload at one that exists. The server closes when done; our
+/// next FILE_NEXT read short-reads and we stop. Returns 0 on success,
+/// [`HXNET_XFER_CHANGED`], [`HXNET_XFER_AGAIN`], [`HXNET_XFER_REOFFER`], or
+/// an errno-like positive code on failure.
+///
+/// # Safety
+/// Worker helper on a blocking-pool thread; `fp.hx` open.
+pub unsafe fn folder_send(fp: &HxnetFolderParams, ledger: &mut UploadLedger) -> c_int {
     if fp.hx.is_null() || fp.progress.is_none() {
         return EINVAL;
     }
@@ -1242,15 +1334,45 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
     let mut entries: Vec<PutEntry> = Vec::new();
     collect_put_entries(&base, &[], &mut entries);
 
+    // Whether the server's last answer already asked for the next entry.
+    let mut asked = false;
+    // A folder offered, which the server has made once it asks again, and
+    // whether an earlier upload offered it and lost the answer.
+    let mut offered: Option<(Vec<u8>, bool)> = None;
+    // The folders this upload doesn't offer, and whether the last item was
+    // a file in one of them.
+    let mut skipped: Vec<&[Vec<u8>]> = Vec::new();
+    let mut in_skipped = false;
     for e in &entries {
-        // Wait for FILE_NEXT.
-        let mut cmd = [0u8; 2];
-        if htxf_read_full(fp.hx, &mut cmd) != 2 {
-            return EIO;
+        let rel = e.components.join(&b'/');
+        if e.is_folder && ledger.folders.contains(&rel) {
+            skipped.push(&e.components);
+            continue;
         }
-        if u16::from_be_bytes(cmd) != FILE_NEXT_CMD {
-            return EPROTO;
+        if !asked {
+            let mut cmd = [0u8; 2];
+            let n = htxf_read_full(fp.hx, &mut cmd);
+            if n == 0 && !aborted(fp.hx) {
+                if let Some(again) = ended(ledger, &mut offered, in_skipped) {
+                    return again;
+                }
+            }
+            if n != 2 {
+                if let Some((rel, _)) = offered {
+                    ledger.unsure.insert(rel);
+                }
+                return EIO;
+            }
+            if u16::from_be_bytes(cmd) != FILE_NEXT_CMD {
+                return EPROTO;
+            }
         }
+        asked = false;
+        if let Some((made, _)) = offered.take() {
+            ledger.unsure.remove(&made);
+            ledger.folders.insert(made);
+        }
+        in_skipped = !e.is_folder && skipped.iter().any(|s| e.components.starts_with(s));
 
         // nfi header: len = 4 + sum(3 + nlen_i), type, pathcount. Compute the
         // length wide and refuse an nfi that won't fit the u16 wire fields
@@ -1284,18 +1406,28 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
         }
 
         if e.is_folder {
+            let lost = ledger.unsure.contains(&rel);
+            offered = Some((rel, lost));
             continue; // folder marker — no payload
         }
 
-        // File leaf — server replies FILE_SEND (fresh) or FILE_RESUME.
         let mut cmd = [0u8; 2];
-        if htxf_read_full(fp.hx, &mut cmd) != 2 {
+        let n = htxf_read_full(fp.hx, &mut cmd);
+        if n != 2 {
+            if n == 0 && !aborted(fp.hx) {
+                if let Some(again) = ended(ledger, &mut None, in_skipped) {
+                    return again;
+                }
+            }
             return EIO;
         }
         let cmd = u16::from_be_bytes(cmd);
         let mut data_pos = 0u64;
         let mut rsrc_pos = 0u64;
-        if cmd == FILE_RESUME_CMD {
+        if cmd == FILE_NEXT_CMD {
+            asked = true;
+            continue;
+        } else if cmd == FILE_RESUME_CMD {
             let mut rl = [0u8; 2];
             if htxf_read_full(fp.hx, &mut rl) != 2 {
                 return EIO;
@@ -1334,16 +1466,33 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
         let data_size = md.len();
         let rsrc_size = hfs::resource_len(&cfg, &e.full);
         let com = hfs::comment_len(&cfg, &e.full) as u64;
+        // Sent from where the server's copy ends, a file that isn't what it
+        // was when this upload sent its start would come out neither.
+        let now = Offered::of(&md);
+        let resumed = data_pos + rsrc_pos != 0;
+        if data_pos > data_size
+            || rsrc_pos > rsrc_size
+            || resumed && ledger.files.get(&rel).is_some_and(|was| *was != now)
+        {
+            return HXNET_XFER_CHANGED;
+        }
+        ledger.files.insert(rel, now);
+        // What the server holds counts towards the tree.
+        if let Some(progress) = fp.progress.filter(|_| resumed) {
+            progress(fp.user_data, data_pos + rsrc_pos);
+        }
 
         // Per-file payload size — MUST equal exactly what hxnet_xfer_file_send_one
-        // writes (FILP header + comment + data fork + the unconditional 16-byte
-        // MACR marker + rsrc fork), or the trailing bytes desync the server's
+        // writes (FILP header + comment + data fork, and the 16-byte MACR
+        // marker + rsrc fork when any of it is left), or the trailing bytes desync the server's
         // parse of the next file's nfi and the whole folder stream fails.
         let file_size = FILP_HEADER_LEN as u64
             + com
             + data_size.wrapping_sub(data_pos)
-            + ffo::FORK_HEADER_LEN as u64
-            + rsrc_size.wrapping_sub(rsrc_pos);
+            + match rsrc_size.wrapping_sub(rsrc_pos) {
+                0 => 0,
+                left => ffo::FORK_HEADER_LEN as u64 + left,
+            };
         // The folder-stream size header is a u32 on the wire; a file whose FFO
         // payload exceeds 4 GiB can't be represented, so refuse it explicitly
         // rather than truncating and desyncing the stream. (The C path silently
@@ -1371,10 +1520,44 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
         );
         let rv = hxnet_xfer_file_send_one(&per);
         if rv != 0 {
+            // The connection's failing, not a local file's, which a fresh
+            // upload would meet too.
+            if rv == EPIPE && !aborted(fp.hx) {
+                if let Some(again) = ended(ledger, &mut None, in_skipped) {
+                    return again;
+                }
+            }
             return rv;
         }
     }
     0
+}
+
+/// The server ended a folder upload: what the ledger learns from where, and
+/// [`HXNET_XFER_AGAIN`] or [`HXNET_XFER_REOFFER`] if it learned anything. A folder an earlier upload
+/// offered and lost the answer to, ended at again, is one the server has:
+/// mhxd ends the upload at a folder that exists. It isn't taken as made the
+/// first time the answer is lost, as a server that never read it wouldn't
+/// have it, and its files would be sent into a folder that isn't there. A
+/// file in a folder not offered, ended at, says the server's folder may be a
+/// new one, made since the folders were: each is offered again.
+fn ended(
+    ledger: &mut UploadLedger,
+    offered: &mut Option<(Vec<u8>, bool)>,
+    in_skipped: bool,
+) -> Option<c_int> {
+    if let Some((made, true)) = offered {
+        ledger.unsure.remove(made);
+        ledger.folders.insert(std::mem::take(made));
+        *offered = None;
+        Some(HXNET_XFER_AGAIN)
+    } else if in_skipped {
+        let made: Vec<_> = ledger.folders.drain().collect();
+        ledger.unsure.extend(made);
+        Some(HXNET_XFER_REOFFER)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1492,9 +1675,9 @@ mod folder_loopback_tests {
     use crate::htxf::HtxfConn;
     use std::net::{TcpListener, TcpStream};
 
-    // The full FILP body hxnet_xfer_file_send_one emits for `body` (133-byte
-    // header + data fork + 16-byte MACR), generated by running the send path
-    // into a loopback capture.
+    // A server's FILP body for `body`: what hxnet_xfer_file_send_one emits
+    // (133-byte header + data fork), generated by running the send path into
+    // a loopback capture, and the empty MACR marker after it.
     fn gen_filp(body: &[u8]) -> Vec<u8> {
         // One directory per call: tests run in parallel, and two bodies of
         // the same length must not share a file.
@@ -1539,8 +1722,10 @@ mod folder_loopback_tests {
         };
         assert_eq!(unsafe { hxnet_xfer_file_send_one(&params) }, 0);
         drop(conn);
-        let got = reader.join().unwrap();
+        let mut got = reader.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+        // The empty resource fork's marker a server's FILP carries.
+        got.extend_from_slice(&ffo::pack_fork_header(b"MACR", 0, false).unwrap());
         got
     }
 
@@ -1619,15 +1804,304 @@ mod folder_loopback_tests {
         assert_eq!(got.len(), 2, "server should receive two files");
         for (name, size, blob) in &got {
             let body: &[u8] = if name == b"a.txt" { b"aaa" } else { b"bbbb" };
-            // Declared size == actual bytes == 133 header + body + 16 MACR.
+            // Declared size == actual bytes == 133 header + body: no resource
+            // fork, so no MACR marker the FILP does not declare.
             assert_eq!(*size as usize, blob.len(), "declared size matches bytes");
             assert_eq!(
                 *size as usize,
-                133 + body.len() + 16,
+                133 + body.len(),
                 "folder file size accounting"
             );
             assert_eq!(&blob[133..133 + body.len()], body, "data fork bytes");
         }
+    }
+
+    /// How the scripted upload server answers a file it is offered.
+    #[derive(Clone, Copy)]
+    enum Reply {
+        Send,
+        Resume(u32),
+        Next,
+        /// Close the connection rather than answer, as mhxd does at a
+        /// folder that exists.
+        Close,
+    }
+
+    /// What the scripted upload server saw of one item: its path, and for a
+    /// file it took, the data fork that came.
+    type Took = (String, Option<Vec<u8>>);
+
+    /// A folder-upload server on a loopback port, answering each file with
+    /// `reply`, as the 1.9 server does a NEXT: as the ask for the next item.
+    fn serve_upload(
+        reply: impl Fn(&str) -> Reply + Send + 'static,
+    ) -> (u16, std::thread::JoinHandle<Vec<Took>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            let mut asked = false;
+            loop {
+                if !asked && s.write_all(&FILE_NEXT_CMD.to_be_bytes()).is_err() {
+                    break;
+                }
+                asked = false;
+                let mut nfi = [0u8; NFI_HEADER_LEN];
+                if s.read_exact(&mut nfi).is_err() {
+                    break;
+                }
+                let mut path = Vec::new();
+                for _ in 0..u16::from_be_bytes([nfi[4], nfi[5]]) {
+                    let mut ph = [0u8; 3];
+                    s.read_exact(&mut ph).unwrap();
+                    let mut nm = vec![0u8; ph[2] as usize];
+                    s.read_exact(&mut nm).unwrap();
+                    path.push(String::from_utf8(nm).unwrap());
+                }
+                let path = path.join("/");
+                let answer = reply(&path);
+                if matches!(answer, Reply::Close) {
+                    break;
+                }
+                if nfi[3] == 1 {
+                    got.push((path, None));
+                    continue;
+                }
+                match answer {
+                    Reply::Close => unreachable!(),
+                    Reply::Next => {
+                        s.write_all(&FILE_NEXT_CMD.to_be_bytes()).unwrap();
+                        got.push((path, None));
+                        asked = true;
+                        continue;
+                    }
+                    Reply::Send => {
+                        s.write_all(&FILE_SEND_CMD.to_be_bytes()).unwrap();
+                    }
+                    Reply::Resume(data) => {
+                        let mut cmd = FILE_RESUME_CMD.to_be_bytes().to_vec();
+                        cmd.extend_from_slice(&(rflt::CANONICAL_LEN as u16).to_be_bytes());
+                        cmd.extend_from_slice(&rflt::encode(rflt::Resume { data, resource: 0 }));
+                        s.write_all(&cmd).unwrap();
+                    }
+                }
+                let mut sz = [0u8; 4];
+                if s.read_exact(&mut sz).is_err() {
+                    break;
+                }
+                let mut blob = vec![0u8; u32::from_be_bytes(sz) as usize];
+                if s.read_exact(&mut blob).is_err() {
+                    break;
+                }
+                got.push((path, Some(blob[FILP_HEADER_LEN..].to_vec())));
+            }
+            got
+        });
+        (port, server)
+    }
+
+    /// Upload the tree at `base` to the server on `port`, noting in `ledger`.
+    fn send_to(port: u16, base: &Path, ledger: &mut UploadLedger) -> c_int {
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(base.to_str().unwrap()).unwrap();
+        let fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        unsafe { folder_send(&fp, ledger) }
+    }
+
+    /// A local tree of `a`, `b/c` and `d`, each `len` bytes of its own.
+    fn upload_tree(tag: &str, len: usize) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hxnet_fput_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("b")).unwrap();
+        for (p, k) in [("a", 1), ("b/c", 2), ("d", 3)] {
+            std::fs::write(dir.join(p), body(len, k)).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_folder_upload_sends_each_file_as_far_as_the_server_answers() {
+        let dir = upload_tree("answers", 300);
+        let (port, server) = serve_upload(|p| match p {
+            "a" => Reply::Next,
+            "b/c" => Reply::Resume(100),
+            _ => Reply::Send,
+        });
+        let mut ledger = UploadLedger::default();
+        let rv = send_to(port, &dir, &mut ledger);
+        let got = server.join().unwrap();
+        let items = |l| put_totals(&dir, l).1;
+        let counted = (items(None), items(Some(&ledger)));
+        std::fs::remove_dir_all(dir.join("b")).unwrap();
+        let gone = items(Some(&ledger));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(rv, 0);
+        assert_eq!((counted, gone), ((4, 3), 2), "what is left to offer");
+        assert_eq!(
+            got,
+            [
+                ("a".to_string(), None),
+                ("b".to_string(), None),
+                ("b/c".to_string(), Some(body(300, 2)[100..].to_vec())),
+                ("d".to_string(), Some(body(300, 3))),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_folder_upload_asked_again_offers_no_folder_the_server_made() {
+        let dir = upload_tree("again", 300);
+        let mut ledger = UploadLedger::default();
+        let (port, server) = serve_upload(|_| Reply::Send);
+        assert_eq!(send_to(port, &dir, &mut ledger), 0);
+        server.join().unwrap();
+        let (port, server) = serve_upload(|p| match p {
+            "d" => Reply::Send,
+            _ => Reply::Resume(300),
+        });
+        let rv = send_to(port, &dir, &mut ledger);
+        let got = server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(rv, 0);
+        let paths: Vec<&str> = got.iter().map(|g| g.0.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["a", "b/c", "d"],
+            "mhxd ends at a folder that exists"
+        );
+        assert_eq!(got[1].1.as_deref(), Some(&[][..]), "nothing past the end");
+    }
+
+    #[test]
+    fn a_resume_past_the_file_or_of_a_file_changed_since_sends_nothing() {
+        // (the server's offset for b/c, whether b/c changed after the first pass)
+        for (at, change) in [(301, false), (100, true)] {
+            let dir = upload_tree("changed", 300);
+            let mut ledger = UploadLedger::default();
+            let (port, server) = serve_upload(|_| Reply::Send);
+            assert_eq!(send_to(port, &dir, &mut ledger), 0);
+            server.join().unwrap();
+            assert!(!ledger.changed(&dir));
+            if change {
+                std::fs::write(dir.join("b/c"), body(310, 9)).unwrap();
+                assert!(ledger.changed(&dir));
+            }
+            let (port, server) = serve_upload(move |p| match p {
+                "b/c" => Reply::Resume(at),
+                _ => Reply::Next,
+            });
+            let rv = send_to(port, &dir, &mut ledger);
+            let got = server.join().unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert_eq!(rv, HXNET_XFER_CHANGED, "at {at}, changed {change}");
+            assert!(got.iter().all(|g| g.1.is_none()), "{got:?}");
+        }
+    }
+
+    #[test]
+    fn a_folder_ended_at_twice_is_taken_as_made_and_not_offered_again() {
+        let dir = upload_tree("ended", 300);
+        let mut ledger = UploadLedger::default();
+        let mut runs = Vec::new();
+        // The answer to b lost, as a pause between its item and the next
+        // FILE_NEXT loses it; then mhxd ending the upload at b, which it has.
+        for close in [true, true, false] {
+            let (port, server) = serve_upload(move |p| match p {
+                "b" if close => Reply::Close,
+                _ => Reply::Send,
+            });
+            let rv = send_to(port, &dir, &mut ledger);
+            let got = server.join().unwrap();
+            runs.push((rv, got.into_iter().map(|g| g.0).collect::<Vec<_>>()));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            runs,
+            [
+                (EIO, names(&["a"])),
+                (HXNET_XFER_AGAIN, names(&["a"])),
+                (0, names(&["a", "b/c", "d"])),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_ended_at_in_a_folder_not_offered_offers_the_folders_again() {
+        let dir = upload_tree("fresh", 300);
+        let mut ledger = UploadLedger::default();
+        let mut runs = Vec::new();
+        // The server's folder made afresh: a file sent into b, which it
+        // hasn't, ends the upload.
+        for close in [false, true, false] {
+            let (port, server) = serve_upload(move |p| match p {
+                "b/c" if close => Reply::Close,
+                _ => Reply::Send,
+            });
+            let rv = send_to(port, &dir, &mut ledger);
+            let got = server.join().unwrap();
+            runs.push((rv, got.into_iter().map(|g| g.0).collect::<Vec<_>>()));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            runs,
+            [
+                (0, names(&["a", "b", "b/c", "d"])),
+                (HXNET_XFER_REOFFER, names(&["a"])),
+                (0, names(&["a", "b", "b/c", "d"])),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_cut_short_in_a_folder_not_offered_fails_as_it_is() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Shrink {
+            armed: std::sync::Arc<AtomicBool>,
+            path: PathBuf,
+        }
+        // Armed when the server reads b/c's item, so its first call after is
+        // for b/c's FILP header: after b/c was sized, before it is read.
+        extern "C" fn shrink(u: *mut c_void, _d: u64) {
+            let s = unsafe { &*(u as *const Shrink) };
+            if s.armed.swap(false, Ordering::SeqCst) {
+                std::fs::File::create(&s.path).unwrap();
+            }
+        }
+        let dir = upload_tree("short", 300);
+        let mut ledger = UploadLedger::default();
+        let (port, server) = serve_upload(|_| Reply::Send);
+        assert_eq!(send_to(port, &dir, &mut ledger), 0);
+        server.join().unwrap();
+        let armed = std::sync::Arc::new(AtomicBool::new(false));
+        let cut = Shrink {
+            armed: armed.clone(),
+            path: dir.join("b/c"),
+        };
+        let (port, server) = serve_upload(move |p| {
+            if p == "b/c" {
+                armed.store(true, Ordering::SeqCst);
+            }
+            Reply::Send
+        });
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+        let mut fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        fp.progress = Some(shrink);
+        fp.user_data = &cut as *const Shrink as *mut c_void;
+        let rv = unsafe { folder_send(&fp, &mut ledger) };
+        drop(conn);
+        server.join().unwrap();
+        let (port, server) = serve_upload(|_| Reply::Send);
+        assert_eq!(send_to(port, &dir, &mut ledger), 0);
+        let again: Vec<_> = server.join().unwrap().into_iter().map(|g| g.0).collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(rv, EIO, "the short read's own reason, not a retry");
+        assert_eq!(again, ["a", "b/c", "d"], "b still taken as made");
     }
 
     // Client download: hxnet_xfer_folder_recv_all against a mock server that

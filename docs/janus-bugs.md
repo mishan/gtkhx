@@ -50,6 +50,22 @@ GtkHx tells the two apart by the data fork's length and writes a whole one
 from the start (`hxnet::xfer::data_from`), counting only what it hadn't
 already had toward the download's progress.
 
+## A folder upload is taken into a folder that exists
+
+**Verified; 2.0.23.**
+
+- **Sends:** FILE_PUTFOLDER (213) without the resume flag (204) for a folder
+  that already exists.
+- **Gets:** the upload, into the folder that is there: each file it has
+  whole is passed over (3), and a partial one resumed (2).
+- **Should get:** a refusal, as for a file upload over one that exists, and
+  as mhxd, hxd-ng and the 1.9 server refuse it; the folder taken only with
+  the flag set.
+
+GtkHx sets the flag only on a folder upload it paused, so a new upload over
+a folder of the same name merges into it on Janus rather than being
+refused.
+
 ## Fixed upstream
 
 Older servers still behave this way, which is worth knowing when a report

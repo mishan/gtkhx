@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-15 10:28-0700\n"
+"POT-Creation-Date: 2026-10-16 00:31-0700\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: Japanese <misha@nasledov.com>\n"
@@ -21,71 +21,71 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/chat.c:1076
+#: src/chat.c:1078
 #, c-format
 msgid "chat history (%u message)"
 msgid_plural "chat history (%u messages)"
 msgstr[0] "チャット履歴 (%u 件のメッセージ)"
 
-#: src/chat.c:1121
+#: src/chat.c:1123
 msgid "Load older messages"
 msgstr "以前のメッセージを読み込む"
 
-#: src/chat.c:1186
+#: src/chat.c:1188
 msgid "live messages"
 msgstr "ここから新着"
 
-#: src/chat.c:1272
+#: src/chat.c:1275
 msgid "Loading older messages..."
 msgstr "以前のメッセージを読み込んでいます..."
 
-#: src/chat.c:1852
+#: src/chat.c:1858
 msgid "Subject Changed to"
 msgstr "トピック変更"
 
-#: src/chat.c:1869
+#: src/chat.c:1875
 #, c-format
 msgid "join: %s\n"
 msgstr "参加: %s\n"
 
-#: src/chat.c:1875
+#: src/chat.c:1881
 #, c-format
 msgid "parts: %s \n"
 msgstr "退出: %s \n"
 
-#: src/chat.c:1881
+#: src/chat.c:1887
 #, c-format
 msgid "%1$s is now known as %2$s\n"
 msgstr "%1$s は %2$s に名前を変更\n"
 
-#: src/chat.c:1885
+#: src/chat.c:1891
 msgid "kick successful"
 msgstr "キック成功"
 
-#: src/chat.c:2024 src/users.c:518 src/users_bridge.c:91
+#: src/chat.c:2030 src/users.c:518 src/users_bridge.c:91
 msgid "Private Message"
 msgstr "プライベートメッセージ"
 
-#: src/chat.c:2032 src/users.c:499 src/users_bridge.c:94
+#: src/chat.c:2038 src/users.c:499 src/users_bridge.c:94
 msgid "Kick"
 msgstr "キック"
 
-#: src/chat.c:2040 src/users_bridge.c:97
+#: src/chat.c:2046 src/users_bridge.c:97
 msgid "User Info"
 msgstr "ユーザー情報"
 
-#: src/chat.c:2047 src/users.c:501 src/users_bridge.c:100
+#: src/chat.c:2053 src/users.c:501 src/users_bridge.c:100
 msgid "Ban"
 msgstr "アクセス禁止"
 
-#: src/chat.c:2050 src/users.c:520 src/users_bridge.c:103
+#: src/chat.c:2056 src/users.c:520 src/users_bridge.c:103
 #: rust/crates/gtkhx-ui/src/chat_tabs.rs:305
 #: rust/crates/gtkhx-ui/src/chat_tabs.rs:542
 #: rust/crates/gtkhx-ui/src/pchat.rs:159
 msgid "Private Chat"
 msgstr "プライベートチャット"
 
-#: src/chat.c:2058 src/users.c:508 src/users_bridge.c:106
+#: src/chat.c:2064 src/users.c:508 src/users_bridge.c:106
 msgid "Ignore"
 msgstr "無視"
 
@@ -149,54 +149,54 @@ msgstr "ログイン中…"
 msgid "Remote"
 msgstr "リモート"
 
-#: src/gtkhx.c:1146 src/gtkhx.c:1180 src/gtkhx.c:2156
+#: src/gtkhx.c:1147 src/gtkhx.c:1181 src/gtkhx.c:2157
 msgid "Not connected"
 msgstr "未接続"
 
-#: src/gtkhx.c:1680
+#: src/gtkhx.c:1681
 msgid "polite quit\n"
 msgstr "正常な切断\n"
 
-#: src/gtkhx.c:1727
+#: src/gtkhx.c:1728
 msgid "server confirmed large-file (64-bit) mode for this session\n"
 msgstr "このセッションで大容量ファイル (64 ビット) モードをサーバーが確認\n"
 
-#: src/gtkhx.c:1729
+#: src/gtkhx.c:1730
 msgid "server confirmed UTF-8 text encoding for this session\n"
 msgstr "このセッションで UTF-8 テキストエンコーディングをサーバーが確認\n"
 
-#: src/gtkhx.c:1731
+#: src/gtkhx.c:1732
 msgid "server confirmed chat-history extension for this session\n"
 msgstr "このセッションでチャット履歴拡張をサーバーが確認\n"
 
-#: src/gtkhx.c:1733
+#: src/gtkhx.c:1734
 msgid "server confirmed inline-media extension for this session\n"
 msgstr "このセッションでインラインメディア拡張をサーバーが確認\n"
 
-#: src/gtkhx.c:1747
+#: src/gtkhx.c:1748
 msgid "login"
 msgstr "ログイン"
 
-#: src/gtkhx.c:1747
+#: src/gtkhx.c:1748
 msgid "successful"
 msgstr "成功"
 
-#: src/gtkhx.c:2423
+#: src/gtkhx.c:2424
 #, c-format
 msgid "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
 msgstr "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
 
-#: src/gtkhx.c:2424
+#: src/gtkhx.c:2425
 #, c-format
 msgid "GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
 msgstr "GtkHx は完全に無保証です。\n"
 
-#: src/gtkhx.c:2425
+#: src/gtkhx.c:2426
 #, c-format
 msgid "This is free software, and you are welcome\n"
 msgstr "これはフリーソフトウェアであり、一定の条件の下で\n"
 
-#: src/gtkhx.c:2426
+#: src/gtkhx.c:2427
 #, c-format
 msgid ""
 "to redistribute it under certain conditions.\n"
@@ -205,12 +205,12 @@ msgstr ""
 "再配布できます。\n"
 "\n"
 
-#: src/gtkhx.c:2428
+#: src/gtkhx.c:2429
 #, c-format
 msgid "usage: %s [options]\n"
 msgstr "使い方: %s [オプション]\n"
 
-#: src/gtkhx.c:2429
+#: src/gtkhx.c:2430
 #, c-format
 msgid ""
 "\n"
@@ -219,39 +219,39 @@ msgstr ""
 "\n"
 "サポートされているオプション:\n"
 
-#: src/gtkhx.c:2430
+#: src/gtkhx.c:2431
 #, c-format
 msgid "\t--help, -h\t\tPrint this help message out.\n"
 msgstr "\t--help, -h\t\tこのヘルプメッセージを表示する。\n"
 
-#: src/gtkhx.c:2431
+#: src/gtkhx.c:2432
 #, c-format
 msgid "\t--server, -s <host>\tConnect to <host>\n"
 msgstr "\t--server, -s <host>\t<host> に接続する\n"
 
-#: src/gtkhx.c:2432
+#: src/gtkhx.c:2433
 #, c-format
 msgid "\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
 msgstr "\t--port, -t <port>\t<host> の <port> に接続する。(デフォルト: 5500)\n"
 
-#: src/gtkhx.c:2434
+#: src/gtkhx.c:2435
 #, c-format
 msgid "\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
 msgstr ""
 "\t--login, -l <login>\t<host> で <login> を使用する。(デフォルト: guest)\n"
 
-#: src/gtkhx.c:2437
+#: src/gtkhx.c:2438
 #, c-format
 msgid "\t--pass, -p\t\tPrompt for pass of <login>.\n"
 msgstr "\t--pass, -p\t\t<login> のパスワードを尋ねる。\n"
 
-#: src/gtkhx.c:2439
+#: src/gtkhx.c:2440
 #, c-format
 msgid "\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
 msgstr "\t--bookmark, -b <name>\tブックマーク <name> を使って接続する。\n"
 
-#: src/gtkurl.c:167 rust/crates/gtkhx-ui/src/connect.rs:1143
-#: rust/crates/gtkhx-ui/src/connect.rs:1153
+#: src/gtkurl.c:167 rust/crates/gtkhx-ui/src/connect.rs:1210
+#: rust/crates/gtkhx-ui/src/connect.rs:1220
 msgid "Couldn't parse hotline:// URL"
 msgstr "hotline:// URL を解析できませんでした"
 
@@ -273,8 +273,8 @@ msgstr "不明なエラー"
 msgid "Connect to Server"
 msgstr "サーバーに接続"
 
-#: src/gtkurl.c:311 rust/crates/gtkhx-ui/src/connect.rs:863
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:291
+#: src/gtkurl.c:311 rust/crates/gtkhx-ui/src/connect.rs:930
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:292
 msgid "Save Bookmark"
 msgstr "ブックマークを保存"
 
@@ -314,7 +314,7 @@ msgstr "ログイン済み:"
 msgid "GtkHx"
 msgstr "GtkHx"
 
-#: src/gtkutil.c:705 src/msg.c:823
+#: src/gtkutil.c:705 src/msg.c:824
 #: rust/crates/gtkhx-ui/src/options_connections.rs:384
 msgid "_OK"
 msgstr "OK(_O)"
@@ -331,12 +331,12 @@ msgstr "ゲスト"
 msgid " (Away)"
 msgstr " (離席中)"
 
-#: src/msg.c:813
+#: src/msg.c:814
 #, c-format
 msgid "broadcast: %s\n"
 msgstr "一斉通知: %s\n"
 
-#: src/msg.c:822 src/toolbar.c:1203 rust/crates/gtkhx-ui/src/broadcast.rs:61
+#: src/msg.c:823 src/toolbar.c:1203 rust/crates/gtkhx-ui/src/broadcast.rs:61
 msgid "Broadcast"
 msgstr "一斉通知"
 
@@ -488,23 +488,23 @@ msgctxt "files transfer"
 msgid "Upload"
 msgstr "アップロード"
 
-#: src/tasks.c:916
+#: src/tasks.c:918
 msgid "Stop Transfer"
 msgstr "転送を停止"
 
-#: src/tasks.c:919
+#: src/tasks.c:921
 msgid "Pause Transfer"
 msgstr "転送を一時停止"
 
-#: src/tasks.c:923
+#: src/tasks.c:925
 msgid "Start Transfer"
 msgstr "転送を開始"
 
-#: src/tasks.c:928
+#: src/tasks.c:930
 msgid "Move Transfer Up in Queue"
 msgstr "転送をキューの上へ移動"
 
-#: src/tasks.c:931
+#: src/tasks.c:933
 msgid "Move Transfer Down in Queue"
 msgstr "転送をキューの下へ移動"
 
@@ -519,9 +519,9 @@ msgstr ""
 "このウィンドウを閉じると、現在のサーバーから切断して GtkHx を終了します。"
 
 #: src/toolbar.c:258 src/users.c:671 rust/crates/gtkhx-ui/src/broadcast.rs:64
-#: rust/crates/gtkhx-ui/src/connect.rs:866
+#: rust/crates/gtkhx-ui/src/connect.rs:933
 #: rust/crates/gtkhx-ui/src/conn_tabs.rs:254
-#: rust/crates/gtkhx-ui/src/create_post.rs:114
+#: rust/crates/gtkhx-ui/src/create_post.rs:113
 #: rust/crates/gtkhx-ui/src/files/dialogs.rs:25
 #: rust/crates/gtkhx-ui/src/news_compose.rs:90
 #: rust/crates/gtkhx-ui/src/news_dialogs.rs:85
@@ -530,7 +530,7 @@ msgstr ""
 #: rust/crates/gtkhx-ui/src/screen_share.rs:287
 #: rust/crates/gtkhx-ui/src/tls_trust_dialog.rs:127
 #: rust/crates/gtkhx-ui/src/updates.rs:472
-#: rust/crates/gtkhx-ui/src/useredit.rs:506
+#: rust/crates/gtkhx-ui/src/useredit.rs:507
 #: rust/crates/gtkhx-ui/src/voice_panel.rs:885
 msgid "_Cancel"
 msgstr "キャンセル(_C)"
@@ -580,7 +580,7 @@ msgstr "接続設定…"
 
 #: src/toolbar.c:820 src/toolbar.c:1163
 #: rust/crates/gtkhx-ui/src/shortcuts.rs:36
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:575
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:576
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:805
 msgid "Tracker"
 msgstr "トラッカー"
@@ -588,7 +588,7 @@ msgstr "トラッカー"
 #: src/toolbar.c:821 src/toolbar.c:1180
 #: rust/crates/gtkhx-ui/src/files/mod.rs:57
 #: rust/crates/gtkhx-ui/src/shortcuts.rs:138
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:567
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:568
 msgid "Files"
 msgstr "ファイル"
 
@@ -642,10 +642,10 @@ msgstr "パネル"
 msgid "Main menu"
 msgstr "メインメニュー"
 
-#: src/toolbar.c:1134 rust/crates/gtkhx-ui/src/connect.rs:657
-#: rust/crates/gtkhx-ui/src/connect.rs:666
+#: src/toolbar.c:1134 rust/crates/gtkhx-ui/src/connect.rs:724
+#: rust/crates/gtkhx-ui/src/connect.rs:733
 #: rust/crates/gtkhx-ui/src/shortcuts.rs:35
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:289
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:290
 msgid "Connect"
 msgstr "接続"
 
@@ -746,40 +746,40 @@ msgstr "メンションされました: %s"
 msgid "%s mentioned you: %s"
 msgstr "%s さんがあなたをメンションしました: %s"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:316
-#: rust/crates/gtkhx-ui/src/banner.rs:328
+#: rust/crates/gtkhx-ui/src/banner.rs:330
+#: rust/crates/gtkhx-ui/src/banner.rs:342
 msgid "Server banner"
 msgstr "サーバーのバナー"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:444
+#: rust/crates/gtkhx-ui/src/banner.rs:440
 msgid "Server banner: URL mode without URL"
 msgstr "サーバーバナー: URL モードですが URL がありません"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:452
+#: rust/crates/gtkhx-ui/src/banner.rs:448
 msgid "Server banner [%s] — loading…"
 msgstr "サーバーバナー [%s] — 読み込み中…"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:545
+#: rust/crates/gtkhx-ui/src/banner.rs:502
 msgid "Server banner: empty transfer"
 msgstr "サーバーバナー: 転送が空です"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:549
+#: rust/crates/gtkhx-ui/src/banner.rs:506
 msgid "Server banner: image too large"
 msgstr "サーバーバナー: 画像が大きすぎます"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:834
+#: rust/crates/gtkhx-ui/src/banner.rs:779
 msgid "Server banner: image not decodable"
 msgstr "サーバーバナー: 画像をデコードできません"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:896
+#: rust/crates/gtkhx-ui/src/banner.rs:845
 msgid "Server banner: empty response"
 msgstr "サーバーバナー: 応答が空です"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:899
+#: rust/crates/gtkhx-ui/src/banner.rs:848
 msgid "Server banner: fetch failed"
 msgstr "サーバーバナー: 取得に失敗しました"
 
-#: rust/crates/gtkhx-ui/src/banner.rs:1006
+#: rust/crates/gtkhx-ui/src/banner.rs:944
 msgid "Server banner: HTXF fetch failed"
 msgstr "サーバーバナー: HTXF での取得に失敗しました"
 
@@ -792,7 +792,7 @@ msgid "_Send"
 msgstr "送信(_S)"
 
 #: rust/crates/gtkhx-ui/src/broadcast.rs:72
-#: rust/crates/gtkhx-ui/src/create_post.rs:125
+#: rust/crates/gtkhx-ui/src/create_post.rs:124
 #: rust/crates/gtkhx-ui/src/news_compose.rs:126
 msgid "Message"
 msgstr "メッセージ"
@@ -884,22 +884,22 @@ msgstr "チャットのトピック"
 msgid "PM"
 msgstr "メッセージ"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:576
+#: rust/crates/gtkhx-ui/src/connect.rs:643
 msgid "Enter a server address"
 msgstr "サーバーのアドレスを入力してください"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:663
+#: rust/crates/gtkhx-ui/src/connect.rs:730
 msgid "Save Bookmark…"
 msgstr "ブックマークを保存…"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:682
-#: rust/crates/gtkhx-ui/src/connect.rs:688
+#: rust/crates/gtkhx-ui/src/connect.rs:749
+#: rust/crates/gtkhx-ui/src/connect.rs:755
 #: rust/crates/gtkhx-ui/src/options_connections.rs:602
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:469
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:470
 msgid "Server"
 msgstr "サーバー"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:684
+#: rust/crates/gtkhx-ui/src/connect.rs:751
 msgid ""
 "Enter the server address. If you have an account, fill in your login and "
 "password below; otherwise leave them blank."
@@ -907,40 +907,40 @@ msgstr ""
 "サーバーのアドレスを入力します。アカウントをお持ちの場合は、下にログイン名と"
 "パスワードも入力してください。お持ちでない場合は空欄のままで構いません。"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:692
+#: rust/crates/gtkhx-ui/src/connect.rs:759
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:334
 msgid "Port"
 msgstr "ポート"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:700
+#: rust/crates/gtkhx-ui/src/connect.rs:767
 #: rust/crates/gtkhx-ui/src/options_connections.rs:619
 msgid "Account"
 msgstr "アカウント"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:702
+#: rust/crates/gtkhx-ui/src/connect.rs:769
 #: rust/crates/gtkhx-ui/src/options_connections.rs:623
 #: rust/crates/gtkhx-ui/src/useredit.rs:360
-#: rust/crates/gtkhx-ui/src/useredit.rs:514
+#: rust/crates/gtkhx-ui/src/useredit.rs:515
 msgid "Login"
 msgstr "ログイン名"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:706
+#: rust/crates/gtkhx-ui/src/connect.rs:773
 #: rust/crates/gtkhx-ui/src/options_connections.rs:627
 #: rust/crates/gtkhx-ui/src/useredit.rs:369
 msgid "Password"
 msgstr "パスワード"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:713
+#: rust/crates/gtkhx-ui/src/connect.rs:780
 #: rust/crates/gtkhx-ui/src/conn_tabs.rs:458
 msgid "Connection"
 msgstr "接続"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:716
+#: rust/crates/gtkhx-ui/src/connect.rs:783
 #: rust/crates/gtkhx-ui/src/options_connections.rs:675
 msgid "Use TLS"
 msgstr "TLS を使用する"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:718
+#: rust/crates/gtkhx-ui/src/connect.rs:785
 #: rust/crates/gtkhx-ui/src/options_connections.rs:677
 msgid ""
 "Connect to the server's TLS port. Disables HOPE and compression — they're "
@@ -949,58 +949,58 @@ msgstr ""
 "サーバーの TLS ポートに接続します。HOPE と圧縮は無効になります — TLS で暗号化"
 "されたストリームでは意味がないためです。"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:726
+#: rust/crates/gtkhx-ui/src/connect.rs:793
 msgid "Secure (HOPE)"
 msgstr "セキュア (HOPE)"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:727
+#: rust/crates/gtkhx-ui/src/connect.rs:794
 msgid "Encrypt and optionally compress the connection"
 msgstr "接続を暗号化し、必要に応じて圧縮します"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:733
+#: rust/crates/gtkhx-ui/src/connect.rs:800
 #: rust/crates/gtkhx-ui/src/options_connections.rs:695
 msgid "Compression"
 msgstr "圧縮"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:740
+#: rust/crates/gtkhx-ui/src/connect.rs:807
 #: rust/crates/gtkhx-ui/src/options_connections.rs:689
 msgid "Cipher"
 msgstr "暗号方式"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:855
-#: rust/crates/gtkhx-ui/src/connect.rs:888
-#: rust/crates/gtkhx-ui/src/connect.rs:956
-#: rust/crates/gtkhx-ui/src/connect.rs:1000
+#: rust/crates/gtkhx-ui/src/connect.rs:922
+#: rust/crates/gtkhx-ui/src/connect.rs:955
+#: rust/crates/gtkhx-ui/src/connect.rs:1023
+#: rust/crates/gtkhx-ui/src/connect.rs:1067
 #: rust/crates/gtkhx-ui/src/options.rs:585
 msgid "Error"
 msgstr "エラー"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:864
+#: rust/crates/gtkhx-ui/src/connect.rs:931
 msgid "Enter a name for this bookmark."
 msgstr "このブックマークの名前を入力してください。"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:867
+#: rust/crates/gtkhx-ui/src/connect.rs:934
 msgid "_Save"
 msgstr "保存(_S)"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:875
+#: rust/crates/gtkhx-ui/src/connect.rs:942
 msgid "Bookmark name"
 msgstr "ブックマーク名"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:890
+#: rust/crates/gtkhx-ui/src/connect.rs:957
 msgid "You must specify a name for this bookmark with at least one character."
 msgstr "このブックマークには 1 文字以上の名前を指定してください。"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:951
-#: rust/crates/gtkhx-ui/src/connect.rs:995
+#: rust/crates/gtkhx-ui/src/connect.rs:1018
+#: rust/crates/gtkhx-ui/src/connect.rs:1062
 msgid "No such bookmark"
 msgstr "そのブックマークは存在しません"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:1166
+#: rust/crates/gtkhx-ui/src/connect.rs:1233
 msgid "Couldn't derive a bookmark name from URL"
 msgstr "URL からブックマーク名を導き出せませんでした"
 
-#: rust/crates/gtkhx-ui/src/connect.rs:1177
+#: rust/crates/gtkhx-ui/src/connect.rs:1244
 msgid ""
 "There is already a connection named \"%s\". Edit it in Settings → "
 "Connections."
@@ -1027,12 +1027,16 @@ msgstr "切断(_D)"
 msgid "Voice chat is active on this connection"
 msgstr "この接続でボイスチャットを使用中です"
 
-#: rust/crates/gtkhx-ui/src/create_post.rs:101
+#: rust/crates/gtkhx-ui/src/create_post.rs:73
+msgid "Not posted: the connection this was for has closed"
+msgstr "投稿されませんでした: 投稿先の接続が閉じられました"
+
+#: rust/crates/gtkhx-ui/src/create_post.rs:100
 #: rust/crates/gtkhx-ui/src/news.rs:304
 msgid "Post News"
 msgstr "ニュースを投稿"
 
-#: rust/crates/gtkhx-ui/src/create_post.rs:116
+#: rust/crates/gtkhx-ui/src/create_post.rs:115
 #: rust/crates/gtkhx-ui/src/news_compose.rs:91
 msgid "_Post"
 msgstr "投稿(_P)"
@@ -1062,53 +1066,53 @@ msgstr "暗号方式: %s"
 msgid "Connecting"
 msgstr "接続中"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:58
-#: rust/crates/gtkhx-ui/src/file_info.rs:60
+#: rust/crates/gtkhx-ui/src/file_info.rs:53
+#: rust/crates/gtkhx-ui/src/file_info.rs:55
 msgid "bytes"
 msgstr "バイト"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:138
+#: rust/crates/gtkhx-ui/src/file_info.rs:127
 msgid "File Info"
 msgstr "ファイル情報"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:143
+#: rust/crates/gtkhx-ui/src/file_info.rs:132
 #: rust/crates/gtkhx-ui/src/options_connections.rs:724
 #: rust/crates/gtkhx-ui/src/useredit.rs:342
 msgid "Save"
 msgstr "保存"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:157
+#: rust/crates/gtkhx-ui/src/file_info.rs:146
 #: rust/crates/gtkhx-ui/src/files/panel.rs:258
 #: rust/crates/gtkhx-ui/src/options_connections.rs:605
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:471
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:472
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:298
-#: rust/crates/gtkhx-ui/src/users_view.rs:694
+#: rust/crates/gtkhx-ui/src/users_view.rs:696
 msgid "Name"
 msgstr "名前"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:164
+#: rust/crates/gtkhx-ui/src/file_info.rs:153
 msgid "Creator"
 msgstr "クリエーターコード"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:165
+#: rust/crates/gtkhx-ui/src/file_info.rs:154
 msgid "Type"
 msgstr "タイプ"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:166
+#: rust/crates/gtkhx-ui/src/file_info.rs:155
 #: rust/crates/gtkhx-ui/src/files/panel.rs:259
 msgid "Size"
 msgstr "サイズ"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:167
+#: rust/crates/gtkhx-ui/src/file_info.rs:156
 msgid "Created"
 msgstr "作成日時"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:168
+#: rust/crates/gtkhx-ui/src/file_info.rs:157
 #: rust/crates/gtkhx-ui/src/files/panel.rs:261
 msgid "Modified"
 msgstr "更新日時"
 
-#: rust/crates/gtkhx-ui/src/file_info.rs:173
+#: rust/crates/gtkhx-ui/src/file_info.rs:162
 msgid "Comments"
 msgstr "コメント"
 
@@ -1207,7 +1211,7 @@ msgid "Preview"
 msgstr "プレビュー"
 
 #: rust/crates/gtkhx-ui/src/files/browser.rs:464
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:295
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:296
 msgid "Get Info"
 msgstr "情報を見る"
 
@@ -1508,7 +1512,7 @@ msgid "Images (PNG, JPEG, GIF)"
 msgstr "画像 (PNG, JPEG, GIF)"
 
 #: rust/crates/gtkhx-ui/src/media_attach.rs:122
-#: rust/crates/gtkhx-ui/src/options_identity.rs:234
+#: rust/crates/gtkhx-ui/src/options_identity.rs:250
 msgid "File picker failed: %s"
 msgstr "ファイル選択に失敗しました: %s"
 
@@ -1644,7 +1648,7 @@ msgid "Messages with %s"
 msgstr "%s さんとのメッセージ"
 
 #: rust/crates/gtkhx-ui/src/news_browser.rs:48
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:507
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:508
 msgid "Category"
 msgstr "カテゴリ"
 
@@ -1879,7 +1883,7 @@ msgid "New Connection"
 msgstr "新規接続"
 
 #: rust/crates/gtkhx-ui/src/options_connections.rs:609
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:479
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:480
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:325
 msgid "Address"
 msgstr "アドレス"
@@ -1914,7 +1918,7 @@ msgid "Icon"
 msgstr "アイコン"
 
 #: rust/crates/gtkhx-ui/src/options_connections.rs:657
-#: rust/crates/gtkhx-ui/src/options_identity.rs:301
+#: rust/crates/gtkhx-ui/src/options_identity.rs:317
 msgid "Choose…"
 msgstr "選択…"
 
@@ -1988,27 +1992,27 @@ msgstr ""
 "他のクライアントで取り込めるように、接続ごとに従来の Hotline ブックマークファ"
 "イルを 1 つずつ書き出します。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:65
+#: rust/crates/gtkhx-ui/src/options_identity.rs:79
 msgid "Identity icon"
 msgstr "プロフィールアイコン"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:68
+#: rust/crates/gtkhx-ui/src/options_identity.rs:82
 msgid "Icon ID"
 msgstr "アイコン ID"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:69
+#: rust/crates/gtkhx-ui/src/options_identity.rs:83
 msgid "Numeric ID from the loaded icon resource files"
 msgstr "読み込まれたアイコンリソースファイル内の数値 ID"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:76
+#: rust/crates/gtkhx-ui/src/options_identity.rs:90
 msgid "Your icon"
 msgstr "自分のアイコン"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:87
+#: rust/crates/gtkhx-ui/src/options_identity.rs:101
 msgid "Browse…"
 msgstr "参照…"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:172
+#: rust/crates/gtkhx-ui/src/options_identity.rs:186
 msgid ""
 "Couldn't save the avatar — check the permissions on your GtkHx configuration "
 "directory."
@@ -2016,11 +2020,11 @@ msgstr ""
 "アバターを保存できませんでした — GtkHx の設定ディレクトリの権限を確認してくだ"
 "さい。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:182
+#: rust/crates/gtkhx-ui/src/options_identity.rs:198
 msgid "Avatar updated."
 msgstr "アバターを更新しました。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:185
+#: rust/crates/gtkhx-ui/src/options_identity.rs:201
 msgid ""
 "Avatar saved — it'll be sent when you connect to a server that supports GIF "
 "icons."
@@ -2028,37 +2032,37 @@ msgstr ""
 "アバターを保存しました — GIF アイコンに対応したサーバーに接続したときに送信さ"
 "れます。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:197
+#: rust/crates/gtkhx-ui/src/options_identity.rs:213
 msgid "That file is %s KB — the limit is %s KB. Pick a smaller one."
 msgstr ""
 "そのファイルは %s KB です — 上限は %s KB です。もっと小さいものを選んでくださ"
 "い。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:207
+#: rust/crates/gtkhx-ui/src/options_identity.rs:223
 msgid "GIF images"
 msgstr "GIF 画像"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:213
+#: rust/crates/gtkhx-ui/src/options_identity.rs:229
 msgid "Choose an avatar"
 msgstr "アバターを選択"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:256
+#: rust/crates/gtkhx-ui/src/options_identity.rs:272
 msgid "Couldn't read the file: %s"
 msgstr "ファイルを読み込めませんでした: %s"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:261
+#: rust/crates/gtkhx-ui/src/options_identity.rs:277
 msgid "That file is empty."
 msgstr "そのファイルは空です。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:270
+#: rust/crates/gtkhx-ui/src/options_identity.rs:286
 msgid "That file is not a GIF."
 msgstr "そのファイルは GIF ではありません。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:279
+#: rust/crates/gtkhx-ui/src/options_identity.rs:295
 msgid "Custom GIF avatar"
 msgstr "カスタム GIF アバター"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:281
+#: rust/crates/gtkhx-ui/src/options_identity.rs:297
 msgid ""
 "A GIF other users see in place of your icon. Best authored at icon size (or "
 "wide-banner size); max 32 KB. Sent automatically when you connect to a "
@@ -2068,45 +2072,45 @@ msgstr ""
 "長バナーサイズ) で作成するのが最適です。最大 32 KB。対応するサーバーに接続す"
 "ると自動的に送信されます。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:287
+#: rust/crates/gtkhx-ui/src/options_identity.rs:303
 msgid "Avatar"
 msgstr "アバター"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:293
+#: rust/crates/gtkhx-ui/src/options_identity.rs:309
 msgid "Your avatar"
 msgstr "自分のアバター"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:310
+#: rust/crates/gtkhx-ui/src/options_identity.rs:326
 #: rust/crates/gtkhx-ui/src/options.rs:293
 msgid "Clear"
 msgstr "クリア"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:326
+#: rust/crates/gtkhx-ui/src/options_identity.rs:341
 msgid "Avatar cleared."
 msgstr "アバターをクリアしました。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:328
+#: rust/crates/gtkhx-ui/src/options_identity.rs:343
 msgid "Avatar cleared for now, but the saved file could not be deleted."
 msgstr ""
 "アバターはひとまずクリアしましたが、保存されているファイルは削除できませんで"
 "した。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:338
+#: rust/crates/gtkhx-ui/src/options_identity.rs:353
 msgid "Animate GIF avatars"
 msgstr "GIF アバターをアニメーションさせる"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:340
+#: rust/crates/gtkhx-ui/src/options_identity.rs:355
 msgid "Play animated avatars in the user list. Turn off to show a still frame."
 msgstr ""
 "ユーザーリストでアニメーションアバターを再生します。オフにすると静止画を表示"
 "します。"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:349
+#: rust/crates/gtkhx-ui/src/options_identity.rs:364
 #: rust/crates/gtkhx-ui/src/useredit.rs:366
 msgid "Display name"
 msgstr "表示名"
 
-#: rust/crates/gtkhx-ui/src/options_identity.rs:350
+#: rust/crates/gtkhx-ui/src/options_identity.rs:365
 msgid "Your name"
 msgstr "名前"
 
@@ -2726,7 +2730,7 @@ msgid "Sound"
 msgstr "サウンド"
 
 #: rust/crates/gtkhx-ui/src/options_window.rs:129
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:553
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:554
 #: rust/crates/gtkhx-ui/src/users_voice_col.rs:345
 msgid "Voice"
 msgstr "ボイス"
@@ -2994,18 +2998,26 @@ msgid "%1$s of %2$s · Paused: the file has changed"
 msgstr "%1$s / %2$s · 一時停止中: ファイルが変更されました"
 
 #: rust/crates/gtkhx-ui/src/tasks.rs:87
+msgid "%1$s of %2$s · Paused: a file in it has changed"
+msgstr "%1$s / %2$s · 一時停止中: フォルダー内のファイルが変更されました"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:90
+msgid "%1$s of %2$s · Paused: the folder on the server has changed"
+msgstr "%1$s / %2$s · 一時停止中: サーバー上のフォルダーが変更されました"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs:94
 msgid "%1$s of %2$s · Paused"
 msgstr "%1$s / %2$s · 一時停止中"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:90
+#: rust/crates/gtkhx-ui/src/tasks.rs:97
 msgid "%1$s of %2$s"
 msgstr "%1$s / %2$s"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:99
+#: rust/crates/gtkhx-ui/src/tasks.rs:106
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
 msgstr "%1$s / %2$s · %3$s/s · 残り %4$d:%5$02d:%6$02d"
 
-#: rust/crates/gtkhx-ui/src/tasks.rs:104
+#: rust/crates/gtkhx-ui/src/tasks.rs:111
 msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr "%1$s / %2$s · %3$s/s · 残り %4$d:%5$02d"
 
@@ -3046,44 +3058,44 @@ msgstr ""
 msgid "Pinned certificates live in %s."
 msgstr "ピン留めした証明書は %s にあります。"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:209
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:210
 msgid "Couldn't pick a bookmark name for this server."
 msgstr "このサーバーのブックマーク名を決められませんでした。"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:217
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:218
 msgid ""
 "There is already a connection with that name; edit it in Settings → "
 "Connections:"
 msgstr "その名前の接続がすでに存在します。設定 → 接続 で編集してください:"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:237
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:238
 msgid "Saved bookmark"
 msgstr "ブックマークを保存しました"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:239
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:240
 msgid "Couldn't save bookmark"
 msgstr "ブックマークを保存できませんでした"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:347
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:348
 msgid "Yes"
 msgstr "はい"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:398
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:399
 msgid "Teen"
 msgstr "ティーン向け"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:399
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:400
 msgid "Mature"
 msgstr "一般成人向け"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:400
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:401
 msgid "Adult"
 msgstr "アダルト"
 
 #. TRANSLATORS: An age rating, the mildest of Teen/Mature/Adult —
 #. "suitable for everyone", no age restriction. Not the server
 #. category "General" below, and not the "General" preferences page.
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:404
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:405
 msgctxt "maturity rating"
 msgid "General"
 msgstr "全年齢向け"
@@ -3091,238 +3103,238 @@ msgstr "全年齢向け"
 #. TRANSLATORS: A server category, alongside Development, Gaming,
 #. Media and so on — a server with no particular specialism. Not the
 #. age rating "General" above, and not the preferences page.
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:414
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:415
 msgctxt "server category"
 msgid "General"
 msgstr "全般"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:415
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:416
 msgid "Development"
 msgstr "開発"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:416
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:417
 msgid "Archive"
 msgstr "アーカイブ"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:417
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:418
 msgid "Warez"
 msgstr "Warez"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:418
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:419
 msgid "Gaming"
 msgstr "ゲーム"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:419
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:420
 msgid "Media"
 msgstr "メディア"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:420
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:421
 msgid "Education"
 msgstr "教育"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:421
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:422
 msgid "Research"
 msgstr "研究"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:422
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:423
 msgid "File Sharing"
 msgstr "ファイル共有"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:423
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:424
 msgid "Social"
 msgstr "ソーシャル"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:424
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:425
 msgid "Security"
 msgstr "セキュリティ"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:425
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:426
 msgid "Creative"
 msgstr "クリエイティブ"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:426
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:427
 msgid "Unspecified"
 msgstr "未指定"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:445
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:446
 msgid "Server details"
 msgstr "サーバーの詳細"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:481
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:482
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:352
 msgid "Description"
 msgstr "説明"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:482
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:483
 msgid "Users online"
 msgstr "オンラインのユーザー数"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:485
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:486
 msgid "Maximum users"
 msgstr "最大ユーザー数"
 
 #. TRANSLATORS: Heading for a group of facts about the server —
 #. its software, country, region, language and tags. The other
 #. "Identity" in this catalog is the user's own name and icon.
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:496
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:497
 msgctxt "server details"
 msgid "Identity"
 msgstr "基本情報"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:498
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:499
 msgid "Software"
 msgstr "ソフトウェア"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:499
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:500
 #: rust/crates/gtkhx-ui/src/tracker/mod.rs:316
 msgid "Country"
 msgstr "国"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:500
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:501
 msgid "Region"
 msgstr "地域"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:501
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:502
 msgid "Language"
 msgstr "言語"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:502
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:503
 msgid "Tags"
 msgstr "タグ"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:504
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:505
 msgid "Maturity"
 msgstr "対象年齢"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:509
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:510
 msgid "Contact"
 msgstr "連絡先"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:510
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:511
 msgid "Rules"
 msgstr "ルール"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:511
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:512
 msgid "Banner URL"
 msgstr "バナー URL"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:512
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:513
 msgid "Icon URL"
 msgstr "アイコン URL"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:519
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:520
 msgid "Timezone"
 msgstr "タイムゾーン"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:523
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:524
 msgid "Server launched"
 msgstr "サーバー起動日時"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:524
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:525
 msgid "Uptime"
 msgstr "稼働時間"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:529
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:530
 msgid "Capabilities"
 msgstr "対応機能"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:534
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:535
 msgid "Protocol version"
 msgstr "プロトコルバージョン"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:541
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:542
 msgid "Minimum client protocol"
 msgstr "クライアントの最小プロトコル"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:545
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:546
 msgid "HOPE encryption"
 msgstr "HOPE 暗号化"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:546
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:547
 msgid "HOPE ciphers"
 msgstr "HOPE 暗号方式"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:547
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:548
 msgid "TLS"
 msgstr "TLS"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:549
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:550
 msgid "TLS port"
 msgstr "TLS ポート"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:551
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:552
 msgid "IPv6"
 msgstr "IPv6"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:552
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:553
 msgid "Inline media"
 msgstr "インラインメディア"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:554
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:555
 msgid "Large files"
 msgstr "大容量ファイル"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:555
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:556
 msgid "Link down (Mbit/s)"
 msgstr "下り回線 (Mbit/s)"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:556
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:557
 msgid "Link up (Mbit/s)"
 msgstr "上り回線 (Mbit/s)"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:561
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:562
 msgid "Activity"
 msgstr "アクティビティ"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:563
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:564
 msgid "Peak users (24h)"
 msgstr "ピークユーザー数 (24 時間)"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:564
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:565
 msgid "Average users (24h)"
 msgstr "平均ユーザー数 (24 時間)"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:565
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:566
 msgid "News posts"
 msgstr "ニュース投稿数"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:566
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:567
 msgid "Message-board posts"
 msgstr "掲示板の投稿数"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:568
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:569
 msgid "Total file size"
 msgstr "ファイルの合計サイズ"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:569
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:570
 msgid "Last news activity"
 msgstr "最後のニュース更新"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:570
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:571
 msgid "Last public chat"
 msgstr "最後の公開チャット"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:577
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:578
 msgid "Promoted"
 msgstr "おすすめ掲載"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:578
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:579
 msgid "Verified online"
 msgstr "オンライン確認済み"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:579
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:580
 msgid "Private listing"
 msgstr "非公開の掲載"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:580
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:581
 msgid "Language strict"
 msgstr "言語制限あり"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:581
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:582
 msgid "First seen"
 msgstr "初回確認日時"
 
-#: rust/crates/gtkhx-ui/src/tracker/actions.rs:582
+#: rust/crates/gtkhx-ui/src/tracker/actions.rs:583
 msgid "Last heartbeat"
 msgstr "最終ハートビート"
 
@@ -3474,15 +3486,15 @@ msgstr "ランダムなパスワードを生成"
 msgid "You don't have this privilege"
 msgstr "この権限がありません"
 
-#: rust/crates/gtkhx-ui/src/useredit.rs:503
+#: rust/crates/gtkhx-ui/src/useredit.rs:504
 msgid "Open User"
 msgstr "ユーザーを開く"
 
-#: rust/crates/gtkhx-ui/src/useredit.rs:504
+#: rust/crates/gtkhx-ui/src/useredit.rs:505
 msgid "Enter the login of the account to edit."
 msgstr "編集するアカウントのログイン名を入力してください。"
 
-#: rust/crates/gtkhx-ui/src/useredit.rs:507
+#: rust/crates/gtkhx-ui/src/useredit.rs:508
 msgid "_Open"
 msgstr "開く(_O)"
 
@@ -3507,7 +3519,7 @@ msgstr "%s、管理者、離席中"
 msgid "Private chat with %s"
 msgstr "%s とのプライベートチャット"
 
-#: rust/crates/gtkhx-ui/src/users_view.rs:624
+#: rust/crates/gtkhx-ui/src/users_view.rs:626
 msgid "UID"
 msgstr "UID"
 
