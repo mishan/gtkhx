@@ -1,26 +1,25 @@
-## 1.6.1-dev
+## 1.6.1
 
-- Accessibility
-  - A video tile's picture is named for what it shows, a camera or a shared screen, so a screen reader can tell apart the two tiles of a user sharing both; a tile says its user's name once rather than twice
-  - A transfer reads as its file, its place in the queue and its progress; the Files window's two lists say which is local and which is remote, and a tracker's server list is named for its tracker
-  - With more than one connection open, a transfer also says which server it is on, as its row shows
 - Transfers
   - A folder download can be paused and resumed: Start skips the files it already has, picks up the one it stopped in, and fetches the rest
   - A file's upload, up to 4 GiB, can be paused and resumed: Start sends the rest of the file from what the server already has, or, when the server can't resume it, the whole file again; an upload whose file changed while it was paused, or that the server refuses, stays paused, saying why
   - A folder's upload can be paused and resumed: Start asks the server to take up the folder it holds, and sends each file from what the server already has of it, skipping any it has whole; an upload with a file that changed while it was paused stays paused, saying so
   - Fixed folder uploads to Janus stalling after the first file, and folder uploads to Janus and hlservd ending early, leaving as many items unsent as the folder has subfolders
+- Connections
+  - Reconnect, on the banner after a lost connection, reconnects that tab to the server it lost, however it connected (the Connect dialog, a bookmark, a link, the tracker, `/server` or `--server`), rather than to whichever server some other tab connected to last
+  - Post News posts to the server it was opened for, even when another connection opens and takes the focus while you write; it closes with its tab, and if that connection drops first it keeps what you wrote rather than closing
+  - Closing a connection's tab closes its user editors and File Info windows; one left open across a reconnect to another server no longer saves there, and neither does the answer to a chat invitation
+  - A chat line arriving on a connection you aren't looking at is checked for a mention against your name on that server, and its speaker and avatar come from that server's user list, rather than the one in focus
+  - Changing the theme or font in Settings applies to every open connection, not only the one in focus, and so do the nickname and the icon, each except where a connection has its own: from its entry in Settings → Connections, or set there with `/nick` or `/icon`, kept until it connects again without one
+  - A new avatar chosen in Settings goes to every connected server that takes one, not only to the one in focus
+  - Two servers logging in at the same moment each show their banner, where the first could be left with none
+- Accessibility
+  - A transfer reads as its file, its place in the queue and its progress, and, with more than one connection open, which server it is on; the Files window's two lists say which is local and which is remote, and a tracker's server list is named for its tracker
+  - A video tile's picture is named for what it shows, a camera or a shared screen, so a screen reader can tell apart the two tiles of a user sharing both; a tile says its user's name once rather than twice
 - Users
   - The voice column's heading is an icon that follows the theme, rather than an emoji
 - Files
   - Fixed downloading a file whose name is one character long from hlservd
-- Connections
-  - Reconnect, on the banner after a lost connection, reconnects that tab to the server it lost, however it connected (the Connect dialog, a bookmark, a link, the tracker, `/server` or `--server`), rather than to whichever server some other tab connected to last
-  - A new avatar chosen in Settings goes to every connected server that takes one, not only to the one in focus
-  - Closing a connection's tab closes its user editors and File Info windows; one left open across a reconnect to another server no longer saves there, and neither does the answer to a chat invitation
-  - Post News posts to the server it was opened for, even when another connection opens and takes the focus while you write; it closes with its tab, and if that connection drops first it keeps what you wrote rather than closing
-  - Two servers logging in at the same moment each show their banner, where the first could be left with none
-  - A chat line arriving on a connection you aren't looking at is checked for a mention against your name on that server, and its speaker and avatar come from that server's user list, rather than the one in focus
-  - Changing the theme or font in Settings applies to every open connection, not only the one in focus, and so do the nickname and the icon, each except where a connection has its own: from its entry in Settings → Connections, or set there with `/nick` or `/icon`, kept until it connects again without one
 
 ## 1.6.0
 
