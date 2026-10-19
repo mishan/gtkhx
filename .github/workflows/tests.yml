@@ -36,11 +36,27 @@ name: tests
 permissions:
   contents: read
 
+# A change only to docs, the changelog, the screenshots or the metainfo
+# builds nothing, so it skips this, as analyze and codeql do; lint still runs,
+# and checks the metainfo. None of these is a required check, so a skip
+# can't hold up a merge; one made required would need a job that always runs.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'data/screenshots/**'
+      - 'data/com.nasledov.gtkhx.metainfo.xml'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'data/screenshots/**'
+      - 'data/com.nasledov.gtkhx.metainfo.xml'
+      - 'LICENSE'
   workflow_dispatch:
 
 # Cancel in-flight runs for the same PR / branch when a new push comes in.

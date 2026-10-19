@@ -50,6 +50,14 @@ jobs:
       - name: icon-only buttons are named
         run: tools/check-icon-buttons.sh
 
+      - name: AppStream metainfo is valid
+        # The tests workflow validates it too (meson's validate-metainfo),
+        # but skips a change to it alone, so a release-date fix still gets
+        # checked here.
+        run: |
+          sudo apt-get install -y --no-install-recommends appstream
+          appstreamcli validate --no-net --pedantic data/com.nasledov.gtkhx.metainfo.xml
+
       - name: flatpak cargo sources match Cargo.lock
         # The release Flatpak build vendors every Rust dependency from
         # rust/cargo-sources.json, and nothing reads that file before release

@@ -18,8 +18,20 @@ name: codeql
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'data/screenshots/**'
+      - 'data/com.nasledov.gtkhx.metainfo.xml'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'data/screenshots/**'
+      - 'data/com.nasledov.gtkhx.metainfo.xml'
+      - 'LICENSE'
   schedule:
     - cron: "17 6 * * 1"
 

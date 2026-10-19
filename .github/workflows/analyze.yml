@@ -38,8 +38,20 @@ name: analyze
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'data/screenshots/**'
+      - 'data/com.nasledov.gtkhx.metainfo.xml'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'data/screenshots/**'
+      - 'data/com.nasledov.gtkhx.metainfo.xml'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
