@@ -152,7 +152,7 @@
   </content_rating>
 
   <releases>
-    <release version="1.6.1" date="2026-10-16">
+    <release version="1.6.1" date="2026-10-19">
       <description>
         <p>Every kind of transfer can now be paused and resumed, and each connection's windows act on that connection.</p>
         <ul>
