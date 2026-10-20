@@ -1,6 +1,9 @@
 ## 1.6.2-dev
 
 - Accessibility
+  - Fixed GtkHx crashing as soon as a screen reader read a chat view
+  - A chat picture is read as its description once, without "image" said again after it
+  - The dock's corner menu buttons are each named for their pane, and a divider no longer reads as two different numbers
   - On a first run, Settings opens over the main window, rather than as a window of its own that could open behind it
   - The section headings in Settings' sidebar are easier to read in the light style
 

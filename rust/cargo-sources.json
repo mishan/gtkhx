@@ -3746,40 +3746,40 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rotulus/rotulus-0.2.0.crate",
-    "sha256": "42c29363cd53e052fb6b70cf8dd51fb6d2fd07ce92b3ce14d1a4ea7cc27876d5",
-    "dest": "cargo/vendor/rotulus-0.2.0"
+    "url": "https://static.crates.io/crates/rotulus/rotulus-0.2.2.crate",
+    "sha256": "ed672c0a045be2c91e4e8bdd05b46dffe72bf89fd8ac263a8e4bfd661b37165a",
+    "dest": "cargo/vendor/rotulus-0.2.2"
   },
   {
     "type": "inline",
-    "contents": "{\"package\": \"42c29363cd53e052fb6b70cf8dd51fb6d2fd07ce92b3ce14d1a4ea7cc27876d5\", \"files\": {}}",
-    "dest": "cargo/vendor/rotulus-0.2.0",
+    "contents": "{\"package\": \"ed672c0a045be2c91e4e8bdd05b46dffe72bf89fd8ac263a8e4bfd661b37165a\", \"files\": {}}",
+    "dest": "cargo/vendor/rotulus-0.2.2",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rotulus-layout/rotulus-layout-0.2.0.crate",
-    "sha256": "2544bd651ddf139be7276440cc69b2babb29ead0a75afb4f546b6846807e3a8a",
-    "dest": "cargo/vendor/rotulus-layout-0.2.0"
+    "url": "https://static.crates.io/crates/rotulus-layout/rotulus-layout-0.2.2.crate",
+    "sha256": "c859d2cfcda433d68bee14c782ef473ee0d40d500d1a5fe9bbc137f9f55755b5",
+    "dest": "cargo/vendor/rotulus-layout-0.2.2"
   },
   {
     "type": "inline",
-    "contents": "{\"package\": \"2544bd651ddf139be7276440cc69b2babb29ead0a75afb4f546b6846807e3a8a\", \"files\": {}}",
-    "dest": "cargo/vendor/rotulus-layout-0.2.0",
+    "contents": "{\"package\": \"c859d2cfcda433d68bee14c782ef473ee0d40d500d1a5fe9bbc137f9f55755b5\", \"files\": {}}",
+    "dest": "cargo/vendor/rotulus-layout-0.2.2",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rotulus-mirc/rotulus-mirc-0.2.0.crate",
-    "sha256": "f165e870847f4b4d8b3f1282e02da7aa5c119b0633ff16729f94ba9361832891",
-    "dest": "cargo/vendor/rotulus-mirc-0.2.0"
+    "url": "https://static.crates.io/crates/rotulus-mirc/rotulus-mirc-0.2.2.crate",
+    "sha256": "f822669975e7c85288805c255a83c3b127f09a3c2c3f1808ae8b7c2e3bd1177c",
+    "dest": "cargo/vendor/rotulus-mirc-0.2.2"
   },
   {
     "type": "inline",
-    "contents": "{\"package\": \"f165e870847f4b4d8b3f1282e02da7aa5c119b0633ff16729f94ba9361832891\", \"files\": {}}",
-    "dest": "cargo/vendor/rotulus-mirc-0.2.0",
+    "contents": "{\"package\": \"f822669975e7c85288805c255a83c3b127f09a3c2c3f1808ae8b7c2e3bd1177c\", \"files\": {}}",
+    "dest": "cargo/vendor/rotulus-mirc-0.2.2",
     "dest-filename": ".cargo-checksum.json"
   },
   {

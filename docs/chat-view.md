@@ -36,7 +36,7 @@ Three crates, released together from the rotulus repository:
   `rotulus`.
 
 `rust/Cargo.toml` names the first two in `[workspace.dependencies]` with a
-caret requirement (`rotulus = "0.2"`, `rotulus-layout = "0.2"`), and
+caret requirement (`rotulus = "0.2.2"`, `rotulus-layout = "0.2.2"`), and
 `gtkhx-ui` and `gtkhx-ffi` take them with `workspace = true`. The exact
 versions are whatever `rust/Cargo.lock` holds, so a build never moves to a
 new release on its own. The two must move together: the widget is built
