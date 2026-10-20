@@ -300,8 +300,8 @@ modules:
     sources:
       - type: git
         url: https://github.com/mishan/mullion-gtk.git
-        tag: v0.3.1
-        commit: dd4ae83db41d8fcd11c9077fbb8f5985f4d206b7
+        tag: v0.3.2
+        commit: eab2f732797d07d98ea7151ab0c3a7db6137e564
 
   - name: gtkhx
     buildsystem: meson
