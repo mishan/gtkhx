@@ -950,6 +950,7 @@ init_icons (void)
 }
 
 extern void gtkhx_shortcuts_install (GtkApplication *app);
+extern int hxconfig_is_first_run (void);
 
 /* Defined below fe_init, next to the explanation of what it is for. */
 static void hx_debug_second_session (void);
@@ -1370,6 +1371,11 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
         }
     }
     g_list_free (toplevels);
+
+    /* First run, here: prefs_read runs before there's a window to open over */
+    if (hxconfig_is_first_run ()) {
+        gtkhx_create_options_window ();
+    }
 
     /* register the toolbar's hamburger-menu actions
      * (app.settings / app.about / app.quit). The actions can't be

@@ -196,7 +196,6 @@ fn section_header(row: &gtk::ListBoxRow, before: Option<&gtk::ListBoxRow>, entri
 
     let label = gtk::Label::new(Some(&tr(section)));
     label.add_css_class("heading");
-    label.add_css_class("dim-label");
     label.set_xalign(0.0);
     label.set_margin_start(12);
     label.set_margin_end(12);

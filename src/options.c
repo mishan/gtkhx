@@ -71,7 +71,6 @@
  * through its migration map to schema paths. */
 extern int hxconfig_load (const char *dir, const char *legacy,
                           const char *legacy_home);
-extern int hxconfig_is_first_run (void);
 extern char *hxconfig_warning (int i);
 extern int hxconfig_flush (void);
 extern int hxconfig_type (const char *name);
@@ -740,11 +739,6 @@ prefs_read (void)
      * Applying uniformly deletes both the bug and the compensator. */
     for (i = 0; i < (int)G_N_ELEMENTS (pref_hooks); i++) {
         pref_hook_run (&pref_hooks[i]);
-    }
-
-    /* No settings file anywhere — first run. Pop Settings, as before. */
-    if (hxconfig_is_first_run ()) {
-        gtkhx_create_options_window ();
     }
 }
 
