@@ -1,5 +1,9 @@
 ## 1.6.2-dev
 
+- Accessibility
+  - On a first run, Settings opens over the main window, rather than as a window of its own that could open behind it
+  - The section headings in Settings' sidebar are easier to read in the light style
+
 ## 1.6.1
 
 - Transfers
