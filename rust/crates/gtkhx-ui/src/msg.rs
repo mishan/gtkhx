@@ -14,6 +14,7 @@
 
 use std::ffi::{c_char, c_void};
 
+use crate::tr::tr1;
 use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::pango;
@@ -190,11 +191,11 @@ pub unsafe extern "C" fn hx_msgwin_name(
     crate::chat_tabs::gtkhx_chat_tabs_set_title_msg(gtkhx_session_htlc(sess), uid, title.as_ptr());
     let input: gtk::Widget = from_glib_none(input);
     let output: gtk::Widget = from_glib_none(output);
-    input.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr1(
+    input.update_property(&[gtk::accessible::Property::Label(&tr1(
         "Message to %s",
         &nick,
     ))]);
-    output.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr1(
+    output.update_property(&[gtk::accessible::Property::Label(&tr1(
         "Messages with %s",
         &nick,
     ))]);

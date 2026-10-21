@@ -21,7 +21,7 @@ use libadwaita as adw;
 use super::panel::Panel;
 use super::provider::{bytes_c, join_bytes, Provider};
 use super::{dialogs, dnd};
-use crate::tr::{tr, trc, trn_argv};
+use crate::tr::{tr, tr_argv, trc, trn_argv};
 
 extern "C" {
     /// gtkhx-core — the session a connection belongs to.
@@ -297,7 +297,7 @@ impl Browser {
                 &[&queued.to_string()],
             ),
             Some(err) if queued == 0 => err.message(),
-            Some(err) => crate::tr::tr_argv(
+            Some(err) => tr_argv(
                 "%1$u queued, %2$u failed (%3$s).",
                 &[&queued.to_string(), &failed.to_string(), &err.message()],
             ),

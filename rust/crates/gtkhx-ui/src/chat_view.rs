@@ -11,6 +11,7 @@
 //! news views' URL tagging calls, runs on the scheme list the chat view
 //! uses, so the two agree about what a link is.
 
+use crate::tr::tr;
 use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::glib::translate::ToGlibPtr;
@@ -139,7 +140,7 @@ fn setup(view: &RotulusView) {
                 return true;
             };
             if unsafe { connect_open_hotline_url(c.as_ptr()) } == 0 {
-                let msg = crate::cs(&crate::tr::tr("Couldn't parse hotline:// URL"));
+                let msg = crate::cs(&tr("Couldn't parse hotline:// URL"));
                 unsafe { crate::ffi::toolbar_show_toast(msg.as_ptr()) };
             }
             true

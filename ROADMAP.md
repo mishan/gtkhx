@@ -7,7 +7,7 @@ carried it forward to GTK 4 + libadwaita and has been rewriting it in Rust ever 
 constrain how.** The port itself — which C files remain and in what order they move to
 Rust — lives in [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md). Smaller known gaps and
 review follow-ups are in [BACKLOG.md](BACKLOG.md). Subsystem references are in
-[docs/](docs/README.md); working notes for the codebase are in [CLAUDE.md](CLAUDE.md).
+[docs/](docs/README.md); working notes for the codebase are in [AGENTS.md](AGENTS.md).
 
 ---
 

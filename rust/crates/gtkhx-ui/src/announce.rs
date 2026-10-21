@@ -4,6 +4,7 @@
 
 use std::ffi::c_char;
 
+use crate::tr::{tr1, tr_argv};
 use gtk4 as gtk;
 
 /// Announce `text` from `widget`'s window, or from the application's active
@@ -57,12 +58,12 @@ pub unsafe extern "C" fn gtkhx_announce_line(
     let args = [crate::cstr(sender), crate::cstr(body)];
     let args = [args[0].as_str(), args[1].as_str()];
     let text = if private_msg != 0 {
-        crate::tr::tr_argv("Message from %s: %s", &args)
+        tr_argv("Message from %s: %s", &args)
     } else if args[0].is_empty() {
         // A line with no sender (an emote or a server line).
-        crate::tr::tr1("You were mentioned: %s", args[1])
+        tr1("You were mentioned: %s", args[1])
     } else {
-        crate::tr::tr_argv("%s mentioned you: %s", &args)
+        tr_argv("%s mentioned you: %s", &args)
     };
     announce(None, &text, false);
 }

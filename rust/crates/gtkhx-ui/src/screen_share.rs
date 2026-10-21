@@ -38,7 +38,7 @@ use hxvoice_runtime::hxvoice::VideoKind;
 use hxvoice_runtime::video::ScreenSource;
 
 use crate::dock;
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 extern "C" {
     fn hx_session_with_serial(serial: u16) -> *mut c_void;
@@ -303,7 +303,7 @@ pub(crate) fn picking(conn: dock::ConnKey) -> bool {
 
 #[cfg(target_os = "linux")]
 fn tr1_err(e: &str) -> String {
-    crate::tr::tr1("Couldn't share the screen: %s", e)
+    tr1("Couldn't share the screen: %s", e)
 }
 
 /// Hand the chosen source to the runtime and start the publication.

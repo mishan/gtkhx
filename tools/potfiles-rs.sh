@@ -12,7 +12,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 candidates=$(grep -rlE '\b(tr|tr1|tr_fmt|tr_argv|trn|trn_argv|trc|n_)[[:space:]]*\(' \
-    --include='*.rs' rust/crates | grep -v '/gtkhx-ui/src/tr\.rs$' | sort)
+    --include='*.rs' rust/crates | grep -v '/gtkhx-ui/src/tr\.rs$' | LC_ALL=C sort)
 
 for f in $candidates; do
     n=$(xgettext --language=Rust --from-code=UTF-8 \

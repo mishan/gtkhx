@@ -31,7 +31,7 @@ use gtk4 as gtk;
 use crate::dock;
 use crate::dock::ConnKey;
 use crate::ffi as cffi;
-use crate::tr::tr;
+use crate::tr::{tr, tr_argv};
 
 /// Opaque C `session *`.
 type Session = c_void;
@@ -169,7 +169,7 @@ impl SearchCtx {
             self.count.set_text(&format!("{cur} / {n}"));
             crate::announce::announce(
                 Some(self.entry.upcast_ref()),
-                &crate::tr::tr_argv("Match %s of %s", &[&cur, &n.to_string()]),
+                &tr_argv("Match %s of %s", &[&cur, &n.to_string()]),
                 false,
             );
             self.prev_btn.set_sensitive(n > 1);

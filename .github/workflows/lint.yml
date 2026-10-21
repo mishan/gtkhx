@@ -11,7 +11,8 @@
 #                rustfmt / clippy versions match the canonical build
 #                environment exactly (avoids "formatted with a different
 #                rustfmt" drift). Also builds the codec crates for
-#                wasm32-unknown-unknown.
+#                wasm32-unknown-unknown, and checks po/POTFILES lists the
+#                Rust sources that carry translatable strings.
 #   c-growth   — pull requests only: fails if the branch adds net lines of C
 #                to src/ (tools/check-c-growth.sh). A `C-Growth:` commit
 #                trailer records a deliberate exception.
@@ -144,6 +145,11 @@ jobs:
               # some spins; install them if the base image lacks them.
               command -v rustfmt      >/dev/null || dnf install -y rustfmt
               command -v cargo-clippy >/dev/null || dnf install -y clippy
+
+              # po/POTFILES lists every Rust source with a translatable
+              # string. It needs xgettext with Rust support (gettext 0.25+),
+              # which this image has and the plain runner does not.
+              LC_ALL=C.UTF-8 tools/check-potfiles.sh
 
               cd rust
 

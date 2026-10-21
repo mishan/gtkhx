@@ -10,7 +10,7 @@ like a changelog stops being read at all. Anything genuinely unfinished lives in
 "Open" section at the end of the relevant subject doc, described as behaviour rather than
 as phases.
 
-For the codebase tour, start at [../CLAUDE.md](../CLAUDE.md). For what is left to build,
+For the codebase tour, start at [../AGENTS.md](../AGENTS.md). For what is left to build,
 [../ROADMAP.md](../ROADMAP.md) (product) and [rust/ROADMAP.md](rust/ROADMAP.md) (the C→Rust
 port).
 
