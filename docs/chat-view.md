@@ -204,7 +204,7 @@ headless benchmarks and render tests live in the rotulus repository.
    `chat` bench in `gtkhx-ui` builds rows through the crate's Rust FFI
    types directly, so it breaks loudly when those change.
 
-Then run the full set of gates in `CLAUDE.md`, both voice configurations
+Then run the full set of gates in `AGENTS.md`, both voice configurations
 included.
 
 ---

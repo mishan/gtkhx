@@ -129,7 +129,7 @@ server, so they can't reach your desktop.
 - [docs/](docs/README.md) explains how each part of GtkHx works.
 - [ROADMAP.md](ROADMAP.md) is what's planned, and
   [BACKLOG.md](BACKLOG.md) the smaller known gaps.
-- [CLAUDE.md](CLAUDE.md) is the orientation guide to the codebase.
+- [AGENTS.md](AGENTS.md) is the orientation guide to the codebase.
 - The screenshots above are generated; see
   [docs/screenshots.md](docs/screenshots.md).
 
