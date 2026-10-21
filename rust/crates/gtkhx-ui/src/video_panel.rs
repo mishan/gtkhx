@@ -46,7 +46,7 @@ use hxvoice_runtime::runtime::{VideoNotice, VoiceRuntime};
 use hxvoice_runtime::video::{self_key, StreamKey, VideoFrame};
 
 use crate::dock;
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 use crate::video_grid::VideoGrid;
 
 /// How long the subscription set may settle before it goes out.
@@ -139,7 +139,7 @@ unsafe fn nick(sess: *mut c_void, cid: u32, uid: u16) -> String {
             return String::from_utf8_lossy(&bytes).into_owned();
         }
     }
-    crate::tr::tr1("User %s", &uid.to_string())
+    tr1("User %s", &uid.to_string())
 }
 
 // ---------------------------------------------------------------------
@@ -1320,9 +1320,9 @@ fn announce_share(conn: dock::ConnKey, uid: u16, kind: u32) {
     };
     let name = unsafe { nick(sess, cid, uid) };
     let line = if kind == hxvoice_model::VIDEO_SCREEN {
-        crate::tr::tr1("%s started sharing their screen", &name)
+        tr1("%s started sharing their screen", &name)
     } else {
-        crate::tr::tr1("%s turned their camera on", &name)
+        tr1("%s turned their camera on", &name)
     };
     let line = crate::cs(&(line + "\n"));
     unsafe {

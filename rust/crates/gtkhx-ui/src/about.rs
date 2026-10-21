@@ -9,6 +9,7 @@ use crate::ffi as cffi;
 use gtk4 as gtk;
 use libadwaita as adw;
 
+use crate::tr::tr;
 use adw::prelude::*;
 use gtk::gdk;
 use gtk::glib;
@@ -46,7 +47,7 @@ pub extern "C" fn create_about_window(_widget: *mut cffi::GtkWidget, _data: *mut
     crate::ensure_gtk_init();
 
     let window = gtk::Window::new();
-    window.set_title(Some(&crate::tr::tr("About GtkHx")));
+    window.set_title(Some(&tr("About GtkHx")));
     window.set_resizable(false);
     window.set_default_size(480, 680);
     window.set_titlebar(Some(&adw::HeaderBar::new()));
@@ -78,9 +79,7 @@ pub extern "C" fn create_about_window(_widget: *mut cffi::GtkWidget, _data: *mut
     let logo = gtk::Picture::for_paintable(&tex);
     logo.set_can_shrink(false);
     logo.set_halign(gtk::Align::Center);
-    logo.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr(
-        "GtkHx logo",
-    ))]);
+    logo.update_property(&[gtk::accessible::Property::Label(&tr("GtkHx logo"))]);
     bx.append(&logo);
 
     let title = gtk::Label::new(None);
@@ -92,12 +91,12 @@ pub extern "C" fn create_about_window(_widget: *mut cffi::GtkWidget, _data: *mut
     title.set_margin_top(6);
     bx.append(&title);
 
-    let subtitle = gtk::Label::new(Some(&crate::tr::tr("A GTK+ Hotline client")));
+    let subtitle = gtk::Label::new(Some(&tr("A GTK+ Hotline client")));
     subtitle.add_css_class("dim-label");
     subtitle.set_halign(gtk::Align::Center);
     bx.append(&subtitle);
 
-    let copyright = gtk::Label::new(Some(&crate::tr::tr("Copyright © 2000–2026 Misha Nasledov")));
+    let copyright = gtk::Label::new(Some(&tr("Copyright © 2000–2026 Misha Nasledov")));
     copyright.add_css_class("dim-label");
     copyright.set_halign(gtk::Align::Center);
     copyright.set_margin_top(6);

@@ -234,6 +234,9 @@ Routing, and getting it wrong sends a request to the wrong server:
   `create_child_model` fires once and the leaf-vs-expandable verdict sticks.
 - **Icon-only buttons** go through `gtkhx_icon_button_new` (C) or `icon_button` (Rust),
   which give them an accessible name; `tools/check-icon-buttons.sh` enforces it.
+- **Call the gettext helpers unqualified** (`use crate::tr::tr;`, then `tr("…")`): gettext
+  0.25 doesn't extract a path-qualified `crate::tr::tr("…")`, so the string silently
+  drops out of the catalog where it is built with that release.
 - **No phase labels in source comments.** Describe the reason, not the project-management
   label. Phase labels are fine in commit messages and docs.
 

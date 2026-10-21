@@ -33,7 +33,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::dock::{self, ConnKey};
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 /// The size a Files window opens at when none has been saved: enough for two
 /// panels to show name, size and date side by side.
@@ -58,7 +58,7 @@ fn window_title(sess: *mut c_void) -> String {
     } else {
         // TRANSLATORS: The Files window's title. %s is the server's name,
         // or its address before it has sent one.
-        crate::tr::tr1("Files — %s", &label)
+        tr1("Files — %s", &label)
     }
 }
 

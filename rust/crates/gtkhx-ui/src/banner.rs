@@ -43,7 +43,7 @@ use hx_image_decode::ffi::HxInlineMediaCaps;
 use hx_image_decode::{decode_first_frame_async, ImageDecodeHandle, ImageDecodeOutcome};
 
 use crate::ensure_gtk_init;
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 // ------------------------------------------------------------------- //
 // Constants (mirror src/banner.c + banner_dispatch.h + hotline.h).
@@ -445,7 +445,7 @@ pub unsafe extern "C" fn banner_handle_message(
 
     // File mode: TYPE is a binary image-format tag. Ask the server for the
     // bytes over HTXF; show a loading caption meanwhile.
-    let loading = crate::tr::tr1("Server banner [%s] — loading…", &type_str);
+    let loading = tr1("Server banner [%s] — loading…", &type_str);
     show_caption(key, &loading);
     send_download_request(htlc);
 }

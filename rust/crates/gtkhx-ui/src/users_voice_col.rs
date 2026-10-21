@@ -43,6 +43,7 @@ pub(crate) mod voice_impl {
     use std::cell::Cell;
     use std::ffi::c_char;
 
+    use crate::tr::tr;
     use glib::translate::{from_glib_none, ToGlibPtr};
     use gtk::glib;
     use gtk::prelude::*;
@@ -115,7 +116,6 @@ pub(crate) mod voice_impl {
     /// Map the indicator enum to a stock symbolic icon and its name, or None
     /// for NONE.
     fn indicator_icon(ind: u32) -> Option<(&'static str, String)> {
-        use crate::tr::tr;
         match ind {
             1 => Some(("audio-volume-low-symbolic", tr("In voice"))), // dim speaker
             2 => Some(("audio-volume-high-symbolic", tr("Speaking"))),
@@ -161,9 +161,9 @@ pub(crate) mod voice_impl {
                 "screen-shared-symbolic",
                 paused,
                 if paused {
-                    crate::tr::tr("Screen sharing paused")
+                    tr("Screen sharing paused")
                 } else {
-                    crate::tr::tr("Sharing their screen")
+                    tr("Sharing their screen")
                 },
             ))
         } else if f & VIDEO_CAMERA != 0 {
@@ -172,9 +172,9 @@ pub(crate) mod voice_impl {
                 "camera-video-symbolic",
                 paused,
                 if paused {
-                    crate::tr::tr("Camera paused")
+                    tr("Camera paused")
                 } else {
-                    crate::tr::tr("Camera on")
+                    tr("Camera on")
                 },
             ))
         } else {
@@ -342,7 +342,7 @@ pub(crate) mod voice_impl {
         });
 
         let col = gtk::ColumnViewColumn::new(
-            Some(&crate::tr::tr("Voice")),
+            Some(&tr("Voice")),
             Some(factory.upcast::<gtk::ListItemFactory>()),
         );
         col.connect_column_view_notify(show_title_as_icon);

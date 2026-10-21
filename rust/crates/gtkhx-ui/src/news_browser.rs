@@ -34,7 +34,7 @@ use libadwaita::prelude::*;
 
 use crate::dock;
 use crate::dock::ConnKey;
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 /// Node kinds (mirror the `NB_KIND_*` enum in the hxmodel::news module).
 const NB_KIND_FOLDER: i32 = 1;
@@ -44,9 +44,9 @@ const NB_KIND_POST: i32 = 3;
 /// What a node's icon shows, in words, for assistive technology.
 pub(crate) fn kind_label(kind: i32) -> String {
     match kind {
-        NB_KIND_FOLDER => crate::tr::tr("Folder"),
-        NB_KIND_CATEGORY => crate::tr::tr("Category"),
-        NB_KIND_POST => crate::tr::tr("Post"),
+        NB_KIND_FOLDER => tr("Folder"),
+        NB_KIND_CATEGORY => tr("Category"),
+        NB_KIND_POST => tr("Post"),
         _ => String::new(),
     }
 }
@@ -187,7 +187,7 @@ fn window_title(sess: *mut c_void) -> String {
     } else {
         // TRANSLATORS: The threaded news window's title. %s is the server's
         // name, or its address before it has sent one.
-        crate::tr::tr1("News — %s", &label)
+        tr1("News — %s", &label)
     }
 }
 

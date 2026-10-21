@@ -12,7 +12,7 @@
 //! same `load_icon` every other icon consumer uses. See that file for why that
 //! matters beyond convenience.
 
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 use gtk4 as gtk;
 use gtk4::gdk_pixbuf;
 use gtk4::glib;
@@ -169,7 +169,7 @@ fn fill_grid(
 
             let child = gtk::FlowBoxChild::new();
             child.set_child(Some(&cell));
-            child.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr1(
+            child.update_property(&[gtk::accessible::Property::Label(&tr1(
                 "Icon %s",
                 &id.to_string(),
             ))]);

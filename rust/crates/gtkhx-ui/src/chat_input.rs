@@ -30,6 +30,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 
+use crate::tr::tr;
 use hxmodel::chat_members::{hx_input_history_down, hx_input_history_record, hx_input_history_up};
 use hxmodel::conversation::hx_chat_member_model;
 
@@ -430,9 +431,7 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
         return;
     }
     tv.set_data(ATTACHED_KEY, true);
-    tv.update_property(&[gtk::accessible::Property::Label(&crate::tr::tr(
-        "Chat message",
-    ))]);
+    tv.update_property(&[gtk::accessible::Property::Label(&tr("Chat message"))]);
 
     let ctrl = gtk::EventControllerKey::new();
     ctrl.connect_key_pressed(move |c, keyval, _keycode, state| {
