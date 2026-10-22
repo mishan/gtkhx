@@ -360,9 +360,6 @@ extern char *g_user_colors[4];
 
 extern char *colorstr (guint16 color);
 
-extern void hotline_client_input (struct htlc_conn *htlc, char *str,
-                                  guint32 cid, guint16 style);
-
 extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
                         guint16 port, const char *login, const char *pass,
                         char secure, char tls);

@@ -52,13 +52,6 @@ record.
   profiles) they fail and the dock's tabs fall back to titles. GTK's own PNG
   loader would take them without a sandbox.
 
-## Commands
-
-- **`/exec` never runs locally.** "exec" is on `hxd_commands` in `src/gtkhx.c`,
-  so `is_hxdcmd` sends a typed `/exec` to the server as chat, and the client's
-  own `cmd_exec` is unreachable from the chat input. `is_hxdcmd` also measures
-  the first word with a NULL `strchr` result when there is no space.
-
 ## Tests and rig
 
 - The hxd-ng entrypoint falls back to advertising `127.0.0.1` on an IPv6-only or

@@ -96,6 +96,8 @@ COMMAND (help)
     hx_printf (htlc, cid, "clear   close     exec    help\n");
     hx_printf (htlc, cid, "icon    ignore    me      news\n");
     hx_printf (htlc, cid, "nick    post      quit    server\n");
+    hx_printf (htlc, cid,
+               "Start a line with // to send it to the server as typed.\n");
 }
 
 COMMAND (nick)
