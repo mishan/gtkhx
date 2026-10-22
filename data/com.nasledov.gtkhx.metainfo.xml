@@ -158,7 +158,7 @@
         <ul>
           <li>Fixed GtkHx crashing as soon as a screen reader read a chat view</li>
           <li>/exec runs the command on your computer rather than sending it to the chat; start a line with // to send it to the server as typed</li>
-          <li>The dock's menu buttons, chat pictures and Settings read more clearly with a screen reader</li>
+          <li>The dock's menu buttons and chat pictures read more clearly with a screen reader, and Settings' section headings are easier to read</li>
           <li>On a first run, Settings opens over the main window</li>
         </ul>
       </description>
