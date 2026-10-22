@@ -1,7 +1,7 @@
 ## 1.6.2
 
 - Chat
-  - `/exec` runs the command on your computer, rather than sending the line to everyone in the chat; start a line with `//` to send it to the server as typed, as in `//exec`
+  - `/exec` runs the command on your computer, rather than sending the line to everyone in the chat; start a line with `//` to send it to the server as typed, as in `//exec`. A server's own commands are recognized only by their full names
 - Accessibility
   - Fixed GtkHx crashing as soon as a screen reader read a chat view
   - A chat picture is read as its description once, without "image" said again after it
