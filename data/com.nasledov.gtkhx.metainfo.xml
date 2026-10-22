@@ -152,6 +152,17 @@
   </content_rating>
 
   <releases>
+    <release version="1.6.2" date="2026-10-22">
+      <description>
+        <p>Screen readers no longer crash GtkHx, and /exec runs on your computer.</p>
+        <ul>
+          <li>Fixed GtkHx crashing as soon as a screen reader read a chat view</li>
+          <li>/exec runs the command on your computer rather than sending it to the chat; start a line with // to send it to the server as typed</li>
+          <li>The dock's menu buttons, chat pictures and Settings read more clearly with a screen reader</li>
+          <li>On a first run, Settings opens over the main window</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.6.1" date="2026-10-19">
       <description>
         <p>Every kind of transfer can now be paused and resumed, and each connection's windows act on that connection.</p>
