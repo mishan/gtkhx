@@ -1,4 +1,4 @@
-## 1.6.2-dev
+## 1.6.2
 
 - Chat
   - `/exec` runs the command on your computer, rather than sending the line to everyone in the chat; start a line with `//` to send it to the server as typed, as in `//exec`
