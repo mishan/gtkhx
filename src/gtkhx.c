@@ -2336,55 +2336,6 @@ main (int argc, char **argv, char **envp)
     return 0;
 }
 
-char *hxd_commands[] = {
-    "0wn",    "access", "away", "alert", "broadcast", "color",   "exec",
-    "g0away", "maltbl", "mon",  "users", "version",   "visible",
-};
-
-int hxdcmd_len = sizeof (hxd_commands) / sizeof (hxd_commands[0]);
-
-static int
-is_hxdcmd (char *str)
-{
-    int i;
-    char *ptr;
-
-    if (!str) {
-        return 0;
-    }
-
-    ptr = strchr (str, ' ');
-
-    for (i = 0; i < hxdcmd_len; i++) {
-        int _len = strlen (hxd_commands[i]);
-        int len = ptr - str > _len ? _len : ptr - str;
-
-        if (!strncmp (hxd_commands[i], str, len)) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-void
-hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
-                      guint16 style)
-{
-    if (*str) {
-        if (*str == '/' && *++str && *str != '/') {
-            if (is_hxdcmd (str)) {
-                str--;
-                hx_send_chat (htlc, str, cid, style);
-            } else {
-                hx_command (htlc, str, cid);
-            }
-        } else {
-            hx_send_chat (htlc, str, cid, style);
-        }
-    }
-}
-
 #ifdef G_OS_UNIX
 #include <termios.h>
 

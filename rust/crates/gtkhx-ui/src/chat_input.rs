@@ -9,7 +9,7 @@
 //!   - **Ctrl+B / Ctrl+I / Ctrl+Shift+C** → wrap the selection in markdown.
 //!   - **Shift+Return** → newline (let the view's default insert run).
 //!   - **Return** → record the line in history, dispatch it
-//!     (`hotline_client_input`, which routes `/commands` and chat), clear.
+//!     (`route_line`: chat, a server command, or a client `/command`), clear.
 //!   - **Tab / Shift+Tab** → nick completion against the chat's membership
 //!     (the C `tab_nick_comp` core — kept in C so the tested completer + the
 //!     ambiguous-list `hx_printf` stay put).
@@ -38,7 +38,8 @@ extern "C" {
     // gtkhx_ui_bridge.c, always compiled — unlike voice_bridge.c's
     // hx_session_htlc, which is gated on HAVE_VOICE.
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
-    fn hotline_client_input(htlc: *mut c_void, s: *mut c_char, cid: u32, style: u16);
+    fn hx_send_chat(htlc: *mut c_void, s: *mut c_char, cid: u32, style: u16);
+    fn hx_command(htlc: *mut c_void, s: *mut c_char, cid: u32);
 
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
     fn tab_nick_comp(
@@ -51,6 +52,61 @@ extern "C" {
     ) -> i32;
 
     fn create_connect_window(btn: *mut gtk::ffi::GtkWidget, data: *mut c_void);
+}
+
+/// Commands the server runs itself (hxd's and mhxd's chat commands): a line
+/// starting with one goes out as chat, slash and all.
+const SERVER_COMMANDS: &[&str] = &[
+    "0wn",
+    "access",
+    "away",
+    "alert",
+    "broadcast",
+    "color",
+    "g0away",
+    "maltbl",
+    "mon",
+    "users",
+    "version",
+    "visible",
+];
+
+#[derive(Debug, PartialEq)]
+enum Route<'a> {
+    Chat(&'a [u8]),
+    Command(&'a [u8]),
+}
+
+/// Where a typed line goes. `//` escapes the slash, so `//exec ls` sends the
+/// server `/exec ls` instead of running `/exec` here.
+fn route_line(line: &[u8]) -> Option<Route<'_>> {
+    match line {
+        [] => None,
+        [b'/', b'/', ..] => Some(Route::Chat(&line[1..])),
+        [b'/', rest @ ..] => {
+            let word = rest
+                .split(u8::is_ascii_whitespace)
+                .next()
+                .unwrap_or_default();
+            if word.is_empty() || SERVER_COMMANDS.iter().any(|c| c.as_bytes() == word) {
+                Some(Route::Chat(line))
+            } else {
+                Some(Route::Command(rest))
+            }
+        }
+        _ => Some(Route::Chat(line)),
+    }
+}
+
+/// Sends a line from `buffer_cbytes` wherever `route_line` says. Every route
+/// is a tail of the line, so the buffer's own NUL ends it for C too.
+unsafe fn dispatch_line(htlc: *mut c_void, line: &[u8], cid: u32) {
+    let text = line.strip_suffix(&[0]).unwrap_or(line);
+    match route_line(text) {
+        Some(Route::Chat(s)) => hx_send_chat(htlc, s.as_ptr().cast_mut().cast(), cid, 0),
+        Some(Route::Command(s)) => hx_command(htlc, s.as_ptr().cast_mut().cast(), cid),
+        None => {}
+    }
 }
 
 /// The whole buffer as a NUL-terminated, mutable byte buffer — the C send /
@@ -300,13 +356,13 @@ fn on_key(
     match keyval {
         Key::Return => {
             view.set_editable(false);
-            let mut line = buffer_cbytes(&buf);
+            let line = buffer_cbytes(&buf);
             unsafe {
                 hx_input_history_record(history, line.as_ptr() as *const c_char);
                 // The input's own connection, which a line typed just as the
                 // focus moves to another tab still belongs to.
                 let htlc = gtkhx_session_htlc(sess);
-                hotline_client_input(htlc, line.as_mut_ptr() as *mut c_char, cid, 0);
+                dispatch_line(htlc, &line, cid);
             }
             let (mut s, mut e) = (buf.start_iter(), buf.end_iter());
             buf.delete(&mut s, &mut e);
@@ -455,4 +511,32 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
     // Live markdown tinting. `changed` rather than a key handler, so
     // paste, emoji typeahead and history recall all tint too.
     tv.buffer().connect_changed(apply_tint);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{route_line, Route};
+
+    #[test]
+    fn lines_route_to_chat_server_or_client() {
+        let cases: &[(&str, Option<Route>)] = &[
+            ("", None),
+            ("hello", Some(Route::Chat(b"hello"))),
+            ("/", Some(Route::Chat(b"/"))),
+            ("/ hi", Some(Route::Chat(b"/ hi"))),
+            ("/exec ls ~", Some(Route::Command(b"exec ls ~"))),
+            ("/exec", Some(Route::Command(b"exec"))),
+            ("//exec ls ~", Some(Route::Chat(b"/exec ls ~"))),
+            ("/away", Some(Route::Chat(b"/away"))),
+            ("/visible on", Some(Route::Chat(b"/visible on"))),
+            ("/away\nback soon", Some(Route::Chat(b"/away\nback soon"))),
+            // A server command matches as a whole word, not as a prefix.
+            ("/a b", Some(Route::Command(b"a b"))),
+            ("/awayx", Some(Route::Command(b"awayx"))),
+            ("/me waves", Some(Route::Command(b"me waves"))),
+        ];
+        for (line, want) in cases {
+            assert_eq!(route_line(line.as_bytes()), *want, "{line:?}");
+        }
+    }
 }
