@@ -58,14 +58,14 @@ frame "GtkHx (Northwind Commons)"
           page tab "Chat" [focusable, selected]
             image ""
             button "Close Chat" [focusable]
-          button "Pane menu" [focusable]
+          button "Pane menu for Chat" [focusable]
         page tab list "Panes: Video"
           page tab "Users"
             image ""
           page tab "Video" [focusable, focused, selected]
             image ""
             button "Close Video" [focusable]
-          button "Pane menu" [focusable]
+          button "Pane menu for Video" [focusable]
       grouping ""
         panel ""
           panel ""
