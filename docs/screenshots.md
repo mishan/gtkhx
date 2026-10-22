@@ -123,9 +123,10 @@ are taken inside the pinned image, so they read as its at-spi2-core does; one ta
 with another release, can differ in its roles alone. The lint compares roles by their enum, not
 their names, and holds either way.
 
-shotbox walks the nodes GTK marks visible, not only those on screen, so a tree also lists a
-widget that is visible but collapsed out of sight, such as the screen-sharing banner in every
-main window, which nobody in the scenes is sharing. The lint covers those nodes too.
+shotbox walks the nodes GTK says are showing. That still takes in one collapsed out of sight:
+the screen-sharing banner in every main window, which nobody in the scenes is sharing, is an
+`AdwBanner` with its revealer closed, and GTK counts the banner itself as showing. The lint
+covers it too.
 
 ## Quick pictures
 

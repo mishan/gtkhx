@@ -30,8 +30,8 @@ RUN dnf -y install --setopt=tsflags=nodocs \
 # tree. Its wheel declares no dependencies (PyGObject, for the tree, comes
 # from dnf above), so pip's system install (into /usr/local; Fedora doesn't
 # mark its Python externally managed) has nothing else to bring in.
-RUN printf 'shotbox==0.6.0 --hash=sha256:%s\n' \
-        43d01f8e66882e4473b2d5343b6033e32236de32c6a99c71afe650f94573ac3a \
+RUN printf 'shotbox==0.9.0 --hash=sha256:%s\n' \
+        9cbde77bc26401cd6563b1a4aa7cd6f53cbad0db9263c4e4a278222c80c591ef \
         >/tmp/shotbox.txt \
     && python3 -m pip install --no-cache-dir --require-hashes -r /tmp/shotbox.txt \
     && rm /tmp/shotbox.txt

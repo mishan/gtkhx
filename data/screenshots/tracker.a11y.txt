@@ -131,19 +131,19 @@ frame "GtkHx (Northwind Commons)"
             button "Close News" [focusable]
           page tab "Transfers"
             image ""
-          button "Pane menu" [focusable]
+          button "Pane menu for News" [focusable]
         page tab list "Panes: Chat"
           page tab "Chat" [focusable, selected]
             image ""
             button "Close Chat" [focusable]
-          button "Pane menu" [focusable]
+          button "Pane menu for Chat" [focusable]
         page tab list "Panes: Users"
           page tab "Users" [focusable, selected]
             image ""
             button "Close Users" [focusable]
           page tab "Video"
             image ""
-          button "Pane menu" [focusable]
+          button "Pane menu for Users" [focusable]
       grouping ""
         panel ""
           panel ""
