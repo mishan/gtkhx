@@ -563,7 +563,7 @@ jobs:
 
   # =====================================================================
   # macOS — full voice-enabled meson build against Homebrew, both arches
-  # (macos-14 = arm64 Apple Silicon, macos-15-intel = x86_64). Same
+  # (macos-15 = arm64 Apple Silicon, macos-15-intel = x86_64). Same
   # breakage-tripwire role as build-windows.
   # =====================================================================
   build-macos:
@@ -572,7 +572,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15-intel]
+        os: [macos-15, macos-15-intel]
     env:
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       # Skip the multi-minute `brew update` (the runner's formulae are recent
