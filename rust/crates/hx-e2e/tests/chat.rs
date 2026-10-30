@@ -197,7 +197,12 @@ fn history_holds_what_was_said_over_every_transport() {
         caps.extend(cipher.map(Cap::Hope));
         for s in servers_with(&caps) {
             let (mut a, na) = chatter_over(s, "ch", cipher);
-            assert_ne!(a.caps() & CAP_CHAT_HISTORY, 0, "{} {cipher:?}", s.name);
+            assert_ne!(
+                a.caps() & u64::from(CAP_CHAT_HISTORY),
+                0,
+                "{} {cipher:?}",
+                s.name
+            );
             let line = format!("{na} for the record");
             a.send(&chat(line.as_bytes()));
             let entries = page_with(&mut a, &line, 0, 0, 50);

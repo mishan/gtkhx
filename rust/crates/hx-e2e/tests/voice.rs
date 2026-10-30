@@ -29,8 +29,8 @@ fn member(server: &'static Server) -> Client {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
-        c.caps() & (CAP_VOICE | CAP_VIDEO),
-        CAP_VOICE | CAP_VIDEO,
+        c.caps() & u64::from(CAP_VOICE | CAP_VIDEO),
+        u64::from(CAP_VOICE | CAP_VIDEO),
         "{}: voice and video not agreed",
         server.name
     );

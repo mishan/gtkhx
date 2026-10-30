@@ -85,7 +85,7 @@ extern void connect_test_reset_rcv_record (void);
 extern guint connect_test_rcv_count;
 extern gboolean connect_test_session_before_rcv;
 /* The capabilities the session agreed (rust/crates/hxnet/src/ffi.rs). */
-extern guint16 hxnet_connection_agreed_caps (void *handle);
+extern guint64 hxnet_connection_agreed_caps (void *handle);
 
 /* server_matrix.c references hx_integration_connect_to (via the
  * unused-here hx_test_server_connect). This test never calls it, but

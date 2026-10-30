@@ -53,7 +53,7 @@ pub(crate) unsafe fn logged_in(htlc: *mut c_void, info: &ServerInfo) {
         hx_conn_set_uid(h, uid);
     }
     hx_conn_set_version(h, info.version);
-    hx_conn_set_caps(h, u64::from(info.caps));
+    hx_conn_set_caps(h, info.caps);
     // Each limit is optional on the wire, and 0 is the client's default.
     let m = &info.media;
     hx_conn_set_media_max_bytes(h, m.max_bytes.unwrap_or(0));
@@ -75,7 +75,7 @@ pub(crate) unsafe fn logged_in(htlc: *mut c_void, info: &ServerInfo) {
             l.max_bitrate,
         );
     }
-    if hx_conn_has_cap(h, u64::from(cap::INLINE_MEDIA)) != 0 {
+    if hx_conn_has_cap(h, cap::INLINE_MEDIA) != 0 {
         let line = format!(
             "server inline-media limits: max_bytes={} max_dim={} max_pixels={} \
              chunk_size={} max_frames={} max_duration_ms={} (0 = use default)",

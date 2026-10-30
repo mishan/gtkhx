@@ -327,13 +327,13 @@ impl Client {
     }
 
     /// The capability bits both sides agreed to.
-    pub fn caps(&self) -> u16 {
+    pub fn caps(&self) -> u64 {
         self.login.caps
     }
 
     /// Whether names go out as UTF-8 on this connection.
     pub fn utf8(&self) -> bool {
-        self.caps() & CAP_TEXT_ENCODING != 0
+        self.caps() & u64::from(CAP_TEXT_ENCODING) != 0
     }
 
     /// Send `req` and return its trans.

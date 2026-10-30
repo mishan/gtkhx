@@ -37,7 +37,7 @@ const HTLC_HDR_CHAT_JOIN: u32 = ClientHdr::ChatJoin as u32;
 const HTLC_HDR_CHAT_PART: u32 = ClientHdr::ChatPart as u32;
 const HTLC_HDR_CHAT_SUBJECT: u32 = ClientHdr::ChatSubject as u32;
 const HTLC_HDR_CHAT_DECLINE: u32 = ClientHdr::ChatDecline as u32;
-const HTLC_CAP_INLINE_MEDIA: u64 = hxsession::cap::INLINE_MEDIA as u64;
+const HTLC_CAP_INLINE_MEDIA: u64 = hxsession::cap::INLINE_MEDIA;
 
 // Real build: these resolve at the final C link. Test build: the `use
 // tests::{…}` below shadows them with recording stubs, so the extern

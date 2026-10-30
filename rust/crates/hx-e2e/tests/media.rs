@@ -37,8 +37,8 @@ fn member_as(server: &'static Server, nick: &str) -> Client {
     let c = Client::login_handling(server, "", None, CAP_INLINE_MEDIA, handled, nick)
         .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
-        c.caps() & CAP_INLINE_MEDIA,
-        CAP_INLINE_MEDIA,
+        c.caps() & u64::from(CAP_INLINE_MEDIA),
+        u64::from(CAP_INLINE_MEDIA),
         "{}: inline media not agreed",
         server.name
     );

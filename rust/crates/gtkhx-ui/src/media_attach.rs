@@ -24,7 +24,7 @@ use crate::dock::{self, Bound, ConnKey};
 use crate::tr::{tr, tr1, tr_argv, tr_fmt};
 
 /// `HTLC_CAP_INLINE_MEDIA`.
-const CAP_INLINE_MEDIA: u64 = hxsession::cap::INLINE_MEDIA as u64;
+const CAP_INLINE_MEDIA: u64 = hxsession::cap::INLINE_MEDIA;
 /// `HX_MEDIA_DEFAULT_MAX_BYTES`: the largest picture when the server names
 /// no limit.
 const DEFAULT_MAX_BYTES: u32 = 256 * 1024;

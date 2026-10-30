@@ -100,7 +100,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         assert_eq!(hx_conn_logged_in(h), 1);
         assert_eq!(hx_conn_uid(h), 42);
         assert_eq!(hx_conn_version(h), 200);
-        assert_eq!(hx_conn_caps(h), u64::from(full.caps));
+        assert_eq!(hx_conn_caps(h), full.caps);
         assert_eq!(hx_conn_media_max_bytes(h), 262_144);
         assert_eq!(hx_conn_media_chunk_size(h), 60_000);
         assert_eq!(hx_conn_media_max_pixels(h), 0);
