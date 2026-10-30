@@ -136,7 +136,7 @@ jobs:
     # label says "arm64" only by today's coincidence of GitHub's
     # labelling, and that coincidence has broken before — macos-latest
     # flipped from x86_64 to arm64 in 2024, which is why the Intel image
-    # now needs an explicit -intel suffix. Bumping macos-14 to macos-15
+    # now needs an explicit -intel suffix. Bumping macos-15 to macos-16
     # would silently rename the artifact without changing what is in it.
     #
     # matrix.os stays in the cache keys below: Homebrew bottles and Rust
@@ -149,7 +149,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             arch: arm64
           - os: macos-15-intel
             arch: x86_64

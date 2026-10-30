@@ -279,7 +279,7 @@ chmod +x "$MACOS/GtkHx"
 # The per-file scan is a function, not inlined in the $( ): macOS's stock bash
 # 3.2 takes the `)` of a case pattern inside a command substitution as the end
 # of the substitution, and the script fails to parse.
-MIN_OS_FALLBACK="14.0"
+MIN_OS_FALLBACK="15.0"
 bundle_minos_each() {
     find "$APP" -type f 2>/dev/null |
     while IFS= read -r f; do
