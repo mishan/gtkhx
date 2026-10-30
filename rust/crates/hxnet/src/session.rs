@@ -62,7 +62,7 @@ pub fn config(
         nick: String::from_utf8_lossy(nick).into_owned(),
         icon,
         version,
-        caps,
+        caps: caps.into(),
         handshake_timeout_ms: crate::HANDSHAKE_TIMEOUT_SECS * 1000,
         agreement_wait_ms: 2_000,
         keepalive_ms: 60_000,

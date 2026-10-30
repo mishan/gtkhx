@@ -635,7 +635,7 @@ pub unsafe fn connection_encryption(handle: *const HxnetConnection) -> Option<En
 ///
 /// `handle` is NULL or valid.
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_agreed_caps(handle: *mut HxnetConnection) -> u16 {
+pub unsafe extern "C" fn hxnet_connection_agreed_caps(handle: *mut HxnetConnection) -> u64 {
     let Some(s) = handle.as_ref().and_then(|h| h.session.as_ref()) else {
         return 0;
     };

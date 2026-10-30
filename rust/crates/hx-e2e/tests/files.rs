@@ -644,7 +644,12 @@ fn a_guest_is_refused_file_management() {
 fn utf8_and_large_files_are_negotiated_where_offered() {
     for s in servers_with(&[Cap::TextEncoding, Cap::LargeFiles]) {
         let c = Client::guest(s, CAP_TEXT_ENCODING | CAP_LARGE_FILES);
-        assert_eq!(c.caps(), CAP_TEXT_ENCODING | CAP_LARGE_FILES, "{}", s.name);
+        assert_eq!(
+            c.caps(),
+            u64::from(CAP_TEXT_ENCODING | CAP_LARGE_FILES),
+            "{}",
+            s.name
+        );
         assert!(c.utf8());
     }
     for s in servers_with(&[]) {
