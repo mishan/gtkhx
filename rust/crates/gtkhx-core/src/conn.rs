@@ -200,6 +200,9 @@ pub extern "C" fn hx_conn_new() -> *mut HtlcConn {
 /// 65535 live-and-dead connections in one process something else has gone
 /// wrong, and repeating a serial would silently alias two connections'
 /// entries in every table keyed on one.
+// `fetch_update` is deprecated for `try_update`, which is newer than the
+// toolchain floor.
+#[allow(deprecated)]
 fn next_serial() -> u16 {
     use std::sync::atomic::{AtomicU16, Ordering};
     static NEXT: AtomicU16 = AtomicU16::new(1);
