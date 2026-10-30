@@ -203,6 +203,51 @@ only the video tests use it so far. What is left:
   [docs/rust/ROADMAP.md](docs/rust/ROADMAP.md#shared-code-with-hxd-ng).
 - **One home for extension specs**, and a wire-fixture corpus both projects run.
 
+### Messaging and identity on the classic wire
+
+hxd-ng now serves on the classic wire what it first built for Hotline-ng: friends and
+instant messages (the Messaging extension, with message requests beside it), a device key
+proved on any port, and friendships that move with their identity from one server to the
+next. All of it is behind capability bits, and the wire is in hx-libs. GtkHx has none of it
+yet. In order, each stage a branch of its own:
+
+1. **Take the hx-libs revision hxd-ng uses.** `hxproto::messaging` arrives with it, and
+   capabilities widen to `u64` in `hxsession` and `hxhope`, which `hxnet`'s session config
+   and `hx-e2e` have to follow. `ACCESS_MESSAGING` (bit 58) goes into `hl_access.h`.
+   C's capability offer can stay 16 bits until a bit past 15 is needed.
+2. **The friend family** (bit 6, transactions 800–828): a buddy list, presence, instant
+   messages with receipts and typing, find and search, nicknames. In Rust throughout:
+   requests in `hxrequest`, handlers in `hxhandlers::recv`, windows in `gtkhx-ui`, and an
+   IM window of its own rather than an extension of `msg.c`. Bit 6 is offered only by a
+   build that has it. The messenger-only session (bit 8) is for clients that are nothing
+   else, and GtkHx is not one.
+3. **Message requests** (829–832): the requests a stranger's first message waits in,
+   approved, deleted or cleared, and `DATA_TAKES_REQUESTS` in 808.
+4. **A device key, proved** (bit 14, Get Device Challenge and Prove Device). The identity
+   objects GtkHx would sign are in hxd-ng's `hl-identity` crate, not hx-libs, so they move
+   there first. Then: the key and its certificate, enrolled or imported from `hlid`; the
+   proof between the login reply and Agreed, before the user list; and the server's key
+   pinned at first contact. Logging in by identity then no longer needs `hlid tunnel`.
+5. **Portable friendships** (bit 15, Present Friendships and Get Friendships): friendships
+   kept, presented at login, withdrawn, and followed through an identity's rotation.
+
+Stages 1 to 3 need nothing more from hxd-ng. Stages 4 and 5 follow its device-proof and
+classic-friendships work. The specs are hxd-ng's
+[instant-messaging.md](https://github.com/mishan/hxd-ng/blob/main/docs/instant-messaging.md)
+and
+[proposals/portable-friends.md](https://github.com/mishan/hxd-ng/blob/main/docs/proposals/portable-friends.md).
+
+Older gaps against hxd-ng, to fold in where they fit:
+
+- **Rooms.** `/join` and `/rooms` are private messages to the server's system account,
+  but GtkHx sends a typed command as public chat, and its own `/msg` takes the name
+  hxd-ng's offline mail uses. A room's history (700 with its channel) is never asked for,
+  and being parted from a room is untested.
+- **Markdown news.** An article's plain-text part is shown and its markdown never
+  rendered, and nothing posts `text/markdown`.
+- **Reporting.** `/report` works only typed as a message to the system account.
+- **Tests.** The nick-color and chat-history suites run against hxd-ng too.
+
 ### Transfer pause and resume
 
 *Done.* Every transfer but a preview, and a file's upload past 4 GiB, pauses: Pause in
