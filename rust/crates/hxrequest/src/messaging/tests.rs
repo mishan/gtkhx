@@ -35,13 +35,17 @@ fn each_request_goes_as_the_extension_has_it() {
         (block(b"bob").unwrap(), req(806, &[(0x0600, b"bob")])),
         (unblock(b"bob").unwrap(), req(807, &[(0x0600, b"bob")])),
         (
-            set_presence(PresenceState::Away, Some(b"out"), true).unwrap(),
+            set_presence(PresenceState::Away, Some(b"out"), None, true).unwrap(),
             req(808, &[(0x0602, &[0, 2]), (0x0603, b"out")]),
         ),
         // No status leaves the stored one as it is.
         (
-            set_presence(PresenceState::Online, None, true).unwrap(),
+            set_presence(PresenceState::Online, None, None, true).unwrap(),
             req(808, &[(0x0602, &[0, 1])]),
+        ),
+        (
+            set_presence(PresenceState::Online, None, Some(false), true).unwrap(),
+            req(808, &[(0x0602, &[0, 1]), (0x0650, &[0, 0])]),
         ),
         (
             im_send(b"bob", &guid, b"a\nb", true).unwrap(),
@@ -61,6 +65,32 @@ fn each_request_goes_as_the_extension_has_it() {
             req(824, &[(0x0600, b"bob"), (0x0601, b"")]),
         ),
         (profile(b"bob").unwrap(), req(825, &[(0x0600, b"bob")])),
+        // The first page carries no cursor.
+        (message_requests(None).unwrap(), req(829, &[])),
+        (
+            message_requests(Some(&[0, 0, 0, 3])).unwrap(),
+            req(829, &[(0x0651, &[0, 0, 0, 3])]),
+        ),
+        (
+            answer_request(b"bob", RequestAction::EndApproval).unwrap(),
+            req(830, &[(0x0600, b"bob"), (0x0652, &[0, 3])]),
+        ),
+        // Neither end clears everything.
+        (clear_requests(None, None), req(831, &[])),
+        (
+            clear_requests(Some(0x0102), None),
+            req(831, &[(0x0655, &[0, 0, 0, 0, 0, 0, 1, 2])]),
+        ),
+        (
+            clear_requests(Some(1), Some(2)),
+            req(
+                831,
+                &[
+                    (0x0655, &[0, 0, 0, 0, 0, 0, 0, 1]),
+                    (0x0656, &[0, 0, 0, 0, 0, 0, 0, 2]),
+                ],
+            ),
+        ),
     ] {
         assert_eq!(got, want);
     }
@@ -83,5 +113,7 @@ fn what_the_wire_cannot_carry_is_refused() {
         im_send(b"bob", &[0; GUID_LEN], &vec![b'x'; 65536], true),
         None
     );
-    assert_eq!(set_presence(PresenceState::Offline, None, true), None);
+    assert_eq!(set_presence(PresenceState::Offline, None, None, true), None);
+    assert_eq!(message_requests(Some(b"")), None);
+    assert_eq!(answer_request(b"", RequestAction::Approve), None);
 }

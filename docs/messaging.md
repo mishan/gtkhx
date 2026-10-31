@@ -5,8 +5,9 @@ GtkHx's side of the friend family of fogWraith's messaging extension
 ([instant-messaging.md](https://github.com/mishan/hxd-ng/blob/main/docs/instant-messaging.md)
 §7): a roster of friends made by request and answer, presence, instant
 messages with delivery and read receipts and typing, finding an account by
-its Login, and an alias for a friend. The wire is hx-libs'
-`hxproto::messaging`; everything GtkHx adds over it is Rust.
+its Login, an alias for a friend, and the message requests draft (§4
+there) by which someone who is not a friend writes first. The wire is
+hx-libs' `hxproto::messaging`; everything GtkHx adds over it is Rust.
 
 The bit is not yet offered by a default build: only a build with
 `gtkhx-ffi/messaging` asks for it.
@@ -24,6 +25,13 @@ server, or an account without the access bit (`ACCESS_MESSAGING`, 58), sees
 the login it always saw. Every sender in `hxhandlers::send::friends` checks
 the confirmed bit and sends nothing without it, and every push is dropped
 on a connection that did not confirm it.
+
+A server **serves message requests** where it confirmed bit 6 and its
+login reply advertised `DATA_MAX_REQUEST_MESSAGES` among the extension's
+limits (`hxsession::ServerInfo::messaging`). The requests' senders check
+that too, so a server that confirmed bit 6 without the bound is sent
+nothing of the draft, and its Message Requests Changed, should it send
+one, is dropped.
 
 ## Routing
 
@@ -53,14 +61,43 @@ server's record, not a guess: Get Roster's reply replaces it, a Roster
 Entry (801) replaces the one entry whole (or, `Removed`, ends it), a
 Friend Request (804) is held as `PendingIn` with its note, and a Presence
 Changed (809) moves only the presence and status of an entry already held.
-A message's delivery only moves forward (sending, sent or queued,
+A message's delivery only moves forward (sending, sent, queued or requested,
 delivered, read), and only by a receipt from its recipient; once read or
 failed it is let go of. The roster goes when its connection closes or logs
 in again, and a message still unanswered then has failed.
 
 Get Roster goes out once the login settles, on every connection that
 confirmed bit 6; hxd-ng hands over the messages that waited, as IM Deliver
-(811), after its reply.
+(811), after its reply. Where requests are served, the first page of Get
+Message Requests goes out before it: hxd-ng hands over what waited under
+an approval only to a session that understands requests, which listing
+them makes it, so the order is what delivers those messages at login.
+That page alone: the login has already spent most of what hxd-ng lets a
+session spend in five seconds before it bans it, so a longer listing
+waits there until something asks for the requests. Nothing at login sets
+whether our account takes requests.
+
+**Requests.** The roster's `requests` (`gtkhx_core::messaging::requests`)
+holds whether the server serves them, how many senders wait, the senders
+oldest first with their messages, the Logins we approved, how many the
+server dropped, added up over the connection's listings since each first
+page resets the server's count, and our account's setting as the last
+listing gave it. A listing is gathered page by page, its senders merged
+by Login, since a cursor is a place in a listing the server reads again
+for each page (and a sender approved between pages is the later page's
+approval), and replaces what is held only at its last page; a page
+refused or unreadable drops it and keeps the one before. Message Requests
+Changed (832) moves the count alone. The listing is paced, since hxd-ng
+charges a page a tenth of what a session may spend in five seconds before
+it is banned: one listing at a time on a connection, each page a second
+after the one before arrived, two listings five seconds apart at least, and a listing asked for
+meanwhile owed once and run at the earliest moment allowed, by a GLib
+timer that `send::friends` sets. A cursor that never ends is cut off at a
+bound on the pages, and what the listing gathered stands.
+
+A message to someone who is not a friend is answered `Requested`
+(`Delivery::Requested`) where it is held as a request. No receipt follows
+one, so it stays so until the connection goes, and is not failed then.
 
 An instant message that arrives is acknowledged as delivered at once, a
 receipt nobody asked for whose refusal is never shown; read is the view's
@@ -83,6 +120,8 @@ from C:
 | `Changed { login }` | one entry arrived, changed or went, or a friend's presence moved |
 | `Request { login }` | someone asks to be a friend |
 | `Presence` | the server took our presence |
+| `Requests` | the requests were listed again, or their count changed |
+| `Cleared { trans, requests, friend_requests }` | Clear Message Requests deleted and declined so many |
 | `Im(Im)` | an instant message: its sender, id, text and when it was sent |
 | `Delivery { to, guid, delivery }` | a message we sent moved on |
 | `Typing { from, typing }` | someone started or stopped typing to us |
@@ -93,10 +132,20 @@ from C:
 
 `hxhandlers::send::friends` is the view's API, one function a request:
 `roster`, `add`, `remove`, `respond`, `block`, `unblock`, `set_presence`,
-`im`, `read`, `typing`, `find`, `profile` and `set_nickname`. Each returns
-the trans its answer will name, and `None` where nothing was sent, except
-`im`, which returns the message's id, and `typing`, whose trans is never
-answered. A Login is bytes as the wire carries it, from
+`im`, `read`, `typing`, `find`, `profile` and `set_nickname`, and for
+message requests `requests`, `answer_request`, `clear_requests` and
+`set_takes_requests`. Each returns the trans its answer will name, and
+`None` where nothing was sent, except `im`, which returns the message's
+id, `typing`, whose trans is never answered, and `requests`, which asks
+for a paced listing and is answered by the `Requests` event.
+`set_takes_requests` goes as Set Presence, which must carry a presence,
+so the caller gives the one it last told the server.
+
+Ending an approval is listed again once the server takes it, since
+hxd-ng pushes no Message Requests Changed for it as it does for an
+approval, a deletion, a clearing and a block that ends a request. The view lists the requests
+again on a Message Requests Changed where it shows them; nothing else
+does. A Login is bytes as the wire carries it, from
 an entry or from `login`, which encodes one the user typed; text is UTF-8,
 sent as the connection's encoding has it (Mac Roman unless UTF-8 was
 negotiated). The requests themselves are `hxrequest::messaging`, which the
@@ -147,10 +196,18 @@ menu and the conversations are what they always were.
   that names it.
 - User Search (823) is not served, so search is Find User.
 - A message's id is taken once: the server drops a second send under it.
-- Message requests (829–832) reach only a client that sent
-  `DATA_TAKES_REQUESTS` or listed them. GtkHx does neither, so an instant
-  message to someone who is not a friend is refused `NotFriends`; a push of
-  that draft that arrives anyway is dropped.
+- Message requests (829–832) reach only a session that understands them:
+  one that sent `DATA_TAKES_REQUESTS` or listed them, which GtkHx does at
+  every login where they are served. A message such a session sends to
+  someone who is not a friend is answered `Requested` where the recipient's
+  account takes requests, and refused `NotFriends` where it takes none.
+  Whether an account takes them is the account's, on every client: GtkHx
+  sends it only when asked to, and nothing yet asks.
+- Requests are answered alike whatever becomes of them: one from a sender
+  whose request was deleted, whose approval was ended, or whose friendship
+  was removed is answered `Requested` and kept nowhere, for days.
+- Under an approval every message is answered `OfflineQueued`, and its
+  Delivered receipts are not passed on.
 
 ## Tests
 
@@ -163,13 +220,22 @@ suite runs against the rig's hxd-ng, whose `friend-*` accounts take part
 (`tests/COMPOSE.md`): two accounts becoming friends and seeing each other's
 presence and alias, a message with both receipts and typing, a block and
 its lifting, Find User, and every server in the rig taking the offer with
-only a taking-part account confirmed.
+only a taking-part account confirmed. Its message requests tests make
+their accounts fresh each run through the rig's `requests-admin`, since
+what a request leaves on hxd-ng outlives a run: the login reply's bound,
+a stranger's message answered `Requested`, listed and told by Message
+Requests Changed, approved and delivered, an approval's message handed
+over at Get Roster to a session that listed first, an approval ended, a
+request deleted and one approved by a reply, a clearing's counts, and an
+account that takes none answering `NotFriends`.
 
 ## Open
 
 - Turning the offer on in a default build.
 - An instant message carries text alone: a friend's conversation has no
   attachment button.
-- The login reply's messaging limits (`hxproto::messaging::Limits`) are
-  not read: `hxsession::ServerInfo` carries none, so a message past the
-  server's bound is refused by it rather than held back here.
+- Of the login reply's messaging limits (`hxproto::messaging::Limits`),
+  only the request bound is read, as whether requests are served: a
+  message past the server's other bounds is refused by it rather than held
+  back here.
+- The interface for message requests, and turning taking them on.

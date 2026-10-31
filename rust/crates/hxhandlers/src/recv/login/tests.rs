@@ -84,6 +84,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         history_max_msgs: Some(500),
         history_max_days: Some(7),
         video: vec![CAMERA],
+        messaging: None,
     };
     let bare = ServerInfo {
         version: 0,
@@ -94,6 +95,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         history_max_msgs: None,
         history_max_days: None,
         video: vec![],
+        messaging: None,
     };
     unsafe {
         logged_in(h.cast(), &full);
@@ -134,14 +136,24 @@ fn a_refusal_shows_the_servers_reason() {
 }
 
 /// Only a server that confirmed the friend family is asked for the
-/// roster, which also hands over what waited for us.
+/// roster, which also hands over what waited for us; and only one that
+/// serves message requests is asked for them, before the roster, which
+/// hands over what waited under an approval only once they are listed.
+/// Our setting goes to none.
 #[test]
-fn a_server_that_confirmed_bit_6_is_asked_for_the_roster() {
-    use hxproto::messaging::CAP_MESSAGING;
-    for (caps, asked) in [
-        (0, false),
-        (cap::TEXT_ENCODING, false),
-        (CAP_MESSAGING, true),
+fn a_server_that_confirmed_bit_6_is_asked_for_the_roster_and_its_requests() {
+    use hxproto::messaging::{Limits, CAP_MESSAGING};
+    let bound = Limits {
+        max_request_messages: Some(5),
+        ..Limits::default()
+    };
+    for (caps, messaging, asked, served) in [
+        (0, None, &[][..], false),
+        (cap::TEXT_ENCODING, None, &[], false),
+        (CAP_MESSAGING, Some(Limits::default()), &[800], false),
+        (CAP_MESSAGING, Some(bound), &[829, 800], true),
+        // A bound beside no bit 6 is nothing.
+        (0, Some(bound), &[], false),
     ] {
         crate::send::friends::tests::sent();
         let h = hx_conn_new();
@@ -154,17 +166,60 @@ fn a_server_that_confirmed_bit_6_is_asked_for_the_roster() {
             history_max_msgs: None,
             history_max_days: None,
             video: vec![],
+            messaging,
         };
         unsafe { logged_in(h.cast(), &info) };
         let opcodes: Vec<u32> = crate::send::friends::tests::sent()
             .into_iter()
             .map(|(o, _, _)| o)
             .collect();
-        assert_eq!(opcodes == [800], asked, "caps {caps:#x}: {opcodes:?}");
+        assert_eq!(opcodes, asked, "caps {caps:#x}, {messaging:?}");
+        let held = gtkhx_core::messaging::with_roster(h.cast(), |m| m.requests.served);
+        assert_eq!(held, served, "caps {caps:#x}, {messaging:?}");
         emitted();
         unsafe {
             crate::recv::forget(h.cast(), false);
             hx_conn_free(h);
         }
+    }
+}
+
+/// The login asks for the requests' first page alone, which spends the
+/// least of what the login has left: a cursor on it is not followed.
+#[test]
+fn a_login_lists_only_the_first_page_of_its_requests() {
+    use hxproto::messages::tag;
+    use hxproto::messaging::{Limits, CAP_MESSAGING};
+    crate::send::friends::tests::sent();
+    crate::send::friends::tests::woken();
+    let h = hx_conn_new();
+    let info = ServerInfo {
+        version: 200,
+        name: None,
+        uid: None,
+        caps: CAP_MESSAGING,
+        media: LimitsAdvertisement::empty(),
+        history_max_msgs: None,
+        history_max_days: None,
+        video: vec![],
+        messaging: Some(Limits {
+            max_request_messages: Some(5),
+            ..Limits::default()
+        }),
+    };
+    unsafe { logged_in(h.cast(), &info) };
+    let (_, trans, _) = crate::send::friends::tests::sent().remove(0);
+    let page = hxrequest::Request {
+        opcode: 0x0001_0000,
+        chunks: vec![(tag::REQUEST_CURSOR, vec![0, 0, 0, 1])],
+    }
+    .pack(trans);
+    unsafe { crate::recv::friends::reply(h.cast(), trans, &page) };
+    assert_eq!(crate::send::friends::tests::sent(), []);
+    assert_eq!(crate::send::friends::tests::woken(), []);
+    emitted();
+    unsafe {
+        crate::recv::forget(h.cast(), false);
+        hx_conn_free(h);
     }
 }

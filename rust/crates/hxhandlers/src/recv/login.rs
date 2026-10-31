@@ -14,6 +14,7 @@ use gtkhx_core::conn::{
     hx_conn_set_uid, hx_conn_set_version, hx_conn_set_video_limits,
 };
 use hxnet::ffi::{hxnet_connection_hope_aead_material, hxnet_hope_aead_free};
+use hxproto::messaging::CAP_MESSAGING;
 use hxsession::{cap, ServerInfo};
 
 use super::chat::c_text;
@@ -89,9 +90,23 @@ pub(crate) unsafe fn logged_in(htlc: *mut c_void, info: &ServerInfo) {
         debug_log_str(c"media".as_ptr(), c_text(&line).as_ptr());
     }
 
-    // The roster, where the server confirmed the friend family: held until
-    // the login settles, as every request is, and it hands over what
-    // waited for us too.
+    // A server serves message requests where it confirmed the friend
+    // family with a bound on them.
+    if hx_conn_has_cap(h, CAP_MESSAGING) != 0
+        && info
+            .messaging
+            .is_some_and(|l| l.max_request_messages.is_some())
+    {
+        gtkhx_core::messaging::with_roster_mut(htlc, |m| m.requests.served = true);
+    }
+    // Then the requests' first page, where they are served, and the
+    // roster, where the server confirmed the friend family: held until the
+    // login settles, as every request is. The roster hands over what
+    // waited for us too, and what waited under an approval only to a
+    // session that has listed its requests, so they go first. One page
+    // alone: the login has spent most of what hxd-ng lets a session spend
+    // in a few seconds before it bans it.
+    crate::send::friends::look(htlc);
     crate::send::friends::roster(htlc);
 
     let name = info.name.as_deref().map(c_text);

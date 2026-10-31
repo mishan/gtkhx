@@ -1,6 +1,7 @@
 //! The friend family of fogWraith's messaging extension (capability bit 6):
 //! the roster, friend requests, blocks, presence, instant messages with
-//! their receipts and typing, finding an account, and a friend's alias.
+//! their receipts and typing, finding an account, a friend's alias, and
+//! the message requests draft's listing, answers and clearing.
 //!
 //! A Login is bytes as the wire carries it: what an entry gave, or what
 //! [`login`] made of what the user typed. Text the user wrote (a note, a
@@ -11,7 +12,7 @@
 
 use hxproto::build::HxChunk;
 use hxproto::messages::ClientHdr;
-use hxproto::messaging::{self as m, AckType, PresenceState, TypingState, GUID_LEN};
+use hxproto::messaging::{self as m, AckType, PresenceState, RequestAction, TypingState, GUID_LEN};
 
 use crate::Request;
 
@@ -79,15 +80,21 @@ pub fn unblock(login: &[u8]) -> Option<Request> {
 }
 
 /// SET_PRESENCE (808): our presence, and our status text where `status` is
-/// given; an empty one clears it. Never offline, which a client does not
-/// set for itself.
-pub fn set_presence(state: PresenceState, status: Option<&[u8]>, utf8: bool) -> Option<Request> {
+/// given; an empty one clears it; and whether our account takes message
+/// requests, where `takes_requests` says. Never offline, which a client
+/// does not set for itself.
+pub fn set_presence(
+    state: PresenceState,
+    status: Option<&[u8]>,
+    takes_requests: Option<bool>,
+    utf8: bool,
+) -> Option<Request> {
     let status = status.map(|t| text(t, utf8));
     let p = m::Presence {
         state,
         status_text: status.as_deref(),
         discoverable: None,
-        takes_requests: None,
+        takes_requests,
     };
     built(ClientHdr::SetPresence, |c, s| {
         m::build_set_presence_chunks(&p, c, s)
@@ -147,6 +154,45 @@ pub fn profile(login: &[u8]) -> Option<Request> {
     built(ClientHdr::GetProfile, |c, s| {
         m::build_login_only_chunks(login, c, s)
     })
+}
+
+/// GET_MESSAGE_REQUESTS (829): the first page of our requests and
+/// approvals, with no fields, or the page at the `cursor` the one before
+/// gave.
+pub fn message_requests(cursor: Option<&[u8]>) -> Option<Request> {
+    let Some(cursor) = cursor else {
+        return Some(Request {
+            opcode: ClientHdr::GetMessageRequests as u32,
+            chunks: Vec::new(),
+        });
+    };
+    built(ClientHdr::GetMessageRequests, |c, s| {
+        m::build_get_message_requests_chunks(cursor, c, s)
+    })
+}
+
+/// ANSWER_MESSAGE_REQUEST (830): approve or delete `login`'s request, or
+/// end its approval.
+pub fn answer_request(login: &[u8], action: RequestAction) -> Option<Request> {
+    built(ClientHdr::AnswerMessageRequest, |c, s| {
+        m::build_answer_message_request_chunks(login, action, c, s)
+    })
+}
+
+/// CLEAR_MESSAGE_REQUESTS (831): every request and friend request received
+/// from `since` to `before`, in Unix seconds, either end open; with
+/// neither, everything, which the request says by carrying no fields.
+pub fn clear_requests(since: Option<u64>, before: Option<u64>) -> Request {
+    if since.is_none() && before.is_none() {
+        return Request {
+            opcode: ClientHdr::ClearMessageRequests as u32,
+            chunks: Vec::new(),
+        };
+    }
+    built(ClientHdr::ClearMessageRequests, |c, s| {
+        m::build_clear_message_requests_chunks(since, before, c, s)
+    })
+    .expect("a span with an end always builds")
 }
 
 #[cfg(test)]

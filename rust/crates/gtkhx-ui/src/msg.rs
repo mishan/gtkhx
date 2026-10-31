@@ -477,7 +477,7 @@ fn delivery_words(d: Delivery) -> String {
     match d {
         Delivery::Sending => tr("sending…"),
         Delivery::Sent => tr("sent"),
-        Delivery::Queued => tr("waiting for them"),
+        Delivery::Queued | Delivery::Requested => tr("waiting for them"),
         Delivery::Delivered => tr("delivered"),
         Delivery::Read => tr("read"),
         Delivery::Failed => tr("not delivered"),

@@ -147,7 +147,10 @@ may download and upload into `Uploads` but not make, delete or move.
 Its `friend-*` accounts (each password its login) hold `messaging`, and
 `[messaging]` is on, for the friends suite: those accounts keep their
 friendships and blocks between runs, so each test has its own and undoes
-what an earlier run left before it starts. hxd-ng's messaging needs
+what an earlier run left before it starts. What a message request leaves
+cannot be undone, so its tests log in as `requests-admin` on the
+hotline-ng port to make accounts of their own each run, and delete them
+after. hxd-ng's messaging needs
 `[inbox]`, which also queues private messages for anyone offline and keeps
 the moderation trail, reports and bans in its `messages.db` rather than
 the news database.

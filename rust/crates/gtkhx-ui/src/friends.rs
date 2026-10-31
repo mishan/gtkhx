@@ -133,7 +133,7 @@ unsafe fn heard(htlc: *mut c_void, e: &Event) {
         Event::Delivery { to, guid, delivery } => crate::msg::delivered(htlc, to, guid, *delivery),
         Event::Typing { from, typing } => crate::msg::typing(htlc, from, *typing),
         Event::Refused { reason, text, .. } => refused(htlc, *reason, text.as_deref()),
-        Event::Presence | Event::Found { .. } => {}
+        Event::Presence | Event::Found { .. } | Event::Requests | Event::Cleared { .. } => {}
     }
 }
 

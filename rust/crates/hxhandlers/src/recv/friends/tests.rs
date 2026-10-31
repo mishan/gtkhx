@@ -10,7 +10,7 @@ use hxproto::messaging::{PresenceState as P, RosterEntry, RosterState as S};
 use hxproto::wire::Encoder;
 
 use super::*;
-use crate::send::friends::tests::{sent, Conn};
+use crate::send::friends::tests::{sent, woken, Conn};
 
 thread_local! {
     static TOLD: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
@@ -323,8 +323,8 @@ fn typing_is_told_and_a_push_this_client_does_not_take_is_dropped() {
         false,
         fields(&[(tag::FRIEND_LOGIN, b"bob"), (tag::TYPING_STATE, &[0, 1])]),
     );
-    // Message Requests Changed, which a client that never listed its
-    // requests is not sent, and is not this client's if it is.
+    // Message Requests Changed, which a server that serves no requests
+    // never sends, and is nothing from one.
     let requests = frame(832, 0, false, fields(&[(0x0653, &[0, 0, 0, 1])]));
     unsafe {
         pushed(c.0, 813, &typing);
@@ -398,4 +398,227 @@ fn a_connection_closing_lets_go_of_its_roster_and_its_requests() {
     unsafe { reply(c.0, trans, &frame(TASK, trans, false, entries(&[]))) };
     assert_eq!(told(), []);
     assert!(with_roster(c.0, |r| r.get(b"bob").is_none()));
+}
+
+/// What the listing is answered with: `takes` and `dropped` before any
+/// group, as on a first page, then each group's fields.
+fn listing(trans: u32, before: &[(u16, &[u8])], groups: &[(u16, &[u8])]) -> Vec<u8> {
+    let all: Vec<(u16, &[u8])> = before.iter().chain(groups).copied().collect();
+    frame(TASK, trans, false, fields(&all))
+}
+
+#[test]
+fn the_listing_is_read_page_by_page_paced_and_told_once() {
+    let c = Conn::serving_requests(0);
+    sent();
+    told();
+    woken();
+    let asked = std::time::Instant::now();
+    unsafe { crate::send::friends::requests(c.0) };
+    let (opcode, first, cursor) = sent().remove(0);
+    assert_eq!((opcode, cursor), (829, vec![]));
+    let t1 = 1_700_000_000u64.to_be_bytes();
+    let page1 = listing(
+        first,
+        &[
+            (tag::TAKES_REQUESTS, &[0, 1]),
+            (tag::REQUEST_COUNT, &[0, 0, 0, 2]),
+            (tag::REQUEST_CURSOR, &[0, 0, 0, 1]),
+        ],
+        &[
+            (tag::FRIEND_LOGIN, b"alice"),
+            (tag::MESSAGE_GUID, &[1; 16]),
+            (tag::MESSAGE_BODY, b"lunch\rnow"),
+            (tag::MESSAGE_TIMESTAMP, &t1),
+        ],
+    );
+    unsafe { reply(c.0, first, &page1) };
+    // Nothing told, and the next page not asked for until a second on.
+    assert_eq!((told(), sent()), (vec![], vec![]));
+    let [at] = woken()[..] else { panic!() };
+    assert!(at >= asked + model::requests::PAGE_GAP);
+    unsafe { crate::send::friends::pace(c.0, at) };
+    let (opcode, second, cursor) = sent().remove(0);
+    assert_eq!(
+        (opcode, cursor),
+        (829, vec![(tag::REQUEST_CURSOR, vec![0, 0, 0, 1])])
+    );
+    let page2 = listing(
+        second,
+        &[],
+        &[
+            (tag::FRIEND_LOGIN, b"\xe9ve"),
+            (tag::MESSAGE_GUID, &[2; 16]),
+            (tag::MESSAGE_BODY, b"hi"),
+            (tag::MESSAGE_TIMESTAMP, &t1),
+            (tag::FRIEND_LOGIN, b"bob"),
+            (tag::ROSTER_STATE, &[0, 3]),
+        ],
+    );
+    unsafe { reply(c.0, second, &page2) };
+    assert_eq!(told(), [Event::Requests]);
+    with_roster(c.0, |m| {
+        let r = &m.requests;
+        assert_eq!((r.count, r.dropped, r.takes), (2, 2, Some(true)));
+        let alice = &r.senders[0];
+        assert_eq!(
+            (alice.login.as_slice(), alice.messages[0].body.as_str()),
+            (&b"alice"[..], "lunch\nnow")
+        );
+        assert_eq!(r.senders[1].login, b"\xe9ve");
+        assert!(r.approvals.contains(&b"bob"[..]));
+    });
+    assert_eq!(woken(), []);
+}
+
+#[test]
+fn a_refused_listing_is_told_and_not_asked_for_again_unasked() {
+    let c = Conn::serving_requests(0);
+    sent();
+    told();
+    woken();
+    unsafe { crate::send::friends::requests(c.0) };
+    let (_, trans, _) = sent().remove(0);
+    unsafe { reply(c.0, trans, &frame(TASK, trans, true, fields(&[]))) };
+    assert_eq!(
+        told(),
+        [Event::Refused {
+            trans,
+            request: 829,
+            reason: None,
+            text: None
+        }]
+    );
+    assert_eq!((sent(), woken()), (vec![], vec![]));
+    // Asked again, it goes once the pacing allows.
+    unsafe { crate::send::friends::requests(c.0) };
+    assert_eq!((sent().len(), woken().len()), (0, 1));
+}
+
+#[test]
+fn a_change_in_the_requests_is_told_with_its_count() {
+    let unbound = messenger();
+    let c = Conn::serving_requests(0);
+    let changed = frame(
+        832,
+        0,
+        false,
+        fields(&[(tag::REQUEST_COUNT, &[0, 0, 0, 3])]),
+    );
+    unsafe {
+        pushed(unbound.0, 832, &changed);
+        pushed(c.0, 832, &changed);
+    }
+    assert_eq!(told(), [Event::Requests]);
+    assert_eq!(with_roster(c.0, |m| m.requests.count), 3);
+    // Nothing is listed for it: the view asks, where it shows them.
+    assert_eq!(sent(), []);
+}
+
+#[test]
+fn ending_an_approval_lists_the_requests_again_and_a_clearing_says_what_went() {
+    let c = Conn::serving_requests(0);
+    sent();
+    told();
+    let ok = |trans| frame(TASK, trans, false, fields(&[]));
+    let (approve, end) = unsafe {
+        (
+            crate::send::friends::answer_request(c.0, b"bob", RequestAction::Approve).unwrap(),
+            crate::send::friends::answer_request(c.0, b"eve", RequestAction::EndApproval).unwrap(),
+        )
+    };
+    sent();
+    // An approval is followed by the server's own Message Requests
+    // Changed; an end by nothing, so it is listed here.
+    unsafe { reply(c.0, approve, &ok(approve)) };
+    assert_eq!(sent(), []);
+    unsafe { reply(c.0, end, &ok(end)) };
+    let opcodes: Vec<u32> = sent().into_iter().map(|(o, _, _)| o).collect();
+    assert_eq!(opcodes, [829]);
+
+    let clear = unsafe { crate::send::friends::clear_requests(c.0, Some(1), None).unwrap() };
+    let counts = frame(
+        TASK,
+        clear,
+        false,
+        fields(&[
+            (tag::REQUEST_COUNT, &[0, 0, 0, 4]),
+            (tag::FRIEND_REQUEST_COUNT, &[0, 0, 0, 1]),
+        ]),
+    );
+    unsafe { reply(c.0, clear, &counts) };
+    assert_eq!(
+        told(),
+        [Event::Cleared {
+            trans: clear,
+            requests: 4,
+            friend_requests: 1
+        }]
+    );
+}
+
+#[test]
+fn a_message_held_as_a_request_is_said_to_be() {
+    let c = messenger();
+    let guid = unsafe { crate::send::friends::im(c.0, b"zed", "hi").unwrap() };
+    let (_, trans, _) = sent().remove(0);
+    let requested = [0, ReasonCode::Requested.wire() as u8];
+    let answer = frame(
+        TASK,
+        trans,
+        false,
+        fields(&[(tag::REASON_CODE, &requested)]),
+    );
+    unsafe { reply(c.0, trans, &answer) };
+    assert_eq!(
+        told(),
+        [Event::Delivery {
+            to: b"zed".to_vec(),
+            guid,
+            delivery: Delivery::Requested
+        }]
+    );
+}
+
+/// A page's text in the connection's encoding: Mac Roman unless UTF-8
+/// was negotiated, even where its bytes would read as UTF-8.
+#[test]
+fn a_page_is_read_in_the_connections_encoding() {
+    for (caps, body) in [
+        (0, "caf\u{221a}\u{a9}"),
+        (hxsession::cap::TEXT_ENCODING, "caf\u{e9}"),
+    ] {
+        let c = Conn::serving_requests(caps);
+        sent();
+        unsafe { crate::send::friends::requests(c.0) };
+        let (_, trans, _) = sent().remove(0);
+        let at = 1_700_000_000u64.to_be_bytes();
+        let page = listing(
+            trans,
+            &[],
+            &[
+                (tag::FRIEND_LOGIN, b"alice"),
+                (tag::MESSAGE_GUID, &[1; 16]),
+                (tag::MESSAGE_BODY, b"caf\xc3\xa9"),
+                (tag::MESSAGE_TIMESTAMP, &at),
+            ],
+        );
+        unsafe { reply(c.0, trans, &page) };
+        let got = with_roster(c.0, |m| m.requests.senders[0].messages[0].body.clone());
+        assert_eq!(got, body, "caps {caps:#x}");
+    }
+}
+
+#[test]
+fn a_page_after_the_connection_let_go_is_nobodys() {
+    let c = Conn::serving_requests(0);
+    sent();
+    told();
+    unsafe { crate::send::friends::requests(c.0) };
+    let (_, trans, _) = sent().remove(0);
+    unsafe { forget(c.0) };
+    let page = listing(trans, &[], &[(tag::FRIEND_LOGIN, b"alice")]);
+    unsafe { reply(c.0, trans, &page) };
+    assert_eq!((told(), sent()), (vec![], vec![]));
+    assert!(with_roster(c.0, |m| m.requests.senders.is_empty()));
 }
