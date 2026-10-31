@@ -96,7 +96,7 @@ struct Listing {
     /// Read past its first page: a listing that only looks waits there
     /// until one is asked for.
     follow: bool,
-    /// Message Requests Changed arrived while it was read.
+    /// Message Requests Changed arrived while it was under way.
     changed: bool,
 }
 
@@ -118,14 +118,16 @@ impl Requests {
         self.owed = Some(true);
     }
 
-    /// Message Requests Changed said how many wait. A listing being read
-    /// may have read past the change, so another is owed and its count is
-    /// not taken.
+    /// Message Requests Changed said how many wait. A listing under way
+    /// may have read past the change, so its count is not taken, and one
+    /// being read is owed another; a login's first page is never extended.
     pub fn changed(&mut self, count: u32) {
         self.count = count;
-        if let Some(l) = self.listing.as_mut().filter(|l| l.follow) {
+        if let Some(l) = &mut self.listing {
             l.changed = true;
-            self.owed = Some(true);
+            if l.follow {
+                self.owed = Some(true);
+            }
         }
     }
 

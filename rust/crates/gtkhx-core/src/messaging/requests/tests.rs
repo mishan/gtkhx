@@ -145,11 +145,19 @@ fn a_change_while_a_listing_is_read_owes_another_and_keeps_its_count() {
     assert_eq!(r.count, 1);
     assert_eq!(r.due(t + PAGE_GAP), Some(t + LISTING_GAP));
 
-    // With none being read, the count is all it moves.
     assert_eq!(r.next(t + LISTING_GAP), Some(None));
     assert!(r.page(page(None, vec![]), t + LISTING_GAP));
+
+    // A login's first page, awaited, keeps the count and owes nothing.
+    r.look();
+    assert_eq!(r.next(t + LISTING_GAP * 2), Some(None));
+    r.changed(3);
+    assert!(r.page(page(None, vec![sender("carol", &[3])]), t + LISTING_GAP * 2));
+    assert_eq!((r.count, r.due(t + LISTING_GAP * 3)), (3, None));
+
+    // With none being read, the count is all it moves.
     r.changed(4);
-    assert_eq!((r.count, r.due(t + LISTING_GAP)), (4, None));
+    assert_eq!((r.count, r.due(t + LISTING_GAP * 3)), (4, None));
 }
 
 #[test]

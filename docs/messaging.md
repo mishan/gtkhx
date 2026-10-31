@@ -87,8 +87,8 @@ by Login, since a cursor is a place in a listing the server reads again
 for each page (and a sender approved between pages is the later page's
 approval), and replaces what is held only at its last page; a page
 refused or unreadable drops it and keeps the one before. Message Requests
-Changed (832) moves the count, and a listing being read when it arrives
-keeps that count and owes another. The listing is paced, since hxd-ng
+Changed (832) moves the count, which a listing under way when it arrives
+does not replace, and owes another listing where one is being read. The listing is paced, since hxd-ng
 charges a page a tenth of what a session may spend in five seconds before
 it is banned: one listing at a time on a connection, each page a second
 after the one before arrived, two listings five seconds apart at least, and a listing asked for
