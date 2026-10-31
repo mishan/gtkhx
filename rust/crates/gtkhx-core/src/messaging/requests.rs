@@ -96,22 +96,36 @@ struct Listing {
     /// Read past its first page: a listing that only looks waits there
     /// until one is asked for.
     follow: bool,
+    /// Message Requests Changed arrived while it was read.
+    changed: bool,
 }
 
 impl Requests {
     /// Ask for a listing, which goes once the pacing allows: a burst of
-    /// asks is one listing. One that stopped at its first page goes on;
-    /// one being read is owed another, since a change between its pages
-    /// can move a sender onto a page already read.
+    /// asks is one listing. One being read is owed another, since a change
+    /// between its pages can move a sender onto a page already read; one
+    /// that stopped at its first page is read again from the start, since
+    /// that page may be long out of date.
     pub fn want(&mut self) {
         match &mut self.listing {
-            Some(l) => {
-                if l.follow {
-                    self.owed = Some(true);
-                }
+            Some(l) if l.follow => {}
+            Some(l) if l.next.is_none() => {
                 l.follow = true;
+                return;
             }
-            None => self.owed = Some(true),
+            _ => self.listing = None,
+        }
+        self.owed = Some(true);
+    }
+
+    /// Message Requests Changed said how many wait. A listing being read
+    /// may have read past the change, so another is owed and its count is
+    /// not taken.
+    pub fn changed(&mut self, count: u32) {
+        self.count = count;
+        if let Some(l) = self.listing.as_mut().filter(|l| l.follow) {
+            l.changed = true;
+            self.owed = Some(true);
         }
     }
 
@@ -157,6 +171,7 @@ impl Requests {
             answered: now,
             next: None,
             follow: self.owed.take().unwrap_or(true),
+            changed: false,
         });
         Some(None)
     }
@@ -200,7 +215,9 @@ impl Requests {
         let Some(l) = self.listing.take() else {
             return false;
         };
-        self.count = u32::try_from(l.senders.len()).unwrap_or(u32::MAX);
+        if !l.changed {
+            self.count = u32::try_from(l.senders.len()).unwrap_or(u32::MAX);
+        }
         self.senders = l.senders;
         self.approvals = l.approvals;
         self.takes = l.takes;

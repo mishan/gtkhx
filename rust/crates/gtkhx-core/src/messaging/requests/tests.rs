@@ -124,11 +124,32 @@ fn a_look_stops_at_the_first_page_until_a_listing_is_asked_for() {
     assert_eq!(r.next(t), Some(None));
     assert!(!r.page(page(Some(b"1"), vec![sender("alice", &[1])]), t));
     assert_eq!(r.due(t + LISTING_GAP), None);
-    // Asked for, it goes on where it stopped.
+    // Asked for, it is read again from the start, as the gap allows.
     r.want();
+    assert_eq!(r.next(t + PAGE_GAP), None);
+    assert_eq!(r.next(t + LISTING_GAP), Some(None));
+    assert!(r.page(page(None, vec![sender("bob", &[2])]), t + LISTING_GAP));
+    assert_eq!(logins(&r), [&b"bob"[..]]);
+}
+
+#[test]
+fn a_change_while_a_listing_is_read_owes_another_and_keeps_its_count() {
+    let t = Instant::now();
+    let mut r = Requests::default();
+    r.want();
+    assert_eq!(r.next(t), Some(None));
+    assert!(!r.page(page(Some(b"1"), vec![sender("alice", &[1])]), t));
+    r.changed(1);
     assert_eq!(r.next(t + PAGE_GAP), Some(Some(b"1".to_vec())));
     assert!(r.page(page(None, vec![sender("bob", &[2])]), t + PAGE_GAP));
-    assert_eq!(logins(&r), [&b"alice"[..], b"bob"]);
+    assert_eq!(r.count, 1);
+    assert_eq!(r.due(t + PAGE_GAP), Some(t + LISTING_GAP));
+
+    // With none being read, the count is all it moves.
+    assert_eq!(r.next(t + LISTING_GAP), Some(None));
+    assert!(r.page(page(None, vec![]), t + LISTING_GAP));
+    r.changed(4);
+    assert_eq!((r.count, r.due(t + LISTING_GAP)), (4, None));
 }
 
 #[test]

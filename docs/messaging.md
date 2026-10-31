@@ -87,12 +87,14 @@ by Login, since a cursor is a place in a listing the server reads again
 for each page (and a sender approved between pages is the later page's
 approval), and replaces what is held only at its last page; a page
 refused or unreadable drops it and keeps the one before. Message Requests
-Changed (832) moves the count alone. The listing is paced, since hxd-ng
+Changed (832) moves the count, and a listing being read when it arrives
+keeps that count and owes another. The listing is paced, since hxd-ng
 charges a page a tenth of what a session may spend in five seconds before
 it is banned: one listing at a time on a connection, each page a second
 after the one before arrived, two listings five seconds apart at least, and a listing asked for
 meanwhile owed once and run at the earliest moment allowed, by a GLib
-timer that `send::friends` sets. A cursor that never ends is cut off at a
+timer that `send::friends` sets. The login's first page, left waiting,
+is read again from the start when a listing is asked for. A cursor that never ends is cut off at a
 bound on the pages, and what the listing gathered stands.
 
 A message to someone who is not a friend is answered `Requested`

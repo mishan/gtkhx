@@ -367,7 +367,7 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
             let count = chunk(frame, tag::REQUEST_COUNT).map(|c| c.as_uint());
             match count {
                 Some(n) if model::with_roster(htlc, |m| m.requests.served) => {
-                    model::with_roster_mut(htlc, |m| m.requests.count = n);
+                    model::with_roster_mut(htlc, |m| m.requests.changed(n));
                     tell(htlc, &Event::Requests);
                 }
                 Some(_) => {}
