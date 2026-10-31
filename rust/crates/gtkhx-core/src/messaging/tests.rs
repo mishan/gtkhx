@@ -100,12 +100,13 @@ fn a_message_only_moves_forward_and_only_by_its_recipient() {
 #[test]
 fn a_closing_connection_fails_only_what_was_never_answered() {
     let htlc = 0x5150 as *const c_void;
-    let [unanswered, taken, failed] = [[1; GUID_LEN], [2; GUID_LEN], [3; GUID_LEN]];
+    let [unanswered, taken, requested, failed] = [1, 2, 3, 4].map(|g| [g; GUID_LEN]);
     with_roster_mut(htlc, |r| {
-        for g in [unanswered, taken, failed] {
+        for g in [unanswered, taken, requested, failed] {
             r.sending(g, b"bob");
         }
         r.delivered(&taken, None, Delivery::Queued);
+        r.delivered(&requested, None, Delivery::Requested);
         r.delivered(&failed, None, Delivery::Failed);
     });
     assert_eq!(forget(htlc), [(unanswered, b"bob".to_vec())]);
@@ -120,6 +121,10 @@ fn what_a_sends_reason_and_a_receipt_say() {
         (
             Delivery::sent(Some(ReasonCode::OfflineQueued)),
             Delivery::Queued,
+        ),
+        (
+            Delivery::sent(Some(ReasonCode::Requested)),
+            Delivery::Requested,
         ),
         (Delivery::acked(AckType::Delivered), Delivery::Delivered),
         (Delivery::acked(AckType::Read), Delivery::Read),

@@ -15,6 +15,16 @@ pub(crate) type Written = (u32, u32, Vec<(u16, Vec<u8>)>);
 thread_local! {
     static TRANS: Cell<u32> = const { Cell::new(0) };
     static SENT: RefCell<Vec<Written>> = const { RefCell::new(Vec::new()) };
+    static WOKEN: RefCell<Vec<Instant>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) unsafe fn wake(_htlc: *mut c_void, at: Instant) {
+    WOKEN.with(|w| w.borrow_mut().push(at));
+}
+
+/// When the timers set since last asked are to fire.
+pub(crate) fn woken() -> Vec<Instant> {
+    WOKEN.with(|w| w.take())
 }
 
 pub(crate) unsafe fn next_trans(_h: *mut HtlcConn) -> u32 {
@@ -60,6 +70,13 @@ impl Conn {
         unsafe { hx_conn_set_caps(h, caps) };
         Conn(h.cast())
     }
+
+    /// One whose server serves message requests.
+    pub(crate) fn serving_requests(caps: u64) -> Conn {
+        let c = Conn::with_caps(caps | CAP_MESSAGING);
+        with_roster_mut(c.0, |m| m.requests.served = true);
+        c
+    }
 }
 
 impl Drop for Conn {
@@ -81,6 +98,37 @@ fn nothing_goes_where_the_server_did_not_confirm_bit_6() {
         assert_eq!(typing(c.0, b"bob", true), None);
     }
     assert_eq!(sent(), []);
+}
+
+/// Bit 6 alone, or a bound beside no bit 6, is no server that serves
+/// message requests.
+#[test]
+fn no_request_of_the_draft_goes_where_it_is_not_served() {
+    sent();
+    let unbound = Conn::with_caps(CAP_MESSAGING);
+    let no_bit = Conn::serving_requests(0);
+    unsafe { hx_conn_set_caps(no_bit.0.cast(), 0) };
+    for c in [&unbound, &no_bit] {
+        unsafe {
+            requests(c.0);
+            assert_eq!(answer_request(c.0, b"bob", RequestAction::Approve), None);
+            assert_eq!(clear_requests(c.0, None, None), None);
+            assert_eq!(set_takes_requests(c.0, true, PresenceState::Online), None);
+        }
+    }
+    assert_eq!(sent(), []);
+}
+
+#[test]
+fn our_setting_goes_with_the_presence_the_caller_gives() {
+    sent();
+    let c = Conn::serving_requests(0);
+    unsafe { set_takes_requests(c.0, true, PresenceState::Away).unwrap() };
+    let (opcode, _, fields) = sent().remove(0);
+    assert_eq!(
+        (opcode, fields),
+        (808, vec![(0x0602, vec![0, 2]), (0x0650, vec![0, 1])])
+    );
 }
 
 #[test]

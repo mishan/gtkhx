@@ -1,7 +1,8 @@
 //! The messaging extension's friend family, as a connection holds it: the
 //! roster read from the server and kept up by what it pushes, the state of
-//! each instant message sent, and the events `hxhandlers::recv::friends`
-//! tells the view of on the session's `messaging` signal.
+//! each instant message sent, the message requests waiting for us
+//! ([`requests`]), and the events `hxhandlers::recv::friends` tells the
+//! view of on the session's `messaging` signal.
 //!
 //! What the server sends is the record: an entry pushed replaces the one
 //! held, whole, as the extension asks, and nothing here guesses at a
@@ -12,6 +13,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 
 use hxproto::messaging::{AckType, PresenceState, ReasonCode, RosterEntry, RosterState, GUID_LEN};
+
+pub mod requests;
+
+pub use requests::{Requests, Sender, Waiting};
 
 /// A message's id, the one its receipts name.
 pub type Guid = [u8; GUID_LEN];
@@ -57,6 +62,8 @@ pub enum Delivery {
     Sent,
     /// Held for them until they are back.
     Queued,
+    /// Held as a request until they approve it; no receipt follows one.
+    Requested,
     /// Their client has it.
     Delivered,
     /// They have seen it.
@@ -69,7 +76,8 @@ impl Delivery {
     /// What an IM Send's success says.
     pub fn sent(reason: Option<ReasonCode>) -> Delivery {
         match reason {
-            Some(ReasonCode::OfflineQueued | ReasonCode::Requested) => Delivery::Queued,
+            Some(ReasonCode::OfflineQueued) => Delivery::Queued,
+            Some(ReasonCode::Requested) => Delivery::Requested,
             _ => Delivery::Sent,
         }
     }
@@ -87,7 +95,7 @@ impl Delivery {
     fn rank(self) -> u8 {
         match self {
             Delivery::Sending => 0,
-            Delivery::Sent | Delivery::Queued => 1,
+            Delivery::Sent | Delivery::Queued | Delivery::Requested => 1,
             Delivery::Delivered => 2,
             Delivery::Read => 3,
             Delivery::Failed => 4,
@@ -101,6 +109,7 @@ pub struct Roster {
     entries: BTreeMap<Vec<u8>, Friend>,
     sent: HashMap<Guid, (Vec<u8>, Delivery)>,
     presence: Option<(PresenceState, Option<String>)>,
+    pub requests: Requests,
 }
 
 impl Roster {
@@ -219,6 +228,15 @@ pub enum Event {
     },
     /// The server took our presence.
     Presence,
+    /// The requests were listed again, or their count changed.
+    Requests,
+    /// Clear Message Requests on `trans` deleted `requests` requests and
+    /// declined `friend_requests` friend requests.
+    Cleared {
+        trans: u32,
+        requests: u32,
+        friend_requests: u32,
+    },
     Im(Im),
     /// A message we sent moved on.
     Delivery {

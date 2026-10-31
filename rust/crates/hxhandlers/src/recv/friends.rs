@@ -10,12 +10,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
+use std::time::Instant;
 
 use gtkhx_core::conn::hx_conn_has_cap;
-use gtkhx_core::messaging::{self as model, Delivery, Event, Friend, Guid, Im};
+use gtkhx_core::messaging::requests::Page;
+use gtkhx_core::messaging::{self as model, Delivery, Event, Friend, Guid, Im, Sender, Waiting};
 use hxproto::messages::{tag, ServerHdr};
 use hxproto::messaging::{
-    parse_entry, parse_roster, AckType, PresenceState, ReasonCode, TypingState, CAP_MESSAGING,
+    parse_entry, parse_message_requests, parse_roster, AckType, MessageRequests, PresenceState,
+    ReasonCode, RequestAction, TypingState, CAP_MESSAGING,
 };
 use hxproto::parse::Header;
 use hxproto::wire::{Chunk, ChunkIter};
@@ -37,12 +40,19 @@ extern "C" {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Asked {
     Roster,
-    /// Our presence, and the status sent with it, if any.
-    Presence(PresenceState, Option<String>),
+    /// Our presence, the status sent with it, if any, and whether we take
+    /// message requests, if it said.
+    Presence(PresenceState, Option<String>, Option<bool>),
     /// An instant message.
     Im(Guid),
     /// Find User or Get User Info: an entry, or nobody.
     Find,
+    /// A page of the message requests' listing.
+    Requests,
+    /// An answer to a message request.
+    Answer(RequestAction),
+    /// Clear Message Requests.
+    Clear,
     /// The rest, whose effect the server pushes as Roster Entries: only a
     /// refusal is news.
     Change,
@@ -107,8 +117,11 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
             }
             Err(e) => unreadable(htlc, trans, opcode, &format!("{e:?}")),
         },
-        Asked::Presence(state, status) => {
-            model::with_roster_mut(htlc, |m| m.set_own_presence(state, status));
+        Asked::Presence(state, status, takes) => {
+            model::with_roster_mut(htlc, |m| {
+                m.set_own_presence(state, status);
+                m.requests.takes = takes.or(m.requests.takes);
+            });
             tell(htlc, &Event::Presence);
         }
         Asked::Im(guid) => delivered(htlc, &guid, None, Delivery::sent(reason)),
@@ -119,8 +132,75 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
             }
             Err(e) => unreadable(htlc, trans, opcode, &format!("{e:?}")),
         },
-        Asked::Change => {}
+        Asked::Requests => {
+            match parse_message_requests(frame, frame.len()) {
+                Ok(p) => {
+                    let page = page(htlc, &p);
+                    let now = Instant::now();
+                    if model::with_roster_mut(htlc, |m| m.requests.page(page, now)) {
+                        tell(htlc, &Event::Requests);
+                    }
+                }
+                Err(e) => {
+                    model::with_roster_mut(htlc, |m| m.requests.failed());
+                    unreadable(htlc, trans, opcode, &format!("{e:?}"));
+                }
+            }
+            crate::send::friends::pace(htlc, Instant::now());
+        }
+        // Approving and deleting change what waits, which the server says
+        // with a Message Requests Changed; ending an approval does not.
+        Asked::Answer(RequestAction::EndApproval) => crate::send::friends::requests(htlc),
+        Asked::Clear => {
+            let count = |t| chunk(frame, t).map_or(0, |c| c.as_uint());
+            tell(
+                htlc,
+                &Event::Cleared {
+                    trans,
+                    requests: count(tag::REQUEST_COUNT),
+                    friend_requests: count(tag::FRIEND_REQUEST_COUNT),
+                },
+            );
+        }
+        Asked::Answer(_) | Asked::Change => {}
     }
+}
+
+/// A page of the listing, its text in the connection's encoding.
+unsafe fn page(htlc: *mut c_void, p: &MessageRequests<'_>) -> Page {
+    let utf8 = hx_conn_has_cap(htlc.cast(), hxsession::cap::TEXT_ENCODING) != 0;
+    let (mut senders, mut approvals) = (Vec::new(), Vec::new());
+    for g in p.groups() {
+        if g.is_approval() {
+            approvals.push(g.login.to_vec());
+            continue;
+        }
+        let messages = g.messages().map(|m| Waiting {
+            guid: *m.guid,
+            body: lf(&if utf8 {
+                hxproto::text::to_utf8(m.body)
+            } else {
+                hxproto::text::mac_roman_to_utf8(m.body)
+            }),
+            sent_at: m.timestamp,
+        });
+        senders.push(Sender {
+            login: g.login.to_vec(),
+            messages: messages.collect(),
+        });
+    }
+    Page {
+        takes: p.takes_requests,
+        dropped: p.dropped,
+        cursor: p.cursor.map(<[u8]>::to_vec),
+        senders,
+        approvals,
+    }
+}
+
+/// Line endings as GtkHx keeps them, LF.
+fn lf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 /// A reply that does not say what it must is no answer, and is said to be
@@ -165,6 +245,10 @@ unsafe fn refused(
             return;
         }
         Asked::Im(guid) => delivered(htlc, &guid, None, Delivery::Failed),
+        Asked::Requests => {
+            model::with_roster_mut(htlc, |m| m.requests.failed());
+            crate::send::friends::pace(htlc, Instant::now());
+        }
         _ => {}
     }
     let text = hxproto::parse::parse_task_error(frame, frame.len(), 4096)
@@ -279,8 +363,18 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
                 );
             }
         }
-        // Message requests, calls, transfers and buddy icons are not this
-        // client's yet.
+        o if o == hdr(ServerHdr::MessageRequestsChanged) => {
+            let count = chunk(frame, tag::REQUEST_COUNT).map(|c| c.as_uint());
+            match count {
+                Some(n) if model::with_roster(htlc, |m| m.requests.served) => {
+                    model::with_roster_mut(htlc, |m| m.requests.changed(n));
+                    tell(htlc, &Event::Requests);
+                }
+                Some(_) => {}
+                None => log("message requests changed, without their count"),
+            }
+        }
+        // Calls, transfers and buddy icons are not this client's yet.
         _ => {}
     }
 }
@@ -297,7 +391,7 @@ fn im(frame: &[u8]) -> Option<Im> {
     Some(Im {
         from: from.to_vec(),
         guid,
-        body: body.replace("\r\n", "\n").replace('\r', "\n"),
+        body: lf(&body),
         sent_at,
     })
 }

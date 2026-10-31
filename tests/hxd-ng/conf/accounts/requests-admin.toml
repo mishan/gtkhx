@@ -1,0 +1,19 @@
+# Makes the accounts the friends suite's message requests tests use, and
+# deletes them after: hxd-ng keeps what a request did to its sender (a
+# hold, the requests it counts against the pair) for days, so each run
+# needs senders and recipients no run before it has used. It holds every
+# bit it gives, as hxd-ng asks of an account's editor.
+name = "requests-admin"
+password = "requests-admin"
+
+[access]
+read_chat = true
+send_chat = true
+send_msgs = true
+messaging = true
+create_users = true
+delete_users = true
+
+# Each test makes and deletes its accounts in a burst.
+[extra]
+can_spam = true
