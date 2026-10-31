@@ -47,7 +47,6 @@
 
 #include "chat.h"
 #include "hxconn.h"
-#include "msg.h"
 #include "session_registry.h"
 #include "hxnet_bridge.h"
 #include "hxnet_htxf.h" /* hxnet_hope_aead_free */
@@ -101,20 +100,18 @@ hx_session_new (void)
     sess->htlc = hx_conn_new ();
     hx_conn_set_sess (sess->htlc, sess);
 
-    /* The per-session collections. chats_init additionally seeds the public
-     * chat at cid 0, which must exist for as long as the table does.
+    /* The per-session chats. chats_init additionally seeds the public chat at
+     * cid 0, which must exist for as long as the table does.
      *
-     * Both also register a process-global tab-close handler on the
-     * way past (chats_init → pchat_close, msg_windows_init → msg_tab_on_close).
-     * Re-registering the same function pointer per session is idempotent, so
-     * this is harmless rather than merely tolerated — but it is a per-process
-     * concern living inside a per-session call, and if either ever becomes
-     * per-connection it has to move out of here.
+     * It also registers a process-global tab-close handler on the way past
+     * (pchat_close). Re-registering the same function pointer per session is
+     * idempotent, so this is harmless rather than merely tolerated — but it is
+     * a per-process concern living inside a per-session call, and if it ever
+     * becomes per-connection it has to move out of here.
      *
-     * All are pure model calls — no widgets — which is what lets the
-     * factory run at the very top of fe_init, ahead of prefs_read. */
+     * A pure model call — no widgets — which is what lets the factory run at
+     * the very top of fe_init, ahead of prefs_read. */
     chats_init (sess);
-    msg_windows_init (sess);
 
 #ifdef HAVE_VOICE
     /* Per-session because each server's user list renders its own speaker
@@ -275,10 +272,10 @@ hx_conn_release (struct htlc_conn *htlc)
  * runs, and every long-lived holder asks it rather than keeping a pointer of
  * its own.
  *
- * The three collections destroy their entries: `tasks` through `task_free`,
- * `msg_windows` through `msgwin_free`, and the chat registry through the
- * `chat_free` it was built with — which is also what tears down each chat's
- * attached view.
+ * The chat registry destroys its entries through the `chat_free` it was built
+ * with — which is also what tears down each chat's attached view. The
+ * private-message conversations went earlier, with the pages
+ * (`gtkhx_dock_remove_session_pages`).
  *
  * Most widget fields on the session are borrowed: children of a dock page that
  * `hx_session_close` destroyed before getting here, gone with their parent.
@@ -327,7 +324,6 @@ hx_session_free (session *sess)
         return;
     }
 
-    g_clear_pointer (&sess->msg_windows, g_hash_table_destroy);
     g_clear_pointer (&sess->chats, hx_chats_free);
     g_clear_pointer (&sess->server_name, g_free);
     g_clear_pointer (&sess->listed_name, g_free);

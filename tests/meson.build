@@ -351,21 +351,6 @@ test_dock_layout_parse = executable('test_dock_layout_parse',
 test('dock_layout_parse', test_dock_layout_parse,
      suite : 'unit')
 
-# msgwin_hash — Phase 1.2 replaces the doubly-linked msg_list (a
-# file-scope global in msg.c) with GHashTable<u16 uid, struct msgwin*>
-# on the session. struct msgwin lives in session.h, which pulls in
-# gtk + adwaita, so this test exercises a layout-compatible stub
-# rather than linking msg.c. The integration suite covers the real
-# msgwin path end-to-end against mhxd.
-test_msgwin_hash = executable('test_msgwin_hash',
-  'unit/test_msgwin_hash.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-  link_depends        : rust_build,
-)
-test('msgwin_hash', test_msgwin_hash,
-     suite : 'unit')
-
 # chat_hash — Phase 1.3 replaces the chat_front / chat_tail /
 # chat_list / __chat_list sentinel quartet on the session with
 # GHashTable<u32 cid, struct chat*>. struct chat sits alongside

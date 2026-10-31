@@ -441,9 +441,9 @@ extern void hx_inline_media_row_append (struct _GtkWidget *view, void *table,
  *
  * Consumers:
  *
- *   - msg.c::msg_output: opens a private-message window keyed on
- *     uid, prefixes the body with a coloured "<name>" header, and
- *     hands the line to xtext.
+ *   - gtkhx-ui msg::msg_output_from_event: opens a private-message
+ *     window keyed on uid, prefixes the body with a colored "<name>"
+ *     header, and hands the line to the chat view.
  *
  *   - notify.c::gtkhx_notify_msg: posts a notification titled
  *     "name (private message)" with the body as preview. Skipped

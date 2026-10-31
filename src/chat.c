@@ -52,6 +52,8 @@
 #include "users_view.h"
 #include "gtkhx.h"
 #include "chat.h"
+#include "msg.h"
+#include "sound.h"
 #include "chat_members.h"
 #include "chat_tabs.h"
 #include "emoji.h"
@@ -228,6 +230,10 @@ GdkRGBA colors[] = {
 G_STATIC_ASSERT (G_N_ELEMENTS (colors) == ROTULUS_PAL_COLS);
 G_STATIC_ASSERT (HX_CHAT_LOG_INFO_COLOR == HX_CHAT_INFO_COLOR);
 G_STATIC_ASSERT (ROTULUS_PAL_NICK_COLORS == GTKHX_NICK_COLORS_MAX);
+/* Values gtkhx-ui's msg.rs and broadcast.rs mirror. */
+G_STATIC_ASSERT (ROTULUS_PAL_NICK_BRACKET == 41);
+G_STATIC_ASSERT (ROTULUS_PAL_SELF_BRACKET == 42);
+G_STATIC_ASSERT (HX_CHAT_LOG_INFO_COLOR == 43 && MSG == 6);
 
 /* Whether the active theme has any nick_colors. The slot a nick hashes to
  * never depends on how many (see hx_chat_nick_color), only on this. */
@@ -305,14 +311,12 @@ gtkhx_apply_theme_palette (gboolean dark)
     }
 
     /* Push the new palette into every live chat view, of every connection:
-     * chat and private-chat outputs in each session's chats, private-message
-     * outputs in its msg_windows. News is a plain GtkTextView and follows
+     * chat and private-chat outputs in each session's chats, and its
+     * private-message outputs. News is a plain GtkTextView and follows
      * the theme's CSS without help. */
     for (guint s = 0; s < hx_session_count (); s++) {
         session *sess = hx_session_at (s);
         guint n = hx_chats_count (sess->chats);
-        GHashTableIter iter;
-        gpointer val;
 
         for (guint i = 0; i < n; i++) {
             struct gtkhx_chat *gchat
@@ -321,14 +325,7 @@ gtkhx_apply_theme_palette (gboolean dark)
                 rotulus_view_set_palette (ROTULUS_VIEW (gchat->output), colors);
             }
         }
-        g_hash_table_iter_init (&iter, sess->msg_windows);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct msgwin *msg = val;
-            if (msg->outputbuf) {
-                rotulus_view_set_palette (ROTULUS_VIEW (msg->outputbuf),
-                                          colors);
-            }
-        }
+        hx_msg_set_palette (sess, colors);
     }
 }
 
@@ -1362,7 +1359,7 @@ xprintline (session *sess, GtkWidget *text, guint32 cid, char *chat, size_t len,
      * xtext renders the per-entry stamp (ent->stamp, auto-set in
      * the view on append) iff indent mode is on &&
      * buf->time_stamp. Both are flipped on per-buffer at creation
-     * time in chat.c / msg.c, and re-applied to live buffers when
+     * time in chat.c / msg.rs, and re-applied to live buffers when
      * the user toggles CFG_TIMESTAMP via Settings. */
 
     /* Find the parse facts xprintline_render needs: INFOPREFIX
@@ -1907,8 +1904,7 @@ user_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
 
 /* Content-build helpers for the Rust private-chat window (gtkhx-ui `pchat`).
  * create_pchat_window moved to Rust: it assembles the tab layout around the
- * C-coupled leaf widgets these helpers build. Mirrors msg.c's create_msg +
- * hx_msgwin_* accessor seam. */
+ * C-coupled leaf widgets these helpers build. */
 
 GtkWidget *
 hx_gchat_output (struct gtkhx_chat *g)
@@ -2009,7 +2005,7 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
 
     /* HxUserListView GObject (STYLE_CHAT — 18-px rows, 1.0× scale,
      * 36-px text offset). The view installs its own right-click
-     * gesture and double-click → msgwin handler, so the older
+     * gesture and double-click → private-message handler, so the older
      * users_attach_click_gesture wiring is gone. Selection lives
      * on the view's GtkSingleSelection — the action buttons below
      * pull it via hx_user_list_view_get_selected_user. */

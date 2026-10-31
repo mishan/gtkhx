@@ -8,16 +8,16 @@
 //! The two index maps behind those views are shared, and so stay keyed on
 //! `(connection, cid)` / `(connection, uid)`: a cid or a uid is only unique
 //! *within* a connection. This module owns the views, the maps, and the
-//! close-page dispatch; `chat.c` / `msg.c` call in to add / find / raise /
-//! close tabs through the `gtkhx_chat_tabs_*` C ABI, each passing the
-//! connection its tab belongs to.
+//! close-page dispatch; `chat.c` calls in to add / find / raise / close tabs
+//! through the `gtkhx_chat_tabs_*` C ABI, and the `msg` module directly, each
+//! passing the connection its tab belongs to.
 //!
 //! The dock side (flag / raise the Chat dock panel) stays C behind
 //! `dock_bridge` — this module only names GTK / libadwaita types. State lives
 //! in a `thread_local!` (main-thread only, like every other window module);
 //! the close-page handler snapshots what it needs out of that cell and drops
-//! the borrow before calling the registered C teardown, so a teardown that
-//! calls back in (e.g. `gtkhx_chat_tabs_close_pchat`) can't re-enter the borrow.
+//! the borrow before calling the kind's teardown, so a teardown that calls
+//! back in (e.g. `gtkhx_chat_tabs_close_pchat`) can't re-enter the borrow.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -104,7 +104,6 @@ struct ChatTabs {
     pchat: HashMap<(ConnKey, u32), adw::TabPage>,
     msg: HashMap<(ConnKey, u16), adw::TabPage>,
     on_close_pchat: Option<extern "C" fn(*mut c_void, u32)>,
-    on_close_msg: Option<extern "C" fn(*mut c_void, u16)>,
 }
 
 thread_local! {
@@ -125,7 +124,7 @@ fn view_of(page: &adw::TabPage) -> Option<adw::TabView> {
 }
 
 /// The close-page dispatcher. Removes the page's index entry, fires the
-/// registered C teardown for its kind, then confirms the close.
+/// teardown for its kind, then confirms the close.
 fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation {
     let m = meta(page);
 
@@ -151,11 +150,9 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
                     }
                 }
                 KIND_MSG => {
-                    st.msg.remove(&(m.conn, m.id as u16));
-                    if let Some(f) = st.on_close_msg {
-                        let (htlc, uid) = (m.htlc, m.id as u16);
-                        cb = Some(Box::new(move || f(htlc, uid)));
-                    }
+                    let uid = m.id as u16;
+                    st.msg.remove(&(m.conn, uid));
+                    cb = Some(Box::new(move || crate::msg::tab_closed(m.conn, uid)));
                 }
                 _ => {}
             }
@@ -243,13 +240,6 @@ pub extern "C" fn gtkhx_chat_tabs_set_close_pchat_handler(
     STATE.with(|s| s.borrow_mut().on_close_pchat = func);
 }
 
-#[no_mangle]
-pub extern "C" fn gtkhx_chat_tabs_set_close_msg_handler(
-    func: Option<extern "C" fn(*mut c_void, u16)>,
-) {
-    STATE.with(|s| s.borrow_mut().on_close_msg = func);
-}
-
 /// # Safety
 /// `content` is a valid `GtkWidget*`; `title` is NULL or a valid C string.
 #[no_mangle]
@@ -317,24 +307,30 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
     ptr
 }
 
-/// # Safety
-/// `content` is a valid `GtkWidget*`; `title` is NULL or a valid C string.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_chat_tabs_add_msg(
+/// A private message's tab title, or the generic one when it has none.
+fn msg_title(title: &str) -> String {
+    if title.is_empty() {
+        tr("PM")
+    } else {
+        title.to_owned()
+    }
+}
+
+/// Add a private-message tab for the partner at `uid` on `htlc`. False when
+/// that connection has no tab view to add it to: its Chat page isn't built.
+pub(crate) fn add_msg(
     htlc: *mut c_void,
-    content: *mut gtk::ffi::GtkWidget,
+    content: &impl IsA<gtk::Widget>,
     uid: u16,
-    title: *const c_char,
-) -> *mut adw::ffi::AdwTabPage {
+    title: &str,
+) -> bool {
     let conn = conn_key(htlc);
     let Some(view) = view(conn) else {
-        return std::ptr::null_mut();
+        return false;
     };
-    let w: gtk::Widget = from_glib_none(content);
 
-    let page = view.append(&w);
-    let t = crate::cstr(title);
-    page.set_title(&if t.is_empty() { tr("PM") } else { t });
+    let page = view.append(content);
+    page.set_title(&msg_title(title));
 
     set_meta(
         &page,
@@ -346,11 +342,10 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_msg(
         },
     );
 
-    let ptr = page.as_ptr();
     STATE.with(|s| {
         s.borrow_mut().msg.insert((conn, uid), page);
     });
-    ptr
+    true
 }
 
 fn find_pchat(htlc: *mut c_void, cid: u32) -> Option<adw::TabPage> {
@@ -367,16 +362,6 @@ pub extern "C" fn gtkhx_chat_tabs_find_pchat(
     cid: u32,
 ) -> *mut adw::ffi::AdwTabPage {
     find_pchat(htlc, cid)
-        .map(|p| p.as_ptr())
-        .unwrap_or(std::ptr::null_mut())
-}
-
-#[no_mangle]
-pub extern "C" fn gtkhx_chat_tabs_find_msg(
-    htlc: *mut c_void,
-    uid: u16,
-) -> *mut adw::ffi::AdwTabPage {
-    find_msg(htlc, uid)
         .map(|p| p.as_ptr())
         .unwrap_or(std::ptr::null_mut())
 }
@@ -404,8 +389,7 @@ pub extern "C" fn gtkhx_chat_tabs_raise_pchat(htlc: *mut c_void, cid: u32) {
     raise_and_select(find_pchat(htlc, cid));
 }
 
-#[no_mangle]
-pub extern "C" fn gtkhx_chat_tabs_raise_msg(htlc: *mut c_void, uid: u16) {
+pub(crate) fn raise_msg(htlc: *mut c_void, uid: u16) {
     raise_and_select(find_msg(htlc, uid));
 }
 
@@ -512,13 +496,8 @@ pub extern "C" fn gtkhx_chat_tabs_set_attention_pchat(
     set_page_attention(htlc, find_pchat(htlc, cid), state != glib::ffi::GFALSE);
 }
 
-#[no_mangle]
-pub extern "C" fn gtkhx_chat_tabs_set_attention_msg(
-    htlc: *mut c_void,
-    uid: u16,
-    state: glib::ffi::gboolean,
-) {
-    set_page_attention(htlc, find_msg(htlc, uid), state != glib::ffi::GFALSE);
+pub(crate) fn set_attention_msg(htlc: *mut c_void, uid: u16, state: bool) {
+    set_page_attention(htlc, find_msg(htlc, uid), state);
 }
 
 /// # Safety
@@ -535,17 +514,9 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_pchat(
     }
 }
 
-/// # Safety
-/// `title` is NULL or a valid C string.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_msg(
-    htlc: *mut c_void,
-    uid: u16,
-    title: *const c_char,
-) {
+pub(crate) fn set_title_msg(htlc: *mut c_void, uid: u16, title: &str) {
     if let Some(page) = find_msg(htlc, uid) {
-        let t = crate::cstr(title);
-        page.set_title(&if t.is_empty() { tr("PM") } else { t });
+        page.set_title(&msg_title(title));
     }
 }
 
@@ -555,13 +526,6 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_msg(
 #[no_mangle]
 pub extern "C" fn gtkhx_chat_tabs_close_pchat(htlc: *mut c_void, cid: u32) {
     if let (Some(view), Some(page)) = (view(conn_key(htlc)), find_pchat(htlc, cid)) {
-        view.close_page(&page);
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn gtkhx_chat_tabs_close_msg(htlc: *mut c_void, uid: u16) {
-    if let (Some(view), Some(page)) = (view(conn_key(htlc)), find_msg(htlc, uid)) {
         view.close_page(&page);
     }
 }

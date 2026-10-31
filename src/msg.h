@@ -1,61 +1,39 @@
 #ifndef HX_MSG_H
 #define HX_MSG_H
 
-/* lazy-allocate the session's PM-window GHashTable. Safe to
- * call multiple times — only the first call constructs the table.
- * gtkhx.c calls it before the first create_msgwin at startup. */
-extern void msg_windows_init (session *sess);
+/* Private messages: gtkhx-ui's `msg` module, over hxmodel::pm. */
 
-/* create_msgwin is the gtkhx-ui `msg` Rust shell: it builds the PM tab layout
- * around the model + leaf widgets create_msg makes, then adds the tab. The
- * accessors/setters below are the seam it uses (create_msg is C, the layout
- * assembly is Rust). */
-extern struct msgwin *create_msgwin (session *sess, guint16 uid, char *name);
-extern struct msgwin *create_msg (session *sess, guint16 uid, char *name);
-extern GtkWidget *hx_msgwin_outputbuf (struct msgwin *msg);
-extern GtkWidget *hx_msgwin_vscroll (struct msgwin *msg);
-extern GtkWidget *hx_msgwin_inputbuf (struct msgwin *msg);
-extern void hx_msgwin_set_window (struct msgwin *msg, GtkWidget *w);
-extern void hx_msgwin_set_info_image (struct msgwin *msg, GtkWidget *w);
-extern void hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w);
-extern void hx_msgwin_name (session *sess, guint16 uid, GtkWidget *input,
-                            GtkWidget *output, const char *nick);
-/* Look up a PM window in `sess`. The uid alone is not a key: it is only
- * unique within a connection, so the session picks which table to search. */
-extern struct msgwin *msgwin_with_uid (session *sess, guint16 uid);
-extern void msg_output (session *sess, const char *name, guint16 uid,
-                        char *buf);
-
-/* msg-signal renderer. Same as msg_output but reads from
- * a pre-parsed HxMsgEvent (uid + UTF-8 name/body + is_self flag). */
+/* Show a private message received on htlc, opening its conversation. */
 struct _HxMsgEvent;
 extern void msg_output_from_event (struct htlc_conn *htlc,
                                    struct _HxMsgEvent *event);
 
-/* Render a broadcast received on htlc. sender_name + sender_color
- * are from the wire chunk (NULL/0 when the server didn't include
- * them — older Hotline servers and anonymous "rate-limit" notes).
- * When sender_name is non-NULL the chat log line uses "[name] body"
- * with sender_color picking the name's mIRC slot; otherwise it
- * falls back to the legacy "[hx] broadcast: ..." form. */
+/* Open the conversation with uid, or select it if it is open. */
+extern void hx_msg_open (session *sess, guint16 uid, const char *name);
+
+/* Redraw the open conversation with uid, if any, for the user's new name,
+ * icon and status. Passed in because the user list hasn't taken them yet. */
+extern void hx_msg_user_changed (session *sess, guint16 uid, const char *nam,
+                                 guint16 icon, guint16 color);
+
+/* The conversation's tab content, or NULL when none is open. */
+extern GtkWidget *hx_msg_window (session *sess, guint16 uid);
+
+/* Restyle each of sess's conversations: the palette, the chat font, and the
+ * chat preferences. */
+extern void hx_msg_set_palette (session *sess, const GdkRGBA *palette);
+extern void hx_msg_set_font (session *sess, const char *font);
+extern void hx_msg_configure (session *sess);
+
+/* Render a broadcast received on htlc (gtkhx-ui's `broadcast` module).
+ * sender_name + sender_color are from the wire (NULL/0 when the server
+ * didn't include them — older Hotline servers and anonymous "rate-limit"
+ * notes). With a name, the chat log line is "[name] body" with
+ * sender_color picking the name's slot; otherwise "[hx] broadcast: ...". */
 extern void broadcastmsg (struct htlc_conn *htlc, const char *sender_name,
                           guint16 sender_color, char *text);
-/* Re-render the recipient info pane from the recipient's current entry in the
- * public chat's HxMemberModel. Used at create_msgwin time when that entry
- * already reflects current state. */
-extern void msgwin_refresh_user_info (struct msgwin *msg);
-
-/* Re-render the recipient info pane from explicit just-changed
- * values. Called from users.c's user_change handler, which receives
- * the NEW name/icon/color as direct args before rcv.c has applied
- * them to the chat's member model. */
-extern void msgwin_apply_user_change (struct msgwin *msg, const char *nam,
-                                      guint16 icon, guint16 color);
 
 /* SEND_MSG, whose reply the session reads (hxhandlers::send::msg). */
 extern void hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg);
-
-/* hx_send_broadcast (the HTLC_HDR_MSG_BROADCAST wire sender) moved to Rust
- * (gtkhx-ui broadcast.rs) alongside the Broadcast composer. */
 
 #endif

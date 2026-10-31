@@ -8,7 +8,7 @@
  *   CR2LF / LF2CR (compat.h macros)
  *     The Hotline wire format uses '\r' for line endings; we use
  *     '\n' internally. Every chunk parser in rcv.c calls CR2LF on
- *     the way in; commands.c / msg.c / news.c call LF2CR on the way
+ *     the way in; commands.c / news.c call LF2CR on the way
  *     out. Both are in-place and length-preserving — they just
  *     swap one byte for another.
  *

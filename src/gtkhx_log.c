@@ -73,16 +73,6 @@ hx_printf_prefix (struct htlc_conn *htlc, guint32 cid, const char *prefix,
 }
 
 void
-hx_printf_named (struct htlc_conn *htlc, guint32 cid, const char *name,
-                 gint32 color, const char *fmt, ...)
-{
-    va_list ap;
-    va_start (ap, fmt);
-    log_line_emit (htlc, cid, name, color, fmt, ap);
-    va_end (ap);
-}
-
-void
 hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt, ...)
 {
     va_list ap;

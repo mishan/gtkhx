@@ -57,7 +57,6 @@ gtkhx_sources = files(
   'inline_media_decode.c',
   'hl_code.c',
   'human_readable.c',
-  'msg.c',
   'network.c',
   'hxnet_bridge.c',
   # hxconn.c retired — struct htlc_conn's accessors + lifecycle are the Rust

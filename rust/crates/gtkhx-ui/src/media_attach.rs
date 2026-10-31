@@ -17,7 +17,7 @@ use gtk::{gio, glib};
 use gtk4 as gtk;
 
 use gtkhx_core::boxed::chat::HxChatMedia;
-use gtkhx_core::conn::{hx_conn_has_cap, hx_conn_media_max_bytes, hx_conn_name, hx_conn_sess};
+use gtkhx_core::conn::{hx_conn_has_cap, hx_conn_media_max_bytes};
 use hxhandlers::media::{hx_send_upload_media, UploadResult};
 
 use crate::dock::{self, Bound, ConnKey};
@@ -41,9 +41,6 @@ enum Target {
 extern "C" {
     fn toolbar_show_toast(text: *const c_char);
     fn hx_gchat_cid(gchat: *mut c_void) -> u32;
-    fn msg_output(sess: *mut c_void, name: *const c_char, uid: u16, buf: *const c_char);
-    fn msgwin_with_uid(sess: *mut c_void, uid: u16) -> *mut c_void;
-    fn hx_msgwin_outputbuf(msg: *mut c_void) -> *mut gtk::ffi::GtkWidget;
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
 }
 
@@ -243,15 +240,9 @@ unsafe extern "C" fn uploaded(htlc: *mut c_void, r: *const UploadResult, upload:
 /// window shows its own: the picture fetched by the handle, as the
 /// recipient's is.
 unsafe fn echo(htlc: *mut c_void, uid: u16, r: &UploadResult) {
-    let sess = hx_conn_sess(htlc.cast());
-    if sess.is_null() {
+    let Some(output) = crate::msg::echo(htlc, uid, c"") else {
         return;
-    }
-    msg_output(sess, hx_conn_name(htlc.cast()), uid, c"".as_ptr());
-    let msg = msgwin_with_uid(sess, uid);
-    if msg.is_null() {
-        return;
-    }
+    };
     let media = HxChatMedia {
         id: r.media_id.cast_mut(),
         id_len: r.media_id_len,
@@ -265,7 +256,7 @@ unsafe fn echo(htlc: *mut c_void, uid: u16, r: &UploadResult) {
         bytes_present: r.bytes_present,
     };
     crate::inline_media_row::hx_inline_media_row_append(
-        hx_msgwin_outputbuf(msg),
+        output.as_ptr(),
         ptr::null_mut(),
         &media,
         htlc,

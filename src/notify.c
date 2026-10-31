@@ -112,13 +112,6 @@ chat_window_for_cid (session *sess, guint32 cid)
     return hx_gchat_window (gc);
 }
 
-static GtkWidget *
-msg_window_for_uid (session *sess, guint16 uid)
-{
-    struct msgwin *m = msgwin_with_uid (sess, uid);
-    return m ? m->window : NULL;
-}
-
 /* Notification ids are app-global: g_application_send_notification replaces
  * any earlier notification with the same id. A cid or a uid is only unique
  * within a connection, so "msg-5" from two servers is one notification and
@@ -299,7 +292,7 @@ gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event)
 
     if (gtkhx_prefs.notify_omit_focused
         && window_is_active (
-            msg_window_for_uid (sess_from_htlc (htlc), event->uid))) {
+            hx_msg_window (sess_from_htlc (htlc), event->uid))) {
         return;
     }
 

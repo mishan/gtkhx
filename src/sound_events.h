@@ -10,8 +10,8 @@
  *
  * Signal → sound:
  *   "chat"                 → CHAT_POST
- *   "msg"                  → MSG   (broadcasts play MSG from msg.c, which
- *                                   has no "msg" signal — see broadcastmsg)
+ *   "msg"                  → MSG   (broadcasts play MSG themselves, having
+ *                                   no "msg" signal — see broadcastmsg)
  *   "news-post"            → NEWS_POST
  *   "chat-invitation"      → CHAT_INVITE
  *   "user-create"          → USER_JOIN  (only when incremental == TRUE)

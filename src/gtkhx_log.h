@@ -32,12 +32,6 @@ extern void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid,
                               const char *prefix, const char *fmt, ...)
     G_GNUC_PRINTF (4, 5);
 
-/* As hx_printf_prefix, but with an explicit gutter tag and colour —
- * broadcastmsg's per-sender "[name]" lines, which used to encode the
- * colour as escape bytes inside a pre-formatted prefix string. */
-extern void hx_printf_named (struct htlc_conn *htlc, guint32 cid,
-                             const char *name, gint32 color, const char *fmt,
-                             ...) G_GNUC_PRINTF (5, 6);
 extern void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt,
                        ...) G_GNUC_PRINTF (3, 4);
 

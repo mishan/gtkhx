@@ -78,8 +78,9 @@ time, which makes it a configure dependency: moving the lock reconfigures
 the build and picks up the new header.
 
 The C ABI's methods take a `RotulusView *`, and GtkHx's C holds its views
-as `GtkWidget *`, so the call sites in `chat.c`, `msg.c` and `options.c`
-cast with `ROTULUS_VIEW()`.
+as `GtkWidget *`, so the call sites in `chat.c` and `options.c` cast with
+`ROTULUS_VIEW()`. Private messages, in `gtkhx-ui`'s `msg.rs`, build their
+rows through the crate's Rust FFI types.
 
 The widget's own strings (its two context menus) are in the `rotulus`
 gettext domain, and their catalogs ship in the crate's `po/`. The same
@@ -133,7 +134,7 @@ can't bridge that, so `chat_view.rs` registers the resolver through the
 crate's Rust API, `set_avatar_func`, and takes its own reference on the
 way out.
 
-### `chat.c` and `msg.c`
+### `chat.c` and `msg.rs`
 
 **The palette.** `chat.c::gtkhx_apply_theme_palette` fills the view's
 palette from the active theme and pushes it to every open view with
@@ -199,10 +200,10 @@ headless benchmarks and render tests live in the rotulus repository.
 4. Reconfigure (the lockfile change does this on the next build) so the
    new `rotulus.h` and translations are picked up.
 5. Adapt to API changes. Most land in `chat_view.rs`; C ABI changes land at
-   the `ROTULUS_VIEW()` call sites in `chat.c`, `msg.c` and `options.c`,
-   and in `src/chat_avatar.c` if the avatar contract moves again. The
-   `chat` bench in `gtkhx-ui` builds rows through the crate's Rust FFI
-   types directly, so it breaks loudly when those change.
+   the `ROTULUS_VIEW()` call sites in `chat.c` and `options.c`, and in
+   `src/chat_avatar.c` if the avatar contract moves again. The `chat` bench
+   and the private messages in `gtkhx-ui` build rows through the crate's
+   Rust FFI types directly, so they break loudly when those change.
 
 Then run the full set of gates in `AGENTS.md`, both voice configurations
 included.
@@ -286,7 +287,7 @@ the six is now a field of a row or a palette index on a run.
 The `chat-log-line` session signal changed shape with it: it carries
 `(htlc, cid, name, color, body)` rather than a pre-formatted string, so
 `INFOPREFIX` is the bare string `"hx"` and broadcast passes its sender name
-and color as parameters (`hx_printf_named`). The `hx_printf_prefix`
+and color as the signal's own parameters. The `hx_printf_prefix`
 callers are unchanged — the prefix argument simply means the tag now.
 
 ### Two security consequences

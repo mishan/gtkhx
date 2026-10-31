@@ -12,9 +12,8 @@
 //!     `hxproto::emoji::shortcode_matches` (native Rust); this module
 //!     owns only the GTK wiring.
 //!
-//! The three C ABI entry points are preserved so chat.c / msg.c (and the
-//! sibling Rust modules msg.rs / pchat.rs, which extern them) link
-//! unchanged.
+//! The three C ABI entry points are preserved so chat.c (and the sibling
+//! Rust module pchat.rs, which externs them) link unchanged.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_char;

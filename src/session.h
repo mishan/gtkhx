@@ -59,41 +59,6 @@ typedef gpointer GdkImage;
  * unrelated consumers. */
 typedef gpointer GdkDrawable;
 
-/* ---- Message-window threading ------------------------------------- */
-
-/* no more next/prev. Open PM windows
- * live in session->msg_windows, a GHashTable<u16 uid, struct
- * msgwin*>. Lookup by uid is O(1) via msgwin_with_uid (now a thin
- * g_hash_table_lookup wrapper); the table owns the msgwin and frees
- * it (name + uid heap pointer + struct itself) via msgwin_free when
- * the user closes the window. */
-struct msgwin {
-    /* The session whose msg_windows table owns this window. Stored rather
-     * than resolved through hx_active_session() at use, because a private
-     * message is addressed to a uid that is only unique within its
-     * connection — the window has to remember which one it belongs to. */
-    session *sess;
-    guint16 *uid;
-    char *name;
-    GtkWidget *outputbuf;
-    GtkWidget *inputbuf;
-    GtkWidget *vscroll;
-    GtkWidget *window;
-    /* header pane above the chat showing the recipient's
-     * icon + name + status. info_image is a GtkImage (Mac classic
-     * cicn rendered to GdkPixbuf via load_icon); info_label is a
-     * single GtkLabel with Pango markup — bold (optionally
-     * coloured) name on top, dim small details (UID · Icon ·
-     * Admin/Guest [Away]) below. msgwin_refresh_user_info()
-     * repopulates both when the user changes their nick / icon /
-     * idle state. */
-    GtkWidget *info_image;
-    GtkWidget *info_label;
-    /* PM input line history — a Rust InputHistory (hxmodel::chat), like
-     * gtkhx_chat::chat_history. Owns the Up-arrow draft internally. */
-    void *history;
-};
-
 /* ---- Custom timer wheel (gtkhx.c) --------------------------------- */
 
 struct timer {
@@ -261,15 +226,6 @@ typedef struct _session {
     /* per-session gfile_list pointer retired with the legacy files browser.
      * The orthodox-FM browser (files_browser.c) keeps one browser per
      * session, in a table of its own keyed on the session. */
-
-    /* open PM windows keyed on the recipient's uid.
-     * Replaces the file-scope `msg_list` global in msg.c and the
-     * dead `sess->msg_list` field that was declared here but never
-     * populated (a long-standing bug — options.c font / wordwrap /
-     * timestamp iterations over the dead session pointer were
-     * silently no-oping). Lookup is O(1) via msgwin_with_uid;
-     * iteration uses GHashTableIter. */
-    GHashTable *msg_windows;
 
     struct gnews_catalog *gcnews_list;
 

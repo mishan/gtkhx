@@ -1613,7 +1613,7 @@ extern void output_user_info (guint16 uid, const char *nam, const char *info,
 /* Forward declarations for the file-local view functions the
  * Phase 3 adapter handlers below call. The functions themselves
  * are defined later in this file; the extern-linkage ones
- * (output_chat_subject, output_news_*, msg_output, etc.) are
+ * (output_chat_subject, output_news_*, msg_output_from_event, etc.) are
  * already declared in their respective headers.
  *
  * the chat-signal path bypasses

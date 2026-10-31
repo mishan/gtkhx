@@ -4,7 +4,7 @@
 //! The dialog is an `AdwDialog` form (server / account / connection groups).
 //! The service functions (bookmark menu, direct-connect-by-name, builtin
 //! bookmarks, reconnect-last, URL open/save) are re-exported with their C
-//! ABI so their callers (toolbar.c, chat.c, msg.c, tray.c, gtkurl.c,
+//! ABI so their callers (toolbar.c, chat.c, tray.c, gtkurl.c,
 //! gtkhx.c, bookmark_rc4_dialog.c) link unchanged.
 //!
 //! The cipher / compression picker vocabulary lives in the sibling

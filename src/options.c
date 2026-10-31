@@ -31,6 +31,7 @@
 #include <rotulus.h>
 #include "users.h"
 #include "chat.h"
+#include "msg.h"
 #include "chat_members.h" /* hx_member_model_get_info, struct hx_member_info */
 #include "network.h"
 #include "tray.h"
@@ -116,30 +117,14 @@ reinit_gtktexts (session *sess)
                 }
             }
         }
-        /* walk the PM-window hashtable. The pre-port
-         * code walked `sess->msg_list` here, but that field was
-         * never populated — the real msg_list global lived in
-         * msg.c, so this loop was a silent no-op for years and
-         * font-changes never reached open PM windows. The
-         * migration to session->msg_windows fixes that as a side
-         * effect. */
-        if (sess->msg_windows) {
-            GHashTableIter iter;
-            gpointer val;
-            g_hash_table_iter_init (&iter, sess->msg_windows);
-            while (g_hash_table_iter_next (&iter, NULL, &val)) {
-                struct msgwin *msg = val;
-                rotulus_view_set_font (ROTULUS_VIEW (msg->outputbuf), fontname);
-                gtkhx_apply_input_font (msg->inputbuf);
-            }
-        }
+        hx_msg_set_font (sess, fontname);
         g_free (fontname);
     }
 }
 
 /* Re-apply the chat preferences to every live chat view, in every
  * session: the chat and private-chat outputs in sess->chats, and the
- * private-message outputs in msg_windows. The view reads the values itself
+ * private-message outputs. The view reads the values itself
  * (gtkhx_chat_view_configure), so one walk serves every chat preference
  * rather than one per setting. */
 static void
@@ -157,13 +142,8 @@ changed_chat_view (void)
                 }
             }
         }
-        if (sess && sess->msg_windows) {
-            GHashTableIter iter;
-            gpointer val;
-            g_hash_table_iter_init (&iter, sess->msg_windows);
-            while (g_hash_table_iter_next (&iter, NULL, &val)) {
-                gtkhx_chat_view_configure (((struct msgwin *)val)->outputbuf);
-            }
+        if (sess) {
+            hx_msg_configure (sess);
         }
     }
 }

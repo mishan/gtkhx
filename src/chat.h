@@ -146,7 +146,7 @@ extern void output_chat_invitation (struct htlc_conn *htlc, guint32 cid,
                                     char *name);
 /* create_pchat_window is the gtkhx-ui `pchat` Rust content port: it assembles
  * the private-chat tab layout around these C-built leaf widgets + the user
- * sidebar, then adds the tab. Mirrors msg.c's create_msg + hx_msgwin_* seam. */
+ * sidebar, then adds the tab. */
 extern struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
                                                struct chat *chat);
 extern struct gtkhx_chat *gtkhx_pchat_new (struct htlc_conn *htlc,

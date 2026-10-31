@@ -27,6 +27,8 @@
 //!   subject, membership, and an opaque handle to its view).
 //! - [`chat_members`] — the C ABI over [`chat`] + [`member`]: membership
 //!   queries, the per-uid ignore flag, nick completion and input history.
+//! - [`pm`] — private-message conversations, keyed by connection and peer,
+//!   and the rules for what a message in one reads as.
 //!
 //! `conversation` and `chat_members` lived in `gtkhx-ui` until the step 3
 //! consolidation, because the chat-model re-think (ROADMAP M4b.5) landed them
@@ -46,3 +48,4 @@ pub mod files;
 pub mod files_entry;
 pub mod member;
 pub mod news;
+pub mod pm;

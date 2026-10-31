@@ -217,10 +217,17 @@ yet. In order, each stage a branch of its own:
    C's capability offer can stay 16 bits until a bit past 15 is needed.
 2. **The friend family** (bit 6, transactions 800–828): a buddy list, presence, instant
    messages with receipts and typing, find and search, nicknames. In Rust throughout:
-   requests in `hxrequest`, handlers in `hxhandlers::recv`, windows in `gtkhx-ui`, and an
-   IM window of its own rather than an extension of `msg.c`. Bit 6 is offered only by a
-   build that has it. The messenger-only session (bit 8) is for clients that are nothing
-   else, and GtkHx is not one.
+   requests in `hxrequest`, handlers in `hxhandlers::recv`, the view in `gtkhx-ui`. It
+   goes into the UI GtkHx already has rather than into windows of its own: a
+   connection's friends in its users panel, offline ones dimmed, with requests and
+   blocks there too; the private-message window as the conversation, keyed by login so
+   it reaches a friend who is offline, with delivered and read marks and typing;
+   Add Friend, Remove Friend and Block in the user context menus; presence on the
+   away state the list already shows; and a request notified as a private message
+   is. The private-message window moved to Rust first, so none of this grows C. Bit 6
+   is offered only by a build that has it. The messenger-only session (bit 8) is for
+   clients that are nothing else, and GtkHx is not one; a separate messaging-only
+   app for it is a later stage.
 3. **Message requests** (829–832): the requests a stranger's first message waits in,
    approved, deleted or cleared, and `DATA_TAKES_REQUESTS` in 808.
 4. **A device key, proved** (bit 14, Get Device Challenge and Prove Device). The identity
