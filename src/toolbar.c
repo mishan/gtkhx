@@ -667,6 +667,8 @@ toolbar_show_toast (const char *text)
     }
 
     toast = adw_toast_new (body);
+    /* Server text arrives here; as markup, a stray '<' or '&' loses it. */
+    adw_toast_set_use_markup (toast, FALSE);
     g_signal_connect (toast, "dismissed", G_CALLBACK (on_toast_dismissed),
                       NULL);
     /* Append before handing to the overlay so a synchronous

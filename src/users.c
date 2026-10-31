@@ -509,6 +509,7 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
                               _ ("Private Message"), on_user_msg);
     user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
                               _ ("Private Chat"), on_user_pchat);
+    hx_friends_popup_append (GTK_BOX (vbox), sess, cid, uid);
 
     /* GIF-icons (Phase 10.D): pause / resume this user's animated
      * avatar. Only shown when they actually have an animated one — the

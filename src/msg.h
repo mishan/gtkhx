@@ -16,9 +16,6 @@ extern void hx_msg_open (session *sess, guint16 uid, const char *name);
 extern void hx_msg_user_changed (session *sess, guint16 uid, const char *nam,
                                  guint16 icon, guint16 color);
 
-/* The conversation's tab content, or NULL when none is open. */
-extern GtkWidget *hx_msg_window (session *sess, guint16 uid);
-
 /* Restyle each of sess's conversations: the palette, the chat font, and the
  * chat preferences. */
 extern void hx_msg_set_palette (session *sess, const GdkRGBA *palette);

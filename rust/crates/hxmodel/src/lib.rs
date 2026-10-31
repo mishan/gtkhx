@@ -29,6 +29,8 @@
 //!   queries, the per-uid ignore flag, nick completion and input history.
 //! - [`pm`] — private-message conversations, keyed by connection and peer,
 //!   and the rules for what a message in one reads as.
+//! - [`friends`] — the friend family as the users panel lists it, and when
+//!   our presence and typing go out.
 //!
 //! `conversation` and `chat_members` lived in `gtkhx-ui` until the step 3
 //! consolidation, because the chat-model re-think (ROADMAP M4b.5) landed them
@@ -46,6 +48,7 @@ pub mod chat_members;
 pub mod conversation;
 pub mod files;
 pub mod files_entry;
+pub mod friends;
 pub mod member;
 pub mod news;
 pub mod pm;

@@ -53,5 +53,9 @@ extern void gtkhx_notify_pchat_invite (struct htlc_conn *htlc, guint32 cid,
 extern void gtkhx_notify_news (const char *headline);
 extern void gtkhx_notify_xfer_done (const char *filename);
 extern void gtkhx_notify_broadcast (const char *text);
+/* Post one notification under `id`, which a later one with the same id
+ * replaces; for the Rust callers that build their own. */
+extern void gtkhx_notify_send (const char *id, const char *title,
+                               const char *body);
 
 #endif /* HX_NOTIFY_H */

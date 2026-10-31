@@ -52,6 +52,9 @@ extern void hx_popup_item_install_css (void);
 
 extern void user_popup_show (GtkWidget *anchor, session *sess, guint32 cid,
                              guint16 uid, double x, double y);
+/* The friend family's items in that menu, where the server agreed to it. */
+extern void hx_friends_popup_append (GtkBox *menu, session *sess, guint32 cid,
+                                     guint16 uid);
 
 /* Shared headerbar / sidebar button handlers. `data` is the
  * HxUserListView* the button is attached to — selection + session

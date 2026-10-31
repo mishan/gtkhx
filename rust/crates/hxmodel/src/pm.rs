@@ -22,6 +22,11 @@ pub type ConnKey = u16;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Peer {
     Uid(u16),
+    /// A friend, by Login as the wire carries it: an account rather than a
+    /// session, so the conversation reaches them while they are offline.
+    /// The user list names nobody's Login, so the same person may have a
+    /// conversation of each kind.
+    Login(Vec<u8>),
 }
 
 /// One open conversation.
@@ -107,6 +112,16 @@ impl<V> Conversations<V> {
 /// A conversation's tab title.
 pub fn title(name: &str, uid: u16) -> String {
     format!("{name} ({uid})")
+}
+
+/// A friend's conversation's tab title, with their Login where they go by
+/// another name.
+pub fn login_title(name: &str, login: &str) -> String {
+    if name == login {
+        name.to_owned()
+    } else {
+        format!("{name} ({login})")
+    }
 }
 
 /// Whether `name` is ours. Only an answer once we have a nick: before that
@@ -233,6 +248,14 @@ mod tests {
         assert_eq!(t.of_conn(1).count(), 0);
         assert_eq!(t.get(2, &Peer::Uid(200)).unwrap().name, "y");
         assert!(t.forget_conn(1).is_empty());
+    }
+
+    #[test]
+    fn a_friend_is_titled_with_the_login_they_do_not_go_by() {
+        let cases = [("alice", "alice", "alice"), ("Al", "alice", "Al (alice)")];
+        for (name, login, want) in cases {
+            assert_eq!(login_title(name, login), want);
+        }
     }
 
     #[test]

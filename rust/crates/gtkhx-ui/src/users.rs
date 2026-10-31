@@ -66,5 +66,6 @@ pub unsafe extern "C" fn create_users_window(_parent: *mut c_void, data: *mut c_
         content,
     ) {
         gtkhx_users_bridge_after_embed(sess);
+        crate::friends::attach(sess, content);
     }
 }

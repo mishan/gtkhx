@@ -29,6 +29,8 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
 
+use hxmodel::pm::Peer;
+
 use crate::dock;
 use crate::tr::tr;
 
@@ -53,10 +55,12 @@ fn conn_key(htlc: *mut c_void) -> ConnKey {
     unsafe { hx_conn_serial(htlc) }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TabMeta {
     kind: u8,
     id: u32,
+    /// A private message's peer.
+    peer: Option<Peer>,
     /// The connection whose tab this is, as the pointer the close callback
     /// hands straight back to C — which wants a connection to resolve a
     /// session from, not a number it would have to look up.
@@ -83,7 +87,7 @@ fn set_meta(page: &adw::TabPage, meta: TabMeta) {
 fn meta(page: &adw::TabPage) -> Option<TabMeta> {
     // Safety: matched type with `set_meta`; NonNull points at qdata owned by
     // the page for its lifetime, copied out immediately.
-    unsafe { page.data::<TabMeta>(META_KEY).map(|p| *p.as_ref()) }
+    unsafe { page.data::<TabMeta>(META_KEY).map(|p| p.as_ref().clone()) }
 }
 
 #[derive(Default)]
@@ -102,7 +106,7 @@ struct ChatTabs {
     /// the view is per-connection.
     views: HashMap<ConnKey, adw::TabView>,
     pchat: HashMap<(ConnKey, u32), adw::TabPage>,
-    msg: HashMap<(ConnKey, u16), adw::TabPage>,
+    msg: HashMap<(ConnKey, Peer), adw::TabPage>,
     on_close_pchat: Option<extern "C" fn(*mut c_void, u32)>,
 }
 
@@ -130,7 +134,7 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
 
     // Public chat is pinned; the user can't close it through the strip.
     // Defensive: decline if some path ever triggers it.
-    if m.map(|m| m.kind) == Some(KIND_PUBLIC) {
+    if m.as_ref().map(|m| m.kind) == Some(KIND_PUBLIC) {
         view.close_page_finish(page, false);
         return glib::Propagation::Stop;
     }
@@ -150,9 +154,10 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
                     }
                 }
                 KIND_MSG => {
-                    let uid = m.id as u16;
-                    st.msg.remove(&(m.conn, uid));
-                    cb = Some(Box::new(move || crate::msg::tab_closed(m.conn, uid)));
+                    if let Some(peer) = m.peer {
+                        st.msg.remove(&(m.conn, peer.clone()));
+                        cb = Some(Box::new(move || crate::msg::tab_closed(m.conn, &peer)));
+                    }
                 }
                 _ => {}
             }
@@ -262,6 +267,7 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
         TabMeta {
             kind: KIND_PUBLIC,
             id: 0,
+            peer: None,
             // Never indexed and never closed through the strip, so the
             // pointer is only here for `view_of` to find the right view.
             htlc,
@@ -295,6 +301,7 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
         TabMeta {
             kind: KIND_PCHAT,
             id: cid,
+            peer: None,
             htlc,
             conn,
         },
@@ -316,12 +323,12 @@ fn msg_title(title: &str) -> String {
     }
 }
 
-/// Add a private-message tab for the partner at `uid` on `htlc`. False when
-/// that connection has no tab view to add it to: its Chat page isn't built.
+/// Add a private-message tab for `peer` on `htlc`. False when that
+/// connection has no tab view to add it to: its Chat page isn't built.
 pub(crate) fn add_msg(
     htlc: *mut c_void,
     content: &impl IsA<gtk::Widget>,
-    uid: u16,
+    peer: &Peer,
     title: &str,
 ) -> bool {
     let conn = conn_key(htlc);
@@ -336,14 +343,15 @@ pub(crate) fn add_msg(
         &page,
         TabMeta {
             kind: KIND_MSG,
-            id: uid as u32,
+            id: 0,
+            peer: Some(peer.clone()),
             htlc,
             conn,
         },
     );
 
     STATE.with(|s| {
-        s.borrow_mut().msg.insert((conn, uid), page);
+        s.borrow_mut().msg.insert((conn, peer.clone()), page);
     });
     true
 }
@@ -352,8 +360,8 @@ fn find_pchat(htlc: *mut c_void, cid: u32) -> Option<adw::TabPage> {
     STATE.with(|s| s.borrow().pchat.get(&(conn_key(htlc), cid)).cloned())
 }
 
-fn find_msg(htlc: *mut c_void, uid: u16) -> Option<adw::TabPage> {
-    STATE.with(|s| s.borrow().msg.get(&(conn_key(htlc), uid)).cloned())
+fn find_msg(htlc: *mut c_void, peer: &Peer) -> Option<adw::TabPage> {
+    STATE.with(|s| s.borrow().msg.get(&(conn_key(htlc), peer.clone())).cloned())
 }
 
 #[no_mangle]
@@ -389,16 +397,43 @@ pub extern "C" fn gtkhx_chat_tabs_raise_pchat(htlc: *mut c_void, cid: u32) {
     raise_and_select(find_pchat(htlc, cid));
 }
 
-pub(crate) fn raise_msg(htlc: *mut c_void, uid: u16) {
-    raise_and_select(find_msg(htlc, uid));
+pub(crate) fn raise_msg(htlc: *mut c_void, peer: &Peer) {
+    raise_and_select(find_msg(htlc, peer));
+}
+
+/// The id a notification of a message from `peer` goes by, which
+/// [`open_notified`] reads back: `msg-` with the connection's serial and
+/// the uid, or `im-` with it and the Login in hex.
+pub(crate) fn notify_id(conn: ConnKey, peer: &Peer) -> String {
+    match peer {
+        Peer::Uid(uid) => format!("msg-{conn}-{uid}"),
+        Peer::Login(login) => format!("im-{conn}-{}", hex(login)),
+    }
+}
+
+/// A Login in hex, for a notification's id.
+pub(crate) fn hex(login: &[u8]) -> String {
+    login.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A Login back out of the hex [`notify_id`] wrote.
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect()
 }
 
 /// `app.open-notified`: clicking a notification opens the conversation it was
 /// about, and brings GtkHx forward either way. The target is the
-/// notification's own id (notify.c): `chat-`, `pchat-` or `msg-` with the
-/// connection's serial and the chat or user id, which opens nothing once
-/// that conversation has closed; anything else (news, transfers, broadcasts,
-/// invitations) only brings the window forward.
+/// notification's own id (notify.c, or [`notify_id`]): `chat-`, `pchat-`,
+/// `msg-` or `im-` with the connection's serial and the chat, user or
+/// account, which opens nothing once that conversation has closed; anything
+/// else (news, transfers, broadcasts, invitations, friend requests) only
+/// brings the window forward.
 fn open_notified(app: &gtk::Application, id: &str) {
     let mut it = id.splitn(3, '-');
     let (kind, conn, n) = (
@@ -415,7 +450,10 @@ fn open_notified(app: &gtk::Application, id: &str) {
             .and_then(|cid| STATE.with(|s| s.borrow().pchat.get(&(conn, cid)).cloned())),
         (Some("msg"), Some(conn)) => n
             .and_then(|n| n.parse::<u16>().ok())
-            .and_then(|uid| STATE.with(|s| s.borrow().msg.get(&(conn, uid)).cloned())),
+            .and_then(|uid| STATE.with(|s| s.borrow().msg.get(&(conn, Peer::Uid(uid))).cloned())),
+        (Some("im"), Some(conn)) => n.and_then(unhex).and_then(|login| {
+            STATE.with(|s| s.borrow().msg.get(&(conn, Peer::Login(login))).cloned())
+        }),
         _ => None,
     };
     let child = page.as_ref().map(|p| p.child());
@@ -446,6 +484,8 @@ pub unsafe extern "C" fn gtkhx_notify_install_actions(app: *mut gtk::ffi::GtkApp
         }
     });
     app.add_action(&action);
+    // Once, at startup, before any connection can hear from a friend.
+    crate::friends::install();
 }
 
 /// Raise the public-chat tab of the connection the user is looking at. The
@@ -496,8 +536,8 @@ pub extern "C" fn gtkhx_chat_tabs_set_attention_pchat(
     set_page_attention(htlc, find_pchat(htlc, cid), state != glib::ffi::GFALSE);
 }
 
-pub(crate) fn set_attention_msg(htlc: *mut c_void, uid: u16, state: bool) {
-    set_page_attention(htlc, find_msg(htlc, uid), state);
+pub(crate) fn set_attention_msg(htlc: *mut c_void, peer: &Peer, state: bool) {
+    set_page_attention(htlc, find_msg(htlc, peer), state);
 }
 
 /// # Safety
@@ -514,8 +554,8 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_pchat(
     }
 }
 
-pub(crate) fn set_title_msg(htlc: *mut c_void, uid: u16, title: &str) {
-    if let Some(page) = find_msg(htlc, uid) {
+pub(crate) fn set_title_msg(htlc: *mut c_void, peer: &Peer, title: &str) {
+    if let Some(page) = find_msg(htlc, peer) {
         page.set_title(&msg_title(title));
     }
 }
@@ -527,5 +567,22 @@ pub(crate) fn set_title_msg(htlc: *mut c_void, uid: u16, title: &str) {
 pub extern "C" fn gtkhx_chat_tabs_close_pchat(htlc: *mut c_void, cid: u32) {
     if let (Some(view), Some(page)) = (view(conn_key(htlc)), find_pchat(htlc, cid)) {
         view.close_page(&page);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_login_comes_back_out_of_its_notification() {
+        let logins: [&[u8]; 4] = [b"alice", b"friend-a", b"\x00\xff\x8a", b""];
+        for login in logins {
+            let id = notify_id(7, &Peer::Login(login.to_vec()));
+            let hex = id.strip_prefix("im-7-").expect(&id);
+            assert_eq!(unhex(hex).as_deref(), Some(login), "{id}");
+        }
+        assert_eq!(unhex("abc"), None);
+        assert_eq!(unhex("zz"), None);
     }
 }
