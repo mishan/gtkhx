@@ -251,6 +251,9 @@ output_device = ""
 ptt_enabled = false
 ptt_key = ""
 
+[messaging]
+requests_set = ["hotline.example.org:5500/616c696365"]   # host:port/Login in hex
+
 [window]
 toolbar_width = 1100
 toolbar_height = 700
@@ -264,6 +267,10 @@ toolbar_height = 700
   form without the `#`, any case, and a bare integer, so a file written before
   this or by someone reaching for a decimal still loads and heals itself on the
   next save.
+- **`messaging.requests_set` is a record, not a preference.** Whether an
+  account takes message requests is the account's, held by its server; the
+  list names each account GtkHx has set that for, so the one time it turns
+  it on by default is one time (see `docs/messaging.md`).
 
 Four structural changes worth calling out:
 

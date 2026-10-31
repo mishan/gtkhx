@@ -134,18 +134,23 @@ pub unsafe fn set_presence(
     state: PresenceState,
     status: Option<&str>,
 ) -> Option<u32> {
-    let r = req::set_presence(state, status.map(str::as_bytes), None, utf8(htlc));
-    let what = Asked::Presence(state, status.map(str::to_owned), None);
+    let r = req::set_presence(Some(state), status.map(str::as_bytes), None, utf8(htlc));
+    let what = Asked::Presence(Some(state), status.map(str::to_owned), None);
     send(htlc, r, Some(what))
 }
 
 /// Whether our account takes message requests: the account's, on every
-/// client. Set Presence carries it, and must carry a presence too, so the
-/// caller gives ours, `state`, as it last told the server.
+/// client. Set Presence carries it, with our presence, `state`, as the
+/// caller last told the server, or none, which leaves it as it is where
+/// the server allows that and is refused where it does not.
 ///
 /// # Safety
 /// See [`login`].
-pub unsafe fn set_takes_requests(htlc: *mut c_void, on: bool, state: PresenceState) -> Option<u32> {
+pub unsafe fn set_takes_requests(
+    htlc: *mut c_void,
+    on: bool,
+    state: Option<PresenceState>,
+) -> Option<u32> {
     let r = req::set_presence(state, None, Some(on), utf8(htlc));
     send_served(htlc, r, Asked::Presence(state, None, Some(on)))
 }

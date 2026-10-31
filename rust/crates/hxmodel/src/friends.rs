@@ -1,6 +1,6 @@
 //! The friend family as the users panel lists it: which of a connection's
-//! roster entries go where, in what order, and how each reads; and when our
-//! presence and typing go out.
+//! roster entries go where, in what order, and how each reads; when our
+//! presence and typing go out; and what is shown of what a stranger sent.
 //!
 //! No widgets. `gtkhx-ui`'s `friends` module draws these rows, and its
 //! conversations ask [`Typing`] when to tell a friend we are typing.
@@ -20,6 +20,8 @@ pub enum Section {
     /// They asked to be a friend.
     Request,
     Friend,
+    /// Someone who is not a friend, whose messages we approved.
+    Approved,
     /// We asked, and they have not answered.
     Sent,
     Blocked,
@@ -56,13 +58,13 @@ pub struct Row {
 /// What to call an account: our alias for it, else the name it goes by,
 /// else its Login.
 pub fn display_name(f: &Friend) -> String {
-    fn set(s: &Option<String>) -> Option<&str> {
-        s.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    fn set(s: &Option<String>) -> Option<String> {
+        let s = plain_name(s.as_deref()?);
+        Some(s.trim().to_owned()).filter(|s| !s.is_empty())
     }
     set(&f.nickname)
         .or_else(|| set(&f.name))
-        .map(str::to_owned)
-        .unwrap_or_else(|| hxproto::text::to_utf8(&f.login))
+        .unwrap_or_else(|| plain_name(&hxproto::text::to_utf8(&f.login)))
 }
 
 /// What to call the account `login`: as [`display_name`] where `roster`
@@ -70,7 +72,57 @@ pub fn display_name(f: &Friend) -> String {
 pub fn name_of(roster: &Roster, login: &[u8]) -> String {
     roster
         .get(login)
-        .map_or_else(|| hxproto::text::to_utf8(login), display_name)
+        .map_or_else(|| plain_name(&hxproto::text::to_utf8(login)), display_name)
+}
+
+/// Whether a character changes how the text around it is drawn, or is no
+/// text at all: a bidi override or isolate can make a name read as another,
+/// or reverse the window title it is in, and an invisible one can make two
+/// names that look alike differ. The joiners an emoji or a script needs,
+/// U+200C and U+200D, stay.
+fn unshown(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{ad}'
+                | '\u{61c}'
+                | '\u{115f}'
+                | '\u{1160}'
+                | '\u{180e}'
+                | '\u{200b}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206f}'
+                | '\u{3164}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+                | '\u{e0000}'..='\u{e007f}'
+        )
+}
+
+/// A name someone else chose, as one line of plain text: what [`unshown`]
+/// catches dropped, line breaks among them.
+pub fn plain_name(name: &str) -> String {
+    name.chars()
+        .filter(|&c| !unshown(c) && !matches!(c, '\u{2028}' | '\u{2029}'))
+        .collect()
+}
+
+/// A message someone else wrote, as plain text: as [`plain_name`], but its
+/// lines kept.
+pub fn plain_text(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if matches!(c, '\u{2028}' | '\u{2029}') {
+                '\n'
+            } else {
+                c
+            }
+        })
+        .filter(|&c| c == '\n' || c == '\t' || !unshown(c))
+        .collect()
 }
 
 /// Whether a friend can be reached now. Invisible is never reported for a
@@ -81,7 +133,8 @@ pub fn is_present(p: PresenceState) -> bool {
 
 /// The rows of `roster`, in the panel's order: by section, then, among
 /// friends, those present first, then by name without regard to case, and
-/// by Login where names agree.
+/// by Login where names agree. An approval is listed only for an account
+/// with no entry, which says more of it.
 pub fn rows(roster: &Roster) -> Vec<Row> {
     let mut rows: Vec<Row> = roster
         .entries()
@@ -99,6 +152,20 @@ pub fn rows(roster: &Roster) -> Vec<Row> {
             })
         })
         .collect();
+    let approvals = roster.requests.approvals.iter();
+    rows.extend(
+        approvals
+            .filter(|login| roster.get(login).is_none())
+            .map(|login| Row {
+                login: login.clone(),
+                name: name_of(roster, login),
+                section: Section::Approved,
+                presence: PresenceState::Offline,
+                status: None,
+                note: None,
+                dimmed: true,
+            }),
+    );
     rows.sort_by(|a, b| {
         let absent = |r: &Row| r.section == Section::Friend && !is_present(r.presence);
         (a.section, absent(a), a.name.to_lowercase(), &a.login).cmp(&(
@@ -111,8 +178,14 @@ pub fn rows(roster: &Roster) -> Vec<Row> {
     rows
 }
 
-/// Whether a message to `login` goes as an instant message: only to a
-/// friend, since the server refuses one to anyone else.
+/// How many wait with a message request, where the server serves them and
+/// any do.
+pub fn requests_waiting(roster: &Roster) -> Option<u32> {
+    let r = &roster.requests;
+    (r.served && r.count > 0).then_some(r.count)
+}
+
+/// Whether `login` is a friend.
 pub fn is_friend(roster: &Roster, login: &[u8]) -> bool {
     roster
         .get(login)
@@ -135,6 +208,11 @@ impl Default for Presence {
 }
 
 impl Presence {
+    /// The presence the server was last told.
+    pub fn told(&self) -> PresenceState {
+        self.told
+    }
+
     /// We read as `away`; the presence to send, if that changes it.
     pub fn away(&mut self, away: bool) -> Option<PresenceState> {
         let now = if away {
@@ -147,6 +225,49 @@ impl Presence {
             now
         })
     }
+}
+
+/// How long after we approve someone's requests their messages, handed
+/// over at once as instant messages, arrive unannounced.
+pub const APPROVAL_HUSH: Duration = Duration::from_secs(5);
+
+/// The senders whose messages arrive unannounced for now: those we just
+/// approved, whose waiting messages are drawn into the conversation the
+/// approval opened, where announcing each would be noise.
+#[derive(Debug, Default)]
+pub struct Hush {
+    until: Vec<(Vec<u8>, Instant)>,
+}
+
+impl Hush {
+    /// We approved `login` at `now`.
+    pub fn approved(&mut self, login: &[u8], now: Instant) {
+        self.until.retain(|(l, t)| l != login && *t > now);
+        self.until.push((login.to_vec(), now + APPROVAL_HUSH));
+    }
+
+    /// Whether a message from `login` arriving at `now` goes unannounced.
+    pub fn hushed(&self, login: &[u8], now: Instant) -> bool {
+        self.until.iter().any(|(l, t)| l == login && now < *t)
+    }
+}
+
+/// How GtkHx remembers, in the settings, having set whether the account
+/// `login` on the server at `host` and `port` takes message requests: the
+/// Login in hex, since the list is written with commas between its items
+/// and each item trimmed, so an empty Login still leaves a whole key.
+pub fn requests_set_key(host: &str, port: u16, login: &[u8]) -> String {
+    let hex: String = login.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{host}:{port}/{hex}")
+}
+
+/// Whether GtkHx turns taking message requests on for an account, which it
+/// does once for an account that has it off as its server holds it
+/// (`takes`): never where GtkHx has set it there before (`set`), since the
+/// user may have turned it off, and never twice on one connect (`asked`),
+/// where the first is still unanswered or was refused.
+pub fn turn_requests_on(takes: Option<bool>, set: bool, asked: bool) -> bool {
+    takes == Some(false) && !set && !asked
 }
 
 /// Whether we are typing to someone, which they are told only as it starts
@@ -230,6 +351,7 @@ mod tests {
             friend("frank", Accepted, Busy),
             zed,
         ]);
+        roster.requests.approvals = [&b"grace"[..], b"bob", b"Hal"].map(<[u8]>::to_vec).into();
         let got: Vec<_> = rows(&roster)
             .into_iter()
             .map(|r| (r.name, r.section, r.dimmed))
@@ -241,6 +363,8 @@ mod tests {
             ("frank", Section::Friend, false),
             ("bob", Section::Friend, true),
             ("erin", Section::Friend, true),
+            ("grace", Section::Approved, true),
+            ("Hal", Section::Approved, true),
             ("carol", Section::Sent, true),
             ("mallory", Section::Blocked, true),
         ];
@@ -249,6 +373,85 @@ mod tests {
             .map(|(n, s, d)| (n.to_owned(), s, d))
             .collect();
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn what_a_stranger_wrote_is_shown_as_plain_text() {
+        let cases = [
+            ("alice", "alice", "alice"),
+            (
+                "caf\u{e9} \u{1f600}",
+                "caf\u{e9} \u{1f600}",
+                "caf\u{e9} \u{1f600}",
+            ),
+            ("\u{202e}evil.exe", "evil.exe", "evil.exe"),
+            ("a\u{2066}b\u{2069}c\u{200f}d\u{61c}", "abcd", "abcd"),
+            ("one\ntwo\r\tthree", "onetwothree", "one\ntwo\tthree"),
+            ("bell\u{7}\u{1b}[31m\u{9b}", "bell[31m", "bell[31m"),
+            ("line\u{2028}next\u{2029}", "linenext", "line\nnext\n"),
+            ("dennis\u{200b}", "dennis", "dennis"),
+            ("de\u{ad}n\u{feff}n\u{2060}is\u{e0041}", "dennis", "dennis"),
+            ("\u{3164}\u{115f}x\u{206a}\u{fff9}", "x", "x"),
+            (
+                "\u{1f469}\u{200d}\u{1f4bb} a\u{200c}b",
+                "\u{1f469}\u{200d}\u{1f4bb} a\u{200c}b",
+                "\u{1f469}\u{200d}\u{1f4bb} a\u{200c}b",
+            ),
+        ];
+        for (raw, name, text) in cases {
+            assert_eq!(plain_name(raw), name, "{raw:?}");
+            assert_eq!(plain_text(raw), text, "{raw:?}");
+        }
+        let mut f = friend("\u{202e}gro", RosterState::Accepted, PresenceState::Online);
+        assert_eq!(display_name(&f), "gro");
+        f.name = Some("\u{2067}\u{2069}".into());
+        assert_eq!(display_name(&f), "gro", "a name of nothing shown is none");
+    }
+
+    #[test]
+    fn the_requests_row_is_there_while_any_wait_where_they_are_served() {
+        let cases = [(false, 3, None), (true, 0, None), (true, 2, Some(2))];
+        for (served, count, want) in cases {
+            let mut roster = Roster::default();
+            roster.requests.served = served;
+            roster.requests.count = count;
+            assert_eq!(requests_waiting(&roster), want, "{served} {count}");
+        }
+    }
+
+    #[test]
+    fn taking_requests_is_turned_on_once_for_an_account_that_has_it_off() {
+        let cases = [
+            (None, false, false, false),
+            (Some(true), false, false, false),
+            (Some(false), false, false, true),
+            (Some(false), true, false, false),
+            (Some(false), false, true, false),
+        ];
+        for (takes, set, asked, want) in cases {
+            assert_eq!(
+                turn_requests_on(takes, set, asked),
+                want,
+                "{takes:?} {set} {asked}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_approved_senders_messages_arrive_unannounced_for_a_while() {
+        let t0 = Instant::now();
+        let mut h = Hush::default();
+        assert!(!h.hushed(b"alice", t0));
+        h.approved(b"alice", t0);
+        let cases = [
+            (&b"alice"[..], Duration::ZERO, true),
+            (b"alice", APPROVAL_HUSH - Duration::from_millis(1), true),
+            (b"alice", APPROVAL_HUSH, false),
+            (b"bob", Duration::ZERO, false),
+        ];
+        for (login, after, want) in cases {
+            assert_eq!(h.hushed(login, t0 + after), want, "{login:?} {after:?}");
+        }
     }
 
     #[test]

@@ -77,6 +77,7 @@ pub const MAP: &[(&str, Target)] = &[
     ("OPENTASKS", Drop(PANEL_LATCH)),
     ("OPENUSERS", Drop(PANEL_LATCH)),
     ("QUEUEDL", Path("transfers.queue")),
+    ("REQUESTSSET", Path("messaging.requests_set")),
     ("SHOWJOIN", Path("chat.show_joins")),
     ("SINGLECLICKLINKS", Path("chat.single_click_links")),
     ("SOUNDCHAT", Path("sound.chat")),
@@ -160,6 +161,9 @@ pub const NEW_PATHS: &[&str] = &[
     // it read these.
     "updates.check",
     "updates.skip_version",
+    // Message requests arrived after gtkhxrc, and what GtkHx has set for
+    // an account is no preference anyone carries over.
+    "messaging.requests_set",
 ];
 
 /// Where an old key goes, or `None` if the schema has never heard of it.

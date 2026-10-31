@@ -79,12 +79,12 @@ pub fn unblock(login: &[u8]) -> Option<Request> {
     })
 }
 
-/// SET_PRESENCE (808): our presence, and our status text where `status` is
-/// given; an empty one clears it; and whether our account takes message
-/// requests, where `takes_requests` says. Never offline, which a client
-/// does not set for itself.
+/// SET_PRESENCE (808): our presence where `state` is given, and our status
+/// text where `status` is; an empty one clears it; and whether our account
+/// takes message requests, where `takes_requests` says. Never offline,
+/// which a client does not set for itself.
 pub fn set_presence(
-    state: PresenceState,
+    state: Option<PresenceState>,
     status: Option<&[u8]>,
     takes_requests: Option<bool>,
     utf8: bool,
