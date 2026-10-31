@@ -317,6 +317,8 @@ field_table! {
     "voice.ptt_key"                 => text,     voice.ptt_key;
     "voice.metered_one_video"       => flag,     voice.metered_one_video;
 
+    "messaging.requests_set"        => list,     messaging.requests_set;
+
     "window.toolbar_width"          => extent,   window.toolbar_width;
     "window.toolbar_height"         => extent,   window.toolbar_height;
 }

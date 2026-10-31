@@ -75,7 +75,8 @@ them makes it, so the order is what delivers those messages at login.
 That page alone: the login has already spent most of what hxd-ng lets a
 session spend in five seconds before it bans it, so a longer listing
 waits there until something asks for the requests. Nothing at login sets
-whether our account takes requests.
+whether our account takes requests, but for the one time the interface
+turns it on (below).
 
 **Requests.** The roster's `requests` (`gtkhx_core::messaging::requests`)
 holds whether the server serves them, how many senders wait, the senders
@@ -122,7 +123,8 @@ from C:
 | `Changed { login }` | one entry arrived, changed or went, or a friend's presence moved |
 | `Request { login }` | someone asks to be a friend |
 | `Presence` | the server took our presence |
-| `Requests` | the requests were listed again, or their count changed |
+| `Requests` | the requests were listed again |
+| `RequestsChanged` | Message Requests Changed said how many wait |
 | `Cleared { trans, requests, friend_requests }` | Clear Message Requests deleted and declined so many |
 | `Im(Im)` | an instant message: its sender, id, text and when it was sent |
 | `Delivery { to, guid, delivery }` | a message we sent moved on |
@@ -140,8 +142,9 @@ message requests `requests`, `answer_request`, `clear_requests` and
 `None` where nothing was sent, except `im`, which returns the message's
 id, `typing`, whose trans is never answered, and `requests`, which asks
 for a paced listing and is answered by the `Requests` event.
-`set_takes_requests` goes as Set Presence, which must carry a presence,
-so the caller gives the one it last told the server.
+`set_takes_requests` goes as Set Presence, with the presence the caller
+last told the server, or with none, which a server that wants one
+refuses.
 
 Ending an approval is listed again once the server takes it, since
 hxd-ng pushes no Message Requests Changed for it as it does for an
@@ -161,35 +164,83 @@ menu and the conversations are what they always were.
 
 - **The users panel.** Below the user list, a Friends section lists the
   roster (`friends::refresh`, after every `messaging` event and connection
-  state change): requests first, with Accept and Decline, then friends,
-  present ones first and absent ones dimmed, then the requests we sent and
-  the accounts we blocked, dimmed. Each row's menu (right-click, Menu or
+  state change): a Message Requests row with how many wait, where the
+  server serves requests and any do; then friend requests, with Accept and
+  Decline; then friends, present ones first and absent ones dimmed; then
+  the senders we approved, as Approved, and the requests we sent and the
+  accounts we blocked, all dimmed. Each row's menu (right-click, Menu or
   Shift+F10) offers what fits its state: Message, Remove Friend, Block,
-  Cancel Request, Unblock, asking first before a removal or a block. Rows
-  are kept across changes, so an open menu or a focused button outlives a
-  change to another entry. Add Friend… asks for a Login.
+  Cancel Request, Unblock, End Approval, asking first before a removal, a
+  block or the end of an approval. Rows are kept across changes, so an
+  open menu or a focused button outlives a change to another entry. Add
+  Friend… asks for a Login. Where the server serves requests, the
+  section's menu offers Message…, which asks for a Login and opens a
+  conversation with it, and Accept Message Requests.
+- **Message requests.** The Message Requests row opens the connection's
+  requests window (`requests`), one a connection, closed with it: each
+  sender, oldest first, with their messages and when each was sent, and
+  Approve and Reply, and Add Friend…, Delete… and Block… under a menu.
+  Approving opens the sender's conversation, and so does Reply; hxd-ng
+  takes a message written back to a requester as approving them. Clear…
+  deletes those from about the last hour or day, or all of them, asking
+  first, and says how many requests and friend requests went; the span is
+  this computer's clock, so the question says "about". A line under the list
+  says how many the server dropped. The requests are listed when the
+  window opens and again on each `RequestsChanged` while it is open, and
+  a request itself notifies nothing: the row's count is the news.
+- **Text from strangers.** A sender's Login and messages are plain text in
+  labels that wrap: never markup, never a link, and without the control,
+  bidi and invisible formatting characters that would change how a name
+  reads, make two names that look alike differ, or turn a window's title
+  around; the joiners U+200C and U+200D stay (`hxmodel::friends::
+  plain_name` and `plain_text`). Every name the friend family shows goes
+  through it, and so does a friend request's note.
+- **Taking requests.** Accept Message Requests shows our account's setting
+  as the server's last listing gave it, and changing it sends Set Presence
+  with the presence the user list's away state last told the server,
+  which every server takes. It is on by default: the first time GtkHx
+  lists an account's requests and finds it off, it turns it on, at most
+  once a connect (`hxmodel::friends::turn_requests_on`); once the
+  server's answer or a later listing says it is on, GtkHx remembers it
+  did, by server address and Login, in the settings
+  (`messaging.requests_set`). Once remembered, GtkHx never turns it on
+  again, since the user may have turned it off. A change the user makes
+  is remembered as it is sent. The automatic one carries no presence, so
+  it leaves ours alone where the server allows that; where it does not,
+  its refusal is told to nobody and it is tried again at the next
+  connect.
 - **The user menu.** Add Friend… and Block… on a user of the user list ask
   for the user's Login: the classic list carries none, and the roster no
   uid, so a user is never matched to a friend, by nick or otherwise.
 - **Conversations.** The private-message tab is the conversation, keyed by
   the friend's Login (`pm::Peer::Login`), so it reaches a friend who is
-  offline. What is typed goes as an instant message where the friend is
-  one on a connection that agreed to bit 6, and is otherwise noted as not
-  sent; a conversation opened from the user list is keyed by uid and goes
-  as a classic private message, as before. Each message we send is marked
-  as it gets further (sending, sent or waiting, delivered, read, not
+  offline. What is typed goes as an instant message on a connection that
+  agreed to bit 6, to a friend, or to anyone where the server serves
+  requests, and is otherwise noted as not sent; a conversation opened
+  from the user list is keyed by uid and goes as a classic private
+  message, as before. Each message we send is marked as it gets further
+  (sending, sent or waiting, waiting for approval, delivered, read, not
   delivered), the friend's typing is shown under the transcript, and
   lapses ten seconds after their last Started, as on Hotline-ng; ours is
-  told as it starts and stops, and stopped when the tab closes. A message
+  told, to a friend alone, as it starts and stops, and stopped when the
+  tab closes. A message
   received is marked read once its conversation is on screen in the window
   that has the focus.
 - **Notification.** An instant message, and a friend request, is announced,
   chimed and notified as a private message is, under the same setting; the
-  notification of a message opens its conversation.
+  notification of a message opens its conversation. What waited as a
+  request is handed over as instant messages too, drawn into the sender's
+  conversation, so their messages go unannounced for a few seconds after
+  we approve them, write back to them, or become their friend
+  (`hxmodel::friends::Hush`).
 - **Presence** follows the away state the user list shows of us: when our
   own row's away bit changes, Set Presence says Away or Online.
 - **Refusals** are shown as every refusal the server explains is, a toast
-  and the error sound, in our words where the extension gives a reason.
+  and the error sound, in our words where the extension gives a reason:
+  among them, a message to someone who takes no requests (`NotFriends`),
+  too many waiting for them (`QueueFull`, as hxd-ng's full request comes),
+  too many asked too fast (`RateLimited`), nobody by that Login
+  (`AccountNotFound`), and an answer to a request that no longer waits.
 
 ## What hxd-ng does that a client sees
 
@@ -204,7 +255,7 @@ menu and the conversations are what they always were.
   someone who is not a friend is answered `Requested` where the recipient's
   account takes requests, and refused `NotFriends` where it takes none.
   Whether an account takes them is the account's, on every client: GtkHx
-  sends it only when asked to, and nothing yet asks.
+  sends it once by default and otherwise only when the user changes it.
 - Requests are answered alike whatever becomes of them: one from a sender
   whose request was deleted, whose approval was ended, or whose friendship
   was removed is answered `Requested` and kept nowhere, for days.
@@ -214,8 +265,10 @@ menu and the conversations are what they always were.
 ## Tests
 
 The model's rules are unit tests in `gtkhx-core`, and the panel's order,
-presence and typing in `hxmodel::friends`; what the pushes and replies
-make of the model and the signal, and what each sender writes, are
+presence, typing, the requests' row, what is shown of a stranger's text,
+the quiet after an approval and when taking requests is turned on in
+`hxmodel::friends`; what the pushes and
+replies make of the model and the signal, and what each sender writes, are
 `hxhandlers`' (`recv::friends`, `send::friends`), against a real connection
 struct. `hxnet`'s session tests check the routing. `hx-e2e`'s `friends`
 suite runs against the rig's hxd-ng, whose `friend-*` accounts take part
@@ -240,4 +293,3 @@ account that takes none answering `NotFriends`.
   only the request bound is read, as whether requests are served: a
   message past the server's other bounds is refused by it rather than held
   back here.
-- The interface for message requests, and turning taking them on.

@@ -228,8 +228,11 @@ pub enum Event {
     },
     /// The server took our presence.
     Presence,
-    /// The requests were listed again, or their count changed.
+    /// The requests were listed again.
     Requests,
+    /// Message Requests Changed said how many wait: the listing held may
+    /// be out of date.
+    RequestsChanged,
     /// Clear Message Requests on `trans` deleted `requests` requests and
     /// declined `friend_requests` friend requests.
     Cleared {

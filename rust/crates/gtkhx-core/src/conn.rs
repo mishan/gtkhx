@@ -629,6 +629,12 @@ pub unsafe extern "C" fn hx_conn_set_name(h: *mut HtlcConn, v: *const c_char) {
 /// # Safety
 /// See the module note above the string accessors.
 #[no_mangle]
+pub unsafe extern "C" fn hx_conn_login(h: *const HtlcConn) -> *const c_char {
+    (*h).login.as_ptr()
+}
+/// # Safety
+/// See the module note above the string accessors.
+#[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_login(h: *mut HtlcConn, v: *const c_char) {
     strlcpy(&mut (*h).login, v);
 }

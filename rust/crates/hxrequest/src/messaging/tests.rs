@@ -35,17 +35,22 @@ fn each_request_goes_as_the_extension_has_it() {
         (block(b"bob").unwrap(), req(806, &[(0x0600, b"bob")])),
         (unblock(b"bob").unwrap(), req(807, &[(0x0600, b"bob")])),
         (
-            set_presence(PresenceState::Away, Some(b"out"), None, true).unwrap(),
+            set_presence(Some(PresenceState::Away), Some(b"out"), None, true).unwrap(),
             req(808, &[(0x0602, &[0, 2]), (0x0603, b"out")]),
         ),
         // No status leaves the stored one as it is.
         (
-            set_presence(PresenceState::Online, None, None, true).unwrap(),
+            set_presence(Some(PresenceState::Online), None, None, true).unwrap(),
             req(808, &[(0x0602, &[0, 1])]),
         ),
         (
-            set_presence(PresenceState::Online, None, Some(false), true).unwrap(),
+            set_presence(Some(PresenceState::Online), None, Some(false), true).unwrap(),
             req(808, &[(0x0602, &[0, 1]), (0x0650, &[0, 0])]),
+        ),
+        // No state leaves our presence as it is.
+        (
+            set_presence(None, None, Some(true), true).unwrap(),
+            req(808, &[(0x0650, &[0, 1])]),
         ),
         (
             im_send(b"bob", &guid, b"a\nb", true).unwrap(),
@@ -113,7 +118,10 @@ fn what_the_wire_cannot_carry_is_refused() {
         im_send(b"bob", &[0; GUID_LEN], &vec![b'x'; 65536], true),
         None
     );
-    assert_eq!(set_presence(PresenceState::Offline, None, None, true), None);
+    assert_eq!(
+        set_presence(Some(PresenceState::Offline), None, None, true),
+        None
+    );
     assert_eq!(message_requests(Some(b"")), None);
     assert_eq!(answer_request(b"", RequestAction::Approve), None);
 }

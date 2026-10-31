@@ -428,6 +428,15 @@ impl Default for Voice {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Messaging {
+    /// The accounts GtkHx has set whether they take message requests for,
+    /// once by default or as the user chose, each as `host:port/login`
+    /// with the Login in hex. Taking them is the account's, held by its
+    /// server; this only keeps GtkHx from turning it on again once set.
+    pub requests_set: Vec<String>,
+}
+
 /// The toolbar window's outer size. Everything *inside* the window — the split
 /// tree, divider positions, undocked panel sizes — belongs to the dock layout
 /// file, and that split is deliberate.
@@ -462,5 +471,6 @@ pub struct Settings {
     pub trackers: Trackers,
     pub updates: Updates,
     pub voice: Voice,
+    pub messaging: Messaging,
     pub window: Window,
 }

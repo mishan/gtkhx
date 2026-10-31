@@ -113,22 +113,28 @@ fn no_request_of_the_draft_goes_where_it_is_not_served() {
             requests(c.0);
             assert_eq!(answer_request(c.0, b"bob", RequestAction::Approve), None);
             assert_eq!(clear_requests(c.0, None, None), None);
-            assert_eq!(set_takes_requests(c.0, true, PresenceState::Online), None);
+            assert_eq!(set_takes_requests(c.0, true, None), None);
         }
     }
     assert_eq!(sent(), []);
 }
 
 #[test]
-fn our_setting_goes_with_the_presence_the_caller_gives() {
-    sent();
+fn our_setting_goes_with_the_presence_the_caller_gives_or_none() {
     let c = Conn::serving_requests(0);
-    unsafe { set_takes_requests(c.0, true, PresenceState::Away).unwrap() };
-    let (opcode, _, fields) = sent().remove(0);
-    assert_eq!(
-        (opcode, fields),
-        (808, vec![(0x0602, vec![0, 2]), (0x0650, vec![0, 1])])
-    );
+    let cases = [
+        (
+            Some(PresenceState::Away),
+            vec![(0x0602, vec![0, 2]), (0x0650, vec![0, 1])],
+        ),
+        (None, vec![(0x0650, vec![0, 1])]),
+    ];
+    for (state, want) in cases {
+        sent();
+        unsafe { set_takes_requests(c.0, true, state).unwrap() };
+        let (opcode, _, fields) = sent().remove(0);
+        assert_eq!((opcode, fields), (808, want), "{state:?}");
+    }
 }
 
 #[test]

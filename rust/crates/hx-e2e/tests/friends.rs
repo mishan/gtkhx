@@ -140,7 +140,12 @@ fn two_accounts_become_friends_and_see_each_others_presence() {
     // The account keeps its presence between runs: a status no earlier
     // run set is a change.
     let status = hx_e2e::unique_name("lunch");
-    let away = req::set_presence(PresenceState::Away, Some(status.as_bytes()), None, true);
+    let away = req::set_presence(
+        Some(PresenceState::Away),
+        Some(status.as_bytes()),
+        None,
+        true,
+    );
     ok(&mut a, away);
     told(&mut b, 809, "friend-a", |e| {
         e.presence_state() == Some(PresenceState::Away) && e.status_text == Some(status.as_bytes())
@@ -339,7 +344,7 @@ fn taking(server: &'static Server, login: &str) -> Client {
     let mut c = requester(server, login);
     ok(
         &mut c,
-        req::set_presence(PresenceState::Online, None, Some(true), true),
+        req::set_presence(Some(PresenceState::Online), None, Some(true), true),
     );
     c
 }
@@ -590,7 +595,7 @@ fn an_account_that_takes_no_requests_answers_not_friends() {
     let mut r = taking(s, &r_login);
     ok(
         &mut r,
-        req::set_presence(PresenceState::Online, None, Some(false), true),
+        req::set_presence(Some(PresenceState::Online), None, Some(false), true),
     );
     assert_eq!(listed(&mut r).takes, Some(false));
     let mut sender = requester(s, &s_login);

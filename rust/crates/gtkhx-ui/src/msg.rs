@@ -398,17 +398,20 @@ fn send(win: &MsgWin, buf: &gtk::TextBuffer) {
     }
 }
 
-/// Whether `login` is a friend `htlc` can send an instant message to.
+/// Whether `htlc` can send `login` an instant message: a friend, or anyone
+/// where the server serves message requests, which holds one to someone
+/// else as a request.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
 unsafe fn reaches(htlc: *mut c_void, login: &[u8]) -> bool {
     hx_conn_has_cap(htlc.cast(), CAP_MESSAGING) != 0
-        && with_roster(htlc, |r| friends::is_friend(r, login))
+        && with_roster(htlc, |r| r.requests.served || friends::is_friend(r, login))
 }
 
-/// An instant message to `login`, shown marked as it goes; to someone who is
-/// no friend, a note that it did not go, since the server would refuse it.
+/// An instant message to `login`, shown marked as it goes; to someone it
+/// cannot reach, a note that it did not go, since the server would refuse
+/// it.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
@@ -420,6 +423,13 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
             &tr1("Not sent: %s is not a friend on this server.", &name),
         );
         return;
+    }
+    // hxd-ng takes a reply to someone waiting with a request as approving
+    // it, and hands over at once what waited.
+    if with_roster(htlc, |r| {
+        r.requests.senders.iter().any(|s| s.login == login)
+    }) {
+        crate::friends::hush(win.conn, login);
     }
     let Some(guid) = hxhandlers::send::friends::im(htlc, login, text) else {
         return;
@@ -477,7 +487,8 @@ fn delivery_words(d: Delivery) -> String {
     match d {
         Delivery::Sending => tr("sending…"),
         Delivery::Sent => tr("sent"),
-        Delivery::Queued | Delivery::Requested => tr("waiting for them"),
+        Delivery::Queued => tr("waiting for them"),
+        Delivery::Requested => tr("waiting for approval"),
         Delivery::Delivered => tr("delivered"),
         Delivery::Read => tr("read"),
         Delivery::Failed => tr("not delivered"),
@@ -595,13 +606,14 @@ impl Line<'_> {
 }
 
 /// The input of a friend's conversation became `empty`, or not: tell them
-/// we started or stopped typing, as that changes.
+/// we started or stopped typing, as that changes. Someone who is not a
+/// friend is told nothing until they are one.
 fn typed(win: &MsgWin, empty: bool) {
     let Peer::Login(login) = &win.peer else {
         return;
     };
     let htlc = dock::htlc_for(win.conn);
-    if htlc.is_null() || !unsafe { reaches(htlc, login) } {
+    if htlc.is_null() || !with_roster(htlc, |r| friends::is_friend(r, login)) {
         return;
     }
     let change = win.im.borrow_mut().typing.edited(empty);
@@ -738,12 +750,12 @@ unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) {
 }
 
 /// An instant message `htlc` received: shown in its sender's conversation,
-/// opened if need be, notified as a private message is, and read if it is
-/// on screen.
+/// opened if need be, notified as a private message is unless `quiet`, and
+/// read if it is on screen.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
-pub(crate) unsafe fn im(htlc: *mut c_void, m: &Im) {
+pub(crate) unsafe fn im(htlc: *mut c_void, m: &Im, quiet: bool) {
     if hx_conn_sess(htlc.cast()).is_null() {
         return;
     }
@@ -768,8 +780,10 @@ pub(crate) unsafe fn im(htlc: *mut c_void, m: &Im) {
     chat_tabs::set_attention_msg(htlc, &peer, true);
     win.im.borrow_mut().unread.push(m.guid);
     mark_read(&win);
-    notify(htlc, &peer, &name, &m.body);
-    play_sound(SOUND_MSG);
+    if !quiet {
+        notify(htlc, &peer, &name, &m.body);
+        play_sound(SOUND_MSG);
+    }
 }
 
 /// A message we sent to `to` got further: mark it so, and once it can get
@@ -970,7 +984,7 @@ unsafe fn friend_view(win: &MsgWin, htlc: *mut c_void, login: &[u8]) {
     let name = entry
         .as_ref()
         .map_or_else(|| win.model.borrow().name.clone(), friends::display_name);
-    let login = hxproto::text::to_utf8(login);
+    let login = friends::plain_name(&hxproto::text::to_utf8(login));
     let status = entry
         .as_ref()
         .map(|f| crate::friends::presence_line(f.presence, f.status.as_deref()));
@@ -1088,7 +1102,9 @@ fn name_widgets(win: &MsgWin, htlc: *mut c_void, nick: &str) {
 fn title(peer: &Peer, name: &str) -> String {
     match peer {
         Peer::Uid(uid) => pm::title(name, *uid),
-        Peer::Login(login) => pm::login_title(name, &hxproto::text::to_utf8(login)),
+        Peer::Login(login) => {
+            pm::login_title(name, &friends::plain_name(&hxproto::text::to_utf8(login)))
+        }
     }
 }
 
@@ -1116,8 +1132,8 @@ pub(crate) unsafe fn open(htlc: *mut c_void, uid: u16, name: &CStr) {
     open_peer(htlc, &Peer::Uid(uid), &name.to_string_lossy());
 }
 
-/// Open the conversation with the friend `login` on `htlc`, or select it if
-/// it is open.
+/// Open the conversation with the account `login` on `htlc`, a friend or
+/// not, or select it if it is open.
 ///
 /// # Safety
 /// `htlc` is NULL or a live connection. Main thread.

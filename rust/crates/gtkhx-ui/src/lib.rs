@@ -148,6 +148,9 @@ pub mod msg;
 // The messaging extension's friend family: the users panel's friends, the
 // user menu's items, presence, and what a friend's conversation is handed.
 pub mod friends;
+// The message requests' window, one a connection, opened from the Friends
+// section.
+mod requests;
 // the Files browser: its window, both panels and every operation between
 // them. The providers underneath stay C (files_*_provider.c, files_ops.c).
 // open_files_browser is this module's #[no_mangle] export.

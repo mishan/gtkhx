@@ -509,7 +509,7 @@ fn a_change_in_the_requests_is_told_with_its_count() {
         pushed(unbound.0, 832, &changed);
         pushed(c.0, 832, &changed);
     }
-    assert_eq!(told(), [Event::Requests]);
+    assert_eq!(told(), [Event::RequestsChanged]);
     assert_eq!(with_roster(c.0, |m| m.requests.count), 3);
     // Nothing is listed for it: the view asks, where it shows them.
     assert_eq!(sent(), []);
@@ -621,4 +621,19 @@ fn a_page_after_the_connection_let_go_is_nobodys() {
     unsafe { reply(c.0, trans, &page) };
     assert_eq!((told(), sent()), (vec![], vec![]));
     assert!(with_roster(c.0, |m| m.requests.senders.is_empty()));
+}
+
+#[test]
+fn a_setting_sent_without_a_presence_leaves_ours_as_it_was() {
+    let c = Conn::serving_requests(0);
+    sent();
+    told();
+    model::with_roster_mut(c.0, |m| m.set_own_presence(P::Away, None));
+    let trans = unsafe { crate::send::friends::set_takes_requests(c.0, true, None).unwrap() };
+    unsafe { reply(c.0, trans, &frame(TASK, trans, false, fields(&[]))) };
+    assert_eq!(told(), [Event::Presence]);
+    with_roster(c.0, |m| {
+        assert_eq!(m.own_presence(), Some((P::Away, None)));
+        assert_eq!(m.requests.takes, Some(true));
+    });
 }

@@ -40,9 +40,9 @@ extern "C" {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Asked {
     Roster,
-    /// Our presence, the status sent with it, if any, and whether we take
-    /// message requests, if it said.
-    Presence(PresenceState, Option<String>, Option<bool>),
+    /// Our presence, if it said, the status sent with it, if any, and
+    /// whether we take message requests, if it said.
+    Presence(Option<PresenceState>, Option<String>, Option<bool>),
     /// An instant message.
     Im(Guid),
     /// Find User or Get User Info: an entry, or nobody.
@@ -119,7 +119,9 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
         },
         Asked::Presence(state, status, takes) => {
             model::with_roster_mut(htlc, |m| {
-                m.set_own_presence(state, status);
+                if let Some(state) = state {
+                    m.set_own_presence(state, status);
+                }
                 m.requests.takes = takes.or(m.requests.takes);
             });
             tell(htlc, &Event::Presence);
@@ -368,7 +370,7 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
             match count {
                 Some(n) if model::with_roster(htlc, |m| m.requests.served) => {
                     model::with_roster_mut(htlc, |m| m.requests.changed(n));
-                    tell(htlc, &Event::Requests);
+                    tell(htlc, &Event::RequestsChanged);
                 }
                 Some(_) => {}
                 None => log("message requests changed, without their count"),

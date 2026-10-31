@@ -883,6 +883,7 @@ fn every_path_round_trips_a_non_default_value() {
     s.transfers.download_dir = "dir!".into();
     s.trackers.addresses = vec!["t1".into(), "t2".into(), "t3".into()];
     s.updates.skip_version = "skip!".into();
+    s.messaging.requests_set = vec!["h:5500/61".into(), "h:5500/".into()];
     s.voice.input_device = "in!".into();
     s.voice.output_device = "out!".into();
     s.voice.ptt_key = "key!".into();
