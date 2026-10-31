@@ -89,6 +89,13 @@ impl Reply {
         }
     }
 
+    /// A whole transaction, as the session hands one over.
+    pub fn from_raw(raw: Vec<u8>) -> Self {
+        let header = hxproto::parse::decode_header_full(&raw, u32::MAX)
+            .expect("the session hands over whole transactions");
+        Reply { header, raw }
+    }
+
     pub fn is_error(&self) -> bool {
         self.header.flag & 1 != 0
     }
@@ -374,6 +381,13 @@ impl Client {
                     match events.recv().await {
                         Some(Event::Frame(f)) if is_reply(&f, trans) => {
                             return Ok(Reply::from_frame(f));
+                        }
+                        // The messaging extension's, as production's
+                        // receive handlers are handed them.
+                        Some(Event::Session(hxsession::Event::Reply { trans: t, frame }))
+                            if t == trans =>
+                        {
+                            return Ok(Reply::from_raw(frame));
                         }
                         Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
                         Some(Event::Shutdown(r)) => {

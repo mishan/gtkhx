@@ -35,6 +35,8 @@ hxtask = { path = "../hxtask" }
 hxsession = { workspace = true }
 # chat.history_initial, the lines the history fetches ask for.
 hxconfig = { path = "../hxconfig" }
+# A sent instant message's id.
+getrandom = "0.3"
 
 [features]
 # Voice and video's requests (src/voice.rs), on with -Dvoice: they reach the

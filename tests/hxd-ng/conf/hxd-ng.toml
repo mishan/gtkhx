@@ -58,3 +58,11 @@ per_hour = 100000
 # account earns back every two seconds is for a server with people on it.
 [limits]
 reconnect_seconds = 0
+
+# The messaging extension's friend family, for the friend-* accounts
+# (hx-e2e's friends suite); the inbox keeps what waits for them.
+[inbox]
+db = "/var/lib/hxd-ng/messages.db"
+
+[messaging]
+enabled = true

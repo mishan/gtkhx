@@ -36,6 +36,7 @@ port).
 | [voice.md](voice.md) | Voice chat: the wire contract, the WebRTC pipeline and state machine, and the longest gotchas chapter in the tree. |
 | [video.md](video.md) | Camera video and screen sharing on top of the voice room: the extension's contract, subscriptions as visibility, the capture and receive legs, the `webrtcbin` behaviors they had to work around, and screen-share consent. |
 | [inline-media.md](inline-media.md) | Images in chat: the upload/handle/fetch pipeline, the field block, and the decoder's security posture. |
+| [messaging.md](messaging.md) | Friends and instant messages, the messaging extension's friend family: negotiation, how its transactions reach Rust, the roster model and the `messaging` signal. |
 | [gif-icons.md](gif-icons.md) | Per-user GIF avatars, discovered by probe because the spec defines no capability bit. |
 | [emoji-shortcodes.md](emoji-shortcodes.md) | Emoji that survive servers which don't speak UTF-8, and how the shortcode table is generated. |
 | [image-decoding.md](image-decoding.md) | The glycin-backed decoder, the loader-generation compatibility problem, and the three backends. |

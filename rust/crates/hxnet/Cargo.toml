@@ -25,6 +25,10 @@ crate-type = ["staticlib", "rlib"]
 # ProxyConfig type + URI parsing are always available; only the actual
 # tokio-socks tunnel + the SOCKS connect tests are gated.
 socks = ["dep:tokio-socks"]
+# Offer the messaging extension's friend family (capability bit 6) at
+# login. Off until GtkHx shows what it brings; the routing and handlers
+# beneath it are built either way.
+messaging = []
 
 [dependencies]
 hxproto = { workspace = true }

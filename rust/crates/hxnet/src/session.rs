@@ -11,6 +11,10 @@
 //! the session says becomes:
 //!
 //! - every transaction it hands over whole → `Event::Frame`
+//! - but the messaging extension's (800–834), where the server agreed to
+//!   it, as the session's own `Unhandled` and `Reply` in `Event::Session`:
+//!   what the server pushes, and the replies to the consumer's requests
+//!   of it, whose handlers are all Rust's (`hxhandlers::recv::friends`)
 //! - what it makes of the rest, the replies the consumer expected, and
 //!   with the tap on each transaction as it came → `Event::Session`
 //! - logged in → what the login reply said, as `Event::Session`, then
@@ -24,6 +28,7 @@
 //! The agreement is shown from its frame; answering it is
 //! [`Command::Agree`].
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use hxsession::{Closed, Session};
@@ -88,6 +93,14 @@ struct Shared {
     /// Held while popping events and handing them on, so they reach the
     /// consumer in the session's order whichever side hands them on.
     delivering: tokio::sync::Mutex<()>,
+    /// The trans of each messaging request the consumer sent and has not
+    /// had answered.
+    messaging: Mutex<HashSet<u32>>,
+}
+
+/// The messaging extension's transactions, both ways.
+fn is_messaging(opcode: u32) -> bool {
+    (800..=834).contains(&opcode)
 }
 
 impl Shared {
@@ -95,6 +108,10 @@ impl Shared {
         self.session
             .lock()
             .expect("the session lock is never held across a panic")
+    }
+
+    fn agreed(&self, cap: u64) -> bool {
+        self.session().server().is_some_and(|i| i.caps & cap != 0)
     }
 
     fn now(&self) -> u64 {
@@ -138,6 +155,7 @@ pub async fn run<S>(
         to_write: Notify::new(),
         to_deliver: Notify::new(),
         delivering: tokio::sync::Mutex::new(()),
+        messaging: Mutex::new(HashSet::new()),
     };
     shared.queue_out();
 
@@ -246,6 +264,12 @@ where
                     // Refused only once closed, and the reason is on its
                     // way to the consumer. Not traced here: the consumer
                     // traced it as it built it.
+                    if let Some(h) = hxproto::parse::Header::parse(&bytes) {
+                        // Typing (813) is never answered.
+                        if is_messaging(h.type_) && h.type_ != 813 {
+                            shared.messaging.lock().expect("never held across a panic").insert(h.trans);
+                        }
+                    }
                     let queued = {
                         let mut s = shared.session();
                         match s.send_raw(&bytes) {
@@ -319,6 +343,23 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
     loop {
         let event = shared.session().poll_event()?;
         let out = match event {
+            hxsession::Event::Reply { trans, frame }
+                if shared
+                    .messaging
+                    .lock()
+                    .expect("never held across a panic")
+                    .remove(&trans) =>
+            {
+                Event::Session(hxsession::Event::Reply { trans, frame })
+            }
+            // A server that never agreed to the extension is sent nothing
+            // of it, and what it sends anyway is shown as any unknown
+            // transaction is.
+            e @ hxsession::Event::Unhandled { opcode, .. }
+                if is_messaging(opcode) && shared.agreed(hxproto::messaging::CAP_MESSAGING) =>
+            {
+                Event::Session(e)
+            }
             // Traced from the session's tap, the session's own replies
             // among them.
             hxsession::Event::Reply { frame, .. } | hxsession::Event::Unhandled { frame, .. } => {
@@ -493,14 +534,22 @@ mod tests {
     }
 
     fn start() -> (Server, Client) {
-        start_handling(hxsession::Handled::LOGIN)
+        start_handling(hxsession::Handled::LOGIN, 0)
     }
 
-    fn start_handling(handled: hxsession::Handled) -> (Server, Client) {
+    fn start_handling(handled: hxsession::Handled, caps: u16) -> (Server, Client) {
         let (near, far) = duplex(64 * 1024);
         let (cmd_tx, cmd_rx) = mpsc::channel(8);
         let (evt_tx, evt_rx) = mpsc::channel(8);
-        let cfg = config(b"", b"", b"me", 414, hxsession::CLIENT_VERSION, 0, handled);
+        let cfg = config(
+            b"",
+            b"",
+            b"me",
+            414,
+            hxsession::CLIENT_VERSION,
+            caps,
+            handled,
+        );
         let session = Arc::new(Mutex::new(Session::new(cfg, 0)));
         tokio::spawn(run(near, session.clone(), cmd_rx, evt_tx));
         (
@@ -565,6 +614,62 @@ mod tests {
             match client.next().await {
                 Event::Frame(f) => assert_eq!(f.header.trans, trans),
                 other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    /// Where the server agreed to the friend family, its pushes and the
+    /// replies to its requests reach the consumer as the session's; where
+    /// it did not, a push is a frame like any unknown transaction.
+    #[tokio::test]
+    async fn the_messaging_extension_reaches_the_consumer_as_the_sessions() {
+        const MESSAGING: u16 = hxproto::messaging::CAP_MESSAGING as u16;
+        for agreed in [true, false] {
+            let (mut server, mut client) = start_handling(hxsession::Handled::LOGIN, MESSAGING);
+            server.accept().await;
+            server.next().await;
+            let (version, caps) = (190u16.to_be_bytes(), MESSAGING.to_be_bytes());
+            let mut reply: Vec<(u16, &[u8])> = vec![(0x00a0, &version)];
+            if agreed {
+                reply.push((0x01f0, &caps));
+            }
+            server.send(&server_says(TASK, 1, &reply)).await;
+            for state in [
+                ConnectionState::LoginSending,
+                ConnectionState::LoginReplyWait,
+            ] {
+                client.expect_state(state).await;
+            }
+            client.expect_logged_in(190).await;
+            client.expect_state(ConnectionState::HandshakeDone).await;
+
+            let send = |opcode: u32| {
+                let trans = client.session.lock().unwrap().take_trans();
+                (trans, Request::new(opcode).pack(trans).unwrap())
+            };
+            let (roster, roster_frame) = send(800);
+            let (users, users_frame) = send(300);
+            for f in [roster_frame, users_frame] {
+                client.cmd.send(Command::WriteFrame(f)).await.unwrap();
+                server.next().await;
+            }
+            server.send(&server_says(TASK, users, &[])).await;
+            server.send(&server_says(TASK, roster, &[])).await;
+            server.send(&server_says(809, 0, &[(0x0600, b"bob")])).await;
+            match client.next().await {
+                Event::Frame(f) => assert_eq!(f.header.trans, users),
+                other => panic!("{other:?}"),
+            }
+            match client.next().await {
+                Event::Session(hxsession::Event::Reply { trans, .. }) => {
+                    assert_eq!(trans, roster)
+                }
+                other => panic!("{other:?}"),
+            }
+            match (agreed, client.next().await) {
+                (true, Event::Session(hxsession::Event::Unhandled { opcode: 809, .. })) => {}
+                (false, Event::Frame(f)) if f.header.type_ == 809 => {}
+                (_, other) => panic!("agreed {agreed}: {other:?}"),
             }
         }
     }
@@ -662,7 +767,7 @@ mod tests {
     #[tokio::test]
     async fn what_the_session_handles_arrives_among_the_frames_in_order() {
         let (mut server, mut client) =
-            start_handling(hxsession::Handled::CHAT | hxsession::Handled::LOGIN);
+            start_handling(hxsession::Handled::CHAT | hxsession::Handled::LOGIN, 0);
         logged_in(&mut server, &mut client).await;
         let sent = [
             server_says(0x6a, 0, &[(0x0065, b"one")]),

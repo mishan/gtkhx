@@ -11,6 +11,7 @@ pub mod chat;
 pub mod files;
 pub mod icon;
 pub mod media;
+pub mod messaging;
 pub mod news;
 pub mod path;
 pub mod user;

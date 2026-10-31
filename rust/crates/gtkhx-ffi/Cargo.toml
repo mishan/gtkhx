@@ -79,3 +79,7 @@ voice = [
     "gtkhx-ui/voice",
     "hxhandlers/voice",
 ]
+
+# Offer the messaging extension's friend family at login (hxnet's
+# `messaging`). No meson option turns it on yet.
+messaging = ["hxnet/messaging"]

@@ -144,6 +144,13 @@ and the shared servers don't drift.
 Operations that need a file-admin account run on mhxd, Janus and hlservd
 (all `admin`, empty password); the rig's hxd-ng account is a guest, which
 may download and upload into `Uploads` but not make, delete or move.
+Its `friend-*` accounts (each password its login) hold `messaging`, and
+`[messaging]` is on, for the friends suite: those accounts keep their
+friendships and blocks between runs, so each test has its own and undoes
+what an earlier run left before it starts. hxd-ng's messaging needs
+`[inbox]`, which also queues private messages for anyone offline and keeps
+the moderation trail, reports and bans in its `messages.db` rather than
+the news database.
 hlservd's `admin` has no password until one is set, and until then logs
 in only from the machine running the server, which host networking makes
 every test connection; its flood ban is off for loopback
