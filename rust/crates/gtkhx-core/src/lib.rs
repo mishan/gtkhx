@@ -6,6 +6,8 @@
 //!   `HxChatEvent` + `HxChatMedia`, `HxTrackerServer` + `HxTrackerV3Meta`,
 //!   and the inline-media `MediaTable`).
 //! - [`conn`] — `struct htlc_conn`, the per-connection state.
+//! - [`messaging`] — the friend family's roster and the events its signal
+//!   carries.
 //!
 //! ## Why `hxtask` is not in here
 //!
@@ -23,10 +25,11 @@
 //! references and fail to link. That is not hypothetical: it is exactly how
 //! the first attempt at this crate failed.
 //!
-//! The three modules here are all extern-free, so the merged archive stays
+//! The modules here are all extern-free, so the merged archive stays
 //! self-contained and the Tier 2 tests keep linking it alone. **Anything added
 //! to this crate must also be extern-free**, or those tests break.
 
 pub mod boxed;
 pub mod conn;
+pub mod messaging;
 pub mod session;

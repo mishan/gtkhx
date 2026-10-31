@@ -1061,6 +1061,18 @@ pub(crate) unsafe fn parse_proxy_arg(
     crate::connect::ProxyConfig::from_uri(uri).map(Some)
 }
 
+/// The capabilities a connect offers: what C asks for, and the messaging
+/// extension's friend family (bit 6) in a build with the `messaging`
+/// feature, whose handlers are all Rust's. Never the messenger session
+/// (bit 8): GtkHx is a whole client, not a messenger.
+fn offered(caps: u16) -> u16 {
+    if cfg!(feature = "messaging") {
+        caps | hxproto::messaging::CAP_MESSAGING as u16
+    } else {
+        caps
+    }
+}
+
 /// Open a Hotline connection with hxnet driving the full
 /// plaintext-login lifecycle (Phase G of
 /// `hxnet-owns-the-whole-lifecycle`).
@@ -1256,7 +1268,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         name: name_vec,
         icon,
         version,
-        caps,
+        caps: offered(caps),
         trans,
         proxy,
     };
@@ -1420,7 +1432,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         name: name_vec,
         icon,
         version,
-        caps,
+        caps: offered(caps),
         trans,
         proxy,
     };
@@ -1601,7 +1613,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         name: name_vec,
         icon,
         version,
-        caps,
+        caps: offered(caps),
         trans,
         proxy,
     };
@@ -1790,7 +1802,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         name: name_vec,
         icon,
         version,
-        caps,
+        caps: offered(caps),
         trans,
         // This TLS polling open is direct-only: it takes no proxy_uri
         // param (unlike hxnet_connection_open_plaintext_polling, which the
@@ -2042,7 +2054,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         name: name_vec,
         icon,
         version,
-        caps,
+        caps: offered(caps),
         cipher,
         compression,
         proxy,
@@ -2257,7 +2269,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         name: name_vec,
         icon,
         version,
-        caps,
+        caps: offered(caps),
         cipher,
         compression,
         // This HOPE polling open is direct-only: it takes no proxy_uri

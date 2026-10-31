@@ -16,6 +16,7 @@ use hxsession::{Closed, Event};
 
 pub mod chat;
 pub mod files;
+pub mod friends;
 pub mod icon;
 pub mod login;
 pub mod msg;
@@ -134,6 +135,9 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             let quiet = files::failed(htlc, *trans, reason.as_deref()) || quiet;
             chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
         }
+        // hxnet hands over only the messaging extension's this way.
+        Event::Reply { trans, frame } => friends::reply(htlc, *trans, frame),
+        Event::Unhandled { opcode, frame } => friends::pushed(htlc, *opcode, frame),
         _ => {}
     }
 }
@@ -154,6 +158,7 @@ pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
     files::forget(htlc, login);
     icon::forget(htlc);
     crate::media::forget(htlc);
+    friends::forget(htlc);
     #[cfg(feature = "voice")]
     crate::voice::forget(htlc);
 }

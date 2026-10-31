@@ -1,0 +1,14 @@
+# A friends suite account: messaging (bit 58), and private messages,
+# which an instant message needs too.
+name = "friend-f"
+password = "friend-f"
+
+[access]
+read_chat = true
+send_chat = true
+send_msgs = true
+messaging = true
+
+# The suite asks in bursts.
+[extra]
+can_spam = true

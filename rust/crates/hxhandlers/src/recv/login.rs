@@ -89,6 +89,11 @@ pub(crate) unsafe fn logged_in(htlc: *mut c_void, info: &ServerInfo) {
         debug_log_str(c"media".as_ptr(), c_text(&line).as_ptr());
     }
 
+    // The roster, where the server confirmed the friend family: held until
+    // the login settles, as every request is, and it hands over what
+    // waited for us too.
+    crate::send::friends::roster(htlc);
+
     let name = info.name.as_deref().map(c_text);
     gtkhx_session_emit_logged_in(
         gtkhx_session_get_default(),

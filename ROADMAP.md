@@ -228,6 +228,10 @@ yet. In order, each stage a branch of its own:
    is offered only by a build that has it. The messenger-only session (bit 8) is for
    clients that are nothing else, and GtkHx is not one; a separate messaging-only
    app for it is a later stage.
+   *In progress.* Beneath the interface it is built
+   ([docs/messaging.md](docs/messaging.md)): the requests, the routing, the roster and
+   the `messaging` signal, with end-to-end tests against the rig's hxd-ng. Until the
+   interface lands, bit 6 is offered only by a build with `gtkhx-ffi/messaging`.
 3. **Message requests** (829–832): the requests a stranger's first message waits in,
    approved, deleted or cleared, and `DATA_TAKES_REQUESTS` in 808.
 4. **A device key, proved** (bit 14, Get Device Challenge and Prove Device). The identity

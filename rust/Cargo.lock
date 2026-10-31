@@ -2148,6 +2148,7 @@ dependencies = [
 name = "hxhandlers"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "glib 0.22.10",
  "gtkhx-core",
  "gtkhx-proto-ffi",

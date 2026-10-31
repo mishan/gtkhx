@@ -355,6 +355,12 @@ mod imp {
                             Type::BOOL,
                         ])
                         .build(),
+                    // messaging: (htlc*, event*) — the friend family moved
+                    // on: a `crate::messaging::Event`, Rust's alone, valid
+                    // for the emit. Read through `connect_messaging`.
+                    Signal::builder("messaging")
+                        .param_types([Type::POINTER, Type::POINTER])
+                        .build(),
                 ]
             })
         }
@@ -1035,6 +1041,39 @@ pub unsafe extern "C" fn gtkhx_session_emit_broadcast(
 }
 
 /// # Safety
+/// `self_`/`htlc` valid.
+pub unsafe fn gtkhx_session_emit_messaging(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    event: &crate::messaging::Event,
+) {
+    let v = [
+        ptr_value(htlc),
+        ptr_value((event as *const crate::messaging::Event).cast()),
+    ];
+    emit(self_, "messaging", &v);
+}
+
+/// Hear the `messaging` signal: the connection, and what moved on.
+pub fn connect_messaging<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, &crate::messaging::Event) + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("messaging", false, move |args| {
+        let ptr = |i: usize| args[i].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        let (htlc, event) = (ptr(1), ptr(2) as *const crate::messaging::Event);
+        // SAFETY: the emit passes an event that outlives it.
+        if let Some(e) = unsafe { event.as_ref() } {
+            f(htlc, e);
+        }
+        None
+    })
+}
+
+/// # Safety
 /// `self_`/`htlc` valid. `state` is a `GtkhxConnectionState` (C enum = int).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_connection_state(
@@ -1368,5 +1407,27 @@ mod tests {
         unsafe {
             gtkhx_session_emit_connection_state(std::ptr::null_mut(), std::ptr::null_mut(), 1);
         }
+    }
+
+    #[test]
+    fn messaging_hands_its_event_to_a_listener() {
+        let got = Rc::new(std::cell::RefCell::new(None));
+        let g = got.clone();
+        let id = connect_messaging(move |htlc, e| {
+            *g.borrow_mut() = Some((htlc as usize, e.clone()));
+        });
+        let ev = crate::messaging::Event::Changed {
+            login: b"bob".to_vec(),
+        };
+        unsafe {
+            gtkhx_session_emit_messaging(gtkhx_session_get_default(), 0x1234 as *mut c_void, &ev);
+        }
+        let obj: glib::Object = unsafe {
+            glib::Object::from_glib_none(
+                gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
+            )
+        };
+        obj.disconnect(id);
+        assert_eq!(*got.borrow(), Some((0x1234, ev)));
     }
 }

@@ -132,3 +132,39 @@ fn a_refusal_shows_the_servers_reason() {
         [Emitted::RequestFailed("Incorrect login.".into())]
     );
 }
+
+/// Only a server that confirmed the friend family is asked for the
+/// roster, which also hands over what waited for us.
+#[test]
+fn a_server_that_confirmed_bit_6_is_asked_for_the_roster() {
+    use hxproto::messaging::CAP_MESSAGING;
+    for (caps, asked) in [
+        (0, false),
+        (cap::TEXT_ENCODING, false),
+        (CAP_MESSAGING, true),
+    ] {
+        crate::send::friends::tests::sent();
+        let h = hx_conn_new();
+        let info = ServerInfo {
+            version: 200,
+            name: None,
+            uid: None,
+            caps,
+            media: LimitsAdvertisement::empty(),
+            history_max_msgs: None,
+            history_max_days: None,
+            video: vec![],
+        };
+        unsafe { logged_in(h.cast(), &info) };
+        let opcodes: Vec<u32> = crate::send::friends::tests::sent()
+            .into_iter()
+            .map(|(o, _, _)| o)
+            .collect();
+        assert_eq!(opcodes == [800], asked, "caps {caps:#x}: {opcodes:?}");
+        emitted();
+        unsafe {
+            crate::recv::forget(h.cast(), false);
+            hx_conn_free(h);
+        }
+    }
+}
