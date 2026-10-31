@@ -104,6 +104,9 @@ struct Sent {
     /// How far it has got, and on which connect of its connection.
     at: Delivery,
     connect: u32,
+    /// Sending it let the recipient's request to us go, which a refusal
+    /// leaves waiting after all.
+    released: bool,
 }
 
 thread_local! {
@@ -428,8 +431,9 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
         return;
     };
     // hxd-ng takes a reply to someone waiting with a request as approving
-    // it.
-    crate::friends::release(htlc, login);
+    // it. It is let go of here rather than at the answer, which can come
+    // after what the approval hands over.
+    let released = crate::friends::release(htlc, login);
     let stamp = now();
     let own = opt_cstr(hx_conn_name(htlc.cast()));
     let nick = own.map_or(&b""[..], CStr::to_bytes);
@@ -466,6 +470,7 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
         nick: nick.to_vec(),
         at: Delivery::Sending,
         connect: generation(htlc.cast()),
+        released,
     };
     win.im.borrow_mut().sent.insert(guid, sent);
 }
@@ -810,8 +815,13 @@ pub(crate) unsafe fn delivered(htlc: *mut c_void, to: &[u8], guid: &Guid, d: Del
         stamp: sent.stamp,
     };
     line.put(&view, Some(sent.mark), &sent.line, Some(&delivery_words(d)));
+    let relist = d == Delivery::Failed && sent.released;
     if matches!(d, Delivery::Read | Delivery::Failed) {
         im.sent.remove(guid);
+    }
+    drop(im);
+    if relist {
+        hxhandlers::send::friends::requests(htlc);
     }
 }
 

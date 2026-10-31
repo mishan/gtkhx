@@ -203,15 +203,17 @@ unsafe fn heard(htlc: *mut c_void, e: &Event) {
 
 /// `login`'s request on `htlc` no longer waits, and what waited is handed
 /// over at once: their messages arrive unannounced for a while, once for
-/// each request let go of.
+/// each request let go of. Whether one was.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
-pub(crate) unsafe fn release(htlc: *mut c_void, login: &[u8]) {
-    if with_roster_mut(htlc, |r| r.requests.released(login)) {
+pub(crate) unsafe fn release(htlc: *mut c_void, login: &[u8]) -> bool {
+    let released = with_roster_mut(htlc, |r| r.requests.released(login));
+    if released {
         let conn = dock::conn_key(htlc);
         HUSH.with_borrow_mut(|h| h.entry(conn).or_default().approved(login, Instant::now()));
     }
+    released
 }
 
 /// Our own status word in the public chat's user list, 0 before it lists us.
