@@ -19,9 +19,9 @@ use hxrequest::messaging as req;
 
 const OFFER: u16 = CAP_MESSAGING as u16 | CAP_TEXT_ENCODING;
 
-fn server() -> &'static Server {
-    let found = servers_with(&[Cap::Messaging]).first().copied();
-    found.expect("GTKHX_TEST_SERVERS names no server with the friend family (the rig's hxd-ng)")
+/// The rig's hxd-ng, unless `GTKHX_TEST_SERVERS` leaves it out.
+fn server() -> Option<&'static Server> {
+    servers_with(&[Cap::Messaging]).first().copied()
 }
 
 /// `login` (its password is its name), offering the friend family.
@@ -117,7 +117,7 @@ fn befriend(a: &mut Client, a_login: &str, b: &mut Client, b_login: &str) {
 
 #[test]
 fn two_accounts_become_friends_and_see_each_others_presence() {
-    let s = server();
+    let Some(s) = server() else { return };
     let mut a = messenger(s, "friend-a");
     let mut b = messenger(s, "friend-b");
     befriend(&mut a, "friend-a", &mut b, "friend-b");
@@ -146,7 +146,7 @@ fn two_accounts_become_friends_and_see_each_others_presence() {
 
 #[test]
 fn an_instant_message_carries_its_receipts_and_typing() {
-    let s = server();
+    let Some(s) = server() else { return };
     let mut a = messenger(s, "friend-c");
     let mut b = messenger(s, "friend-d");
     befriend(&mut a, "friend-c", &mut b, "friend-d");
@@ -209,7 +209,7 @@ fn an_instant_message_carries_its_receipts_and_typing() {
 
 #[test]
 fn a_block_hides_the_blocker_until_it_is_lifted() {
-    let s = server();
+    let Some(s) = server() else { return };
     let mut a = messenger(s, "friend-e");
     let mut b = messenger(s, "friend-f");
     befriend(&mut a, "friend-e", &mut b, "friend-f");
@@ -242,7 +242,7 @@ fn a_block_hides_the_blocker_until_it_is_lifted() {
 
 #[test]
 fn find_user_answers_for_an_exact_login_only() {
-    let s = server();
+    let Some(s) = server() else { return };
     let mut c = messenger(s, "friend-g");
     let found = ok(&mut c, req::find_user(b"friend-a"));
     let listed = parse_roster(&found.raw, found.raw.len()).unwrap();

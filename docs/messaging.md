@@ -93,9 +93,10 @@ from C:
 
 `hxhandlers::send::friends` is the view's API, one function a request:
 `roster`, `add`, `remove`, `respond`, `block`, `unblock`, `set_presence`,
-`im` (which returns the message's id), `read`, `typing`, `find`, `profile`
-and `set_nickname`. Each returns the trans its answer will name, and
-`None` where nothing was sent. A Login is bytes as the wire carries it, from
+`im`, `read`, `typing`, `find`, `profile` and `set_nickname`. Each returns
+the trans its answer will name, and `None` where nothing was sent, except
+`im`, which returns the message's id, and `typing`, whose trans is never
+answered. A Login is bytes as the wire carries it, from
 an entry or from `login`, which encodes one the user typed; text is UTF-8,
 sent as the connection's encoding has it (Mac Roman unless UTF-8 was
 negotiated). The requests themselves are `hxrequest::messaging`, which the
