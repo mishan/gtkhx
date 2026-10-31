@@ -20,6 +20,7 @@ use gtk4 as gtk;
 use libadwaita as adw;
 
 use crate::dock::{self, Bound};
+use crate::msg::{play_sound, SOUND_MSG};
 use crate::tr::{tr, tr1};
 
 extern "C" {
@@ -33,11 +34,7 @@ extern "C" {
     static INFOPREFIX: *const c_char;
     // notify.c / sound.c
     fn gtkhx_notify_broadcast(text: *const c_char);
-    fn play_sound(sound: std::ffi::c_int);
 }
-
-/// `MSG` (sound.h, pinned in chat.c): broadcasts share the private-message chime.
-const SOUND_MSG: std::ffi::c_int = 6;
 
 /// `HX_CHAT_LOG_INFO_COLOR` (gtkhx_log.h, pinned in chat.c): the color of the `[hx]` tag.
 const INFO_COLOR: i32 = 43;

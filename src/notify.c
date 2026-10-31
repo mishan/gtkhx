@@ -38,7 +38,6 @@
 #include "hxconn.h"
 #include "session.h"
 #include "chat.h"
-#include "msg.h"
 #include "proto_helpers.h"
 #include "toolbar.h"
 #include "gtkutil.h" /* gtkhx_announce_line */
@@ -150,8 +149,8 @@ truncated (const char *body)
     return g_strdup_printf ("%.*s…", (int)(cut - body), body);
 }
 
-static void
-send_notify (const char *id, const char *title, const char *body)
+void
+gtkhx_notify_send (const char *id, const char *title, const char *body)
 {
     GNotification *n;
 
@@ -259,49 +258,12 @@ gtkhx_notify_chat (struct htlc_conn *htlc, HxChatEvent *event)
         title = g_strdup (is_mention ? _ ("Mention in public chat")
                                      : _ ("Public chat"));
     }
-    send_notify (id, title, body);
+    gtkhx_notify_send (id, title, body);
     g_free (title);
 
 out:
     g_free (sender);
     g_free (body);
-}
-
-void
-gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event)
-{
-    char *title;
-    char id[64];
-
-    if (!event) {
-        return;
-    }
-    if (!event->is_self) {
-        gtkhx_announce_line (event->name, event->body, TRUE);
-    }
-
-    if (!gtkhx_prefs.notify_msg) {
-        return;
-    }
-
-    /* Don't notify on our own outbound PMs (echoed back by the
-     * server, or local self-injects). */
-    if (event->is_self) {
-        return;
-    }
-
-    if (gtkhx_prefs.notify_omit_focused
-        && window_is_active (
-            hx_msg_window (sess_from_htlc (htlc), event->uid))) {
-        return;
-    }
-
-    g_snprintf (id, sizeof (id), NOTIFY_ID_FMT ("msg"), NOTIFY_CONN_ID (htlc),
-                event->uid);
-    title = g_strdup_printf (_ ("%s (private message)"),
-                             (event->name && *event->name) ? event->name : "?");
-    send_notify (id, title, event->body);
-    g_free (title);
 }
 
 void
@@ -351,7 +313,7 @@ gtkhx_notify_pchat (struct htlc_conn *htlc, HxChatEvent *event)
         title = g_strdup (is_mention ? _ ("Mention in private chat")
                                      : _ ("Private chat"));
     }
-    send_notify (id, title, body);
+    gtkhx_notify_send (id, title, body);
     g_free (title);
 
 out:
@@ -374,7 +336,7 @@ gtkhx_notify_pchat_invite (struct htlc_conn *htlc, guint32 cid,
                 NOTIFY_CONN_ID (htlc), cid);
     title = g_strdup_printf (_ ("Chat invitation from %s"),
                              inviter ? inviter : "?");
-    send_notify (id, title, NULL);
+    gtkhx_notify_send (id, title, NULL);
     g_free (title);
 }
 
@@ -390,7 +352,7 @@ gtkhx_notify_news (const char *headline)
      * (news window isn't tracked by uid/cid, and a news post
      * arriving while the news window is open is still
      * notification-worthy). */
-    send_notify ("news", _ ("New news post"), headline ? headline : NULL);
+    gtkhx_notify_send ("news", _ ("New news post"), headline ? headline : NULL);
 }
 
 void
@@ -400,8 +362,8 @@ gtkhx_notify_xfer_done (const char *filename)
         return;
     }
 
-    send_notify ("xfer", _ ("File transfer complete"),
-                 filename ? filename : NULL);
+    gtkhx_notify_send ("xfer", _ ("File transfer complete"),
+                       filename ? filename : NULL);
 }
 
 void
@@ -411,5 +373,5 @@ gtkhx_notify_broadcast (const char *text)
         return;
     }
 
-    send_notify ("broadcast", _ ("Server broadcast"), text ? text : NULL);
+    gtkhx_notify_send ("broadcast", _ ("Server broadcast"), text ? text : NULL);
 }

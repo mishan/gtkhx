@@ -143,8 +143,11 @@ pub mod chat_invite;
 // (cid + subject + owned HxMemberModel + opaque view pointer).
 // Private messages: each conversation's tab, its input and the render of
 // what it says, over hxmodel::pm. Exports what C still calls in with:
-// msg_output_from_event and the hx_msg_* hooks.
+// msg_output_from_event, gtkhx_notify_msg and the hx_msg_* hooks.
 pub mod msg;
+// The messaging extension's friend family: the users panel's friends, the
+// user menu's items, presence, and what a friend's conversation is handed.
+pub mod friends;
 // the Files browser: its window, both panels and every operation between
 // them. The providers underneath stay C (files_*_provider.c, files_ops.c).
 // open_files_browser is this module's #[no_mangle] export.

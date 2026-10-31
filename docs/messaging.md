@@ -8,8 +8,8 @@ messages with delivery and read receipts and typing, finding an account by
 its Login, and an alias for a friend. The wire is hx-libs'
 `hxproto::messaging`; everything GtkHx adds over it is Rust.
 
-What is built is everything beneath the user interface. The bit is not yet
-offered by a default build, since nothing shows what it would bring.
+The bit is not yet offered by a default build: only a build with
+`gtkhx-ffi/messaging` asks for it.
 
 ## Negotiation
 
@@ -102,6 +102,44 @@ sent as the connection's encoding has it (Mac Roman unless UTF-8 was
 negotiated). The requests themselves are `hxrequest::messaging`, which the
 end-to-end suite sends too.
 
+## The interface
+
+All of it is in `gtkhx-ui`, over `hxmodel::friends`, and none of it is there
+on a connection that did not agree to bit 6: there the users panel, the user
+menu and the conversations are what they always were.
+
+- **The users panel.** Below the user list, a Friends section lists the
+  roster (`friends::refresh`, after every `messaging` event and connection
+  state change): requests first, with Accept and Decline, then friends,
+  present ones first and absent ones dimmed, then the requests we sent and
+  the accounts we blocked, dimmed. Each row's menu (right-click, Menu or
+  Shift+F10) offers what fits its state: Message, Remove Friend, Block,
+  Cancel Request, Unblock, asking first before a removal or a block. Rows
+  are kept across changes, so an open menu or a focused button outlives a
+  change to another entry. Add Friend… asks for a Login.
+- **The user menu.** Add Friend… and Block… on a user of the user list ask
+  for the user's Login: the classic list carries none, and the roster no
+  uid, so a user is never matched to a friend, by nick or otherwise.
+- **Conversations.** The private-message tab is the conversation, keyed by
+  the friend's Login (`pm::Peer::Login`), so it reaches a friend who is
+  offline. What is typed goes as an instant message where the friend is
+  one on a connection that agreed to bit 6, and is otherwise noted as not
+  sent; a conversation opened from the user list is keyed by uid and goes
+  as a classic private message, as before. Each message we send is marked
+  as it gets further (sending, sent or waiting, delivered, read, not
+  delivered), the friend's typing is shown under the transcript, and
+  lapses ten seconds after their last Started, as on Hotline-ng; ours is
+  told as it starts and stops, and stopped when the tab closes. A message
+  received is marked read once its conversation is on screen in the window
+  that has the focus.
+- **Notification.** An instant message, and a friend request, is announced,
+  chimed and notified as a private message is, under the same setting; the
+  notification of a message opens its conversation.
+- **Presence** follows the away state the user list shows of us: when our
+  own row's away bit changes, Set Presence says Away or Online.
+- **Refusals** are shown as every refusal the server explains is, a toast
+  and the error sound, in our words where the extension gives a reason.
+
 ## What hxd-ng does that a client sees
 
 - Find User answers only an exact Login, and an account that blocked the
@@ -116,7 +154,8 @@ end-to-end suite sends too.
 
 ## Tests
 
-The model's rules are unit tests in `gtkhx-core`; what the pushes and replies
+The model's rules are unit tests in `gtkhx-core`, and the panel's order,
+presence and typing in `hxmodel::friends`; what the pushes and replies
 make of the model and the signal, and what each sender writes, are
 `hxhandlers`' (`recv::friends`, `send::friends`), against a real connection
 struct. `hxnet`'s session tests check the routing. `hx-e2e`'s `friends`
@@ -128,8 +167,9 @@ only a taking-part account confirmed.
 
 ## Open
 
-- The user interface: the users panel, the private-message conversation,
-  the context menus and notifications, and turning the offer on.
+- Turning the offer on in a default build.
+- An instant message carries text alone: a friend's conversation has no
+  attachment button.
 - The login reply's messaging limits (`hxproto::messaging::Limits`) are
   not read: `hxsession::ServerInfo` carries none, so a message past the
   server's bound is refused by it rather than held back here.
