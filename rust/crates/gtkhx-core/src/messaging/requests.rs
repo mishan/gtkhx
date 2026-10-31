@@ -226,6 +226,19 @@ impl Requests {
         true
     }
 
+    /// `login`'s request no longer waits: we approved it, wrote back, or
+    /// became friends. Whether it was held, so what follows from that
+    /// happens once.
+    pub fn released(&mut self, login: &[u8]) -> bool {
+        let held = self.senders.len();
+        self.senders.retain(|s| s.login != login);
+        let released = self.senders.len() < held;
+        if released {
+            self.count = self.count.saturating_sub(1);
+        }
+        released
+    }
+
     /// The listing was refused, or a page could not be read: the one held
     /// stands.
     pub fn failed(&mut self) {

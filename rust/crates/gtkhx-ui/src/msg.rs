@@ -424,16 +424,12 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
         );
         return;
     }
-    // hxd-ng takes a reply to someone waiting with a request as approving
-    // it, and hands over at once what waited.
-    if with_roster(htlc, |r| {
-        r.requests.senders.iter().any(|s| s.login == login)
-    }) {
-        crate::friends::hush(win.conn, login);
-    }
     let Some(guid) = hxhandlers::send::friends::im(htlc, login, text) else {
         return;
     };
+    // hxd-ng takes a reply to someone waiting with a request as approving
+    // it.
+    crate::friends::release(htlc, login);
     let stamp = now();
     let own = opt_cstr(hx_conn_name(htlc.cast()));
     let nick = own.map_or(&b""[..], CStr::to_bytes);
@@ -775,13 +771,16 @@ pub(crate) unsafe fn im(htlc: *mut c_void, m: &Im, quiet: bool) {
         speaker: 0,
         stamp: i64::try_from(m.sent_at).unwrap_or(0),
     };
-    draw(&win, &line, &m.body);
+    // Whoever sent it, no bidi override or invisible character of theirs
+    // reaches the transcript or the desktop.
+    let body = friends::plain_text(&m.body);
+    draw(&win, &line, &body);
     show_typing(&win, false);
     chat_tabs::set_attention_msg(htlc, &peer, true);
     win.im.borrow_mut().unread.push(m.guid);
     mark_read(&win);
     if !quiet {
-        notify(htlc, &peer, &name, &m.body);
+        notify(htlc, &peer, &name, &body);
         play_sound(SOUND_MSG);
     }
 }

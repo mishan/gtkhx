@@ -210,3 +210,22 @@ fn a_failed_listing_leaves_the_one_held() {
     assert!(!r.page(page(None, vec![sender("eve", &[3])]), t + LISTING_GAP));
     assert_eq!(logins(&r), [&b"alice"[..]]);
 }
+
+#[test]
+fn a_released_sender_is_let_go_of_once() {
+    let mut r = Requests {
+        senders: vec![sender("alice", &[1]), sender("bob", &[2])],
+        count: 2,
+        ..Requests::default()
+    };
+    let steps = [
+        ("alice", true, vec![&b"bob"[..]], 1),
+        ("alice", false, vec![&b"bob"[..]], 1),
+        ("carol", false, vec![&b"bob"[..]], 1),
+        ("bob", true, vec![], 0),
+    ];
+    for (login, want, left, count) in steps {
+        assert_eq!(r.released(login.as_bytes()), want, "{login}");
+        assert_eq!((logins(&r), r.count), (left, count), "{login}");
+    }
+}

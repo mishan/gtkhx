@@ -343,7 +343,7 @@ fn act(conn: ConnKey, login: &[u8], what: Do, parent: &gtk::Widget) {
     match what {
         Do::Approve => unsafe {
             if send::answer_request(htlc, login, RequestAction::Approve).is_some() {
-                crate::friends::hush(conn, login);
+                crate::friends::release(htlc, login);
                 crate::msg::open_friend(htlc, login);
             }
         },

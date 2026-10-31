@@ -194,7 +194,8 @@ menu and the conversations are what they always were.
   reads, make two names that look alike differ, or turn a window's title
   around; the joiners U+200C and U+200D stay (`hxmodel::friends::
   plain_name` and `plain_text`). Every name the friend family shows goes
-  through it, and so does a friend request's note.
+  through it, and so do a friend request's note and every instant message
+  received, a friend's too.
 - **Taking requests.** Accept Message Requests shows our account's setting
   as the server's last listing gave it, and changing it sends Set Presence
   with the presence the user list's away state last told the server,
@@ -232,7 +233,8 @@ menu and the conversations are what they always were.
   request is handed over as instant messages too, drawn into the sender's
   conversation, so their messages go unannounced for a few seconds after
   we approve them, write back to them, or become their friend
-  (`hxmodel::friends::Hush`).
+  (`hxmodel::friends::Hush`), once: the request is let go of then
+  (`Requests::released`), whether or not a listing follows.
 - **Presence** follows the away state the user list shows of us: when our
   own row's away bit changes, Set Presence says Away or Online.
 - **Refusals** are shown as every refusal the server explains is, a toast

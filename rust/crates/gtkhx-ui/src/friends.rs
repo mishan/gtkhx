@@ -31,7 +31,7 @@ use gtkhx_core::conn::{
     generation, hx_conn_has_cap, hx_conn_logged_in, hx_conn_login, hx_conn_serverhost,
     hx_conn_serverport, hx_conn_uid,
 };
-use gtkhx_core::messaging::{with_roster, Event};
+use gtkhx_core::messaging::{with_roster, with_roster_mut, Event};
 use gtkhx_core::session::{
     connect_messaging, gtkhx_session_emit_request_failed, gtkhx_session_get_default,
 };
@@ -150,12 +150,9 @@ unsafe fn heard(htlc: *mut c_void, e: &Event) {
             follow_away(htlc, away);
         }
         Event::Changed { login } => {
-            // A requester made a friend is handed what waited, at once.
-            let released = with_roster(htlc, |r| {
-                friends::is_friend(r, login) && r.requests.senders.iter().any(|s| s.login == *login)
-            });
-            if released {
-                hush(dock::conn_key(htlc), login);
+            // A requester made a friend is handed what waited.
+            if with_roster(htlc, |r| friends::is_friend(r, login)) {
+                release(htlc, login);
             }
             refresh(dock::conn_key(htlc));
             crate::msg::friend_changed(htlc, login);
@@ -204,10 +201,17 @@ unsafe fn heard(htlc: *mut c_void, e: &Event) {
     }
 }
 
-/// Messages from `login`, whose requests `conn` just approved, arrive
-/// unannounced for a while: what waited is handed over at once.
-pub(crate) fn hush(conn: ConnKey, login: &[u8]) {
-    HUSH.with_borrow_mut(|h| h.entry(conn).or_default().approved(login, Instant::now()));
+/// `login`'s request on `htlc` no longer waits, and what waited is handed
+/// over at once: their messages arrive unannounced for a while, once for
+/// each request let go of.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+pub(crate) unsafe fn release(htlc: *mut c_void, login: &[u8]) {
+    if with_roster_mut(htlc, |r| r.requests.released(login)) {
+        let conn = dock::conn_key(htlc);
+        HUSH.with_borrow_mut(|h| h.entry(conn).or_default().approved(login, Instant::now()));
+    }
 }
 
 /// Our own status word in the public chat's user list, 0 before it lists us.
