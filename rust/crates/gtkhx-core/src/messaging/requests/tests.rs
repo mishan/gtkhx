@@ -74,14 +74,16 @@ fn a_burst_of_asks_is_one_listing_at_the_earliest_instant_allowed() {
     assert_eq!((r.due(t), r.next(t)), (None, None));
     r.want();
     assert_eq!(r.next(t), Some(None));
-    // Asked again while that one is out: owed, and nothing goes.
+    // Asked again while that one is out: owed, and nothing goes until
+    // it has ended and the gap has passed.
     r.want();
     assert_eq!((r.due(t), r.next(t)), (None, None));
     assert!(r.page(page(None, vec![]), t));
+    let due = t + LISTING_GAP;
+    assert_eq!(r.due(t + PAGE_GAP), Some(due));
     for _ in 0..5 {
         r.want();
     }
-    let due = t + LISTING_GAP;
     assert_eq!(r.due(t + PAGE_GAP), Some(due));
     assert_eq!(r.next(due - PAGE_GAP), None);
     assert_eq!(r.next(due), Some(None));

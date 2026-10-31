@@ -100,10 +100,17 @@ struct Listing {
 
 impl Requests {
     /// Ask for a listing, which goes once the pacing allows: a burst of
-    /// asks is one listing. One that stopped at its first page goes on.
+    /// asks is one listing. One that stopped at its first page goes on;
+    /// one being read is owed another, since a change between its pages
+    /// can move a sender onto a page already read.
     pub fn want(&mut self) {
         match &mut self.listing {
-            Some(l) => l.follow = true,
+            Some(l) => {
+                if l.follow {
+                    self.owed = Some(true);
+                }
+                l.follow = true;
+            }
             None => self.owed = Some(true),
         }
     }
