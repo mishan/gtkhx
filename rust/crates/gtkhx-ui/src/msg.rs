@@ -632,17 +632,21 @@ fn watch_window(win: &Rc<MsgWin>, window: Option<gtk::Window>) {
 
 /// A friend's conversation is in front of the user, its tab shown in the
 /// window that has the focus: what it holds unread has been read.
-fn mark_read(win: &MsgWin) {
-    let Peer::Login(login) = &win.peer else {
-        return;
-    };
-    let seen = win.content.upgrade().is_some_and(|c| {
+/// Whether the conversation is on screen in the window that has the focus.
+fn is_focused(win: &MsgWin) -> bool {
+    win.content.upgrade().is_some_and(|c| {
         c.is_mapped()
             && c.root()
                 .and_downcast::<gtk::Window>()
                 .is_some_and(|w| w.is_active())
-    });
-    if !seen {
+    })
+}
+
+fn mark_read(win: &MsgWin) {
+    let Peer::Login(login) = &win.peer else {
+        return;
+    };
+    if !is_focused(win) {
         return;
     }
     let htlc = dock::htlc_for(win.conn);
@@ -902,6 +906,11 @@ pub(crate) unsafe fn notify(htlc: *mut c_void, peer: &Peer, name: &str, body: &s
     if !hxconfig::ffi::with_settings(|s| s.notify.private_message).unwrap_or(false) {
         return;
     }
+    if hxconfig::ffi::with_settings(|s| s.notify.omit_focused).unwrap_or(false)
+        && find(dock::conn_key(htlc), peer).is_some_and(|win| is_focused(&win))
+    {
+        return;
+    }
     let id = crate::cs(&chat_tabs::notify_id(dock::conn_key(htlc), peer));
     let shown = if name.is_empty() { "?" } else { name };
     let title = crate::cs(&tr1("%s (private message)", shown));
@@ -921,13 +930,9 @@ pub unsafe extern "C" fn gtkhx_notify_msg(htlc: *mut c_void, event: *const HxMsg
     if e.is_self != 0 {
         return;
     }
-    let name = opt_cstr(e.name)
-        .map(CStr::to_string_lossy)
-        .unwrap_or_default();
-    let body = opt_cstr(e.body)
-        .map(CStr::to_string_lossy)
-        .unwrap_or_default();
-    notify(htlc, &Peer::Uid(e.uid), &name, &body);
+    // In the server's encoding, as the transcript reads them.
+    let text = |p| hxproto::text::to_utf8(opt_cstr(p).map_or(&[][..], CStr::to_bytes));
+    notify(htlc, &Peer::Uid(e.uid), &text(e.name), &text(e.body));
 }
 
 /// Draw the info pane from the public chat's entry for the peer, or from
