@@ -90,7 +90,6 @@ looking for code in the wrong place.
 | **Tracker** | `tracker_event.c` (the `HxTrackerServer` signal payload). The wire codec is `hxproto::tracker` in hx-libs; the fetch is `hxnet`. |
 | **Media** | `inline_media*.c`, `gif_icons.c`, `cicn.c`, `pict_embed.c`, `pict_magick.c`, `preview.c` |
 | **Theming / chrome** | `gtkhx_theme.c`, `gtkhx_icon.c`, `gtkutil.c`, `gtkurl.c` |
-| **Messaging** | `msg.c` (private-message windows, broadcast render) |
 | **Voice** (optional) | `voice_bridge.c`, `voice_ptt_keyspec.c` |
 | **Desktop integration** | `tray.c`, `notify.c`, `sound.c`, `sound_events.c` |
 | **Bridges to Rust** | `hxnet_bridge.c`, `dock_bridge.c`, `gtkhx_ui_bridge.c`, `users_bridge.c`, `tracker_bridge.c`, `chat_send_bridge.c`, `voice_bridge.c`, `htxf_accessors.c`, `inline_media_decode.c` |
@@ -186,7 +185,6 @@ by `hx_session_new()` and held in the collection in `session_registry.c`, in tab
 closing one frees its session and connection. `docs/multi-connection.md` is the design.
 Each session holds:
 
-- `msg_windows` — `GHashTable` keyed by user ID.
 - `chats` — the Rust `HxChatRegistry` (not a `GHashTable`), keyed by chat ID, seeded with
   the always-present public chat at cid 0.
 - `htlc` — the connection. **Heap-allocated and opaque**, reached through the `hxconn.h`
@@ -209,7 +207,7 @@ Routing, and getting it wrong sends a request to the wrong server:
   and which connect of it, so a window left open across a reconnect elsewhere goes
   quiet — and closes with its tab through `dock::close_with`; `useredit.rs` is the
   pattern. Per-connection UI state is a map keyed by `ConnKey` (`news.rs`,
-  `create_post.rs`, `files/`), never a single process-wide slot.
+  `create_post.rs`, `files/`, `msg.rs`), never a single process-wide slot.
 
 ## Idioms and pitfalls
 

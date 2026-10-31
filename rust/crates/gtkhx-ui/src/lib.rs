@@ -117,7 +117,7 @@ pub mod chat;
 // gtkurl.c's callers share with it.
 pub mod chat_view;
 // The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
-// gtkhx_chat_tabs_* C ABI chat.c / msg.c / users.c / gtkutil.c + chat.rs use.
+// gtkhx_chat_tabs_* C ABI chat.c / gtkutil.c + chat.rs use.
 pub mod chat_tabs;
 // The connection tab strip — one tab per open connection, switching the focus
 // and with it every per-connection panel's content page. Not chat_tabs, which
@@ -141,10 +141,9 @@ pub mod chat_invite;
 // the M1 nick completion (hx_member_model_* / hx_nick_complete).
 // HxConversation — the Rust per-chat model that replaces the C struct chat
 // (cid + subject + owned HxMemberModel + opaque view pointer).
-// Private Message content — create_msgwin builds the PM tab's content
-// tree (output frame, input + emoji, recipient info pane) in gtk4-rs around
-// the C create_msg model/leaf widgets. The msgwin struct + chat_tabs + wire
-// senders stay C.
+// Private messages: each conversation's tab, its input and the render of
+// what it says, over hxmodel::pm. Exports what C still calls in with:
+// msg_output_from_event and the hx_msg_* hooks.
 pub mod msg;
 // the Files browser: its window, both panels and every operation between
 // them. The providers underneath stay C (files_*_provider.c, files_ops.c).
@@ -206,7 +205,8 @@ pub mod emoji;
 // the Broadcast composer + wire sender (was toolbar.c's broadcast
 // dialog + msg.c's hx_send_broadcast). AdwAlertDialog + AdwEntryRow; the wire
 // build is native hxproto, the text encoder / task / write stay C.
-// gtkhx_broadcast_dialog_open is this module's #[no_mangle] export.
+// gtkhx_broadcast_dialog_open is this module's #[no_mangle] export, and
+// broadcastmsg shows a broadcast received.
 pub mod broadcast;
 // the server banner surface + URL / HTXF fetch state machines (was banner.c +
 // banner_dispatch.c). Decode / connection-state / TLS-verify are native Rust;

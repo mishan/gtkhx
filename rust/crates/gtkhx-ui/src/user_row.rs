@@ -130,7 +130,7 @@ impl HxUserRow {
 
     /// Run `f` with a borrowed `const char *` to the row's cached display
     /// name (valid for the closure's duration). Lets the view hand the name
-    /// to `create_msgwin` on activate without dereferencing `hx_user*`.
+    /// to `msg::open` on activate without dereferencing `hx_user*`.
     pub(crate) fn with_name_ptr<R>(&self, f: impl FnOnce(*const c_char) -> R) -> R {
         let name = self.imp().name.borrow();
         f(name.as_ptr())

@@ -414,6 +414,7 @@ pub unsafe extern "C" fn gtkhx_dock_remove_session_pages(sess: *mut c_void) {
     // on destroy.
     crate::files::close_for_session(sess);
     crate::news_browser::close_for_session(sess);
+    crate::msg::forget_conn(key_for_session(sess));
     close_owned(key_for_session(sess));
     crate::connect::forget_session(sess);
 }

@@ -210,8 +210,9 @@ tables are keyed on those with no connection dimension:
   different servers, so matching mentions against the focused connection's
   nickname both missed real ones and invented others.
 
-By contrast `sess->chats`, `sess->msg_windows` and the voice
-model are already per-session and need nothing. It is only the flat indexes.
+By contrast `sess->chats` and the voice model are already per-session, and the
+private-message conversations are one table keyed by connection and peer
+(`hxmodel::pm`), so none of them need anything. It is only the flat indexes.
 
 **What supplies the connection dimension.** `hx_conn_serial()` — a small
 integer assigned once at allocation, unique within the process run, preserved
@@ -245,10 +246,10 @@ site-by-site:
   remote side. Still a file-static singleton — one browser at a time — but the
   routing no longer asks which connection is focused.
 - ~~**The private-message path**~~ — fixed. The `msg` signal carries its
-  connection, `msgwin_with_uid` takes the session to search, and a `msgwin`
-  remembers which session's table owns it, so a close routes there rather than
-  to whatever is focused. The tab strip's close dispatchers are handed the
-  connection the tab belonged to too (M4d).
+  connection, and a conversation is keyed by connection and uid together
+  (`hxmodel::pm`), so a close routes to that connection's conversation rather
+  than to whatever is focused. The tab strip's close dispatchers are handed
+  the connection the tab belonged to too (M4d).
 - ~~**The Rust UI reaches for a connection through C shims**~~ — fixed.
   The chat input sends on the session it was attached to, and `hx_command`
   takes that connection rather than asking for the focused one. The user

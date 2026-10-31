@@ -167,7 +167,7 @@ the map.
 | `GtkhxSession` GObject + its boxed signal payloads + `htlc_conn` accessors | `gtkhx-core` | `gtkhx_session.c`, the boxed types in `proto_helpers.c` / `tracker_event.c`, `hxconn.c` |
 | Receive- and send-side protocol handlers | `hxhandlers::{recv,send}` | the per-opcode handler bodies in `rcv.c` and the scattered `hlwrite` call sites |
 | The send primitive | `hxtask` | the variadic `hlwrite` |
-| Client-side models: chat / membership / conversation registry, news, files | `hxmodel` | `struct chat` + `gchats`, the news GUI structs, `filelist_walker.c` |
+| Client-side models: chat / membership / conversation registry, private messages, news, files | `hxmodel` | `struct chat` + `gchats`, `struct msgwin` + `msg_windows`, the news GUI structs, `filelist_walker.c` |
 | Chat output surface | `rotulus` + `rotulus-layout`, from crates.io | vendored `xtext.c` |
 | Windows and dialogs | `gtkhx-ui`, module per window | see below |
 | TLS trust store (TOFU + SHA-256 pinning) | `hxtls-trust` | `tls_trust.c`, `tls_trust_dialog.c` |
@@ -351,7 +351,7 @@ Two smaller ones worth carrying:
 
 Each shell port leaves a thin C `gtkhx_<win>_build_content` (plus an optional
 `_after_embed`); each content port leaves a small accessor/setter seam
-(`hx_msgwin_*`, `hx_gchat_*`, the `HxUserListView` FFI). These are the leaf-up
+(`hx_gchat_*`, the `HxUserListView` FFI). These are the leaf-up
 boundary. They stay until the corresponding deeper layer (model, wire, dock) is
 itself ported — they are not churn to be removed.
 
@@ -465,9 +465,13 @@ genuinely-C leaves behind FFI. This is the big remaining category.
   behind the `HxUserListView` FFI.
 - **Transfers content** — the `gtask` row build, progress and queue-badge updates,
   the up/down queue reorder, and the transfer-progress handlers in `tasks.c`.
-- **Private-message model + broadcast rendering** — `msg.c` keeps the `msgwin`
-  struct and its lifecycle, the input handlers, and the message / broadcast
-  render path; the tab content tree is already Rust.
+- **Private-message model + broadcast rendering** — done. `msg.c` is gone:
+  the conversations, keyed by connection and peer, and the rules for what a
+  message reads as are `hxmodel::pm`; the tab, its input and the render are
+  `gtkhx-ui::msg`, and a broadcast received is `gtkhx-ui::broadcast`. C calls
+  in only where it still holds the event: the `msg` and `broadcast` signal
+  adapters in `gtkhx.c`, `users.c`'s open and user-change hooks, `notify.c`'s
+  focus check and the settings hooks that restyle every chat view.
 - **Inline media** — the attach / upload / download paths
   (`inline_media*.c`). The view dialog is Rust, and the decode itself is the
   `hx-image-decode` crate behind a thin C shim (`inline_media_decode.c`, which
@@ -664,9 +668,9 @@ In order:
 2. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
    the whole-app theming work is fresh.
 3. **The rest of inventory §B**, one feature at a time: Chat's render and
-   output path and window construction, the Transfers list, `msg.c`, and the
-   Users controller once the Chat and Users slices have taken the session
-   structs it depends on with them.
+   output path and window construction, the Transfers list, and the Users
+   controller once the Chat and Users slices have taken the session structs it
+   depends on with them.
 4. **The standalone windows**: `tray.c` is unblocked; `preview.c` waits on the
    poppler / sourceview crate alignment.
 5. **Decide on `main()`** — last, as planned, or early, as rule 5 describes.

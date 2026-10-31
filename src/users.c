@@ -37,7 +37,6 @@
 #include "chat_members.h"
 #include "gtkhx.h"
 #include "msg.h"
-#include "chat_tabs.h"
 #include "gtkutil.h"
 #include "tasks.h"
 #include "rcv.h"
@@ -163,7 +162,6 @@ static void
 on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
     struct UserActionCtx *ctx = user_data;
-    struct msgwin *msg;
     (void)action;
     (void)param;
 
@@ -176,14 +174,7 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
 
-    if ((msg = msgwin_with_uid (ctx->sess, mi.uid))) {
-        /* Existing msgwin — just raise its tab inside the Chat
-         * panel. The Chat panel itself gets attached / raised by
-         * gtkhx_chat_tabs_raise_msg if it's hidden. */
-        gtkhx_chat_tabs_raise_msg (ctx->sess->htlc, mi.uid);
-    } else {
-        create_msgwin (ctx->sess, mi.uid, mi.name);
-    }
+    hx_msg_open (ctx->sess, mi.uid, mi.name);
 }
 
 static void
@@ -826,17 +817,11 @@ void
 view_msg_btn (GtkWidget *w, gpointer data)
 {
     struct hx_member_info mi;
-    struct msgwin *mw;
     (void)w;
     if (!view_selected_member (data, &mi)) {
         return;
     }
-    mw = msgwin_with_uid (view_session (data), mi.uid);
-    if (mw) {
-        gtkhx_chat_tabs_raise_msg (view_session (data)->htlc, mi.uid);
-    } else {
-        create_msgwin (view_session (data), mi.uid, mi.name);
-    }
+    hx_msg_open (view_session (data), mi.uid, mi.name);
 }
 
 void
@@ -967,7 +952,7 @@ user_color_gdk (guint16 color)
      *
      * The buffer is static — every caller copies the GdkRGBA out
      * of the returned pointer before doing anything else with it
-     * (cell renderer paths in users_view.c and msg.c both
+     * (cell renderer paths in users_view.c and msg.rs both
      * dereference once for the snapshot or Pango span). User-list
      * rendering is main-thread-only, so no concurrent reads. */
     static GdkRGBA themed;
@@ -1167,10 +1152,5 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
      * this point in the dispatch (its rename-detection compares
      * the old name vs nam after we return), so a cache-lookup
      * refresh would paint the OLD identity. */
-    {
-        struct msgwin *mw = msgwin_with_uid (sess, uid);
-        if (mw) {
-            msgwin_apply_user_change (mw, nam, icon, color);
-        }
-    }
+    hx_msg_user_changed (sess, uid, nam, icon, color);
 }

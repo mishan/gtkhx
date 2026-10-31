@@ -13,8 +13,7 @@
 //! What stays C behind FFI: the custom Name cell (`users_cell.c`
 //! `hx_user_cell_name_*`), the voice-indicator column (`users_voice_col.c`,
 //! NULL when voice is compiled out), the right-click popover
-//! (`user_popup_show`), msg-window opens (`msgwin_with_uid` /
-//! `create_msgwin` / `gtkhx_chat_tabs_raise_msg`), the user-list CSS class
+//! (`user_popup_show`), the user-list CSS class
 //! (`gtkhx_apply_userlist_style`), and the theme singleton
 //! (`gtkhx_theme_get_default`). Rows are the Rust `HxUserRow` (R5.8).
 //!
@@ -84,10 +83,6 @@ extern "C" {
         y: f64,
     );
 
-    // msg.c / chat_tabs.c — open or raise the PM window.
-    fn msgwin_with_uid(sess: *mut c_void, uid: u16) -> *mut c_void;
-    fn create_msgwin(sess: *mut c_void, uid: u16, name: *mut c_char) -> *mut c_void;
-    fn gtkhx_chat_tabs_raise_msg(htlc: *mut c_void, uid: u16);
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
 
     // gtkhx_theme.c — the theming singleton (a GObject) for live rescale.
@@ -506,13 +501,11 @@ impl HxUserListView {
         if sess.is_null() {
             return;
         }
-        if unsafe { msgwin_with_uid(sess, uid) }.is_null() {
-            // The row's cached name; create_msgwin copies it, so a borrowed
-            // pointer valid for the call is enough (no hx_user* deref).
-            row.with_name_ptr(|name| unsafe { create_msgwin(sess, uid, name as *mut c_char) });
-        } else {
-            unsafe { gtkhx_chat_tabs_raise_msg(gtkhx_session_htlc(sess), uid) };
-        }
+        // The row's cached name; a new conversation copies it, so a borrowed
+        // pointer valid for the call is enough (no hx_user* deref).
+        row.with_name_ptr(|name| unsafe {
+            crate::msg::open(gtkhx_session_htlc(sess), uid, CStr::from_ptr(name))
+        });
     }
 
     fn on_secondary_press(&self, gesture: &gtk::GestureClick, x: f64, y: f64) {

@@ -38,9 +38,9 @@
  * hx_user_list_view_get_selected_user() rather than maintaining
  * a parallel `user_storow` integer global. The view also installs
  * its own right-click gesture + double-click activation; the
- * popup + msgwin opens are wired in via per-view callbacks set at
- * construction time so users.c keeps the existing user_popup /
- * msgwin code.
+ * popup + private-message opens are wired in via per-view callbacks set
+ * at construction time so users.c keeps the existing user_popup /
+ * private-message code.
  */
 
 #ifndef HX_USERS_VIEW_H
