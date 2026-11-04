@@ -149,6 +149,8 @@ extern void output_chat_invitation (struct htlc_conn *htlc, guint32 cid,
  * sidebar, then adds the tab. */
 extern struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
                                                struct chat *chat);
+/* The name its tab shows; g_free it. */
+extern char *gtkhx_pchat_label (struct htlc_conn *htlc, struct chat *chat);
 extern struct gtkhx_chat *gtkhx_pchat_new (struct htlc_conn *htlc,
                                            struct chat *chat);
 extern GtkWidget *gtkhx_pchat_user_sidebar (struct htlc_conn *htlc,

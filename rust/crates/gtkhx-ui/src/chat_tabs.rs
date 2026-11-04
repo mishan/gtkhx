@@ -360,6 +360,19 @@ fn find_pchat(htlc: *mut c_void, cid: u32) -> Option<adw::TabPage> {
     STATE.with(|s| s.borrow().pchat.get(&(conn_key(htlc), cid)).cloned())
 }
 
+/// The private chats `htlc` has a tab for.
+pub(crate) fn pchat_cids(htlc: *mut c_void) -> Vec<u32> {
+    let conn = conn_key(htlc);
+    STATE.with(|s| {
+        s.borrow()
+            .pchat
+            .keys()
+            .filter(|(c, _)| *c == conn)
+            .map(|(_, cid)| *cid)
+            .collect()
+    })
+}
+
 fn find_msg(htlc: *mut c_void, peer: &Peer) -> Option<adw::TabPage> {
     STATE.with(|s| s.borrow().msg.get(&(conn_key(htlc), peer.clone())).cloned())
 }
@@ -486,6 +499,7 @@ pub unsafe extern "C" fn gtkhx_notify_install_actions(app: *mut gtk::ffi::GtkApp
     app.add_action(&action);
     // Once, at startup, before any connection can hear from a friend.
     crate::friends::install();
+    crate::pchat::install();
 }
 
 /// Raise the public-chat tab of the connection the user is looking at. The
@@ -540,17 +554,9 @@ pub(crate) fn set_attention_msg(htlc: *mut c_void, peer: &Peer, state: bool) {
     set_page_attention(htlc, find_msg(htlc, peer), state);
 }
 
-/// # Safety
-/// `title` is NULL or a valid C string.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_chat_tabs_set_title_pchat(
-    htlc: *mut c_void,
-    cid: u32,
-    title: *const c_char,
-) {
+pub(crate) fn set_title_pchat(htlc: *mut c_void, cid: u32, title: &str) {
     if let Some(page) = find_pchat(htlc, cid) {
-        let t = crate::cstr(title);
-        page.set_title(&if t.is_empty() { tr("Private Chat") } else { t });
+        page.set_title(title);
     }
 }
 
@@ -571,8 +577,18 @@ pub extern "C" fn gtkhx_chat_tabs_close_pchat(htlc: *mut c_void, cid: u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A view for `htlc` without `gtkhx_chat_tabs_init`'s handlers, whose
+    /// teardowns reach C a test binary does not link.
+    pub(crate) fn bare_view(htlc: *mut c_void) {
+        STATE.with(|s| {
+            s.borrow_mut()
+                .views
+                .insert(conn_key(htlc), adw::TabView::new())
+        });
+    }
 
     #[test]
     fn a_login_comes_back_out_of_its_notification() {

@@ -15,7 +15,7 @@ use gtk::glib;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 use hxhandlers::send::chat::{hx_chat_join, hx_reject_chat};
 
@@ -38,12 +38,8 @@ pub unsafe extern "C" fn output_chat_invitation(htlc: *mut c_void, cid: u32, nam
     crate::ensure_gtk_init();
 
     let name = crate::cstr(name);
-    let body = format!(
-        "{} {}: 0x{:08x}",
-        name,
-        tr("invites you to private chat"),
-        cid
-    );
+    // TRANSLATORS: %s is the inviter's nickname.
+    let body = tr1("%s invites you to a private chat", &name);
 
     let dialog = adw::AlertDialog::new(Some(&tr("Chat Invitation")), Some(&body));
     dialog.add_response("decline", &tr("_Decline"));

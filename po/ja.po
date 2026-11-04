@@ -855,9 +855,10 @@ msgstr "次の一致 (Ctrl+G, F3)"
 msgid "Chat message"
 msgstr "チャットメッセージ"
 
-#: rust/crates/gtkhx-ui/src/chat_invite.rs:44
-msgid "invites you to private chat"
-msgstr "さんがプライベートチャットに招待しています"
+#. TRANSLATORS: %s is the inviter's nickname.
+#: rust/crates/gtkhx-ui/src/chat_invite.rs:42
+msgid "%s invites you to a private chat"
+msgstr "%s さんがプライベートチャットに招待しています"
 
 #: rust/crates/gtkhx-ui/src/chat_invite.rs:48
 msgid "Chat Invitation"
