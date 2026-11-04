@@ -488,6 +488,26 @@ fn a_join_makes_its_chat_only_once_answered() {
 }
 
 #[test]
+fn a_join_reply_renaming_a_member_already_listed_retitles_the_tabs() {
+    test_env::reset();
+    test_env::CHAT_CID.with(|c| c.set(9));
+    unsafe {
+        joined(
+            std::ptr::null_mut(),
+            8,
+            9,
+            &[user(3, 1, Some(1), "Z", None)],
+            None,
+        )
+    };
+    assert!(matches!(
+        test_env::take(),
+        Some(Emit::Upsert { uid: 3, .. })
+    ));
+    assert!(test_env::RETITLED.with(|c| c.get()));
+}
+
+#[test]
 fn a_join_answered_after_the_user_left_the_chat_is_ignored() {
     test_env::reset();
     test_env::CHAT_EXISTS.with(|c| c.set(false));

@@ -89,10 +89,6 @@ void gtkhx_chat_tabs_raise_public (void);
 void gtkhx_chat_tabs_set_attention_pchat (struct htlc_conn *htlc, guint32 cid,
                                           gboolean state);
 
-/* Update the tab's title (e.g. rename or status change). */
-void gtkhx_chat_tabs_set_title_pchat (struct htlc_conn *htlc, guint32 cid,
-                                      const char *title);
-
 /* Programmatically close a tab. Used when the server tears down a
  * private chat or kicks us out, etc. (NOT the user clicking the
  * tab X — that path runs the close handler below.) */

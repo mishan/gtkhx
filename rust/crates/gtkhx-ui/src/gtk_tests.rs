@@ -36,6 +36,7 @@ fn display_backed() {
     crate::files::complete::tests::check_completes_and_survives_entry_destroy();
     crate::emoji::tests::check_chooser_is_built_on_first_open();
     crate::users_view::tests::check_rows_land_in_one_batch();
+    crate::pchat::tests::check_a_rename_retitles_the_tabs();
     crate::users_view::tests::check_avatars_stay_with_their_connection();
     crate::updates::tests::check_banner_starts_hidden();
     crate::icon_picker::tests::check_banners_fit_the_dialog();

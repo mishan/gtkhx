@@ -567,9 +567,8 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
  *
  * State carried through user_data: sess + uid + listbox. Selection
  * tracking lives on the GtkListBox itself — no separate selected_row
- * counter. Each row is a GtkListBoxRow with a horizontal label pair
- * (cid in monospace, subject right-aligned) and the cid stashed as
- * "pchat-cid" qdata for O(1) read-back.
+ * counter. Each row is a GtkListBoxRow with the chat's name and the cid
+ * stashed as "pchat-cid" qdata for O(1) read-back.
  *
  * Lifetime: ctx is owned by the dialog GObject via
  * g_object_set_data_full. The destroy-notify (prompt_chat_ctx_free)
@@ -612,39 +611,25 @@ prompt_chat_response (AdwAlertDialog *dialog, const char *response,
     }
 }
 
-/* Build one GtkListBoxRow for a pchat. Layout: monospace cid label
- * on the start side (fixed-ish width via xalign + width-chars), the
- * subject as a single-line ellipsised label filling the rest. The cid
- * lives on the row as qdata for the response handler. */
+/* One GtkListBoxRow for a pchat, named as its tab is, with the cid as
+ * qdata for the response handler. */
 static GtkWidget *
-prompt_chat_make_row (guint32 cid, const char *subject)
+prompt_chat_make_row (session *sess, struct chat *chat)
 {
     GtkWidget *row = gtk_list_box_row_new ();
-    GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
-    GtkWidget *cid_lbl;
-    GtkWidget *subj_lbl;
-    char *cid_str = g_strdup_printf ("0x%08x", cid);
+    g_autofree char *name = gtkhx_pchat_label (sess->htlc, chat);
+    GtkWidget *lbl = gtk_label_new (name);
 
-    gtk_widget_set_margin_start (hbox, 8);
-    gtk_widget_set_margin_end (hbox, 8);
-    gtk_widget_set_margin_top (hbox, 4);
-    gtk_widget_set_margin_bottom (hbox, 4);
+    gtk_widget_set_margin_start (lbl, 8);
+    gtk_widget_set_margin_end (lbl, 8);
+    gtk_widget_set_margin_top (lbl, 4);
+    gtk_widget_set_margin_bottom (lbl, 4);
+    gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
+    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), lbl);
 
-    cid_lbl = gtk_label_new (cid_str);
-    gtk_label_set_xalign (GTK_LABEL (cid_lbl), 0.0f);
-    gtk_widget_add_css_class (cid_lbl, "monospace");
-    g_free (cid_str);
-
-    subj_lbl = gtk_label_new (subject ? subject : "");
-    gtk_label_set_xalign (GTK_LABEL (subj_lbl), 0.0f);
-    gtk_label_set_ellipsize (GTK_LABEL (subj_lbl), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand (subj_lbl, TRUE);
-
-    gtk_box_append (GTK_BOX (hbox), cid_lbl);
-    gtk_box_append (GTK_BOX (hbox), subj_lbl);
-    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), hbox);
-
-    g_object_set_data (G_OBJECT (row), "pchat-cid", GUINT_TO_POINTER (cid));
+    g_object_set_data (G_OBJECT (row), "pchat-cid",
+                       GUINT_TO_POINTER (hx_chat_cid (chat)));
     return row;
 }
 
@@ -699,9 +684,8 @@ prompt_chat (session *sess, guint16 _uid)
             if (!hx_chat_cid (c) || !hx_chat_view (c)) {
                 continue; /* skip the public chat + window-less models */
             }
-            GtkWidget *row
-                = prompt_chat_make_row (hx_chat_cid (c), hx_chat_subject (c));
-            gtk_list_box_append (GTK_LIST_BOX (listbox), row);
+            gtk_list_box_append (GTK_LIST_BOX (listbox),
+                                 prompt_chat_make_row (sess, c));
         }
     }
     /* Pre-select the first row so the default "Invite" response

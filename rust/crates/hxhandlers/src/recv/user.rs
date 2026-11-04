@@ -56,6 +56,8 @@ extern "C" {
     /// `void reload_news (widget, data)` — kick off the post-login news fetch
     /// (news.c); `data` is the session, `widget` is unused (pass NULL).
     fn reload_news(widget: *mut c_void, data: *mut c_void);
+    /// Name `htlc`'s private chat tabs for who is in them now (gtkhx-ui).
+    fn gtkhx_pchat_retitle(htlc: *mut c_void);
     /// gtkhx-core::conn accessors for our own identity bookkeeping.
     fn hx_conn_uid(htlc: *mut c_void) -> u16;
     fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
@@ -559,6 +561,9 @@ pub(crate) unsafe fn joined(
         chat = chat_new(sess, cid);
     }
     load(htlc, chat, users, subject);
+    // A member the chat already lists is updated without a signal, which
+    // would leave a tab named for a nick it no longer has.
+    gtkhx_pchat_retitle(htlc);
 }
 
 /// The reply to our creating private chat `cid`: the chat, with us in it.
@@ -827,6 +832,8 @@ pub(crate) mod test_env {
         pub static MEMBERS: Cell<u32> = const { Cell::new(0) };
         /// True once chat_delete fired.
         pub static CHAT_DELETED: Cell<bool> = const { Cell::new(false) };
+        /// True once the private chat tabs were asked to retitle.
+        pub static RETITLED: Cell<bool> = const { Cell::new(false) };
     }
 
     /// A member snapshot the get_info double hands back.
@@ -868,6 +875,7 @@ pub(crate) mod test_env {
         VIEW.with(|c| c.set(false));
         MEMBERS.with(|c| c.set(0));
         CHAT_DELETED.with(|c| c.set(false));
+        RETITLED.with(|c| c.set(false));
     }
 
     /// Set the self display name the hx_conn_name double returns.
@@ -1176,6 +1184,11 @@ unsafe fn hx_chat_subject(_chat: *const c_void) -> *const c_char {
     // The stored CString lives in the thread-local and isn't mutated during the
     // emit, so the borrowed pointer stays valid for the caller.
     test_env::SUBJECT_STORE.with(|c| c.borrow().as_ptr())
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_pchat_retitle(_htlc: *mut c_void) {
+    test_env::RETITLED.with(|c| c.set(true));
 }
 
 #[cfg(test)]

@@ -359,3 +359,28 @@ pub unsafe extern "C" fn user_nick_color_rgb(
 ) -> *const c_void {
     std::ptr::null()
 }
+
+// ---- chat.c, for the chats a session holds ----
+
+/// The chats tests made, by session and cid.
+pub fn chats() -> &'static std::sync::Mutex<Vec<(usize, u32, usize)>> {
+    static CHATS: std::sync::OnceLock<std::sync::Mutex<Vec<(usize, u32, usize)>>> =
+        std::sync::OnceLock::new();
+    CHATS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void {
+    chats()
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(s, c, _)| *s == sess as usize && *c == cid)
+        .map_or(std::ptr::null_mut(), |(_, _, chat)| *chat as *mut c_void)
+}
+
+/// The connection a serial names: a test's connection is its own session.
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_with_serial(serial: u16) -> *mut c_void {
+    gtkhx_session_htlc(hx_session_with_serial(serial))
+}
