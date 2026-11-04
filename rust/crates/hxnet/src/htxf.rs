@@ -512,6 +512,10 @@ pub struct HtxfConn {
     /// A folder download's item count, as the server announced it; 0 when
     /// unknown. See [`hxnet_htxf_set_folder_items`].
     folder_items: u32,
+    /// The fork bytes it announced; 0 when unknown.
+    folder_size: u64,
+    /// The fork bytes of its files read so far.
+    forks: u64,
     /// The read timeout when no shorter one is armed.
     stall: Option<Duration>,
     /// A shorter read timeout is armed, which a caller expects to run out.
@@ -535,6 +539,8 @@ impl HtxfConn {
             inner: HtxfInner::Plain(HtxfChannel::new_plain(stream)),
             abort: None,
             folder_items: 0,
+            folder_size: 0,
+            forks: 0,
             stall: None,
             short: false,
             stalled: false,
@@ -638,6 +644,8 @@ unsafe fn htxf_finish(
             inner: HtxfInner::Tls(Box::new(ch)),
             abort: None,
             folder_items: 0,
+            folder_size: 0,
+            forks: 0,
             stall: Some(stall),
             short: false,
             stalled: false,
@@ -657,6 +665,8 @@ unsafe fn htxf_finish(
             inner: HtxfInner::Plain(ch),
             abort: None,
             folder_items: 0,
+            folder_size: 0,
+            forks: 0,
             stall: Some(stall),
             short: false,
             stalled: false,
@@ -973,27 +983,42 @@ pub unsafe extern "C" fn hxnet_htxf_finish_send(handle: *mut HtxfConn) -> c_int 
 }
 
 /// Tell a folder download on `handle` how many items the server announced
-/// for it (the reply's item count, `DATA_FILE_NFILES`), before
+/// for it (the reply's item count, `DATA_FILE_NFILES`), and how many bytes
+/// its files' forks hold (the reply's size), before
 /// [`hxnet_xfer_folder_recv_all`](crate::xfer::hxnet_xfer_folder_recv_all)
 /// runs. A folder has no end marker: its end is the server closing, and
 /// some servers — Janus — close only on a timeout of their own, ten
 /// seconds on, waiting for the client to stop at the count. With the
 /// count, once that many items have arrived the download gives the next
 /// one a grace rather than the server's timeout; see
-/// `hxnet_xfer_folder_recv_all`. 0 leaves it waiting for the close.
+/// `hxnet_xfer_folder_recv_all`. A server that announces no count gets
+/// the grace once that many fork bytes have arrived; the size counts no
+/// headers, so only at the last file with any. 0 for both leaves it
+/// waiting for the close.
 ///
 /// # Safety
 /// `handle` is NULL or a live handle from [`hxnet_htxf_connect`].
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_htxf_set_folder_items(handle: *mut HtxfConn, items: u32) {
+pub unsafe extern "C" fn hxnet_htxf_set_folder_items(handle: *mut HtxfConn, items: u32, size: u64) {
     if let Some(h) = handle.as_mut() {
-        h.folder_items = items;
+        (h.folder_items, h.folder_size) = (items, size);
     }
 }
 
 impl HtxfConn {
     pub(crate) fn folder_items(&self) -> u32 {
         self.folder_items
+    }
+
+    /// Whether a folder download that announced no count has read the
+    /// fork bytes it announced.
+    pub(crate) fn folder_size_arrived(&self) -> bool {
+        self.folder_items == 0 && self.folder_size != 0 && self.forks >= self.folder_size
+    }
+
+    /// Count `n` bytes of a file's fork read.
+    pub(crate) fn forks_read(&mut self, n: u64) {
+        self.forks = self.forks.saturating_add(n);
     }
 
     /// One read, with its error kind kept — which [`hxnet_htxf_read`]

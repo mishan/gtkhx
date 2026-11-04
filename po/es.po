@@ -3758,3 +3758,39 @@ msgstr "Archivo %s"
 
 #~ msgid "Msg"
 #~ msgstr "Mensaje"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "Couldn't upload %1$s: %2$s"
+msgstr "No se ha podido subir %1$s: %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "Couldn't download %1$s: %2$s"
+msgstr "No se ha podido descargar %1$s: %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the connection to the server couldn't be opened"
+msgstr "no se ha podido abrir la conexión con el servidor"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server stopped responding"
+msgstr "el servidor ha dejado de responder"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the connection to the server failed"
+msgstr "la conexión con el servidor ha fallado"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server already has a larger file with that name"
+msgstr "el servidor ya tiene un archivo más grande con ese nombre"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server already has a larger file with the name of a file in the folder"
+msgstr "el servidor ya tiene un archivo más grande con el nombre de uno de los archivos de la carpeta"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "%1$s of %2$s · Failed: %3$s"
+msgstr "%1$s de %2$s · Error: %3$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "%1$s of %2$s · Failed"
+msgstr "%1$s de %2$s · Error"

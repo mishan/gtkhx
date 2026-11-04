@@ -198,7 +198,7 @@ pub(crate) unsafe fn download_ready(
     if folder {
         // How the download knows it's done without waiting on a server that
         // closes late; see hxnet_htxf_set_folder_items.
-        crate::xfer::remember_folder_items(htxf, t.items);
+        crate::xfer::remember_folder_items(htxf, t.items, t.size);
     }
     stamp_subchannel(htlc, htxf);
 
@@ -281,6 +281,12 @@ pub(crate) unsafe fn upload_ready(
         // would come out neither.
         if data_pos > data_size || rsrc_pos > rsrc_size {
             if !crate::xfer::upload_file_changed(htxf) {
+                crate::xfer::tell(
+                    true,
+                    false,
+                    CStr::from_ptr(path).to_bytes(),
+                    hxnet::xfer::Failure::Larger,
+                );
                 upload_refused(htlc, htxf);
             }
             return;

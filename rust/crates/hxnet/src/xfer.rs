@@ -418,6 +418,21 @@ pub enum Failure {
     Lost,
     /// A local file couldn't be read or written: the OS's error.
     Local(c_int),
+    /// A new upload's server already holds more of a file by that name
+    /// than the local one has.
+    Larger,
+}
+
+impl Failure {
+    /// Whether asking again could go otherwise: not for a server holding a
+    /// larger file, a file too large for a folder's stream, or a name the
+    /// server sent that can't be written.
+    pub fn may_retry(self) -> bool {
+        !matches!(
+            self,
+            Failure::Larger | Failure::Local(EFBIG | EINVAL | ENAMETOOLONG)
+        )
+    }
 }
 
 /// What `rv`, the failure a transfer worker returned, says went wrong on
@@ -608,6 +623,8 @@ unsafe fn file_recv(p: &HxnetXferParams, was: &mut Option<Filp>) -> c_int {
         {
             return e;
         }
+        // What is sent again was counted as held when it was asked from.
+        (*hx).forks_read(fork_len - again);
         let _ = f.sync_all();
     }
 
@@ -624,6 +641,7 @@ unsafe fn file_recv(p: &HxnetXferParams, was: &mut Option<Filp>) -> c_int {
                 if let Err(e) = rd_wr_recv(hx, &mut std::io::sink(), ffo::fork_len(&m, large), p) {
                     return e;
                 }
+                (*hx).forks_read(ffo::fork_len(&m, large));
             }
             Ok(None) => {}
             Err(e) => return e,
@@ -1082,8 +1100,9 @@ pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> 
         }
         let asked = std::time::Instant::now();
         let mut nfi = [0u8; NFI_HEADER_LEN];
-        if expected != 0 && received >= expected {
-            // Past the announced count the tree is probably done, and some
+        if expected != 0 && received >= expected || (*hx).folder_size_arrived() {
+            // Past the announced count, or with none the announced fork
+            // bytes, the tree is probably done, and some
             // servers only close on a timeout of their own: give the next
             // entry a grace instead. The count is only a guide — mhxd counts
             // the top level alone (docs/mhxd-bugs.md) — so an entry that
@@ -1173,8 +1192,12 @@ pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> 
         let kept = ledger.kept(&rel);
         let mut was = None;
         let data_pos = match answer(kept, Kept::of(&full, false, None)) {
-            // The FILE_NEXT the loop starts with passes over it.
-            Answer::Skip => continue,
+            // The FILE_NEXT the loop starts with passes over it. What is
+            // held counts towards the size as the server offers it.
+            Answer::Skip => {
+                (*hx).forks_read(kept.map_or(0, |k| k.len));
+                continue;
+            }
             Answer::Send => {
                 if xfer_write(fp.hx, &FILE_SEND_CMD.to_be_bytes()).is_err() {
                     return EIO;
@@ -1191,6 +1214,7 @@ pub unsafe fn folder_recv(fp: &HxnetFolderParams, ledger: &mut FolderLedger) -> 
                     return EIO;
                 }
                 was = kept.and_then(|k| k.filp);
+                (*hx).forks_read(u64::from(data));
                 u64::from(data)
             }
         };
@@ -2439,6 +2463,7 @@ mod folder_loopback_tests {
     fn recv_folders(
         port: u16,
         items: u32,
+        size: u64,
         abort_after: Option<std::time::Duration>,
         tag: &str,
     ) -> (c_int, std::time::Duration, Vec<(String, Vec<u8>)>) {
@@ -2446,7 +2471,7 @@ mod folder_loopback_tests {
         let _ = std::fs::remove_dir_all(&dest);
         let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         let mut conn = HtxfConn::new_plain_for_test(stream);
-        unsafe { crate::htxf::hxnet_htxf_set_folder_items(&mut conn, items) };
+        unsafe { crate::htxf::hxnet_htxf_set_folder_items(&mut conn, items, size) };
         let token = crate::htxf::hxnet_htxf_abort_new();
         unsafe { crate::htxf::hxnet_htxf_abort_arm(&mut conn, token) };
         let canceller = abort_after.map(|d| {
@@ -2511,7 +2536,7 @@ mod folder_loopback_tests {
             Step::FileUnsized("one.txt", with_rsrc),
             Step::FileUnsized("two.txt", plain),
         ]);
-        let (rv, _, got) = recv_folders(port, 2, None, "unsized");
+        let (rv, _, got) = recv_folders(port, 2, 0, None, "unsized");
         server.join().unwrap();
         assert_eq!(rv, 0);
         let bodies: Vec<_> = got
@@ -2538,7 +2563,7 @@ mod folder_loopback_tests {
             Step::Folder("b", NOW),
             Step::Hold(std::time::Duration::from_secs(4)),
         ]);
-        let (rv, took, got) = recv_folders(port, 2, None, "stop");
+        let (rv, took, got) = recv_folders(port, 2, 0, None, "stop");
         server.join().unwrap();
         assert_eq!(rv, 0, "a clean end");
         assert_eq!(names(&got), ["a", "b"]);
@@ -2546,6 +2571,32 @@ mod folder_loopback_tests {
             took < FOLDER_END_GRACE + std::time::Duration::from_millis(1500),
             "ended {took:?} in, not after the server's hold"
         );
+    }
+
+    // A server that announces no count, only the size — its files' fork
+    // bytes — and closes only on its own timeout: the download ends soon
+    // after the last of those bytes, and not before, however slowly an
+    // entry ahead of them comes.
+    #[test]
+    fn folder_recv_without_a_count_stops_soon_after_the_size() {
+        // Past the least grace, which a grace begun too early would cut off.
+        let late = std::time::Duration::from_millis(1300);
+        let size = (b"first".len() + b"second".len()) as u64;
+        for (tag, size, soon) in [("size", size, true), ("short", size + 1000, false)] {
+            let (port, server) = serve_steps(vec![
+                Step::File("a", gen_filp(b"first")),
+                Step::Folder("late", late),
+                Step::File("b", gen_filp(b"second")),
+                Step::Hold(std::time::Duration::from_secs(8)),
+            ]);
+            let (rv, took, got) = recv_folders(port, 0, size, None, tag);
+            server.join().unwrap();
+            assert_eq!(rv, 0, "{tag}: a clean end");
+            assert_eq!(names(&got), ["a", "b", "late"], "{tag}");
+            // The grace after the size is three times the slowest answer.
+            let quick = took < late * 4 + std::time::Duration::from_millis(1500);
+            assert_eq!(quick, soon, "{tag}: ended {took:?} in");
+        }
     }
 
     // A count lower than what the server sends — mhxd counts the top level
@@ -2560,7 +2611,7 @@ mod folder_loopback_tests {
             Step::File("f", gen_filp(&body)),
             Step::Folder("c", NOW),
         ]);
-        let (rv, _, got) = recv_folders(port, 1, None, "under");
+        let (rv, _, got) = recv_folders(port, 1, 0, None, "under");
         server.join().unwrap();
         assert_eq!(rv, 0, "a clean end");
         assert_eq!(names(&got), ["a", "b", "c", "f"]);
@@ -2578,7 +2629,7 @@ mod folder_loopback_tests {
             Step::Folder("b", slow),
             Step::Folder("c", slow),
         ]);
-        let (rv, _, got) = recv_folders(port, 1, None, "slow");
+        let (rv, _, got) = recv_folders(port, 1, 0, None, "slow");
         server.join().unwrap();
         assert_eq!(rv, 0, "a clean end");
         assert_eq!(names(&got), ["a", "b", "c"]);
@@ -2590,7 +2641,7 @@ mod folder_loopback_tests {
     fn folder_recv_past_the_count_still_fails_on_a_reset_or_a_cut_header() {
         for (tag, last) in [("reset", Step::Reset), ("cut", Step::PartialHeader)] {
             let (port, server) = serve_steps(vec![Step::Folder("a", NOW), last]);
-            let (rv, _, _) = recv_folders(port, 1, None, tag);
+            let (rv, _, _) = recv_folders(port, 1, 0, None, tag);
             server.join().unwrap();
             assert_ne!(rv, 0, "{tag}: reported as a clean end");
         }
@@ -2606,6 +2657,7 @@ mod folder_loopback_tests {
         let (rv, _, _) = recv_folders(
             port,
             1,
+            0,
             Some(std::time::Duration::from_millis(300)),
             "cancel",
         );
@@ -2902,8 +2954,8 @@ mod folder_loopback_tests {
         recv_counted(port, dest, ledger).0
     }
 
-    /// [`recv_into`], and the bytes its progress reported.
-    fn recv_counted(port: u16, dest: &Path, ledger: &mut FolderLedger) -> (c_int, u64) {
+    /// [`recv_into`], the bytes its progress reported, and its connection.
+    fn recv_counted(port: u16, dest: &Path, ledger: &mut FolderLedger) -> (c_int, u64, HtxfConn) {
         unsafe extern "C" fn count(user: *mut c_void, delta: u64) {
             *(user as *mut u64) += delta;
         }
@@ -2915,7 +2967,13 @@ mod folder_loopback_tests {
         fp.user_data = (&mut reported as *mut u64).cast();
         fp.progress = Some(count);
         let rv = unsafe { folder_recv(&fp, ledger) };
-        (rv, reported)
+        (rv, reported, conn)
+    }
+
+    /// Whether `conn` counted at least `n` fork bytes.
+    fn counted(conn: &mut HtxfConn, n: u64) -> bool {
+        unsafe { crate::htxf::hxnet_htxf_set_folder_items(conn, 0, n) };
+        conn.folder_size_arrived()
     }
 
     fn body(n: usize, k: u8) -> Vec<u8> {
@@ -2962,8 +3020,14 @@ mod folder_loopback_tests {
                 .sum();
             let held = ledger.held(&dest);
             let (port, server) = serve_answers(files.clone(), DATE, resumes, None);
-            let (rv, reported) = recv_counted(port, &dest, &mut ledger);
+            let (rv, reported, mut conn) = recv_counted(port, &dest, &mut ledger);
             assert_eq!(rv, 0, "{tag}");
+            // Each file's data fork, held or not. The resource fork a sized
+            // item carries is read past uncounted: a server announcing it
+            // waits for the close.
+            let forks: u64 = files.iter().map(|f| f.1.len() as u64).sum();
+            assert!(counted(&mut conn, forks), "{tag}: short of the forks");
+            assert!(!counted(&mut conn, forks + 1), "{tag}: past the forks");
             assert!(
                 held + reported <= size,
                 "{tag}: {held} held and {reported} more of {size}"

@@ -3776,3 +3776,39 @@ msgstr "%s-Datei"
 
 #~ msgid "Msg"
 #~ msgstr "Private Nachricht senden"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "Couldn't upload %1$s: %2$s"
+msgstr "%1$s konnte nicht hochgeladen werden: %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "Couldn't download %1$s: %2$s"
+msgstr "%1$s konnte nicht heruntergeladen werden: %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the connection to the server couldn't be opened"
+msgstr "Die Verbindung zum Server konnte nicht hergestellt werden"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server stopped responding"
+msgstr "Der Server antwortet nicht mehr"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the connection to the server failed"
+msgstr "Die Verbindung zum Server ist fehlgeschlagen"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server already has a larger file with that name"
+msgstr "Der Server hat bereits eine größere Datei mit diesem Namen"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server already has a larger file with the name of a file in the folder"
+msgstr "Der Server hat bereits eine größere Datei mit dem Namen einer Datei im Ordner"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "%1$s of %2$s · Failed: %3$s"
+msgstr "%1$s von %2$s · Fehlgeschlagen: %3$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "%1$s of %2$s · Failed"
+msgstr "%1$s von %2$s · Fehlgeschlagen"

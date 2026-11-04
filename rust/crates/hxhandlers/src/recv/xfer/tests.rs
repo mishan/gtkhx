@@ -177,7 +177,7 @@ fn a_file_upload_is_sized_from_the_disk_and_where_it_resumes() {
 }
 
 /// A server that says it holds more than the file has is refused, not sent
-/// to.
+/// to, and the person told.
 #[test]
 fn an_upload_resumed_past_the_file_is_not_sent() {
     for (data_from, rsrc_from) in [(1001, 0), (0, 51)] {
@@ -193,6 +193,11 @@ fn an_upload_resumed_past_the_file_is_not_sent() {
         assert_eq!(htxf().ref_, 0);
         assert!(!test_env::STARTED.with(|c| c.get()));
         assert!(test_env::XFER_DELETED.with(|c| c.get()));
+        let told = crate::xfer::TOLD.take();
+        assert_eq!(
+            told.iter().map(|t| (t.0, t.2)).collect::<Vec<_>>(),
+            [(1, 4)]
+        );
     }
 }
 

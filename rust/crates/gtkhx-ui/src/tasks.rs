@@ -51,7 +51,7 @@ fn human(size: u64) -> String {
 }
 
 /// The line under a transfer's name: how far it has got of how much, and
-/// either how fast and how long to go or that it is paused, `paused` being
+/// either how fast and how long to go or that it is paused or failed, `paused` being
 /// `xfer_paused`'s answer. `run` is what its connection has brought, over
 /// `elapsed` seconds. A newly allocated string, for the caller to `g_free`.
 #[no_mangle]
@@ -71,7 +71,8 @@ pub extern "C" fn gtkhx_tasks_subtitle(
 /// — tell the person a transfer of `name` failed, as a refused request is
 /// told: a toast and the error sound. `why` is 0 for a connection that
 /// couldn't be opened, 1 for a server that stopped responding, 2 for one that
-/// failed partway, and 3 for the local file's OS error `err`.
+/// failed partway, 3 for the local file's OS error `err`, and 4 for a file,
+/// 5 for a folder, that the server already holds a larger file of.
 ///
 /// # Safety
 /// `name` is NULL or a NUL-terminated string. Main thread only.
@@ -87,14 +88,11 @@ pub unsafe extern "C" fn gtkhx_tasks_failed(
     } else {
         CStr::from_ptr(name).to_string_lossy()
     };
-    let reason = match why {
-        0 => tr("the connection to the server couldn't be opened"),
-        1 => tr("the server stopped responding"),
-        2 => tr("the connection to the server failed"),
-        _ => CStr::from_ptr(gtk4::glib::ffi::g_strerror(err))
+    let reason = reason(why).unwrap_or_else(|| {
+        CStr::from_ptr(gtk4::glib::ffi::g_strerror(err))
             .to_string_lossy()
-            .into_owned(),
-    };
+            .into_owned()
+    });
     let msgid = if upload != 0 {
         n_("Couldn't upload %1$s: %2$s")
     } else {
@@ -103,6 +101,19 @@ pub unsafe extern "C" fn gtkhx_tasks_failed(
     let text = crate::cs(&tr_argv(msgid, &[&name, &reason]));
     crate::ffi::toolbar_show_toast(text.as_ptr());
     crate::msg::play_sound(SOUND_ERROR);
+}
+
+/// Why a transfer failed, as [`gtkhx_tasks_failed`] is told it, but for
+/// the local file's error.
+fn reason(why: c_int) -> Option<String> {
+    Some(match why {
+        0 => tr("the connection to the server couldn't be opened"),
+        1 => tr("the server stopped responding"),
+        2 => tr("the connection to the server failed"),
+        4 => tr("the server already has a larger file with that name"),
+        5 => tr("the server already has a larger file with the name of a file in the folder"),
+        _ => return None,
+    })
 }
 
 /// sound.h's `ERROR`.
@@ -131,6 +142,11 @@ fn subtitle(
             "%1$s of %2$s · Paused: the folder on the server has changed",
             &[&p, &s],
         )
+    } else if paused >= 5 {
+        match reason(paused - 5) {
+            Some(r) => tr_argv("%1$s of %2$s · Failed: %3$s", &[&p, &s, &r]),
+            None => tr_argv("%1$s of %2$s · Failed", &[&p, &s]),
+        }
     } else if paused != 0 {
         tr_argv("%1$s of %2$s · Paused", &[&p, &s])
     } else if run == 0 {
@@ -235,6 +251,15 @@ mod tests {
                 4,
                 "1200 of 5000 · Paused: the folder on the server has changed",
             ),
+            (
+                1_200,
+                5_000,
+                0,
+                0,
+                6,
+                "1200 of 5000 · Failed: the server stopped responding",
+            ),
+            (1_200, 5_000, 0, 0, 8, "1200 of 5000 · Failed"), // a local error
             (1_000, 5_000, 1_000, 2, 0, "1000 of 5000 · 500/s · ETA 0:08"),
             (
                 0,
