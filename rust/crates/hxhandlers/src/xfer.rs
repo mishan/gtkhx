@@ -1674,7 +1674,7 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<Disk>) {
         let sz = hx_file_size((*htxf).path.as_ptr());
         if sz >= 0 {
             let local_data = sz as u32; // C's (guint32)sb.st_size truncation
-            let ours = kept.map(|k| k.len) == Some(sz) && sz <= i64::from(u32::MAX);
+            let ours = kept == Some(disk((*htxf).path.as_ptr())) && sz <= i64::from(u32::MAX);
             if ours && sz == 0 {
                 // Paused before any data came: start over into the same file.
             } else if ours
@@ -2365,6 +2365,37 @@ mod tests {
                     "the row still measures the whole file"
                 );
             }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_download_replaced_by_a_file_its_length_is_renamed() {
+        use std::os::unix::ffi::OsStrExt;
+        let then = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1 << 30);
+        let touch = |f: &std::path::Path, at| {
+            let file = std::fs::File::options().write(true).open(f).unwrap();
+            file.set_modified(at).unwrap();
+        };
+        // (changed since it was kept, the offset asked), the server's size
+        // unknown
+        for (replaced, want) in [(false, Some(1000)), (true, None)] {
+            reset(&[]);
+            let f =
+                std::env::temp_dir().join(format!("gtkhx_kept_{replaced}_{}", std::process::id()));
+            std::fs::write(&f, b"partial").unwrap();
+            touch(&f, then);
+            unsafe {
+                let r = running();
+                set_carr(&mut (*r).path, f.as_os_str().as_bytes());
+                pause_settled(r, 1000);
+                if replaced {
+                    touch(&f, then + std::time::Duration::from_secs(60));
+                }
+                xfer_go(r);
+                assert_eq!(resumed_at(), want, "replaced {replaced}");
+            }
+            let _ = std::fs::remove_file(&f);
         }
     }
 
