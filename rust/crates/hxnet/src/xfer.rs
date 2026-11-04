@@ -641,7 +641,6 @@ unsafe fn file_recv(p: &HxnetXferParams, was: &mut Option<Filp>) -> c_int {
                 if let Err(e) = rd_wr_recv(hx, &mut std::io::sink(), ffo::fork_len(&m, large), p) {
                     return e;
                 }
-                (*hx).forks_read(ffo::fork_len(&m, large));
             }
             Ok(None) => {}
             Err(e) => return e,
@@ -2582,9 +2581,25 @@ mod folder_loopback_tests {
         // Past the least grace, which a grace begun too early would cut off.
         let late = std::time::Duration::from_millis(1300);
         let size = (b"first".len() + b"second".len()) as u64;
-        for (tag, size, soon) in [("size", size, true), ("short", size + 1000, false)] {
-            let (port, server) = serve_steps(vec![
+        // A Large File item, unsized, whose declared resource fork is read
+        // past and counts for nothing.
+        let mut rsrc = gen_filp(b"first");
+        rsrc[22..24].copy_from_slice(&3u16.to_be_bytes());
+        let macr = rsrc.len() - ffo::FORK_HEADER_LEN;
+        rsrc[macr + 12..macr + 16].copy_from_slice(&64u32.to_be_bytes());
+        rsrc.extend_from_slice(&[0; 64]);
+        for (tag, first, size, soon) in [
+            ("size", Step::File("a", gen_filp(b"first")), size, true),
+            (
+                "short",
                 Step::File("a", gen_filp(b"first")),
+                size + 1000,
+                false,
+            ),
+            ("rsrc", Step::FileUnsized("a", rsrc.clone()), size, true),
+        ] {
+            let (port, server) = serve_steps(vec![
+                first,
                 Step::Folder("late", late),
                 Step::File("b", gen_filp(b"second")),
                 Step::Hold(std::time::Duration::from_secs(8)),
@@ -3022,9 +3037,9 @@ mod folder_loopback_tests {
             let (port, server) = serve_answers(files.clone(), DATE, resumes, None);
             let (rv, reported, mut conn) = recv_counted(port, &dest, &mut ledger);
             assert_eq!(rv, 0, "{tag}");
-            // Each file's data fork, held or not. The resource fork a sized
-            // item carries is read past uncounted: a server announcing it
-            // waits for the close.
+            // Each file's data fork, held or not. A resource fork, read
+            // past, is never counted: a server announcing one waits for the
+            // close.
             let forks: u64 = files.iter().map(|f| f.1.len() as u64).sum();
             assert!(counted(&mut conn, forks), "{tag}: short of the forks");
             assert!(!counted(&mut conn, forks + 1), "{tag}: past the forks");
