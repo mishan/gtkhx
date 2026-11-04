@@ -424,10 +424,10 @@ impl HtxfInner {
 /// a send's end makes certain; this only bounds a server that doesn't.
 const FINISH_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How long a write may make no progress before it fails: a server that
-/// stops reading an upload without closing would otherwise hold the
-/// worker, and its row, forever.
-const WRITE_STALL: Duration = Duration::from_secs(60);
+/// How long a read or a write may make no progress before it fails: a
+/// server that stops sending a download, or reading an upload, without
+/// closing would otherwise hold the worker, and its row, forever.
+const STALL: Duration = Duration::from_secs(60);
 
 /// Thread-safe cancellation token for one HTXF subchannel — the
 /// foundation for cooperative transfer cancel (Phase R3 X1,
@@ -512,6 +512,14 @@ pub struct HtxfConn {
     /// A folder download's item count, as the server announced it; 0 when
     /// unknown. See [`hxnet_htxf_set_folder_items`].
     folder_items: u32,
+    /// The read timeout when no shorter one is armed.
+    stall: Option<Duration>,
+    /// A shorter read timeout is armed, which a caller expects to run out.
+    short: bool,
+    /// A read or write ran out of the stall bound.
+    stalled: bool,
+    /// A read or write failed, or the server closed.
+    broke: bool,
 }
 
 impl HtxfConn {
@@ -527,6 +535,10 @@ impl HtxfConn {
             inner: HtxfInner::Plain(HtxfChannel::new_plain(stream)),
             abort: None,
             folder_items: 0,
+            stall: None,
+            short: false,
+            stalled: false,
+            broke: false,
         }
     }
 }
@@ -566,7 +578,7 @@ unsafe fn htxf_finish(
     aead: Option<(AeadState, AeadState)>,
     verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
-    write_stall: Duration,
+    stall: Duration,
 ) -> *mut HtxfConn {
     // Force blocking mode. This path is synchronous (sync rustls handshake
     // + blocking read/write); a non-blocking socket would make the
@@ -577,8 +589,11 @@ unsafe fn htxf_finish(
         glib::g_critical!("hxnet", "hxnet_htxf: set_nonblocking(false): {}", e);
         return std::ptr::null_mut();
     }
-    if let Err(e) = tcp.set_write_timeout(Some(write_stall)) {
-        glib::g_critical!("hxnet", "hxnet_htxf: set_write_timeout: {}", e);
+    if let Err(e) = tcp
+        .set_write_timeout(Some(stall))
+        .and_then(|()| tcp.set_read_timeout(Some(stall)))
+    {
+        glib::g_critical!("hxnet", "hxnet_htxf: socket timeouts: {}", e);
         return std::ptr::null_mut();
     }
 
@@ -623,6 +638,10 @@ unsafe fn htxf_finish(
             inner: HtxfInner::Tls(Box::new(ch)),
             abort: None,
             folder_items: 0,
+            stall: Some(stall),
+            short: false,
+            stalled: false,
+            broke: false,
         }))
     } else {
         let mut tcp = tcp;
@@ -638,6 +657,10 @@ unsafe fn htxf_finish(
             inner: HtxfInner::Plain(ch),
             abort: None,
             folder_items: 0,
+            stall: Some(stall),
+            short: false,
+            stalled: false,
+            broke: false,
         }))
     }
 }
@@ -782,7 +805,7 @@ pub unsafe extern "C" fn hxnet_htxf_connect(
         aead,
         verify_cert,
         user_data,
-        WRITE_STALL,
+        STALL,
     )
 }
 
@@ -813,13 +836,17 @@ pub unsafe extern "C" fn hxnet_htxf_read(handle: *mut HtxfConn, buf: *mut u8, le
         // after an abort must surface as an error, not a clean 0 the
         // worker loop would mistake for end-of-stream.
         Ok(n) => {
+            h.broke |= n == 0 && len != 0;
             if h.is_aborted() {
                 -1
             } else {
                 n as isize
             }
         }
-        Err(_) => -1,
+        Err(e) => {
+            h.note(&e, !h.short);
+            -1
+        }
     }
 }
 
@@ -875,11 +902,12 @@ pub unsafe extern "C" fn hxnet_htxf_write(
 }
 
 /// Set the blocking read timeout on the underlying socket. `timeout_ms`
-/// of 0 restores indefinite blocking; non-zero arms a per-read deadline
-/// after which a read returns `-1` (the OS surfaces `WouldBlock`, which
-/// the channel does not retry). The C folder-drain path uses this to
-/// reproduce the old `g_socket_condition_timed_wait` "slurp what's in
-/// flight, then give up" behaviour without a separate pollable handle.
+/// of 0 restores the connection's stall bound; non-zero arms a shorter
+/// per-read deadline after which a read returns `-1` (the OS surfaces
+/// `WouldBlock`, which the channel does not retry). The C folder-drain
+/// path uses this to reproduce the old `g_socket_condition_timed_wait`
+/// "slurp what's in flight, then give up" behaviour without a separate
+/// pollable handle.
 /// Returns `0` on success, `-1` on a NULL handle or a setsockopt error.
 ///
 /// # Safety
@@ -898,8 +926,11 @@ pub unsafe extern "C" fn hxnet_htxf_set_read_timeout(
     } else {
         Some(Duration::from_millis(timeout_ms as u64))
     };
-    match h.inner.set_read_timeout(dur) {
-        Ok(()) => 0,
+    match h.inner.set_read_timeout(dur.or(h.stall)) {
+        Ok(()) => {
+            h.short = dur.is_some();
+            0
+        }
         Err(e) => {
             glib::g_critical!("hxnet", "hxnet_htxf_set_read_timeout: {}", e);
             -1
@@ -972,7 +1003,11 @@ impl HtxfConn {
         if self.is_aborted() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
-        let n = self.inner.read(buf)?;
+        let n = self
+            .inner
+            .read(buf)
+            .inspect_err(|e| self.note(e, !self.short))?;
+        self.broke |= n == 0 && !buf.is_empty();
         if self.is_aborted() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
@@ -986,15 +1021,38 @@ impl HtxfConn {
         if self.is_aborted() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
-        let n = self.inner.write(buf)?;
+        let n = self.inner.write(buf).inspect_err(|e| self.note(e, true))?;
         if self.is_aborted() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
         Ok(n)
     }
 
-    pub(crate) fn set_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
-        self.inner.set_read_timeout(dur)
+    pub(crate) fn set_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
+        self.inner.set_read_timeout(dur.or(self.stall))?;
+        self.short = dur.is_some();
+        Ok(())
+    }
+
+    /// Whether a read or write ran out of the stall bound.
+    pub(crate) fn stalled(&self) -> bool {
+        self.stalled
+    }
+
+    /// Whether a read or write failed, or the server closed.
+    pub(crate) fn broke(&self) -> bool {
+        self.broke
+    }
+
+    /// Note `e`, if a timeout ran out and `bound` says it was the stall
+    /// bound's.
+    fn note(&mut self, e: &io::Error, bound: bool) {
+        self.broke = true;
+        self.stalled |= bound
+            && matches!(
+                e.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            );
     }
 }
 
@@ -1455,6 +1513,63 @@ mod tests {
             Ok(true),
             "a write making no progress fails within its bound"
         );
+        unsafe { hxnet_htxf_close(h) };
+        drop(done_tx);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_download_the_server_stops_sending_fails_instead_of_waiting_forever() {
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accepts and then sends nothing, holding the socket open.
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            let (_sock, _) = listener.accept().unwrap();
+            let _ = done_rx.recv();
+        });
+        let tcp = TcpStream::connect(addr).unwrap();
+        let h = unsafe {
+            htxf_finish(
+                tcp,
+                false,
+                None,
+                b"HTXF",
+                None,
+                None,
+                std::ptr::null_mut(),
+                Duration::from_millis(200),
+            )
+        };
+        assert!(!h.is_null());
+        // A drain's own timeout running out is no stall.
+        let mut buf = [0u8; 16];
+        assert_eq!(unsafe { hxnet_htxf_set_read_timeout(h, 50) }, 0);
+        assert_eq!(
+            unsafe { hxnet_htxf_read(h, buf.as_mut_ptr(), buf.len()) },
+            -1
+        );
+        assert!(!unsafe { &*h }.stalled());
+        // What a drain does once it has given up on a marker.
+        assert_eq!(unsafe { hxnet_htxf_set_read_timeout(h, 0) }, 0);
+        struct SendPtr(*mut HtxfConn);
+        unsafe impl Send for SendPtr {}
+        let hp = SendPtr(h);
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let hp = hp;
+            let mut buf = [0u8; 16];
+            let _ = tx.send(unsafe { hxnet_htxf_read(hp.0, buf.as_mut_ptr(), buf.len()) });
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)),
+            Ok(-1),
+            "a read that gets nothing fails within its bound"
+        );
+        assert!(unsafe { &*h }.stalled());
         unsafe { hxnet_htxf_close(h) };
         drop(done_tx);
         server.join().unwrap();

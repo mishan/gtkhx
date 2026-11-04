@@ -23,7 +23,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 
 use crate::dock;
-use crate::tr::tr_argv;
+use crate::tr::{n_, tr, tr_argv};
 
 /// Opaque C `session *`.
 type Session = c_void;
@@ -66,6 +66,47 @@ pub extern "C" fn gtkhx_tasks_subtitle(
     let text = CString::new(text).unwrap_or_default();
     unsafe { gtk4::glib::ffi::g_strdup(text.as_ptr()) }
 }
+
+/// `void gtkhx_tasks_failed(int upload, const char *name, int why, int err)`
+/// — tell the person a transfer of `name` failed, as a refused request is
+/// told: a toast and the error sound. `why` is 0 for a connection that
+/// couldn't be opened, 1 for a server that stopped responding, 2 for one that
+/// failed partway, and 3 for the local file's OS error `err`.
+///
+/// # Safety
+/// `name` is NULL or a NUL-terminated string. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_tasks_failed(
+    upload: c_int,
+    name: *const c_char,
+    why: c_int,
+    err: c_int,
+) {
+    let name = if name.is_null() {
+        Default::default()
+    } else {
+        CStr::from_ptr(name).to_string_lossy()
+    };
+    let reason = match why {
+        0 => tr("the connection to the server couldn't be opened"),
+        1 => tr("the server stopped responding"),
+        2 => tr("the connection to the server failed"),
+        _ => CStr::from_ptr(gtk4::glib::ffi::g_strerror(err))
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let msgid = if upload != 0 {
+        n_("Couldn't upload %1$s: %2$s")
+    } else {
+        n_("Couldn't download %1$s: %2$s")
+    };
+    let text = crate::cs(&tr_argv(msgid, &[&name, &reason]));
+    crate::ffi::toolbar_show_toast(text.as_ptr());
+    crate::msg::play_sound(SOUND_ERROR);
+}
+
+/// sound.h's `ERROR`.
+const SOUND_ERROR: c_int = 2;
 
 /// [`gtkhx_tasks_subtitle`]'s text, with sizes written by `human`.
 fn subtitle(

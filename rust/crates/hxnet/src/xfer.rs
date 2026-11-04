@@ -405,6 +405,37 @@ fn finish(
 /// MACR read.
 const MACR_DRAIN_TIMEOUT_MS: u32 = 200;
 
+/// Why a transfer failed, for the person who asked for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Failure {
+    /// Its connection couldn't be opened.
+    Unreachable,
+    /// The server stopped sending or reading, for longer than a transfer
+    /// waits on it.
+    Stalled,
+    /// Its connection failed or ended partway, or the server sent what
+    /// makes no sense.
+    Lost,
+    /// A local file couldn't be read or written: the OS's error.
+    Local(c_int),
+}
+
+/// What `rv`, the failure a transfer worker returned, says went wrong on
+/// `hx`, its live connection.
+///
+/// # Safety
+/// `hx` is NULL or a live handle.
+pub unsafe fn failure(hx: *const HtxfConn, rv: c_int) -> Failure {
+    let h = hx.as_ref();
+    if h.is_some_and(|h| h.stalled()) {
+        Failure::Stalled
+    } else if h.is_some_and(|h| h.broke()) || rv < 0 || rv == EPROTO {
+        Failure::Lost
+    } else {
+        Failure::Local(rv)
+    }
+}
+
 /// What [`hxnet_xfer_file_recv_one`] returns for a preview that stopped at the
 /// part of the file it shows: not a failure, but not the whole file either.
 pub const HXNET_XFER_STOPPED: c_int = -1;
@@ -1731,11 +1762,82 @@ mod send_stall_tests {
             data_size: size as u64,
             rsrc_size: 0,
         };
-        assert_eq!(unsafe { hxnet_xfer_file_send_one(&params) }, ETIMEDOUT);
+        let rv = unsafe { hxnet_xfer_file_send_one(&params) };
+        assert_eq!(rv, ETIMEDOUT);
+        assert_eq!(unsafe { failure(&conn, rv) }, Failure::Stalled);
         drop(conn);
         drop(done_tx);
         server.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use crate::htxf::HtxfConn;
+    use std::net::{TcpListener, TcpStream};
+
+    /// Upload a file said to be `len` bytes, `on_disk` of them there if any,
+    /// to a server that reads it all or a little and then closes, and say
+    /// why it failed.
+    fn failed_upload(name: &str, len: usize, on_disk: Option<usize>, reads_all: bool) -> Failure {
+        let dir = std::env::temp_dir().join(format!("hxnet_failure_{}_{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("up.bin");
+        if let Some(n) = on_disk {
+            std::fs::write(&path, vec![0u8; n]).unwrap();
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            if reads_all {
+                let _ = s.read_to_end(&mut Vec::new());
+            } else {
+                let _ = s.read(&mut [0u8; 4096]);
+            }
+        });
+        let mut conn = HtxfConn::new_plain_for_test(TcpStream::connect(addr).unwrap());
+        let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: path_c.as_ptr(),
+            file_budget: 0,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: len as u64,
+            rsrc_size: 0,
+        };
+        let rv = unsafe { hxnet_xfer_file_send_one(&params) };
+        assert_ne!(rv, 0);
+        let why = unsafe { failure(&conn, rv) };
+        drop(conn);
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        why
+    }
+
+    #[test]
+    fn a_failed_upload_says_whose_end_failed() {
+        let len = 16 << 20;
+        for (name, on_disk, reads_all, want) in [
+            ("closed", Some(len), false, Failure::Lost),
+            ("missing", None, false, Failure::Local(2)),
+            ("shrunk", Some(len / 16), true, Failure::Local(EIO)),
+        ] {
+            assert_eq!(failed_upload(name, len, on_disk, reads_all), want, "{name}");
+        }
     }
 }
 
