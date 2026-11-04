@@ -481,7 +481,7 @@ fn download_folder(c: &mut Client, dir: &str, name: &[u8]) -> (i32, std::time::D
     );
     let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
     let h = open_xfer(c, get.ref_, u64::from(get.size), true);
-    unsafe { hxnet_htxf_set_folder_items(h, get.nfiles) };
+    unsafe { hxnet_htxf_set_folder_items(h, get.nfiles, u64::from(get.size)) };
 
     let dest = local_dir(c, "folder");
     let dest_c = CString::new(dest.to_str().unwrap()).unwrap();
@@ -542,7 +542,7 @@ fn download_folder_into(
     );
     let get = hxproto::parse::parse_folder_get_reply(&r.raw, r.raw.len());
     let (h, abort) = open_transfer(c, get.ref_, u64::from(get.size), true);
-    unsafe { hxnet_htxf_set_folder_items(h, get.nfiles) };
+    unsafe { hxnet_htxf_set_folder_items(h, get.nfiles, u64::from(get.size)) };
     let mut at = PauseAt {
         abort,
         received: 0,

@@ -384,6 +384,9 @@ enum Pause {
     /// server, and asked for from the start, some servers would add it to
     /// what they hold.
     Changed { kept: Disk },
+    /// Its connection failed, for `why` ([`gtkhx_tasks_failed`]'s): kept
+    /// to be asked for again, as a pause is.
+    Failed { kept: Disk, why: c_int },
 }
 
 /// A local file as a pause left it: its data fork's size (-1 for none) and
@@ -460,7 +463,7 @@ fn set_pause(htxf: *mut HtxfHandle, to: Option<Pause>) {
 fn paused(htxf: *mut HtxfHandle) -> bool {
     matches!(
         pause_of(htxf),
-        Some(Pause::Winding | Pause::Paused { .. } | Pause::Changed { .. })
+        Some(Pause::Winding | Pause::Paused { .. } | Pause::Changed { .. } | Pause::Failed { .. })
     )
 }
 
@@ -479,14 +482,20 @@ unsafe fn emit_file_update(htxf: *mut HtxfHandle) {
 /// `htxf` is a live handle. Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_can_pause(htxf: *mut HtxfHandle) -> c_int {
-    let kind = if (*htxf).type_ == XFER_GET {
+    (resumable(htxf) && WORKING.with_borrow(|w| w.contains(&htxf)) && pause_of(htxf).is_none())
+        as c_int
+}
+
+/// Whether `htxf` is a transfer that can be asked for again from where it
+/// stopped.
+unsafe fn resumable(htxf: *mut HtxfHandle) -> bool {
+    if (*htxf).type_ == XFER_GET {
         hx_htxf_opt_preview(htxf as *const c_void) == 0
     } else {
         // An upload resumes from offsets an RFLT says in 32 bits; a folder's
         // stream already sizes each of its files so.
         hx_htxf_opt_folder(htxf as *const c_void) != 0 || (*htxf).total_size <= u64::from(u32::MAX)
-    };
-    (kind && WORKING.with_borrow(|w| w.contains(&htxf)) && pause_of(htxf).is_none()) as c_int
+    }
 }
 
 /// `int xfer_can_start(struct htxf_conn *htxf)` — whether Start would send
@@ -500,12 +509,17 @@ pub unsafe extern "C" fn xfer_can_start(htxf: *mut HtxfHandle) -> c_int {
     let fresh = (*htxf).gone == 0
         && pause_of(htxf).is_none()
         && hx_htxf_opt_folder(htxf as *const c_void) == 0;
-    (fresh || matches!(pause_of(htxf), Some(Pause::Paused { .. }))) as c_int
+    (fresh
+        || matches!(
+            pause_of(htxf),
+            Some(Pause::Paused { .. } | Pause::Failed { .. })
+        )) as c_int
 }
 
 /// `int xfer_paused(struct htxf_conn *htxf)` — whether the row shows `htxf`
 /// paused: 1, or for an upload whose file has changed since 2, or 3 for a
-/// folder's, or 4 for a folder upload whose folder on the server has.
+/// folder's, or 4 for a folder upload whose folder on the server has; or
+/// failed: 5 plus why.
 ///
 /// # Safety
 /// Main thread only.
@@ -513,6 +527,7 @@ pub unsafe extern "C" fn xfer_can_start(htxf: *mut HtxfHandle) -> c_int {
 pub unsafe extern "C" fn xfer_paused(htxf: *mut HtxfHandle) -> c_int {
     match pause_of(htxf) {
         Some(Pause::Changed { .. }) => 2 + hx_htxf_opt_folder(htxf as *const c_void).min(1),
+        Some(Pause::Failed { why, .. }) => 5 + why,
         Some(Pause::Paused { .. }) if with_folder_run(htxf, |r| r.reoffered) == Some(true) => 4,
         _ => paused(htxf) as c_int,
     }
@@ -609,7 +624,18 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
         set_pause(htxf, None);
         return false;
     }
-    // The old token stays aborted; the next connection needs a live one.
+    hold(htxf, |kept| Pause::Paused { kept });
+    true
+}
+
+/// Keep `htxf`'s row, its worker returned, as `to` of what its local file
+/// is now, and let the queue move on.
+///
+/// # Safety
+/// `htxf` is a live handle whose worker has returned. Main thread only.
+unsafe fn hold(htxf: *mut HtxfHandle, to: impl FnOnce(Disk) -> Pause) {
+    // A paused transfer's token stays aborted, and the next connection
+    // needs a live one.
     hxnet_htxf_abort_free((*htxf).abort as *const HtxfAbort);
     (*htxf).abort = hxnet_htxf_abort_new() as *mut c_void;
     let kept = if hx_htxf_opt_folder(htxf as *const c_void) != 0 {
@@ -617,10 +643,9 @@ unsafe fn settle_pause(htxf: *mut HtxfHandle) -> bool {
     } else {
         disk((*htxf).path.as_ptr())
     };
-    set_pause(htxf, Some(Pause::Paused { kept }));
+    set_pause(htxf, Some(to(kept)));
     emit_file_update(htxf);
     start_next();
-    true
 }
 
 /// The server answered a transfer's request: it is no longer paused, nor
@@ -1066,10 +1091,18 @@ unsafe extern "C" fn xfer_cleanup_dispatch(data: glib::ffi::gpointer) -> glib::f
     WORKING.with_borrow_mut(|w| w.retain(|&e| e != htxf));
     let failed = take_failure(htxf);
     if !settle_pause(htxf) {
-        if let Some(why) = failed.filter(|_| hx_htxf_is_canceled(htxf) == 0) {
-            tell_failed(htxf, why);
+        match failed.filter(|_| hx_htxf_is_canceled(htxf) == 0) {
+            // One that can be asked for again keeps its row, to be retried.
+            Some(why) if why.may_retry() && resumable(htxf) && xfer_num(htxf) >= 0 => {
+                let why = tell_failed(htxf, why);
+                hold(htxf, |kept| Pause::Failed { kept, why });
+            }
+            Some(why) => {
+                tell_failed(htxf, why);
+                xfer_remove_from_list(htxf);
+            }
+            None => xfer_remove_from_list(htxf),
         }
-        xfer_remove_from_list(htxf);
     }
     hx_htxf_unref(htxf); // drop the worker's ref
     glib::ffi::G_SOURCE_REMOVE
@@ -1258,12 +1291,25 @@ fn take_failure(htxf: *mut HtxfHandle) -> Option<Failure> {
     Some(all.swap_remove(i).1)
 }
 
-/// Tell the person `htxf` failed, and why.
+/// Tell the person `htxf` failed, and why; [`gtkhx_tasks_failed`]'s `why`.
 ///
 /// # Safety
 /// `htxf` is a live handle. Main thread only.
-unsafe fn tell_failed(htxf: *mut HtxfHandle, why: Failure) {
-    let path = std::ffi::CStr::from_ptr((*htxf).path.as_ptr()).to_bytes();
+unsafe fn tell_failed(htxf: *mut HtxfHandle, why: Failure) -> c_int {
+    tell(
+        (*htxf).type_ != XFER_GET,
+        hx_htxf_opt_folder(htxf as *const c_void) != 0,
+        std::ffi::CStr::from_ptr((*htxf).path.as_ptr()).to_bytes(),
+        why,
+    )
+}
+
+/// Tell the person the upload or download of `path`, a folder or a file,
+/// failed, and why; [`gtkhx_tasks_failed`]'s `why`.
+///
+/// # Safety
+/// Main thread only.
+pub(crate) unsafe fn tell(upload: bool, folder: bool, path: &[u8], why: Failure) -> c_int {
     let name = &path[hxmodel::files::basename_offset(path, b'/')..];
     let name = std::ffi::CString::new(name).unwrap_or_default();
     let (why, err) = match why {
@@ -1271,38 +1317,36 @@ unsafe fn tell_failed(htxf: *mut HtxfHandle, why: Failure) {
         Failure::Stalled => (1, 0),
         Failure::Lost => (2, 0),
         Failure::Local(err) => (3, err),
+        Failure::Larger => (4 + folder as c_int, 0),
     };
-    gtkhx_tasks_failed(
-        ((*htxf).type_ != XFER_GET) as c_int,
-        name.as_ptr(),
-        why,
-        err,
-    );
+    gtkhx_tasks_failed(upload as c_int, name.as_ptr(), why, err);
+    why
 }
 
-/// The item counts servers announced for folder downloads, by transfer,
-/// held from the reply until the download's worker hands its count to the
-/// connection (`hxnet_htxf_set_folder_items`). Here rather than on the
+/// The item counts and sizes servers announced for folder downloads, by
+/// transfer, held from the reply until the download's worker hands them to
+/// the connection (`hxnet_htxf_set_folder_items`). Here rather than on the
 /// transfer, whose layout C shares.
-static FOLDER_ITEMS: std::sync::Mutex<Vec<(usize, u32)>> = std::sync::Mutex::new(Vec::new());
+static FOLDER_ITEMS: std::sync::Mutex<Vec<(usize, (u32, u64))>> = std::sync::Mutex::new(Vec::new());
 
-fn folder_items() -> std::sync::MutexGuard<'static, Vec<(usize, u32)>> {
+fn folder_items() -> std::sync::MutexGuard<'static, Vec<(usize, (u32, u64))>> {
     FOLDER_ITEMS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Note the item count a folder download's reply announced.
-pub(crate) fn remember_folder_items(htxf: *mut c_void, items: u32) {
+/// Note the item count and size a folder download's reply announced.
+pub(crate) fn remember_folder_items(htxf: *mut c_void, items: u32, size: u64) {
     let mut all = folder_items();
     all.retain(|(h, _)| *h != htxf as usize);
-    all.push((htxf as usize, items));
+    all.push((htxf as usize, (items, size)));
 }
 
-/// The count noted for `htxf`, forgotten as it's taken; 0 if none.
-fn take_folder_items(htxf: *mut HtxfHandle) -> u32 {
+/// The count and size noted for `htxf`, forgotten as they're taken; 0 if
+/// none.
+fn take_folder_items(htxf: *mut HtxfHandle) -> (u32, u64) {
     let mut all = folder_items();
     match all.iter().position(|(h, _)| *h == htxf as usize) {
         Some(i) => all.swap_remove(i).1,
-        None => 0,
+        None => (0, 0),
     }
 }
 
@@ -1395,11 +1439,11 @@ unsafe fn with_folder_base<R>(
 /// the root internally, never mutating it), answering each file as far as the
 /// download's earlier workers got, chime + stamp on success.
 unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
-    let items = take_folder_items(htxf);
+    let (items, size) = take_folder_items(htxf);
     let mut get = take_folder_run(htxf);
     get.finished = false;
     let failed = if htxf_connect(htxf) != glib::ffi::GFALSE {
-        hxnet_htxf_set_folder_items((*htxf).hx as *mut HtxfConn, items);
+        hxnet_htxf_set_folder_items((*htxf).hx as *mut HtxfConn, items, size);
         let params = xfer_folder_params(htxf);
         match folder_recv(&params, &mut get.ledger) {
             0 => {
@@ -1478,8 +1522,9 @@ unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
     };
     let sent = rv == 0;
     run.finished = sent;
+    let resumed = run.resumed;
     run.stop = match rv {
-        HXNET_XFER_CHANGED if run.resumed => Some(Stop::Changed),
+        HXNET_XFER_CHANGED if resumed => Some(Stop::Changed),
         HXNET_XFER_AGAIN => Some(Stop::Again),
         HXNET_XFER_REOFFER => Some(Stop::Reoffer),
         _ => None,
@@ -1497,6 +1542,7 @@ unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
     // failing.
     let failed = match rv {
         _ if !connected => Some(Failure::Unreachable),
+        HXNET_XFER_CHANGED if !resumed => Some(Failure::Larger),
         0 | HXNET_XFER_CHANGED | HXNET_XFER_AGAIN | HXNET_XFER_REOFFER => None,
         rv => Some(failure((*htxf).hx as *const HtxfConn, rv)),
     };
@@ -1628,7 +1674,7 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle, kept: Option<Disk>) {
         let sz = hx_file_size((*htxf).path.as_ptr());
         if sz >= 0 {
             let local_data = sz as u32; // C's (guint32)sb.st_size truncation
-            let ours = kept.map(|k| k.len) == Some(sz) && sz <= i64::from(u32::MAX);
+            let ours = kept == Some(disk((*htxf).path.as_ptr())) && sz <= i64::from(u32::MAX);
             if ours && sz == 0 {
                 // Paused before any data came: start over into the same file.
             } else if ours
@@ -1758,7 +1804,7 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
         return;
     }
     let kept = match pause_of(htxf) {
-        Some(Pause::Paused { kept }) => Some(kept),
+        Some(Pause::Paused { kept } | Pause::Failed { kept, .. }) => Some(kept),
         Some(_) => return,
         None => None,
     };
@@ -1806,7 +1852,7 @@ pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
 /// # Safety
 /// `htxf` is a live folder transfer. Main thread only.
 unsafe fn resume_folder(htxf: *mut HtxfHandle) {
-    let Some(Pause::Paused { kept }) = pause_of(htxf) else {
+    let Some(Pause::Paused { kept } | Pause::Failed { kept, .. }) = pause_of(htxf) else {
         return;
     };
     if (*htxf).type_ != XFER_GET {
@@ -1976,7 +2022,7 @@ unsafe fn play_sound(_sound: c_int) {}
 #[cfg(test)]
 thread_local! {
     /// Each failed transfer told: whether an upload, its name, why and errno.
-    static TOLD: RefCell<Vec<(c_int, String, c_int, c_int)>> = const { RefCell::new(Vec::new()) };
+    pub(crate) static TOLD: RefCell<Vec<(c_int, String, c_int, c_int)>> = const { RefCell::new(Vec::new()) };
 }
 #[cfg(test)]
 unsafe fn gtkhx_tasks_failed(upload: c_int, name: *const c_char, why: c_int, err: c_int) {
@@ -2184,15 +2230,43 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_transfer_is_told_and_one_paused_or_canceled_is_not() {
+    fn a_failed_transfer_asking_again_cannot_help_is_told_and_not_kept() {
+        for (why, kept) in [
+            (Failure::Lost, true),
+            (Failure::Local(28), true),  // ENOSPC: space can be made
+            (Failure::Local(27), false), // EFBIG: too large for the stream
+            (Failure::Larger, false),
+        ] {
+            reset(&[]);
+            TOLD.with_borrow_mut(Vec::clear);
+            unsafe {
+                let h = running();
+                note_failure(h, Some(why));
+                xfer_cleanup_dispatch(h.cast());
+                assert_eq!(TOLD.take().len(), 1, "{why:?} told");
+                assert_eq!(xfer_num(h) >= 0, kept, "{why:?} kept");
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_transfer_is_told_and_kept_to_retry_and_one_paused_or_canceled_is_not() {
         reset(&[]);
         TOLD.with_borrow_mut(Vec::clear);
         unsafe {
             // No server to connect to here: each worker fails at once.
             let failed = running();
             xfer_worker_entry(failed.cast());
+            LOCAL_SIZE.set(1000);
             xfer_cleanup_dispatch(failed.cast());
             assert_eq!(TOLD.take(), [(0, "f".to_owned(), 0, 0)]);
+            assert_eq!(xfer_num(failed), 0, "kept in the list");
+            assert_eq!(xfer_paused(failed), 5);
+            assert_eq!(xfer_can_start(failed), 1);
+            xfer_go(failed);
+            assert_eq!(resumed_at(), Some(1000), "asked for from what it kept");
+            assert_eq!(xfer_paused(failed), 0);
+            xfer_remove_from_list(failed);
 
             let paused = running();
             xfer_pause(paused);
@@ -2291,6 +2365,37 @@ mod tests {
                     "the row still measures the whole file"
                 );
             }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_download_replaced_by_a_file_its_length_is_renamed() {
+        use std::os::unix::ffi::OsStrExt;
+        let then = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1 << 30);
+        let touch = |f: &std::path::Path, at| {
+            let file = std::fs::File::options().write(true).open(f).unwrap();
+            file.set_modified(at).unwrap();
+        };
+        // (changed since it was kept, the offset asked), the server's size
+        // unknown
+        for (replaced, want) in [(false, Some(1000)), (true, None)] {
+            reset(&[]);
+            let f =
+                std::env::temp_dir().join(format!("gtkhx_kept_{replaced}_{}", std::process::id()));
+            std::fs::write(&f, b"partial").unwrap();
+            touch(&f, then);
+            unsafe {
+                let r = running();
+                set_carr(&mut (*r).path, f.as_os_str().as_bytes());
+                pause_settled(r, 1000);
+                if replaced {
+                    touch(&f, then + std::time::Duration::from_secs(60));
+                }
+                xfer_go(r);
+                assert_eq!(resumed_at(), want, "replaced {replaced}");
+            }
+            let _ = std::fs::remove_file(&f);
         }
     }
 

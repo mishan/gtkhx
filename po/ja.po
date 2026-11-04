@@ -3729,3 +3729,39 @@ msgstr "%s ファイル"
 
 #~ msgid "Msg"
 #~ msgstr "メッセージ"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "Couldn't upload %1$s: %2$s"
+msgstr "%1$s をアップロードできませんでした: %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "Couldn't download %1$s: %2$s"
+msgstr "%1$s をダウンロードできませんでした: %2$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the connection to the server couldn't be opened"
+msgstr "サーバーへの接続を開けませんでした"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server stopped responding"
+msgstr "サーバーが応答しなくなりました"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the connection to the server failed"
+msgstr "サーバーへの接続が失敗しました"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server already has a larger file with that name"
+msgstr "サーバーには同じ名前のより大きいファイルが既にあります"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "the server already has a larger file with the name of a file in the folder"
+msgstr "サーバーには、フォルダー内のファイルと同じ名前のより大きいファイルが既にあります"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "%1$s of %2$s · Failed: %3$s"
+msgstr "%1$s / %2$s · 失敗: %3$s"
+
+#: rust/crates/gtkhx-ui/src/tasks.rs
+msgid "%1$s of %2$s · Failed"
+msgstr "%1$s / %2$s · 失敗"
