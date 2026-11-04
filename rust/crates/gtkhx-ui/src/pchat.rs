@@ -183,6 +183,16 @@ pub(crate) unsafe fn retitle(htlc: *mut c_void, subject: Option<(u32, String)>) 
     }
 }
 
+/// `void gtkhx_pchat_retitle(struct htlc_conn *)` — [`retitle`], for a
+/// change to the members no signal tells of.
+///
+/// # Safety
+/// `htlc` is NULL or live.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_pchat_retitle(htlc: *mut c_void) {
+    retitle(htlc, None);
+}
+
 /// Add `chat`'s tab with `content`, and name it among the others.
 ///
 /// # Safety
