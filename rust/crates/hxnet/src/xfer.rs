@@ -38,6 +38,7 @@ const EINVAL: c_int = 22;
 const EFBIG: c_int = 27;
 const ENAMETOOLONG: c_int = 36;
 const EPROTO: c_int = 71;
+const ETIMEDOUT: c_int = 110;
 
 // Folder mini-protocol opcodes (Hotline 1.5 FILE_NEXT/SEND/RESUME state
 // machine), sent/received as u16 big-endian over the HTXF subchannel.
@@ -685,13 +686,25 @@ const FILP_TEMPLATE: [u8; 115] = [
 
 /// One blocking write of the whole buffer to the subchannel (mirrors C
 /// `htxf_io_write`, which returns the full logical length on success — the hxnet
-/// channel writes it all, one AEAD frame when armed). `!= len` is failure,
-/// EPIPE, which a local read's EIO isn't.
+/// channel writes it all, one AEAD frame when armed). `!= len` is failure:
+/// ETIMEDOUT when the server stopped taking it, else EPIPE, either of which
+/// a local read's EIO isn't.
 unsafe fn xfer_write(hx: *mut HtxfConn, buf: &[u8]) -> Result<(), c_int> {
-    if crate::htxf::hxnet_htxf_write(hx, buf.as_ptr(), buf.len()) != buf.len() as isize {
+    let Some(h) = hx.as_mut() else {
         return Err(EPIPE);
+    };
+    match h.write_some(buf) {
+        Ok(n) if n == buf.len() => Ok(()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            Err(ETIMEDOUT)
+        }
+        _ => Err(EPIPE),
     }
-    Ok(())
 }
 
 /// Whether `hx`'s transfer was aborted; a null `hx` was not.
@@ -824,7 +837,8 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
     }
 
     // MACR fork header. A short write at the marker boundary is a clean stop
-    // (the server may not want the resource fork), not an error. The length is
+    // (the server may not want the resource fork), not an error, but a
+    // server that stopped reading hasn't declined it. The length is
     // the remaining resource fork (rsrc_size - rsrc_pos) so a resumed upload's
     // marker matches what we actually stream below.
     let macr_hdr = match ffo::pack_fork_header(b"MACR", p.rsrc_size.wrapping_sub(p.rsrc_pos), large)
@@ -832,8 +846,10 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         Ok(header) => header,
         Err(_) => return EFBIG,
     };
-    if xfer_write(hx, &macr_hdr).is_err() {
-        return 0;
+    match xfer_write(hx, &macr_hdr) {
+        Err(ETIMEDOUT) => return ETIMEDOUT,
+        Err(_) => return 0,
+        Ok(()) => {}
     }
     p.report(16);
     let mut ropts = hfs::ResourceOpenOptions::new();
@@ -1666,6 +1682,60 @@ mod send_capture_tests {
             body,
             "raw data fork follows header"
         );
+    }
+}
+
+#[cfg(test)]
+mod send_stall_tests {
+    use super::*;
+    use crate::htxf::HtxfConn;
+    use std::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn an_upload_the_server_stops_reading_ends_timed_out() {
+        let dir = std::env::temp_dir().join(format!("hxnet_send_stall_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.bin");
+        let size = 64 << 20;
+        std::fs::write(&path, vec![0u8; size]).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accepts and then reads nothing, holding the socket open.
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let server = std::thread::spawn(move || {
+            let (_sock, _) = listener.accept().unwrap();
+            let _ = done_rx.recv();
+        });
+        let stream = TcpStream::connect(addr).unwrap();
+        stream
+            .set_write_timeout(Some(std::time::Duration::from_millis(200)))
+            .unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: path_c.as_ptr(),
+            file_budget: 0,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: size as u64,
+            rsrc_size: 0,
+        };
+        assert_eq!(unsafe { hxnet_xfer_file_send_one(&params) }, ETIMEDOUT);
+        drop(conn);
+        drop(done_tx);
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

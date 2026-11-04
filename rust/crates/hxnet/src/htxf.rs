@@ -424,6 +424,11 @@ impl HtxfInner {
 /// a send's end makes certain; this only bounds a server that doesn't.
 const FINISH_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a write may make no progress before it fails: a server that
+/// stops reading an upload without closing would otherwise hold the
+/// worker, and its row, forever.
+const WRITE_STALL: Duration = Duration::from_secs(60);
+
 /// Thread-safe cancellation token for one HTXF subchannel — the
 /// foundation for cooperative transfer cancel (Phase R3 X1,
 /// `docs/rust/ROADMAP.md`).
@@ -552,6 +557,7 @@ unsafe fn htxf_derive_aead(
 /// # Safety
 /// `verify_cert` / `user_data` follow the [`HxnetVerifyCertCallback`]
 /// contract.
+#[allow(clippy::too_many_arguments)]
 unsafe fn htxf_finish(
     tcp: TcpStream,
     tls: bool,
@@ -560,6 +566,7 @@ unsafe fn htxf_finish(
     aead: Option<(AeadState, AeadState)>,
     verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
+    write_stall: Duration,
 ) -> *mut HtxfConn {
     // Force blocking mode. This path is synchronous (sync rustls handshake
     // + blocking read/write); a non-blocking socket would make the
@@ -568,6 +575,10 @@ unsafe fn htxf_finish(
     // back non-blocking — so normalise here for both.
     if let Err(e) = tcp.set_nonblocking(false) {
         glib::g_critical!("hxnet", "hxnet_htxf: set_nonblocking(false): {}", e);
+        return std::ptr::null_mut();
+    }
+    if let Err(e) = tcp.set_write_timeout(Some(write_stall)) {
+        glib::g_critical!("hxnet", "hxnet_htxf: set_write_timeout: {}", e);
         return std::ptr::null_mut();
     }
 
@@ -771,6 +782,7 @@ pub unsafe extern "C" fn hxnet_htxf_connect(
         aead,
         verify_cert,
         user_data,
+        WRITE_STALL,
     )
 }
 
@@ -851,23 +863,13 @@ pub unsafe extern "C" fn hxnet_htxf_write(
     if handle.is_null() || (buf.is_null() && len != 0) || (len as u64) > (isize::MAX as u64) {
         return -1;
     }
-    let h = &mut *handle;
-    if h.is_aborted() {
-        return -1;
-    }
     let data = if len == 0 {
         &[][..]
     } else {
         slice::from_raw_parts(buf, len)
     };
-    match h.inner.write(data) {
-        Ok(n) => {
-            if h.is_aborted() {
-                -1
-            } else {
-                n as isize
-            }
-        }
+    match (*handle).write_some(data) {
+        Ok(n) => n as isize,
         Err(_) => -1,
     }
 }
@@ -971,6 +973,20 @@ impl HtxfConn {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
         let n = self.inner.read(buf)?;
+        if self.is_aborted() {
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        Ok(n)
+    }
+
+    /// One write, with its error kind kept — which [`hxnet_htxf_write`]
+    /// folds into `-1` — so a caller can tell a stall from a failure.
+    /// An abort, before or during, is an error.
+    pub(crate) fn write_some(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.is_aborted() {
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        let n = self.inner.write(buf)?;
         if self.is_aborted() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
@@ -1393,6 +1409,55 @@ mod tests {
 
         assert_eq!(server.join().unwrap(), TOTAL, "the whole upload arrived");
         assert_eq!(finished, 0, "the server closed after reading it");
+    }
+
+    #[test]
+    fn an_upload_the_server_stops_reading_fails_instead_of_waiting_forever() {
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accepts and then reads nothing, holding the socket open.
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            let (_sock, _) = listener.accept().unwrap();
+            let _ = done_rx.recv();
+        });
+        let tcp = TcpStream::connect(addr).unwrap();
+        let h = unsafe {
+            htxf_finish(
+                tcp,
+                false,
+                None,
+                b"HTXF",
+                None,
+                None,
+                std::ptr::null_mut(),
+                Duration::from_millis(200),
+            )
+        };
+        assert!(!h.is_null());
+        struct SendPtr(*mut HtxfConn);
+        unsafe impl Send for SendPtr {}
+        let hp = SendPtr(h);
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let hp = hp;
+            let chunk = [0u8; 0xf000];
+            let failed = (0..4096).any(|_| unsafe {
+                hxnet_htxf_write(hp.0, chunk.as_ptr(), chunk.len()) != chunk.len() as isize
+            });
+            let _ = tx.send(failed);
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)),
+            Ok(true),
+            "a write making no progress fails within its bound"
+        );
+        unsafe { hxnet_htxf_close(h) };
+        drop(done_tx);
+        server.join().unwrap();
     }
 
     // A worker parked in a blocking read of a stalled transfer must be
