@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-03 22:33-0800\n"
+"POT-Creation-Date: 2026-11-04 00:56-0800\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: Portuguese <misha@nasledov.com>\n"
@@ -3202,7 +3202,7 @@ msgid "Reply to %s"
 msgstr "Responder a %s"
 
 #: rust/crates/gtkhx-ui/src/requests.rs:305
-msgid "More for %s"
+msgid "More actions for %s"
 msgstr "Mais ações para %s"
 
 #: rust/crates/gtkhx-ui/src/requests.rs:355
@@ -3225,11 +3225,14 @@ msgstr "Da última hora"
 msgid "From the Last Day"
 msgstr "Do último dia"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:423
+#. TRANSLATORS: every message request, beside "From the Last Hour" and
+#. "From the Last Day" in the Clear… menu.
+#: rust/crates/gtkhx-ui/src/requests.rs:425
+msgctxt "clear span"
 msgid "All"
 msgstr "Todos"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:477
+#: rust/crates/gtkhx-ui/src/requests.rs:479
 msgid ""
 "Delete the message requests from about the last hour? Friend requests from "
 "then are declined too."
@@ -3237,7 +3240,7 @@ msgstr ""
 "Eliminar os pedidos de mensagem de cerca da última hora? Os pedidos de "
 "amizade desse período também são recusados."
 
-#: rust/crates/gtkhx-ui/src/requests.rs:480
+#: rust/crates/gtkhx-ui/src/requests.rs:482
 msgid ""
 "Delete the message requests from about the last day? Friend requests from "
 "then are declined too."
@@ -3245,18 +3248,18 @@ msgstr ""
 "Eliminar os pedidos de mensagem de cerca do último dia? Os pedidos de "
 "amizade desse período também são recusados."
 
-#: rust/crates/gtkhx-ui/src/requests.rs:482
+#: rust/crates/gtkhx-ui/src/requests.rs:484
 msgid ""
 "Delete every message request? Every friend request waiting is declined too."
 msgstr ""
 "Eliminar todos os pedidos de mensagem? Todos os pedidos de amizade em espera "
 "também são recusados."
 
-#: rust/crates/gtkhx-ui/src/requests.rs:486
+#: rust/crates/gtkhx-ui/src/requests.rs:488
 msgid "Clear Requests"
 msgstr "Limpar pedidos"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:488
+#: rust/crates/gtkhx-ui/src/requests.rs:490
 msgid "_Clear"
 msgstr "_Limpar"
 
