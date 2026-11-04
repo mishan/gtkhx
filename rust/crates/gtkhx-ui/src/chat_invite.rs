@@ -27,6 +27,16 @@ extern "C" {
     fn gtkhx_htlc_chat_window(htlc: *mut c_void) -> *mut gtk::ffi::GtkWidget;
 }
 
+/// What the invitation says, of an inviter who may be nameless.
+fn invite_body(name: &str) -> String {
+    if name.is_empty() {
+        tr("Someone invites you to a private chat")
+    } else {
+        // TRANSLATORS: %s is the inviter's nickname.
+        tr1("%s invites you to a private chat", name)
+    }
+}
+
 /// `void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)`
 /// — present the incoming private-chat invitation dialog.
 ///
@@ -38,8 +48,7 @@ pub unsafe extern "C" fn output_chat_invitation(htlc: *mut c_void, cid: u32, nam
     crate::ensure_gtk_init();
 
     let name = crate::cstr(name);
-    // TRANSLATORS: %s is the inviter's nickname.
-    let body = tr1("%s invites you to a private chat", &name);
+    let body = invite_body(&name);
 
     let dialog = adw::AlertDialog::new(Some(&tr("Chat Invitation")), Some(&body));
     dialog.add_response("decline", &tr("_Decline"));
@@ -73,4 +82,19 @@ pub unsafe extern "C" fn output_chat_invitation(htlc: *mut c_void, cid: u32, nam
         Some(from_glib_none(parent_ptr))
     };
     dialog.present(parent.as_ref());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_invitation_names_its_inviter_or_someone() {
+        for (name, want) in [
+            ("alice", "alice invites you to a private chat"),
+            ("", "Someone invites you to a private chat"),
+        ] {
+            assert_eq!(invite_body(name), want, "{name:?}");
+        }
+    }
 }

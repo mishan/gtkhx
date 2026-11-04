@@ -378,3 +378,9 @@ pub unsafe extern "C" fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_vo
         .find(|(s, c, _)| *s == sess as usize && *c == cid)
         .map_or(std::ptr::null_mut(), |(_, _, chat)| *chat as *mut c_void)
 }
+
+/// The connection a serial names: a test's connection is its own session.
+#[no_mangle]
+pub unsafe extern "C" fn hx_conn_with_serial(serial: u16) -> *mut c_void {
+    gtkhx_session_htlc(hx_session_with_serial(serial))
+}

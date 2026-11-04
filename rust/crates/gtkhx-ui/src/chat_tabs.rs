@@ -59,6 +59,9 @@ fn conn_key(htlc: *mut c_void) -> ConnKey {
 struct TabMeta {
     kind: u8,
     id: u32,
+    /// When a private chat's tab was added, which numbers alike names in an
+    /// order a drag does not change.
+    seq: u64,
     /// A private message's peer.
     peer: Option<Peer>,
     /// The connection whose tab this is, as the pointer the close callback
@@ -108,6 +111,9 @@ struct ChatTabs {
     pchat: HashMap<(ConnKey, u32), adw::TabPage>,
     msg: HashMap<(ConnKey, Peer), adw::TabPage>,
     on_close_pchat: Option<extern "C" fn(*mut c_void, u32)>,
+    next_seq: u64,
+    /// The connections whose private chats are queued to be retitled.
+    retitling: std::collections::HashSet<ConnKey>,
 }
 
 thread_local! {
@@ -142,6 +148,7 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     // Remove our index entry and snapshot the teardown handler, then drop the
     // borrow before calling out — the handler may call back into this module.
     let mut cb: Option<Box<dyn FnOnce()>> = None;
+    let pchat_of = m.as_ref().filter(|m| m.kind == KIND_PCHAT).map(|m| m.conn);
     if let Some(m) = m {
         STATE.with(|s| {
             let mut st = s.borrow_mut();
@@ -168,7 +175,25 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     }
 
     view.close_page_finish(page, true);
+    if let Some(conn) = pchat_of {
+        retitle_soon(conn);
+    }
     glib::Propagation::Stop
+}
+
+/// Retitle `conn`'s private chats once the teardown under way is done, a
+/// closing connection being gone by then, and once however many tabs close.
+fn retitle_soon(conn: ConnKey) {
+    if !STATE.with(|s| s.borrow_mut().retitling.insert(conn)) {
+        return;
+    }
+    glib::idle_add_local_once(move || {
+        STATE.with(|s| s.borrow_mut().retitling.remove(&conn));
+        let htlc = dock::htlc_for(conn);
+        if !htlc.is_null() {
+            unsafe { crate::pchat::retitle(htlc, None) };
+        }
+    });
 }
 
 /// Selecting any tab acknowledges attention: clear the new page's flag and the
@@ -267,6 +292,7 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
         TabMeta {
             kind: KIND_PUBLIC,
             id: 0,
+            seq: 0,
             peer: None,
             // Never indexed and never closed through the strip, so the
             // pointer is only here for `view_of` to find the right view.
@@ -296,11 +322,17 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
     let t = crate::cstr(title);
     page.set_title(&if t.is_empty() { tr("Private Chat") } else { t });
 
+    let seq = STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.next_seq += 1;
+        st.next_seq
+    });
     set_meta(
         &page,
         TabMeta {
             kind: KIND_PCHAT,
             id: cid,
+            seq,
             peer: None,
             htlc,
             conn,
@@ -344,6 +376,7 @@ pub(crate) fn add_msg(
         TabMeta {
             kind: KIND_MSG,
             id: 0,
+            seq: 0,
             peer: Some(peer.clone()),
             htlc,
             conn,
@@ -360,17 +393,18 @@ fn find_pchat(htlc: *mut c_void, cid: u32) -> Option<adw::TabPage> {
     STATE.with(|s| s.borrow().pchat.get(&(conn_key(htlc), cid)).cloned())
 }
 
-/// The private chats `htlc` has a tab for.
+/// The private chats `htlc` has a tab for, in the order they were added.
 pub(crate) fn pchat_cids(htlc: *mut c_void) -> Vec<u32> {
-    let conn = conn_key(htlc);
-    STATE.with(|s| {
-        s.borrow()
-            .pchat
-            .keys()
-            .filter(|(c, _)| *c == conn)
-            .map(|(_, cid)| *cid)
-            .collect()
-    })
+    let Some(view) = view(conn_key(htlc)) else {
+        return Vec::new();
+    };
+    let mut tabs: Vec<(u64, u32)> = (0..view.n_pages())
+        .filter_map(|i| meta(&view.nth_page(i)))
+        .filter(|m| m.kind == KIND_PCHAT)
+        .map(|m| (m.seq, m.id))
+        .collect();
+    tabs.sort_unstable();
+    tabs.into_iter().map(|(_, cid)| cid).collect()
 }
 
 fn find_msg(htlc: *mut c_void, peer: &Peer) -> Option<adw::TabPage> {
@@ -588,6 +622,20 @@ pub(crate) mod tests {
                 .views
                 .insert(conn_key(htlc), adw::TabView::new())
         });
+    }
+
+    /// Close private chat `cid`'s tab of a [`bare_view`] as the strip's
+    /// handler does, short of the teardown.
+    pub(crate) fn close_pchat(htlc: *mut c_void, cid: u32) {
+        let page = find_pchat(htlc, cid).expect("a tab to close");
+        view(conn_key(htlc)).expect("a view").close_page(&page);
+        retitle_soon(conn_key(htlc));
+    }
+
+    /// Move the first page of `htlc`'s view to the end, as a drag would.
+    pub(crate) fn move_first_to_end(htlc: *mut c_void) {
+        let view = view(conn_key(htlc)).expect("a view");
+        view.reorder_last(&view.nth_page(0));
     }
 
     #[test]

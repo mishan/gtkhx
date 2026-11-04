@@ -844,7 +844,7 @@ msgid "Chat message"
 msgstr ""
 
 #. TRANSLATORS: %s is the inviter's nickname.
-#: rust/crates/gtkhx-ui/src/chat_invite.rs:42
+#: rust/crates/gtkhx-ui/src/chat_invite.rs:36
 msgid "%s invites you to a private chat"
 msgstr ""
 
