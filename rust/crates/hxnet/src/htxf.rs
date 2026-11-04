@@ -863,23 +863,13 @@ pub unsafe extern "C" fn hxnet_htxf_write(
     if handle.is_null() || (buf.is_null() && len != 0) || (len as u64) > (isize::MAX as u64) {
         return -1;
     }
-    let h = &mut *handle;
-    if h.is_aborted() {
-        return -1;
-    }
     let data = if len == 0 {
         &[][..]
     } else {
         slice::from_raw_parts(buf, len)
     };
-    match h.inner.write(data) {
-        Ok(n) => {
-            if h.is_aborted() {
-                -1
-            } else {
-                n as isize
-            }
-        }
+    match (*handle).write_some(data) {
+        Ok(n) => n as isize,
         Err(_) => -1,
     }
 }
@@ -983,6 +973,20 @@ impl HtxfConn {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
         let n = self.inner.read(buf)?;
+        if self.is_aborted() {
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        Ok(n)
+    }
+
+    /// One write, with its error kind kept — which [`hxnet_htxf_write`]
+    /// folds into `-1` — so a caller can tell a stall from a failure.
+    /// An abort, before or during, is an error.
+    pub(crate) fn write_some(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.is_aborted() {
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        let n = self.inner.write(buf)?;
         if self.is_aborted() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
