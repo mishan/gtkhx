@@ -342,7 +342,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo build --target wasm32-unknown-unknown --no-default-features \
   -p hxtext -p hxrequest -p hxvoice --ignore-rust-version
 ../tools/isolated-run.sh cargo test --workspace
-../tools/isolated-run.sh cargo test -p gtkhx-ui --features voice
+../tools/isolated-run.sh cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
 cargo test -p hxhandlers --features voice
 cargo test -p hxnet --features socks
 cargo test -p hx-image-decode --lib --no-default-features --features glycin-v2
