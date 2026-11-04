@@ -70,6 +70,12 @@ literal gloss of the English.
 | ban | sperren | vetar | bannir | banir |
 | fingerprint (TLS) | Fingerabdruck | huella digital | empreinte | impressão digital |
 | certificate | Zertifikat | certificado | certificat | certificado |
+| friend | Freund | amigo | ami | amigo |
+| friend request | Freundschaftsanfrage | solicitud de amistad | demande d'ami | pedido de amizade |
+| message request | Nachrichtenanfrage | solicitud de mensaje | demande de message | pedido de mensagem |
+| instant message | Sofortnachricht | mensaje instantáneo | message instantané | mensagem instantânea |
+| to block | blockieren | bloquear | bloquer | bloquear |
+| to approve (a request) | zulassen | aprobar | approuver | aprovar |
 
 Notes on the harder ones:
 
@@ -148,6 +154,12 @@ Japanese joined later and does not fit the four-column table, so it gets its own
 | encryption | 暗号化 | the property |
 | fingerprint | フィンガープリント | |
 | certificate | 証明書 | |
+| friend | フレンド | not 友達 |
+| friend request | フレンドリクエスト | |
+| message request | メッセージリクエスト | |
+| instant message | インスタントメッセージ | |
+| to block | ブロック | |
+| to approve (a request) | 承認 | |
 
 Japanese conventions that matter here:
 
