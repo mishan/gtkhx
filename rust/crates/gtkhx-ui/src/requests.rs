@@ -25,7 +25,7 @@ use hxmodel::friends::{plain_name, plain_text};
 use hxproto::messaging::{RequestAction, CAP_MESSAGING};
 
 use crate::dock::{self, Bound, ConnKey};
-use crate::tr::{tr, tr1, trn_argv};
+use crate::tr::{tr, tr1, trc, trn_argv};
 
 extern "C" {
     // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
@@ -302,7 +302,7 @@ fn sender(conn: ConnKey, s: &Sender) -> gtk::Box {
     }
     let more = gtk::MenuButton::new();
     more.set_icon_name("view-more-symbolic");
-    crate::set_name_tip(&more, &tr1("More for %s", &name));
+    crate::set_name_tip(&more, &tr1("More actions for %s", &name));
     let rest = [
         (tr("Add Friend…"), Do::Add),
         (tr("Delete…"), Do::Delete),
@@ -420,7 +420,9 @@ fn clear_menu(conn: ConnKey) -> gtk::MenuButton {
     let spans = [
         (tr("From the Last Hour"), Span::Hour),
         (tr("From the Last Day"), Span::Day),
-        (tr("All"), Span::All),
+        // TRANSLATORS: every message request, beside "From the Last Hour" and
+        // "From the Last Day" in the Clear… menu.
+        (trc("clear span", "All"), Span::All),
     ];
     popup_menu(
         &button,

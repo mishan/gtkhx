@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-03 22:33-0800\n"
+"POT-Creation-Date: 2026-11-04 00:56-0800\n"
 "PO-Revision-Date: 2026-08-04 06:49+0000\n"
 "Last-Translator: GtkHx project <misha@nasledov.com>\n"
 "Language-Team: Japanese <misha@nasledov.com>\n"
@@ -3170,7 +3170,7 @@ msgid "Reply to %s"
 msgstr "%s さんに返信"
 
 #: rust/crates/gtkhx-ui/src/requests.rs:305
-msgid "More for %s"
+msgid "More actions for %s"
 msgstr "%s さんのその他の操作"
 
 #: rust/crates/gtkhx-ui/src/requests.rs:355
@@ -3193,11 +3193,14 @@ msgstr "過去 1 時間"
 msgid "From the Last Day"
 msgstr "過去 1 日"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:423
+#. TRANSLATORS: every message request, beside "From the Last Hour" and
+#. "From the Last Day" in the Clear… menu.
+#: rust/crates/gtkhx-ui/src/requests.rs:425
+msgctxt "clear span"
 msgid "All"
 msgstr "すべて"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:477
+#: rust/crates/gtkhx-ui/src/requests.rs:479
 msgid ""
 "Delete the message requests from about the last hour? Friend requests from "
 "then are declined too."
@@ -3205,7 +3208,7 @@ msgstr ""
 "過去約 1 時間のメッセージリクエストを削除しますか？その間のフレンドリクエスト"
 "も拒否されます。"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:480
+#: rust/crates/gtkhx-ui/src/requests.rs:482
 msgid ""
 "Delete the message requests from about the last day? Friend requests from "
 "then are declined too."
@@ -3213,18 +3216,18 @@ msgstr ""
 "過去約 1 日のメッセージリクエストを削除しますか？その間のフレンドリクエストも"
 "拒否されます。"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:482
+#: rust/crates/gtkhx-ui/src/requests.rs:484
 msgid ""
 "Delete every message request? Every friend request waiting is declined too."
 msgstr ""
 "すべてのメッセージリクエストを削除しますか？待機中のフレンドリクエストもすべ"
 "て拒否されます。"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:486
+#: rust/crates/gtkhx-ui/src/requests.rs:488
 msgid "Clear Requests"
 msgstr "リクエストを消去"
 
-#: rust/crates/gtkhx-ui/src/requests.rs:488
+#: rust/crates/gtkhx-ui/src/requests.rs:490
 msgid "_Clear"
 msgstr "消去(_C)"
 

@@ -181,7 +181,7 @@ Japanese conventions that matter here:
 
 A few English words carry unrelated senses that no other language collapses the
 same way. Those entries take a `msgctxt`, so each sense is a separate catalog
-entry, plus a `#.` note saying which is which. Four exist today:
+entry, plus a `#.` note saying which is which:
 
 | msgctxt | msgid | which sense |
 |---|---|---|
@@ -189,6 +189,7 @@ entry, plus a `#.` note saying which is which. Four exist today:
 | `maturity rating` | General | an age rating: the mildest of Teen/Mature/Adult, meaning no age restriction |
 | `server category` | General | a server with no particular specialism, alongside Development, Gaming, Media |
 | `server details` | Identity | heading over the server's software, country, region, language and tags — *not* the user's own name and icon |
+| `clear span` | All | every message request, in the Clear… menu beside From the Last Hour and From the Last Day |
 
 If you meet another overloaded msgid, don't paper over it in one language: add a
 `trc("context", "Msgid")` at the call site (`g_dpgettext2` on the C side) so every
