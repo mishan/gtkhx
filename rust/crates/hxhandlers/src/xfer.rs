@@ -21,9 +21,9 @@ use hxnet::htxf::{
     hxnet_htxf_finish_send, hxnet_htxf_set_folder_items, HtxfAbort, HtxfConn,
 };
 use hxnet::xfer::{
-    folder_recv, folder_send, hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, progress_due,
-    FolderLedger, HxnetFolderParams, HxnetXferParams, UploadLedger, HXNET_XFER_AGAIN,
-    HXNET_XFER_CHANGED, HXNET_XFER_REOFFER,
+    failure, folder_recv, folder_send, hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one,
+    progress_due, Failure, FolderLedger, HxnetFolderParams, HxnetXferParams, UploadLedger,
+    HXNET_XFER_AGAIN, HXNET_XFER_CHANGED, HXNET_XFER_REOFFER, HXNET_XFER_STOPPED,
 };
 use hxnet::xfer_handle::{
     hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
@@ -112,6 +112,8 @@ extern "C" {
     fn htxf_connect(htxf: *mut HtxfHandle) -> glib::ffi::gboolean;
     /// sound.c — play a chime by id (FILE_DONE here). Worker thread.
     fn play_sound(sound: c_int);
+    /// Tell the person a transfer of `name` failed, and why (gtkhx-ui).
+    fn gtkhx_tasks_failed(upload: c_int, name: *const c_char, why: c_int, err: c_int);
     /// debug.c — a line under a `GTKHX_DEBUG` category.
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
     /// preview.c — the GTK preview-window feed. Reached only through the receive
@@ -1062,7 +1064,11 @@ unsafe extern "C" fn fu_dispatch(data: glib::ffi::gpointer) -> glib::ffi::gboole
 unsafe extern "C" fn xfer_cleanup_dispatch(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
     let htxf = data as *mut HtxfHandle;
     WORKING.with_borrow_mut(|w| w.retain(|&e| e != htxf));
+    let failed = take_failure(htxf);
     if !settle_pause(htxf) {
+        if let Some(why) = failed.filter(|_| hx_htxf_is_canceled(htxf) == 0) {
+            tell_failed(htxf, why);
+        }
         xfer_remove_from_list(htxf);
     }
     hx_htxf_unref(htxf); // drop the worker's ref
@@ -1210,18 +1216,68 @@ unsafe fn xfer_folder_params(htxf: *mut HtxfHandle) -> HxnetFolderParams {
 /// deferred to `xfer_completion_entry` on the main thread, after every queued
 /// progress idle.
 unsafe fn get_thread(htxf: *mut HtxfHandle) {
-    if htxf_connect(htxf) != glib::ffi::GFALSE {
+    let failed = if htxf_connect(htxf) != glib::ffi::GFALSE {
         let params = xfer_recv_params(htxf, (*htxf).total_size);
-        // A preview that stopped at the part it shows didn't finish the file.
-        if hxnet_xfer_file_recv_one(&params) == 0 {
-            play_sound(FILE_DONE);
-            hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+        match hxnet_xfer_file_recv_one(&params) {
+            0 => {
+                play_sound(FILE_DONE);
+                hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+                None
+            }
+            // A preview that stopped at the part it shows didn't finish the
+            // file, but didn't fail either.
+            HXNET_XFER_STOPPED => None,
+            rv => Some(failure((*htxf).hx as *const HtxfConn, rv)),
         }
-    }
+    } else {
+        Some(Failure::Unreachable)
+    };
     // The last progress update, however it ended: the reports along the
     // way are throttled, so this one makes the row exact.
     post_file_update(htxf);
+    note_failure(htxf, failed);
     xfer_close_channel(htxf);
+}
+
+/// Why each transfer whose worker failed did, from its return until its
+/// cleanup takes it.
+static FAILURES: std::sync::Mutex<Vec<(usize, Failure)>> = std::sync::Mutex::new(Vec::new());
+
+fn note_failure(htxf: *mut HtxfHandle, failed: Option<Failure>) {
+    if let Some(why) = failed {
+        FAILURES
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push((htxf as usize, why));
+    }
+}
+
+fn take_failure(htxf: *mut HtxfHandle) -> Option<Failure> {
+    let mut all = FAILURES.lock().unwrap_or_else(|p| p.into_inner());
+    let i = all.iter().position(|(h, _)| *h == htxf as usize)?;
+    Some(all.swap_remove(i).1)
+}
+
+/// Tell the person `htxf` failed, and why.
+///
+/// # Safety
+/// `htxf` is a live handle. Main thread only.
+unsafe fn tell_failed(htxf: *mut HtxfHandle, why: Failure) {
+    let path = std::ffi::CStr::from_ptr((*htxf).path.as_ptr()).to_bytes();
+    let name = &path[hxmodel::files::basename_offset(path, b'/')..];
+    let name = std::ffi::CString::new(name).unwrap_or_default();
+    let (why, err) = match why {
+        Failure::Unreachable => (0, 0),
+        Failure::Stalled => (1, 0),
+        Failure::Lost => (2, 0),
+        Failure::Local(err) => (3, err),
+    };
+    gtkhx_tasks_failed(
+        ((*htxf).type_ != XFER_GET) as c_int,
+        name.as_ptr(),
+        why,
+        err,
+    );
 }
 
 /// The item counts servers announced for folder downloads, by transfer,
@@ -1342,19 +1398,26 @@ unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
     let items = take_folder_items(htxf);
     let mut get = take_folder_run(htxf);
     get.finished = false;
-    if htxf_connect(htxf) != glib::ffi::GFALSE {
+    let failed = if htxf_connect(htxf) != glib::ffi::GFALSE {
         hxnet_htxf_set_folder_items((*htxf).hx as *mut HtxfConn, items);
         let params = xfer_folder_params(htxf);
-        if folder_recv(&params, &mut get.ledger) == 0 {
-            get.finished = true;
-            play_sound(FILE_DONE);
-            hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+        match folder_recv(&params, &mut get.ledger) {
+            0 => {
+                get.finished = true;
+                play_sound(FILE_DONE);
+                hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+                None
+            }
+            rv => Some(failure((*htxf).hx as *const HtxfConn, rv)),
         }
-    }
+    } else {
+        Some(Failure::Unreachable)
+    };
     put_folder_run(htxf, get);
     // The last progress update, however it ended: the reports along the
     // way are throttled, so this one makes the row exact.
     post_file_update(htxf);
+    note_failure(htxf, failed);
     xfer_close_channel(htxf);
 }
 
@@ -1382,17 +1445,23 @@ unsafe fn finish_upload(htxf: *mut HtxfHandle) {
 /// Solo upload worker: connect, run the single-file send loop, see it all
 /// reach the server, chime on success.
 unsafe fn put_thread(htxf: *mut HtxfHandle) {
-    let sent = htxf_connect(htxf) != glib::ffi::GFALSE && {
+    let failed = if htxf_connect(htxf) != glib::ffi::GFALSE {
         let params = xfer_send_params(htxf);
-        hxnet_xfer_file_send_one(&params) == 0
+        match hxnet_xfer_file_send_one(&params) {
+            0 => None,
+            rv => Some(failure((*htxf).hx as *const HtxfConn, rv)),
+        }
+    } else {
+        Some(Failure::Unreachable)
     };
     // The last progress update, however it went — the reports along the
     // way are throttled — and before the wait for the server, so a sent
     // upload's row completes now.
     post_file_update(htxf);
-    if sent {
+    if failed.is_none() {
         finish_upload(htxf);
     }
+    note_failure(htxf, failed);
     xfer_close_channel(htxf);
 }
 
@@ -1401,7 +1470,8 @@ unsafe fn put_thread(htxf: *mut HtxfHandle) {
 /// the server says it holds it, chime + stamp on success.
 unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
     let mut run = take_folder_run(htxf);
-    let rv = if htxf_connect(htxf) != glib::ffi::GFALSE {
+    let connected = htxf_connect(htxf) != glib::ffi::GFALSE;
+    let rv = if connected {
         folder_send(&xfer_folder_params(htxf), &mut run.sent)
     } else {
         -1
@@ -1423,6 +1493,14 @@ unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
     if sent {
         finish_upload(htxf);
     }
+    // The server ending the upload at what it holds isn't the connection
+    // failing.
+    let failed = match rv {
+        _ if !connected => Some(Failure::Unreachable),
+        0 | HXNET_XFER_CHANGED | HXNET_XFER_AGAIN | HXNET_XFER_REOFFER => None,
+        rv => Some(failure((*htxf).hx as *const HtxfConn, rv)),
+    };
+    note_failure(htxf, failed);
     xfer_close_channel(htxf);
 }
 
@@ -1896,6 +1974,18 @@ unsafe fn htxf_connect(_htxf: *mut HtxfHandle) -> glib::ffi::gboolean {
 #[cfg(test)]
 unsafe fn play_sound(_sound: c_int) {}
 #[cfg(test)]
+thread_local! {
+    /// Each failed transfer told: whether an upload, its name, why and errno.
+    static TOLD: RefCell<Vec<(c_int, String, c_int, c_int)>> = const { RefCell::new(Vec::new()) };
+}
+#[cfg(test)]
+unsafe fn gtkhx_tasks_failed(upload: c_int, name: *const c_char, why: c_int, err: c_int) {
+    let name = std::ffi::CStr::from_ptr(name)
+        .to_string_lossy()
+        .into_owned();
+    TOLD.with_borrow_mut(|t| t.push((upload, name, why, err)));
+}
+#[cfg(test)]
 unsafe fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
 #[cfg(test)]
 unsafe extern "C" fn hx_preview_chunk(_preview: *mut c_void, _buf: *const c_char, _len: usize) {}
@@ -2090,6 +2180,32 @@ mod tests {
             assert_eq!(requests(), asked + 1);
             let b = new_download();
             assert_eq!((*b).gone, 1, "a paused download holds nothing back");
+        }
+    }
+
+    #[test]
+    fn a_failed_transfer_is_told_and_one_paused_or_canceled_is_not() {
+        reset(&[]);
+        TOLD.with_borrow_mut(Vec::clear);
+        unsafe {
+            // No server to connect to here: each worker fails at once.
+            let failed = running();
+            xfer_worker_entry(failed.cast());
+            xfer_cleanup_dispatch(failed.cast());
+            assert_eq!(TOLD.take(), [(0, "f".to_owned(), 0, 0)]);
+
+            let paused = running();
+            xfer_pause(paused);
+            xfer_worker_entry(paused.cast());
+            LOCAL_SIZE.set(1000);
+            xfer_cleanup_dispatch(paused.cast());
+            assert_eq!(xfer_paused(paused), 1);
+
+            let canceled = running();
+            hx_htxf_cancel(canceled);
+            xfer_worker_entry(canceled.cast());
+            xfer_cleanup_dispatch(canceled.cast());
+            assert_eq!(TOLD.take(), []);
         }
     }
 
