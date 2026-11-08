@@ -88,7 +88,7 @@ fn a_line_reaches_the_view_unless_its_sender_is_ignored() {
         test_env::IGNORE.with(|c| c.set(ignored));
         test_env::SHORTCODES.with(|c| c.set(shortcodes));
         test_env::OWN_NAME.with(|c| *c.borrow_mut() = own.into());
-        unsafe { line(HTLC, 0, uid, text, media) };
+        unsafe { line(HTLC, 0, uid, text, None, media) };
         assert_eq!(test_env::emitted(), want, "{text:?}, ignored {ignored}");
     }
 }

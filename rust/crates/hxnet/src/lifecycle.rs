@@ -37,7 +37,7 @@ pub struct PlaintextOpenRequest {
     /// Capability bitmask (`HTLC_CAP_*`) to advertise in the LOGIN.
     /// 0 omits the chunk; production passes the same bits the legacy
     /// LOGIN does so extensions negotiate.
-    pub caps: u16,
+    pub caps: u64,
     pub trans: u32,
     /// Optional SOCKS proxy to tunnel the connection through. `None`
     /// connects direct. Sourced in C from `GProxyResolver` and parsed by
@@ -257,7 +257,7 @@ pub struct HopeOpenRequest {
     pub name: Vec<u8>,
     pub icon: u16,
     pub version: u16,
-    pub caps: u16,
+    pub caps: u64,
     /// The cipher to offer, or `None` for HMAC authentication over a
     /// plaintext transport (mhxd's non-`cipher_only` mode).
     pub cipher: Option<hxhope::Cipher>,

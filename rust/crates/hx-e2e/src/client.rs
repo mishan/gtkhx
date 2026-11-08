@@ -29,8 +29,8 @@ pub fn is_reply(f: &Frame, trans: u32) -> bool {
 /// `HTLS_DATA_FILE_LIST` — one entry of a FILE_LIST reply.
 const TAG_FILE_LIST: u16 = 0x00c8;
 /// `HTLC_CAP_TEXT_ENCODING` / `HTLC_CAP_LARGE_FILES`.
-pub const CAP_TEXT_ENCODING: u16 = 0x0002;
-pub const CAP_LARGE_FILES: u16 = 0x0001;
+pub const CAP_TEXT_ENCODING: u64 = 0x0002;
+pub const CAP_LARGE_FILES: u64 = 0x0001;
 /// The trans the LOGIN goes out on.
 const LOGIN_TRANS: u32 = 1;
 /// How long a reply may take. Generous: the rig's servers are shared by
@@ -149,7 +149,7 @@ impl Client {
         server: &'static Server,
         login: &str,
         password: Option<&str>,
-        caps: u16,
+        caps: u64,
     ) -> Result<Client, String> {
         Client::login_handling(server, login, password, caps, Handled::NONE, "hx-e2e")
     }
@@ -162,7 +162,7 @@ impl Client {
         server: &'static Server,
         login: &str,
         password: Option<&str>,
-        caps: u16,
+        caps: u64,
         handled: Handled,
         nick: &str,
     ) -> Result<Client, String> {
@@ -195,7 +195,7 @@ impl Client {
     pub fn hope_guest(
         server: &'static Server,
         cipher: hxhope::Cipher,
-        caps: u16,
+        caps: u64,
         handled: Handled,
         nick: &str,
     ) -> Result<Client, String> {
@@ -308,13 +308,13 @@ impl Client {
     }
 
     /// Log in as the server's guest (the empty login), offering `caps`.
-    pub fn guest(server: &'static Server, caps: u16) -> Client {
+    pub fn guest(server: &'static Server, caps: u64) -> Client {
         Client::login(server, "", None, caps).unwrap_or_else(|e| panic!("{e}"))
     }
 
     /// Log in with the server's file-admin account, offering `caps`. Panics
     /// when the server can't be reached or refuses: the rig is expected up.
-    pub fn admin(server: &'static Server, caps: u16) -> Client {
+    pub fn admin(server: &'static Server, caps: u64) -> Client {
         Client::login(server, server.admin, None, caps).unwrap_or_else(|e| panic!("{e}"))
     }
 
@@ -340,7 +340,7 @@ impl Client {
 
     /// Whether names go out as UTF-8 on this connection.
     pub fn utf8(&self) -> bool {
-        self.caps() & u64::from(CAP_TEXT_ENCODING) != 0
+        self.caps() & CAP_TEXT_ENCODING != 0
     }
 
     /// Send `req` and return its trans.

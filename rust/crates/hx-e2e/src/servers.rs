@@ -36,6 +36,9 @@ pub enum Cap {
     /// The messaging extension's friend family (capability bit 6), for the
     /// rig's `friend-*` accounts.
     Messaging,
+    /// Each chat line also as its history entry, to a session that asks
+    /// (the Structured Chat draft's capability bit 17).
+    StructuredChat,
     /// Lets the guest download the rig's seed `test.txt` from the root.
     SeedFile,
     /// Lets the guest download the rig's seed `test_folder`, holding
@@ -123,14 +126,15 @@ pub const SERVERS: &[Server] = &[
         port: 5520,
         xfer_port: 5521,
         // The rig gives hxd-ng a guest and no admin: it is here for voice,
-        // video, news pictures, messaging and the downloads of its seed
-        // files.
+        // video, news pictures, messaging, structured chat and the
+        // downloads of its seed files.
         admin: "",
         caps: &[
             Cap::Voice,
             Cap::Video,
             Cap::NgNewsPictures,
             Cap::Messaging,
+            Cap::StructuredChat,
             Cap::SeedFile,
             Cap::SeedFolder,
         ],

@@ -57,7 +57,7 @@ pub fn config(
     nick: &[u8],
     icon: u16,
     version: u16,
-    caps: u16,
+    caps: u64,
     handled: hxsession::Handled,
 ) -> hxsession::Config {
     hxsession::Config {
@@ -67,7 +67,7 @@ pub fn config(
         nick: String::from_utf8_lossy(nick).into_owned(),
         icon,
         version,
-        caps: caps.into(),
+        caps,
         handshake_timeout_ms: crate::HANDSHAKE_TIMEOUT_SECS * 1000,
         agreement_wait_ms: 2_000,
         keepalive_ms: 60_000,
@@ -537,7 +537,7 @@ mod tests {
         start_handling(hxsession::Handled::LOGIN, 0)
     }
 
-    fn start_handling(handled: hxsession::Handled, caps: u16) -> (Server, Client) {
+    fn start_handling(handled: hxsession::Handled, caps: u64) -> (Server, Client) {
         let (near, far) = duplex(64 * 1024);
         let (cmd_tx, cmd_rx) = mpsc::channel(8);
         let (evt_tx, evt_rx) = mpsc::channel(8);
@@ -625,7 +625,8 @@ mod tests {
     async fn the_messaging_extension_reaches_the_consumer_as_the_sessions() {
         const MESSAGING: u16 = hxproto::messaging::CAP_MESSAGING as u16;
         for agreed in [true, false] {
-            let (mut server, mut client) = start_handling(hxsession::Handled::LOGIN, MESSAGING);
+            let (mut server, mut client) =
+                start_handling(hxsession::Handled::LOGIN, MESSAGING.into());
             server.accept().await;
             server.next().await;
             let (version, caps) = (190u16.to_be_bytes(), MESSAGING.to_be_bytes());

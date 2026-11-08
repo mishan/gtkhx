@@ -1276,6 +1276,7 @@ bitmap.
 | 8 | 0x0100 | Messenger session (requires bit 6) | Capabilities-Messaging.md |
 | 9 | 0x0200 | Modern dates | Capabilities.md |
 | 10 | 0x0400 | Video (only together with bit 2) | hxd-ng `docs/capabilities-video.md` |
+| 17 | 0x00020000 | Structured chat (a draft, not adopted) | Capabilities-Structured-Chat.md |
 
 With **modern dates**, dates use the real year as the base instead of 1904, which
 avoids the 2040 overflow. Nothing yet defines the layout of the 128-bit access map
@@ -1359,6 +1360,20 @@ Fields 0x0F01 channel, 0x0F02 before, 0x0F03 after, 0x0F04 limit, 0x0F05 entry (
 a packed record of message ID, Unix timestamp, flags, icon, nick and text, with a TLV
 trailer), 0x0F06 has-more, and 0x0F07 / 0x0F08 retention limits in the Login reply.
 0x0F01–0x0F1F are reserved. Implemented by Janus and hxd-ng.
+
+### Structured chat
+
+Capability bit 17, a draft (Capabilities-Structured-Chat.md) that is not adopted. To a
+session that asks, every 106 that relays a line also carries field 0x0F33, the line as a
+Chat History entry, with the sender's user ID in field 103; entry flag bit 3 marks an ID
+counted by the chat itself rather than its history. Implemented by hxd-ng.
+
+The bit is above 15, so offering it makes the Login's capabilities field 4 bytes for
+every server, and GtkHx offers it only in a build with hxnet's `structured-chat`
+feature. In such a build, a line a user said is drawn with the nick and text from its
+entry rather than split out of the formatted text, which cuts a nick at 13 columns; an
+emote or a server's line is drawn as formatted; and a line is GtkHx's own by user ID
+rather than by nick.
 
 ### Messaging
 

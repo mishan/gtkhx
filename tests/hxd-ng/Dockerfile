@@ -4,15 +4,16 @@
 #
 # hxd-ng (https://github.com/mishan/hxd-ng) implements the video
 # extension, and every video test runs against it as well as Janus; the
-# news test reads the pictures it attaches to articles, and the friends
-# test speaks the messaging extension to it. The
+# news test reads the pictures it attaches to articles, the friends test
+# speaks the messaging extension to it, and the chat suite the Structured
+# Chat draft. The
 # server itself comes from the image hxd-ng's own CI publishes to GHCR
 # for every commit on main, so nothing compiles here;
 # this layer adds only the rig's config, accounts and entrypoint. Pinned
 # by commit tag and digest, like the other servers are pinned: an
 # unpinned main has broken this rig before. Bump both deliberately, with
 # the tests run against the new one.
-FROM ghcr.io/mishan/hxd-ng:sha-73ccc89@sha256:fcd8064753629dd885e166a1cd19ceba4a264a2a8978b030256ea9ee2c925823
+FROM ghcr.io/mishan/hxd-ng:sha-bf08fd3@sha256:2903d381fd10d216be50b17b0509a4633677053f0da38264aa409e0887649c90
 
 # The base image runs as the unprivileged hxd user (10001), which owns
 # /var/lib/hxd-ng and /run/hxd-ng; the accounts go in owned by it too.

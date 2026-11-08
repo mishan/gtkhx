@@ -24,7 +24,7 @@ use hxrequest::messaging as req;
 use hxsession::Handled;
 use serde_json::json;
 
-const OFFER: u16 = CAP_MESSAGING as u16 | CAP_TEXT_ENCODING;
+const OFFER: u64 = CAP_MESSAGING | CAP_TEXT_ENCODING;
 
 /// The rig's hxd-ng, unless `GTKHX_TEST_SERVERS` leaves it out.
 fn server() -> Option<&'static Server> {

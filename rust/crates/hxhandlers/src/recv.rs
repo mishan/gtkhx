@@ -56,7 +56,8 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             uid,
             text,
             media,
-        } => chat::line(htlc, *cid, *uid, text, media.as_ref()),
+            line,
+        } => chat::line(htlc, *cid, *uid, text, line.as_ref(), media.as_ref()),
         Event::ChatInvite { cid, uid, name } => chat::invited(htlc, *cid, *uid, name),
         Event::ChatSubject { cid, subject } => chat::subject(htlc, *cid, subject),
         Event::ChatHistory {

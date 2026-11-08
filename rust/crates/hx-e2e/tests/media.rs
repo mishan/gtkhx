@@ -12,7 +12,7 @@ use hxrequest::{media, Request};
 use hxsession::{ChatMedia, Expect, Handled};
 
 /// `HTLC_CAP_INLINE_MEDIA`.
-const CAP_INLINE_MEDIA: u16 = 0x0008;
+const CAP_INLINE_MEDIA: u64 = 0x0008;
 /// A part's size when the server names none, and the most it may name, as
 /// `hxhandlers::media` has it.
 const PART_SIZE: usize = 60_000;
@@ -37,8 +37,8 @@ fn member_as(server: &'static Server, nick: &str) -> Client {
     let c = Client::login_handling(server, "", None, CAP_INLINE_MEDIA, handled, nick)
         .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
-        c.caps() & u64::from(CAP_INLINE_MEDIA),
-        u64::from(CAP_INLINE_MEDIA),
+        c.caps() & CAP_INLINE_MEDIA,
+        CAP_INLINE_MEDIA,
         "{}: inline media not agreed",
         server.name
     );

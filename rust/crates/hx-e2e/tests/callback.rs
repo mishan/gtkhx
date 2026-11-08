@@ -125,7 +125,7 @@ fn session_events_through_the_callback(s: &'static Server) {
                 nick.len(),
                 414,
                 hxnet::login::CLIENT_VERSION,
-                CAP_TEXT_ENCODING | CAP_CHAT_HISTORY,
+                CAP_TEXT_ENCODING as u16 | CAP_CHAT_HISTORY,
                 1,
                 std::ptr::null(),
                 0,

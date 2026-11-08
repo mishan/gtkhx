@@ -21,7 +21,7 @@ use gtkhx_core::boxed::chat::hx_chat_event_free;
 #[cfg(not(test))]
 use gtkhx_core::conn::{
     hx_conn_chat_history_last_msgid, hx_conn_name, hx_conn_sess,
-    hx_conn_set_chat_history_last_msgid,
+    hx_conn_set_chat_history_last_msgid, hx_conn_uid,
 };
 #[cfg(not(test))]
 use gtkhx_core::session::{
@@ -128,6 +128,7 @@ pub(crate) unsafe fn line(
     cid: u32,
     uid: u16,
     text: &str,
+    entry: Option<&HistoryEntry>,
     media: Option<&ChatMedia>,
 ) {
     let members = public_members(htlc);
@@ -153,7 +154,8 @@ pub(crate) unsafe fn line(
         );
     }
     let shortcodes = gtkhx_text_emoji_shortcodes_enabled() != 0;
-    let ev = chat_event_new(cid, uid, text, media, own, shortcodes);
+    let me = (hx_conn_uid(htlc.cast()), own);
+    let ev = chat_event_new(cid, uid, text, entry, media, me, shortcodes);
     gtkhx_session_emit_chat(gtkhx_session_get_default(), htlc, ev.cast());
     hx_chat_event_free(ev);
 }
@@ -459,6 +461,9 @@ mod doubles {
         gtkhx_core::boxed::chat::hx_chat_event_free(e)
     }
     pub unsafe fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
+    pub unsafe fn hx_conn_uid(_h: *const c_void) -> u16 {
+        0
+    }
     pub unsafe fn hx_conn_chat_history_last_msgid(_h: *const c_void) -> u64 {
         test_env::CURSOR.with(|c| c.get())
     }
