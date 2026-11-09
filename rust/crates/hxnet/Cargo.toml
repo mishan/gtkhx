@@ -29,6 +29,11 @@ socks = ["dep:tokio-socks"]
 # login. Off until GtkHx shows what it brings; the routing and handlers
 # beneath it are built either way.
 messaging = []
+# Offer the Structured Chat draft (capability bit 17) at login. Off: until
+# the bit is allocated the draft is for those who choose to try it, and
+# the bit makes the login's capabilities 4 bytes, which every server
+# would be sent. The handlers beneath it are built either way.
+structured-chat = []
 
 [dependencies]
 hxproto = { workspace = true }

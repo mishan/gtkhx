@@ -12,8 +12,8 @@ use hxrequest::voice;
 use hxsession::{Expect, Handled};
 
 /// `HTLC_CAP_VOICE` and `HTLC_CAP_VIDEO`.
-const CAP_VOICE: u16 = 0x0004;
-const CAP_VIDEO: u16 = 0x0400;
+const CAP_VOICE: u64 = 0x0004;
+const CAP_VIDEO: u64 = 0x0400;
 
 /// A guest that agreed to voice and video, going by a name no other test
 /// uses.
@@ -29,8 +29,8 @@ fn member(server: &'static Server) -> Client {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
-        c.caps() & u64::from(CAP_VOICE | CAP_VIDEO),
-        u64::from(CAP_VOICE | CAP_VIDEO),
+        c.caps() & (CAP_VOICE | CAP_VIDEO),
+        CAP_VOICE | CAP_VIDEO,
         "{}: voice and video not agreed",
         server.name
     );

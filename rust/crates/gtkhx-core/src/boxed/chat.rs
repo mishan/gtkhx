@@ -129,30 +129,62 @@ pub unsafe extern "C" fn hx_chat_split_nick_body(
     1
 }
 
+/// Chat History's entry flags for an emote and for a line the server wrote.
+const ACTION: u16 = 0x0001;
+const SERVER_MSG: u16 = 0x0002;
+
 /// A heap `HxChatEvent` for a chat line the session decoded, freed by
 /// [`hx_chat_event_free`]. With `shortcodes`, `:shortcode:`s become their
 /// emoji across the whole line before it is split: some servers format a
 /// line with no "nick:", and a body-only decode would take a shortcode's
-/// own colon for the separator. A nick is never a shortcode — those are
-/// lowercase and colon-delimited on both sides. `self_nick` is the name
-/// this connection goes by, which marks the line as its own when the
-/// sender is exactly that.
+/// own colon for the separator. A nick shaped like a shortcode, lowercase
+/// and colon-delimited on both sides, is converted with it, which is rare
+/// enough to accept. `me` is this connection's uid, 0 while it is not
+/// known, and the name it goes by.
+///
+/// `entry` is the line as data, where the server sent it. For a line a
+/// user said, the nick and text come from it rather than from splitting
+/// `text`, which gets a nick wrong past the formatter's 13 columns or with
+/// a colon in it, and only the text takes shortcodes. An emote or a line
+/// the server wrote is drawn, and converted, as `text` has it. A line with
+/// an entry is ours by uid where the uid is known, which two users of one
+/// nick do not share, and never one the server wrote.
 pub fn chat_event_new(
     cid: u32,
     uid: u16,
     text: &str,
+    entry: Option<&hxsession::HistoryEntry>,
     media: Option<&hxsession::ChatMedia>,
-    self_nick: &[u8],
+    me: (u16, &[u8]),
     shortcodes: bool,
 ) -> *mut HxChatEvent {
-    let decoded;
-    let line = if shortcodes {
-        decoded = hxproto::emoji::shortcodes_to_emoji(text);
-        decoded.as_bytes()
-    } else {
-        text.as_bytes()
+    let emoji = |t: &str| {
+        if shortcodes {
+            hxproto::emoji::shortcodes_to_emoji(t)
+        } else {
+            t.to_owned()
+        }
     };
-    let split = split_nick_body(line);
+    let said = entry.filter(|e| e.flags & (ACTION | SERVER_MSG) == 0 && !e.nick.is_empty());
+    let line = match said {
+        Some(e) => format!("{}:  {}", e.nick, emoji(&e.text)),
+        None => emoji(text),
+    };
+    let line = line.as_bytes();
+    let split = match (said, entry) {
+        (Some(e), _) => {
+            let body = e.nick.len() + 3;
+            Some((0, e.nick.len(), body, line.len() - body))
+        }
+        (None, Some(_)) => None,
+        (None, None) => split_nick_body(line),
+    };
+    let is_self = match entry {
+        Some(e) if e.flags & SERVER_MSG != 0 => false,
+        Some(_) if me.0 != 0 => uid == me.0,
+        Some(e) => !me.1.is_empty() && e.nick.as_bytes() == me.1,
+        None => split.is_some_and(|(so, sl, ..)| !me.1.is_empty() && &line[so..so + sl] == me.1),
+    };
     // SAFETY: the allocation is zeroed and sized for the struct, and every
     // pointer stored in it is a fresh glib allocation.
     unsafe {
@@ -166,8 +198,8 @@ pub fn chat_event_new(
             (*e).sender_len = sl;
             (*e).body_off = bo;
             (*e).body_len = bl;
-            (*e).is_self = i32::from(!self_nick.is_empty() && &line[so..so + sl] == self_nick);
         }
+        (*e).is_self = i32::from(is_self);
         (*e).media = media_new(media);
         e
     }
@@ -415,10 +447,111 @@ mod tests {
         ];
         for (line, me, want, mine) in cases {
             unsafe {
-                let e = chat_event_new(3, 4242, line, None, me.as_bytes(), false);
+                let e = chat_event_new(3, 4242, line, None, None, (0, me.as_bytes()), false);
                 assert_eq!(read(e), (line.to_string(), want, mine), "{line:?}");
                 assert_eq!(((*e).cid, (*e).uid), (3, 4242));
                 assert!((*e).media.is_null());
+                hx_chat_event_free(e);
+            }
+        }
+    }
+
+    #[test]
+    fn an_entry_says_who_spoke_and_what_where_the_text_cannot() {
+        let split = |s: &str, b: &str| Some((s.to_string(), b.to_string()));
+        let entry = |flags: u16, nick: &str, text: &str| hxsession::HistoryEntry {
+            message_id: 1000,
+            timestamp: 0,
+            flags,
+            icon: 128,
+            nick: nick.into(),
+            text: text.into(),
+        };
+        let me: (u16, &[u8]) = (9, b"bob");
+        let cases = [
+            (
+                " alice-in-wond:  hi",
+                7,
+                entry(0, "alice-in-wonderland", "hi"),
+                me,
+                split("alice-in-wonderland", "hi"),
+                false,
+            ),
+            (
+                "          a:b:  hi",
+                7,
+                entry(0, "a:b", "hi"),
+                me,
+                split("a:b", "hi"),
+                false,
+            ),
+            (
+                " :fire::  :tada: hi",
+                7,
+                entry(0, ":fire:", ":tada: hi"),
+                me,
+                split(":fire:", "\u{1f389} hi"),
+                false,
+            ),
+            (
+                " *** alice says: hi",
+                7,
+                entry(ACTION, "alice", "says: hi"),
+                me,
+                None,
+                false,
+            ),
+            (
+                " *** bob waves",
+                9,
+                entry(ACTION, "bob", "waves"),
+                me,
+                None,
+                true,
+            ),
+            (
+                " *** bob was kicked: spam",
+                9,
+                entry(SERVER_MSG, "", "bob was kicked: spam"),
+                me,
+                None,
+                false,
+            ),
+            (
+                "          bob:  hi",
+                9,
+                entry(0, "bob", "hi"),
+                me,
+                split("bob", "hi"),
+                true,
+            ),
+            (
+                "          bob:  hi",
+                4,
+                entry(0, "bob", "hi"),
+                me,
+                split("bob", "hi"),
+                false,
+            ),
+            (
+                "          bob:  hi",
+                4,
+                entry(0, "bob", "hi"),
+                (0, b"bob"),
+                split("bob", "hi"),
+                true,
+            ),
+            ("       :  hi", 0, entry(0, "", "hi"), me, None, false),
+            ("       :  hi", 0, entry(0, "", "hi"), (0, b""), None, false),
+        ];
+        for (text, uid, entry, me, want, mine) in cases {
+            unsafe {
+                let e = chat_event_new(0, uid, text, Some(&entry), None, me, true);
+                let (line, split, is_self) = read(e);
+                assert_eq!((&split, is_self), (&want, mine), "{text:?}");
+                if split.is_none() {
+                    assert_eq!(line, text, "{text:?} is drawn as the server formatted it");
+                }
                 hx_chat_event_free(e);
             }
         }
@@ -450,7 +583,7 @@ mod tests {
         ];
         for (text, shortcodes, want, sender) in cases {
             unsafe {
-                let e = chat_event_new(0, 0, text, None, b"", shortcodes);
+                let e = chat_event_new(0, 0, text, None, None, (0, b""), shortcodes);
                 let (line, split, _) = read(e);
                 assert_eq!(line, want, "{text:?}");
                 assert_eq!(split.map(|s| s.0).as_deref(), sender, "{text:?}");
@@ -473,7 +606,7 @@ mod tests {
             ..png.clone()
         };
         unsafe {
-            let e = chat_event_new(0, 0, "alice: look", Some(&png), b"", false);
+            let e = chat_event_new(0, 0, "alice: look", None, Some(&png), (0, b""), false);
             let m = &*(*e).media;
             assert_eq!(std::slice::from_raw_parts(m.id, m.id_len), [0xAB, 0xCD]);
             assert_eq!(cstr(m.mime, m.mime_len), "image/png");
@@ -481,7 +614,7 @@ mod tests {
             assert_eq!((m.bytes, m.bytes_present), (124_000, 1));
             hx_chat_event_free(e);
 
-            let e = chat_event_new(0, 0, "alice: look", Some(&no_id), b"", false);
+            let e = chat_event_new(0, 0, "alice: look", None, Some(&no_id), (0, b""), false);
             assert!((*e).media.is_null());
             hx_chat_event_free(e);
         }

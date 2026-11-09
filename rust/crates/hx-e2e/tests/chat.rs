@@ -11,22 +11,25 @@ use hxrequest::Request;
 use hxsession::{Expect, Handled, HistoryEntry};
 
 /// `HTLC_CAP_CHAT_HISTORY`.
-const CAP_CHAT_HISTORY: u16 = 0x0010;
+const CAP_CHAT_HISTORY: u64 = 0x0010;
+/// What a guest offers unless a test says otherwise.
+const CAPS: u64 = CAP_TEXT_ENCODING | CAP_CHAT_HISTORY;
 
 /// A guest whose session handles chat, going by a name no other test uses.
 fn chatter(server: &'static Server, who: &str) -> (Client, String) {
-    chatter_over(server, who, None)
+    chatter_over(server, who, None, CAPS)
 }
 
-/// As [`chatter`], logged in over HOPE with `cipher` when there is one.
+/// As [`chatter`], offering `caps`, and logged in over HOPE with `cipher`
+/// when there is one.
 fn chatter_over(
     server: &'static Server,
     who: &str,
     cipher: Option<hxhope::Cipher>,
+    caps: u64,
 ) -> (Client, String) {
     // Inside every server's 31-byte cap.
     let nick: String = unique_name(who).chars().take(31).collect();
-    let caps = CAP_TEXT_ENCODING | CAP_CHAT_HISTORY;
     let mut c = match cipher {
         None => Client::login_handling(server, "", None, caps, Handled::CHAT, &nick),
         Some(cipher) => Client::hope_guest(server, cipher, caps, Handled::CHAT, &nick),
@@ -196,13 +199,8 @@ fn history_holds_what_was_said_over_every_transport() {
         let mut caps = vec![Cap::ChatHistory];
         caps.extend(cipher.map(Cap::Hope));
         for s in servers_with(&caps) {
-            let (mut a, na) = chatter_over(s, "ch", cipher);
-            assert_ne!(
-                a.caps() & u64::from(CAP_CHAT_HISTORY),
-                0,
-                "{} {cipher:?}",
-                s.name
-            );
+            let (mut a, na) = chatter_over(s, "ch", cipher, CAPS);
+            assert_ne!(a.caps() & CAP_CHAT_HISTORY, 0, "{} {cipher:?}", s.name);
             let line = format!("{na} for the record");
             a.send(&chat(line.as_bytes()));
             let entries = page_with(&mut a, &line, 0, 0, 50);
@@ -277,7 +275,7 @@ fn an_emoji_crosses_a_server_that_knows_only_mac_roman() {
         )
         .remove(0);
         assert!(text.contains(":tada:"), "{}: {text:?}", s.name);
-        let ev = gtkhx_core::boxed::chat::chat_event_new(0, 0, &text, None, b"", true);
+        let ev = gtkhx_core::boxed::chat::chat_event_new(0, 0, &text, None, None, (0, b""), true);
         // SAFETY: a fresh event, freed here.
         let line = unsafe {
             let e = &*ev;
@@ -376,5 +374,108 @@ fn a_line_arrives_as_its_sender_s() {
         // writes it whole.
         let shown: String = na.chars().take(13).collect();
         assert!(text.contains(&shown), "{}: {text:?}", s.name);
+    }
+}
+
+/// Where the server agreed to Structured Chat, a line comes as data too,
+/// and the view takes its sender and text from that: the whole nick, which
+/// the formatted text cuts at 13 columns, and the line ours by uid. An
+/// emote is drawn as the server formatted it, and a client that did not
+/// ask is sent the text it always was.
+#[test]
+fn a_structured_line_names_its_sender_whole() {
+    const STRUCTURED: u64 = hxsession::cap::STRUCTURED_CHAT;
+    for s in servers_with(&[Cap::StructuredChat]) {
+        let (mut a, na) = chatter_over(s, "structured-a", None, CAPS | STRUCTURED);
+        let (mut b, nb) = chatter_over(s, "structured-b", None, CAPS | STRUCTURED);
+        let (mut c, _) = chatter(s, "structured-c");
+        assert!(na.len() > 13, "{na:?} fits the formatter's columns");
+        assert_ne!(b.caps() & STRUCTURED, 0, "{}: bit 17 not agreed", s.name);
+        assert_eq!(
+            c.caps() & STRUCTURED,
+            0,
+            "{}: bit 17 agreed unasked",
+            s.name
+        );
+        let (a_uid, b_uid) = (uid_of(&mut b, &na), uid_of(&mut b, &nb));
+
+        let said = format!("to {nb}: one");
+        a.send(&chat(said.as_bytes()));
+        a.send(&request(
+            105,
+            &[(tag::BODY, b"waves"), (tag::STYLE, &[0, 1])],
+        ));
+        let lines = |who: &mut Client| {
+            heard(
+                who,
+                |e| match e {
+                    Event::Session(hxsession::Event::Chat {
+                        uid, text, line, ..
+                    }) if *uid == a_uid => Some((text.clone(), line.clone())),
+                    _ => None,
+                },
+                |got| got.len() == 2,
+            )
+        };
+        let (at_a, at_b, at_c) = (lines(&mut a), lines(&mut b), lines(&mut c));
+
+        let text = |got: &[(String, Option<HistoryEntry>)]| {
+            got.iter().map(|g| g.0.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(text(&at_c), text(&at_b), "{}: the text changed", s.name);
+        assert!(at_c.iter().all(|g| g.1.is_none()), "{}: {at_c:?}", s.name);
+        let entries: Vec<HistoryEntry> = at_b.iter().map(|g| g.1.clone().unwrap()).collect();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| (e.nick.as_str(), e.text.as_str(), e.flags & 1))
+                .collect::<Vec<_>>(),
+            [(na.as_str(), said.as_str(), 0), (na.as_str(), "waves", 1)],
+            "{}",
+            s.name
+        );
+        let echoed = at_a[0].1.as_ref().map(|e| e.message_id);
+        assert_eq!(echoed, Some(entries[0].message_id), "{}", s.name);
+        assert_ne!(entries[0].message_id, 0, "{}", s.name);
+
+        // What the view makes of each: b sees a's line from a, the sender
+        // whole, and the emote as the server drew it; a sees its own.
+        let view = |got: &(String, Option<HistoryEntry>), me: (u16, &str)| {
+            let ev = gtkhx_core::boxed::chat::chat_event_new(
+                0,
+                a_uid,
+                &got.0,
+                got.1.as_ref(),
+                None,
+                (me.0, me.1.as_bytes()),
+                false,
+            );
+            // SAFETY: a fresh event, freed here.
+            unsafe {
+                let e = &*ev;
+                let line = std::slice::from_raw_parts(e.line as *const u8, e.line_len);
+                let part = |off: usize, len: usize| String::from_utf8_lossy(&line[off..off + len]);
+                let seen = (
+                    part(e.sender_off, e.sender_len).into_owned(),
+                    part(e.body_off, e.body_len).into_owned(),
+                    e.is_self != 0,
+                );
+                gtkhx_core::boxed::chat::hx_chat_event_free(ev);
+                seen
+            }
+        };
+        assert_eq!(
+            view(&at_b[0], (b_uid, &nb)),
+            (na.clone(), said.clone(), false),
+            "{}",
+            s.name
+        );
+        assert_eq!(
+            view(&at_b[1], (b_uid, &nb)).0,
+            "",
+            "{}: the emote split",
+            s.name
+        );
+        assert!(view(&at_a[0], (a_uid, &na)).2, "{}: our own line", s.name);
     }
 }

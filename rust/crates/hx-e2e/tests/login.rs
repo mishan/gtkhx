@@ -13,14 +13,13 @@ use hxnet::lifecycle::{
 use hxnet::{Connection, Event};
 use hxsession::{cap, Closed, Handled, ServerInfo};
 
-/// What GtkHx offers at login with voice and video built in, in the
-/// 16 bits hxnet's login carries.
-const CAPS: u16 = (cap::LARGE_FILES
+/// What GtkHx offers at login with voice and video built in.
+const CAPS: u64 = cap::LARGE_FILES
     | cap::TEXT_ENCODING
     | cap::VOICE
     | cap::INLINE_MEDIA
     | cap::CHAT_HISTORY
-    | 0x0400) as u16;
+    | 0x0400;
 
 #[derive(Debug)]
 enum Outcome {

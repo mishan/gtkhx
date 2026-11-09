@@ -66,3 +66,8 @@ db = "/var/lib/hxd-ng/messages.db"
 
 [messaging]
 enabled = true
+
+# The Structured Chat draft (capability bit 17), for hx-e2e's chat suite.
+# No [history], so the lobby's lines carry ids counted in memory.
+[structured_chat]
+enabled = true

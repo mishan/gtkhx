@@ -83,3 +83,7 @@ voice = [
 # Offer the messaging extension's friend family at login (hxnet's
 # `messaging`). No meson option turns it on yet.
 messaging = ["hxnet/messaging"]
+
+# Offer the Structured Chat draft at login (hxnet's `structured-chat`). No
+# meson option turns it on yet.
+structured-chat = ["hxnet/structured-chat"]

@@ -1061,16 +1061,20 @@ pub(crate) unsafe fn parse_proxy_arg(
     crate::connect::ProxyConfig::from_uri(uri).map(Some)
 }
 
-/// The capabilities a connect offers: what C asks for, and the messaging
-/// extension's friend family (bit 6) in a build with the `messaging`
-/// feature, whose handlers are all Rust's. Never the messenger session
-/// (bit 8): GtkHx is a whole client, not a messenger.
-fn offered(caps: u16) -> u16 {
+/// The capabilities a connect offers: what C asks for, and in a build
+/// with each feature, the messaging extension's friend family (bit 6,
+/// `messaging`) and Structured Chat (bit 17, `structured-chat`), whose
+/// handlers are all Rust's. Never the messenger session (bit 8): GtkHx is
+/// a whole client, not a messenger.
+fn offered(caps: u16) -> u64 {
+    let mut caps = u64::from(caps);
     if cfg!(feature = "messaging") {
-        caps | hxproto::messaging::CAP_MESSAGING as u16
-    } else {
-        caps
+        caps |= hxproto::messaging::CAP_MESSAGING;
     }
+    if cfg!(feature = "structured-chat") {
+        caps |= hxsession::cap::STRUCTURED_CHAT;
+    }
+    caps
 }
 
 /// Open a Hotline connection with hxnet driving the full
