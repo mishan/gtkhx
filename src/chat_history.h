@@ -61,9 +61,9 @@ extern void hx_history_entry_free (HxHistoryEntry *entry);
  * chat-history-batch signal (hxhandlers send/chat_history.rs). Each
  * returns whether it sent anything.
  *
- * _initial: the public chat's history once the login has settled — the
- * catch-up since the newest line seen after a reconnect to the same
- * server, or else the last chat.history_initial lines.
+ * _initial: the public chat's history once the login has settled: the
+ * last chat.history_initial lines, or the catch-up after the cursor
+ * should one survive the connect (none does yet).
  * _older: the page of chat `cid` before line `before`. */
 extern gboolean hx_chat_history_fetch_initial (struct htlc_conn *htlc);
 extern gboolean hx_chat_history_fetch_older (struct htlc_conn *htlc,
