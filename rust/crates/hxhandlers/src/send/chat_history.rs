@@ -38,10 +38,10 @@ fn initial_lines() -> u16 {
 }
 
 /// `gboolean hx_chat_history_fetch_initial (htlc)` — the public chat's
-/// history, once the login has settled. After a reconnect to the same
-/// server, everything since the newest line this connection saw, as many
-/// as the server keeps; otherwise the last `chat.history_initial` lines,
-/// and nothing when that is 0. Whether it was sent.
+/// history, once the login has settled: the last `chat.history_initial`
+/// lines, and nothing when that is 0. With a cursor set, everything after
+/// it, as many as the server keeps; no connect keeps one yet, since each
+/// clears the chat view. Whether it was sent.
 ///
 /// # Safety
 /// `htlc` is NULL or a live connection; main thread.

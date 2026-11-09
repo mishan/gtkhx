@@ -53,9 +53,9 @@ extern void hx_conn_free (struct htlc_conn *h);
 /* ---- Chat-history extension session state ---------------------------------
  *
  * history_max_msgs / history_max_days: server retention hints from the LOGIN
- * reply (0 = unlimited / undisclosed). chat_history_last_msgid: the newest
- * message_id rendered this run, used as the AFTER= reconnect cursor. All three
- * are wiped on disconnect. */
+ * reply (0 = unlimited / undisclosed), wiped on disconnect. chat_history_last_msgid:
+ * the newest message_id a history batch brought, the AFTER= cursor; reset at every
+ * connect, since connecting clears the chat view it would point into. */
 extern guint32 hx_conn_history_max_msgs (const struct htlc_conn *h);
 extern void hx_conn_set_history_max_msgs (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_history_max_days (const struct htlc_conn *h);
