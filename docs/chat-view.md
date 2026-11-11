@@ -6,7 +6,7 @@ private-chat and private-message window draws its output on.
 The widget is **Rotulus**, a GTK4 scrollback view for text-stream chat,
 LGPL-2.1-or-later. It lives in its own repository,
 [mishan/rotulus](https://github.com/mishan/rotulus), and GtkHx takes it
-from crates.io like any other dependency. It knows nothing about Hotline.
+as a Cargo dependency (section 1). It knows nothing about Hotline.
 How it works — the layout engine, the message model, scroll anchoring,
 markdown, selection, search, the signals and properties an application
 hooks, and its measurements — is in its
@@ -35,8 +35,7 @@ Three crates, released together from the rotulus repository:
   use it (Hotline has no in-band styling); it arrives as a dependency of
   `rotulus`.
 
-`rust/Cargo.toml` names the first two in `[workspace.dependencies]` with a
-caret requirement (`rotulus = "0.2.2"`, `rotulus-layout = "0.2.2"`), and
+`rust/Cargo.toml` names the first two in `[workspace.dependencies]`, and
 `gtkhx-ui` and `gtkhx-ffi` take them with `workspace = true`. The exact
 versions are whatever `rust/Cargo.lock` holds, so a build never moves to a
 new release on its own. The two must move together: the widget is built
@@ -46,14 +45,24 @@ news views find links with GtkHx's `Linkifier` while the chat view uses
 the widget's, and the compose box highlights markdown with the parser the
 view renders it with; two copies could disagree on both.
 
+Normally the two come from crates.io with a caret requirement
+(`rotulus = "0.2.2"`). For now they are instead a git dependency on the
+rotulus repository, pinned by `rev` to a commit of its `main`: the reply
+headers and reaction chips GtkHx is building on are merged there but not
+yet released. The crates' version number on `main` does not change
+between releases, so a version requirement cannot tell `main` from the
+release. **No GtkHx release goes out while the pin is a git revision**: a
+release depends only on released widget code. When Rotulus releases
+them, GtkHx moves back to crates.io (section 4).
+
 The workspace pin turns on rotulus's `v4_16` feature, which GtkHx's GTK
 floor allows: it is what makes the view implement `GtkAccessibleText`, and
 tells magnifiers where the text is on screen.
 
 The Flatpak build is offline, so the crates are vendored through
-`rust/cargo-sources.json` like every other crates.io dependency. It is
-generated from the lockfile and has to be regenerated whenever the lockfile
-changes:
+`rust/cargo-sources.json` like every other dependency, a git one as a
+checkout of its commit. It is generated from the lockfile and has to be
+regenerated whenever the lockfile changes:
 
 ```sh
 python3 tools/flatpak-cargo-generator.py rust/Cargo.lock
@@ -69,13 +78,13 @@ straight to them. There is no dispatcher file between C and the widget.
 
 The declarations are in `rotulus.h`, which ships inside the crate. GtkHx
 keeps no copy of it. `rust/rotulus.py` asks `cargo metadata --locked`
-where the locked `rotulus` package lives — in the cargo registry for a
-normal build, in the vendored sources for the Flatpak — and
+where the locked `rotulus` package lives — in the cargo registry or git
+checkout for a normal build, in the vendored sources for the Flatpak — and
 `rust/meson.build` uses that directory's `include/` as `rotulus_inc`, which
 `src/meson.build` adds to the C include path. The directory's name carries
-the crate's version, so `rust/meson.build` reads `Cargo.lock` at configure
-time, which makes it a configure dependency: moving the lock reconfigures
-the build and picks up the new header.
+the crate's version (or a git pin's commit), so `rust/meson.build` reads
+`Cargo.lock` at configure time, which makes it a configure dependency:
+moving the lock reconfigures the build and picks up the new header.
 
 The C ABI's methods take a `RotulusView *`, and GtkHx's C holds its views
 as `GtkWidget *`, so the call sites in `chat.c` and `options.c` cast with
@@ -184,7 +193,8 @@ headless benchmarks and render tests live in the rotulus repository.
 1. Raise the requirement on `rotulus` and `rotulus-layout` together in
    `rust/Cargo.toml`, when the new release is outside the current caret
    range (a new `0.x`). Within the range, the lockfile is the only thing
-   that moves.
+   that moves. On a git pin, move both `rev`s to the new commit, or
+   replace both with a release's version.
 2. Update the lock for all three crates at once:
 
    ```sh
@@ -219,11 +229,14 @@ something any chat application could use, with GtkHx's specifics left in
 `chat_view.rs` or C.
 
 The normal path is to make the change there, release it, and move GtkHx to
-the release as above.
+the release as above. Before a release, GtkHx may pin the commit on
+rotulus's `main` that merged it (section 1).
 
 While developing both sides at once, point Cargo at a local checkout with a
-`[patch.crates-io]` entry in `rust/Cargo.toml` — here, a rotulus checkout
-beside this one:
+`[patch]` entry in `rust/Cargo.toml` for the source the pin names
+(`[patch.crates-io]` for a release,
+`[patch."https://github.com/mishan/rotulus.git"]` for a git pin) — here,
+a rotulus checkout beside this one:
 
 ```toml
 [patch.crates-io]
@@ -236,8 +249,8 @@ rotulus-mirc = { path = "../../rotulus/crates/rotulus-mirc" }
 crate is, so the header and translations come from the checkout too.
 **Never commit the patch.** It points at a path that exists only on your
 machine, the Flatpak's offline build cannot see it, and a GtkHx that
-depends on unreleased widget code cannot be built by anyone else. Release
-the widget, then move GtkHx to the release.
+depends on unmerged widget code cannot be built by anyone else. Merge the
+change into rotulus, then move GtkHx to it.
 
 ---
 
