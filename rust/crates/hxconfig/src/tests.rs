@@ -880,6 +880,7 @@ fn every_path_round_trips_a_non_default_value() {
     s.chat.timestamp_format = "fmt!".into();
     s.chat.history_initial = 7;
     s.chat.highlight_words = vec!["one".into(), "two".into()];
+    s.chat.emoji.quick_reactions = vec!["q".into()];
     s.transfers.download_dir = "dir!".into();
     s.trackers.addresses = vec!["t1".into(), "t2".into(), "t3".into()];
     s.updates.skip_version = "skip!".into();

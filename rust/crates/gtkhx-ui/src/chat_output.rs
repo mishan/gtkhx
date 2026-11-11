@@ -11,7 +11,9 @@
 //!
 //! Where the session has reactions (the Reactions draft, capability bit
 //! 19), a lobby line's chips come from its history entry and then from
-//! what the `reactions` signal says of it.
+//! what the `reactions` signal says of it, with what the user has asked
+//! for and not had answered drawn over them (`hxmodel::reactions`). A
+//! click on a chip, or its row's menu (`reactions`), asks for one.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -21,7 +23,8 @@ use glib::translate::{from_glib_none, ToGlibPtr};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
-use hxproto::reactions::{Key, Mine, Summary};
+use hxmodel::reactions::{LineReactions, Next, Shown};
+use hxproto::reactions::{Key, Mine, Summary, INVALID_KEY};
 use hxproto::target::Target;
 use hxsession::HistoryEntry;
 use rotulus::ffi::{RotulusRun, RotulusSpeaker};
@@ -82,21 +85,39 @@ enum Space {
 /// while after its row has gone, never the other way round.
 #[derive(Default)]
 struct LineRegistry {
-    lines: HashMap<(Space, u64), MessageId>,
+    lines: HashMap<(Space, u64), Line>,
     /// Live lines, oldest first, each with the count of live rows drawn up
     /// to its own.
     live: VecDeque<((Space, u64), MessageId, u64)>,
     drawn: u64,
 }
 
+/// A line's row, and the reactions shown under it.
+struct Line {
+    row: MessageId,
+    reactions: LineReactions,
+}
+
 impl LineRegistry {
     /// The row of line `id`, unless it has been let go of.
     fn row(&self, space: Space, id: u64) -> Option<MessageId> {
-        self.lines.get(&(space, id)).copied()
+        self.lines.get(&(space, id)).map(|l| l.row)
     }
 
-    fn history(&mut self, id: u64, row: MessageId) {
-        self.lines.insert((Space::History, id), row);
+    /// History line `id` is drawn on `row`: its reactions, none yet.
+    fn history(&mut self, id: u64, row: MessageId) -> &mut LineReactions {
+        let reactions = LineReactions::default();
+        let line = self.lines.entry((Space::History, id));
+        &mut line
+            .insert_entry(Line { row, reactions })
+            .into_mut()
+            .reactions
+    }
+
+    /// The history line drawn on `row`.
+    fn history_on(&self, row: MessageId) -> Option<u64> {
+        let mut lines = self.lines.iter();
+        lines.find_map(|(&(space, id), l)| (space == Space::History && l.row == row).then_some(id))
     }
 
     /// `rows` more live rows were drawn, in a view that keeps `max_rows`.
@@ -107,7 +128,7 @@ impl LineRegistry {
                 break;
             }
             self.live.pop_front();
-            if self.lines.get(&key) == Some(&row) {
+            if self.row(key.0, key.1) == Some(row) {
                 self.lines.remove(&key);
             }
         }
@@ -119,7 +140,8 @@ impl LineRegistry {
         if self.lines.contains_key(&key) {
             return;
         }
-        self.lines.insert(key, row);
+        let reactions = LineReactions::default();
+        self.lines.insert(key, Line { row, reactions });
         self.live.push_back((key, row, self.drawn));
     }
 }
@@ -174,6 +196,9 @@ fn hear(view: &RotulusView, cid: u32) {
         return;
     }
     unsafe { view.set_data(HEARD, ()) };
+    if cid == 0 {
+        crate::reactions::hear(view);
+    }
     view.connect_local("load-more", false, move |args| {
         let view = args[0].get::<RotulusView>().ok()?;
         if args[1].get::<LoadDirection>().ok()? == LoadDirection::Older {
@@ -382,15 +407,18 @@ fn c_str(s: &str) -> &str {
     s.split('\0').next().unwrap_or_default()
 }
 
-/// The chips `summary` draws, ours among them where `mine` says: an emoji
-/// as itself, which a screen reader names; one of the server's own, which
-/// GtkHx cannot draw, as a placeholder named by its id.
-fn chips(summary: &Summary, mine: &Mine) -> Vec<Reaction> {
-    let chip = |(i, (key, count)): (usize, &(Key, u32))| {
-        let (key, text, label) = match key {
+/// What a chip for one of the server's own emoji is known by.
+const SERVER_EMOJI: &str = "server-emoji:";
+
+/// The chips `shown` draws: an emoji as itself, which a screen reader
+/// names; one of the server's own, which GtkHx cannot draw, as a
+/// placeholder named by its id.
+fn chips(shown: &[Shown]) -> Vec<Reaction> {
+    let chip = |s: &Shown| {
+        let (key, text, label) = match &s.key {
             Key::Emoji(e) => (e.clone(), None, None),
             Key::Server(id) => (
-                format!("server-emoji:{id}"),
+                format!("{SERVER_EMOJI}{id}"),
                 Some("\u{25C7}".to_owned()),
                 // TRANSLATORS: what a screen reader calls a placeholder
                 // for one of the server's own emoji, by its number.
@@ -400,32 +428,139 @@ fn chips(summary: &Summary, mine: &Mine) -> Vec<Reaction> {
         Reaction {
             key,
             text,
-            count: *count,
-            mine: mine.holds(i),
+            count: s.count,
+            mine: s.mine,
             label,
         }
     };
-    summary.entries.iter().enumerate().map(chip).collect()
+    shown.iter().map(chip).collect()
 }
 
-/// What history line `id` holds now: chips, or none. One not drawn while
-/// the first page is on its way (`page_due`) is kept to be asked after.
-fn reacted(view: &RotulusView, id: u64, reactions: Option<&(Summary, Mine)>, page_due: bool) {
-    let row = output(view).borrow().lines.row(Space::History, id);
-    let Some(row) = row else {
-        let missed = &mut output(view).borrow_mut().missed;
-        if page_due && missed.len() < MISSED && !missed.contains(&id) {
-            missed.push(id);
-        }
-        return;
+/// Draw history line `id`'s chips again, after `change` to its reactions;
+/// what it returns. A line whose row has gone is let go of.
+fn redraw<T>(
+    view: &RotulusView,
+    id: u64,
+    change: impl FnOnce(&mut LineReactions) -> T,
+) -> Option<T> {
+    let (row, chips, done) = {
+        let mut out = output(view).borrow_mut();
+        let line = out.lines.lines.get_mut(&(Space::History, id))?;
+        let done = change(&mut line.reactions);
+        (line.row, chips(&line.reactions.shown()), done)
     };
-    let chips = reactions.map_or_else(Vec::new, |(s, m)| chips(s, m));
     if !view.set_reactions(row, chips) {
         output(view)
             .borrow_mut()
             .lines
             .lines
             .remove(&(Space::History, id));
+    }
+    Some(done)
+}
+
+/// What history line `id` holds now: chips, or none. One not drawn while
+/// the first page is on its way (`page_due`) is kept to be asked after.
+fn reacted(view: &RotulusView, id: u64, reactions: Option<&(Summary, Mine)>, page_due: bool) {
+    let (summary, mine) = reactions.cloned().unwrap_or_default();
+    if redraw(view, id, |r| r.replace(summary, &mine)).is_some() {
+        return;
+    }
+    let missed = &mut output(view).borrow_mut().missed;
+    if page_due && missed.len() < MISSED && !missed.contains(&id) {
+        missed.push(id);
+    }
+}
+
+/// What [`want`] and [`answered`] leave to do.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Then {
+    /// Ask for `key` on the line, an add or not.
+    Send(u64, Key, bool),
+    /// Take back the request for `key` on the line, if it is still to go.
+    Withdraw(u64, Key),
+    /// Tell the user why not.
+    Say(String),
+}
+
+/// The lobby line drawn on `row`, where `limits` take reactions to it.
+pub(crate) fn line_on(
+    view: &RotulusView,
+    row: MessageId,
+    limits: &hxproto::reactions::Limits,
+) -> Option<u64> {
+    let id = output(view).borrow().lines.history_on(row)?;
+    limits.takes(&Target::Line { channel: 0, id }).then_some(id)
+}
+
+/// The user wants the chip `key` on `row` on, or off, or (`None`) the
+/// other way round; `limits` are the login's. A line reached by no chip of
+/// GtkHx's is none of these.
+pub(crate) fn want(
+    view: &RotulusView,
+    row: MessageId,
+    key: &str,
+    on: Option<bool>,
+    limits: &hxproto::reactions::Limits,
+) -> Option<Then> {
+    let id = line_on(view, row, limits)?;
+    if key.starts_with(SERVER_EMOJI) {
+        return Some(Then::Say(crate::reactions::server_emoji()));
+    }
+    let key = Key::Emoji(key.to_owned());
+    let next = redraw(view, id, |r| {
+        let on = on.unwrap_or_else(|| !r.mine(&key));
+        let refusal = on && !r.mine(&key);
+        match refusal.then(|| r.refusal(&key, limits.max_keys, limits.max_per_user)) {
+            Some(Some(code)) => Err(code),
+            _ => Ok(r.want(key.clone(), on)),
+        }
+    })?;
+    match next {
+        Err(code) => Some(Then::Say(crate::reactions::refusal(Some(code), None))),
+        Ok(Next::Send(add)) => Some(Then::Send(id, key, add)),
+        Ok(Next::Withdraw) => Some(Then::Withdraw(id, key)),
+        Ok(Next::Nothing) => None,
+    }
+}
+
+/// The request for `key` on line `id` that `add`ed or not was made, with
+/// `count` after: what the user wants since, if that is otherwise.
+pub(crate) fn answered(
+    view: &RotulusView,
+    id: u64,
+    key: &Key,
+    add: bool,
+    count: Option<u32>,
+) -> Option<Then> {
+    let again = redraw(view, id, |r| r.answered(key, add, count))??;
+    Some(Then::Send(id, key.clone(), again))
+}
+
+/// The request for `key` on line `id` was refused, or taken back.
+pub(crate) fn refused(view: &RotulusView, id: u64, key: &Key) {
+    redraw(view, id, |r| r.refused(key));
+}
+
+/// Do what [`want`] or [`answered`] left to do, on `htlc`.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn then(htlc: *mut c_void, view: &RotulusView, t: Then) {
+    use hxhandlers::send::reactions as send;
+    match t {
+        Then::Send(id, key, add) => {
+            if !send::react(htlc, Target::Line { channel: 0, id }, key.clone(), add) {
+                refused(view, id, &key);
+                crate::reactions::toast(&crate::reactions::refusal(Some(INVALID_KEY), None));
+            }
+        }
+        Then::Withdraw(id, key) => {
+            if send::withdraw(htlc, &Target::Line { channel: 0, id }, &key) {
+                refused(view, id, &key);
+            }
+        }
+        Then::Say(text) => crate::reactions::toast(&text),
     }
 }
 
@@ -504,9 +639,10 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
         }
         .put(view, at);
         if let Some(row) = mark(row).filter(|_| e.message_id != 0 && e.flags & DELETED == 0) {
-            out.lines.history(e.message_id, row);
+            let r = out.lines.history(e.message_id, row);
             if let Some((s, m)) = &e.reactions {
-                view.set_reactions(row, chips(s, m));
+                r.replace(s.clone(), m);
+                view.set_reactions(row, chips(&r.shown()));
             }
         }
     }
@@ -844,16 +980,51 @@ pub extern "C" fn gtkhx_chat_output_install() {
             }
         });
         gtkhx_core::session::connect_reactions(|htlc, e| unsafe {
-            let gtkhx_core::reactions::Event::Now {
-                target: Target::Line { channel: 0, id },
-                reactions,
-            } = e
-            else {
+            use gtkhx_core::reactions::Event;
+            let Some(view) = view_of(htlc, 0) else {
                 return;
             };
-            if let Some(view) = view_of(htlc, 0) {
-                let page_due = hxhandlers::recv::chat::first_page_pending(htlc, 0);
-                reacted(&view, *id, reactions.as_ref(), page_due);
+            match e {
+                Event::Now {
+                    target: Target::Line { channel: 0, id },
+                    reactions,
+                } => {
+                    let page_due = hxhandlers::recv::chat::first_page_pending(htlc, 0);
+                    reacted(&view, *id, reactions.as_ref(), page_due);
+                }
+                Event::Acted {
+                    target: Target::Line { channel: 0, id },
+                    key,
+                    add,
+                    count,
+                } => {
+                    if let Some(t) = answered(&view, *id, key, *add, *count) {
+                        then(htlc, &view, t);
+                    }
+                }
+                Event::PutOff {
+                    target: Target::Line { channel: 0, id },
+                    key,
+                    add,
+                } => {
+                    if redraw(&view, *id, |r| r.put_off(key)) == Some(true) {
+                        let line = Target::Line {
+                            channel: 0,
+                            id: *id,
+                        };
+                        hxhandlers::send::reactions::retry(htlc, line, key.clone(), *add);
+                    }
+                }
+                Event::Refused {
+                    target: Target::Line { channel: 0, id },
+                    key,
+                    reason,
+                    error,
+                } => {
+                    refused(&view, *id, key);
+                    crate::reactions::toast(&crate::reactions::refusal(*reason, error.as_deref()));
+                }
+                _ => {}
             }
         });
         let session: glib::Object = unsafe {
@@ -1230,6 +1401,79 @@ pub(crate) mod tests {
         assert_eq!(counts(picture), [0u32; 0]);
     }
 
+    /// A click on a chip asks for it and shows it at once, a second while
+    /// it is asked takes it back, and the answer asks for what the user
+    /// wants since; past the login's limits, and on a server emoji's
+    /// placeholder, the user is told why not instead. A row no line is on,
+    /// or one the server takes no reactions to, is none of this.
+    pub(crate) fn check_a_chip_clicked_asks_for_it_and_shows_it() {
+        use hxproto::reactions::{Limits, TARGETS_LINES, TOO_MANY_KEYS};
+        let (up, heart) = ("\u{1F44D}", "\u{2764}\u{FE0F}");
+        let key = |e: &str| Key::Emoji(e.into());
+        let limits = |max_keys| Limits {
+            targets: TARGETS_LINES,
+            max_keys,
+            max_per_user: None,
+        };
+        let view = view();
+        let seeded = HistoryEntry {
+            reactions: Some(thumbs(2)),
+            ..entry(4, 0, "a", "four")
+        };
+        draw_history(&view, &[seeded], false);
+        let row = output(&view).borrow().lines.row(Space::History, 4).unwrap();
+        let shown = || {
+            (view.reactions_of(row).into_iter())
+                .map(|r| (r.key, r.count, r.mine))
+                .collect::<Vec<_>>()
+        };
+        let ups = |n, mine| vec![(up.to_owned(), n, mine)];
+        let any = limits(None);
+
+        assert_eq!(
+            want(&view, row, up, None, &any),
+            Some(Then::Send(4, key(up), true))
+        );
+        assert_eq!(shown(), ups(3, true));
+        assert_eq!(
+            want(&view, row, up, None, &any),
+            Some(Then::Withdraw(4, key(up)))
+        );
+        assert_eq!(shown(), ups(2, false));
+        let again = answered(&view, 4, &key(up), true, Some(3));
+        assert_eq!(again, Some(Then::Send(4, key(up), false)));
+        assert_eq!(shown(), ups(2, false));
+        assert_eq!(answered(&view, 4, &key(up), false, Some(2)), None);
+
+        let full = Then::Say(crate::reactions::refusal(Some(TOO_MANY_KEYS), None));
+        assert_eq!(
+            want(&view, row, heart, Some(true), &limits(Some(1))),
+            Some(full)
+        );
+        let placeholder = want(&view, row, "server-emoji:9", None, &any);
+        assert_eq!(
+            placeholder,
+            Some(Then::Say(crate::reactions::server_emoji()))
+        );
+        assert_eq!(shown(), ups(2, false));
+
+        assert_eq!(
+            want(&view, row, heart, Some(true), &any),
+            Some(Then::Send(4, key(heart), true))
+        );
+        refused(&view, 4, &key(heart));
+        assert_eq!(shown(), ups(2, false));
+
+        draw_live(&view, None, || say(&view, "a", "no id"));
+        // SAFETY: the view is live.
+        let bare = mark(unsafe { rotulus::ffi::rotulus_view_get_last(raw(&view)) }).unwrap();
+        let none = Limits { targets: 0, ..any };
+        for (row, limits) in [(bare, &any), (row, &none)] {
+            assert_eq!(want(&view, row, up, None, limits), None);
+            assert_eq!(line_on(&view, row, limits), None);
+        }
+    }
+
     #[test]
     fn a_summary_draws_a_chip_a_key_in_its_order_ours_marked() {
         let (thumbs, heart) = ("\u{1F44D}", "\u{2764}\u{FE0F}");
@@ -1249,8 +1493,10 @@ pub(crate) mod tests {
             label: label.map(Into::into),
         };
         let placeholder = Some("\u{25C7}");
+        let mut shown = LineReactions::default();
+        shown.replace(summary, &Mine(vec![3, 1]));
         assert_eq!(
-            chips(&summary, &Mine(vec![3, 1])),
+            chips(&shown.shown()),
             [
                 chip(thumbs, None, 3, false, None),
                 chip(

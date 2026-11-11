@@ -4,6 +4,8 @@
 //! keep the exact C ABI the C senders they replaced exported.
 
 use std::os::raw::c_void;
+#[cfg(not(test))]
+use std::time::Instant;
 
 use hxsession::Expect;
 
@@ -16,6 +18,47 @@ pub mod msg;
 pub mod news;
 pub mod reactions;
 pub mod user;
+
+#[cfg(not(test))]
+extern "C" {
+    /// session_registry.c — the live connection with this serial, or NULL.
+    fn hx_conn_with_serial(serial: u16) -> *mut c_void;
+}
+
+#[cfg(not(test))]
+thread_local! {
+    /// The timers set, by connection serial and what each calls.
+    static WAKING: std::cell::RefCell<std::collections::HashSet<(u16, usize)>> =
+        std::cell::RefCell::default();
+}
+
+/// Call `then` for `htlc` at `at`, by its serial, which outlives it: one
+/// timer a connection and caller, which does whatever is due when it fires.
+///
+/// # Safety
+/// `htlc` is a live connection; main thread.
+#[cfg(not(test))]
+pub(crate) unsafe fn wake(htlc: *mut c_void, at: Instant, then: unsafe fn(*mut c_void, Instant)) {
+    let serial = gtkhx_core::conn::hx_conn_serial(htlc.cast());
+    if !WAKING.with_borrow_mut(|w| w.insert((serial, then as usize))) {
+        return;
+    }
+    let ms = at.saturating_duration_since(Instant::now()).as_millis() + 1;
+    let ms = u32::try_from(ms).unwrap_or(u32::MAX);
+    let data = Box::into_raw(Box::new((serial, then))).cast();
+    glib::ffi::g_timeout_add(ms, Some(woke), data);
+}
+
+#[cfg(not(test))]
+unsafe extern "C" fn woke(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
+    let (serial, then) = *Box::from_raw(data.cast::<(u16, unsafe fn(*mut c_void, Instant))>());
+    WAKING.with_borrow_mut(|w| w.remove(&(serial, then as usize)));
+    let htlc = hx_conn_with_serial(serial);
+    if !htlc.is_null() {
+        then(htlc, Instant::now());
+    }
+    glib::ffi::G_SOURCE_REMOVE
+}
 
 #[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_bridge_handle;

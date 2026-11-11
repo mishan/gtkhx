@@ -2063,6 +2063,7 @@ dependencies = [
  "glib 0.22.10",
  "gtkhx-core",
  "hxhope",
+ "hxmodel",
  "hxnet",
  "hxproto",
  "hxrequest",

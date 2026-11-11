@@ -23,23 +23,11 @@ use hxsession::cap;
 use crate::recv::friends::{asked, Asked};
 
 #[cfg(not(test))]
+use crate::send::wake;
+#[cfg(not(test))]
 use hxtask::send::{hlwrite_chunks, next_trans};
 #[cfg(test)]
 use tests::{hlwrite_chunks, next_trans, wake};
-
-#[cfg(not(test))]
-extern "C" {
-    /// session_registry.c — the live connection with this serial, or NULL.
-    fn hx_conn_with_serial(serial: u16) -> *mut c_void;
-}
-
-#[cfg(not(test))]
-thread_local! {
-    /// The connections, by serial, with a timer set to ask for their
-    /// listing's next page.
-    static WAKING: std::cell::RefCell<std::collections::HashSet<u16>> =
-        std::cell::RefCell::default();
-}
 
 unsafe fn utf8(htlc: *mut c_void) -> bool {
     hx_conn_has_cap(htlc.cast(), cap::TEXT_ENCODING) != 0
@@ -185,7 +173,7 @@ unsafe fn ask(htlc: *mut c_void, how: fn(&mut Requests)) {
 pub(crate) unsafe fn pace(htlc: *mut c_void, now: Instant) {
     let Some(cursor) = with_roster_mut(htlc, |m| m.requests.next(now)) else {
         if let Some(at) = with_roster(htlc, |m| m.requests.due(now)) {
-            wake(htlc, at);
+            wake(htlc, at, pace);
         }
         return;
     };
@@ -193,30 +181,6 @@ pub(crate) unsafe fn pace(htlc: *mut c_void, now: Instant) {
     if send(htlc, r, Some(Asked::Requests)).is_none() {
         with_roster_mut(htlc, |m| m.requests.failed());
     }
-}
-
-/// [`pace`] `htlc` again at `at`, by its serial, which outlives it: one
-/// timer a connection, which asks for whatever is due when it fires.
-#[cfg(not(test))]
-unsafe fn wake(htlc: *mut c_void, at: Instant) {
-    let serial = gtkhx_core::conn::hx_conn_serial(htlc.cast());
-    if !WAKING.with_borrow_mut(|w| w.insert(serial)) {
-        return;
-    }
-    let ms = at.saturating_duration_since(Instant::now()).as_millis() + 1;
-    let ms = u32::try_from(ms).unwrap_or(u32::MAX);
-    glib::ffi::g_timeout_add(ms, Some(woke), usize::from(serial) as glib::ffi::gpointer);
-}
-
-#[cfg(not(test))]
-unsafe extern "C" fn woke(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
-    let serial = data as usize as u16;
-    WAKING.with_borrow_mut(|w| w.remove(&serial));
-    let htlc = hx_conn_with_serial(serial);
-    if !htlc.is_null() {
-        pace(htlc, Instant::now());
-    }
-    glib::ffi::G_SOURCE_REMOVE
 }
 
 /// Approve `login`'s request, delete it, or end their approval. What an
