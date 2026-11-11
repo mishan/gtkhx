@@ -16,7 +16,9 @@
 //!
 //! The scenario refuses a connected session, clears the chat view and what
 //! `chat_output` kept of it before and after, and puts back the
-//! connection's newest-history cursor, which the replay advances.
+//! connection's newest-history cursor, which the replay advances. It holds
+//! the connection by its key and looks it up again after every wait,
+//! stopping where the session closed or connected meanwhile.
 //!
 //! Checks: the replay adds N rows plus its two dividers and "Load older"
 //! row, whatever the scrollback cap — history doesn't count against it;
@@ -36,6 +38,7 @@ use rotulus::RotulusView;
 use rotulus_layout::{Block, Message, MessageFlags, MessageKind};
 
 use super::{after_paint, warm_up, Report};
+use crate::dock::{conn_key, htlc_for, ConnKey};
 
 extern "C" {
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
@@ -85,42 +88,62 @@ fn row(text: String) -> Message {
     }
 }
 
+/// The connection `key` names while it is unconnected. The replay renders
+/// into the public chat, and the view is cleared after: a real server's
+/// history with it.
+fn unconnected(key: ConnKey) -> Option<*mut c_void> {
+    let htlc = htlc_for(key);
+    (!htlc.is_null() && unsafe { hx_conn_fd(htlc as *mut HtlcConn) } == 0).then_some(htlc)
+}
+
+fn stopped() {
+    glib::g_warning!(
+        "gtkhx",
+        "GTKHX_BENCH history: the session closed or connected; stopped"
+    );
+}
+
 pub(super) async fn run(view: &gtk::Widget, n: u32) {
     let Some(chat) = view.downcast_ref::<RotulusView>() else {
         glib::g_warning!("gtkhx", "GTKHX_BENCH history: not a chat view");
         return;
     };
     let sess = unsafe { crate::ffi::hx_active_session() };
-    let htlc = if sess.is_null() {
-        std::ptr::null_mut()
+    let key = if sess.is_null() {
+        0
     } else {
-        unsafe { gtkhx_session_htlc(sess) }
+        conn_key(unsafe { gtkhx_session_htlc(sess) })
     };
-    if htlc.is_null() {
+    if key == 0 {
         glib::g_warning!("gtkhx", "GTKHX_BENCH history: no connection");
         return;
     }
-    let conn = htlc as *mut HtlcConn;
-    // The replay renders into the public chat, and the view is cleared
-    // after: a real server's history with it.
-    if unsafe { hx_conn_fd(conn) } != 0 {
+    let Some(htlc) = unconnected(key) else {
         glib::g_warning!(
             "gtkhx",
             "GTKHX_BENCH history: the session is connected; run with a scratch configuration"
         );
         return;
+    };
+    let cursor = unsafe { hx_conn_chat_history_last_msgid(htlc as *mut HtlcConn) };
+    crate::chat_output::clear(chat);
+
+    if measure(chat, view, key, n).await.is_none() {
+        return stopped();
     }
-    let cursor = unsafe { hx_conn_chat_history_last_msgid(conn) };
-    crate::chat_output::clear(chat);
 
-    measure(chat, view, htlc, n).await;
-
+    let Some(htlc) = unconnected(key) else {
+        return stopped();
+    };
     crate::chat_output::clear(chat);
-    unsafe { hx_conn_set_chat_history_last_msgid(conn, cursor) };
+    unsafe { hx_conn_set_chat_history_last_msgid(htlc as *mut HtlcConn, cursor) };
 }
 
-async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u32) {
+/// The report, or `None` where the connection went or connected during a
+/// wait.
+async fn measure(chat: &RotulusView, view: &gtk::Widget, key: ConnKey, n: u32) -> Option<()> {
     let idle = warm_up(view).await;
+    let htlc = unconnected(key)?;
     let mut r = Report::new("chat history", idle);
     r.line("entries", &format!("{n:9}"), "");
     r.line(
@@ -137,6 +160,7 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     let call = glib::monotonic_time() - t;
     let t = glib::monotonic_time();
     let paint = after_paint(view).await - t;
+    unconnected(key)?;
     r.ms("replay", call, "signal + render, UI frozen");
     r.ms("  first paint", paint, "");
     r.ms("  replay + paint", call + paint, "compare this one");
@@ -156,6 +180,7 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     // oldest first, as the renderer inserts an older page.
     chat.scroll_to_extreme(false);
     after_paint(view).await;
+    unconnected(key)?;
     let anchor = chat.insert_before(None, row("── chat history ──".into()));
     let before = chat.len();
     let t = glib::monotonic_time();
@@ -166,6 +191,7 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     let call = glib::monotonic_time() - t;
     let t = glib::monotonic_time();
     let paint = after_paint(view).await - t;
+    unconnected(key)?;
     r.ms("load older", call, "inserted above, UI frozen");
     r.ms("  first paint", paint, "");
     r.ms("  load older + paint", call + paint, "compare this one");
@@ -185,7 +211,7 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     if cap == 0 {
         r.line("live message", "", "no scrollback cap; nothing to trim");
         r.print();
-        return;
+        return Some(());
     }
     let live = |i: usize| Message {
         kind: MessageKind::Live,
@@ -216,4 +242,5 @@ async fn measure(chat: &RotulusView, view: &gtk::Widget, htlc: *mut c_void, n: u
     }
 
     r.print();
+    Some(())
 }
