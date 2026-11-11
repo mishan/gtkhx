@@ -364,6 +364,19 @@ fn draw_live(view: &RotulusView, entry: Option<&HistoryEntry>, draw: impl FnOnce
     out.lines.live((space, e.message_id), row);
 }
 
+/// Draw live line `s`, then with `picture` the row of the picture it
+/// carries, if any, which says how many rows it drew. The line is its text
+/// row, as a history line is, so its chips go under its words.
+fn draw_said_live(
+    view: &RotulusView,
+    entry: Option<&HistoryEntry>,
+    s: &Said,
+    picture: impl FnOnce() -> u64,
+) {
+    draw_live(view, entry, || draw_said(view, s));
+    draw_live(view, None, picture);
+}
+
 /// Up to the first NUL, as C reads a string.
 fn c_str(s: &str) -> &str {
     s.split('\0').next().unwrap_or_default()
@@ -720,10 +733,9 @@ unsafe fn chat(htlc: *mut c_void, e: &HxChatEvent, entry: Option<&HistoryEntry>)
             }
             let is_self = e.is_self != 0;
             let s = said(htlc, e.cid, e.uid, sender, &body, is_self);
-            draw_live(&view, entry, || {
-                let rows = draw_said(&view, &s);
+            draw_said_live(&view, entry, &s, || {
                 if e.media.is_null() {
-                    return rows;
+                    return 0;
                 }
                 let conv = chat_with_cid(hx_conn_sess(htlc.cast()), e.cid);
                 crate::inline_media_row::hx_inline_media_row_append(
@@ -732,7 +744,7 @@ unsafe fn chat(htlc: *mut c_void, e: &HxChatEvent, entry: Option<&HistoryEntry>)
                     e.media,
                     htlc,
                 );
-                rows + 1
+                1
             });
             // A private chat's tab asks for attention; the public chat,
             // shown by default and busy, doesn't.
@@ -1175,6 +1187,47 @@ pub(crate) mod tests {
             reacted(&full, id, None, true);
         }
         assert_eq!(output(&full).borrow().missed.len(), MISSED);
+    }
+
+    /// A line's chips go on its own row: a history line's from its entry,
+    /// and a live one's on its words, not on the picture under them.
+    pub(crate) fn check_chips_go_on_the_lines_row() {
+        let view = view();
+        let seeded = HistoryEntry {
+            reactions: Some(thumbs(2)),
+            ..entry(4, 0, "a", "four")
+        };
+        draw_history(&view, &[seeded], false);
+        let five = Said {
+            nick: b"a",
+            body: b"five",
+            is_self: false,
+            highlight: false,
+            nick_color: PAL_NICK_BRACKET,
+            speaker: NOBODY,
+        };
+        draw_said_live(&view, Some(&entry(5, 0, "a", "five")), &five, || {
+            draw_prose(&view, b"[picture]")
+        });
+        reacted(&view, 5, Some(&thumbs(3)), false);
+        let counts = |row| {
+            view.reactions_of(row)
+                .iter()
+                .map(|r| r.count)
+                .collect::<Vec<_>>()
+        };
+        let row = |id| {
+            output(&view)
+                .borrow()
+                .lines
+                .row(Space::History, id)
+                .unwrap()
+        };
+        assert_eq!(counts(row(4)), [2]);
+        assert_eq!(counts(row(5)), [3]);
+        // SAFETY: the view is live.
+        let picture = mark(unsafe { rotulus::ffi::rotulus_view_get_last(raw(&view)) }).unwrap();
+        assert_eq!(counts(picture), [0u32; 0]);
     }
 
     #[test]
