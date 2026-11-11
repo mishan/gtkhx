@@ -184,6 +184,9 @@ pub struct Emoji {
     pub shortcodes: bool,
     /// The inline `:prefix` suggestion popup.
     pub typeahead: bool,
+    /// The emoji a chat line's menu offers to react with at once, the one
+    /// last reacted with first.
+    pub quick_reactions: Vec<String>,
 }
 
 impl Default for Emoji {
@@ -191,6 +194,15 @@ impl Default for Emoji {
         Emoji {
             shortcodes: true,
             typeahead: true,
+            quick_reactions: [
+                "\u{1F44D}",
+                "\u{2764}\u{FE0F}",
+                "\u{1F602}",
+                "\u{1F62E}",
+                "\u{1F622}",
+            ]
+            .map(String::from)
+            .into(),
         }
     }
 }

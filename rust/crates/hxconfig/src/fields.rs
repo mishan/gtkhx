@@ -274,6 +274,7 @@ field_table! {
 
     "chat.emoji.shortcodes"         => flag,     chat.emoji.shortcodes;
     "chat.emoji.typeahead"          => flag,     chat.emoji.typeahead;
+    "chat.emoji.quick_reactions"    => list,     chat.emoji.quick_reactions;
 
     "users.animate_avatars"         => flag,     users.animate_avatars;
 

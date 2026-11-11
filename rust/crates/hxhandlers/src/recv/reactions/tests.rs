@@ -8,8 +8,10 @@ use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
 
 use super::*;
 use crate::recv::friends::tests::{fields, frame};
-use crate::send::friends::tests::{sent, Conn};
-use crate::send::reactions::refresh;
+use crate::send::friends::tests::{sent, woken, Conn};
+use crate::send::reactions::{pace, react, refresh, withdraw};
+use hxproto::structured_chat::NOT_ALLOWED;
+use std::time::{Duration, Instant};
 
 thread_local! {
     static TOLD: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
@@ -211,4 +213,161 @@ fn lines_are_asked_after_fifty_at_once_and_a_reply_too_big_for_its_frame_in_halv
         unsafe { refresh(c.0, targets) };
         assert_eq!(asked_after(), []);
     }
+}
+
+fn thumbs() -> Key {
+    Key::Emoji(THUMBS.into())
+}
+
+/// The lines each Send Reaction written since last asked reacts to, with
+/// its trans.
+fn reacted_to() -> Vec<(u32, Target)> {
+    sent()
+        .into_iter()
+        .map(|(opcode, trans, f)| {
+            assert_eq!(opcode, 710);
+            let (_, t) = f.iter().find(|(t, _)| *t == tag::TARGET).unwrap();
+            (trans, Target::parse(t).unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn reactions_go_at_the_drafts_rate_and_one_waiting_may_be_taken_back() {
+    let c = conn(AGREED, lines());
+    sent();
+    woken();
+    let start = Instant::now();
+    for id in 1..=12 {
+        assert!(unsafe { react(c.0, line(id), thumbs(), true) });
+    }
+    let first: Vec<Target> = reacted_to().into_iter().map(|(_, t)| t).collect();
+    assert_eq!(first, (1..=10).map(line).collect::<Vec<_>>(), "the burst");
+    let timers = woken();
+    assert!(
+        !timers.is_empty() && timers.iter().all(|at| *at > start),
+        "a timer for the rest"
+    );
+
+    assert!(unsafe { withdraw(c.0, &line(12), &thumbs()) });
+    assert!(
+        !unsafe { withdraw(c.0, &line(12), &thumbs()) },
+        "taken twice"
+    );
+    assert!(
+        !unsafe { withdraw(c.0, &line(1), &thumbs()) },
+        "one gone already"
+    );
+
+    let second = Instant::now() + Duration::from_millis(1001);
+    unsafe { pace(c.0, second) };
+    assert_eq!(
+        reacted_to().into_iter().map(|(_, t)| t).collect::<Vec<_>>(),
+        [line(11)]
+    );
+    unsafe { pace(c.0, second) };
+    assert_eq!(reacted_to(), [], "nothing left");
+
+    // What waits goes with the connection.
+    unsafe { react(c.0, line(13), thumbs(), true) };
+    forget(c.0);
+    unsafe { pace(c.0, second + Duration::from_secs(10)) };
+    assert_eq!(reacted_to(), [], "sent after the connection went");
+
+    // Nothing goes without reactions.
+    let none = conn(AGREED, None);
+    unsafe { react(none.0, line(1), thumbs(), true) };
+    assert_eq!(sent(), []);
+}
+
+#[test]
+fn a_send_reaction_reply_says_what_was_made_or_why_not() {
+    let refused = |trans: u32, list: &[(u16, &[u8])]| frame(TASK, trans, true, fields(list));
+    let acted = |n: u32, add: bool| Event::Acted {
+        target: line(1),
+        key: thumbs(),
+        add,
+        count: Some(n),
+    };
+    let no = |reason: Option<u16>, error: Option<&str>| Event::Refused {
+        target: line(1),
+        key: thumbs(),
+        reason,
+        error: error.map(Into::into),
+    };
+    let not_allowed = NOT_ALLOWED.to_be_bytes();
+    for (case, add, answer, want) in [
+        (
+            "made, with the count after",
+            true,
+            frame(
+                TASK,
+                0,
+                false,
+                fields(&[(tag::REACTION_COUNT, &[0, 0, 0, 3])]),
+            ),
+            vec![acted(3, true)],
+        ),
+        (
+            "taken back",
+            false,
+            frame(
+                TASK,
+                0,
+                false,
+                fields(&[(tag::REACTION_COUNT, &[0, 0, 0, 0])]),
+            ),
+            vec![acted(0, false)],
+        ),
+        (
+            "refused with a code and words",
+            true,
+            refused(
+                0,
+                &[(tag::CHAT_REASON, &not_allowed), (tag::TASK_ERROR, b"No.")],
+            ),
+            vec![no(Some(NOT_ALLOWED), Some("No."))],
+        ),
+        (
+            "refused with words alone",
+            true,
+            refused(0, &[(tag::TASK_ERROR, b"Server error.")]),
+            vec![no(None, Some("Server error."))],
+        ),
+    ] {
+        let c = conn(AGREED, lines());
+        sent();
+        told();
+        unsafe { react(c.0, line(1), thumbs(), add) };
+        let [(trans, _)] = reacted_to()[..] else {
+            panic!("{case}: not sent")
+        };
+        unsafe { reply(c.0, trans, &answer) };
+        assert_eq!(told(), want, "{case}");
+    }
+
+    // Told to slow down, it is asked again once, a second later.
+    let c = conn(AGREED, lines());
+    sent();
+    woken();
+    unsafe { react(c.0, line(1), thumbs(), true) };
+    let slow = RATE_LIMITED.to_be_bytes();
+    let [(trans, _)] = reacted_to()[..] else {
+        panic!("not sent")
+    };
+    unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
+    assert_eq!((told(), reacted_to()), (vec![], vec![]), "at once");
+    let [at] = woken()[..] else {
+        panic!("no timer")
+    };
+    assert!(
+        at >= Instant::now() + Duration::from_millis(900),
+        "not a second on"
+    );
+    unsafe { pace(c.0, at) };
+    let [(trans, _)] = reacted_to()[..] else {
+        panic!("not asked again")
+    };
+    unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
+    assert_eq!(told(), [no(Some(RATE_LIMITED), None)], "twice");
 }

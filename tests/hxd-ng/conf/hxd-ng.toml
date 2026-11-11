@@ -78,11 +78,12 @@ enabled = true
 
 # The Reactions draft (capability bit 19) beside it, for the react-*
 # accounts (hx-e2e's reactions suite), which react faster than one a
-# second.
+# second, and two of which fill a line's kinds between them.
 [reactions]
 enabled = true
 burst = 1000
 per_second = 100
+max_keys = 8
 
 # One room, so a room's lines are reaction targets too. No lobby notice,
 # which the chat suites would hear among their lines.

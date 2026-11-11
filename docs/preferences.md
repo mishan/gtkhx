@@ -207,6 +207,7 @@ color = false
 [chat.emoji]
 shortcodes = true
 typeahead = true
+quick_reactions = ["\U0001F44D", "\u2764\uFE0F", "\U0001F602", "\U0001F62E", "\U0001F622"]   # a line's menu, the last used first
 
 [users]
 animate_avatars = true        # GIF avatars in the user list

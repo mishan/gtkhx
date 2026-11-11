@@ -18,7 +18,7 @@ thread_local! {
     static WOKEN: RefCell<Vec<Instant>> = const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) unsafe fn wake(_htlc: *mut c_void, at: Instant) {
+pub(crate) unsafe fn wake(_htlc: *mut c_void, at: Instant, _then: unsafe fn(*mut c_void, Instant)) {
     WOKEN.with(|w| w.borrow_mut().push(at));
 }
 

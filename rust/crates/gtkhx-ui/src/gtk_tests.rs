@@ -46,6 +46,7 @@ fn display_backed() {
     crate::chat_output::tests::check_a_cleared_view_starts_over();
     crate::chat_output::tests::check_a_page_read_before_a_change_is_asked_again();
     crate::chat_output::tests::check_chips_go_on_the_lines_row();
+    crate::chat_output::tests::check_a_chip_clicked_asks_for_it_and_shows_it();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();

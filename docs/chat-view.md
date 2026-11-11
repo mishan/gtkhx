@@ -179,6 +179,8 @@ structure. A lookup that misses stays 0.
 | `speaker-menu` | `users.c::user_popup_show`, the same menu the Users window and the private-chat sidebars pop |
 | `load-more` | fetch the next page of chat history |
 | `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
+| `reaction-activated` | on the public chat, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
+| `row-menu` | likewise, on a lobby line: the quick reactions and "Add Reaction…", then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
 
 `link-activated` and `link-menu` are connected in `chat_view.rs`, above.
 

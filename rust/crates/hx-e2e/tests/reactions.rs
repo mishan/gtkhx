@@ -7,6 +7,7 @@
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
 use hx_e2e::{servers_with, unique_name, Cap, Client, Reply, Server};
+use hxmodel::reactions::LineReactions;
 use hxnet::Event;
 use hxproto::messages::tag;
 use hxproto::reactions::{
@@ -246,6 +247,45 @@ fn a_reaction_the_server_will_not_take_says_why() {
             let r = who.request(&req::send(&line, ADD, Some(&key), None).unwrap());
             assert!(r.is_error(), "{}: {key:?} taken", s.name);
             assert_eq!(reason(&r), Some(code), "{}: {}", s.name, r.error_text());
+        }
+    }
+}
+
+/// GtkHx refuses one more reaction where the server would, by the limits
+/// the login gave: each of two accounts reacts to a line with a new emoji
+/// each time, as GtkHx sees the line from a Get Reactions, until GtkHx
+/// would refuse, and the server then does with the same code.
+#[test]
+fn a_reaction_is_refused_where_the_logins_limits_say() {
+    for s in servers_with(&[Cap::Reactions]) {
+        let mut a = reactor(s, "react-a");
+        let mut b = reactor(s, "react-b");
+        let line = say(&mut a, &unique_name("react all over this"));
+        let mut emoji = (0x1F600..0x1F650).map(|c| Key::Emoji(char::from_u32(c).unwrap().into()));
+        for c in [&mut a, &mut b] {
+            let l = c.server_info().reactions.unwrap();
+            loop {
+                let key = emoji.next().expect("never refused");
+                let r = c.request(&req::get(std::slice::from_ref(&line), None).unwrap());
+                let [g] = &parse_got(ChunkIter::over_message(&r.raw, r.raw.len()))[..] else {
+                    panic!("{}: not one group", s.name)
+                };
+                let mut shown = LineReactions::default();
+                shown.replace(g.summary.clone(), &g.mine);
+                let refusal = shown.refusal(&key, l.max_keys, l.max_per_user);
+                let r = c.request(&req::send(&line, ADD, Some(&key), None).unwrap());
+                assert_eq!(
+                    r.is_error(),
+                    refusal.is_some(),
+                    "{}: {}",
+                    s.name,
+                    r.error_text()
+                );
+                if refusal.is_some() {
+                    assert_eq!(reason(&r), refusal, "{}", s.name);
+                    break;
+                }
+            }
         }
     }
 }

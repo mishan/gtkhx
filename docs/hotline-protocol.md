@@ -1400,6 +1400,21 @@ placeholder chip named by its id. hxnet hands 711, and the Notification (718) a 
 may send beside it, to the Rust handlers only where the session has reactions, and the
 replies to 710 and 712 by their trans.
 
+A click on a lobby line's chip, or Enter on it, makes that reaction or takes it back; the
+line's menu offers a few emoji at once (`chat.emoji.quick_reactions`, the last used first)
+and GTK's emoji chooser, whose pick is sent fully qualified. The chip changes at once:
+each line keeps what the server last said apart from the reactions asked for and not yet
+answered, drawn over it, so a Reaction Changed in between replaces only the former, and a
+reply sets its key's count from 0x0F27. One request a key is in flight at a time, and the
+answer asks again only where the user has changed their mind since, so clicking back and
+forth costs one request. Every 710 and 712 waits its turn at the draft's default rate, ten
+at once and then one a second, since each costs spam points too; one still waiting when
+its click is undone is never sent, and one refused `RateLimited` is asked again once, a
+second later. The login's limits (0x0F2C, 0x0F2D) refuse a new kind or one more of ours
+before any request, and every refusal is a toast, in GtkHx's words by reason code or else
+the server's. A server's own emoji cannot be sent without the Server Emoji draft, so its
+placeholder says so and sends nothing.
+
 ### Messaging
 
 Capability bits 6, 7 and 8, access bit 58,
