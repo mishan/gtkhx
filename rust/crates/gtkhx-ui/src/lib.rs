@@ -119,7 +119,7 @@ pub mod chat_view;
 // What the chat views draw: their lines, live and from history, and GtkHx's
 // own; and each view's registry of the rows of the lines it drew.
 pub mod chat_output;
-// Reacting to a lobby line: its chips, and its menu with the emoji chooser.
+// Reacting to a lobby line: its chips, its menu with the emoji chooser, and who reacted.
 mod reactions;
 // The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
 // gtkhx_chat_tabs_* C ABI chat.c / gtkutil.c + chat.rs use.

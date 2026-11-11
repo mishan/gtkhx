@@ -18,6 +18,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::time::{Duration, Instant};
 
 use glib::translate::{from_glib_none, ToGlibPtr};
 use gtk::glib;
@@ -96,7 +97,27 @@ struct LineRegistry {
 struct Line {
     row: MessageId,
     reactions: LineReactions,
+    /// When the server last said what the line holds, or was asked.
+    told: Instant,
 }
+
+impl Line {
+    fn new(row: MessageId) -> Line {
+        let (reactions, told) = (LineReactions::default(), Instant::now());
+        Line {
+            row,
+            reactions,
+            told,
+        }
+    }
+}
+
+/// How long what the server said of a line's reactions is taken as so.
+const FRESH: Duration = Duration::from_secs(60);
+
+/// How many of a chat's newest lines a server tells changes to (hxd-ng's
+/// live window); older lines' changes may never come.
+const TOLD_LINES: usize = 200;
 
 impl LineRegistry {
     /// The row of line `id`, unless it has been let go of.
@@ -106,12 +127,22 @@ impl LineRegistry {
 
     /// History line `id` is drawn on `row`: its reactions, none yet.
     fn history(&mut self, id: u64, row: MessageId) -> &mut LineReactions {
-        let reactions = LineReactions::default();
         let line = self.lines.entry((Space::History, id));
-        &mut line
-            .insert_entry(Line { row, reactions })
-            .into_mut()
-            .reactions
+        &mut line.insert_entry(Line::new(row)).into_mut().reactions
+    }
+
+    /// Whether what history line `id` holds may have changed untold by
+    /// `now`: it was last told a while ago, and enough lines drawn since
+    /// are newer that the server may no longer tell its changes. GtkHx
+    /// draws no line the user ignores, so it counts fewer than the server
+    /// and errs toward fresh.
+    fn stale(&self, id: u64, now: Instant) -> bool {
+        let Some(line) = self.lines.get(&(Space::History, id)) else {
+            return false;
+        };
+        let newer =
+            (self.lines.keys()).filter(|&&(space, other)| space == Space::History && other > id);
+        now.saturating_duration_since(line.told) > FRESH && newer.count() >= TOLD_LINES
     }
 
     /// The history line drawn on `row`.
@@ -140,8 +171,7 @@ impl LineRegistry {
         if self.lines.contains_key(&key) {
             return;
         }
-        let reactions = LineReactions::default();
-        self.lines.insert(key, Line { row, reactions });
+        self.lines.insert(key, Line::new(row));
         self.live.push_back((key, row, self.drawn));
     }
 }
@@ -464,12 +494,52 @@ fn redraw<T>(
 fn reacted(view: &RotulusView, id: u64, reactions: Option<&(Summary, Mine)>, page_due: bool) {
     let (summary, mine) = reactions.cloned().unwrap_or_default();
     if redraw(view, id, |r| r.replace(summary, &mine)).is_some() {
+        let mut out = output(view).borrow_mut();
+        if let Some(line) = out.lines.lines.get_mut(&(Space::History, id)) {
+            line.told = Instant::now();
+        }
         return;
     }
     let missed = &mut output(view).borrow_mut().missed;
     if page_due && missed.len() < MISSED && !missed.contains(&id) {
         missed.push(id);
     }
+}
+
+/// Ask after what history line `id` holds, on `htlc`, where it may have
+/// changed untold.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn refresh_if_stale(view: &RotulusView, htlc: *mut c_void, id: u64) {
+    if due(view, id, Instant::now()) {
+        hxhandlers::send::reactions::refresh(htlc, &[Target::Line { channel: 0, id }]);
+    }
+}
+
+/// Whether history line `id` is to be asked after at `now`; asking counts
+/// as told, so a menu opened again before the answer asks no more.
+fn due(view: &RotulusView, id: u64, now: Instant) -> bool {
+    let mut out = output(view).borrow_mut();
+    if !out.lines.stale(id, now) {
+        return false;
+    }
+    out.lines.lines.get_mut(&(Space::History, id)).unwrap().told = now;
+    true
+}
+
+/// The emoji history line `id` holds, in the order its chips are drawn.
+pub(crate) fn emoji_on(view: &RotulusView, id: u64) -> Vec<String> {
+    let out = output(view).borrow();
+    let Some(line) = out.lines.lines.get(&(Space::History, id)) else {
+        return Vec::new();
+    };
+    (line.reactions.shown().into_iter())
+        .filter_map(|s| match s.key {
+            Key::Emoji(e) => Some(e),
+            Key::Server(_) => None,
+        })
+        .collect()
 }
 
 /// What [`want`] and [`answered`] leave to do.
@@ -782,28 +852,28 @@ unsafe fn speaker(htlc: *mut c_void, cid: u32, uid: u16, nick: &[u8]) -> Rotulus
     if nick.is_empty() {
         return NOBODY;
     }
-    let key = if uid != 0 {
-        u64::from(uid)
-    } else {
-        let conv = chat_with_cid(hx_conn_sess(htlc.cast()), cid);
-        if conv.is_null() {
-            return NOBODY;
-        }
-        let name =
-            CString::new(nick.split(|&b| b == 0).next().unwrap_or_default()).unwrap_or_default();
-        u64::from(hx_member_model_find_by_name(
-            hx_chat_member_model(conv.cast()),
-            name.as_ptr(),
-        ))
+    let key = match uid {
+        0 => uid_of(htlc, cid, nick),
+        uid => uid,
     };
     if key == 0 {
         return NOBODY;
     }
     RotulusSpeaker {
-        key,
+        key: u64::from(key),
         nick: nick.as_ptr().cast(),
         nick_len: nick.len() as i32,
     }
+}
+
+/// Whoever in chat `cid` goes by `nick`, or 0.
+unsafe fn uid_of(htlc: *mut c_void, cid: u32, nick: &[u8]) -> u16 {
+    let conv = chat_with_cid(hx_conn_sess(htlc.cast()), cid);
+    if conv.is_null() {
+        return 0;
+    }
+    let name = CString::new(nick.split(|&b| b == 0).next().unwrap_or_default()).unwrap_or_default();
+    hx_member_model_find_by_name(hx_chat_member_model(conv.cast()), name.as_ptr())
 }
 
 /// A line `nick` said in chat `cid`, as it is drawn.
@@ -984,6 +1054,19 @@ pub extern "C" fn gtkhx_chat_output_install() {
             let Some(view) = view_of(htlc, 0) else {
                 return;
             };
+            if let Event::Who { ask, nicks, count } = e {
+                // Nicks are what each reacted under: whoever online goes
+                // by one now is the best guess at whose icon it is.
+                let who: Vec<_> = (nicks.iter())
+                    .map(|n| {
+                        (
+                            n.clone(),
+                            crate::chat_view::avatar(&view, uid_of(htlc, 0, n.as_bytes())),
+                        )
+                    })
+                    .collect();
+                return crate::reactions::heard(*ask, &who, *count);
+            }
             match e {
                 Event::Now {
                     target: Target::Line { channel: 0, id },
@@ -1516,6 +1599,76 @@ pub(crate) mod tests {
                 chip(heart, None, 2, true, None),
             ]
         );
+    }
+
+    #[test]
+    fn a_line_is_stale_once_told_a_while_ago_and_past_the_newest_told() {
+        let now = Instant::now();
+        let old = now - FRESH - Duration::from_secs(1);
+        let fresh = now - FRESH + Duration::from_secs(1);
+        for (case, newer, told, want) in [
+            ("old, past the newest", TOLD_LINES, old, true),
+            ("told a moment ago", TOLD_LINES, fresh, false),
+            ("among the newest", TOLD_LINES - 1, old, false),
+        ] {
+            let mut lines = LineRegistry::default();
+            lines.history(10, MessageId(10));
+            // Live lines count as history ones do; older ones and another
+            // space's do not.
+            for id in 11..11 + newer as u64 {
+                match id % 2 {
+                    0 => drop(lines.history(id, MessageId(id))),
+                    _ => lines.live((Space::History, id), MessageId(id)),
+                }
+            }
+            lines.history(9, MessageId(9));
+            lines.live((Space::Ephemeral, 1000), MessageId(1000));
+            lines.lines.get_mut(&(Space::History, 10)).unwrap().told = told;
+            assert_eq!(lines.stale(10, now), want, "{case}");
+        }
+        assert!(!LineRegistry::default().stale(10, now), "a line not drawn");
+    }
+
+    /// What the server says of a line makes it fresh again, and so does
+    /// asking after it.
+    pub(crate) fn check_a_line_told_of_is_fresh_again() {
+        let view = view();
+        let page: Vec<HistoryEntry> = (1..=TOLD_LINES as u64 + 1)
+            .map(|id| entry(id, 0, "a", ""))
+            .collect();
+        draw_history(&view, &page, false);
+        let now = Instant::now();
+        let line = (Space::History, 1);
+        output(&view)
+            .borrow_mut()
+            .lines
+            .lines
+            .get_mut(&line)
+            .unwrap()
+            .told = now - FRESH * 2;
+        assert!(output(&view).borrow().lines.stale(1, now));
+        reacted(&view, 1, Some(&thumbs(1)), false);
+        assert!(!output(&view).borrow().lines.stale(1, now));
+
+        let later = now + FRESH * 2;
+        assert!(due(&view, 1, later), "stale again");
+        assert!(!due(&view, 1, later), "asked already");
+    }
+
+    /// Who reacted lists a line's emoji alone: a server emoji's
+    /// placeholder can't be asked about.
+    pub(crate) fn check_who_reacted_lists_emoji_alone() {
+        let view = view();
+        let summary = Summary {
+            entries: vec![(Key::Server(3), 1), (Key::Emoji("\u{1F44D}".into()), 2)],
+        };
+        let seeded = HistoryEntry {
+            reactions: Some((summary, Mine::default())),
+            ..entry(4, 0, "a", "four")
+        };
+        draw_history(&view, &[seeded], false);
+        assert_eq!(emoji_on(&view, 4), ["\u{1F44D}"]);
+        assert_eq!(emoji_on(&view, 5), [""; 0], "a line not drawn");
     }
 
     #[test]

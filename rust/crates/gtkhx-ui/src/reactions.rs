@@ -1,24 +1,28 @@
 //! Reacting to a lobby line, where the session has reactions (the
 //! Reactions draft, capability bit 19): a click on a chip, or the row's
 //! menu, with a few emoji to react with at once and GTK's emoji chooser
-//! for any other. What the line holds is `chat_output`'s; a refusal is
-//! told as a toast.
+//! for any other, and who reacted with each emoji, from the menu or a
+//! chip's own. What the line holds is `chat_output`'s; a refusal is told
+//! as a toast.
 //!
 //! Without reactions no row is anyone's here, and the view's own menu
 //! opens as before.
 
-use gtk::glib;
 use gtk::prelude::*;
+use gtk::{gdk, glib};
 use gtk4 as gtk;
-use hxproto::reactions::{INVALID_KEY, TOO_MANY_KEYS, TOO_MANY_OF_YOURS};
+use hxproto::reactions::{Key, INVALID_KEY, TOO_MANY_KEYS, TOO_MANY_OF_YOURS};
 use hxproto::structured_chat::{INVALID_TARGET, NOT_ALLOWED, NO_SUCH_TARGET, RATE_LIMITED};
+use hxproto::target::Target;
 use rotulus::view::RowMark;
 use rotulus::RotulusView;
 use rotulus_layout::MessageId;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_void;
 
-use crate::chat_output::{then, want, Then};
-use crate::tr::tr;
+use crate::chat_output::{emoji_on, line_on, refresh_if_stale, then, want, Then};
+use crate::tr::{tr, tr_argv, trn_argv};
 
 /// How many emoji the menu offers at once.
 const QUICK: usize = 5;
@@ -130,16 +134,8 @@ fn popover_at(view: &RotulusView, popover: &impl IsA<gtk::Popover>, x: f64, y: f
     popover.popup();
 }
 
-/// `row`'s menu at `x`, `y`: the quick emoji, "Add Reaction…" for the
-/// chooser, and the view's own Copy and Select All. Whether `row` is a line one can react to.
-fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
-    let Some((_, limits)) = session(view) else {
-        return false;
-    };
-    if crate::chat_output::line_on(view, row, &limits).is_none() {
-        return false;
-    }
-    let popover = gtk::Popover::new();
+/// A menu's column of items.
+fn items() -> gtk::Box {
     let items = gtk::Box::new(gtk::Orientation::Vertical, 0);
     for set in [
         gtk::Box::set_margin_start,
@@ -149,6 +145,23 @@ fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
     ] {
         set(&items, 4);
     }
+    items
+}
+
+/// `row`'s menu at `x`, `y`: the quick emoji, "Add Reaction…" for the
+/// chooser, "Who Reacted…" where it has emoji chips, and the view's own
+/// Copy and Select All. Whether `row` is a line one can react to.
+fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
+    let Some((htlc, limits)) = session(view) else {
+        return false;
+    };
+    let Some(id) = line_on(view, row, &limits) else {
+        return false;
+    };
+    // SAFETY: as for `session`.
+    unsafe { refresh_if_stale(view, htlc, id) };
+    let popover = gtk::Popover::new();
+    let items = items();
     let quick = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     for emoji in self::quick() {
         let b = gtk::Button::with_label(&emoji);
@@ -166,6 +179,14 @@ fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
     item(&items, &popover, view, &tr("Add Reaction…"), move |v| {
         chooser(v, row, x, y)
     });
+    let emoji = emoji_on(view, id);
+    if !emoji.is_empty() {
+        // TRANSLATORS: in a chat line's menu; lists the emoji the line has
+        // been reacted with, to see who reacted with one.
+        item(&items, &popover, view, &tr("Who Reacted…"), move |v| {
+            reacted_with(v, row, &emoji, x, y)
+        });
+    }
     items.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     // This menu stands in for the view's own, so it keeps what that offers.
     if view.has_selection() {
@@ -216,6 +237,172 @@ fn chooser(view: &RotulusView, row: MessageId, x: f64, y: f64) {
     popover_at(view, &chooser, x, y);
 }
 
+/// The emoji `row` has been reacted with, at `x`, `y`, each to see who
+/// reacted with it, or who reacted with the one there is.
+fn reacted_with(view: &RotulusView, row: MessageId, emoji: &[String], x: f64, y: f64) {
+    if let [one] = emoji {
+        who(view, row, one, x, y);
+        return;
+    }
+    let popover = gtk::Popover::new();
+    let items = items();
+    for e in emoji {
+        let key = e.clone();
+        item(&items, &popover, view, e, move |v| {
+            who(v, row, &key, x, y);
+        });
+    }
+    popover.set_child(Some(&items));
+    popover_at(view, &popover, x, y);
+}
+
+thread_local! {
+    /// The lists of who reacted still waiting on their answers, by what
+    /// each asked.
+    static ASKING: RefCell<HashMap<u64, glib::WeakRef<gtk::ListBox>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Who reacted to `row` with `emoji`, at `x`, `y`, as the server says.
+/// Whether `row` holds that emoji, on a line one can react to.
+fn who(view: &RotulusView, row: MessageId, emoji: &str, x: f64, y: f64) -> bool {
+    let Some((htlc, limits)) = session(view) else {
+        return false;
+    };
+    let Some(id) = line_on(view, row, &limits) else {
+        return false;
+    };
+    // A server emoji's placeholder is left to the row's menu: GtkHx sends
+    // no such key, and a server without the Server Emoji draft takes none.
+    if !emoji_on(view, id).iter().any(|e| e == emoji) {
+        return false;
+    }
+    let line = Target::Line { channel: 0, id };
+    // SAFETY: as for `session`.
+    let ask = unsafe { hxhandlers::send::reactions::who(htlc, line, Key::Emoji(emoji.into())) };
+    // A server names up to a hundred.
+    let names = gtk::ScrolledWindow::new();
+    names.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+    names.set_propagate_natural_height(true);
+    names.set_max_content_height(NAMES_HEIGHT);
+    names.set_child(Some(&asking(ask, emoji)));
+    let popover = gtk::Popover::new();
+    popover.set_child(Some(&names));
+    popover.connect_closed(move |_| {
+        if let Some(ask) = ask {
+            ASKING.with_borrow_mut(|a| a.remove(&ask));
+        }
+    });
+    popover_at(view, &popover, x, y);
+    true
+}
+
+/// How tall the list of who reacted grows before it scrolls.
+const NAMES_HEIGHT: i32 = 320;
+
+/// The list of who reacted with `emoji`, loading until [`heard`] fills it
+/// for `ask`, or with nobody to show if nothing was asked.
+fn asking(ask: Option<u64>, emoji: &str) -> gtk::ListBox {
+    let list = gtk::ListBox::new();
+    list.set_selection_mode(gtk::SelectionMode::None);
+    // TRANSLATORS: names the list of who reacted to a chat line with %s,
+    // an emoji.
+    let name = tr_argv("Who reacted with %s", &[emoji]);
+    list.update_property(&[gtk::accessible::Property::Label(&name)]);
+    match ask {
+        Some(ask) => {
+            // TRANSLATORS: while the list of who reacted is on its way.
+            rows(&list, &[(tr("Loading…"), None)]);
+            ASKING.with_borrow_mut(|a| a.insert(ask, list.downgrade()));
+        }
+        None => fill(&list, &[], 0),
+    }
+    list
+}
+
+/// A reactor's nick, and the icon of whoever online goes by it.
+pub(crate) type Who = (String, Option<gdk::Paintable>);
+
+/// What answered `ask`: who holds its emoji, newest first, of `count`.
+pub(crate) fn heard(ask: u64, who: &[Who], count: u32) {
+    let list = ASKING.with_borrow_mut(|a| a.remove(&ask));
+    if let Some(list) = list.and_then(|l| l.upgrade()) {
+        fill(&list, who, count);
+    }
+}
+
+fn fill(list: &gtk::ListBox, who: &[Who], count: u32) {
+    let more = u64::from(count).saturating_sub(who.len() as u64);
+    let mut lines = who.to_vec();
+    if who.is_empty() {
+        lines.push((tr("Nobody can be shown for this reaction."), None));
+    } else if more > 0 {
+        // TRANSLATORS: after the names of who reacted, how many more did.
+        let more = trn_argv("and %u more", "and %u more", more, &[&more.to_string()]);
+        lines.push((more, None));
+    }
+    rows(list, &lines);
+}
+
+/// `list` holds `lines`, a row each, with its icon where it has one. A
+/// row already there is changed rather than replaced, so the keyboard
+/// stays on it.
+fn rows(list: &gtk::ListBox, lines: &[Who]) {
+    for (i, (text, icon)) in lines.iter().enumerate() {
+        let row = list.row_at_index(i as i32).and_then(|r| r.child());
+        let (picture, label) = match row.and_downcast::<gtk::Box>() {
+            Some(b) => (
+                b.first_child().and_downcast::<gtk::Picture>().unwrap(),
+                b.last_child().and_downcast::<gtk::Label>().unwrap(),
+            ),
+            None => {
+                let b = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                for set in [
+                    gtk::Box::set_margin_start,
+                    gtk::Box::set_margin_end,
+                    gtk::Box::set_margin_top,
+                    gtk::Box::set_margin_bottom,
+                ] {
+                    set(&b, 4);
+                }
+                // The name beside it says whose it is.
+                let picture = gtk::Picture::builder()
+                    .accessible_role(gtk::AccessibleRole::Presentation)
+                    .can_shrink(false)
+                    .build();
+                let label = gtk::Label::new(None);
+                label.set_xalign(0.0);
+                b.append(&picture);
+                b.append(&label);
+                list.append(&b);
+                (picture, label)
+            }
+        };
+        picture.set_paintable(icon.as_ref());
+        picture.set_visible(icon.is_some());
+        label.set_text(text);
+    }
+    // A scrollbar that may show is room kept for it, however short the list.
+    if let Some(sw) = list
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+    {
+        let (_, height, _, _) = list.measure(gtk::Orientation::Vertical, -1);
+        let scroll = if height > NAMES_HEIGHT {
+            gtk::PolicyType::Automatic
+        } else {
+            gtk::PolicyType::Never
+        };
+        sw.set_vscrollbar_policy(scroll);
+    }
+    // Hung from the window, whose allocation knows nothing of it, an open
+    // popover is laid out again only when presented, and closes otherwise.
+    let popover = list.ancestor(gtk::Popover::static_type());
+    if let Some(p) = popover.and_downcast::<gtk::Popover>() {
+        p.present();
+    }
+}
+
 /// Hear the chips clicked and the rows' menus asked for in `view`, the
 /// public chat's.
 pub(crate) fn hear(view: &RotulusView) {
@@ -227,10 +414,118 @@ pub(crate) fn hear(view: &RotulusView) {
         }),
     );
     view.connect_closure(
+        "reaction-menu",
+        false,
+        glib::closure_local!(|view: RotulusView,
+                              m: RowMark,
+                              key: String,
+                              x: f64,
+                              y: f64|
+         -> bool { who(&view, m.0, &key, x, y) }),
+    );
+    view.connect_closure(
         "row-menu",
         false,
         glib::closure_local!(|view: RotulusView, m: RowMark, x: f64, y: f64| -> bool {
             menu(&view, m.0, x, y)
         }),
     );
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    fn shown(list: &gtk::ListBox) -> Vec<String> {
+        let mut rows = Vec::new();
+        while let Some(row) = list.row_at_index(rows.len() as i32) {
+            let b = row.child().unwrap();
+            let label = b.last_child().and_downcast::<gtk::Label>().unwrap();
+            rows.push(label.text().to_string());
+        }
+        rows
+    }
+
+    /// Which rows of `list` show an icon.
+    fn iconed(list: &gtk::ListBox) -> Vec<bool> {
+        let mut rows = Vec::new();
+        while let Some(row) = list.row_at_index(rows.len() as i32) {
+            let b = row.child().unwrap();
+            let picture = b.first_child().and_downcast::<gtk::Picture>().unwrap();
+            rows.push(picture.is_visible() && picture.paintable().is_some());
+        }
+        rows
+    }
+
+    /// Who reacted says it is loading until its answer, then who, newest
+    /// first, and how many more the server did not name, or that nobody
+    /// can be shown; a list gone before its answer is left alone, and one
+    /// open stays open.
+    pub(crate) fn check_who_reacted_says_who_once_answered() {
+        let nobody = "Nobody can be shown for this reaction.";
+        let ask = u64::MAX;
+        let list = asking(Some(ask), "\u{1F44D}");
+        assert_eq!(shown(&list), ["Loading\u{2026}"]);
+        let names = |n: &[&str]| {
+            n.iter()
+                .map(|n| (n.to_string(), None))
+                .collect::<Vec<Who>>()
+        };
+        let icon = gdk::Paintable::new_empty(32, 16);
+        heard(ask, &[("b".into(), Some(icon)), ("a".into(), None)], 5);
+        assert_eq!(shown(&list), ["b", "a", "and 3 more"]);
+        assert_eq!(iconed(&list), [true, false, false], "b's icon alone");
+        heard(ask, &[], 0);
+        assert_eq!(shown(&list), ["b", "a", "and 3 more"], "answered twice");
+
+        for (case, nicks, count, want) in [
+            ("everyone named", &["b", "a"][..], 2, &["b", "a"][..]),
+            ("an empty answer", &[], 0, &[nobody]),
+            ("a count without names", &[], 3, &[nobody]),
+        ] {
+            let list = asking(Some(ask), "\u{1F44D}");
+            heard(ask, &names(nicks), count);
+            assert_eq!(shown(&list), want, "{case}");
+        }
+        assert_eq!(shown(&asking(None, "\u{1F44D}")), [nobody], "not asked");
+
+        // Short, it keeps no room for a scrollbar; past its height, it
+        // scrolls.
+        for (case, n, want) in [
+            ("short", 2, gtk::PolicyType::Never),
+            ("long", 100, gtk::PolicyType::Automatic),
+        ] {
+            let scrolled = gtk::ScrolledWindow::new();
+            scrolled.set_child(Some(&asking(Some(ask), "\u{1F44D}")));
+            let nicks: Vec<String> = (0..n).map(|i| i.to_string()).collect();
+            let nicks: Vec<&str> = nicks.iter().map(String::as_str).collect();
+            heard(ask, &names(&nicks), n);
+            assert_eq!(scrolled.vscrollbar_policy(), want, "{case}");
+        }
+
+        drop(asking(Some(ask), "\u{1F44D}"));
+        heard(ask, &names(&["a"]), 1);
+        assert!(ASKING.with_borrow(|a| a.is_empty()));
+
+        // Hung from a window, as the view's are, it stays open once filled.
+        let window = gtk::Window::new();
+        window.present();
+        let popover = gtk::Popover::new();
+        popover.set_child(Some(&asking(Some(ask), "\u{1F44D}")));
+        popover.set_parent(&window);
+        popover.popup();
+        let settle = || {
+            let ctx = glib::MainContext::default();
+            let until = std::time::Instant::now() + std::time::Duration::from_millis(300);
+            while std::time::Instant::now() < until {
+                ctx.iteration(false);
+            }
+        };
+        settle();
+        heard(ask, &names(&["b", "a"]), 2);
+        settle();
+        assert!(popover.is_visible(), "closed once filled");
+        popover.unparent();
+        window.destroy();
+    }
 }

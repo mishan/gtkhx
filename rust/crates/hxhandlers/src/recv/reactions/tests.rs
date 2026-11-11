@@ -9,7 +9,7 @@ use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
 use super::*;
 use crate::recv::friends::tests::{fields, frame};
 use crate::send::friends::tests::{sent, woken, Conn};
-use crate::send::reactions::{pace, react, refresh, retry, withdraw};
+use crate::send::reactions::{pace, react, refresh, retry, who, withdraw};
 use hxproto::structured_chat::NOT_ALLOWED;
 use std::time::{Duration, Instant};
 
@@ -213,6 +213,98 @@ fn lines_are_asked_after_fifty_at_once_and_a_reply_too_big_for_its_frame_in_halv
         unsafe { refresh(c.0, targets) };
         assert_eq!(asked_after(), []);
     }
+}
+
+#[test]
+fn who_holds_a_key_is_told_to_the_request_that_asked_alone() {
+    let held = |trans| {
+        frame(
+            TASK,
+            trans,
+            false,
+            fields(&[
+                (tag::TARGET, &packed(1)),
+                (tag::REACTION_SUMMARY, &summary(5)),
+                (tag::REACTION_MINE, &[1, 0]),
+                (tag::NAME, b"b\xC3\xA9"),
+                (tag::NAME, b"a"),
+            ]),
+        )
+    };
+    let left_out = |trans| frame(TASK, trans, false, fields(&[]));
+    let refused = |trans| frame(TASK, trans, true, fields(&[(tag::CHAT_REASON, &[0, 3])]));
+    let ours = Some(now(1, Some((5, true))));
+    for (case, caps, key, answer, now_, who_) in [
+        (
+            "a line asked after without a key",
+            AGREED,
+            false,
+            &held as &dyn Fn(u32) -> Vec<u8>,
+            ours.clone(),
+            None,
+        ),
+        (
+            "names, newest first",
+            AGREED,
+            true,
+            &held,
+            ours.clone(),
+            Some((&["b\u{E9}", "a"][..], 5)),
+        ),
+        (
+            "names in Mac Roman",
+            STRUCTURED_CHAT | REACTIONS,
+            true,
+            &held,
+            ours.clone(),
+            Some((&["b\u{221A}\u{A9}", "a"], 5)),
+        ),
+        (
+            "the line left out",
+            AGREED,
+            true,
+            &left_out,
+            Some(now(1, None)),
+            Some((&[], 0)),
+        ),
+        ("refused", AGREED, true, &refused, None, Some((&[], 0))),
+    ] {
+        let c = conn(caps, lines());
+        sent();
+        told();
+        let ask = match key {
+            true => unsafe { who(c.0, line(1), thumbs()) }.unwrap(),
+            false => {
+                unsafe { refresh(c.0, &[line(1)]) };
+                0
+            }
+        };
+        let [(712, trans, f)] = &sent()[..] else {
+            panic!("{case}: not asked")
+        };
+        let keys: Vec<_> = f.iter().filter(|(t, _)| *t == tag::REACTION_KEY).collect();
+        assert_eq!(keys.len(), usize::from(key), "{case}: the key");
+        let trans = *trans;
+        unsafe { reply(c.0, trans, &answer(trans)) };
+        let who_ = who_.map(|(nicks, count)| Event::Who {
+            ask,
+            nicks: nicks.iter().map(|n| n.to_string()).collect(),
+            count,
+        });
+        let want: Vec<Event> = now_.into_iter().chain(who_).collect();
+        assert_eq!(told(), want, "{case}");
+    }
+
+    let c = conn(AGREED, lines());
+    let ask = || unsafe { who(c.0, line(1), thumbs()) };
+    assert_ne!(ask(), ask(), "two asks told apart");
+    let ephemeral = Target::Ephemeral { chat: 0, id: 1 };
+    let none = conn(AGREED, None);
+    sent();
+    for (c, target) in [(&none, line(1)), (&c, ephemeral)] {
+        assert_eq!(unsafe { who(c.0, target, thumbs()) }, None);
+    }
+    assert_eq!(asked_after(), []);
 }
 
 fn thumbs() -> Key {

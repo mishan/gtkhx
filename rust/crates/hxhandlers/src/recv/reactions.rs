@@ -12,6 +12,7 @@ use std::ffi::c_void;
 
 use gtkhx_core::conn::hx_conn_has_cap;
 use gtkhx_core::reactions::Event;
+use hxmodel::reactions::same;
 use hxproto::messages::tag;
 use hxproto::reactions::{parse_changed, parse_got, Group, Key, Limits, CHANGED};
 use hxproto::structured_chat::{RATE_LIMITED, TOO_MANY_TARGETS};
@@ -35,6 +36,8 @@ thread_local! {
 pub(crate) enum Asked {
     /// Get Reactions, after these targets in order.
     Get(Vec<Target>),
+    /// Get Reactions, after who holds `key` on `target`, for `ask`.
+    Who { target: Target, key: Key, ask: u64 },
     /// Send Reaction, `add`ing `key` on `target` or taking it back; `again`
     /// once it has been asked to slow down.
     Send {
@@ -122,8 +125,9 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
 /// more goes for a second and the view decides whether to ask again.
 ///
 /// A Get Reactions' says what each target asked after holds, in the order
-/// asked, none for one it left out. One refused as too many targets for
-/// its reply is asked again in halves; any other refusal changes nothing.
+/// asked, none for one it left out, and where it asked after a key, who
+/// holds it. One refused as too many targets for its reply is asked again
+/// in halves; any other refusal changes nothing, and shows nobody.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -154,6 +158,33 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
                     .map(|g| (g.summary, g.mine));
                 tell(htlc, Event::Now { target, reactions });
             }
+        }
+        Asked::Who { ask, .. } if refused => tell(
+            htlc,
+            Event::Who {
+                ask,
+                nicks: Vec::new(),
+                count: 0,
+            },
+        ),
+        Asked::Who { target, key, ask } => {
+            let got = parse_got(ChunkIter::over_message(frame, frame.len()))
+                .into_iter()
+                .find(|g| g.target == target);
+            let utf8 = hx_conn_has_cap(htlc.cast(), hxsession::cap::TEXT_ENCODING) != 0;
+            let nick = |n: &Vec<u8>| match utf8 {
+                true => hxproto::text::to_utf8(n),
+                false => hxproto::text::mac_roman_to_utf8(n),
+            };
+            let (nicks, count) = (got.as_ref())
+                .map(|g| {
+                    let held = g.summary.entries.iter().find(|(k, _)| same(k, &key));
+                    (g.nicks.iter().map(nick).collect(), held.map_or(0, |e| e.1))
+                })
+                .unwrap_or_default();
+            let reactions = got.map(|g| (g.summary, g.mine));
+            tell(htlc, Event::Now { target, reactions });
+            tell(htlc, Event::Who { ask, nicks, count });
         }
         Asked::Send {
             target,
