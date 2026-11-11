@@ -14,11 +14,9 @@
 //! insert-above call — the call the renderer makes for each entry of an
 //! older page, and the part of it that grows with the scrollback.
 //!
-//! The scenario refuses a connected session, clears the chat view before
-//! and after, and puts back the connection's newest-history cursor, which
-//! the replay advances. `chat_output`'s own "Load older" cursor it leaves
-//! on the replay, so it only runs when the app exits afterwards
-//! (`GTKHX_BENCH_QUIT`).
+//! The scenario refuses a connected session, clears the chat view and what
+//! `chat_output` kept of it before and after, and puts back the
+//! connection's newest-history cursor, which the replay advances.
 //!
 //! Checks: the replay adds N rows plus its two dividers and "Load older"
 //! row, whatever the scrollback cap — history doesn't count against it;
