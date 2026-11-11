@@ -111,24 +111,12 @@ pub(super) async fn run(view: &gtk::Widget, n: u32) {
         );
         return;
     }
-    // chat_output keeps its own history cursor for "Load older", which the
-    // replay leaves on the fake history; a real server's "Load older" would
-    // then ask for nothing. So the app must exit after the run, as
-    // tools/uibench.sh has it do.
-    if std::env::var_os("GTKHX_BENCH_QUIT").is_none() {
-        glib::g_warning!(
-            "gtkhx",
-            "GTKHX_BENCH history: needs GTKHX_BENCH_QUIT, since it leaves the chat's \
-             history cursor on the fake replay"
-        );
-        return;
-    }
     let cursor = unsafe { hx_conn_chat_history_last_msgid(conn) };
-    chat.clear();
+    crate::chat_output::clear(chat);
 
     measure(chat, view, htlc, n).await;
 
-    chat.clear();
+    crate::chat_output::clear(chat);
     unsafe { hx_conn_set_chat_history_last_msgid(conn, cursor) };
 }
 

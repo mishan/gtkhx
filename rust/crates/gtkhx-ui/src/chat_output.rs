@@ -142,6 +142,11 @@ fn output(view: &RotulusView) -> &RefCell<Output> {
     unsafe {
         if view.data::<RefCell<Output>>(OUTPUT).is_none() {
             view.set_data(OUTPUT, RefCell::new(Output::default()));
+            // The view trims at once when its scrollback shrinks, and a
+            // larger one by the next draw would not bring those rows back.
+            view.connect_notify_local(Some("max-lines"), |view, _| {
+                output(view).borrow_mut().lines.drew(0, view.max_rows());
+            });
         }
         view.data::<RefCell<Output>>(OUTPUT).unwrap().as_ref()
     }
@@ -472,7 +477,7 @@ fn debug(line: &str) {
 }
 
 /// Empty `view` and forget what it drew.
-fn clear(view: &RotulusView) {
+pub(crate) fn clear(view: &RotulusView) {
     view.clear();
     *output(view).borrow_mut() = Output::default();
 }
@@ -1012,6 +1017,7 @@ pub(crate) mod tests {
         });
         draw_live(&shrunk, None, || draw_prose(&shrunk, b"three\nmore\nrows"));
         shrunk.set_max_rows(3);
+        shrunk.set_max_rows(5);
         draw_history(&shrunk, &[entry(20, 0, "a", "twenty")], false);
         assert!(rows(&shrunk).contains("<a> twenty"), "{}", rows(&shrunk));
     }
