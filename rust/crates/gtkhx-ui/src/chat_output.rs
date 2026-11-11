@@ -16,7 +16,7 @@
 //! click on a chip, or its row's menu (`reactions`), asks for one.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::time::{Duration, Instant};
 
@@ -91,6 +91,9 @@ struct LineRegistry {
     /// to its own.
     live: VecDeque<((Space, u64), MessageId, u64)>,
     drawn: u64,
+    /// The newest history ids drawn, up to [`TOLD_LINES`] of them, kept
+    /// whatever trimming lets go of.
+    newest: BTreeSet<u64>,
 }
 
 /// A line's row, and the reactions shown under it.
@@ -127,6 +130,7 @@ impl LineRegistry {
 
     /// History line `id` is drawn on `row`: its reactions, none yet.
     fn history(&mut self, id: u64, row: MessageId) -> &mut LineReactions {
+        self.drew_id(Space::History, id);
         let line = self.lines.entry((Space::History, id));
         &mut line.insert_entry(Line::new(row)).into_mut().reactions
     }
@@ -140,9 +144,17 @@ impl LineRegistry {
         let Some(line) = self.lines.get(&(Space::History, id)) else {
             return false;
         };
-        let newer =
-            (self.lines.keys()).filter(|&&(space, other)| space == Space::History && other > id);
-        now.saturating_duration_since(line.told) > FRESH && newer.count() >= TOLD_LINES
+        let past = self.newest.len() >= TOLD_LINES && self.newest.first() > Some(&id);
+        now.saturating_duration_since(line.told) > FRESH && past
+    }
+
+    fn drew_id(&mut self, space: Space, id: u64) {
+        if space == Space::History {
+            self.newest.insert(id);
+            if self.newest.len() > TOLD_LINES {
+                self.newest.pop_first();
+            }
+        }
     }
 
     /// The history line drawn on `row`.
@@ -173,6 +185,7 @@ impl LineRegistry {
         }
         self.lines.insert(key, Line::new(row));
         self.live.push_back((key, row, self.drawn));
+        self.drew_id(key.0, key.1);
     }
 }
 
@@ -1623,6 +1636,8 @@ pub(crate) mod tests {
             }
             lines.history(9, MessageId(9));
             lines.live((Space::Ephemeral, 1000), MessageId(1000));
+            // Newer lines trimmed from a short scrollback still count.
+            lines.drew(newer as u64, 1);
             lines.lines.get_mut(&(Space::History, 10)).unwrap().told = told;
             assert_eq!(lines.stale(10, now), want, "{case}");
         }
