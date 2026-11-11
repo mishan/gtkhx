@@ -148,8 +148,10 @@ impl LineReactions {
     pub fn answered(&mut self, key: &Key, add: bool, count: Option<u32>) -> Option<bool> {
         let at = self.said.iter().position(|s| same(&s.key, key));
         let count = count.unwrap_or_else(|| {
-            let before = at.map_or(0, |i| self.said[i].count - u32::from(self.said[i].mine));
-            before + u32::from(add)
+            let before = at.map_or(0, |i| {
+                (self.said[i].count).saturating_sub(u32::from(self.said[i].mine))
+            });
+            before.saturating_add(u32::from(add))
         });
         match at {
             Some(i) => (self.said[i].count, self.said[i].mine) = (count, add),
@@ -339,6 +341,16 @@ mod tests {
                     Answered("\u{1F600}", true, None, None),
                 ],
                 &[(THUMBS, 2, true), ("\u{1F600}", 1, true)],
+            ),
+            (
+                "an answer with no count after a summary of none, ours",
+                &[
+                    Said(&[], &[]),
+                    Want(THUMBS, true, Next::Send(true)),
+                    Said(&[(THUMBS, 0)], &[0]),
+                    Answered(THUMBS, true, None, None),
+                ],
+                &[(THUMBS, 1, true)],
             ),
             (
                 "put off and still wanted: asked again",
