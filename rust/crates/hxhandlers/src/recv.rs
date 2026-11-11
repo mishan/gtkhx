@@ -21,6 +21,7 @@ pub mod icon;
 pub mod login;
 pub mod msg;
 pub mod news;
+pub mod reactions;
 pub mod user;
 pub mod xfer;
 
@@ -136,9 +137,16 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             let quiet = files::failed(htlc, *trans, reason.as_deref()) || quiet;
             chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
         }
-        // hxnet hands over only the messaging extension's this way.
-        Event::Reply { trans, frame } => friends::reply(htlc, *trans, frame),
-        Event::Unhandled { opcode, frame } => friends::pushed(htlc, *opcode, frame),
+        // hxnet hands over only the messaging extension's and the
+        // Reactions draft's this way, each answering only its own.
+        Event::Reply { trans, frame } => {
+            friends::reply(htlc, *trans, frame);
+            reactions::reply(htlc, *trans, frame);
+        }
+        Event::Unhandled { opcode, frame } => {
+            friends::pushed(htlc, *opcode, frame);
+            reactions::pushed(htlc, *opcode, frame);
+        }
         _ => {}
     }
 }
@@ -160,6 +168,7 @@ pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
     icon::forget(htlc);
     crate::media::forget(htlc);
     friends::forget(htlc);
+    reactions::forget(htlc);
     #[cfg(feature = "voice")]
     crate::voice::forget(htlc);
 }

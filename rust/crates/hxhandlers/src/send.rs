@@ -14,6 +14,7 @@ pub mod friends;
 pub mod icon;
 pub mod msg;
 pub mod news;
+pub mod reactions;
 pub mod user;
 
 #[cfg(not(test))]

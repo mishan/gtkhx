@@ -75,6 +75,16 @@ pub(crate) fn history_requested(htlc: *mut c_void, trans: u32, cid: u32, older: 
     });
 }
 
+/// Whether the first page of chat `cid`'s history since the login is on
+/// its way.
+pub fn first_page_pending(htlc: *mut c_void, cid: u32) -> bool {
+    HISTORY_PENDING.with(|p| {
+        p.borrow()
+            .iter()
+            .any(|(&(h, _), a)| h == htlc as usize && a.cid == cid && !a.older)
+    })
+}
+
 /// Forget what `htlc` asked for before: a new connection numbers its
 /// requests afresh, and an old trans would name a new request.
 pub(crate) fn history_forget(htlc: *mut c_void) {

@@ -8,6 +8,10 @@
 //! `LineRegistry`: the row of each line the server gave an id, so that a
 //! line can be found again by that id, and so that a line drawn live while
 //! the first page of history was on its way is not drawn again inside it.
+//!
+//! Where the session has reactions (the Reactions draft, capability bit
+//! 19), a lobby line's chips come from its history entry and then from
+//! what the `reactions` signal says of it.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -17,17 +21,19 @@ use glib::translate::{from_glib_none, ToGlibPtr};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
+use hxproto::reactions::{Key, Mine, Summary};
+use hxproto::target::Target;
 use hxsession::HistoryEntry;
 use rotulus::ffi::{RotulusRun, RotulusSpeaker};
 use rotulus::{LoadDirection, RotulusView};
-use rotulus_layout::MessageId;
+use rotulus_layout::{MessageId, Reaction};
 
 use gtkhx_core::boxed::chat::{split_nick_body, HxChatEvent};
 use gtkhx_core::conn::{hx_conn_name, hx_conn_sess};
 use hxmodel::chat_members::hx_member_model_find_by_name;
 use hxmodel::conversation::{hx_chat_media_table, hx_chat_member_model, hx_chat_view};
 
-use crate::tr::{tr, trn_argv};
+use crate::tr::{tr, tr_argv, trn_argv};
 
 /// Palette slots (rotulus.h's `ROTULUS_PAL_*`).
 const PAL_MUTED: i16 = 37;
@@ -131,7 +137,14 @@ struct Output {
     /// The "Load older" row, or the one saying it is on its way.
     load_older: *mut c_void,
     lines: LineRegistry,
+    /// History lines a change of reactions named while the first page was
+    /// on its way, before the page drew them: the page may have been read
+    /// before the change, so they are asked after again once it is drawn.
+    missed: Vec<u64>,
 }
+
+/// The most lines [`Output::missed`] keeps.
+const MISSED: usize = 200;
 
 const OUTPUT: &str = "gtkhx-chat-output";
 
@@ -351,20 +364,86 @@ fn draw_live(view: &RotulusView, entry: Option<&HistoryEntry>, draw: impl FnOnce
     out.lines.live((space, e.message_id), row);
 }
 
+/// Draw live line `s`, then with `picture` the row of the picture it
+/// carries, if any, which says how many rows it drew. The line is its text
+/// row, as a history line is, so its chips go under its words.
+fn draw_said_live(
+    view: &RotulusView,
+    entry: Option<&HistoryEntry>,
+    s: &Said,
+    picture: impl FnOnce() -> u64,
+) {
+    draw_live(view, entry, || draw_said(view, s));
+    draw_live(view, None, picture);
+}
+
 /// Up to the first NUL, as C reads a string.
 fn c_str(s: &str) -> &str {
     s.split('\0').next().unwrap_or_default()
 }
 
+/// The chips `summary` draws, ours among them where `mine` says: an emoji
+/// as itself, which a screen reader names; one of the server's own, which
+/// GtkHx cannot draw, as a placeholder named by its id.
+fn chips(summary: &Summary, mine: &Mine) -> Vec<Reaction> {
+    let chip = |(i, (key, count)): (usize, &(Key, u32))| {
+        let (key, text, label) = match key {
+            Key::Emoji(e) => (e.clone(), None, None),
+            Key::Server(id) => (
+                format!("server-emoji:{id}"),
+                Some("\u{25C7}".to_owned()),
+                // TRANSLATORS: what a screen reader calls a placeholder
+                // for one of the server's own emoji, by its number.
+                Some(tr_argv("server emoji %u", &[&id.to_string()])),
+            ),
+        };
+        Reaction {
+            key,
+            text,
+            count: *count,
+            mine: mine.holds(i),
+            label,
+        }
+    };
+    summary.entries.iter().enumerate().map(chip).collect()
+}
+
+/// What history line `id` holds now: chips, or none. One not drawn while
+/// the first page is on its way (`page_due`) is kept to be asked after.
+fn reacted(view: &RotulusView, id: u64, reactions: Option<&(Summary, Mine)>, page_due: bool) {
+    let row = output(view).borrow().lines.row(Space::History, id);
+    let Some(row) = row else {
+        let missed = &mut output(view).borrow_mut().missed;
+        if page_due && missed.len() < MISSED && !missed.contains(&id) {
+            missed.push(id);
+        }
+        return;
+    };
+    let chips = reactions.map_or_else(Vec::new, |(s, m)| chips(s, m));
+    if !view.set_reactions(row, chips) {
+        output(view)
+            .borrow_mut()
+            .lines
+            .lines
+            .remove(&(Space::History, id));
+    }
+}
+
 /// Draw a page of history: the first since the view was cleared at the
 /// end, between dividers, under a "Load older" row while there is more; one
-/// "Load older" asked for, above what is there.
-fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) {
+/// "Load older" asked for, above what is there. The lines of
+/// [`Output::missed`] a first page drew, to be asked after.
+fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) -> Vec<u64> {
     let mut out = output(view).borrow_mut();
     // The scrollback may have shrunk since the last live row, so that a
     // line held then is gone and must not be taken as drawn.
     out.lines.drew(0, view.max_rows());
     let older = std::mem::take(&mut out.loading);
+    let missed = if older {
+        Vec::new()
+    } else {
+        std::mem::take(&mut out.missed)
+    };
     for e in entries.iter().filter(|e| e.message_id != 0) {
         if out.oldest == 0 || e.message_id < out.oldest {
             out.oldest = e.message_id;
@@ -377,7 +456,7 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) {
     }
     // A refused "Load older" says there is more, and its row goes back.
     if entries.is_empty() && !(older && has_more) {
-        return;
+        return Vec::new();
     }
     if !older {
         let n = entries.len() as u64;
@@ -426,12 +505,17 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) {
         .put(view, at);
         if let Some(row) = mark(row).filter(|_| e.message_id != 0 && e.flags & DELETED == 0) {
             out.lines.history(e.message_id, row);
+            if let Some((s, m)) = &e.reactions {
+                view.set_reactions(row, chips(s, m));
+            }
         }
     }
     if !older {
         let text = format!("─── {} ───", tr("live messages"));
         Row::of(rotulus::ffi::ROW_DIVIDER, &[muted(&text)]).put(view, None);
     }
+    let drawn = |id: &u64| out.lines.row(Space::History, *id).is_some();
+    missed.into_iter().filter(drawn).collect()
 }
 
 /// "Load older" was asked for: its row says so until the page comes.
@@ -649,10 +733,9 @@ unsafe fn chat(htlc: *mut c_void, e: &HxChatEvent, entry: Option<&HistoryEntry>)
             }
             let is_self = e.is_self != 0;
             let s = said(htlc, e.cid, e.uid, sender, &body, is_self);
-            draw_live(&view, entry, || {
-                let rows = draw_said(&view, &s);
+            draw_said_live(&view, entry, &s, || {
                 if e.media.is_null() {
-                    return rows;
+                    return 0;
                 }
                 let conv = chat_with_cid(hx_conn_sess(htlc.cast()), e.cid);
                 crate::inline_media_row::hx_inline_media_row_append(
@@ -661,7 +744,7 @@ unsafe fn chat(htlc: *mut c_void, e: &HxChatEvent, entry: Option<&HistoryEntry>)
                     e.media,
                     htlc,
                 );
-                rows + 1
+                1
             });
             // A private chat's tab asks for attention; the public chat,
             // shown by default and busy, doesn't.
@@ -752,7 +835,25 @@ pub extern "C" fn gtkhx_chat_output_install() {
         gtkhx_core::session::connect_chat(|htlc, e, entry| unsafe { chat(htlc, e, entry) });
         gtkhx_core::session::connect_chat_history(|htlc, cid, entries, has_more| unsafe {
             if let Some(view) = view_of(htlc, cid) {
-                draw_history(&view, entries, has_more);
+                let missed = draw_history(&view, entries, has_more);
+                let lines: Vec<Target> = missed
+                    .into_iter()
+                    .map(|id| Target::Line { channel: 0, id })
+                    .collect();
+                hxhandlers::send::reactions::refresh(htlc, &lines);
+            }
+        });
+        gtkhx_core::session::connect_reactions(|htlc, e| unsafe {
+            let gtkhx_core::reactions::Event::Now {
+                target: Target::Line { channel: 0, id },
+                reactions,
+            } = e
+            else {
+                return;
+            };
+            if let Some(view) = view_of(htlc, 0) {
+                let page_due = hxhandlers::recv::chat::first_page_pending(htlc, 0);
+                reacted(&view, *id, reactions.as_ref(), page_due);
             }
         });
         let session: glib::Object = unsafe {
@@ -785,6 +886,7 @@ pub(crate) mod tests {
             icon: 0,
             nick: nick.into(),
             text: text.into(),
+            reactions: None,
         }
     }
 
@@ -1038,6 +1140,135 @@ pub(crate) mod tests {
                 "{now}─── chat history (1 message) ───\n{}<a> five\n{now}─── live messages ───",
                 day(5)
             )
+        );
+    }
+
+    fn thumbs(n: u32) -> (Summary, Mine) {
+        let summary = Summary {
+            entries: vec![(Key::Emoji("\u{1F44D}".into()), n)],
+        };
+        (summary, Mine::default())
+    }
+
+    /// A change of reactions reaches a line drawn; while the first page is
+    /// on its way, one to a line not drawn yet is kept, at most so many,
+    /// and asked after again once the page draws it, and never for an older
+    /// page. A line whose row has gone is let go of.
+    pub(crate) fn check_a_page_read_before_a_change_is_asked_again() {
+        let view = view();
+        draw_live(&view, Some(&entry(5, 0, "a", "five")), || {
+            say(&view, "a", "five")
+        });
+        for (id, due) in [(5, true), (7, true), (7, true), (99, true), (8, false)] {
+            reacted(&view, id, Some(&thumbs(2)), due);
+        }
+        assert_eq!(output(&view).borrow().missed, [7, 99]);
+        let page = [
+            entry(5, 0, "a", "five"),
+            entry(7, 0, "a", "seven"),
+            entry(8, 0, "a", ""),
+        ];
+        assert_eq!(draw_history(&view, &page, true), [7]);
+        assert_eq!(output(&view).borrow().missed, [0u64; 0]);
+        reacted(&view, 3, None, true);
+        loading_older(&view, &mut output(&view).borrow_mut());
+        assert_eq!(
+            draw_history(&view, &[entry(3, 0, "a", "")], false),
+            [0u64; 0]
+        );
+
+        let seven = output(&view).borrow().lines.row(Space::History, 7).unwrap();
+        view.remove(seven);
+        reacted(&view, 7, None, false);
+        assert_eq!(output(&view).borrow().lines.row(Space::History, 7), None);
+
+        let full = super::tests::view();
+        for id in 0..MISSED as u64 + 1 {
+            reacted(&full, id, None, true);
+        }
+        assert_eq!(output(&full).borrow().missed.len(), MISSED);
+    }
+
+    /// A line's chips go on its own row: a history line's from its entry,
+    /// and a live one's on its words, not on the picture under them.
+    pub(crate) fn check_chips_go_on_the_lines_row() {
+        let view = view();
+        let seeded = HistoryEntry {
+            reactions: Some(thumbs(2)),
+            ..entry(4, 0, "a", "four")
+        };
+        draw_history(&view, &[seeded], false);
+        let five = Said {
+            nick: b"a",
+            body: b"five",
+            is_self: false,
+            highlight: false,
+            nick_color: PAL_NICK_BRACKET,
+            speaker: NOBODY,
+        };
+        draw_said_live(&view, Some(&entry(5, 0, "a", "five")), &five, || {
+            draw_prose(&view, b"[picture]")
+        });
+        reacted(&view, 5, Some(&thumbs(3)), false);
+        let counts = |row| {
+            view.reactions_of(row)
+                .iter()
+                .map(|r| r.count)
+                .collect::<Vec<_>>()
+        };
+        let row = |id| {
+            output(&view)
+                .borrow()
+                .lines
+                .row(Space::History, id)
+                .unwrap()
+        };
+        assert_eq!(counts(row(4)), [2]);
+        assert_eq!(counts(row(5)), [3]);
+        // SAFETY: the view is live.
+        let picture = mark(unsafe { rotulus::ffi::rotulus_view_get_last(raw(&view)) }).unwrap();
+        assert_eq!(counts(picture), [0u32; 0]);
+    }
+
+    #[test]
+    fn a_summary_draws_a_chip_a_key_in_its_order_ours_marked() {
+        let (thumbs, heart) = ("\u{1F44D}", "\u{2764}\u{FE0F}");
+        let summary = Summary {
+            entries: vec![
+                (Key::Emoji(thumbs.into()), 3),
+                (Key::Server(17), 1),
+                (Key::Server(18), 4),
+                (Key::Emoji(heart.into()), 2),
+            ],
+        };
+        let chip = |key: &str, text: Option<&str>, count, mine, label: Option<&str>| Reaction {
+            key: key.into(),
+            text: text.map(Into::into),
+            count,
+            mine,
+            label: label.map(Into::into),
+        };
+        let placeholder = Some("\u{25C7}");
+        assert_eq!(
+            chips(&summary, &Mine(vec![3, 1])),
+            [
+                chip(thumbs, None, 3, false, None),
+                chip(
+                    "server-emoji:17",
+                    placeholder,
+                    1,
+                    true,
+                    Some("server emoji 17")
+                ),
+                chip(
+                    "server-emoji:18",
+                    placeholder,
+                    4,
+                    false,
+                    Some("server emoji 18")
+                ),
+                chip(heart, None, 2, true, None),
+            ]
         );
     }
 

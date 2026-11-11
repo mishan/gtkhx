@@ -44,6 +44,8 @@ fn display_backed() {
     crate::chat_output::tests::check_a_line_has_one_row_found_by_its_id();
     crate::chat_output::tests::check_trimmed_live_rows_are_let_go();
     crate::chat_output::tests::check_a_cleared_view_starts_over();
+    crate::chat_output::tests::check_a_page_read_before_a_change_is_asked_again();
+    crate::chat_output::tests::check_chips_go_on_the_lines_row();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();

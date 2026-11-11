@@ -14,6 +14,7 @@ pub mod media;
 pub mod messaging;
 pub mod news;
 pub mod path;
+pub mod reactions;
 pub mod user;
 pub mod voice;
 

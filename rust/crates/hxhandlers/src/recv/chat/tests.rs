@@ -169,6 +169,7 @@ fn entry(message_id: u64) -> HistoryEntry {
         icon: 0,
         nick: "a".into(),
         text: "hi".into(),
+        reactions: None,
     }
 }
 

@@ -33,7 +33,12 @@ fn told() -> Vec<Event> {
 const TASK: u32 = 0x0001_0000;
 
 /// A whole transaction: `opcode` on `trans`, refused where `error`.
-fn frame(opcode: u32, trans: u32, error: bool, body: impl FnOnce(&mut Encoder) -> u16) -> Vec<u8> {
+pub(crate) fn frame(
+    opcode: u32,
+    trans: u32,
+    error: bool,
+    body: impl FnOnce(&mut Encoder) -> u16,
+) -> Vec<u8> {
     let mut fields = Encoder::new();
     let n = body(&mut fields);
     let fields = fields.into_vec();
@@ -49,7 +54,7 @@ fn frame(opcode: u32, trans: u32, error: bool, body: impl FnOnce(&mut Encoder) -
     f
 }
 
-fn fields<'a>(list: &'a [(u16, &'a [u8])]) -> impl FnOnce(&mut Encoder) -> u16 + 'a {
+pub(crate) fn fields<'a>(list: &'a [(u16, &'a [u8])]) -> impl FnOnce(&mut Encoder) -> u16 + 'a {
     move |e| {
         for (t, d) in list {
             e.put_chunk(*t, d);

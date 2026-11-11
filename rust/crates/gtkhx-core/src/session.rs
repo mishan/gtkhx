@@ -366,6 +366,12 @@ mod imp {
                     Signal::builder("messaging")
                         .param_types([Type::POINTER, Type::POINTER])
                         .build(),
+                    // reactions: (htlc*, event*) — a
+                    // `crate::reactions::Event`, Rust's alone, valid for the
+                    // emit. Read through `connect_reactions`.
+                    Signal::builder("reactions")
+                        .param_types([Type::POINTER, Type::POINTER])
+                        .build(),
                 ]
             })
         }
@@ -488,7 +494,7 @@ unsafe impl Sync for SendPtr {}
 
 // ----------------------------------------------------------------------
 // Emit wrappers, one per signal, with gtkhx_session.h's C ABI but for the
-// Rust-only chat, chat-history-batch and messaging ones
+// Rust-only chat, chat-history-batch, messaging and reactions ones
 // ----------------------------------------------------------------------
 
 /// # Safety
@@ -1131,6 +1137,39 @@ where
 }
 
 /// # Safety
+/// `self_`/`htlc` valid.
+pub unsafe fn gtkhx_session_emit_reactions(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    event: &crate::reactions::Event,
+) {
+    let v = [
+        ptr_value(htlc),
+        ptr_value((event as *const crate::reactions::Event).cast()),
+    ];
+    emit(self_, "reactions", &v);
+}
+
+/// Hear the `reactions` signal: the connection, and what it said.
+pub fn connect_reactions<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, &crate::reactions::Event) + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("reactions", false, move |args| {
+        let ptr = |i: usize| args[i].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        let (htlc, event) = (ptr(1), ptr(2) as *const crate::reactions::Event);
+        // SAFETY: the emit passes an event that outlives it.
+        if let Some(e) = unsafe { event.as_ref() } {
+            f(htlc, e);
+        }
+        None
+    })
+}
+
+/// # Safety
 /// `self_`/`htlc` valid. `state` is a `GtkhxConnectionState` (C enum = int).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_connection_state(
@@ -1330,6 +1369,7 @@ mod tests {
             icon: 0,
             nick: "a".into(),
             text: "hi".into(),
+            reactions: None,
         };
         let s = new_session();
         let got: Rc<std::cell::RefCell<Vec<u64>>> = Rc::default();

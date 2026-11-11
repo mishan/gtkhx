@@ -62,6 +62,15 @@ lists it as a part after the text. `conf/accounts/` has three accounts:
 - `novideo` / `novideo`: voice but neither video bit, for the access
   refusal tests.
 - `news` / `news`: every news bit and `send_media`, for the news tests.
+- `react-a`, `react-b` and `react-mod` (each password its login): chat,
+  private messages and messaging, and `react-mod` `disconnect_users`, which
+  makes it a moderator, for the reactions suite.
+
+Public chat's history is kept (`[history]`, in the inbox's database), and
+the Structured Chat and Reactions drafts are on, so the chat suite's
+history tests run here and the reactions suite has lines to react to.
+`conf/rooms.toml` holds one room, and `[rooms] announce = false` keeps
+the lobby notice to classic clients off.
 
 The voice section's `advertise` line is rewritten at every start by
 `entrypoint.sh` to the host's own addresses. hxd-ng is ICE-lite and
