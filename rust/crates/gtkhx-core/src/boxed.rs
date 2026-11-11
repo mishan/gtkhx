@@ -9,8 +9,6 @@
 //!   - [`msg`]     — `HxMsgEvent`
 //!   - [`chat`]    — `HxChatEvent` + `HxChatMedia`
 //!   - [`tracker`] — `HxTrackerServer` + `HxTrackerV3Meta`
-//!   - [`history`] — `HxHistoryEntry` (chat-history; a plain value struct
-//!     carried in a `GPtrArray`, **not** a registered `GType`)
 //!
 //! # The struct layout stays C-visible
 //!
@@ -43,7 +41,6 @@ use std::ffi::c_char;
 use std::sync::OnceLock;
 
 pub mod chat;
-pub mod history;
 pub mod media_table;
 pub mod msg;
 pub mod tracker;

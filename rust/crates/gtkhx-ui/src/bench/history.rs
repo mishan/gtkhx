@@ -3,21 +3,22 @@
 //!
 //! The replay takes the path a server's GET_CHAT_HISTORY reply takes on the
 //! main thread, once the session has read it: N entries go through
-//! `recv::chat::history` — the `chat-history-batch` signal, and `chat.c`'s
-//! renderer, which appends the divider, the "Load older" row and every entry
-//! — against the unconnected session's own connection and public chat.
+//! `recv::chat::history` — the `chat-history-batch` signal, and
+//! `chat_output`'s renderer, which appends the divider, the "Load older"
+//! row and every entry — against the unconnected session's own connection
+//! and public chat.
 //!
-//! "Load older" can't take that path: `chat.c` only inserts above the
-//! history when its own click handler has just sent a request, and that
-//! state is C with no accessor. So the page is N rows inserted one at a
-//! time above an anchor row, through the view's insert-above call — the
-//! call the renderer makes for each entry of an older page, and the part of
-//! it that grows with the scrollback.
+//! "Load older" can't take that path: the renderer only inserts above the
+//! history when its own click handler has just sent a request. So the page
+//! is N rows inserted one at a time above an anchor row, through the view's
+//! insert-above call — the call the renderer makes for each entry of an
+//! older page, and the part of it that grows with the scrollback.
 //!
 //! The scenario refuses a connected session, clears the chat view before
 //! and after, and puts back the connection's newest-history cursor, which
-//! the replay advances. `chat.c`'s own "Load older" cursor it can't reach,
-//! so it only runs when the app exits afterwards (`GTKHX_BENCH_QUIT`).
+//! the replay advances. `chat_output`'s own "Load older" cursor it leaves
+//! on the replay, so it only runs when the app exits afterwards
+//! (`GTKHX_BENCH_QUIT`).
 //!
 //! Checks: the replay adds N rows plus its two dividers and "Load older"
 //! row, whatever the scrollback cap — history doesn't count against it;
@@ -70,7 +71,7 @@ fn entries(n: u32) -> Vec<hxsession::HistoryEntry> {
         .collect()
 }
 
-/// A row of an older page: history, as every row `chat.c` draws in the
+/// A row of an older page: history, as every row `chat_output` draws in the
 /// history palette is.
 fn row(text: String) -> Message {
     Message {
@@ -110,14 +111,14 @@ pub(super) async fn run(view: &gtk::Widget, n: u32) {
         );
         return;
     }
-    // chat.c keeps its own history cursor for "Load older", which the
-    // replay leaves on the fake history and the scenario can't reach from
-    // here; a real server's "Load older" would then ask for nothing. So the
-    // app must exit after the run, as tools/uibench.sh has it do.
+    // chat_output keeps its own history cursor for "Load older", which the
+    // replay leaves on the fake history; a real server's "Load older" would
+    // then ask for nothing. So the app must exit after the run, as
+    // tools/uibench.sh has it do.
     if std::env::var_os("GTKHX_BENCH_QUIT").is_none() {
         glib::g_warning!(
             "gtkhx",
-            "GTKHX_BENCH history: needs GTKHX_BENCH_QUIT, since it leaves chat.c's \
+            "GTKHX_BENCH history: needs GTKHX_BENCH_QUIT, since it leaves the chat's \
              history cursor on the fake replay"
         );
         return;

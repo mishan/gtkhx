@@ -9,11 +9,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_void};
 
-use glib::ffi::{g_ptr_array_add, g_ptr_array_new_with_free_func, g_ptr_array_unref, gpointer};
 use gtkhx_core::boxed::chat::chat_event_new;
-use gtkhx_core::boxed::history::{history_entry_new, hx_history_entry_free, HxHistoryEntry};
 use hxsession::{ChatMedia, HistoryEntry};
 
 #[cfg(not(test))]
@@ -156,7 +154,7 @@ pub(crate) unsafe fn line(
     let shortcodes = gtkhx_text_emoji_shortcodes_enabled() != 0;
     let me = (hx_conn_uid(htlc.cast()), own);
     let ev = chat_event_new(cid, uid, text, entry, media, me, shortcodes);
-    gtkhx_session_emit_chat(gtkhx_session_get_default(), htlc, ev.cast());
+    gtkhx_session_emit_chat(gtkhx_session_get_default(), htlc, ev.cast(), entry);
     hx_chat_event_free(ev);
 }
 
@@ -211,18 +209,8 @@ pub(crate) unsafe fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: 
     gtkhx_session_emit_chat_subject(gtkhx_session_get_default(), htlc, cid, subject);
 }
 
-/// `GDestroyNotify` shim: the `GPtrArray` frees each entry with the gtkhx-core
-/// `hx_history_entry_free` (which is typed `*mut HxHistoryEntry`).
-///
-/// # Safety
-/// `p` is NULL or a valid `HxHistoryEntry*` (the array only ever holds those).
-unsafe extern "C" fn destroy_history_entry(p: gpointer) {
-    hx_history_entry_free(p as *mut HxHistoryEntry);
-}
-
 /// A page of chat `cid`'s history, the reply to the request on `trans`:
-/// the `chat-history-batch` signal, borrowing a `GPtrArray` of
-/// `HxHistoryEntry` for the call. The newest line seen moves the cursor a
+/// the `chat-history-batch` signal. The newest line seen moves the cursor a
 /// reconnect to the same server catches up from.
 ///
 /// # Safety
@@ -235,7 +223,6 @@ pub unsafe fn history(
     has_more: bool,
 ) {
     history_answered(htlc, trans);
-    let array = g_ptr_array_new_with_free_func(Some(destroy_history_entry));
     for e in entries {
         debug_trace(
             c"chat-history",
@@ -244,7 +231,6 @@ pub unsafe fn history(
                 e.message_id, e.timestamp, e.flags, e.nick, e.text
             ),
         );
-        g_ptr_array_add(array, history_entry_new(e) as gpointer);
     }
     let newest = entries.iter().map(|e| e.message_id).max().unwrap_or(0);
     if newest > hx_conn_chat_history_last_msgid(htlc.cast()) {
@@ -262,10 +248,9 @@ pub unsafe fn history(
         gtkhx_session_get_default(),
         htlc,
         cid,
-        array as *mut c_void,
-        c_int::from(has_more),
+        entries,
+        has_more,
     );
-    g_ptr_array_unref(array);
 }
 
 /// A request the session said failed. One for history ends its chat's
@@ -300,6 +285,7 @@ pub(crate) mod test_env {
             line: String,
             is_self: bool,
             media: bool,
+            entry: Option<u64>,
         },
         Invitation(u32, String),
         Subject(u32, String),
@@ -346,7 +332,7 @@ use doubles::*;
 mod doubles {
     use super::test_env::{self, Emitted};
     use gtkhx_core::boxed::chat::HxChatEvent;
-    use gtkhx_core::boxed::history::HxHistoryEntry;
+    use hxsession::HistoryEntry;
     use std::ffi::CStr;
     use std::os::raw::{c_char, c_int, c_void};
 
@@ -357,7 +343,12 @@ mod doubles {
     pub unsafe fn gtkhx_session_get_default() -> *mut c_void {
         std::ptr::null_mut()
     }
-    pub unsafe fn gtkhx_session_emit_chat(_s: *mut c_void, _h: *mut c_void, ev: *mut c_void) {
+    pub unsafe fn gtkhx_session_emit_chat(
+        _s: *mut c_void,
+        _h: *mut c_void,
+        ev: *mut c_void,
+        entry: Option<&HistoryEntry>,
+    ) {
         let e = &*(ev as *const HxChatEvent);
         test_env::emit(Emitted::Chat {
             cid: e.cid,
@@ -369,6 +360,7 @@ mod doubles {
             .into_owned(),
             is_self: e.is_self != 0,
             media: !e.media.is_null(),
+            entry: entry.map(|e| e.message_id),
         });
     }
     pub unsafe fn gtkhx_session_emit_chat_invitation(
@@ -399,17 +391,13 @@ mod doubles {
         _s: *mut c_void,
         _h: *mut c_void,
         cid: u32,
-        entries: *mut c_void,
-        has_more: c_int,
+        entries: &[HistoryEntry],
+        has_more: bool,
     ) {
-        let array = &*(entries as *const glib::ffi::GPtrArray);
-        let ids = (0..array.len as usize)
-            .map(|i| (*(*array.pdata.add(i) as *const HxHistoryEntry)).message_id)
-            .collect();
         test_env::emit(Emitted::History {
             cid,
-            ids,
-            has_more: has_more != 0,
+            ids: entries.iter().map(|e| e.message_id).collect(),
+            has_more,
         });
     }
     pub unsafe fn gtkhx_session_emit_request_failed(

@@ -212,9 +212,8 @@ Things that cost real time to learn and would cost it again.
   either side tripped a build error rather than a misalignment at decrypt time.
   Both halves went once no cipher state crossed to C. Every cross-language
   struct since follows the same pattern — C `_Static_assert` against Rust
-  `size_of` / `align_of` / `offset_of` consts. `chat_history.c` and
-  `inline_media_decode.c` are current examples, the latter pinning enum
-  discriminants as well as layout.
+  `size_of` / `align_of` / `offset_of` consts. `inline_media_decode.c` is a
+  current example, pinning enum discriminants as well as layout.
 - **The legacy `key||text` hash branches are pinned byte for byte.** Tier 1
   tests assert the hand-computed digests of the concatenated form for each
   supported hash, so a future "consistency fix" can't quietly rewrite the
@@ -373,7 +372,8 @@ untouched throughout — this was client-side state shape only.
 opaque (defined privately in `chat.c`, reached through `hx_gchat_*`
 accessors), holding the GTK widget handles — window, scrollbar, output, input,
 subject entry, voice panel, media-attach button — plus the user-list widget,
-the view's own `cid`, and the chat-history render cursors. The two Rust *data*
+and the view's own `cid`. What the output draws, and what it keeps of the
+chat history it drew, is `gtkhx-ui::chat_output`'s. The two Rust *data*
 handles that were conversation state rather than view state (input history, the
 media table) moved into the model, so a private chat's typed history now
 survives closing and reopening its window. `cid` deliberately stayed in the
@@ -449,12 +449,11 @@ genuinely-C leaves behind FFI. This is the big remaining category.
   small, stable C ABI to lend it in between; the other order would have needed
   a Rust-implemented GInterface just to keep the C panel working.
 
-- **Chat content** — the render and output path in `chat.c` (`xprintline*`,
-  `output_chat_from_event`, the history batch renderer, the load-more and
-  inline-media click handlers),
-  window construction, the private-chat leaf, and the wire senders. The tab
-  strip, the input key handler and the chat-invitation dialog are already Rust,
-  as is the output widget itself. The model side is described above.
+- **Chat content** — the inline-media click handler in `chat.c`, window
+  construction, the private-chat leaf, and the wire senders. The render and
+  output path is `gtkhx-ui::chat_output`, and the tab strip, the input key
+  handler and the chat-invitation dialog are Rust too, as is the output widget
+  itself. The model side is described above.
 - **Users controller glue** — the action-button handlers, the right-click user
   popover and its `GAction`s, the `user_create` / `delete` / `change` /
   `user_list` model↔view glue, the colour helpers, and the wire senders. The
@@ -667,8 +666,8 @@ In order:
    the one feature work most recently added C to.
 2. **Split the theme model out of `gtkhx_theme.c`** into a GTK-free crate while
    the whole-app theming work is fresh.
-3. **The rest of inventory §B**, one feature at a time: Chat's render and
-   output path and window construction, the Transfers list, and the Users
+3. **The rest of inventory §B**, one feature at a time: Chat's window
+   construction, the Transfers list, and the Users
    controller once the Chat and Users slices have taken the session structs it
    depends on with them.
 4. **The standalone windows**: `tray.c` is unblocked; `preview.c` waits on the

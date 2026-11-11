@@ -13,6 +13,7 @@ fn said(cid: u32, uid: u16, line: &str, is_self: bool, media: bool) -> Emitted {
         line: line.into(),
         is_self,
         media,
+        entry: None,
     }
 }
 
@@ -91,6 +92,23 @@ fn a_line_reaches_the_view_unless_its_sender_is_ignored() {
         unsafe { line(HTLC, 0, uid, text, None, media) };
         assert_eq!(test_env::emitted(), want, "{text:?}, ignored {ignored}");
     }
+}
+
+#[test]
+fn a_line_reaches_the_view_with_its_entry() {
+    test_env::reset();
+    unsafe { line(HTLC, 0, 5, "a:  hi", Some(&entry(7)), None) };
+    assert_eq!(
+        test_env::emitted(),
+        [Emitted::Chat {
+            cid: 0,
+            uid: 5,
+            line: "a:  hi".into(),
+            is_self: false,
+            media: false,
+            entry: Some(7),
+        }]
+    );
 }
 
 #[test]

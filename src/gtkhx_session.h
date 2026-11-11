@@ -62,16 +62,6 @@ GtkhxSession *gtkhx_session_get_default (void);
  * gtkhx_session.c's class_init. When you add a new helper, add the
  * matching signal there too (and connect the existing view-side
  * handler in gtkhx.c's init path). */
-/* The "chat" signal payload was once raw bytes (body + len). It's
- * now a single boxed HxChatEvent so every subscriber sees the same
- * UTF-8-validated, sender/body-split, info/self-classified view of
- * the line. The emitter builds the event from the decoded line with
- * gtkhx-core's chat_event_new; subscribers get a borrowed pointer for the
- * duration of the signal emission (boxed copy/free run if a
- * subscriber needs to keep it). */
-void gtkhx_session_emit_chat (GtkhxSession *self, struct htlc_conn *htlc,
-                              HxChatEvent *event);
-
 void gtkhx_session_emit_chat_subject (GtkhxSession *self,
                                       struct htlc_conn *htlc, guint32 cid,
                                       const char *subj);
@@ -88,25 +78,6 @@ void gtkhx_session_emit_chat_subject_notice (GtkhxSession *self,
 void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
                                          struct htlc_conn *htlc, guint32 cid,
                                          const char *name);
-
-/* "chat-history-batch" — reply from a TRAN_GET_CHAT_HISTORY (700)
- * request landed. Payload: (htlc, cid, GPtrArray<HxHistoryEntry*>,
- * has_more).
- *
- * The GPtrArray is owned by the emitter for the duration of the
- * signal emission; entries are freed automatically (the array's
- * free_func is hx_history_entry_free) after the last subscriber
- * returns. Subscribers that need to keep entry data past the emit
- * must copy what they need (timestamp, nick, message bytes) before
- * returning — pointers into the array are invalid after.
- *
- * cid is the channel id requested. Today the only meaningful
- * channel is 0 (public chat); the spec reserves 1+ for future
- * named channels. */
-void gtkhx_session_emit_chat_history_batch (GtkhxSession *self,
-                                            struct htlc_conn *htlc, guint32 cid,
-                                            GPtrArray *entries,
-                                            gboolean has_more);
 
 /* GIF-icons extension (fogWraith GIF-Icons.md).
  *

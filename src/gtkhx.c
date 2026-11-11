@@ -537,7 +537,7 @@ gtkhx_apply_userlist_style (GtkWidget *w)
 static struct timer *timer_list;
 
 /* The gutter tag on status lines. Just the name now — the view draws
- * the brackets and picks the colours (chat.c::chat_log_line_handler).
+ * the brackets and picks the colors (gtkhx-ui chat_output.rs).
  * Was " \00310[\00303hx\00310]\003 " until C6. */
 const char *INFOPREFIX = "hx";
 
@@ -1614,12 +1614,7 @@ extern void output_user_info (guint16 uid, const char *nam, const char *info,
  * Phase 3 adapter handlers below call. The functions themselves
  * are defined later in this file; the extern-linkage ones
  * (output_chat_subject, output_news_*, msg_output_from_event, etc.) are
- * already declared in their respective headers.
- *
- * the chat-signal path bypasses
- * the gtkhx.c output_chat stub — the renderer is
- * chat.c::output_chat_from_event, which takes the pre-parsed
- * HxChatEvent directly. */
+ * already declared in their respective headers. */
 /* Agreement window ported to Rust (gtkhx-ui, agreement.rs). */
 extern void gtkhx_show_agreement (session *sess, const char *agreement,
                                   guint16 len);
@@ -1629,37 +1624,12 @@ extern void gtkhx_show_agreement (session *sess, const char *agreement,
  * to the legacy view function signatures. Will get cleaned up once
  * Phase 3 finishes and the legacy signatures change to match. */
 static void
-on_chat_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
-                gpointer user_data)
-{
-    HxChatEvent *event = event_p;
-    (void)emitter;
-    (void)user_data;
-    if (!event) {
-        return;
-    }
-    output_chat_from_event (htlc, event);
-    gtkhx_notify_chat (htlc, event);
-}
-
-static void
 on_chat_subject_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                         guint cid, gpointer subj, gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
     output_chat_subject (htlc, (guint32)cid, (char *)subj);
-}
-
-static void
-on_chat_history_batch_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
-                              guint cid, gpointer entries_p, gboolean has_more,
-                              gpointer user_data)
-{
-    GPtrArray *entries = entries_p;
-    (void)emitter;
-    (void)user_data;
-    output_chat_history_batch (htlc, (guint32)cid, entries, has_more);
 }
 
 /* A request the server refused, with its reason: shown and heard as
@@ -2197,15 +2167,13 @@ on_connection_state_changed_signal (GtkhxSession *emitter,
 void
 gtkhx_connect_signals (GtkhxSession *emitter)
 {
-    g_signal_connect (emitter, "chat", G_CALLBACK (on_chat_signal), NULL);
+    gtkhx_chat_output_install ();
     g_signal_connect (emitter, "chat-subject",
                       G_CALLBACK (on_chat_subject_signal), NULL);
     g_signal_connect (emitter, "chat-subject-notice",
                       G_CALLBACK (chat_subject_notice_handler), NULL);
     g_signal_connect (emitter, "chat-invitation",
                       G_CALLBACK (on_chat_invitation_signal), NULL);
-    g_signal_connect (emitter, "chat-history-batch",
-                      G_CALLBACK (on_chat_history_batch_signal), NULL);
     g_signal_connect (emitter, "request-failed",
                       G_CALLBACK (on_request_failed_signal), NULL);
     g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
@@ -2255,8 +2223,6 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_tracker_server_create_signal), NULL);
     g_signal_connect (emitter, "tracker-batch-begin",
                       G_CALLBACK (on_tracker_batch_begin_signal), NULL);
-    g_signal_connect (emitter, "chat-log-line",
-                      G_CALLBACK (chat_log_line_handler), NULL);
     g_signal_connect (emitter, "user-notice", G_CALLBACK (user_notice_handler),
                       NULL);
     g_signal_connect (emitter, "connection-state-changed",

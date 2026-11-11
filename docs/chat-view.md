@@ -134,16 +134,23 @@ can't bridge that, so `chat_view.rs` registers the resolver through the
 crate's Rust API, `set_avatar_func`, and takes its own reference on the
 way out.
 
-### `chat.c` and `msg.rs`
+### `chat.c`, `chat_output.rs` and `msg.rs`
 
 **The palette.** `chat.c::gtkhx_apply_theme_palette` fills the view's
 palette from the active theme and pushes it to every open view with
-`rotulus_view_set_palette`. `src/chat.h` names the slots GtkHx builds rows
-with (`HX_CHAT_INFO_COLOR`, `HX_CHAT_HIGHLIGHT_COLOR`,
-`HX_CHAT_PLACEHOLDER_COLOR`, …) in terms of the header's `ROTULUS_PAL_*`
-roles, and nicks go through `hx_chat_nick_color`, which hashes the name
+`rotulus_view_set_palette`. The rows are built with the header's
+`ROTULUS_PAL_*` roles, which `chat.c` pins for the Rust modules that
+mirror them, and nicks go through `hx_chat_nick_color`, which hashes the name
 onto the theme's `nick_colors` when it has any. See
 [theming.md](theming.md).
+
+**The rows.** `rust/crates/gtkhx-ui/src/chat_output.rs` draws what the
+public chat and each private chat show: a line someone said, a line the
+server wrote, a page of chat history between its dividers under a "Load
+older" row, and the lines GtkHx writes itself. Each view keeps a registry
+of the rows of the lines the server gave an id, by that id, so a line can
+be found again by it; a live line that arrived while the first page of
+history was on its way is drawn once, live, and not again by the page.
 
 **Speaker identity.** A row's `RotulusSpeaker.key` is the Hotline user id,
 `0` when unknown. It comes from the `HTLS_HDR_CHAT` UID field when the
@@ -152,7 +159,8 @@ the same `HxMemberModel` the user list is built from. One user, one
 record, whichever surface you clicked; the thing to avoid is a third user
 structure. A lookup that misses stays 0.
 
-**Signals.** `chat.c` connects the ones that need GtkHx's state:
+**Signals.** `chat.c` connects the ones that need GtkHx's state, and
+`chat_output.rs` the one for history:
 
 | Signal | GtkHx's answer |
 |---|---|

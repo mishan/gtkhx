@@ -16,7 +16,6 @@ gtkhx_sources = files(
   # (hxhandlers::send::chat module; the hx_send_chat / hx_chat_* senders moved out of
   # chat.c). Links via the gtkhx-ffi façade archive.
   'chat_send_bridge.c',
-  'chat_history.c',
   # chat_avatar.c — one icon resolver shared with the user list's rule
   # (GIF avatar wins over the cicn id). See chat_avatar.h.
   'chat_avatar.c',

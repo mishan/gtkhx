@@ -35,11 +35,12 @@
 
 static void
 sound_on_chat (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event,
-               gpointer user_data)
+               gpointer entry, gpointer user_data)
 {
     (void)emitter;
     (void)htlc;
     (void)event;
+    (void)entry;
     (void)user_data;
     play_sound (CHAT_POST);
 }

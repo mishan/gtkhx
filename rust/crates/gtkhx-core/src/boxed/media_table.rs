@@ -4,7 +4,7 @@
 //! `gchat->media_next_id`, plus the three static helpers that drove them
 //! (`gchat_media_value_free`, `ensure_media_handles`, `gchat_register_media`).
 //!
-//! When a chat line carries inline media, `output_chat_from_event`
+//! When a chat line carries inline media, `hx_inline_media_row_append`
 //! [`register`](MediaTable::register)s a deep copy under a freshly-minted
 //! token and embeds `hxmedia:<token>` in the placeholder row text. A click on
 //! that word [`lookup`](MediaTable::lookup)s the token to pop the dialog. The

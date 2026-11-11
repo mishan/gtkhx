@@ -26,6 +26,7 @@ rust/crates/gtkhx-ui/src/chat.rs
 rust/crates/gtkhx-ui/src/chat_find.rs
 rust/crates/gtkhx-ui/src/chat_input.rs
 rust/crates/gtkhx-ui/src/chat_invite.rs
+rust/crates/gtkhx-ui/src/chat_output.rs
 rust/crates/gtkhx-ui/src/chat_tabs.rs
 rust/crates/gtkhx-ui/src/conn_tabs.rs
 rust/crates/gtkhx-ui/src/connect.rs

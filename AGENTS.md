@@ -81,7 +81,7 @@ looking for code in the wrong place.
 | **Entry point** | `gtkhx.c` (`main()`, GtkApplication, signal-handler wiring, opening and closing a connection's tab) |
 | **Dock / layout** | `dock_bridge.c` (the dock), `dock_pages.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `toolbar.c` |
 | **Settings** | `options.c` (change hooks, the startup load through `hxconfig`, the save timer and the `gtkhx_prefs_*` by-name bridge), `prefs_mirror.c` (the read-only C view of the settings), `icon_enum.c` (icon IDs for the Rust picker). The nickname and icon a connection presents are resolved in `gtkhx-ui`'s `identity.rs` |
-| **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c` |
+| **Chat** | `chat.c` (the window's leaf widgets and the palette; what the output draws is `gtkhx-ui`'s `chat_output.rs`), `chat_avatar.c` |
 | **Files** | `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_ops.c` (the providers; the browser itself is `gtkhx-ui`'s `files` module) |
 | **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, and the dispatch switch for the frames the session hands over whole, where a reply nothing expected is shown if it is a refusal; the login's reply, chat, users, messages, news and files, and the replies to the banner, GIF-icon and inline-media requests, reach `hxhandlers` as the session's events instead), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
 | **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
@@ -167,7 +167,8 @@ tracker's carries the connection it came from, and a handler routes by that. Rea
 trusting a table here — it grows.
 
 View-side handlers are static adapter functions in `gtkhx.c` (`on_<name>_signal`), wired
-up once in `gtkhx_connect_signals()` from `fe_init`. Boxed payload types are `#[repr(C)]`
+up once in `gtkhx_connect_signals()` from `fe_init`; the chat lines' are `gtkhx-ui`'s
+`chat_output.rs`, connected from there. Boxed payload types are `#[repr(C)]`
 mirrors in `gtkhx-core::boxed`, with layout pinned by `_Static_assert`s on the C side.
 
 **When a Rust receive handler needs the view to log a notice, emit a session signal** —
