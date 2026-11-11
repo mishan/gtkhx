@@ -37,8 +37,7 @@
  * having echoed HTLC_CAP_INLINE_MEDIA. Sending an upload to a
  * server that didn't negotiate the cap earns a task-error per
  * spec; logging the skip is more useful than spamming the user
- * with toasts. Same convention as voice.c::voice_cap_ok and
- * chat_history.c.
+ * with toasts. Same convention as voice.c::voice_cap_ok.
  *
  * Returns TRUE when the cap is set, FALSE otherwise. Safe to call
  * with NULL htlc (returns FALSE). */

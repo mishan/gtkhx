@@ -53,39 +53,11 @@ extern struct gtkhx_chat *hx_chat_view (struct chat *chat);
 extern void hx_chat_set_view (struct chat *chat, struct gtkhx_chat *view);
 extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
 extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
-/* Render one log line. `tag` is the gutter tag ("hx", a broadcast
- * sender) or NULL for an untagged line; `tag_color` its palette index.
- * They arrive as parameters rather than escapes embedded in `chat` —
- * see gtkhx_session.h's chat-log-line note.
- *
- * `cid` is the conversation being rendered into, and is what a nick
- * lookup resolves against — a private chat has its own membership, so
- * assuming the public room here misidentifies speakers in pchats. */
-extern void xprintline (session *sess, GtkWidget *text, guint32 cid, char *chat,
-                        size_t len, const char *tag, gint16 tag_color);
-
-/* chat-signal renderer. Takes a pre-parsed HxChatEvent
- * (sender/body slices + is_info/is_self flags from
- * gtkhx-core's chat_event_new). Bypasses the legacy hx_printf round-trip
- * the log-line path still uses. */
-struct _HxChatEvent;
-extern void output_chat_from_event (struct htlc_conn *htlc,
-                                    struct _HxChatEvent *event);
-
-/* Chat-history extension (fogWraith Capabilities-Chat-History.md).
- * Render a batch of historical entries received from the server
- * into chat `cid`'s output buffer. Each entry is rendered in a
- * muted (mIRC 14 grey) colour to visually distinguish from live
- * chat. The first batch since reconnect prepends a
- * "─── chat history ───" divider; subsequent batches (from
- * "Load older" — Phase 3) prepend a thinner separator.
- *
- * `entries` is a GPtrArray<HxHistoryEntry*> borrowed for the
- * duration of the call. has_more is informational — Phase 2
- * doesn't render anything different based on it, but Phase 3
- * uses it to decide whether to show the "Load older" row. */
-extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
-                                       GPtrArray *entries, gboolean has_more);
+/* What the chat views draw, from the chat, chat-history-batch and
+ * chat-log-line signals (gtkhx-ui chat_output.rs), connected once. */
+extern void gtkhx_chat_output_install (void);
+/* Empty a chat view, and forget what it drew. */
+extern void gtkhx_chat_output_clear (GtkWidget *view);
 
 /* A chat output for connection `conn`, configured for GtkHx (gtkhx-ui's
  * chat_view.rs): the chat preferences, the hotline:// scheme, the avatar
@@ -98,9 +70,7 @@ extern session *gtkhx_chat_view_session (GtkWidget *view);
 extern void gtkhx_chat_view_configure (GtkWidget *view);
 
 /* Palette slots the chat code reaches for, by what they mean here. */
-#define HX_CHAT_INFO_COLOR ROTULUS_PAL_SYSTEM /* "[hx]" */
-#define HX_CHAT_INFO_BRACKET_COLOR ROTULUS_PAL_SYSTEM_BRACKET
-#define HX_CHAT_HIGHLIGHT_COLOR ROTULUS_PAL_HIGHLIGHT
+#define HX_CHAT_INFO_COLOR ROTULUS_PAL_SYSTEM       /* "[hx]" */
 #define HX_CHAT_PLACEHOLDER_COLOR ROTULUS_PAL_MUTED /* media alt text */
 
 /* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
@@ -109,15 +79,6 @@ extern void gtkhx_chat_view_configure (GtkWidget *view);
  * compat with the existing call sites that include chat.h). */
 #include "gtkhx_log.h"
 
-/* The view-side handler for the "chat-log-line" signal. Connected
- * once in gtkhx_connect_signals at startup; the implementation
- * (xoutput_chat fan-out) lives in chat.c. */
-struct _GtkhxSession;
-typedef struct _GtkhxSession GtkhxSession;
-extern void chat_log_line_handler (GtkhxSession *emitter,
-                                   struct htlc_conn *htlc, guint cid,
-                                   gpointer name, gint color, gpointer body,
-                                   gpointer user_data);
 extern void generate_colors (GtkWidget *widget);
 
 /* Palette slot a nick renders in: the self-nick role for our own, one
@@ -201,6 +162,8 @@ extern void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid,
  * agnostic and stay put. */
 extern void gtkhx_apply_theme_palette (gboolean dark);
 
+struct _GtkhxSession;
+typedef struct _GtkhxSession GtkhxSession;
 /* View-side handler for the "chat-subject-notice" signal — the "Subject Changed
  * to: <subject>" chat line emitted by the Rust chat-subject receive handler
  * (hxhandlers::recv::chat). Applies gettext + INFOPREFIX. Connected in

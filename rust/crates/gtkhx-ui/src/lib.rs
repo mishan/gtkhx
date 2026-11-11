@@ -110,12 +110,15 @@ pub mod news;
 // and its fetches. open_news_browser is this module's export.
 pub mod news_browser;
 // the Chat window shell (public chat, CENTER; hosts the pchat/PM tabs).
-// Dock registration via dock_bridge; chat content + xtext + wire senders stay
-// C in chat.c. create_chat_window is this module's #[no_mangle] export.
+// Dock registration via dock_bridge; the chat's leaf widgets stay C in
+// chat.c. create_chat_window is this module's #[no_mangle] export.
 pub mod chat;
 // GtkHx's configuration of the Rotulus chat view, and the link detector
 // gtkurl.c's callers share with it.
 pub mod chat_view;
+// What the chat views draw: their lines, live and from history, and GtkHx's
+// own; and each view's registry of the rows of the lines it drew.
+pub mod chat_output;
 // The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
 // gtkhx_chat_tabs_* C ABI chat.c / gtkutil.c + chat.rs use.
 pub mod chat_tabs;

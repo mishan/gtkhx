@@ -97,6 +97,12 @@ pub unsafe extern "C" fn gtkhx_chat_view_session(view: *mut gtk::ffi::GtkWidget)
     }
 }
 
+/// The connection a chat view belongs to.
+pub(crate) fn conn_of(view: &RotulusView) -> Option<crate::dock::ConnKey> {
+    // SAFETY: the key is only ever set to a ConnKey.
+    unsafe { view.data::<crate::dock::ConnKey>(CONN_KEY) }.map(|c| unsafe { *c.as_ref() })
+}
+
 /// What every GtkHx chat view has, whatever the preferences say.
 fn setup(view: &RotulusView) {
     // Typing goes to the input box beside the view, so a click on the view

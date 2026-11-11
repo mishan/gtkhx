@@ -39,6 +39,11 @@ fn display_backed() {
     crate::pchat::tests::check_a_rename_retitles_the_tabs();
     crate::users_view::tests::check_avatars_stay_with_their_connection();
     crate::updates::tests::check_banner_starts_hidden();
+    crate::chat_output::tests::check_older_pages_go_above_the_first();
+    crate::chat_output::tests::check_server_prose_takes_a_row_a_line();
+    crate::chat_output::tests::check_a_line_has_one_row_found_by_its_id();
+    crate::chat_output::tests::check_trimmed_live_rows_are_let_go();
+    crate::chat_output::tests::check_a_cleared_view_starts_over();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();

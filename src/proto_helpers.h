@@ -325,10 +325,9 @@ extern gboolean hx_highlight_match (const char *body, gsize body_len,
  * consumers downstream want the same set of derived facts about
  * that line:
  *
- *   - chat.c::output_chat: needs the UTF-8-valid line plus the
- *     sender / body slices to drive xtext's nick column, plus
- *     is_info to suppress highlighting on info lines, plus
- *     is_self to colour the brackets.
+ *   - gtkhx-ui's chat_output.rs: needs the UTF-8-valid line plus the
+ *     sender / body slices to drive the nick column, plus
+ *     is_self to color the brackets.
  *
  *   - notify.c::gtkhx_notify_chat: wants the sender as a separate
  *     string for the notification title, the body for the
@@ -381,7 +380,7 @@ struct _HxChatEvent {
      * 0 means the server didn't send one — parse_chat defaults it, and
      * older servers omit the chunk entirely. It does *not* mean "user
      * zero". The render path falls back to a nick lookup against the
-     * membership model in that case; see chat.c::chat_speaker_for.
+     * membership model in that case; see chat_output.rs `speaker`.
      *
      * Sits in the padding after `cid`, so adding it moved no other
      * field and the struct is still 72 bytes. */
@@ -411,7 +410,7 @@ extern void hx_chat_event_free (HxChatEvent *e);
 /*
  * MediaTable — the per-chat token → HxChatMedia handle table (M3;
  * gtkhx-core::boxed/src/media_table.rs). Replaces gchat->media_handles
- * (GHashTable) + gchat->media_next_id: output_chat_from_event registers a
+ * (GHashTable) + gchat->media_next_id: hx_inline_media_row_append registers a
  * deep copy of the event's media under a fresh token and embeds it in the
  * placeholder; the word_click handler looks the token back up to pop the
  * dialog. The table owns each copy and frees them on _free. Owned by C as an

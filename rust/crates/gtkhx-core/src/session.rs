@@ -130,9 +130,12 @@ mod imp {
             // The one true G_TYPE_STRING is tracker-batch-begin's URL.
             SIGNALS.get_or_init(|| {
                 vec![
-                    // chat: (htlc*, HxChatEvent* boxed)
+                    // chat: (htlc*, HxChatEvent* boxed, entry*) — `entry` is
+                    // the line's `hxsession::HistoryEntry`, Rust's alone,
+                    // NULL where the server sent none; read through
+                    // `connect_chat`.
                     Signal::builder("chat")
-                        .param_types([Type::POINTER, chat_event_type()])
+                        .param_types([Type::POINTER, chat_event_type(), Type::POINTER])
                         .build(),
                     // chat-subject: (htlc*, cid, subject*)
                     Signal::builder("chat-subject")
@@ -148,7 +151,9 @@ mod imp {
                     Signal::builder("chat-invitation")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
                         .build(),
-                    // chat-history-batch: (htlc*, cid, GPtrArray*, has_more)
+                    // chat-history-batch: (htlc*, cid, entries*, has_more) —
+                    // `entries` a `&[hxsession::HistoryEntry]`, Rust's alone;
+                    // read through `connect_chat_history`.
                     Signal::builder("chat-history-batch")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER, Type::BOOL])
                         .build(),
@@ -482,22 +487,54 @@ unsafe impl Send for SendPtr {}
 unsafe impl Sync for SendPtr {}
 
 // ----------------------------------------------------------------------
-// FFI: emit wrappers (one per signal; ABI matches gtkhx_session.h)
+// Emit wrappers, one per signal, with gtkhx_session.h's C ABI but for the
+// Rust-only chat, chat-history-batch and messaging ones
 // ----------------------------------------------------------------------
 
 /// # Safety
 /// `self_`/`htlc` valid pointers; `event` a valid `HxChatEvent*` (or NULL).
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_chat(
+pub unsafe fn gtkhx_session_emit_chat(
     self_: *mut c_void,
     htlc: *mut c_void,
     event: *mut c_void,
+    entry: Option<&hxsession::HistoryEntry>,
 ) {
     let v = [
         ptr_value(htlc),
         boxed_value(hx_chat_event_get_type(), event),
+        ptr_value(entry.map_or(std::ptr::null(), |e| {
+            (e as *const hxsession::HistoryEntry).cast()
+        })),
     ];
     emit(self_, "chat", &v);
+}
+
+/// Hear the `chat` signal: the connection, the line, and its entry.
+pub fn connect_chat<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, &crate::boxed::chat::HxChatEvent, Option<&hxsession::HistoryEntry>)
+        + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("chat", false, move |args| {
+        let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        let event = unsafe {
+            glib::gobject_ffi::g_value_get_boxed(
+                glib::translate::ToGlibPtr::to_glib_none(&args[2]).0,
+            )
+        };
+        let entry = args[3].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        // SAFETY: the emit passes an event of this type, and an entry that
+        // outlives it.
+        if let Some(e) = unsafe { (event as *const crate::boxed::chat::HxChatEvent).as_ref() } {
+            f(htlc, e, unsafe {
+                (entry as *const hxsession::HistoryEntry).as_ref()
+            });
+        }
+        None
+    })
 }
 
 /// # Safety
@@ -556,22 +593,42 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_invitation(
 }
 
 /// # Safety
-/// `self_`/`htlc`/`entries` valid pointers (`entries` a GPtrArray*).
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_chat_history_batch(
+/// `self_`/`htlc` valid pointers.
+pub unsafe fn gtkhx_session_emit_chat_history_batch(
     self_: *mut c_void,
     htlc: *mut c_void,
     cid: u32,
-    entries: *mut c_void,
-    has_more: c_int,
+    entries: &[hxsession::HistoryEntry],
+    has_more: bool,
 ) {
     let v = [
         ptr_value(htlc),
         glib::Value::from(cid),
-        ptr_value(entries),
-        glib::Value::from(has_more != 0),
+        ptr_value((&entries as *const &[hxsession::HistoryEntry]).cast()),
+        glib::Value::from(has_more),
     ];
     emit(self_, "chat-history-batch", &v);
+}
+
+/// Hear the `chat-history-batch` signal: the connection, the chat, its
+/// page of history, and whether there is more before it.
+pub fn connect_chat_history<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, u32, &[hxsession::HistoryEntry], bool) + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("chat-history-batch", false, move |args| {
+        let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        let cid = args[2].get::<u32>().unwrap_or(0);
+        let entries = args[3].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        // SAFETY: the emit passes a page that outlives it.
+        if let Some(e) = unsafe { (entries as *const &[hxsession::HistoryEntry]).as_ref() } {
+            f(htlc, cid, e, args[4].get::<bool>().unwrap_or(false));
+        }
+        None
+    })
 }
 
 /// GIF-icons extension (Phase 10). Fired on an ICON_CHANGE (1864)
@@ -1258,9 +1315,57 @@ mod tests {
                 raw,
                 std::ptr::null_mut(),
                 &mut payload as *mut _ as *mut c_void,
+                None,
             );
         }
         assert_eq!(val.get(), 0xABCD);
+    }
+
+    #[test]
+    fn chat_signals_hand_the_sessions_entries_on() {
+        let entry = |message_id| hxsession::HistoryEntry {
+            message_id,
+            timestamp: 0,
+            flags: 0,
+            icon: 0,
+            nick: "a".into(),
+            text: "hi".into(),
+        };
+        let s = new_session();
+        let got: Rc<std::cell::RefCell<Vec<u64>>> = Rc::default();
+        let g = got.clone();
+        s.connect_local("chat", false, move |args| {
+            let p = args[3].get::<*mut c_void>().unwrap() as *const hxsession::HistoryEntry;
+            g.borrow_mut()
+                .push(unsafe { p.as_ref() }.map_or(0, |e| e.message_id));
+            None
+        });
+        let g = got.clone();
+        let id = connect_chat_history(move |htlc, cid, entries, has_more| {
+            assert_eq!((htlc as usize, cid, has_more), (0x1234, 3, true));
+            g.borrow_mut().extend(entries.iter().map(|e| e.message_id));
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        let mut payload = test_boxed_stubs::ChatStub(1);
+        let event = &mut payload as *mut _ as *mut c_void;
+        unsafe {
+            gtkhx_session_emit_chat(raw, std::ptr::null_mut(), event, Some(&entry(7)));
+            gtkhx_session_emit_chat(raw, std::ptr::null_mut(), event, None);
+            gtkhx_session_emit_chat_history_batch(
+                gtkhx_session_get_default(),
+                0x1234 as *mut c_void,
+                3,
+                &[entry(8), entry(9)],
+                true,
+            );
+        }
+        let default: glib::Object = unsafe {
+            glib::Object::from_glib_none(
+                gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
+            )
+        };
+        default.disconnect(id);
+        assert_eq!(*got.borrow(), [7, 0, 8, 9]);
     }
 
     #[test]

@@ -50,9 +50,9 @@ static GtkApplication *notify_app;
 /* ---- Helpers ------------------------------------------------------- */
 
 /* Pull the user's current nick + the highlight-words list and run
- * hx_highlight_match against `body`. Reuses the same logic chat.c
- * uses for the inline ATTR_BOLD+ATTR_COLOR highlight so visual
- * highlight and notification trigger always agree. */
+ * hx_highlight_match against `body`, over the same words
+ * chat_output.rs's inline highlight matches, so visual highlight
+ * and notification trigger agree. */
 static gboolean
 body_mentions_us (struct htlc_conn *htlc, const char *body)
 {

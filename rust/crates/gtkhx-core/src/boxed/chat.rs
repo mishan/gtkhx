@@ -1,10 +1,9 @@
 //! `HxChatEvent` + nested `HxChatMedia` — chat-line value object
 //! (`src/proto_helpers.h`): the boxed type, and [`chat_event_new`], which
 //! builds one from the line the session decoded. The media placeholder
-//! formatter stays in C and reads these `#[repr(C)]` structs, as do the
-//! chat output and notification consumers.
+//! formatter stays in C and reads these `#[repr(C)]` structs, as does the
+//! notification consumer.
 
-use crate::boxed::history::dup_by_len;
 use crate::boxed::register_once;
 use glib::ffi::{g_free, g_malloc, g_malloc0, g_strndup, GType};
 use std::ffi::c_char;
@@ -203,6 +202,18 @@ pub fn chat_event_new(
         (*e).media = media_new(media);
         e
     }
+}
+
+/// Copy `src` into a fresh `g_malloc(src.len() + 1)` buffer with a trailing
+/// NUL. By length, not `g_strndup`, which stops at the first embedded NUL:
+/// a line may hold one, and its readers go by the recorded length.
+unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
+    let p = g_malloc(src.len() + 1) as *mut u8;
+    if !src.is_empty() {
+        ptr::copy_nonoverlapping(src.as_ptr(), p, src.len());
+    }
+    *p.add(src.len()) = 0;
+    p as *mut c_char
 }
 
 /// A heap `HxChatMedia` for the picture the session read off a line, or

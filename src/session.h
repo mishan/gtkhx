@@ -85,10 +85,8 @@ typedef struct HxChatRegistry HxChatRegistry;
 /* ---- Chat windows ------------------------------------------------- */
 
 /* struct gtkhx_chat — the per-conversation view — is an opaque handle here.
- * Its definition (and struct hx_chat_history_render, which it embeds) lives in
- * chat.c: it is a C-only view aggregate (GTK widget handles, the Rust
- * InputHistory / MediaTable / HxUserListView handles, and render cursors that
- * are raw pointers into xtext internal entries). Code outside chat.c reaches it
+ * Its definition lives in chat.c: it is a C-only view aggregate (GTK widget
+ * handles and the Rust HxUserListView handle). Code outside chat.c reaches it
  * through the hx_gchat_* accessors in chat.h. */
 struct gtkhx_chat;
 
