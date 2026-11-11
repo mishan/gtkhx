@@ -1,0 +1,5 @@
+# The rig's one room. Its id is written here so the server, which writes
+# one for an entry without, finds nothing to change.
+[[room]]
+id = 2754100983
+name = "lounge"

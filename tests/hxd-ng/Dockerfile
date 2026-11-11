@@ -5,20 +5,21 @@
 # hxd-ng (https://github.com/mishan/hxd-ng) implements the video
 # extension, and every video test runs against it as well as Janus; the
 # news test reads the pictures it attaches to articles, the friends test
-# speaks the messaging extension to it, and the chat suite the Structured
-# Chat draft. The
+# speaks the messaging extension to it, the chat suite the Structured
+# Chat draft and its history, and the reactions suite the Reactions draft. The
 # server itself comes from the image hxd-ng's own CI publishes to GHCR
 # for every commit on main, so nothing compiles here;
 # this layer adds only the rig's config, accounts and entrypoint. Pinned
 # by commit tag and digest, like the other servers are pinned: an
 # unpinned main has broken this rig before. Bump both deliberately, with
 # the tests run against the new one.
-FROM ghcr.io/mishan/hxd-ng:sha-bf08fd3@sha256:2903d381fd10d216be50b17b0509a4633677053f0da38264aa409e0887649c90
+FROM ghcr.io/mishan/hxd-ng:sha-c1c97cc@sha256:eab0ff35d9830a3a6fc1f50282413bbfcedfa5c3a4e87bae6322660cf789e209
 
 # The base image runs as the unprivileged hxd user (10001), which owns
 # /var/lib/hxd-ng and /run/hxd-ng; the accounts go in owned by it too.
 COPY conf/hxd-ng.toml /etc/hxd-ng/hxd-ng.toml
 COPY --chown=10001:10001 conf/accounts /var/lib/hxd-ng/accounts
+COPY --chown=10001:10001 conf/rooms.toml /var/lib/hxd-ng/rooms.toml
 COPY --chown=10001:10001 conf/files /srv/hxd-ng/files
 # The folder tests upload here; git keeps no empty folder.
 RUN mkdir /srv/hxd-ng/files/Uploads

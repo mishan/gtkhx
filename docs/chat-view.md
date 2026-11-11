@@ -160,6 +160,9 @@ older" row, and the lines GtkHx writes itself. Each view keeps a registry
 of the rows of the lines the server gave an id, by that id, so a line can
 be found again by it; a live line that arrived while the first page of
 history was on its way is drawn once, live, and not again by the page.
+Where the session has reactions, a lobby line's reaction chips are set on
+its row by that id, from its history entry and then from the `reactions`
+signal ([hotline-protocol.md](hotline-protocol.md), "Reactions").
 
 **Speaker identity.** A row's `RotulusSpeaker.key` is the Hotline user id,
 `0` when unknown. It comes from the `HTLS_HDR_CHAT` UID field when the

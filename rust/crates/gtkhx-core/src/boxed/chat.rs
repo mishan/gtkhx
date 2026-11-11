@@ -477,6 +477,7 @@ mod tests {
             icon: 128,
             nick: nick.into(),
             text: text.into(),
+            reactions: None,
         };
         let me: (u16, &[u8]) = (9, b"bob");
         let cases = [

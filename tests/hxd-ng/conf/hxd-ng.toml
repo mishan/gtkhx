@@ -67,7 +67,25 @@ db = "/var/lib/hxd-ng/messages.db"
 [messaging]
 enabled = true
 
-# The Structured Chat draft (capability bit 17), for hx-e2e's chat suite.
-# No [history], so the lobby's lines carry ids counted in memory.
+# Public chat's history, kept in the inbox's database, for hx-e2e's chat
+# suite and the reactions kept beside the lines.
+[history]
+
+# The Structured Chat draft (capability bit 17), for hx-e2e's chat suite;
+# the lobby's lines carry their history ids.
 [structured_chat]
 enabled = true
+
+# The Reactions draft (capability bit 19) beside it, for the react-*
+# accounts (hx-e2e's reactions suite), which react faster than one a
+# second.
+[reactions]
+enabled = true
+burst = 1000
+per_second = 100
+
+# One room, so a room's lines are reaction targets too. No lobby notice,
+# which the chat suites would hear among their lines.
+[rooms]
+file = "/var/lib/hxd-ng/rooms.toml"
+announce = false

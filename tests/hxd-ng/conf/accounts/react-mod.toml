@@ -1,0 +1,14 @@
+# The reactions suite's moderator: what react-a and react-b may, and
+# disconnect_users, which makes it one, so it may clear a line's reactions.
+name = "react-mod"
+password = "react-mod"
+
+[access]
+read_chat = true
+send_chat = true
+send_msgs = true
+messaging = true
+disconnect_users = true
+
+[extra]
+can_spam = true

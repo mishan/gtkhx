@@ -55,6 +55,7 @@ pub(crate) unsafe fn logged_in(htlc: *mut c_void, info: &ServerInfo) {
     }
     hx_conn_set_version(h, info.version);
     hx_conn_set_caps(h, info.caps);
+    super::reactions::agreed(htlc, info.reactions);
     // Each limit is optional on the wire, and 0 is the client's default.
     let m = &info.media;
     hx_conn_set_media_max_bytes(h, m.max_bytes.unwrap_or(0));

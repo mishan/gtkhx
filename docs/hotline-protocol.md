@@ -1277,6 +1277,7 @@ bitmap.
 | 9 | 0x0200 | Modern dates | Capabilities.md |
 | 10 | 0x0400 | Video (only together with bit 2) | hxd-ng `docs/capabilities-video.md` |
 | 17 | 0x00020000 | Structured chat (a draft, not adopted) | Capabilities-Structured-Chat.md |
+| 19 | 0x00080000 | Reactions (a draft, not adopted; only beside bits 1 and 17) | Capabilities-Reactions.md |
 
 With **modern dates**, dates use the real year as the base instead of 1904, which
 avoids the 2040 overflow. Nothing yet defines the layout of the 128-bit access map
@@ -1374,6 +1375,30 @@ feature. In such a build, a line a user said is drawn with the nick and text fro
 entry rather than split out of the formatted text, which cuts a nick at 13 columns; an
 emote or a server's line is drawn as formatted; and a line is GtkHx's own by user ID
 rather than by nick.
+
+### Reactions
+
+Capability bit 19, a draft (Capabilities-Reactions.md) that is not adopted, confirmed
+only beside bits 1 and 17. A client reacts to a line or a message with an emoji in Send
+Reaction (710), hears what others did in Reaction Changed (711, task id 0) and reads
+reactions back with Get Reactions (712, 1 to 50 targets), each naming what it is about
+by the Replies draft's packed target (field 0x0F24): a kept line by channel and history
+id, a line by its chat's own id, an instant message, or a stored private message. A
+target's reactions are a summary (0x0F29), each key and its count in the order first
+added, and the reader's own keys among them (0x0F31); a Chat History entry carries both
+as sub-fields 0x0021 and 0x0023. The Login reply says which kinds it takes (0x0F2B), and
+a server that echoes the bit without it offers none. Refusals carry the draft family's
+reason code (0x0F2A). Implemented by hxd-ng.
+
+GtkHx offers it only in a build with hxnet's `reactions` feature, which brings
+`structured-chat` with it; without it the login is what it was. It shows each lobby
+line's chips: from its history entry, and then from what a Reaction Changed says. A
+change that arrives while the first page of history is on its way, for a line the page
+then draws, may predate what the page says, so those lines are asked after again with
+Get Reactions once it is drawn. A server's own emoji, which GtkHx cannot draw, is a
+placeholder chip named by its id. hxnet hands 711, and the Notification (718) a server
+may send beside it, to the Rust handlers only where the session has reactions, and the
+replies to 710 and 712 by their trans.
 
 ### Messaging
 

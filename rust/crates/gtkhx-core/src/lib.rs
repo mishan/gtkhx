@@ -32,4 +32,5 @@
 pub mod boxed;
 pub mod conn;
 pub mod messaging;
+pub mod reactions;
 pub mod session;

@@ -399,4 +399,4 @@ fn im(frame: &[u8]) -> Option<Im> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

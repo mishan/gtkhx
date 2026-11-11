@@ -65,6 +65,12 @@ fn video(h: *mut gtkhx_core::conn::HtlcConn, kind: u16) -> Option<(u16, u32)> {
     (unsafe { hx_conn_video_limits(h, kind, &mut l) } != 0).then_some((l.max_width, l.max_bitrate))
 }
 
+const REACTIONS: hxproto::reactions::Limits = hxproto::reactions::Limits {
+    targets: hxproto::reactions::TARGETS_LINES,
+    max_keys: Some(20),
+    max_per_user: None,
+};
+
 /// A server that said everything, then one that said nothing, on the same
 /// connection: nothing of the first outlives the second's reply but our
 /// uid, which only a server that names it changes.
@@ -75,7 +81,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         version: 200,
         name: Some("Janus".into()),
         uid: Some(42),
-        caps: cap::TEXT_ENCODING | cap::INLINE_MEDIA,
+        caps: cap::TEXT_ENCODING | cap::INLINE_MEDIA | cap::STRUCTURED_CHAT | cap::REACTIONS,
         media: LimitsAdvertisement {
             max_bytes: Some(262_144),
             chunk_size: Some(60_000),
@@ -85,6 +91,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         history_max_days: Some(7),
         video: vec![CAMERA],
         messaging: None,
+        reactions: Some(REACTIONS),
     };
     let bare = ServerInfo {
         version: 0,
@@ -96,6 +103,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         history_max_days: None,
         video: vec![],
         messaging: None,
+        reactions: None,
     };
     unsafe {
         logged_in(h.cast(), &full);
@@ -110,6 +118,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         assert_eq!(hx_conn_history_max_days(h), 7);
         assert_eq!(video(h, 1), Some((1280, 1_500_000)));
         assert_eq!(video(h, 2), None);
+        assert_eq!(super::super::reactions::limits(h.cast()), Some(REACTIONS));
         assert_eq!(emitted(), [Emitted::LoggedIn(Some("Janus".into()))]);
 
         logged_in(h.cast(), &bare);
@@ -121,6 +130,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         assert_eq!(hx_conn_history_max_msgs(h), 0);
         assert_eq!(hx_conn_history_max_days(h), 0);
         assert_eq!(video(h, 1), None);
+        assert_eq!(super::super::reactions::limits(h.cast()), None);
         assert_eq!(emitted(), [Emitted::LoggedIn(None)]);
         hx_conn_free(h);
     }
@@ -167,6 +177,7 @@ fn a_server_that_confirmed_bit_6_is_asked_for_the_roster_and_its_requests() {
             history_max_days: None,
             video: vec![],
             messaging,
+            reactions: None,
         };
         unsafe { logged_in(h.cast(), &info) };
         let opcodes: Vec<u32> = crate::send::friends::tests::sent()
@@ -206,6 +217,7 @@ fn a_login_lists_only_the_first_page_of_its_requests() {
             max_request_messages: Some(5),
             ..Limits::default()
         }),
+        reactions: None,
     };
     unsafe { logged_in(h.cast(), &info) };
     let (_, trans, _) = crate::send::friends::tests::sent().remove(0);

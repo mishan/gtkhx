@@ -1,0 +1,14 @@
+# A reactions suite account: chat, private messages and messaging, whose
+# instant messages are reaction targets too.
+name = "react-b"
+password = "react-b"
+
+[access]
+read_chat = true
+send_chat = true
+send_msgs = true
+messaging = true
+
+# The suite reacts in bursts.
+[extra]
+can_spam = true
