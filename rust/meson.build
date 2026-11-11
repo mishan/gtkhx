@@ -457,9 +457,9 @@ endif
 # Build the Rust workspace. The custom_target output is a stamp file that
 # Meson uses for dependency tracking; the actual artifacts are the .a
 # archives under rust_target_dir/release/.
-# The chat view comes from crates.io, and its crate carries the C header
-# and the translations of its own strings. Ask cargo where the locked
-# version lives rather than keep copies here; see rotulus.py.
+# The chat view is an external crate, which carries the C header and the
+# translations of its own strings. Ask cargo where the locked version
+# lives rather than keep copies here; see rotulus.py.
 rotulus_dir = run_command(
   find_program('python3'), files('rotulus.py'), 'dir',
   cargo.full_path(), meson.current_source_dir() / 'Cargo.toml',
@@ -470,8 +470,9 @@ rotulus_inc = include_directories(run_command(
   rotulus_dir, meson.project_source_root(), meson.current_source_dir(),
   check : true,
 ).stdout().strip())
-# The directory's name carries the crate's version, so reconfigure when the
-# lockfile moves; reading it is what makes it a configure dependency.
+# The directory's name carries the crate's version or commit, so
+# reconfigure when the lockfile moves; reading it is what makes it a
+# configure dependency.
 import('fs').read('Cargo.lock')
 
 # Its strings are in their own gettext domain, "rotulus" (see gtkhx.c).

@@ -112,7 +112,7 @@ knowing.
    It was rewritten anyway, and the vendored widget is deleted. The chat output
    surface is now Rotulus, which lives in
    [its own repository](https://github.com/mishan/rotulus) and which GtkHx
-   takes from crates.io: `rotulus-layout` (a dependency-free layout engine — spans,
+   takes as a Cargo dependency: `rotulus-layout` (a dependency-free layout engine — spans,
    wrapping, a chunked prefix-sum height index, scroll anchoring, selection,
    search) plus `rotulus` (the GTK4 widget). The crate's `rotulus.h` is a
    declaration header; there is no `chat_view.c`. See the widget's
@@ -168,7 +168,7 @@ the map.
 | Receive- and send-side protocol handlers | `hxhandlers::{recv,send}` | the per-opcode handler bodies in `rcv.c` and the scattered `hlwrite` call sites |
 | The send primitive | `hxtask` | the variadic `hlwrite` |
 | Client-side models: chat / membership / conversation registry, private messages, news, files | `hxmodel` | `struct chat` + `gchats`, `struct msgwin` + `msg_windows`, the news GUI structs, `filelist_walker.c` |
-| Chat output surface | `rotulus` + `rotulus-layout`, from crates.io | vendored `xtext.c` |
+| Chat output surface | `rotulus` + `rotulus-layout`, external | vendored `xtext.c` |
 | Windows and dialogs | `gtkhx-ui`, module per window | see below |
 | TLS trust store (TOFU + SHA-256 pinning) | `hxtls-trust` | `tls_trust.c`, `tls_trust_dialog.c` |
 | Bookmarks (HTsc format, legacy import, cipher vocabulary) | `hxbookmarks` | `bookmarks_io.c`, `bookmark_rc4_dialog.c`, `cipher_vocab.c` |

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The parts of the Rotulus crate that C needs, found through cargo.
 
-The chat view comes from crates.io, and its crate carries the C header
-and the translations of its own strings. Rather than keep copies here,
-the build asks cargo where the locked version of the crate lives, which
-works the same online and in the Flatpak's offline, vendored build.
+The chat view is an external crate, which carries the C header and the
+translations of its own strings. Rather than keep copies here, the build
+asks cargo where the locked version of the crate lives, which works the
+same for a registry or git dependency and in the Flatpak's offline,
+vendored build.
 
   rotulus.py dir CARGO MANIFEST
       Print the crate's directory.

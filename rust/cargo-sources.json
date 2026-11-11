@@ -3746,45 +3746,6 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rotulus/rotulus-0.2.2.crate",
-    "sha256": "ed672c0a045be2c91e4e8bdd05b46dffe72bf89fd8ac263a8e4bfd661b37165a",
-    "dest": "cargo/vendor/rotulus-0.2.2"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"ed672c0a045be2c91e4e8bdd05b46dffe72bf89fd8ac263a8e4bfd661b37165a\", \"files\": {}}",
-    "dest": "cargo/vendor/rotulus-0.2.2",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rotulus-layout/rotulus-layout-0.2.2.crate",
-    "sha256": "c859d2cfcda433d68bee14c782ef473ee0d40d500d1a5fe9bbc137f9f55755b5",
-    "dest": "cargo/vendor/rotulus-layout-0.2.2"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"c859d2cfcda433d68bee14c782ef473ee0d40d500d1a5fe9bbc137f9f55755b5\", \"files\": {}}",
-    "dest": "cargo/vendor/rotulus-layout-0.2.2",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/rotulus-mirc/rotulus-mirc-0.2.2.crate",
-    "sha256": "f822669975e7c85288805c255a83c3b127f09a3c2c3f1808ae8b7c2e3bd1177c",
-    "dest": "cargo/vendor/rotulus-mirc-0.2.2"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"f822669975e7c85288805c255a83c3b127f09a3c2c3f1808ae8b7c2e3bd1177c\", \"files\": {}}",
-    "dest": "cargo/vendor/rotulus-mirc-0.2.2",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/rubato/rubato-0.16.2.crate",
     "sha256": "5258099699851cfd0082aeb645feb9c084d9a5e1f1b8d5372086b989fc5e56a1",
     "dest": "cargo/vendor/rubato-0.16.2"
@@ -5593,8 +5554,32 @@
     "dest-filename": ".cargo-checksum.json"
   },
   {
+    "type": "git",
+    "url": "https://github.com/mishan/rotulus.git",
+    "commit": "131fdc83e41e22eeb07ab4361fa3c4ec40724582",
+    "dest": "cargo/git/rotulus-131fdc83e41e/rotulus"
+  },
+  {
     "type": "inline",
-    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"/run/build/gtkhx/cargo/vendor\"\n\n[source.\"git+https://github.com/mishan/hx-libs.git?rev=5bf9013feebf095b66cee3273dcc17153054a13c\"]\ngit = \"https://github.com/mishan/hx-libs.git\"\nrev = \"5bf9013feebf095b66cee3273dcc17153054a13c\"\nreplace-with = \"vendored-git-0\"\n\n[source.vendored-git-0]\ndirectory = \"/run/build/gtkhx/cargo/git/hx-libs-5bf9013feebf/hx-libs/crates\"\n",
+    "contents": "{\"package\": null, \"files\": {}}",
+    "dest": "cargo/git/rotulus-131fdc83e41e/rotulus/crates/rotulus",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": null, \"files\": {}}",
+    "dest": "cargo/git/rotulus-131fdc83e41e/rotulus/crates/rotulus-layout",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": null, \"files\": {}}",
+    "dest": "cargo/git/rotulus-131fdc83e41e/rotulus/crates/rotulus-mirc",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "inline",
+    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"/run/build/gtkhx/cargo/vendor\"\n\n[source.\"git+https://github.com/mishan/hx-libs.git?rev=5bf9013feebf095b66cee3273dcc17153054a13c\"]\ngit = \"https://github.com/mishan/hx-libs.git\"\nrev = \"5bf9013feebf095b66cee3273dcc17153054a13c\"\nreplace-with = \"vendored-git-0\"\n\n[source.vendored-git-0]\ndirectory = \"/run/build/gtkhx/cargo/git/hx-libs-5bf9013feebf/hx-libs/crates\"\n\n[source.\"git+https://github.com/mishan/rotulus.git?rev=131fdc83e41e22eeb07ab4361fa3c4ec40724582\"]\ngit = \"https://github.com/mishan/rotulus.git\"\nrev = \"131fdc83e41e22eeb07ab4361fa3c4ec40724582\"\nreplace-with = \"vendored-git-1\"\n\n[source.vendored-git-1]\ndirectory = \"/run/build/gtkhx/cargo/git/rotulus-131fdc83e41e/rotulus/crates\"\n",
     "dest": "cargo",
     "dest-filename": "config.toml"
   }
