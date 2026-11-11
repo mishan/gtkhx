@@ -13,6 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::os::raw::{c_int, c_void};
 use std::time::{Duration, Instant};
 
+use hxmodel::reactions::same;
 use hxproto::reactions::{Key, ADD, REMOVE};
 use hxproto::target::Target;
 use hxrequest::reactions::{self as req, MAX_TARGETS};
@@ -63,18 +64,18 @@ pub unsafe fn react(htlc: *mut c_void, target: Target, key: Key, add: bool) -> b
     ask(htlc, target, key, add, false)
 }
 
-/// [`react`], or ask `again` what the server said to slow down for, before
-/// the rest waiting.
+/// Ask again, before the rest waiting, what the server said to slow down
+/// for (`Event::PutOff`). Refused again, it is the user's to hear.
 ///
 /// # Safety
 /// See [`react`].
-pub(crate) unsafe fn ask(
-    htlc: *mut c_void,
-    target: Target,
-    key: Key,
-    add: bool,
-    again: bool,
-) -> bool {
+pub unsafe fn retry(htlc: *mut c_void, target: Target, key: Key, add: bool) -> bool {
+    ask(htlc, target, key, add, true)
+}
+
+/// # Safety
+/// See [`react`].
+unsafe fn ask(htlc: *mut c_void, target: Target, key: Key, add: bool, again: bool) -> bool {
     let action = if add { ADD } else { REMOVE };
     let Some(r) = req::send(&target, action, Some(&key), None) else {
         return false;
@@ -93,8 +94,8 @@ pub(crate) unsafe fn ask(
     true
 }
 
-/// Take back the reaction with `key` on `target` still waiting its turn:
-/// whether one was.
+/// Take back the reaction with `key`, in any spelling the line's model
+/// takes for it, on `target` still waiting its turn: whether one was.
 ///
 /// # Safety
 /// See [`react`].
@@ -105,7 +106,7 @@ pub unsafe fn withdraw(htlc: *mut c_void, target: &Target, key: &Key) -> bool {
         };
         let n = p.waiting.len();
         p.waiting.retain(
-            |(_, a)| !matches!(a, Asked::Send { target: t, key: k, .. } if t == target && k == key),
+            |(_, a)| !matches!(a, Asked::Send { target: t, key: k, .. } if t == target && same(k, key)),
         );
         p.waiting.len() < n
     })

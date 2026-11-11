@@ -17,7 +17,7 @@ use rotulus::RotulusView;
 use rotulus_layout::MessageId;
 use std::ffi::c_void;
 
-use crate::chat_output::{then, want};
+use crate::chat_output::{then, want, Then};
 use crate::tr::tr;
 
 /// How many emoji the menu offers at once.
@@ -64,22 +64,27 @@ fn session(view: &RotulusView) -> Option<(*mut c_void, hxproto::reactions::Limit
 }
 
 /// The user wants the chip `key` on `row` on, off, or (`None`) the other
-/// way round.
-fn react(view: &RotulusView, row: MessageId, key: &str, on: Option<bool>) {
+/// way round. Whether that was refused before any request.
+fn react(view: &RotulusView, row: MessageId, key: &str, on: Option<bool>) -> bool {
     let Some((htlc, limits)) = session(view) else {
-        return;
+        return false;
     };
-    if let Some(t) = want(view, row, key, on, &limits) {
+    let t = want(view, row, key, on, &limits);
+    let refused = matches!(t, Some(Then::Say(_)));
+    if let Some(t) = t {
         // SAFETY: as for `session`.
         unsafe { then(htlc, view, t) };
     }
+    refused
 }
 
 /// React to `row` with `emoji`, picked from the menu or the chooser, which
-/// goes first among the menu's after.
+/// goes first among the menu's after unless it was refused.
 fn pick(view: &RotulusView, row: MessageId, emoji: &str) {
     let emoji = hxproto::emoji::qualify(emoji);
-    react(view, row, emoji, Some(true));
+    if react(view, row, emoji, Some(true)) {
+        return;
+    }
     let mut quick = vec![emoji.to_owned()];
     quick.extend(self::quick().into_iter().filter(|e| e != emoji));
     quick.truncate(QUICK);

@@ -47,7 +47,7 @@ pub struct LineReactions {
 
 /// Two keys are one with an emoji's U+FE0F aside, since a server may spell
 /// a key otherwise than it was sent.
-fn same(a: &Key, b: &Key) -> bool {
+pub fn same(a: &Key, b: &Key) -> bool {
     match (a, b) {
         (Key::Emoji(a), Key::Emoji(b)) => {
             let bare = |s: &str| s.chars().filter(|&c| c != '\u{FE0F}').collect::<String>();
@@ -142,21 +142,25 @@ impl LineReactions {
     }
 
     /// The request for `key` that `add`ed or not was made, the key held by
-    /// `count` after where the server says. Whether to ask again, for what
-    /// the user has wanted since.
+    /// `count` after, or where the server says none, by what it said before
+    /// with ours as asked. Whether to ask again, for what the user has
+    /// wanted since.
     pub fn answered(&mut self, key: &Key, add: bool, count: Option<u32>) -> Option<bool> {
-        if let Some(count) = count {
-            match self.said.iter().position(|s| same(&s.key, key)) {
-                Some(i) => (self.said[i].count, self.said[i].mine) = (count, add),
-                // Until the server tells the line's reactions in its own
-                // spelling.
-                None if count > 0 => self.said.push(Shown {
-                    key: key.clone(),
-                    count,
-                    mine: add,
-                }),
-                None => {}
-            }
+        let at = self.said.iter().position(|s| same(&s.key, key));
+        let count = count.unwrap_or_else(|| {
+            let before = at.map_or(0, |i| self.said[i].count - u32::from(self.said[i].mine));
+            before + u32::from(add)
+        });
+        match at {
+            Some(i) => (self.said[i].count, self.said[i].mine) = (count, add),
+            // Until the server tells the line's reactions in its own
+            // spelling.
+            None if count > 0 => self.said.push(Shown {
+                key: key.clone(),
+                count,
+                mine: add,
+            }),
+            None => {}
         }
         let i = self.acts.iter().position(|a| same(&a.key, key))?;
         if self.acts[i].want == add {
@@ -165,6 +169,17 @@ impl LineReactions {
         }
         self.acts[i].sent = !add;
         Some(!add)
+    }
+
+    /// The request for `key` was put off by the server's rate: whether to
+    /// ask again, which is so only where the user still wants what it
+    /// asked. Otherwise what the server said stands.
+    pub fn put_off(&mut self, key: &Key) -> bool {
+        let still = (self.acts.iter()).any(|a| same(&a.key, key) && a.want == a.sent);
+        if !still {
+            self.refused(key);
+        }
+        still
     }
 
     /// The request for `key` was refused, or taken back before it went:
@@ -190,6 +205,7 @@ mod tests {
         Want(&'static str, bool, Next),
         Answered(&'static str, bool, Option<u32>, Option<bool>),
         Refused(&'static str),
+        PutOff(&'static str, bool),
     }
     use Op::*;
 
@@ -312,13 +328,37 @@ mod tests {
                 &[(THUMBS, 4, false)],
             ),
             (
-                "an answer with no count",
+                "an answer with no count: ours as asked",
+                &[
+                    Said(&[(THUMBS, 1), (HEART, 1)], &[1]),
+                    Want(THUMBS, true, Next::Send(true)),
+                    Answered(THUMBS, true, None, None),
+                    Want(HEART, false, Next::Send(false)),
+                    Answered(HEART, false, None, None),
+                    Want("\u{1F600}", true, Next::Send(true)),
+                    Answered("\u{1F600}", true, None, None),
+                ],
+                &[(THUMBS, 2, true), ("\u{1F600}", 1, true)],
+            ),
+            (
+                "put off and still wanted: asked again",
                 &[
                     Said(&[(THUMBS, 1)], &[]),
                     Want(THUMBS, true, Next::Send(true)),
-                    Answered(THUMBS, true, None, None),
+                    PutOff(THUMBS, true),
                 ],
-                &[(THUMBS, 1, false)],
+                &[(THUMBS, 2, true)],
+            ),
+            (
+                "put off after it was clicked back: dropped",
+                &[
+                    Said(&[(THUMBS, 1)], &[]),
+                    Want(THUMBS, true, Next::Send(true)),
+                    Want(THUMBS, false, Next::Withdraw),
+                    PutOff(THUMBS, false),
+                    Want(THUMBS, true, Next::Send(true)),
+                ],
+                &[(THUMBS, 2, true)],
             ),
         ] {
             let mut r = LineReactions::default();
@@ -333,6 +373,7 @@ mod tests {
                         assert_eq!(r.answered(&key(e), *add, *count), *again, "{case}")
                     }
                     Refused(e) => r.refused(&key(e)),
+                    PutOff(e, again) => assert_eq!(r.put_off(&key(e)), *again, "{case}"),
                 }
             }
             let shown: Vec<_> = r

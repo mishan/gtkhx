@@ -118,8 +118,8 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
 /// The reply to the request on `trans`.
 ///
 /// A Send Reaction's says the reaction was made, with the key's count
-/// after, or why not; one asked to slow down is asked again once, a second
-/// later.
+/// after, or why not; the first time it is asked to slow down, nothing
+/// more goes for a second and the view decides whether to ask again.
 ///
 /// A Get Reactions' says what each target asked after holds, in the order
 /// asked, none for one it left out. One refused as too many targets for
@@ -162,7 +162,7 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
             again: false,
         } if reason == Some(RATE_LIMITED) => {
             crate::send::reactions::slow(htlc, std::time::Instant::now());
-            crate::send::reactions::ask(htlc, target, key, add, true);
+            tell(htlc, Event::PutOff { target, key, add });
         }
         Asked::Send { target, key, .. } if refused => {
             let error =

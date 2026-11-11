@@ -1410,7 +1410,7 @@ answer asks again only where the user has changed their mind since, so clicking 
 forth costs one request. Every 710 and 712 waits its turn at the draft's default rate, ten
 at once and then one a second, since each costs spam points too; one still waiting when
 its click is undone is never sent, and one refused `RateLimited` is asked again once, a
-second later. The login's limits (0x0F2C, 0x0F2D) refuse a new kind or one more of ours
+second later, if the user still wants it. The login's limits (0x0F2C, 0x0F2D) refuse a new kind or one more of ours
 before any request, and every refusal is a toast, in GtkHx's words by reason code or else
 the server's. A server's own emoji cannot be sent without the Server Emoji draft, so its
 placeholder says so and sends nothing.

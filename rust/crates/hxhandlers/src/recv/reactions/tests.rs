@@ -9,7 +9,7 @@ use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
 use super::*;
 use crate::recv::friends::tests::{fields, frame};
 use crate::send::friends::tests::{sent, woken, Conn};
-use crate::send::reactions::{pace, react, refresh, withdraw};
+use crate::send::reactions::{pace, react, refresh, retry, withdraw};
 use hxproto::structured_chat::NOT_ALLOWED;
 use std::time::{Duration, Instant};
 
@@ -259,6 +259,13 @@ fn reactions_go_at_the_drafts_rate_and_one_waiting_may_be_taken_back() {
         "one gone already"
     );
 
+    let heart = |e: &str| Key::Emoji(e.into());
+    unsafe { react(c.0, line(14), heart("\u{2764}\u{FE0F}"), true) };
+    assert!(
+        unsafe { withdraw(c.0, &line(14), &heart("\u{2764}")) },
+        "a key in another spelling"
+    );
+
     let second = Instant::now() + Duration::from_millis(1001);
     unsafe { pace(c.0, second) };
     assert_eq!(
@@ -346,7 +353,8 @@ fn a_send_reaction_reply_says_what_was_made_or_why_not() {
         assert_eq!(told(), want, "{case}");
     }
 
-    // Told to slow down, it is asked again once, a second later.
+    // Told to slow down, the view hears it put off, and nothing goes for a
+    // second; asked again and told so again, it is refused.
     let c = conn(AGREED, lines());
     sent();
     woken();
@@ -356,7 +364,14 @@ fn a_send_reaction_reply_says_what_was_made_or_why_not() {
         panic!("not sent")
     };
     unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
-    assert_eq!((told(), reacted_to()), (vec![], vec![]), "at once");
+    let put_off = Event::PutOff {
+        target: line(1),
+        key: thumbs(),
+        add: true,
+    };
+    assert_eq!((told(), reacted_to()), (vec![put_off], vec![]), "at once");
+    unsafe { retry(c.0, line(1), thumbs(), true) };
+    assert_eq!(reacted_to(), [], "asked again at once");
     let [at] = woken()[..] else {
         panic!("no timer")
     };

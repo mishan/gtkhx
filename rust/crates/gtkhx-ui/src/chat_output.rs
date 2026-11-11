@@ -1002,6 +1002,19 @@ pub extern "C" fn gtkhx_chat_output_install() {
                         then(htlc, &view, t);
                     }
                 }
+                Event::PutOff {
+                    target: Target::Line { channel: 0, id },
+                    key,
+                    add,
+                } => {
+                    if redraw(&view, *id, |r| r.put_off(key)) == Some(true) {
+                        let line = Target::Line {
+                            channel: 0,
+                            id: *id,
+                        };
+                        hxhandlers::send::reactions::retry(htlc, line, key.clone(), *add);
+                    }
+                }
                 Event::Refused {
                     target: Target::Line { channel: 0, id },
                     key,
