@@ -10,10 +10,12 @@
 //! the first page of history was on its way is not drawn again inside it.
 //!
 //! Where the session has reactions (the Reactions draft, capability bit
-//! 19), a lobby line's chips come from its history entry and then from
+//! 19), a kept line's chips come from its history entry and then from
 //! what the `reactions` signal says of it, with what the user has asked
 //! for and not had answered drawn over them (`hxmodel::reactions`). A
-//! click on a chip, or its row's menu (`reactions`), asks for one.
+//! click on a chip, or its row's menu (`reactions`), asks for one. That
+//! goes for a private chat's kept lines as for the lobby's: on hxd-ng, a
+//! room is shown as a private chat whose lines carry history ids.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -230,18 +232,18 @@ fn output(view: &RotulusView) -> &RefCell<Output> {
     }
 }
 
+/// Where a view keeps the id of the chat it shows, once heard.
 const HEARD: &str = "gtkhx-chat-output-heard";
 
-/// Hear the clicks on "Load older" in `view`, chat `cid`'s. Once.
+/// Hear the clicks on "Load older" in `view`, chat `cid`'s, and on its
+/// chips and rows. Once.
 fn hear(view: &RotulusView, cid: u32) {
-    // SAFETY: the key is only ever set to ().
-    if unsafe { view.data::<()>(HEARD) }.is_some() {
+    // SAFETY: the key is only ever set to a u32.
+    if unsafe { view.data::<u32>(HEARD) }.is_some() {
         return;
     }
-    unsafe { view.set_data(HEARD, ()) };
-    if cid == 0 {
-        crate::reactions::hear(view);
-    }
+    unsafe { view.set_data(HEARD, cid) };
+    crate::reactions::hear(view);
     view.connect_local("load-more", false, move |args| {
         let view = args[0].get::<RotulusView>().ok()?;
         if args[1].get::<LoadDirection>().ok()? == LoadDirection::Older {
@@ -249,6 +251,34 @@ fn hear(view: &RotulusView, cid: u32) {
         }
         None
     });
+}
+
+/// The chat `view` shows: the public chat's, 0, until it is heard.
+fn cid_of(view: &RotulusView) -> u32 {
+    // SAFETY: the key is only ever set to a u32.
+    unsafe { view.data::<u32>(HEARD) }.map_or(0, |c| unsafe { *c.as_ref() })
+}
+
+/// How line `id` in `view` is named to the server: a lobby line by its
+/// channel, and a private chat's by the chat's id (kind 4), as the Replies
+/// draft has a client name any line it saw under a chat id, which on
+/// hxd-ng may be a room's.
+pub(crate) fn target(view: &RotulusView, id: u64) -> Target {
+    match cid_of(view) {
+        0 => Target::Line { channel: 0, id },
+        chat => Target::Ephemeral { chat, id },
+    }
+}
+
+/// The chat and line `target` names, where it is a line GtkHx names: kind
+/// 4 under a private chat's id, and kind 1 under the lobby's channel or,
+/// from a server that names a room as a channel, under its chat's id.
+fn line_of(target: &Target) -> Option<(u32, u64)> {
+    match *target {
+        Target::Line { channel, id } => Some((channel, id)),
+        Target::Ephemeral { chat, id } if chat != 0 => Some((chat, id)),
+        _ => None,
+    }
 }
 
 fn raw(view: &RotulusView) -> *mut gtk::ffi::GtkWidget {
@@ -526,7 +556,7 @@ fn reacted(view: &RotulusView, id: u64, reactions: Option<&(Summary, Mine)>, pag
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn refresh_if_stale(view: &RotulusView, htlc: *mut c_void, id: u64) {
     if due(view, id, Instant::now()) {
-        hxhandlers::send::reactions::refresh(htlc, &[Target::Line { channel: 0, id }]);
+        hxhandlers::send::reactions::refresh(htlc, &[target(view, id)]);
     }
 }
 
@@ -573,14 +603,18 @@ pub(crate) enum Then {
     Say(String),
 }
 
-/// The lobby line drawn on `row`, where `limits` take reactions to it.
+/// The kept line drawn on `row`, where `limits` take reactions to it. A
+/// line under its chat's own count is none: hxd-ng keeps no such line in
+/// the lobby, and in a private chat kind 4 cannot say which count its id
+/// is from, which hxd-ng reads as a kept line's, so it would name another
+/// line or none.
 pub(crate) fn line_on(
     view: &RotulusView,
     row: MessageId,
     limits: &hxproto::reactions::Limits,
 ) -> Option<u64> {
     let id = output(view).borrow().lines.history_on(row)?;
-    limits.takes(&Target::Line { channel: 0, id }).then_some(id)
+    limits.takes(&target(view, id)).then_some(id)
 }
 
 /// The user wants the chip `key` on `row` on, or off, or (`None`) the
@@ -640,13 +674,13 @@ pub(crate) unsafe fn then(htlc: *mut c_void, view: &RotulusView, t: Then) {
     use hxhandlers::send::reactions as send;
     match t {
         Then::Send(id, key, add) => {
-            if !send::react(htlc, Target::Line { channel: 0, id }, key.clone(), add) {
+            if !send::react(htlc, target(view, id), key.clone(), add) {
                 refused(view, id, &key);
                 crate::reactions::toast(&crate::reactions::refusal(Some(INVALID_KEY), None));
             }
         }
         Then::Withdraw(id, key) => {
-            if send::withdraw(htlc, &Target::Line { channel: 0, id }, &key) {
+            if send::withdraw(htlc, &target(view, id), &key) {
                 refused(view, id, &key);
             }
         }
@@ -1052,6 +1086,73 @@ fn log_lines(text: &CStr) -> Vec<&[u8]> {
     }
 }
 
+/// What the `reactions` signal says, told to the view of the chat it is
+/// about, where that chat has one.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+unsafe fn reactions(htlc: *mut c_void, e: &gtkhx_core::reactions::Event) {
+    use gtkhx_core::reactions::Event;
+    let target = match e {
+        Event::Who { ask, nicks, count } => {
+            // Nicks are what each reacted under: whoever online goes by
+            // one now is the best guess at whose icon it is.
+            let lobby = view_of(htlc, 0);
+            let who: Vec<_> = (nicks.iter())
+                .map(|n| {
+                    let uid = uid_of(htlc, 0, n.as_bytes());
+                    let icon = lobby
+                        .as_ref()
+                        .and_then(|v| crate::chat_view::avatar(v, uid));
+                    (n.clone(), icon)
+                })
+                .collect();
+            return crate::reactions::heard(*ask, &who, *count);
+        }
+        Event::Now { target, .. }
+        | Event::Acted { target, .. }
+        | Event::PutOff { target, .. }
+        | Event::Refused { target, .. } => target,
+    };
+    let Some((cid, id)) = line_of(target) else {
+        return;
+    };
+    let Some(view) = view_of(htlc, cid) else {
+        return;
+    };
+    match e {
+        Event::Now { reactions, .. } => {
+            let page_due = hxhandlers::recv::chat::first_page_pending(htlc, cid);
+            reacted(&view, id, reactions.as_ref(), page_due);
+        }
+        Event::Acted {
+            key, add, count, ..
+        } => {
+            if let Some(t) = answered(&view, id, key, *add, *count) {
+                then(htlc, &view, t);
+            }
+        }
+        Event::PutOff { key, add, .. } => {
+            if redraw(&view, id, |r| r.put_off(key)) == Some(true) {
+                hxhandlers::send::reactions::retry(htlc, target.clone(), key.clone(), *add);
+            }
+        }
+        Event::Refused {
+            key, reason, error, ..
+        } => {
+            let text = match key {
+                Some(key) => {
+                    refused(&view, id, key);
+                    crate::reactions::refusal(*reason, error.as_deref())
+                }
+                None => crate::reactions::clear_refusal(*reason, error.as_deref()),
+            };
+            crate::reactions::toast(&text);
+        }
+        Event::Who { .. } => {}
+    }
+}
+
 /// `void gtkhx_chat_output_install (void)` — hear what the chat views
 /// draw. Once.
 #[no_mangle]
@@ -1062,80 +1163,11 @@ pub extern "C" fn gtkhx_chat_output_install() {
         gtkhx_core::session::connect_chat_history(|htlc, cid, entries, has_more| unsafe {
             if let Some(view) = view_of(htlc, cid) {
                 let missed = draw_history(&view, entries, has_more);
-                let lines: Vec<Target> = missed
-                    .into_iter()
-                    .map(|id| Target::Line { channel: 0, id })
-                    .collect();
+                let lines: Vec<Target> = missed.into_iter().map(|id| target(&view, id)).collect();
                 hxhandlers::send::reactions::refresh(htlc, &lines);
             }
         });
-        gtkhx_core::session::connect_reactions(|htlc, e| unsafe {
-            use gtkhx_core::reactions::Event;
-            let Some(view) = view_of(htlc, 0) else {
-                return;
-            };
-            if let Event::Who { ask, nicks, count } = e {
-                // Nicks are what each reacted under: whoever online goes
-                // by one now is the best guess at whose icon it is.
-                let who: Vec<_> = (nicks.iter())
-                    .map(|n| {
-                        (
-                            n.clone(),
-                            crate::chat_view::avatar(&view, uid_of(htlc, 0, n.as_bytes())),
-                        )
-                    })
-                    .collect();
-                return crate::reactions::heard(*ask, &who, *count);
-            }
-            match e {
-                Event::Now {
-                    target: Target::Line { channel: 0, id },
-                    reactions,
-                } => {
-                    let page_due = hxhandlers::recv::chat::first_page_pending(htlc, 0);
-                    reacted(&view, *id, reactions.as_ref(), page_due);
-                }
-                Event::Acted {
-                    target: Target::Line { channel: 0, id },
-                    key,
-                    add,
-                    count,
-                } => {
-                    if let Some(t) = answered(&view, *id, key, *add, *count) {
-                        then(htlc, &view, t);
-                    }
-                }
-                Event::PutOff {
-                    target: Target::Line { channel: 0, id },
-                    key,
-                    add,
-                } => {
-                    if redraw(&view, *id, |r| r.put_off(key)) == Some(true) {
-                        let line = Target::Line {
-                            channel: 0,
-                            id: *id,
-                        };
-                        hxhandlers::send::reactions::retry(htlc, line, key.clone(), *add);
-                    }
-                }
-                Event::Refused {
-                    target: Target::Line { channel: 0, id },
-                    key,
-                    reason,
-                    error,
-                } => {
-                    let text = match key {
-                        Some(key) => {
-                            refused(&view, *id, key);
-                            crate::reactions::refusal(*reason, error.as_deref())
-                        }
-                        None => crate::reactions::clear_refusal(*reason, error.as_deref()),
-                    };
-                    crate::reactions::toast(&text);
-                }
-                _ => {}
-            }
-        });
+        gtkhx_core::session::connect_reactions(|htlc, e| unsafe { reactions(htlc, e) });
         let session: glib::Object = unsafe {
             from_glib_none(
                 gtkhx_core::session::gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
@@ -1580,6 +1612,97 @@ pub(crate) mod tests {
         for (row, limits) in [(bare, &any), (row, &none)] {
             assert_eq!(want(&view, row, up, None, limits), None);
             assert_eq!(line_on(&view, row, limits), None);
+        }
+    }
+
+    /// A private chat's kept line, a room's on hxd-ng, is named kind 4
+    /// under the chat's id, and is a line to react to where the login takes
+    /// kind 4, as a lobby line is where it takes kind 1; a line under its
+    /// chat's own count is none, in either.
+    pub(crate) fn check_a_private_chats_kept_line_is_kind_4() {
+        use hxproto::reactions::{Limits, TARGETS_EPHEMERAL, TARGETS_LINES};
+        let (lobby, room) = (view(), view());
+        // As `hear` keeps it, without hearing what would send.
+        unsafe { room.set_data(HEARD, 7u32) };
+        for v in [&lobby, &room] {
+            draw_live(v, Some(&entry(5, 0, "a", "kept")), || say(v, "a", "kept"));
+            draw_live(v, Some(&entry(6, EPHEMERAL, "a", "own")), || {
+                say(v, "a", "own")
+            });
+        }
+        let row = |v: &RotulusView, space, id| output(v).borrow().lines.row(space, id).unwrap();
+        let takes = |targets| Limits {
+            targets,
+            max_keys: None,
+            max_per_user: None,
+        };
+        let (lines, rooms, both) = (
+            TARGETS_LINES,
+            TARGETS_EPHEMERAL,
+            TARGETS_LINES | TARGETS_EPHEMERAL,
+        );
+        for (case, v, space, id, targets, want) in [
+            (
+                "a lobby line",
+                &lobby,
+                Space::History,
+                5,
+                lines,
+                Some(Target::Line { channel: 0, id: 5 }),
+            ),
+            (
+                "a lobby line, kind 4 alone",
+                &lobby,
+                Space::History,
+                5,
+                rooms,
+                None,
+            ),
+            (
+                "a room's line",
+                &room,
+                Space::History,
+                5,
+                rooms,
+                Some(Target::Ephemeral { chat: 7, id: 5 }),
+            ),
+            (
+                "a room's line, kind 1 alone",
+                &room,
+                Space::History,
+                5,
+                lines,
+                None,
+            ),
+            ("a room's own count", &room, Space::Ephemeral, 6, both, None),
+            (
+                "the lobby's own count",
+                &lobby,
+                Space::Ephemeral,
+                6,
+                both,
+                None,
+            ),
+        ] {
+            let got = line_on(v, row(v, space, id), &takes(targets)).map(|id| target(v, id));
+            assert_eq!(got, want, "{case}");
+        }
+    }
+
+    #[test]
+    fn a_target_names_the_chat_its_line_is_shown_in() {
+        let im = Target::Im {
+            guid: [1; 16],
+            sender: b"bob".to_vec(),
+        };
+        for (target, want) in [
+            (Target::Line { channel: 0, id: 5 }, Some((0, 5))),
+            (Target::Ephemeral { chat: 7, id: 5 }, Some((7, 5))),
+            (Target::Line { channel: 7, id: 5 }, Some((7, 5))),
+            (Target::Ephemeral { chat: 0, id: 5 }, None),
+            (im, None),
+        ] {
+            assert_eq!(line_of(&target), want, "{target:?}");
         }
     }
 
