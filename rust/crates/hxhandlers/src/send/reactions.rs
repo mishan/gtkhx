@@ -8,7 +8,7 @@
 //! to; each costs spam points too, and a session past them is kicked and
 //! banned. Past the rate they wait.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::os::raw::{c_int, c_void};
 use std::time::{Duration, Instant};
@@ -53,6 +53,7 @@ impl Pace {
 
 thread_local! {
     static PACE: RefCell<HashMap<usize, Pace>> = RefCell::new(HashMap::new());
+    static ASKS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// The user's reaction with `key` on `target`, made (`add`) or taken back.
@@ -135,6 +136,22 @@ pub(crate) unsafe fn get(htlc: *mut c_void, targets: &[Target]) {
     if let Some(r) = req::get(targets, None) {
         queue(htlc, r, Asked::Get(targets.to_vec()), false);
     }
+}
+
+/// Ask who holds `key` on `target`, where the server takes reactions to
+/// it: what the answer's `Event::Who` will be known by.
+///
+/// # Safety
+/// See [`react`].
+pub unsafe fn who(htlc: *mut c_void, target: Target, key: Key) -> Option<u64> {
+    if !limits(htlc)?.takes(&target) {
+        return None;
+    }
+    let r = req::get(std::slice::from_ref(&target), Some(&key))?;
+    let ask = ASKS.get() + 1;
+    ASKS.set(ask);
+    queue(htlc, r, Asked::Who { target, key, ask }, false);
+    Some(ask)
 }
 
 /// Send `r` in its turn, or before the rest where `first`.

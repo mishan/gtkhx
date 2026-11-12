@@ -180,9 +180,16 @@ structure. A lookup that misses stays 0.
 | `load-more` | fetch the next page of chat history |
 | `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
 | `reaction-activated` | on the public chat, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
-| `row-menu` | likewise, on a lobby line: the quick reactions and "Add Reaction…", then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
+| `reaction-menu` | likewise, on a lobby line's emoji chip: who reacted with it; a server emoji's placeholder is left to `row-menu` |
+| `row-menu` | likewise, on a lobby line: the quick reactions, "Add Reaction…" and, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
 
 `link-activated` and `link-menu` are connected in `chat_view.rs`, above.
+
+GtkHx's menus and popovers on the view are plain `GtkPopover`s hung from
+the window, as Rotulus's own are. The window's allocation knows nothing
+of them, so one is laid out again only when presented: a popover whose
+content changes once it is open must call `present()` after, or GTK
+closes it.
 
 **The find bar** is `rust/crates/gtkhx-ui/src/chat_find.rs`, driving
 `rotulus_view_search`, `_search_step` and `_search_clear`. The rotulus

@@ -33,4 +33,12 @@ pub enum Event {
         reason: Option<u16>,
         error: Option<String>,
     },
+    /// Who holds the key `send::reactions::who` asked after with `ask`:
+    /// their nicks, newest first, and how many hold it, which may be more;
+    /// none where the server refused or left the line out.
+    Who {
+        ask: u64,
+        nicks: Vec<String>,
+        count: u32,
+    },
 }

@@ -1415,6 +1415,15 @@ before any request, and every refusal is a toast, in GtkHx's words by reason cod
 the server's. A server's own emoji cannot be sent without the Server Emoji draft, so its
 placeholder says so and sends nothing.
 
+Who reacted with an emoji is a Get Reactions for that line naming the key, asked from the
+chip's own menu or the line's ("Who Reacted…"): the reply's nicks (0x0066), newest
+first, in the connection's encoding, each with the icon of whoever online goes by it now
+(the reply names no user), and "and N more" where the key's count passes them.
+A server emoji's placeholder offers no such list, since its key cannot be sent. A server
+tells changes only for a channel's newest lines (hxd-ng's live window), so opening a
+line's menu asks after that line alone where it was last drawn, said (by 700, 711 or 712)
+or asked after over a minute ago and a window's worth of lines GtkHx drew are newer.
+
 ### Messaging
 
 Capability bits 6, 7 and 8, access bit 58,

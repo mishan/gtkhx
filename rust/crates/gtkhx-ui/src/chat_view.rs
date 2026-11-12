@@ -103,6 +103,24 @@ pub(crate) fn conn_of(view: &RotulusView) -> Option<crate::dock::ConnKey> {
     unsafe { view.data::<crate::dock::ConnKey>(CONN_KEY) }.map(|c| unsafe { *c.as_ref() })
 }
 
+/// The avatar, or else the icon, of `uid` on `view`'s connection, as the
+/// view and the user list draw it.
+pub(crate) fn avatar(view: &RotulusView, uid: u16) -> Option<gtk::gdk::Paintable> {
+    avatar_for(view, u64::from(uid))
+}
+
+fn avatar_for(view: &RotulusView, key: u64) -> Option<gtk::gdk::Paintable> {
+    let p = unsafe {
+        hx_chat_avatar_for_key(
+            view.upcast_ref::<gtk::Widget>().to_glib_none().0,
+            key,
+            std::ptr::null_mut(),
+        )
+    };
+    // chat_avatar.c lends its paintable; take a reference of our own.
+    (!p.is_null()).then(|| unsafe { glib::translate::from_glib_none(p) })
+}
+
 /// What every GtkHx chat view has, whatever the preferences say.
 fn setup(view: &RotulusView) {
     // Typing goes to the input box beside the view, so a click on the view
@@ -117,21 +135,8 @@ fn setup(view: &RotulusView) {
     view.set_group_gap_secs(rotulus_layout::buffer::DEFAULT_GROUP_GAP_SECS);
     let schemes: Vec<&str> = LINKS.schemes().iter().map(String::as_str).collect();
     view.set_link_schemes(&schemes);
-    // chat_avatar.c lends its paintable; the view keeps its own reference
-    // for the draw.
     view.set_avatar_func(Some(Box::new(|view: &RotulusView, key| {
-        let p = unsafe {
-            hx_chat_avatar_for_key(
-                view.upcast_ref::<gtk::Widget>().to_glib_none().0,
-                key,
-                std::ptr::null_mut(),
-            )
-        };
-        if p.is_null() {
-            None
-        } else {
-            Some(unsafe { glib::translate::from_glib_none(p) })
-        }
+        avatar_for(view, key)
     })));
 
     // A hotline:// link connects; anything else goes to the desktop.
