@@ -9,7 +9,9 @@ use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
 use super::*;
 use crate::recv::friends::tests::{fields, frame};
 use crate::send::friends::tests::{sent, woken, Conn};
-use crate::send::reactions::{clear, pace, react, refresh, retry, who, withdraw};
+use crate::send::reactions::{
+    clear, pace, react, react_im, refresh, retry, retry_im, who, withdraw,
+};
 use hxproto::structured_chat::NOT_ALLOWED;
 use std::time::{Duration, Instant};
 
@@ -113,13 +115,12 @@ fn asked_after() -> Vec<(u32, usize)> {
 }
 
 #[test]
-fn a_reaction_changed_tells_each_line_it_names_where_the_session_has_reactions() {
-    let im = Target::Im {
+fn a_reaction_changed_tells_each_target_it_names_where_the_session_has_reactions() {
+    let bobs = Target::Im {
         guid: [7; 16],
         sender: b"bob".to_vec(),
-    }
-    .pack()
-    .unwrap();
+    };
+    let im = bobs.pack().unwrap();
     let key = Key::Emoji(THUMBS.into()).pack().unwrap();
     let f = frame(
         711,
@@ -138,7 +139,7 @@ fn a_reaction_changed_tells_each_line_it_names_where_the_session_has_reactions()
             (tag::TARGET, &im),
             (tag::REACTION_ACTION, &[0, 1]),
             (tag::REACTION_KEY, &key),
-            (tag::FRIEND_LOGIN, b"bob"),
+            (tag::FRIEND_LOGIN, b"alice"),
         ]),
     );
     told();
@@ -151,6 +152,12 @@ fn a_reaction_changed_tells_each_line_it_names_where_the_session_has_reactions()
                 now(1, Some((2, true))),
                 now(2, None),
                 now_on(room(9, 1), Some((3, false))),
+                Event::Changed {
+                    target: bobs.clone(),
+                    key: thumbs(),
+                    add: true,
+                    from: b"alice".to_vec(),
+                },
             ],
         ),
         ("a notification", conn(AGREED, lines()), 718, vec![]),
@@ -507,6 +514,61 @@ fn a_send_reaction_reply_says_what_was_made_or_why_not() {
     };
     unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
     assert_eq!(told(), [no(&line(1), Some(RATE_LIMITED), None)], "twice");
+}
+
+/// A reaction to an instant message goes with the conversation's other
+/// party, asked again so too where the server said to slow down, and is
+/// answered with no count.
+#[test]
+fn an_instant_messages_reaction_goes_with_its_other_party() {
+    let c = conn(
+        AGREED,
+        Some(Limits {
+            targets: hxproto::reactions::TARGETS_IMS,
+            max_keys: None,
+            max_per_user: None,
+        }),
+    );
+    let mine = Target::Im {
+        guid: [7; 16],
+        sender: b"alice".to_vec(),
+    };
+    let with_bob = |f: &[(u16, Vec<u8>)]| {
+        let party: Vec<_> = f.iter().filter(|(t, _)| *t == tag::FRIEND_LOGIN).collect();
+        assert_eq!(party, [&(tag::FRIEND_LOGIN, b"bob".to_vec())]);
+    };
+    sent();
+    told();
+    woken();
+    assert!(unsafe { react_im(c.0, mine.clone(), b"bob", thumbs(), true) });
+    let [(710, trans, ref f)] = sent()[..] else {
+        panic!("not sent")
+    };
+    with_bob(f);
+    let slow = RATE_LIMITED.to_be_bytes();
+    let refused = frame(TASK, trans, true, fields(&[(tag::CHAT_REASON, &slow)]));
+    unsafe { reply(c.0, trans, &refused) };
+    let put_off = Event::PutOff {
+        target: mine.clone(),
+        key: thumbs(),
+        add: true,
+    };
+    assert_eq!(told(), [put_off]);
+    assert!(unsafe { retry_im(c.0, mine.clone(), b"bob", thumbs(), true) });
+    let at = *woken().last().expect("no timer");
+    unsafe { pace(c.0, at) };
+    let [(710, trans, ref f)] = sent()[..] else {
+        panic!("not asked again")
+    };
+    with_bob(f);
+    unsafe { reply(c.0, trans, &frame(TASK, trans, false, fields(&[]))) };
+    let acted = Event::Acted {
+        target: mine,
+        key: thumbs(),
+        add: true,
+        count: None,
+    };
+    assert_eq!(told(), [acted]);
 }
 
 #[test]

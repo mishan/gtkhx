@@ -3,6 +3,10 @@
 //! asked for and not yet had answered drawn over it. What the server says
 //! in between replaces only what it said, so neither a change it tells nor
 //! a refusal undoes the other.
+//!
+//! An instant message's are put together here instead, since no server
+//! keeps them to be read back: the other party's as each of its changes
+//! is told, and ours as our requests made them.
 
 #![forbid(unsafe_code)]
 
@@ -173,6 +177,25 @@ impl LineReactions {
         Some(!add)
     }
 
+    /// Someone else's reaction with `key` was made, or taken back.
+    fn others(&mut self, key: &Key, add: bool) {
+        match self.said.iter().position(|s| same(&s.key, key)) {
+            Some(i) if add => self.said[i].count = self.said[i].count.saturating_add(1),
+            Some(i) => {
+                self.said[i].count = self.said[i].count.saturating_sub(1);
+                if self.said[i].count == 0 {
+                    self.said.remove(i);
+                }
+            }
+            None if add => self.said.push(Shown {
+                key: key.clone(),
+                count: 1,
+                mine: false,
+            }),
+            None => {}
+        }
+    }
+
     /// The request for `key` was put off by the server's rate: whether to
     /// ask again, which is so only where the user still wants what it
     /// asked. Otherwise what the server said stands.
@@ -184,10 +207,39 @@ impl LineReactions {
         still
     }
 
+    /// No request asked for will be answered: what the server said stands.
+    pub fn settle(&mut self) {
+        self.acts.clear();
+    }
+
     /// The request for `key` was refused, or taken back before it went:
     /// what the server said stands.
     pub fn refused(&mut self, key: &Key) {
         self.acts.retain(|a| !same(&a.key, key));
+    }
+}
+
+/// An instant message's reactions: each key counted once a reactor.
+#[derive(Debug, Clone, Default)]
+pub struct ImReactions {
+    /// Who else holds each key, as told.
+    theirs: Vec<(Key, Vec<u8>)>,
+    /// Theirs and ours, under what the user has asked for.
+    pub shown: LineReactions,
+}
+
+impl ImReactions {
+    /// `from` made, or took back, a reaction with `key`.
+    pub fn told(&mut self, key: &Key, add: bool, from: &[u8]) {
+        let held = (self.theirs.iter()).position(|(k, f)| same(k, key) && f == from);
+        match (add, held) {
+            (true, None) => self.theirs.push((key.clone(), from.to_vec())),
+            (false, Some(i)) => {
+                self.theirs.remove(i);
+            }
+            _ => return,
+        }
+        self.shown.others(key, add);
     }
 }
 
@@ -391,6 +443,90 @@ mod tests {
             let shown: Vec<_> = r
                 .shown()
                 .into_iter()
+                .map(|s| (s.key, s.count, s.mine))
+                .collect();
+            let want: Vec<_> = want.iter().map(|(e, n, m)| (key(e), *n, *m)).collect();
+            assert_eq!(shown, want, "{case}");
+        }
+    }
+
+    enum ImOp {
+        Told(&'static str, bool, &'static str),
+        Ours(&'static str, bool),
+    }
+
+    /// Each case's steps in order, each of ours asked for and answered as
+    /// an instant message's is, with no count; then the chips shown.
+    #[test]
+    fn an_instant_messages_reactions_count_each_reactor_once() {
+        use ImOp::*;
+        for (case, ops, want) in [
+            (
+                "theirs as told",
+                &[Told(THUMBS, true, "bob")][..],
+                &[(THUMBS, 1, false)][..],
+            ),
+            (
+                "told twice, counted once",
+                &[Told(THUMBS, true, "bob"), Told(THUMBS, true, "bob")],
+                &[(THUMBS, 1, false)],
+            ),
+            (
+                "taken back",
+                &[Told(THUMBS, true, "bob"), Told(THUMBS, false, "bob")],
+                &[],
+            ),
+            ("taken back, never made", &[Told(THUMBS, false, "bob")], &[]),
+            (
+                "first held first",
+                &[Told(HEART, true, "bob"), Told(THUMBS, true, "bob")],
+                &[(HEART, 1, false), (THUMBS, 1, false)],
+            ),
+            (
+                "ours beside theirs",
+                &[Told(THUMBS, true, "bob"), Ours(THUMBS, true)],
+                &[(THUMBS, 2, true)],
+            ),
+            (
+                "theirs beside ours",
+                &[Ours(THUMBS, true), Told(THUMBS, true, "bob")],
+                &[(THUMBS, 2, true)],
+            ),
+            (
+                "theirs taken back, ours left",
+                &[
+                    Ours(THUMBS, true),
+                    Told(THUMBS, true, "bob"),
+                    Told(THUMBS, false, "bob"),
+                ],
+                &[(THUMBS, 1, true)],
+            ),
+            (
+                "ours taken back, theirs left",
+                &[
+                    Told(THUMBS, true, "bob"),
+                    Ours(THUMBS, true),
+                    Ours(THUMBS, false),
+                ],
+                &[(THUMBS, 1, false)],
+            ),
+            (
+                "a key in another spelling is one key",
+                &[Told("\u{2764}", true, "bob"), Ours(HEART, true)],
+                &[("\u{2764}", 2, true)],
+            ),
+        ] {
+            let mut r = ImReactions::default();
+            for op in ops {
+                match op {
+                    Told(e, add, from) => r.told(&key(e), *add, from.as_bytes()),
+                    Ours(e, on) => {
+                        assert_eq!(r.shown.want(key(e), *on), Next::Send(*on), "{case}");
+                        assert_eq!(r.shown.answered(&key(e), *on, None), None, "{case}");
+                    }
+                }
+            }
+            let shown: Vec<_> = (r.shown.shown().into_iter())
                 .map(|s| (s.key, s.count, s.mine))
                 .collect();
             let want: Vec<_> = want.iter().map(|(e, n, m)| (key(e), *n, *m)).collect();

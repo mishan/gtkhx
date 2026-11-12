@@ -87,8 +87,8 @@ unsafe fn tell(htlc: *mut c_void, e: Event) {
     gtkhx_session_emit_reactions(gtkhx_session_get_default(), htlc, &e);
 }
 
-/// A Reaction Changed: each line's summary, or its clearing, told as it
-/// is read. An instant message's change is not shown yet.
+/// A Reaction Changed: each line's summary, or its clearing, and each
+/// change of an instant message's with who made it, told as it is read.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -114,6 +114,20 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
                 Event::Now {
                     target,
                     reactions: None,
+                },
+            ),
+            Group::Change {
+                target: target @ Target::Im { .. },
+                add,
+                key,
+                from: Some(from),
+            } => tell(
+                htlc,
+                Event::Changed {
+                    target,
+                    key,
+                    add,
+                    from,
                 },
             ),
             Group::Change { .. } => {}

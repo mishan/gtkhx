@@ -22,6 +22,14 @@ pub enum Event {
         add: bool,
         count: Option<u32>,
     },
+    /// `from`, by Login, made or took back a reaction with `key` on
+    /// `target`, an instant message.
+    Changed {
+        target: Target,
+        key: Key,
+        add: bool,
+        from: Vec<u8>,
+    },
     /// The server said to slow down: the view asks again with
     /// `send::reactions::retry` where the user still wants it.
     PutOff { target: Target, key: Key, add: bool },
