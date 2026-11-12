@@ -39,6 +39,9 @@ pub enum Cap {
     /// Each chat line also as its history entry, to a session that asks
     /// (the Structured Chat draft's capability bit 17).
     StructuredChat,
+    /// Replies to lines (the Replies draft's capability bit 18), for the
+    /// rig's `react-*` accounts.
+    Replies,
     /// Reactions to lines and messages (the Reactions draft's capability
     /// bit 19), for the rig's `react-*` accounts.
     Reactions,
@@ -130,7 +133,7 @@ pub const SERVERS: &[Server] = &[
         xfer_port: 5521,
         // The rig gives hxd-ng a guest and no admin: it is here for voice,
         // video, news pictures, messaging, chat history, structured chat,
-        // reactions and the downloads of its seed files.
+        // replies, reactions and the downloads of its seed files.
         admin: "",
         caps: &[
             Cap::ChatHistory,
@@ -139,6 +142,7 @@ pub const SERVERS: &[Server] = &[
             Cap::NgNewsPictures,
             Cap::Messaging,
             Cap::StructuredChat,
+            Cap::Replies,
             Cap::Reactions,
             Cap::SeedFile,
             Cap::SeedFolder,

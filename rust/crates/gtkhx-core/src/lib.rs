@@ -8,6 +8,8 @@
 //! - [`conn`] — `struct htlc_conn`, the per-connection state.
 //! - [`messaging`] — the friend family's roster and the events its signal
 //!   carries.
+//! - [`reactions`] and [`replies`] — the events the Reactions and Replies
+//!   drafts' signals carry.
 //!
 //! ## Why `hxtask` is not in here
 //!
@@ -33,4 +35,5 @@ pub mod boxed;
 pub mod conn;
 pub mod messaging;
 pub mod reactions;
+pub mod replies;
 pub mod session;

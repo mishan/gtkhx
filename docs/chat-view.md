@@ -167,6 +167,12 @@ lobby and in a private chat (a room, on hxd-ng) alike, each view's registry
 its own; a line under its chat's own count takes none. A friend's
 conversation (`msg.rs`) keeps each instant message's last row by its guid,
 which is where its chips go.
+Where the session has replies, each registered line also keeps what a
+reply to it quotes, and a lobby reply's row gets its header with
+`set_reply`, by its mark: quoted from the registry, or from the view's
+quotes of lines asked for by id (`hxmodel::replies`), or an unavailable
+header until then; the rows waiting on a target are headed again as it is
+drawn or answered ([hotline-protocol.md](hotline-protocol.md), "Replies").
 
 **Speaker identity.** A row's `RotulusSpeaker.key` is the Hotline user id,
 `0` when unknown. It comes from the `HTLS_HDR_CHAT` UID field when the

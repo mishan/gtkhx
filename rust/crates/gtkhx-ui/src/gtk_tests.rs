@@ -51,6 +51,10 @@ fn display_backed() {
     crate::chat_output::tests::check_who_reacted_lists_emoji_alone();
     crate::chat_output::tests::check_a_moderator_is_offered_to_clear_a_line_with_chips();
     crate::chat_output::tests::check_a_private_chats_kept_line_is_kind_4();
+    crate::chat_output::tests::check_a_reply_is_headed_with_what_it_answers();
+    crate::chat_output::tests::check_a_quote_asked_for_heads_its_replies();
+    crate::chat_output::tests::check_a_line_taken_away_is_quoted_as_removed();
+    crate::chat_output::tests::check_a_trimmed_reply_asks_for_no_quote();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
     crate::msg::tests::check_an_instant_messages_chips_are_its_parties();
     crate::icon_picker::tests::check_banners_fit_the_dialog();

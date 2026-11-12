@@ -91,3 +91,7 @@ structured-chat = ["hxnet/structured-chat"]
 # Offer the Reactions draft at login (hxnet's `reactions`), which brings
 # Structured Chat with it. No meson option turns it on yet.
 reactions = ["hxnet/reactions"]
+
+# Offer the Replies draft at login (hxnet's `replies`), which brings
+# Structured Chat with it. No meson option turns it on yet.
+replies = ["hxnet/replies"]

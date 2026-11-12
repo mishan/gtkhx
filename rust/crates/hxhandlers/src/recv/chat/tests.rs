@@ -170,6 +170,7 @@ fn entry(message_id: u64) -> HistoryEntry {
         nick: "a".into(),
         text: "hi".into(),
         reactions: None,
+        reply_to: None,
     }
 }
 
@@ -239,6 +240,62 @@ fn a_failed_history_request_ends_its_chats_wait_and_a_refusal_is_shown() {
         test_env::emitted(),
         [Emitted::RequestFailed("Not here.".into())]
     );
+}
+
+/// Lines asked for by id are no page: their answer goes to the `replies`
+/// signal alone, with what was asked, and moves no cursor.
+#[test]
+fn quotes_reach_the_replies_signal_and_leave_the_cursor() {
+    test_env::reset();
+    test_env::CURSOR.with(|c| c.set(20));
+    quotes_requested(HTLC, 9, 0, vec![25, 30]);
+    unsafe { history(HTLC, 9, 0, &[entry(25)], true) };
+    assert_eq!(
+        test_env::emitted(),
+        [Emitted::Quotes {
+            cid: 0,
+            asked: vec![25, 30],
+            ids: vec![25],
+            has_more: true
+        }]
+    );
+    assert_eq!(test_env::CURSOR.with(|c| c.get()), 20);
+}
+
+/// A refused request for lines by id is told to the view, which asked,
+/// and never shown, whatever the server said; slow where it said to slow
+/// down.
+#[test]
+fn a_refused_quotes_request_is_told_to_the_view_alone() {
+    for (reason, slow) in [
+        (Some("Slow down."), true),
+        (Some(CUT_SHORT), true),
+        (Some("You are not allowed to read chat history."), false),
+        (None, false),
+    ] {
+        test_env::reset();
+        quotes_requested(HTLC, 9, 0, vec![4]);
+        unsafe { failed(HTLC, 9, reason) };
+        let want = Emitted::QuotesRefused {
+            cid: 0,
+            asked: vec![4],
+            slow,
+        };
+        assert_eq!(test_env::emitted(), [want], "{reason:?}");
+    }
+}
+
+/// While lines are asked for by id the first page is not on its way;
+/// while it is, it is, whatever else is.
+#[test]
+fn quotes_in_flight_are_no_first_page() {
+    test_env::reset();
+    history_forget(HTLC);
+    quotes_requested(HTLC, 9, 0, vec![4]);
+    assert!(!first_page_pending(HTLC, 0));
+    history_requested(HTLC, 10, 0, false);
+    assert!(first_page_pending(HTLC, 0));
+    history_forget(HTLC);
 }
 
 #[test]

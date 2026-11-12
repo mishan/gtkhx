@@ -16,6 +16,15 @@
 //! click on a chip, or its row's menu (`reactions`), asks for one. That
 //! goes for a private chat's kept lines as for the lobby's: on hxd-ng, a
 //! room is shown as a private chat whose lines carry history ids.
+//!
+//! Where the session has replies (the Replies draft, capability bit 18), a
+//! lobby line that answers another is drawn under a header quoting it:
+//! from the line's own row where this view drew it, and otherwise from the
+//! server, which is asked for a kept line by its id once the draw that
+//! found it is done (`hxmodel::replies`). Until the quote comes, and where
+//! it never can, the header says it is an earlier message, so a row's
+//! height stays as it was drawn and a screen reader hears at once that it
+//! is a reply.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -27,12 +36,13 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 use hxmodel::reactions::{LineReactions, Next, Shown};
+use hxmodel::replies::{Quote, Quoted, Refused};
 use hxproto::reactions::{Key, Mine, Summary, INVALID_KEY};
 use hxproto::target::Target;
 use hxsession::HistoryEntry;
 use rotulus::ffi::{RotulusRun, RotulusSpeaker};
 use rotulus::{LoadDirection, RotulusView};
-use rotulus_layout::{MessageId, Reaction};
+use rotulus_layout::{ColorRef, MessageId, Reaction, Reply};
 
 use gtkhx_core::boxed::chat::{split_nick_body, HxChatEvent};
 use gtkhx_core::conn::{hx_conn_name, hx_conn_sess};
@@ -96,6 +106,9 @@ struct LineRegistry {
     /// The newest history ids drawn, up to [`TOLD_LINES`] of them, kept
     /// whatever trimming lets go of.
     newest: BTreeSet<u64>,
+    /// The rows of replies whose header waits for what their target says,
+    /// by the target as the wire names it.
+    waiting: HashMap<Target, Vec<MessageId>>,
 }
 
 /// A line's row, and the reactions shown under it.
@@ -104,6 +117,8 @@ struct Line {
     reactions: LineReactions,
     /// When the server last said what the line holds, or was asked.
     told: Instant,
+    /// What a reply to it quotes.
+    said: Option<Quote>,
 }
 
 impl Line {
@@ -113,6 +128,7 @@ impl Line {
             row,
             reactions,
             told,
+            said: None,
         }
     }
 }
@@ -176,6 +192,10 @@ impl LineRegistry {
             if self.row(key.0, key.1) == Some(row) {
                 self.lines.remove(&key);
             }
+            self.waiting.retain(|_, rows| {
+                rows.retain(|&r| r != row);
+                !rows.is_empty()
+            });
         }
     }
 
@@ -208,6 +228,10 @@ struct Output {
     /// on its way, before the page drew them: the page may have been read
     /// before the change, so they are asked after again once it is drawn.
     missed: Vec<u64>,
+    /// The quotes of lines asked for by id.
+    quotes: hxmodel::replies::Quotes,
+    /// Asking for them waits on the main loop's next idle.
+    asking: bool,
 }
 
 /// The most lines [`Output::missed`] keeps.
@@ -460,6 +484,9 @@ fn draw_live(view: &RotulusView, entry: Option<&HistoryEntry>, draw: impl FnOnce
         Space::History
     };
     out.lines.live((space, e.message_id), row);
+    drop(out);
+    quotable(view, (space, e.message_id), e);
+    head(view, row, e);
 }
 
 /// Draw live line `s`, then with `picture` the row of the picture it
@@ -758,6 +785,7 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
             Row::of(rotulus::ffi::ROW_LOAD_OLDER, &[muted(&text)]).put(view, Some(out.anchor));
     }
     let at = (older && !out.anchor.is_null()).then_some(out.anchor);
+    let mut drawn = Vec::new();
     for e in entries {
         // A line taken away since it was drawn still gets its tombstone.
         if e.message_id != 0
@@ -765,6 +793,13 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
             && out.lines.row(Space::History, e.message_id).is_some()
         {
             continue;
+        }
+        if e.flags & DELETED != 0 {
+            let Output { lines, quotes, .. } = &mut *out;
+            if let Some(line) = lines.lines.get_mut(&(Space::History, e.message_id)) {
+                line.said = None;
+                quotes.removed(e.message_id);
+            }
         }
         let (nick, text) = (c_str(&e.nick), c_str(&e.text));
         let (gutter, body) = if e.flags & DELETED != 0 {
@@ -789,14 +824,311 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
                 r.replace(s.clone(), m);
                 view.set_reactions(row, chips(&r.shown()));
             }
+            drawn.push((row, e));
         }
     }
+    drop(out);
+    for (row, e) in drawn {
+        quotable(view, (Space::History, e.message_id), e);
+        head(view, row, e);
+    }
+    let out = output(view).borrow_mut();
     if !older {
         let text = format!("─── {} ───", tr("live messages"));
         Row::of(rotulus::ffi::ROW_DIVIDER, &[muted(&text)]).put(view, None);
     }
     let drawn = |id: &u64| out.lines.row(Space::History, *id).is_some();
     missed.into_iter().filter(drawn).collect()
+}
+
+// ---- replies -------------------------------------------------------------
+
+/// What a reply to entry `e` quotes: who said it and what. A line the
+/// server wrote is quoted as the server's.
+fn quote_of(e: &HistoryEntry) -> Quote {
+    let nick = match e.flags & SERVER_MSG {
+        0 => c_str(&e.nick).to_owned(),
+        // TRANSLATORS: who a reply's header says wrote a line the server
+        // wrote, such as someone joining.
+        _ => tr("server"),
+    };
+    Quote::new(&nick, c_str(&e.text))
+}
+
+/// The lobby's line a reply's `target` names: a kept line by its history
+/// id, and one nobody keeps by the chat's own count.
+fn lobby_line(target: &Target) -> Option<(Space, u64)> {
+    match *target {
+        Target::Line { channel: 0, id } => Some((Space::History, id)),
+        Target::Ephemeral { chat: 0, id } => Some((Space::Ephemeral, id)),
+        _ => None,
+    }
+}
+
+/// How a reply names the lobby's line `key`.
+fn lobby_target((space, id): (Space, u64)) -> Target {
+    match space {
+        Space::History => Target::Line { channel: 0, id },
+        Space::Ephemeral => Target::Ephemeral { chat: 0, id },
+    }
+}
+
+/// A reply's header: `q`'s nick in the color its own lines are drawn in.
+fn quoting(view: &RotulusView, q: &Quote) -> Reply {
+    let own = crate::chat_view::conn_of(view)
+        .map(crate::dock::htlc_for)
+        .filter(|h| !h.is_null())
+        // SAFETY: main thread; a connection the dock holds is live.
+        .map(|h| unsafe { own_nick(h) })
+        .unwrap_or_default();
+    let nick = q.nick.as_bytes();
+    // SAFETY: the nick is read for the call.
+    let color =
+        unsafe { hx_chat_nick_color(nick.as_ptr().cast(), nick.len(), (nick == own).into()) };
+    Reply::Quote {
+        nick: q.nick.clone(),
+        color: u8::try_from(color).map_or(ColorRef::Default, ColorRef::Palette),
+        excerpt: q.excerpt.clone(),
+    }
+}
+
+/// The header of a reply whose target the view could not quote itself.
+fn unquoted(q: Option<&Quoted>) -> Reply {
+    Reply::Unavailable(match q {
+        // TRANSLATORS: a reply's header, where the line it answers has
+        // been taken away.
+        Some(Quoted::Removed) => tr("message removed"),
+        // TRANSLATORS: a reply's header, where the line it answers was
+        // said by someone the user ignores.
+        Some(Quoted::Hidden) => tr("a message you've hidden"),
+        // TRANSLATORS: a reply's header, where the line it answers is not
+        // shown here, or not yet.
+        _ => tr("earlier message"),
+    })
+}
+
+/// Line `key`, drawn from entry `e`, is one a reply quotes as `e` says;
+/// the replies already drawn that wait for it are headed with it.
+fn quotable(view: &RotulusView, key: (Space, u64), e: &HistoryEntry) {
+    let q = quote_of(e);
+    let rows = {
+        let mut out = output(view).borrow_mut();
+        let Some(line) = out.lines.lines.get_mut(&key) else {
+            return;
+        };
+        line.said.get_or_insert(q.clone());
+        let lobby = cid_of(view) == 0;
+        let rows = lobby.then(|| out.lines.waiting.remove(&lobby_target(key)));
+        rows.flatten().unwrap_or_default()
+    };
+    let reply = quoting(view, &q);
+    for row in rows {
+        view.set_reply(row, Some(reply.clone()));
+    }
+}
+
+/// Head `row`, entry `e`'s, with the line it answers, where it is a reply
+/// to a lobby line: quoted from the view's own row of it, or from what the
+/// server said of it; and until then, or where nothing can be said, as an
+/// earlier message, a kept line asked for by id once the draw is done.
+fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
+    let Some(target) = e.reply_to.as_ref().filter(|_| cid_of(view) == 0) else {
+        return;
+    };
+    let Some(key) = lobby_line(target) else {
+        return;
+    };
+    let quote = {
+        let mut out = output(view).borrow_mut();
+        let drawn = out.lines.lines.get(&key).and_then(|l| l.said.clone());
+        if drawn.is_none() {
+            out.lines
+                .waiting
+                .entry(target.clone())
+                .or_default()
+                .push(row);
+        }
+        match (drawn, key) {
+            (Some(q), _) => Ok(q),
+            (None, (Space::Ephemeral, _)) => Err(None),
+            (None, (Space::History, id)) => match out.quotes.get(id).cloned() {
+                Some(Quoted::Line(q)) => Ok(q),
+                Some(q @ (Quoted::Removed | Quoted::Hidden | Quoted::Unavailable)) => Err(Some(q)),
+                Some(Quoted::Later) | None => {
+                    out.quotes.want(id);
+                    Err(None)
+                }
+            },
+        }
+    };
+    let reply = match &quote {
+        Ok(q) => quoting(view, q),
+        Err(q) => unquoted(q.as_ref()),
+    };
+    if !view.set_reply(row, Some(reply)) {
+        let mut out = output(view).borrow_mut();
+        if let Some(rows) = out.lines.waiting.get_mut(target) {
+            rows.retain(|&r| r != row);
+            if rows.is_empty() {
+                out.lines.waiting.remove(target);
+            }
+        }
+    }
+}
+
+/// The quotes to ask for next, those the view has drawn since, or no
+/// longer holds a reply to, aside.
+fn due_quotes(view: &RotulusView) -> Option<Vec<u64>> {
+    let mut out = output(view).borrow_mut();
+    let Output { lines, quotes, .. } = &mut *out;
+    quotes.next(|id| {
+        let target = Target::Line { channel: 0, id };
+        lines.row(Space::History, id).is_some() || !lines.waiting.contains_key(&target)
+    })
+}
+
+/// Ask for the quotes the view wants once the main loop is idle, so that
+/// a page's replies, or a burst of live ones, go in one request. Called
+/// where what the server says is heard, never from a draw.
+fn ask_soon(view: &RotulusView) {
+    if std::mem::replace(&mut output(view).borrow_mut().asking, true) {
+        return;
+    }
+    let view = view.downgrade();
+    glib::idle_add_local_once(move || {
+        if let Some(view) = view.upgrade() {
+            output(&view).borrow_mut().asking = false;
+            ask(&view);
+        }
+    });
+}
+
+/// The connection `view` shows, or NULL.
+fn htlc_of(view: &RotulusView) -> *mut c_void {
+    crate::chat_view::conn_of(view).map_or(std::ptr::null_mut(), crate::dock::htlc_for)
+}
+
+/// Ask for the quotes the view wants, unless the first page is on its way,
+/// which most likely holds them and asks once it is drawn.
+fn ask(view: &RotulusView) {
+    let htlc = htlc_of(view);
+    if htlc.is_null() || hxhandlers::recv::chat::first_page_pending(htlc, 0) {
+        return;
+    }
+    let Some(ids) = due_quotes(view) else {
+        return;
+    };
+    // SAFETY: main thread; the dock's connection is live.
+    if !unsafe { hxhandlers::send::chat_history::quotes(htlc, 0, &ids) } {
+        let r = output(view).borrow_mut().quotes.refused(false);
+        settled(view, r);
+    }
+}
+
+/// What lines asked for by id hold now: the replies waiting for them are
+/// headed so, and those that can be quoted wait no more.
+fn quoted(view: &RotulusView, now: Vec<(u64, Quoted)>) {
+    for (id, q) in now {
+        let target = Target::Line { channel: 0, id };
+        let rows = {
+            let mut out = output(view).borrow_mut();
+            match q {
+                Quoted::Unavailable | Quoted::Later => out.lines.waiting.get(&target).cloned(),
+                _ => out.lines.waiting.remove(&target),
+            }
+        };
+        let reply = match &q {
+            Quoted::Line(line) => quoting(view, line),
+            q => unquoted(Some(q)),
+        };
+        let gone: Vec<_> = (rows.unwrap_or_default().into_iter())
+            .filter(|&row| !view.set_reply(row, Some(reply.clone())))
+            .collect();
+        let mut out = output(view).borrow_mut();
+        if let Some(rows) = out.lines.waiting.get_mut(&target) {
+            rows.retain(|r| !gone.contains(r));
+            if rows.is_empty() {
+                out.lines.waiting.remove(&target);
+            }
+        }
+    }
+}
+
+fn settled(view: &RotulusView, r: Refused) {
+    if let Refused::Settled(now) = r {
+        quoted(view, now);
+    }
+}
+
+/// Whether someone who now goes by `nick` is ignored on `htlc`.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+unsafe fn ignored(htlc: *mut c_void, nick: &str) -> bool {
+    let conv = chat_with_cid(hx_conn_sess(htlc.cast()), 0);
+    let uid = uid_of(htlc, 0, nick.as_bytes());
+    uid != 0
+        && hxmodel::chat_members::hx_member_model_get_ignore(hx_chat_member_model(conv.cast()), uid)
+            != 0
+}
+
+/// What the `replies` signal says: the answer to a request for quotes, or
+/// its refusal, which is never shown; one put off for the rate is asked
+/// again after a second.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+unsafe fn replies(htlc: *mut c_void, e: &gtkhx_core::replies::Event) {
+    use gtkhx_core::replies::Event;
+    let (Event::Quotes { cid, asked, .. } | Event::Refused { cid, asked, .. }) = e;
+    let Some(view) = view_of(htlc, *cid) else {
+        return;
+    };
+    if !output(&view).borrow().quotes.in_flight(asked) {
+        return;
+    }
+    match e {
+        Event::Quotes {
+            entries, has_more, ..
+        } => {
+            let got = (entries.iter())
+                .map(|e| {
+                    let q = if e.flags & DELETED != 0 {
+                        Quoted::Removed
+                    } else if ignored(htlc, &e.nick) {
+                        Quoted::Hidden
+                    } else {
+                        Quoted::Line(quote_of(e))
+                    };
+                    (e.message_id, q)
+                })
+                .collect();
+            let now = output(&view).borrow_mut().quotes.answered(got, *has_more);
+            quoted(&view, now);
+            ask_soon(&view);
+        }
+        Event::Refused { slow, .. } => {
+            let r = output(&view).borrow_mut().quotes.refused(*slow);
+            if r != Refused::Retry {
+                return settled(&view, r);
+            }
+            let view = view.downgrade();
+            glib::timeout_add_local_once(Duration::from_secs(1), move || {
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                let (htlc, ids) = (htlc_of(&view), output(&view).borrow().quotes.again());
+                let Some(ids) = ids.filter(|_| !htlc.is_null()) else {
+                    return;
+                };
+                // SAFETY: main thread; the dock's connection is live.
+                if !unsafe { hxhandlers::send::chat_history::quotes(htlc, 0, &ids) } {
+                    let r = output(&view).borrow_mut().quotes.refused(false);
+                    settled(&view, r);
+                }
+            });
+        }
+    }
 }
 
 /// "Load older" was asked for: its row says so until the page comes.
@@ -1037,6 +1369,7 @@ unsafe fn chat(htlc: *mut c_void, e: &HxChatEvent, entry: Option<&HistoryEntry>)
                 );
             }
         }
+        ask_soon(&view);
     }
     gtkhx_notify_chat(htlc, e);
 }
@@ -1192,11 +1525,13 @@ pub extern "C" fn gtkhx_chat_output_install() {
         gtkhx_core::session::connect_chat_history(|htlc, cid, entries, has_more| unsafe {
             if let Some(view) = view_of(htlc, cid) {
                 let missed = draw_history(&view, entries, has_more);
+                ask_soon(&view);
                 let lines: Vec<Target> = missed.into_iter().map(|id| target(&view, id)).collect();
                 hxhandlers::send::reactions::refresh(htlc, &lines);
             }
         });
         gtkhx_core::session::connect_reactions(|htlc, e| unsafe { reactions(htlc, e) });
+        gtkhx_core::session::connect_replies(|htlc, e| unsafe { replies(htlc, e) });
         let session: glib::Object = unsafe {
             from_glib_none(
                 gtkhx_core::session::gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
@@ -1228,6 +1563,7 @@ pub(crate) mod tests {
             nick: nick.into(),
             text: text.into(),
             reactions: None,
+            reply_to: None,
         }
     }
 
@@ -1913,6 +2249,160 @@ pub(crate) mod tests {
             lines.live((Space::History, id), MessageId(id));
         }
         assert_eq!(lines.row(Space::History, 5), Some(MessageId(1)));
+    }
+
+    /// What a screen reader is read of `view`, a row a line.
+    fn spoken(view: &RotulusView) -> String {
+        use gtk::ffi::{
+            gtk_accessible_text_get_type, GtkAccessibleText, GtkAccessibleTextInterface,
+        };
+        // SAFETY: the view implements GtkAccessibleText, whose interface
+        // struct this reads the view's own function from.
+        unsafe {
+            let obj = raw(view) as *mut glib::gobject_ffi::GTypeInstance;
+            let iface = glib::gobject_ffi::g_type_interface_peek(
+                (*obj).g_class as glib::ffi::gpointer,
+                gtk_accessible_text_get_type(),
+            ) as *const GtkAccessibleTextInterface;
+            let bytes =
+                ((*iface).get_contents.unwrap())(obj as *mut GtkAccessibleText, 0, u32::MAX);
+            let bytes: glib::Bytes = glib::translate::from_glib_full(bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+    }
+
+    /// The headers a screen reader is read of `view`, in order.
+    fn headers(view: &RotulusView) -> Vec<String> {
+        (spoken(view).lines())
+            .filter_map(|l| l.find("replying to").map(|i| l[i..].to_owned()))
+            .collect()
+    }
+
+    fn reply(id: u64, flags: u16, text: &str, to: Target) -> HistoryEntry {
+        HistoryEntry {
+            reply_to: Some(to),
+            ..entry(id, flags, "bob", text)
+        }
+    }
+
+    fn kept(id: u64) -> Target {
+        Target::Line { channel: 0, id }
+    }
+
+    const EARLIER: &str = "replying to a message: earlier message";
+
+    /// A reply to a line the view drew quotes it, one line, as a reader
+    /// hears it; to a line it did not, it is an earlier message, a kept
+    /// line asked for by id and a line nobody keeps not; and a reply to a
+    /// line elsewhere has no header. A line drawn later, live or in an
+    /// older page, fills the headers that wait for it.
+    pub(crate) fn check_a_reply_is_headed_with_what_it_answers() {
+        let view = view();
+        let notice = |id| Target::Ephemeral { chat: 0, id };
+        draw_history(
+            &view,
+            &[
+                entry(4, 0, "alice", "four\nlines"),
+                reply(5, 0, "yes", kept(4)),
+                reply(6, 0, "and that", kept(2)),
+                reply(7, 0, "hello", notice(19)),
+                reply(8, 0, "there", Target::Line { channel: 3, id: 1 }),
+                entry(9, SERVER_MSG, "", "carol joined"),
+            ],
+            true,
+        );
+        assert_eq!(
+            headers(&view),
+            ["replying to alice: four lines", EARLIER, EARLIER]
+        );
+        assert_eq!(due_quotes(&view), Some(vec![2]));
+
+        draw_live(
+            &view,
+            Some(&entry(19, EPHEMERAL, "carol", "nineteen")),
+            || say(&view, "carol", "nineteen"),
+        );
+        draw_live(&view, Some(&reply(10, 0, "ok", kept(9))), || {
+            say(&view, "bob", "ok")
+        });
+        loading_older(&view, &mut output(&view).borrow_mut());
+        draw_history(&view, &[entry(2, ACTION, "dave", "waves")], false);
+        assert_eq!(
+            headers(&view),
+            [
+                "replying to alice: four lines",
+                "replying to dave: waves",
+                "replying to carol: nineteen",
+                "replying to server: carol joined",
+            ]
+        );
+    }
+
+    /// What the server says of a line asked for by id heads the replies
+    /// that wait for it: its words, that it was taken away, or that it is
+    /// still an earlier message where it was left out; and a quote held is
+    /// not asked for again.
+    pub(crate) fn check_a_quote_asked_for_heads_its_replies() {
+        let view = view();
+        draw_history(
+            &view,
+            &[
+                reply(10, 0, "a", kept(1)),
+                reply(11, 0, "b", kept(2)),
+                reply(12, 0, "c", kept(3)),
+            ],
+            false,
+        );
+        draw_live(&view, Some(&reply(13, 0, "d", kept(1))), || {
+            say(&view, "bob", "d")
+        });
+        assert_eq!(headers(&view), [EARLIER; 4]);
+        assert_eq!(due_quotes(&view), Some(vec![1, 2, 3]));
+        let now = output(&view).borrow_mut().quotes.answered(
+            vec![
+                (1, Quoted::Line(Quote::new("erin", "one"))),
+                (2, Quoted::Removed),
+            ],
+            false,
+        );
+        quoted(&view, now);
+        let one = "replying to erin: one";
+        let removed = "replying to a message: message removed";
+        assert_eq!(headers(&view), [one, removed, EARLIER, one]);
+        draw_live(&view, Some(&reply(14, 0, "e", kept(1))), || {
+            say(&view, "bob", "e")
+        });
+        assert_eq!(headers(&view), [one, removed, EARLIER, one, one]);
+        assert_eq!(due_quotes(&view), None);
+    }
+
+    /// A line drawn live and then shown taken away by a page is quoted as
+    /// removed, not as what it said.
+    pub(crate) fn check_a_line_taken_away_is_quoted_as_removed() {
+        let view = view();
+        draw_live(&view, Some(&entry(3, 0, "alice", "oops")), || {
+            say(&view, "alice", "oops")
+        });
+        draw_history(&view, &[entry(3, DELETED, "", "")], false);
+        draw_live(&view, Some(&reply(4, 0, "what", kept(3))), || {
+            say(&view, "bob", "what")
+        });
+        assert_eq!(headers(&view), ["replying to a message: message removed"]);
+    }
+
+    /// A reply the scrollback let go of before its quote was asked for
+    /// asks for it no more.
+    pub(crate) fn check_a_trimmed_reply_asks_for_no_quote() {
+        let view = view();
+        view.set_max_rows(3);
+        draw_live(&view, Some(&reply(10, 0, "a", kept(1))), || {
+            say(&view, "bob", "a")
+        });
+        draw_live(&view, Some(&reply(11, 0, "b", kept(2))), || {
+            say(&view, "bob", "b")
+        });
+        draw_live(&view, None, || draw_prose(&view, b"two\nrows"));
+        assert_eq!(due_quotes(&view), Some(vec![2]));
     }
 
     #[test]

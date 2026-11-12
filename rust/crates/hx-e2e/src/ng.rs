@@ -20,6 +20,17 @@ pub struct Ng {
 impl Ng {
     /// Log `login` in with `password` on the ng wire at `addr`.
     pub fn login(addr: &str, login: &str, password: &str) -> Result<Ng, String> {
+        Ng::login_with(addr, login, password, json!({}))
+    }
+
+    /// [`Ng::login`], with the login's other `params`, such as the
+    /// capabilities it declares.
+    pub fn login_with(
+        addr: &str,
+        login: &str,
+        password: &str,
+        params: Value,
+    ) -> Result<Ng, String> {
         let mut s = TcpStream::connect(addr).map_err(|e| format!("{addr}: {e}"))?;
         s.set_read_timeout(Some(Duration::from_secs(10))).ok();
         // A fixed key: nothing here checks the server's answer to it.
@@ -40,7 +51,10 @@ impl Ng {
             next: 1,
             bearer: String::new(),
         };
-        let ok = ng.ok("login", json!({ "login": login, "password": password }))?;
+        let mut params = params;
+        params["login"] = json!(login);
+        params["password"] = json!(password);
+        let ok = ng.ok("login", params)?;
         ng.bearer = format!(
             "Bearer {}.{}",
             ok["session"].as_str().unwrap_or_default(),

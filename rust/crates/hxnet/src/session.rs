@@ -105,10 +105,6 @@ fn is_messaging(opcode: u32) -> bool {
     (800..=834).contains(&opcode)
 }
 
-/// The Replies draft's Notification, which a server agreeing to Reactions
-/// may send though GtkHx asks for none.
-const NOTIFICATION: u32 = 718;
-
 /// What the consumer sends whose reply its Rust handlers read.
 fn rust_answers(opcode: u32) -> bool {
     // Typing (813) is never answered.
@@ -133,6 +129,12 @@ impl Shared {
         self.session()
             .server()
             .is_some_and(|i| i.reactions.is_some())
+    }
+
+    /// Whether the session has replies: the bit, and the target kinds the
+    /// draft requires beside it.
+    fn replies(&self) -> bool {
+        self.session().server().is_some_and(|i| i.replies.is_some())
     }
 
     fn now(&self) -> u64 {
@@ -381,9 +383,15 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
                 Event::Session(e)
             }
             e @ hxsession::Event::Unhandled {
-                opcode: hxproto::reactions::CHANGED | NOTIFICATION,
+                opcode: hxproto::reactions::CHANGED,
                 ..
             } if shared.reacts() => Event::Session(e),
+            // The Replies draft's Notification, which a server agreeing to
+            // either draft may send though GtkHx asks for none.
+            e @ hxsession::Event::Unhandled {
+                opcode: hxproto::replies::NOTIFICATION,
+                ..
+            } if shared.reacts() || shared.replies() => Event::Session(e),
             // Traced from the session's tap, the session's own replies
             // among them.
             hxsession::Event::Reply { frame, .. } | hxsession::Event::Unhandled { frame, .. } => {
@@ -700,27 +708,46 @@ mod tests {
     }
 
     /// Where the session has reactions, Reaction Changed and Notification
-    /// reach the consumer as the session's; a server that echoes bit 19
-    /// without the target kinds the draft requires, or never agreed, has
-    /// them shown as frames. A reply to Get Reactions is the session's
-    /// either way, by its trans.
+    /// reach the consumer as the session's, and where it has replies alone,
+    /// Notification; a server that echoes a bit without the target kinds
+    /// its draft requires, or never agreed, has them shown as frames. A
+    /// reply to Get Reactions is the session's either way, by its trans.
     #[tokio::test]
-    async fn the_reactions_draft_reaches_the_consumer_as_the_sessions() {
-        use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
-        let all = (TEXT_ENCODING | STRUCTURED_CHAT | REACTIONS) as u32;
-        let targets = hxproto::reactions::TARGETS_LINES.to_be_bytes();
-        for (caps, targets, agreed) in [
-            (Some(all), Some(&targets[..]), true),
-            (Some(all), None, false),
-            (None, None, false),
+    async fn the_drafts_pushes_reach_the_consumer_as_the_sessions_where_agreed() {
+        use hxproto::messages::tag::{REACTION_TARGETS, REPLY_TARGETS};
+        use hxproto::reactions::CHANGED;
+        use hxproto::replies::NOTIFICATION;
+        use hxsession::cap::{REACTIONS, REPLIES, STRUCTURED_CHAT, TEXT_ENCODING};
+        let base = TEXT_ENCODING | STRUCTURED_CHAT;
+        let (reacts, replies) = ((base | REACTIONS) as u32, (base | REPLIES) as u32);
+        let reaction_kinds = hxproto::reactions::TARGETS_LINES.to_be_bytes();
+        let reply_kinds = 0x0012u16.to_be_bytes();
+        let all = base | REACTIONS | REPLIES;
+        // (caps, the kinds beside them, 711 the session's, 718 the session's)
+        for (caps, kinds, changed, notified) in [
+            (
+                Some(reacts),
+                Some((REACTION_TARGETS, &reaction_kinds)),
+                true,
+                true,
+            ),
+            (Some(reacts), None, false, false),
+            (
+                Some(replies),
+                Some((REPLY_TARGETS, &reply_kinds)),
+                false,
+                true,
+            ),
+            (Some(replies), None, false, false),
+            (None, None, false, false),
         ] {
-            let (mut server, mut client) = start_handling(hxsession::Handled::LOGIN, all.into());
+            let (mut server, mut client) = start_handling(hxsession::Handled::LOGIN, all);
             server.accept().await;
             server.next().await;
             let (version, caps) = (190u16.to_be_bytes(), caps.map(u32::to_be_bytes));
             let mut reply: Vec<(u16, &[u8])> = vec![(0x00a0, &version)];
             reply.extend(caps.as_ref().map(|c| (0x01f0, &c[..])));
-            reply.extend(targets.map(|t| (hxproto::messages::tag::REACTION_TARGETS, t)));
+            reply.extend(kinds.map(|(tag, k)| (tag, &k[..])));
             server.send(&server_says(TASK, 1, &reply)).await;
             for state in [
                 ConnectionState::LoginSending,
@@ -740,13 +767,13 @@ mod tests {
                 Event::Session(hxsession::Event::Reply { trans: t, .. }) => assert_eq!(t, trans),
                 other => panic!("{other:?}"),
             }
-            for opcode in [hxproto::reactions::CHANGED, NOTIFICATION] {
+            for (opcode, theirs) in [(CHANGED, changed), (NOTIFICATION, notified)] {
                 server.send(&server_says(opcode, 0, &[])).await;
-                match (agreed, client.next().await) {
+                match (theirs, client.next().await) {
                     (true, Event::Session(hxsession::Event::Unhandled { opcode: o, .. }))
                         if o == opcode => {}
                     (false, Event::Frame(f)) if f.header.type_ == opcode => {}
-                    (_, other) => panic!("agreed {agreed}: {other:?}"),
+                    (_, other) => panic!("{caps:?} {opcode}: {other:?}"),
                 }
             }
         }

@@ -362,6 +362,20 @@ pub unsafe extern "C" fn user_nick_color_rgb(
 
 // ---- chat.c, for the chats a session holds ----
 
+/// The palette slot a nick is drawn in: the plain nick slot, or ours.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_nick_color(
+    _nick: *const c_char,
+    _len: usize,
+    is_self: glib::ffi::gboolean,
+) -> i16 {
+    if is_self != 0 {
+        43
+    } else {
+        40
+    }
+}
+
 /// The chats tests made, by session and cid.
 pub fn chats() -> &'static std::sync::Mutex<Vec<(usize, u32, usize)>> {
     static CHATS: std::sync::OnceLock<std::sync::Mutex<Vec<(usize, u32, usize)>>> =
