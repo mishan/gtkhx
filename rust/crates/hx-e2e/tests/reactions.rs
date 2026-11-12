@@ -13,7 +13,7 @@ use hxproto::messages::tag;
 use hxproto::messaging::{RosterState, CAP_MESSAGING};
 use hxproto::reactions::{
     parse_changed, parse_got, Group, Key, Mine, Summary, ADD, CLEAR, INVALID_KEY, REMOVE,
-    TARGETS_EPHEMERAL, TARGETS_IMS, TARGETS_LINES,
+    TARGETS_EPHEMERAL, TARGETS_IMS, TARGETS_LINES, TARGETS_STORED_PMS,
 };
 use hxproto::structured_chat::{NOT_ALLOWED, NO_SUCH_TARGET};
 use hxproto::target::Target;
@@ -566,5 +566,97 @@ fn an_instant_messages_reaction_reaches_its_other_party() {
             "{}",
             s.name
         );
+    }
+}
+
+/// `login` with reactions, its session handling private messages.
+fn writer(s: &'static Server, login: &str) -> Client {
+    let nick: String = unique_name(login).chars().take(31).collect();
+    let c = Client::login_handling(s, login, Some(login), OFFER, Handled::MSG, &nick)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let limits = c.server_info().reactions;
+    assert!(
+        limits.is_some_and(|l| l.targets & TARGETS_STORED_PMS != 0),
+        "{login}: no reactions on stored messages: {limits:?}"
+    );
+    c
+}
+
+/// A private message the server stores is named by the same reference to
+/// its sender, in the answer to the request that sent it, and to its
+/// recipient, as it is handed over. A reaction to it is answered with no
+/// count and its summary told to the other party; one made by somebody who
+/// is no party to it is answered alike and dropped, and Get Reactions
+/// answers each party the summary without it and that somebody none.
+#[test]
+fn a_stored_messages_reaction_reaches_its_other_party() {
+    for s in servers_with(&[Cap::Reactions]) {
+        let mut a = writer(s, "react-a");
+        let mut b = writer(s, "react-b");
+        let mut outsider = writer(s, "react-mod");
+        let text = unique_name("react to this message");
+        let to = b.server_info().uid.expect("react-b's uid");
+        let message = Request {
+            opcode: 108,
+            chunks: vec![
+                (tag::UID, to.to_be_bytes().to_vec()),
+                (tag::BODY, text.as_bytes().to_vec()),
+            ],
+        };
+        let t = a.send_expecting(&message, Some(Expect::Message));
+        let sent = loop {
+            match a.next_event().unwrap_or_else(|e| panic!("{e}")) {
+                Event::Session(hxsession::Event::MessageSent { trans, pm_id }) if trans == t => {
+                    break pm_id
+                }
+                Event::Session(hxsession::Event::Failed { trans, reason }) if trans == t => {
+                    panic!("{}: refused: {reason:?}", s.name)
+                }
+                _ => {}
+            }
+        };
+        let got = loop {
+            match b.next_event().unwrap_or_else(|e| panic!("{e}")) {
+                Event::Session(hxsession::Event::Message { text: t, pm_id, .. }) if t == text => {
+                    break pm_id
+                }
+                _ => {}
+            }
+        };
+        assert_eq!(got, sent, "{}: named otherwise to each", s.name);
+        let Some((true, reference)) = sent else {
+            panic!("{}: not named as stored: {sent:?}", s.name)
+        };
+        let target = Target::Pm {
+            stored: true,
+            reference,
+        };
+
+        let react = |c: &mut Client, emoji: &str| {
+            let key = Key::Emoji(emoji.into());
+            let r = c.request(&req::send(&target, ADD, Some(&key), None).unwrap());
+            assert!(!r.is_error(), "{}: {}", s.name, r.error_text());
+            assert_eq!(r.chunk(tag::REACTION_COUNT), None, "{}: a count", s.name);
+        };
+        react(&mut b, THUMBS);
+        told(&mut a, &target, Some((summary(1), Mine::default())));
+        react(&mut outsider, "\u{1F389}");
+
+        let held = |c: &mut Client| {
+            let r = c.request(&req::get(std::slice::from_ref(&target), None).unwrap());
+            assert!(!r.is_error(), "{}: {}", s.name, r.error_text());
+            let [g] = &parse_got(ChunkIter::over_message(&r.raw, r.raw.len()))[..] else {
+                panic!("{}: not one group", s.name)
+            };
+            assert_eq!(g.target, target, "{}", s.name);
+            (g.summary.clone(), g.mine.clone())
+        };
+        for (who, c, want) in [
+            ("its sender", &mut a, (summary(1), Mine::default())),
+            ("its recipient", &mut b, (summary(1), Mine(vec![0]))),
+            ("no party", &mut outsider, Default::default()),
+        ] {
+            assert_eq!(held(c), want, "{}: {who}", s.name);
+        }
     }
 }

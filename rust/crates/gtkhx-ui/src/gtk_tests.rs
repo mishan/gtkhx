@@ -57,6 +57,7 @@ fn display_backed() {
     crate::chat_output::tests::check_a_trimmed_reply_asks_for_no_quote();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
     crate::msg::tests::check_an_instant_messages_chips_are_its_parties();
+    crate::msg::tests::check_a_stored_messages_chips_are_the_servers();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();

@@ -1,11 +1,11 @@
 //! Reacting to a line, the lobby's or a private chat's (a room, on
-//! hxd-ng), or to an instant message, where the session has reactions (the
-//! Reactions draft, capability bit 19): a click on a chip, or the row's
-//! menu, with a few emoji to react with at once and GTK's emoji chooser
-//! for any other, and who reacted to a line with each emoji, from the menu
-//! or a chip's own; a moderator's menu clears the line's reactions. What a
-//! line holds is `chat_output`'s, and an instant message `msg`'s, which
-//! nobody can ask the server after; a refusal is told as a toast.
+//! hxd-ng), or to an instant message or a stored private message, where
+//! the session has reactions (the Reactions draft, capability bit 19): a
+//! click on a chip, or the row's menu, with a few emoji to react with at
+//! once and GTK's emoji chooser for any other, and who reacted to a line
+//! with each emoji, from the menu or a chip's own; a moderator's menu
+//! clears the line's reactions. What a line holds is `chat_output`'s, and
+//! a message's `msg`'s; a refusal is told as a toast.
 //!
 //! Without reactions no row is anyone's here, and the view's own menu
 //! opens as before.
@@ -36,11 +36,11 @@ const QUICK: usize = 5;
 /// draft's `reason` code, or else the server's own `error`.
 pub(crate) fn refusal(reason: Option<u16>, error: Option<&str>) -> String {
     match reason {
-        Some(NO_SUCH_TARGET) => tr("That line can't take reactions any more."),
+        Some(NO_SUCH_TARGET) => tr("That can't take reactions any more."),
         Some(NOT_ALLOWED) => tr("You can't react there."),
         Some(INVALID_KEY) => tr("The server doesn't take that emoji as a reaction."),
-        Some(TOO_MANY_KEYS) => tr("This line has as many kinds of reaction as it can take."),
-        Some(TOO_MANY_OF_YOURS) => tr("You have as many reactions on this line as you can."),
+        Some(TOO_MANY_KEYS) => tr("That has as many kinds of reaction as it can take."),
+        Some(TOO_MANY_OF_YOURS) => tr("You have as many reactions there as you can."),
         // TRANSLATORS: the user reacted faster than the server allows.
         Some(RATE_LIMITED) => tr("Slow down a moment."),
         Some(INVALID_TARGET) => tr("That can't take reactions on this server."),
@@ -126,8 +126,8 @@ fn react(view: &RotulusView, row: MessageId, key: &str, on: Option<bool>) -> boo
     let Some((htlc, limits)) = session(view) else {
         return false;
     };
-    if let Some(guid) = crate::msg::im_on(view, row, &limits) {
-        let t = crate::msg::want(view, guid, key, on, &limits);
+    if let Some(m) = crate::msg::on(view, row, &limits) {
+        let t = crate::msg::want(view, m, key, on, &limits);
         let refused = matches!(t, Some(Then::Say(_)));
         if let Some(t) = t {
             // SAFETY: as for `session`.
@@ -213,19 +213,18 @@ fn items() -> gtk::Box {
 /// `row`'s menu at `x`, `y`: the quick emoji, "Add Reaction…" for the
 /// chooser, on a line "Who Reacted…" where it has emoji chips and "Clear
 /// Reactions…" for a moderator where it has any, and the view's own Copy
-/// and Select All. Whether `row` is a line or an instant message one can
-/// react to.
+/// and Select All. Whether `row` is a line or a message one can react to.
 fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
     let Some((htlc, limits)) = session(view) else {
         return false;
     };
     let line = line_on(view, row, &limits);
-    if line.is_none() && crate::msg::im_on(view, row, &limits).is_none() {
-        return false;
-    }
-    if let Some(id) = line {
-        // SAFETY: as for `session`.
-        unsafe { refresh_if_stale(view, htlc, id) };
+    let message = crate::msg::on(view, row, &limits);
+    // SAFETY: as for `session`.
+    match (line, message) {
+        (Some(id), _) => unsafe { refresh_if_stale(view, htlc, id) },
+        (None, Some(m)) => unsafe { crate::msg::refresh_if_stale(view, htlc, m) },
+        (None, None) => return false,
     }
     let popover = gtk::Popover::new();
     let items = items();

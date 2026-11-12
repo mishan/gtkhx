@@ -534,6 +534,7 @@ pub unsafe extern "C" fn gtkhx_notify_install_actions(app: *mut gtk::ffi::GtkApp
     // Once, at startup, before any connection can hear from a friend.
     crate::friends::install();
     crate::pchat::install();
+    crate::msg::install();
 }
 
 /// Raise the public-chat tab of the connection the user is looking at. The

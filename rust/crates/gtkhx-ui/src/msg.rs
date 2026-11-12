@@ -4,9 +4,9 @@
 //! [`hxmodel::pm`] is the model: the open conversations, keyed by connection
 //! and peer, and the rules for what a message reads as. This module is the
 //! view over it — a tab's widgets, its input, the transcript a message is
-//! rendered into, the recipient pane above it — and the C ABI the remaining
-//! C reaches it through: the `msg` signal's handler hands it each message
-//! and has it notified, `users.c` opens a conversation and tells it of a
+//! rendered into, the recipient pane above it. It hears each message on
+//! the `msg` signal, and has it notified; the remaining C reaches it
+//! through a C ABI: `users.c` opens a conversation and tells it of a
 //! user's change, and the settings hooks restyle its views.
 //!
 //! A friend's conversation is the same tab, keyed by their Login rather
@@ -17,12 +17,17 @@
 //! capability bit 19) and they take an instant message's, each one there
 //! takes chips under its last row, reacted to as a chat line is
 //! (`reactions`); what the friend reacts with is told change by change,
-//! and kept with the conversation, since the server keeps none of it.
+//! and kept with the conversation, since the server keeps none of it. A
+//! private message the server stored takes them likewise, by the reference
+//! it named the message by, and what it holds is the server's to say, as a
+//! line's is.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr};
+use std::hash::Hash;
 use std::rc::{Rc, Weak};
+use std::time::Instant;
 
 use glib::translate::from_glib_none;
 use gtk::gdk;
@@ -36,9 +41,10 @@ use gtkhx_core::conn::{
     generation, hx_conn_has_cap, hx_conn_login, hx_conn_name, hx_conn_sess, hx_conn_uid,
 };
 use gtkhx_core::messaging::{with_roster, Delivery, Guid, Im};
+use gtkhx_core::session::PmId;
 use hxmodel::friends::{self, TheirTyping, Typing};
 use hxmodel::pm::{self, Conversation, Conversations, Peer};
-use hxmodel::reactions::ImReactions;
+use hxmodel::reactions::{ImReactions, LineReactions};
 use hxproto::messaging::CAP_MESSAGING;
 use hxproto::target::Target;
 use rotulus::RotulusView;
@@ -89,6 +95,12 @@ struct MsgWin {
     /// A friend's conversation's: who is typing to us.
     typing: glib::WeakRef<gtk::Label>,
     im: RefCell<ImState>,
+    ims: RefCell<Drawn<Guid, ImMsg>>,
+    /// The private messages the server named, by the reference it gave.
+    pms: RefCell<Drawn<PmId, PmMsg>>,
+    /// The private messages sent and not yet answered, by trans: their
+    /// rows, and the connect they went on.
+    sending: RefCell<HashMap<u32, (Marks, u32)>>,
     /// The window the tab is shown in while it is, and our handler on it.
     shown_in: RefCell<Option<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
 }
@@ -103,48 +115,47 @@ struct ImState {
     sent: HashMap<Guid, Sent>,
     /// What arrived and is not shown yet, to tell its sender once it is.
     unread: Vec<Guid>,
-    ims: Ims,
 }
 
-/// A conversation's instant messages, by id: where each is drawn, and whose
-/// it is.
-#[derive(Default)]
-struct Ims {
-    rows: HashMap<Guid, ImRow>,
+/// A conversation's messages, by what names each: where each is drawn,
+/// and what is kept of it.
+struct Drawn<K, V> {
+    rows: HashMap<K, Drawing<V>>,
     /// Oldest first.
-    order: VecDeque<Guid>,
+    order: VecDeque<K>,
 }
 
-struct ImRow {
+impl<K, V> Default for Drawn<K, V> {
+    fn default() -> Self {
+        Drawn {
+            rows: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+}
+
+struct Drawing<V> {
     /// The message's first row.
     first: MessageId,
     /// Its last, which its chips go under.
     row: MessageId,
-    /// Who sent it, by Login: the friend, or our own account.
-    sender: Vec<u8>,
-    reactions: ImReactions,
+    of: V,
 }
 
-impl Ims {
-    /// Instant message `guid`, `sender`'s, was drawn on the rows from
-    /// `first` to `row`, in a view that keeps `max_rows`. One drawn again
-    /// keeps its first rows.
-    fn drew(&mut self, guid: Guid, sender: &[u8], rows: (MessageId, MessageId), max_rows: usize) {
-        if self.rows.contains_key(&guid) {
+impl<K: Copy + Eq + Hash, V> Drawn<K, V> {
+    /// Message `key` was drawn on the rows from the first to the last, in a
+    /// view that keeps `max_rows`. One drawn again keeps its first rows.
+    fn drew(&mut self, key: K, (first, row): Marks, of: V, max_rows: usize) {
+        if self.rows.contains_key(&key) {
             return;
         }
-        let ((first, row), sender) = (rows, sender.to_vec());
-        let reactions = ImReactions::default();
-        self.rows.insert(
-            guid,
-            ImRow {
-                first,
-                row,
-                sender,
-                reactions,
-            },
-        );
-        self.order.push_back(guid);
+        // In row order: a sent message is named only once its answer comes,
+        // which can be after a later one was drawn.
+        let at = self
+            .order
+            .partition_point(|k| self.rows[k].first.0 < first.0);
+        self.rows.insert(key, Drawing { first, row, of });
+        self.order.insert(at, key);
         // Each takes a row at least, so past that many the oldest is gone.
         while max_rows != 0 && self.order.len() > max_rows {
             if let Some(gone) = self.order.pop_front() {
@@ -155,23 +166,86 @@ impl Ims {
 
     /// The message `row` is one of: a view numbers its rows in the order
     /// they are drawn, and a message's are drawn together.
-    fn on(&self, row: MessageId) -> Option<Guid> {
-        let of = |r: &ImRow| (r.first.0..=r.row.0).contains(&row.0);
-        self.rows.iter().find(|(_, r)| of(r)).map(|(g, _)| *g)
+    fn on(&self, row: MessageId) -> Option<K> {
+        let of = |r: &Drawing<V>| (r.first.0..=r.row.0).contains(&row.0);
+        self.rows.iter().find(|(_, r)| of(r)).map(|(k, _)| *k)
     }
 
-    /// How the Reactions draft names message `guid`.
-    fn target(&self, guid: &Guid) -> Option<Target> {
-        let sender = self.rows.get(guid)?.sender.clone();
-        Some(Target::Im {
-            guid: *guid,
-            sender,
-        })
+    fn forget(&mut self, key: &K) {
+        self.rows.remove(key);
+        self.order.retain(|k| k != key);
+    }
+}
+
+/// An instant message: who sent it, by Login, the friend or our own
+/// account, and its reactions.
+struct ImMsg {
+    sender: Vec<u8>,
+    reactions: ImReactions,
+}
+
+/// A stored private message's reactions, and when the server last said
+/// what they are, or was asked.
+struct PmMsg {
+    reactions: LineReactions,
+    told: Instant,
+}
+
+impl PmMsg {
+    fn new() -> PmMsg {
+        PmMsg {
+            reactions: LineReactions::default(),
+            told: Instant::now(),
+        }
+    }
+}
+
+/// What a message shows its chips from.
+trait Shows {
+    fn shows(&mut self) -> &mut LineReactions;
+}
+
+impl Shows for ImMsg {
+    fn shows(&mut self) -> &mut LineReactions {
+        &mut self.reactions.shown
+    }
+}
+
+impl Shows for PmMsg {
+    fn shows(&mut self) -> &mut LineReactions {
+        &mut self.reactions
+    }
+}
+
+/// A message one may react to: an instant message by its id, or a private
+/// message by the reference the server named it by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Msg {
+    Im(Guid),
+    Pm(PmId),
+}
+
+impl MsgWin {
+    /// How the Reactions draft names message `m`, while it is shown.
+    fn target(&self, m: Msg) -> Option<Target> {
+        match m {
+            Msg::Im(guid) => {
+                let sender = self.ims.borrow().rows.get(&guid)?.of.sender.clone();
+                Some(Target::Im { guid, sender })
+            }
+            Msg::Pm(pm) => {
+                let (stored, reference) = pm;
+                (self.pms.borrow().rows.contains_key(&pm))
+                    .then_some(Target::Pm { stored, reference })
+            }
+        }
     }
 
-    fn forget(&mut self, guid: &Guid) {
-        self.rows.remove(guid);
-        self.order.retain(|g| g != guid);
+    fn holds(&self, m: Msg) -> bool {
+        match m {
+            Msg::Im(guid) => self.ims.borrow().rows.contains_key(&guid),
+            Msg::Pm(pm) => self.pms.borrow().rows.contains_key(&pm),
+        }
     }
 }
 
@@ -256,7 +330,7 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
         conn,
     );
     let output: gtk::Widget = from_glib_none(raw);
-    if let (Peer::Login(_), Some(view)) = (peer, output.downcast_ref::<RotulusView>()) {
+    if let Some(view) = output.downcast_ref::<RotulusView>() {
         crate::reactions::hear(view);
     }
     let adjustment: Option<gtk::Adjustment> =
@@ -305,6 +379,9 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
         info_label: info_label.downgrade(),
         typing: typing.as_ref().map(|l| l.downgrade()).unwrap_or_default(),
         im: RefCell::default(),
+        ims: RefCell::default(),
+        pms: RefCell::default(),
+        sending: RefCell::default(),
         shown_in: RefCell::default(),
     });
     // Before the emoji typeahead attaches its own, so Return reaches this
@@ -477,8 +554,9 @@ fn send(win: &MsgWin, buf: &gtk::TextBuffer) {
         Peer::Uid(uid) => {
             let wire = crate::cs(&text.replace('\n', "\r"));
             unsafe {
-                echo(htlc, *uid, &crate::cs(&text));
-                hxhandlers::send::msg::hx_send_msg(htlc, *uid, wire.as_ptr());
+                let echoed = echo(htlc, *uid, &crate::cs(&text));
+                let trans = hxhandlers::send::msg::message(htlc, *uid, &wire);
+                sending(htlc, echoed, trans);
             }
         }
         Peer::Login(login) => unsafe { send_im(win, htlc, login, &text) },
@@ -760,18 +838,114 @@ fn mark_read(win: &MsgWin) {
 }
 
 /// Show `body` as sent by us to `uid` — a server sends a private message to
-/// its recipient only — and hand back the transcript it went into.
+/// its recipient only — and hand back the conversation and the rows it
+/// went into.
 ///
 /// # Safety
 /// `htlc` is NULL or a live connection. Main thread.
-pub(crate) unsafe fn echo(htlc: *mut c_void, uid: u16, body: &CStr) -> Option<gtk::Widget> {
+unsafe fn echo(htlc: *mut c_void, uid: u16, body: &CStr) -> Option<(Rc<MsgWin>, Rows)> {
     if htlc.is_null() {
         return None;
     }
     let own = opt_cstr(hx_conn_name(htlc.cast()));
     let own_bytes = own.map_or(&b""[..], CStr::to_bytes);
     let is_self = pm::is_self(own.map(CStr::to_bytes), own_bytes);
-    render(htlc, own, uid, Some(body.to_bytes()), is_self, true).and_then(|w| w.output.upgrade())
+    render(htlc, own, uid, Some(body.to_bytes()), is_self, true)
+}
+
+/// Show the picture `media` as sent by us to `uid` on `trans`, as
+/// [`echo`] shows text.
+///
+/// # Safety
+/// `htlc` is NULL or a live connection; `media` is valid. Main thread.
+pub(crate) unsafe fn echo_picture(
+    htlc: *mut c_void,
+    uid: u16,
+    trans: Option<u32>,
+    media: &gtkhx_core::boxed::chat::HxChatMedia,
+) {
+    let echoed = echo(htlc, uid, c"").map(|(win, rows)| {
+        let rows = picture(&win, htlc, media).map_or(rows, |last| (rows.0, last));
+        (win, rows)
+    });
+    sending(htlc, echoed, trans);
+}
+
+/// The first and last rows a message was drawn on.
+type Rows = (*mut c_void, *mut c_void);
+
+/// As [`Rows`], as the view's marks.
+type Marks = (MessageId, MessageId);
+
+/// Append `media`'s row to `win`: the row, where it was drawn.
+///
+/// # Safety
+/// `htlc` is a live connection; `media` is valid. Main thread.
+unsafe fn picture(
+    win: &MsgWin,
+    htlc: *mut c_void,
+    media: *const gtkhx_core::boxed::chat::HxChatMedia,
+) -> Option<*mut c_void> {
+    let output = win.output.upgrade()?;
+    let row = crate::inline_media_row::append(wptr(&output), std::ptr::null_mut(), media, htlc);
+    (!row.is_null()).then_some(row)
+}
+
+/// What we sent to the conversation `echoed` drew it in went on `trans`,
+/// whose answer names it.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+unsafe fn sending(htlc: *mut c_void, echoed: Option<(Rc<MsgWin>, Rows)>, trans: Option<u32>) {
+    let (Some((win, rows)), Some(trans)) = (echoed, trans) else {
+        return;
+    };
+    if let Some(rows) = marks(rows) {
+        let connect = generation(htlc.cast());
+        win.sending.borrow_mut().insert(trans, (rows, connect));
+    }
+}
+
+/// `rows` as the view's marks, where both are rows.
+fn marks((first, last): Rows) -> Option<Marks> {
+    (!first.is_null() && !last.is_null())
+        .then_some((MessageId(first as u64), MessageId(last as u64)))
+}
+
+/// The private message sent on `trans` on `htlc` was answered, the server
+/// naming it `pm_id`, where it stored it.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+unsafe fn answered(htlc: *mut c_void, trans: u32, pm_id: Option<PmId>) {
+    let connect = generation(htlc.cast());
+    for win in of_conn(dock::conn_key(htlc)) {
+        if answered_in(&win, trans, pm_id, connect) {
+            return;
+        }
+    }
+}
+
+/// Whether what `trans` answers on `connect` was sent from `win` on it;
+/// named `pm_id` there, if so.
+fn answered_in(win: &MsgWin, trans: u32, pm_id: Option<PmId>, connect: u32) -> bool {
+    let mut sending = win.sending.borrow_mut();
+    let Some(&(rows, _)) = sending.get(&trans).filter(|(_, at)| *at == connect) else {
+        return false;
+    };
+    sending.remove(&trans);
+    drop(sending);
+    if let Some(pm) = pm_id {
+        drew_pm(win, pm, rows);
+    }
+    true
+}
+
+/// Private message `pm` was drawn in `win` on `rows`.
+fn drew_pm(win: &MsgWin, pm: PmId, rows: Marks) {
+    if let Some(view) = win.output.upgrade().and_downcast::<RotulusView>() {
+        (win.pms.borrow_mut()).drew(pm, rows, PmMsg::new(), view.max_rows());
+    }
 }
 
 /// Render a message into its conversation, opening it if it isn't, and flag
@@ -790,7 +964,7 @@ unsafe fn render(
     body: Option<&[u8]>,
     is_self: bool,
     outgoing: bool,
-) -> Option<Rc<MsgWin>> {
+) -> Option<(Rc<MsgWin>, Rows)> {
     if htlc.is_null() || hx_conn_sess(htlc.cast()).is_null() {
         return None;
     }
@@ -808,11 +982,11 @@ unsafe fn render(
         speaker: pm::speaker(outgoing, hx_conn_uid(htlc.cast()), uid),
         stamp: 0,
     };
-    draw(&win, &line, &body);
+    let rows = draw(&win, &line, &body);
     if !is_self {
         chat_tabs::set_attention_msg(htlc, &peer, true);
     }
-    Some(win)
+    Some((win, rows))
 }
 
 /// Draw a message into `win`: its first row as `line`, the rest as text.
@@ -820,7 +994,7 @@ unsafe fn render(
 ///
 /// # Safety
 /// Main thread.
-unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) -> (*mut c_void, *mut c_void) {
+unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) -> Rows {
     let (mut first, mut last) = (std::ptr::null_mut(), std::ptr::null_mut());
     let Some(view) = win.output.upgrade() else {
         return (first, last);
@@ -841,16 +1015,16 @@ unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) -> (*mut c_void, *mut 
     (first, last)
 }
 
-/// Instant message `guid`, `sender`'s, was drawn in `win` on the `rows`
-/// from the first mark to the last.
-fn drew_im(win: &MsgWin, guid: Guid, sender: &[u8], rows: (*mut c_void, *mut c_void)) {
+/// Instant message `guid`, `sender`'s, was drawn in `win` on `rows`.
+fn drew_im(win: &MsgWin, guid: Guid, sender: &[u8], rows: Rows) {
     let view = win.output.upgrade().and_downcast::<RotulusView>();
-    if let (Some(view), false) = (view, rows.0.is_null() || rows.1.is_null()) {
-        let rows = (MessageId(rows.0 as u64), MessageId(rows.1 as u64));
-        win.im
-            .borrow_mut()
-            .ims
-            .drew(guid, sender, rows, view.max_rows());
+    if let (Some(view), Some(rows)) = (view, marks(rows)) {
+        let sender = sender.to_vec();
+        let of = ImMsg {
+            sender,
+            reactions: ImReactions::default(),
+        };
+        win.ims.borrow_mut().drew(guid, rows, of, view.max_rows());
     }
 }
 
@@ -930,7 +1104,7 @@ pub(crate) unsafe fn delivered(htlc: *mut c_void, to: &[u8], guid: &Guid, d: Del
     }
 }
 
-/// The friend's conversation `view` shows.
+/// The conversation `view` shows.
 fn shown_in(view: &RotulusView) -> Option<Rc<MsgWin>> {
     let conn = crate::chat_view::conn_of(view)?;
     let shows = |w: &Rc<MsgWin>| {
@@ -941,80 +1115,106 @@ fn shown_in(view: &RotulusView) -> Option<Rc<MsgWin>> {
     of_conn(conn).into_iter().find(shows)
 }
 
-/// The instant message drawn on `row` of `view`, where `limits` take
-/// reactions to one.
-pub(crate) fn im_on(
+/// The message drawn on `row` of `view`, where `limits` take reactions to
+/// it.
+pub(crate) fn on(
     view: &RotulusView,
     row: MessageId,
     limits: &hxproto::reactions::Limits,
-) -> Option<Guid> {
+) -> Option<Msg> {
     let win = shown_in(view)?;
-    im_in(&win, row, limits)
+    on_in(&win, row, limits)
 }
 
-fn im_in(win: &MsgWin, row: MessageId, limits: &hxproto::reactions::Limits) -> Option<Guid> {
-    let ims = &win.im.borrow().ims;
-    let guid = ims.on(row)?;
-    limits.takes(&ims.target(&guid)?).then_some(guid)
+/// A message the server stores is the only kind of private message GtkHx
+/// names: one it does not is named with whom it is with, which no server
+/// takes yet.
+fn on_in(win: &MsgWin, row: MessageId, limits: &hxproto::reactions::Limits) -> Option<Msg> {
+    let im = win.ims.borrow().on(row).map(Msg::Im);
+    let pm = || win.pms.borrow().on(row).filter(|(stored, _)| *stored);
+    let m = im.or_else(|| pm().map(Msg::Pm))?;
+    limits.takes(&win.target(m)?).then_some(m)
 }
 
-/// As `chat_output::want`, for instant message `guid` in `view`.
+/// As `chat_output::want`, for message `m` in `view`.
 pub(crate) fn want(
     view: &RotulusView,
-    guid: Guid,
+    m: Msg,
     key: &str,
     on: Option<bool>,
     limits: &hxproto::reactions::Limits,
-) -> Option<Then<Guid>> {
+) -> Option<Then<Msg>> {
     let win = shown_in(view)?;
-    want_in(&win, guid, key, on, limits)
+    want_in(&win, m, key, on, limits)
 }
 
 fn want_in(
     win: &MsgWin,
-    guid: Guid,
+    m: Msg,
     key: &str,
     on: Option<bool>,
     limits: &hxproto::reactions::Limits,
-) -> Option<Then<Guid>> {
+) -> Option<Then<Msg>> {
     let key = match crate::chat_output::chip_key(key) {
         Ok(key) => key,
         Err(say) => return Some(say),
     };
-    // The login's caps are a line's: a server keeps nothing of an instant
-    // message's to hold them to.
-    let uncapped = hxproto::reactions::Limits {
-        max_keys: None,
-        max_per_user: None,
-        ..*limits
+    // The login's caps are a stored message's and a line's: a server keeps
+    // nothing of an instant message's to hold them to.
+    let limits = match m {
+        Msg::Im(_) => hxproto::reactions::Limits {
+            max_keys: None,
+            max_per_user: None,
+            ..*limits
+        },
+        Msg::Pm(_) => *limits,
     };
-    redraw(win, &guid, |r| {
-        crate::chat_output::wanted(&mut r.shown, guid, key, on, &uncapped)
+    redraw(win, m, |r| {
+        crate::chat_output::wanted(r, m, key, on, &limits)
     })?
 }
 
-/// Draw instant message `guid`'s chips again, after `change` to its
-/// reactions; what it returns. One whose row has gone is let go of.
-fn redraw<T>(win: &MsgWin, guid: &Guid, change: impl FnOnce(&mut ImReactions) -> T) -> Option<T> {
+/// Draw message `m`'s chips again, after `change` to what they show; what
+/// it returns. One whose row has gone is let go of.
+fn redraw<T>(win: &MsgWin, m: Msg, change: impl FnOnce(&mut LineReactions) -> T) -> Option<T> {
+    match m {
+        Msg::Im(guid) => redraw_in(win, &win.ims, &guid, |v| change(v.shows())),
+        Msg::Pm(pm) => redraw_in(win, &win.pms, &pm, |v| change(v.shows())),
+    }
+}
+
+fn redraw_in<K: Copy + Eq + Hash, V: Shows, T>(
+    win: &MsgWin,
+    drawn: &RefCell<Drawn<K, V>>,
+    key: &K,
+    change: impl FnOnce(&mut V) -> T,
+) -> Option<T> {
     let view = win.output.upgrade()?.downcast::<RotulusView>().ok()?;
     let (row, chips, done) = {
-        let mut im = win.im.borrow_mut();
-        let r = im.ims.rows.get_mut(guid)?;
-        let done = change(&mut r.reactions);
-        let chips = crate::chat_output::chips(&r.reactions.shown.shown());
+        let mut drawn = drawn.borrow_mut();
+        let r = drawn.rows.get_mut(key)?;
+        let done = change(&mut r.of);
+        let chips = crate::chat_output::chips(&r.of.shows().shown());
         (r.row, chips, done)
     };
     if !view.set_reactions(row, chips) {
-        win.im.borrow_mut().ims.forget(guid);
+        drawn.borrow_mut().forget(key);
     }
     Some(done)
+}
+
+/// Stored message `pm` in `win` was just told of, or asked after.
+fn told(win: &MsgWin, pm: &PmId) {
+    if let Some(r) = win.pms.borrow_mut().rows.get_mut(pm) {
+        r.of.told = Instant::now();
+    }
 }
 
 /// Do what [`want`] left to do in `view`, on `htlc`.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn then(htlc: *mut c_void, view: &RotulusView, t: Then<Guid>) {
+pub(crate) unsafe fn then(htlc: *mut c_void, view: &RotulusView, t: Then<Msg>) {
     if let Some(win) = shown_in(view) {
         act(htlc, &win, t);
     }
@@ -1022,42 +1222,54 @@ pub(crate) unsafe fn then(htlc: *mut c_void, view: &RotulusView, t: Then<Guid>) 
 
 /// # Safety
 /// See [`then`].
-unsafe fn act(htlc: *mut c_void, win: &MsgWin, t: Then<Guid>) {
+unsafe fn act(htlc: *mut c_void, win: &MsgWin, t: Then<Msg>) {
     use hxhandlers::send::reactions as send;
-    let (guid, key) = match &t {
-        Then::Send(g, k, _) | Then::Withdraw(g, k) => (*g, k.clone()),
+    let (m, key) = match &t {
+        Then::Send(m, k, _) | Then::Withdraw(m, k) => (*m, k.clone()),
         Then::Say(text) => return crate::reactions::toast(text),
     };
-    let (Peer::Login(with), Some(target)) = (&win.peer, win.im.borrow().ims.target(&guid)) else {
+    let Some(target) = win.target(m) else {
         return;
     };
-    let gone = match t {
-        Then::Send(_, _, add) => {
-            let sent = send::react_im(htlc, target, with, key.clone(), add);
-            if !sent {
-                let invalid = Some(hxproto::reactions::INVALID_KEY);
-                crate::reactions::toast(&crate::reactions::refusal(invalid, None));
-            }
-            !sent
+    let gone = match (t, m, &win.peer) {
+        (Then::Send(_, _, add), Msg::Im(_), Peer::Login(with)) => {
+            refused_unless(send::react_im(htlc, target, with, key.clone(), add))
         }
+        (Then::Send(_, _, add), Msg::Pm(pm), _) => {
+            // A reply to it may come before the server applies it, so
+            // asking after it now could take back a reaction it took.
+            told(win, &pm);
+            refused_unless(send::react(htlc, target, key.clone(), add))
+        }
+        (Then::Send(..), ..) => true,
         _ => send::withdraw(htlc, &target, &key),
     };
     if gone {
-        redraw(win, &guid, |r| r.shown.refused(&key));
+        redraw(win, m, |r| r.refused(&key));
     }
 }
 
-/// What the `reactions` signal said of instant message `guid` on `htlc`.
+/// Whether a reaction the wire could not carry, `!sent`, is told so.
+fn refused_unless(sent: bool) -> bool {
+    if !sent {
+        let invalid = Some(hxproto::reactions::INVALID_KEY);
+        crate::reactions::toast(&crate::reactions::refusal(invalid, None));
+    }
+    !sent
+}
+
+/// What the `reactions` signal said of message `m` on `htlc`.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn reacted(htlc: *mut c_void, guid: &Guid, e: &gtkhx_core::reactions::Event) {
+pub(crate) unsafe fn reacted(htlc: *mut c_void, m: Msg, e: &gtkhx_core::reactions::Event) {
     use gtkhx_core::reactions::Event;
-    let holds = |w: &Rc<MsgWin>| w.im.borrow().ims.rows.contains_key(guid);
     // A change is the other party's, so in the conversation with them.
     let win = match e {
         Event::Changed { from, .. } => find(dock::conn_key(htlc), &Peer::Login(from.clone())),
-        _ => of_conn(dock::conn_key(htlc)).into_iter().find(holds),
+        _ => of_conn(dock::conn_key(htlc))
+            .into_iter()
+            .find(|w| w.holds(m)),
     };
     // The user hears why their own act was refused even once the
     // conversation it was in has closed.
@@ -1066,7 +1278,7 @@ pub(crate) unsafe fn reacted(htlc: *mut c_void, guid: &Guid, e: &gtkhx_core::rea
     } = e
     {
         if let (Some(win), Some(key)) = (&win, key) {
-            redraw(win, guid, |r| r.shown.refused(key));
+            redraw(win, m, |r| r.refused(key));
         }
         return crate::reactions::toast(&crate::reactions::refusal(*reason, error.as_deref()));
     }
@@ -1075,42 +1287,85 @@ pub(crate) unsafe fn reacted(htlc: *mut c_void, guid: &Guid, e: &gtkhx_core::rea
     };
     match e {
         Event::PutOff { target, key, add } => {
-            let again = redraw(&win, guid, |r| r.shown.put_off(key)) == Some(true);
-            if let (true, Peer::Login(with)) = (again, &win.peer) {
-                hxhandlers::send::reactions::retry_im(
-                    htlc,
-                    target.clone(),
-                    with,
-                    key.clone(),
-                    *add,
-                );
+            if redraw(&win, m, |r| r.put_off(key)) != Some(true) {
+                return;
+            }
+            let (target, key) = (target.clone(), key.clone());
+            match (m, &win.peer) {
+                (Msg::Im(_), Peer::Login(with)) => {
+                    hxhandlers::send::reactions::retry_im(htlc, target, with, key, *add);
+                }
+                _ => {
+                    hxhandlers::send::reactions::retry(htlc, target, key, *add);
+                }
             }
         }
         _ => {
-            if let Some(t) = heard(&win, guid, e) {
+            if let Some(t) = heard(&win, m, e) {
                 act(htlc, &win, t);
             }
         }
     }
 }
 
-/// What a change of instant message `guid`'s in `win`, or the answer to
-/// our own, leaves to do: ask for what the user has wanted since.
-fn heard(win: &MsgWin, guid: &Guid, e: &gtkhx_core::reactions::Event) -> Option<Then<Guid>> {
+/// What a change of message `m`'s in `win`, or the answer to our own,
+/// leaves to do: ask for what the user has wanted since.
+fn heard(win: &MsgWin, m: Msg, e: &gtkhx_core::reactions::Event) -> Option<Then<Msg>> {
     use gtkhx_core::reactions::Event;
-    match e {
-        Event::Changed { key, add, from, .. } => {
-            redraw(win, guid, |r| r.told(key, *add, from));
+    match (e, m) {
+        (Event::Changed { key, add, from, .. }, Msg::Im(guid)) => {
+            redraw_in(win, &win.ims, &guid, |v| v.reactions.told(key, *add, from));
             None
         }
-        Event::Acted {
-            key, add, count, ..
-        } => {
-            let again = redraw(win, guid, |r| r.shown.answered(key, *add, *count))??;
-            Some(Then::Send(*guid, key.clone(), again))
+        (Event::Now { reactions, .. }, Msg::Pm(pm)) => {
+            let (summary, mine) = reactions.clone().unwrap_or_default();
+            redraw(win, m, |r| r.replace(summary, &mine));
+            told(win, &pm);
+            None
+        }
+        (
+            Event::Acted {
+                key, add, count, ..
+            },
+            _,
+        ) => {
+            let again = redraw(win, m, |r| r.answered(key, *add, *count))??;
+            Some(Then::Send(m, key.clone(), again))
         }
         _ => None,
     }
+}
+
+/// Ask after what stored message `m` in `view` holds, on `htlc`, where
+/// what the server last said of it may be out of date.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn refresh_if_stale(view: &RotulusView, htlc: *mut c_void, m: Msg) {
+    let Some(win) = shown_in(view) else {
+        return;
+    };
+    if let Some(target) = due(&win, m, Instant::now()) {
+        hxhandlers::send::reactions::refresh(htlc, &[target]);
+    }
+}
+
+/// What to ask after for message `m` in `win` at `now`: a stored message
+/// told of or asked after over a while ago. Asking counts as told, so a
+/// menu opened again before the answer asks no more.
+fn due(win: &MsgWin, m: Msg, now: Instant) -> Option<Target> {
+    let Msg::Pm(pm) = m else {
+        return None;
+    };
+    {
+        let mut pms = win.pms.borrow_mut();
+        let r = pms.rows.get_mut(&pm)?;
+        if now.saturating_duration_since(r.of.told) <= crate::chat_output::FRESH {
+            return None;
+        }
+        r.of.told = now;
+    }
+    win.target(m)
 }
 
 /// `htlc`'s connection changed state: what was sent on an earlier connect
@@ -1126,6 +1381,7 @@ pub(crate) unsafe fn forget_sent(htlc: *mut c_void) {
             .borrow_mut()
             .sent
             .retain(|_, s| s.connect == connect || s.at == Delivery::Sending);
+        win.sending.borrow_mut().retain(|_, s| s.1 == connect);
         unanswered(&win);
     }
 }
@@ -1133,10 +1389,35 @@ pub(crate) unsafe fn forget_sent(htlc: *mut c_void) {
 /// The reactions asked for in `win` and not answered never will be: the
 /// connection's requests went with it.
 fn unanswered(win: &MsgWin) {
-    let guids: Vec<Guid> = win.im.borrow().ims.rows.keys().copied().collect();
-    for guid in guids {
-        redraw(win, &guid, |r| r.shown.settle());
+    let mut held: Vec<Msg> = win.ims.borrow().rows.keys().copied().map(Msg::Im).collect();
+    held.extend(win.pms.borrow().rows.keys().copied().map(Msg::Pm));
+    for m in held {
+        redraw(win, m, |r| r.settle());
     }
+}
+
+/// The stored messages `htlc`'s conversations show, asked after once it
+/// has logged in again: what they hold may have changed while it was
+/// away, and nothing tells it so. One Get Reactions' worth, each
+/// conversation's newest first: a login has spent most of what hxd-ng
+/// lets a session spend in a few seconds before it bans it, and the rest
+/// are asked after as their menus open.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+unsafe fn ask_again(htlc: *mut c_void) {
+    let mut targets = Vec::new();
+    for win in of_conn(dock::conn_key(htlc)) {
+        let pms: Vec<PmId> = win.pms.borrow().order.iter().rev().copied().collect();
+        for pm in pms.into_iter().filter(|(stored, _)| *stored) {
+            if targets.len() == hxrequest::reactions::MAX_TARGETS {
+                break;
+            }
+            told(&win, &pm);
+            targets.extend(win.target(Msg::Pm(pm)));
+        }
+    }
+    hxhandlers::send::reactions::refresh(htlc, &targets);
 }
 
 /// `from` started or stopped typing to us.
@@ -1238,16 +1519,12 @@ pub(crate) unsafe fn notify(htlc: *mut c_void, peer: &Peer, name: &str, body: &s
     gtkhx_notify_send(id.as_ptr(), title.as_ptr(), cbody.as_ptr());
 }
 
-/// `void gtkhx_notify_msg (struct htlc_conn *, HxMsgEvent *)` — tell the
-/// desktop of a private message `htlc` received; not of one of our own.
+/// Tell the desktop of a private message `htlc` received; not of one of
+/// our own.
 ///
 /// # Safety
-/// `htlc` is a live connection; `event` is NULL or valid. Main thread.
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_notify_msg(htlc: *mut c_void, event: *const HxMsgEvent) {
-    let Some(e) = event.as_ref() else {
-        return;
-    };
+/// `htlc` is a live connection. Main thread.
+unsafe fn notify_msg(htlc: *mut c_void, e: &HxMsgEvent) {
     if e.is_self != 0 {
         return;
     }
@@ -1481,20 +1758,20 @@ pub(crate) fn forget_conn(conn: ConnKey) {
     }
 }
 
-/// `void msg_output_from_event (struct htlc_conn *, HxMsgEvent *)` — show a
-/// private message `htlc` received, opening its conversation if need be.
+/// A private message `htlc` received, the server naming it `pm_id`: shown,
+/// opening its conversation if need be, and told to the desktop.
 ///
 /// # Safety
-/// `htlc` is NULL or a live connection; `event` is NULL or valid. Main
-/// thread.
-#[no_mangle]
-pub unsafe extern "C" fn msg_output_from_event(htlc: *mut c_void, event: *const HxMsgEvent) {
-    let Some(e) = event.as_ref() else {
+/// `htlc` is a live connection. Main thread.
+unsafe fn received(htlc: *mut c_void, e: &HxMsgEvent, pm_id: Option<PmId>) {
+    // Shown and told together: a notification of a message whose
+    // connection has no tab would point at a conversation nobody can open.
+    if hx_conn_sess(htlc.cast()).is_null() {
         return;
-    };
+    }
     let has_media = !e.media.is_null();
     let body = pm::shown_body(opt_cstr(e.body).map(CStr::to_bytes), has_media);
-    let win = render(
+    let shown = render(
         htlc,
         opt_cstr(e.name),
         e.uid,
@@ -1502,15 +1779,46 @@ pub unsafe extern "C" fn msg_output_from_event(htlc: *mut c_void, event: *const 
         e.is_self != 0,
         false,
     );
-    if has_media {
-        let output = win.and_then(|w| w.output.upgrade());
-        crate::inline_media_row::hx_inline_media_row_append(
-            output.as_ref().map_or(std::ptr::null_mut(), wptr),
-            std::ptr::null_mut(),
-            e.media,
-            htlc,
-        );
+    if let Some((win, (first, last))) = shown {
+        let last = match has_media {
+            true => picture(&win, htlc, e.media).unwrap_or(last),
+            false => last,
+        };
+        if let (Some(pm), Some(rows)) = (pm_id, marks((first, last))) {
+            drew_pm(&win, pm, rows);
+        }
     }
+    notify_msg(htlc, e);
+}
+
+/// Hear the private messages the session hands over and the answers to
+/// those sent, and ask after the stored ones again at each login. Once.
+pub(crate) fn install() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        gtkhx_core::session::connect_msg(|htlc, e, pm_id| unsafe {
+            if !htlc.is_null() {
+                received(htlc, e, pm_id);
+            }
+        });
+        gtkhx_core::session::connect_msg_answered(|htlc, trans, pm_id| unsafe {
+            if !htlc.is_null() {
+                answered(htlc, trans, pm_id);
+            }
+        });
+        let session: glib::Object = unsafe {
+            from_glib_none(
+                gtkhx_core::session::gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
+            )
+        };
+        session.connect_local("logged-in", false, |args| {
+            let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+            if !htlc.is_null() {
+                unsafe { ask_again(htlc) };
+            }
+            None
+        });
+    });
 }
 
 /// `void hx_msg_open (session *, guint16 uid, const char *name)` — open the
@@ -1610,9 +1918,13 @@ pub(crate) mod tests {
 
     /// A friend's conversation with bob in `view`, as `create` files one.
     fn bobs(view: &RotulusView) -> MsgWin {
+        with(view, Peer::Login(b"bob".to_vec()))
+    }
+
+    fn with(view: &RotulusView, peer: Peer) -> MsgWin {
         MsgWin {
             conn: 0,
-            peer: Peer::Login(b"bob".to_vec()),
+            peer,
             model: RefCell::new(Conversation::new("bob")),
             content: Default::default(),
             output: view.upcast_ref::<gtk::Widget>().downgrade(),
@@ -1621,6 +1933,9 @@ pub(crate) mod tests {
             info_label: Default::default(),
             typing: Default::default(),
             im: RefCell::default(),
+            ims: RefCell::default(),
+            pms: RefCell::default(),
+            sending: RefCell::default(),
             shown_in: RefCell::default(),
         }
     }
@@ -1669,13 +1984,14 @@ pub(crate) mod tests {
         };
         let ups = |n, mine| vec![(up.to_owned(), n, mine)];
         let changed = |add| Event::Changed {
-            target: win.im.borrow().ims.target(&theirs).unwrap(),
+            target: win.target(Msg::Im(theirs)).unwrap(),
             key: key.clone(),
             add,
             from: b"bob".to_vec(),
         };
 
-        assert_eq!(heard(&win, &theirs, &changed(true)), None);
+        let (theirs_m, ours_m) = (Msg::Im(theirs), Msg::Im(ours));
+        assert_eq!(heard(&win, theirs_m, &changed(true)), None);
         assert_eq!((shown(last), shown(first)), (ups(1, false), vec![]));
         let ims = takes(TARGETS_IMS);
         // Held to no cap of a line's.
@@ -1684,41 +2000,41 @@ pub(crate) mod tests {
             max_per_user: Some(0),
             ..ims
         };
-        let send = Some(Then::Send(theirs, key.clone(), true));
-        assert_eq!(want_in(&win, theirs, up, None, &capped), send);
+        let send = Some(Then::Send(theirs_m, key.clone(), true));
+        assert_eq!(want_in(&win, theirs_m, up, None, &capped), send);
         assert_eq!(shown(last), ups(2, true));
         // A connection's requests go with it, so this one's answer never
         // comes, and the next click asks again.
         unanswered(&win);
         assert_eq!(shown(last), ups(1, false));
-        assert_eq!(want_in(&win, theirs, up, None, &ims), send);
+        assert_eq!(want_in(&win, theirs_m, up, None, &ims), send);
         assert_eq!(shown(last), ups(2, true));
         let acted = Event::Acted {
-            target: win.im.borrow().ims.target(&theirs).unwrap(),
+            target: win.target(Msg::Im(theirs)).unwrap(),
             key: key.clone(),
             add: true,
             count: None,
         };
-        assert_eq!(heard(&win, &theirs, &acted), None);
-        assert_eq!(heard(&win, &theirs, &changed(false)), None);
+        assert_eq!(heard(&win, theirs_m, &acted), None);
+        assert_eq!(heard(&win, theirs_m, &changed(false)), None);
         assert_eq!(shown(last), ups(1, true));
         assert_eq!(
-            want_in(&win, theirs, "server-emoji:9", None, &ims),
+            want_in(&win, theirs_m, "server-emoji:9", None, &ims),
             Some(Then::Say(crate::reactions::server_emoji()))
         );
 
-        for (row, guid) in [(first, theirs), (last, theirs), (mine, ours)] {
-            assert_eq!(im_in(&win, row, &ims), Some(guid));
+        for (row, m) in [(first, theirs_m), (last, theirs_m), (mine, ours_m)] {
+            assert_eq!(on_in(&win, row, &ims), Some(m));
         }
         for (case, row, limits) in [
             ("no message's row", notice, &ims),
             ("lines alone", last, &takes(TARGETS_LINES)),
         ] {
-            assert_eq!(im_in(&win, row, limits), None, "{case}");
+            assert_eq!(on_in(&win, row, limits), None, "{case}");
         }
-        let named = |g| win.im.borrow().ims.target(&g);
+        let named = |m| win.target(m);
         assert_eq!(
-            (named(theirs), named(ours)),
+            (named(theirs_m), named(ours_m)),
             (
                 Some(Target::Im {
                     guid: theirs,
@@ -1732,24 +2048,159 @@ pub(crate) mod tests {
         );
     }
 
+    /// A stored private message's chips go under its last row: what the
+    /// server says it holds, and ours over it at once as asked, held to the
+    /// login's caps as a line is; an answer, which has no count, keeps ours
+    /// until the server says otherwise, and a request still unanswered when
+    /// the connection went is let go of. One we sent is named by the answer
+    /// to its request, on the connect it went on, and nothing by a refusal.
+    /// A message the server does not store, and a session that takes no
+    /// stored message's reactions, is none of this. One is asked after
+    /// once a while has passed since it was told of or asked after, and
+    /// not again until another has.
+    pub(crate) fn check_a_stored_messages_chips_are_the_servers() {
+        use gtkhx_core::reactions::Event;
+        use hxproto::reactions::{
+            Key, Limits, Mine, Summary, TARGETS_LINES, TARGETS_STORED_PMS, TARGETS_UNSTORED_PMS,
+        };
+        let up = "\u{1F44D}";
+        let key = Key::Emoji(up.into());
+        let takes = |targets| Limits {
+            targets,
+            max_keys: None,
+            max_per_user: None,
+        };
+        let view = RotulusView::new();
+        let win = with(&view, Peer::Uid(5));
+        let (theirs, unstored) = ((true, [1; 16]), (false, [3; 16]));
+        let first = row(&view, "hi");
+        let last = row(&view, "there");
+        drew_pm(&win, theirs, (first, last));
+        let plain = row(&view, "not kept");
+        drew_pm(&win, unstored, (plain, plain));
+        let shown = |row| {
+            (view.reactions_of(row).into_iter())
+                .map(|r| (r.key, r.count, r.mine))
+                .collect::<Vec<_>>()
+        };
+        let ups = |n, mine| vec![(up.to_owned(), n, mine)];
+        let m = Msg::Pm(theirs);
+        let now = |n, mine: &[u8]| Event::Now {
+            target: win.target(m).unwrap(),
+            reactions: Some((
+                Summary {
+                    entries: vec![(key.clone(), n)],
+                },
+                Mine(mine.to_vec()),
+            )),
+        };
+
+        assert_eq!(heard(&win, m, &now(1, &[])), None);
+        assert_eq!((shown(last), shown(first)), (ups(1, false), vec![]));
+        let stored = takes(TARGETS_STORED_PMS);
+        let one_kind = Limits {
+            max_keys: Some(1),
+            ..stored
+        };
+        assert_eq!(
+            want_in(&win, m, "\u{1F389}", None, &one_kind),
+            Some(Then::Say(crate::reactions::refusal(
+                Some(hxproto::reactions::TOO_MANY_KEYS),
+                None
+            )))
+        );
+        let send = Some(Then::Send(m, key.clone(), true));
+        assert_eq!(want_in(&win, m, up, None, &stored), send);
+        assert_eq!(shown(last), ups(2, true));
+        let acted = Event::Acted {
+            target: win.target(m).unwrap(),
+            key: key.clone(),
+            add: true,
+            count: None,
+        };
+        assert_eq!(heard(&win, m, &acted), None);
+        assert_eq!(shown(last), ups(2, true), "answered with no count");
+        let one_of_ours = Limits {
+            max_per_user: Some(1),
+            ..stored
+        };
+        assert_eq!(
+            want_in(&win, m, "\u{1F389}", None, &one_of_ours),
+            Some(Then::Say(crate::reactions::refusal(
+                Some(hxproto::reactions::TOO_MANY_OF_YOURS),
+                None
+            )))
+        );
+        assert_eq!(heard(&win, m, &now(1, &[])), None);
+        assert_eq!(shown(last), ups(1, false), "the server dropped it");
+        assert_eq!(want_in(&win, m, up, None, &stored), send);
+        unanswered(&win);
+        assert_eq!(shown(last), ups(1, false));
+
+        for (row, want) in [(first, Some(m)), (last, Some(m)), (plain, None)] {
+            assert_eq!(on_in(&win, row, &stored), want);
+        }
+        let all = takes(TARGETS_STORED_PMS | TARGETS_UNSTORED_PMS);
+        assert_eq!(on_in(&win, plain, &all), None, "not stored");
+        assert_eq!(
+            on_in(&win, last, &takes(TARGETS_LINES)),
+            None,
+            "lines alone"
+        );
+        assert_eq!(
+            win.target(m),
+            Some(Target::Pm {
+                stored: true,
+                reference: [1; 16]
+            })
+        );
+
+        let (sent, refused, earlier) = (row(&view, "ours"), row(&view, "no"), row(&view, "old"));
+        for (trans, at, connect) in [(7, sent, 2), (8, refused, 2), (9, earlier, 1)] {
+            (win.sending.borrow_mut()).insert(trans, ((at, at), connect));
+        }
+        let ours = (true, [2; 16]);
+        assert!(answered_in(&win, 7, Some(ours), 2));
+        assert!(answered_in(&win, 8, None, 2));
+        assert!(
+            !answered_in(&win, 9, Some((true, [4; 16])), 2),
+            "another connect's"
+        );
+        assert!(!answered_in(&win, 7, Some(ours), 2), "answered twice");
+        let named = [sent, refused, earlier].map(|r| on_in(&win, r, &stored));
+        assert_eq!(named, [Some(Msg::Pm(ours)), None, None]);
+
+        let start = win.pms.borrow().rows[&theirs].of.told;
+        let later = start + crate::chat_output::FRESH + std::time::Duration::from_secs(1);
+        assert_eq!(due(&win, m, start), None, "just told");
+        assert_eq!(due(&win, m, later), win.target(m));
+        assert_eq!(due(&win, m, later), None, "asked already");
+        assert_eq!(due(&win, Msg::Im([1; 16]), later), None);
+    }
+
     /// A conversation keeps each message's rows once, its first, and lets
     /// the oldest go once there are more than the view keeps rows.
     #[test]
     fn a_conversation_keeps_what_its_view_can_still_show() {
-        let mut ims = Ims::default();
+        let mut drawn = Drawn::<u8, ()>::default();
         let row = |n| (MessageId(n), MessageId(n));
-        ims.drew([1; 16], b"bob", row(1), 2);
-        ims.drew([1; 16], b"bob", row(9), 2);
-        assert_eq!(ims.on(MessageId(9)), None, "drawn again");
-        ims.drew([2; 16], b"bob", row(2), 2);
-        ims.drew([3; 16], b"bob", row(3), 2);
-        let held = |ims: &Ims| [1, 2, 3].map(|n| ims.on(MessageId(n)).is_some());
-        assert_eq!(held(&ims), [false, true, true]);
-        let mut all = Ims::default();
+        drawn.drew(1, row(1), (), 2);
+        drawn.drew(1, row(9), (), 2);
+        assert_eq!(drawn.on(MessageId(9)), None, "drawn again");
+        drawn.drew(2, row(2), (), 2);
+        drawn.drew(3, row(3), (), 2);
+        let held = |d: &Drawn<u8, ()>| [1, 2, 3].map(|n| d.on(MessageId(n)).is_some());
+        assert_eq!(held(&drawn), [false, true, true]);
+        let mut all = Drawn::<u8, ()>::default();
         for n in 1..=3 {
-            all.drew([n; 16], b"bob", row(u64::from(n)), 0);
+            all.drew(n, row(u64::from(n)), (), 0);
         }
         assert_eq!(held(&all), [true; 3], "no limit");
+        let mut late = Drawn::<u8, ()>::default();
+        late.drew(2, row(2), (), 2);
+        late.drew(1, row(1), (), 2);
+        late.drew(3, row(3), (), 2);
+        assert_eq!(held(&late), [false, true, true], "named after a later one");
     }
 
     #[test]

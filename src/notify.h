@@ -46,7 +46,6 @@ extern void gtkhx_notify_install_actions (GtkApplication *app);
  * which session's windows the omit-when-focused check consults, and whose
  * nickname counts as a mention. */
 extern void gtkhx_notify_chat (struct htlc_conn *htlc, HxChatEvent *event);
-extern void gtkhx_notify_msg (struct htlc_conn *htlc, HxMsgEvent *event);
 extern void gtkhx_notify_pchat (struct htlc_conn *htlc, HxChatEvent *event);
 extern void gtkhx_notify_pchat_invite (struct htlc_conn *htlc, guint32 cid,
                                        const char *inviter);

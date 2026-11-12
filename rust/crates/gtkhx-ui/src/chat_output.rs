@@ -49,6 +49,7 @@ use gtkhx_core::conn::{hx_conn_name, hx_conn_sess};
 use hxmodel::chat_members::hx_member_model_find_by_name;
 use hxmodel::conversation::{hx_chat_media_table, hx_chat_member_model, hx_chat_view};
 
+use crate::msg::Msg;
 use crate::tr::{tr, tr_argv, trn_argv};
 
 /// Palette slots (rotulus.h's `ROTULUS_PAL_*`).
@@ -134,7 +135,7 @@ impl Line {
 }
 
 /// How long what the server said of a line's reactions is taken as so.
-const FRESH: Duration = Duration::from_secs(60);
+pub(crate) const FRESH: Duration = Duration::from_secs(60);
 
 /// How many of a chat's newest lines a server tells changes to (hxd-ng's
 /// live window); older lines' changes may never come.
@@ -1469,8 +1470,12 @@ unsafe fn reactions(htlc: *mut c_void, e: &gtkhx_core::reactions::Event) {
         | Event::Refused { target, .. }
         | Event::Changed { target, .. } => target,
     };
-    if let Target::Im { guid, .. } = target {
-        return crate::msg::reacted(htlc, guid, e);
+    match *target {
+        Target::Im { guid, .. } => return crate::msg::reacted(htlc, Msg::Im(guid), e),
+        Target::Pm { stored, reference } => {
+            return crate::msg::reacted(htlc, Msg::Pm((stored, reference)), e)
+        }
+        _ => {}
     }
     let Some((cid, id)) = line_of(target) else {
         return;

@@ -440,11 +440,11 @@ extern void hx_inline_media_row_append (struct _GtkWidget *view, void *table,
  *
  * Consumers:
  *
- *   - gtkhx-ui msg::msg_output_from_event: opens a private-message
+ *   - gtkhx-ui msg::received: opens a private-message
  *     window keyed on uid, prefixes the body with a colored "<name>"
  *     header, and hands the line to the chat view.
  *
- *   - notify.c::gtkhx_notify_msg: posts a notification titled
+ *   - gtkhx-ui msg::notify_msg: posts a notification titled
  *     "name (private message)" with the body as preview. Skipped
  *     when is_self (you can't usefully self-PM) or when the msg
  *     window for that uid is focused.

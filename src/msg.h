@@ -3,11 +3,6 @@
 
 /* Private messages: gtkhx-ui's `msg` module, over hxmodel::pm. */
 
-/* Show a private message received on htlc, opening its conversation. */
-struct _HxMsgEvent;
-extern void msg_output_from_event (struct htlc_conn *htlc,
-                                   struct _HxMsgEvent *event);
-
 /* Open the conversation with uid, or select it if it is open. */
 extern void hx_msg_open (session *sess, guint16 uid, const char *name);
 

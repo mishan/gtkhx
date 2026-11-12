@@ -170,14 +170,23 @@ mod imp {
                     Signal::builder("gif-icon-data")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER, Type::U32])
                         .build(),
-                    // msg: (HxMsgEvent* boxed)
-                    // msg: (htlc*, HxMsgEvent). The connection is not a
-                    // convenience here — the event's uid is only unique
-                    // *within* a connection, so without it two servers'
-                    // user 5 are the same person and their private messages
-                    // land in one window.
+                    // msg: (htlc*, HxMsgEvent, pm_id*). The connection is
+                    // not a convenience here — the event's uid is only
+                    // unique *within* a connection, so without it two
+                    // servers' user 5 are the same person and their private
+                    // messages land in one window. pm_id is the message's
+                    // reference, Rust's alone, NULL where it has none; read
+                    // through `connect_msg`.
                     Signal::builder("msg")
-                        .param_types([Type::POINTER, msg_event_type()])
+                        .param_types([Type::POINTER, msg_event_type(), Type::POINTER])
+                        .build(),
+                    // msg-answered: (htlc*, trans, pm_id*) — the private
+                    // message sent on trans was answered: pm_id is the
+                    // reference the server stored it under, Rust's alone,
+                    // NULL where it named none or refused it. Read through
+                    // `connect_msg_answered`.
+                    Signal::builder("msg-answered")
+                        .param_types([Type::POINTER, Type::U32, Type::POINTER])
                         .build(),
                     // logged-in: (htlc*, name*) — the server accepted the
                     // login, and what its reply said is on the connection;
@@ -500,7 +509,8 @@ unsafe impl Sync for SendPtr {}
 
 // ----------------------------------------------------------------------
 // Emit wrappers, one per signal, with gtkhx_session.h's C ABI but for the
-// Rust-only chat, chat-history-batch, messaging, reactions and replies ones
+// Rust-only chat, chat-history-batch, msg, msg-answered, messaging, reactions
+// and replies ones
 // ----------------------------------------------------------------------
 
 /// # Safety
@@ -684,16 +694,93 @@ pub unsafe extern "C" fn gtkhx_session_emit_gif_icon_data(
     emit(self_, "gif-icon-data", &v);
 }
 
+/// A private message's reference: whether the server stores it, and the
+/// bytes a kind 5 target names it by.
+pub type PmId = (bool, [u8; 16]);
+
+fn pm_id_value(pm_id: Option<&PmId>) -> glib::Value {
+    ptr_value(pm_id.map_or(std::ptr::null(), |p| (p as *const PmId).cast()))
+}
+
+/// # Safety
+/// The emit's pointer argument, as `pm_id_value` made it.
+unsafe fn pm_id_of(v: &glib::Value) -> Option<PmId> {
+    let p = v.get::<*mut c_void>().unwrap_or(std::ptr::null_mut()) as *const PmId;
+    p.as_ref().copied()
+}
+
 /// # Safety
 /// `self_` valid; `event` a valid `HxMsgEvent*` (or NULL).
-#[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_msg(
+pub unsafe fn gtkhx_session_emit_msg(
     self_: *mut c_void,
     htlc: *mut c_void,
     event: *mut c_void,
+    pm_id: Option<&PmId>,
 ) {
-    let v = [ptr_value(htlc), boxed_value(hx_msg_event_get_type(), event)];
+    let v = [
+        ptr_value(htlc),
+        boxed_value(hx_msg_event_get_type(), event),
+        pm_id_value(pm_id),
+    ];
     emit(self_, "msg", &v);
+}
+
+/// Hear the `msg` signal: the connection, the message, and its reference.
+pub fn connect_msg<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, &crate::boxed::msg::HxMsgEvent, Option<PmId>) + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("msg", false, move |args| {
+        let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        let event = unsafe {
+            glib::gobject_ffi::g_value_get_boxed(
+                glib::translate::ToGlibPtr::to_glib_none(&args[2]).0,
+            )
+        };
+        // SAFETY: the emit passes an event of this type, and a reference
+        // that outlives it.
+        if let Some(e) = unsafe { (event as *const crate::boxed::msg::HxMsgEvent).as_ref() } {
+            f(htlc, e, unsafe { pm_id_of(&args[3]) });
+        }
+        None
+    })
+}
+
+/// # Safety
+/// `self_`/`htlc` valid.
+pub unsafe fn gtkhx_session_emit_msg_answered(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    trans: u32,
+    pm_id: Option<&PmId>,
+) {
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(trans),
+        pm_id_value(pm_id),
+    ];
+    emit(self_, "msg-answered", &v);
+}
+
+/// Hear the `msg-answered` signal: the connection, the trans, and the
+/// message's reference.
+pub fn connect_msg_answered<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, u32, Option<PmId>) + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("msg-answered", false, move |args| {
+        let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        let trans = args[2].get::<u32>().unwrap_or(0);
+        // SAFETY: the emit passes a reference that outlives it.
+        f(htlc, trans, unsafe { pm_id_of(&args[3]) });
+        None
+    })
 }
 
 /// # Safety
@@ -1448,6 +1535,43 @@ mod tests {
         assert_eq!(*got.borrow(), [7, 0, 8, 9]);
     }
 
+    /// A message's reference rides beside it, and beside an answer's trans;
+    /// none is none.
+    #[test]
+    fn a_messages_reference_rides_beside_it() {
+        let stored: PmId = (true, [4; 16]);
+        type Heard = Vec<(u32, Option<PmId>)>;
+        let got: Rc<std::cell::RefCell<Heard>> = Rc::default();
+        let g = got.clone();
+        let heard = connect_msg(move |htlc, e, pm_id| {
+            assert_eq!((htlc as usize, e.uid), (0x1234, 5));
+            g.borrow_mut().push((0, pm_id));
+        });
+        let g = got.clone();
+        let answered = connect_msg_answered(move |htlc, trans, pm_id| {
+            assert_eq!(htlc as usize, 0x1234);
+            g.borrow_mut().push((trans, pm_id));
+        });
+        let default = gtkhx_session_get_default();
+        let htlc = 0x1234 as *mut c_void;
+        let e = crate::boxed::msg::msg_event_new(5, "bob", "hi", None, b"", false);
+        unsafe {
+            gtkhx_session_emit_msg(default, htlc, e.cast(), Some(&stored));
+            gtkhx_session_emit_msg(default, htlc, e.cast(), None);
+            gtkhx_session_emit_msg_answered(default, htlc, 7, Some(&stored));
+            gtkhx_session_emit_msg_answered(default, htlc, 8, None);
+            crate::boxed::msg::hx_msg_event_free(e);
+        }
+        let default: glib::Object =
+            unsafe { glib::Object::from_glib_none(default as *mut glib::gobject_ffi::GObject) };
+        default.disconnect(heard);
+        default.disconnect(answered);
+        assert_eq!(
+            *got.borrow(),
+            [(0, Some(stored)), (0, None), (7, Some(stored)), (8, None)]
+        );
+    }
+
     #[test]
     fn gif_icon_data_round_trips() {
         // GIF-icons emit: (htlc ptr, uid:u32, gif ptr, len:u32).
@@ -1511,7 +1635,7 @@ mod tests {
         // A NULL boxed payload is fine here: g_value_set_boxed on NULL stays
         // NULL, and what this pins is the leading connection argument.
         unsafe {
-            gtkhx_session_emit_msg(raw, 0xBEEF as *mut c_void, std::ptr::null_mut());
+            gtkhx_session_emit_msg(raw, 0xBEEF as *mut c_void, std::ptr::null_mut(), None);
         }
         assert_eq!(got.get(), 0xBEEF);
     }

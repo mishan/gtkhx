@@ -147,8 +147,8 @@ pub mod chat_invite;
 // HxConversation — the Rust per-chat model that replaces the C struct chat
 // (cid + subject + owned HxMemberModel + opaque view pointer).
 // Private messages: each conversation's tab, its input and the render of
-// what it says, over hxmodel::pm. Exports what C still calls in with:
-// msg_output_from_event, gtkhx_notify_msg and the hx_msg_* hooks.
+// what it says, over hxmodel::pm. Hears the msg signal itself, and exports
+// the hx_msg_* hooks C still calls in with.
 pub mod msg;
 // The messaging extension's friend family: the users panel's friends, the
 // user menu's items, presence, and what a friend's conversation is handed.

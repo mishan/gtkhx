@@ -418,7 +418,7 @@ Field numbers are listed in [Fields](#fields).
 | 105 | Send Chat | C→S | 101, 109 (1 = emote), 114 (absent or 0 = public chat) | **no reply** | Privilege 10. The server formats the line: `\r` + the name right-aligned in 13 columns + `:  ` + text, or `\r *** name text` for an emote. Text is capped at 8192 bytes; the official client refuses to send more than 2048. |
 | 106 | Chat Message | S→C | | 101 (formatted, starts with CR), 114 for a private chat | Sent to clients with privilege 9. |
 | 107 | Login | C→S | 105, 106, 160; 1.2 clients add 102, 104 | 160, 161, 162 | See [Session lifecycle](#session-lifecycle). |
-| 108 | Send Instant Message | C→S | 103 (target), 113, 101 (≤ 4096), optional 214 | empty | Privilege 40. Options: 1 user message, 2 refuse-message notice, 3 refuse-chat notice, 4 automatic response. Delivered to the target as 104. Since 1.5.1 the server answers for a target who refuses messages or has an automatic response. |
+| 108 | Send Instant Message | C→S | 103 (target), 113, 101 (≤ 4096), optional 214 | empty; 0x0F23 under Replies or Reactions | Privilege 40. Options: 1 user message, 2 refuse-message notice, 3 refuse-chat notice, 4 automatic response. Delivered to the target as 104. Since 1.5.1 the server answers for a target who refuses messages or has an automatic response. |
 | 109 | Show Agreement | S→C | | 101, or 154 = 1, or nothing | The official client also accepts banner fields 151–153 here; the 1.9 server uses 122 instead. |
 | 110 | Disconnect User | C→S | 103, 113 (1 = also temporary ban, 2 = also permanent ban), 101 (ban reason) | empty | Privilege 22. Refused for a target with privilege 23. |
 | 111 | Disconnect Message | S→C | | 101 | Sent only when the server's operator quits politely. |
@@ -1453,6 +1453,23 @@ made them, and keeps it across a reconnect as it keeps the messages; a change to
 it no longer shows is dropped. A reaction from another session of ours is never told
 here, since the draft tells the other party alone. Such a message's chips and menu are a
 line's, but for who reacted, which needs a 712, and the moderator's clear.
+
+A private message the server stores, kind 5, takes reactions where the login offers them
+(bit 6 of 0x0F2B), named by the reference (0x0F23) the server gives it on the 104 that
+hands it over and on the reply to the 108 that sent it, to a session with bit 18 or 19;
+hxd-ng stores one where it has an inbox. One with no reference, or one the server says it
+does not store, takes none: such a target would carry the other party's session, which no
+server takes yet. A 710 is answered with no count whatever became of it, since a server
+drops one from somebody who is no party or that a block or a cap stops, so as not to tell
+a sender whether its message was read; ours stays drawn as ours until the server says
+otherwise. The other party's reactions arrive as 711 summaries, as a line's do, and one
+that gathered reactions while it waited has its summary after the 104. A conversation
+survives a reconnect with its messages, and their references with it, so once logged in
+again it asks after the stored messages it shows with one 712, each conversation's newest
+first, since a login has already spent most of the spam points hxd-ng allows in a few
+seconds; opening a message's menu asks after it alone where it was last told of, or asked
+after, over a minute ago. Who reacted and the moderator's clear are a line's alone. The
+login's limits refuse a new kind or one more of ours before any request, as on a line.
 
 A click on a line's chip, or Enter on it, makes that reaction or takes it back; the
 line's menu offers a few emoji at once (`chat.emoji.quick_reactions`, the last used first)

@@ -93,8 +93,10 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             from,
             text,
             media,
+            pm_id,
             ..
-        } => msg::message(htlc, *uid, from, text, media.as_ref()),
+        } => msg::message(htlc, *uid, from, text, media.as_ref(), *pm_id),
+        Event::MessageSent { trans, pm_id } => msg::sent(htlc, *trans, *pm_id),
         Event::Broadcast { uid, from, text } => msg::broadcast(htlc, *uid, from, text),
         Event::Disconnecting(text) => msg::parting(htlc, text),
         Event::NewsPosted(text) => news::posted(htlc, text),
@@ -131,6 +133,7 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         #[cfg(feature = "voice")]
         Event::VoiceDone { trans } => crate::voice::done(htlc, *trans),
         Event::Failed { trans, reason } => {
+            msg::failed(htlc, *trans);
             let quiet = user::failed(htlc, *trans, reason.as_deref());
             #[cfg(feature = "voice")]
             let quiet = crate::voice::failed(htlc, *trans, reason.as_deref()) || quiet;
@@ -170,6 +173,7 @@ pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
     icon::forget(htlc);
     crate::media::forget(htlc);
     friends::forget(htlc);
+    msg::forget(htlc);
     reactions::forget(htlc);
     replies::forget(htlc);
     #[cfg(feature = "voice")]
