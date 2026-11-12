@@ -147,6 +147,9 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     let vstack = gtk::Box::new(gtk::Orientation::Vertical, 4);
     vstack.append(&crate::chat_find::build(&output, &vstack));
     vstack.append(&outputframe);
+    if let Some(view) = output.downcast_ref::<rotulus::RotulusView>() {
+        vstack.append(&crate::reply_bar::build(view, &input));
+    }
     vstack.append(&inputframe);
 
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);

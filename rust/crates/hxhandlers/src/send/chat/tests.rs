@@ -125,7 +125,7 @@ fn send_chat_public_omits_chat_id() {
     let body = cstr("hello");
     unsafe { hx_send_chat(htlc(), body.as_ptr(), 0, 0) };
     let s = last().unwrap();
-    assert_eq!(s.ty, HTLC_HDR_CHAT);
+    assert_eq!(s.ty, ClientHdr::Chat as u32);
     // Public chat (cid 0): STYLE + BODY, no CHAT_ID.
     assert_eq!(s.chunks.len(), 2);
     assert_eq!(s.chunks[0].0, TAG_STYLE);
@@ -306,5 +306,38 @@ fn a_line_carries_a_picture_only_whole_and_only_where_agreed() {
             want.push((0x0201, mime.to_vec()));
         }
         assert_eq!(s.chunks, want, "{agreed} {id_len} {mime_len}");
+    }
+}
+
+/// A line answers another only where the login agreed to replies and
+/// takes a reply to that kind; anywhere else it goes as the plain line.
+#[test]
+fn a_reply_names_its_line_only_where_the_login_takes_it() {
+    use gtkhx_core::conn::{hx_conn_free, hx_conn_new, hx_conn_set_caps};
+    use hxproto::replies::Targets;
+    use hxsession::cap::REPLIES;
+    const TAG_REPLY_TO: u16 = 0x0f21;
+    let kept = Target::Line { channel: 0, id: 9 };
+    let notice = Target::Ephemeral { chat: 0, id: 3 };
+    let body = cstr("yes");
+    for (case, caps, targets, to, carried) in [
+        ("a kept line", REPLIES, Some(1 << 1), &kept, true),
+        ("a notice", REPLIES, Some(1 << 4), &notice, true),
+        ("a kind not taken", REPLIES, Some(1 << 4), &kept, false),
+        ("no target kinds", REPLIES, None, &kept, false),
+        ("bit 18 not agreed", 0, Some(1 << 1), &kept, false),
+    ] {
+        reset(true, 0);
+        let h = hx_conn_new();
+        unsafe { hx_conn_set_caps(h, caps) };
+        crate::recv::replies::agreed(h.cast(), targets.map(Targets));
+        unsafe { send_chat_line(h.cast(), &body, 0, 0, Some(to)) };
+        crate::recv::replies::forget(h.cast());
+        unsafe { hx_conn_free(h) };
+        let mut want = vec![(TAG_STYLE, vec![0, 0]), (TAG_BODY, b"yes".to_vec())];
+        if carried {
+            want.push((TAG_REPLY_TO, to.pack().unwrap()));
+        }
+        assert_eq!(last().unwrap().chunks, want, "{case}");
     }
 }

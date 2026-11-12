@@ -62,6 +62,7 @@ rust/crates/gtkhx-ui/src/pchat.rs
 rust/crates/gtkhx-ui/src/preview_notice.rs
 rust/crates/gtkhx-ui/src/rc4_dialog.rs
 rust/crates/gtkhx-ui/src/reactions.rs
+rust/crates/gtkhx-ui/src/reply_bar.rs
 rust/crates/gtkhx-ui/src/requests.rs
 rust/crates/gtkhx-ui/src/screen_share.rs
 rust/crates/gtkhx-ui/src/shortcuts.rs

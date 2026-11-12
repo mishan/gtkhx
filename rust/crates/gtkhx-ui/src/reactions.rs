@@ -7,15 +7,20 @@
 //! clears the line's reactions. What a line holds is `chat_output`'s, and
 //! a message's `msg`'s; a refusal is told as a toast.
 //!
-//! Without reactions no row is anyone's here, and the view's own menu
-//! opens as before.
+//! The row's menu is also where a lobby line is replied to, where the
+//! session has replies (capability bit 18), through `reply_bar`. With
+//! neither, no row is anyone's here, and the view's own menu opens as
+//! before.
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
 use gtk4 as gtk;
 use gtkhx_core::conn::hx_conn_access_has;
+use hxmodel::replies::Quote;
 use hxproto::reactions::{Key, INVALID_KEY, TOO_MANY_KEYS, TOO_MANY_OF_YOURS};
+use hxproto::replies::Targets;
 use hxproto::structured_chat::{INVALID_TARGET, NOT_ALLOWED, NO_SUCH_TARGET, RATE_LIMITED};
+use hxproto::target::Target;
 use libadwaita as adw;
 use rotulus::view::RowMark;
 use rotulus::RotulusView;
@@ -25,7 +30,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 use crate::chat_output::{
-    clearable, emoji_on, line_on, refresh_if_stale, target, then, want, Then,
+    clearable, emoji_on, line_on, refresh_if_stale, reply_target, target, then, want, Then,
 };
 use crate::tr::{tr, tr_argv, trn_argv};
 
@@ -109,13 +114,16 @@ pub(crate) fn toast(text: &str) {
     unsafe { crate::ffi::toolbar_show_toast(crate::cs(text).as_ptr()) };
 }
 
+/// The connection `view` is on, while it is live.
+fn conn(view: &RotulusView) -> Option<*mut c_void> {
+    let htlc = crate::dock::htlc_for(crate::chat_view::conn_of(view)?);
+    (!htlc.is_null()).then_some(htlc)
+}
+
 /// The connection `view` is on, where its session has reactions, and the
 /// limits its login gave.
 fn session(view: &RotulusView) -> Option<(*mut c_void, hxproto::reactions::Limits)> {
-    let htlc = crate::dock::htlc_for(crate::chat_view::conn_of(view)?);
-    if htlc.is_null() {
-        return None;
-    }
+    let htlc = conn(view)?;
     // SAFETY: main thread; the connection is live.
     Some((htlc, unsafe { hxhandlers::recv::reactions::limits(htlc)? }))
 }
@@ -210,56 +218,131 @@ fn items() -> gtk::Box {
     items
 }
 
-/// `row`'s menu at `x`, `y`: the quick emoji, "Add Reaction…" for the
-/// chooser, on a line "Who Reacted…" where it has emoji chips and "Clear
-/// Reactions…" for a moderator where it has any, and the view's own Copy
-/// and Select All. Whether `row` is a line or a message one can react to.
+/// What a row's menu offers above the view's own Copy and Select All.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Action {
+    /// Reply to the line, which the target names and the quote quotes.
+    Reply(Target, Quote),
+    /// The quick emoji and "Add Reaction…".
+    React,
+    /// "Who Reacted…", among the emoji the line holds.
+    WhoReacted(Vec<String>),
+    /// "Clear Reactions…" from line `id`.
+    Clear(u64),
+}
+
+/// What `row` offers on `htlc`, whose login took `replies` and
+/// `reactions`: Reply where the view has a bar and a reply to the row's
+/// line is taken; and where the row is a line or message one can react
+/// to, reacting, on a line "Who Reacted…" where it has emoji chips and
+/// "Clear Reactions…" for a moderator where it has any.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn actions(
+    view: &RotulusView,
+    row: MessageId,
+    htlc: *mut c_void,
+    replies: Option<&Targets>,
+    reactions: Option<&hxproto::reactions::Limits>,
+) -> Vec<Action> {
+    let mut actions = Vec::new();
+    let reply = replies.filter(|_| crate::reply_bar::offered(view));
+    if let Some((target, quote)) = reply.and_then(|t| reply_target(view, row, t)) {
+        actions.push(Action::Reply(target, quote));
+    }
+    let Some(limits) = reactions else {
+        return actions;
+    };
+    let line = line_on(view, row, limits);
+    if line.is_none() && crate::msg::on(view, row, limits).is_none() {
+        return actions;
+    }
+    actions.push(Action::React);
+    let emoji = line.map(|id| emoji_on(view, id)).unwrap_or_default();
+    if !emoji.is_empty() {
+        actions.push(Action::WhoReacted(emoji));
+    }
+    if let Some(id) = line.filter(|&id| clears(htlc, view, id)) {
+        actions.push(Action::Clear(id));
+    }
+    actions
+}
+
+/// `row`'s menu at `x`, `y`, with what [`actions`] offers, and the view's
+/// own Copy and Select All. Whether it offers anything of GtkHx's.
 fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
-    let Some((htlc, limits)) = session(view) else {
+    let Some(htlc) = conn(view) else {
         return false;
     };
-    let line = line_on(view, row, &limits);
-    let message = crate::msg::on(view, row, &limits);
-    // SAFETY: as for `session`.
-    match (line, message) {
-        (Some(id), _) => unsafe { refresh_if_stale(view, htlc, id) },
-        (None, Some(m)) => unsafe { crate::msg::refresh_if_stale(view, htlc, m) },
-        (None, None) => return false,
+    // SAFETY: main thread; the connection is live.
+    let (replies, reactions) = unsafe {
+        (
+            hxhandlers::recv::replies::targets(htlc),
+            hxhandlers::recv::reactions::limits(htlc),
+        )
+    };
+    // SAFETY: as above.
+    let actions = unsafe { actions(view, row, htlc, replies.as_ref(), reactions.as_ref()) };
+    if actions.is_empty() {
+        return false;
+    }
+    if let Some(limits) = &reactions {
+        // SAFETY: as above.
+        match (
+            line_on(view, row, limits),
+            crate::msg::on(view, row, limits),
+        ) {
+            (Some(id), _) => unsafe { refresh_if_stale(view, htlc, id) },
+            (None, Some(m)) => unsafe { crate::msg::refresh_if_stale(view, htlc, m) },
+            (None, None) => {}
+        }
     }
     let popover = gtk::Popover::new();
     let items = items();
-    let quick = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    for emoji in self::quick() {
-        let b = gtk::Button::with_label(&emoji);
-        b.add_css_class("flat");
-        let (view, popover) = (view.downgrade(), popover.downgrade());
-        b.connect_clicked(move |_| {
-            popover.upgrade().inspect(|p| p.popdown());
-            view.upgrade().inspect(|v| pick(v, row, &emoji));
-        });
-        quick.append(&b);
-    }
-    items.append(&quick);
-    // TRANSLATORS: in a chat line's menu; opens an emoji chooser to react
-    // to the line with.
-    item(&items, &popover, view, &tr("Add Reaction…"), move |v| {
-        chooser(v, row, x, y)
-    });
-    let emoji = line.map(|id| emoji_on(view, id)).unwrap_or_default();
-    if !emoji.is_empty() {
-        // TRANSLATORS: in a chat line's menu; lists the emoji the line has
-        // been reacted with, to see who reacted with one.
-        item(&items, &popover, view, &tr("Who Reacted…"), move |v| {
-            reacted_with(v, row, &emoji, x, y)
-        });
-    }
-    // SAFETY: as for `session`.
-    if let Some(id) = line.filter(|&id| unsafe { clears(htlc, view, id) }) {
-        let conn = crate::dock::bind(crate::dock::conn_key(htlc));
-        // TRANSLATORS: in a chat line's menu, for a moderator; asks before
-        // taking away every reaction on the line.
-        let label = tr("Clear Reactions…");
-        item(&items, &popover, view, &label, move |v| clear(v, conn, id));
+    for action in actions {
+        match action {
+            Action::Reply(target, quote) => {
+                // TRANSLATORS: in a chat line's menu; answers the line with
+                // the next one sent.
+                item(&items, &popover, view, &tr("Reply"), move |v| {
+                    crate::reply_bar::start(v, target.clone(), &quote)
+                });
+            }
+            Action::React => {
+                let quick = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                for emoji in self::quick() {
+                    let b = gtk::Button::with_label(&emoji);
+                    b.add_css_class("flat");
+                    let (view, popover) = (view.downgrade(), popover.downgrade());
+                    b.connect_clicked(move |_| {
+                        popover.upgrade().inspect(|p| p.popdown());
+                        view.upgrade().inspect(|v| pick(v, row, &emoji));
+                    });
+                    quick.append(&b);
+                }
+                items.append(&quick);
+                // TRANSLATORS: in a chat line's menu; opens an emoji chooser
+                // to react to the line with.
+                item(&items, &popover, view, &tr("Add Reaction…"), move |v| {
+                    chooser(v, row, x, y)
+                });
+            }
+            Action::WhoReacted(emoji) => {
+                // TRANSLATORS: in a chat line's menu; lists the emoji the
+                // line has been reacted with, to see who reacted with one.
+                item(&items, &popover, view, &tr("Who Reacted…"), move |v| {
+                    reacted_with(v, row, &emoji, x, y)
+                });
+            }
+            Action::Clear(id) => {
+                let conn = crate::dock::bind(crate::dock::conn_key(htlc));
+                // TRANSLATORS: in a chat line's menu, for a moderator; asks
+                // before taking away every reaction on the line.
+                let label = tr("Clear Reactions…");
+                item(&items, &popover, view, &label, move |v| clear(v, conn, id));
+            }
+        }
     }
     items.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     // This menu stands in for the view's own, so it keeps what that offers.

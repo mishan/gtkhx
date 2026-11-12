@@ -6,12 +6,13 @@
 //! room-management opcodes. Each one: encodes any text body for the wire
 //! (via `gtkhx_text_for_wire`, the hxtext crate), builds the chunks with the
 //! **native** `hxproto::build` builders (not the C-ABI
-//! `gtkhx_proto_build_*` shims — the whole build flow is Rust), expects the
+//! `gtkhx_proto_build_*` shims — the whole build flow is Rust), a chat
+//! line's through `hxrequest::chat::say`, expects the
 //! reply (`expect_next`) where one comes, and hands the chunks to
 //! `hlwrite_chunks`. Exports the exact `hx_send_chat` / `hx_chat_*` /
 //! `hx_invite_user` / `hx_part_chat` / `hx_reject_chat` / `hx_change_subject`
-//! C ABI so every caller (toolbar.c, users.c, the chat input handler, the
-//! Rust invite dialog) links unchanged.
+//! C ABI so every caller (toolbar.c, users.c, the Rust invite dialog) links
+//! unchanged; the chat input calls `send_chat_line`, which can answer a line.
 //!
 //! A lean dedicated crate (only `glib` + the pure `hxproto`, no GTK) so
 //! it's `cargo test`-able: the builders run natively and the C send-path
@@ -22,15 +23,15 @@
 //! cap + chat-model lookups (`chat_send_bridge.c`), and the write primitive
 //! (`hlwrite_chunks`, network.c).
 
-use std::ffi::{c_char, c_void};
+use std::ffi::{c_char, c_void, CStr};
 use std::os::raw::c_int;
 
-use hxproto::build::{self, ChatRequest, ChatSubjectRequest, HxChunk};
-use hxproto::messages::{tag, ClientHdr};
+use hxproto::build::{self, ChatSubjectRequest, HxChunk};
+use hxproto::messages::ClientHdr;
+use hxproto::target::Target;
 
 // Wire opcodes — single source of truth is hxproto::messages::ClientHdr
 // (the repr(u32) HTLC_HDR_* enum), not re-spelled magic numbers.
-const HTLC_HDR_CHAT: u32 = ClientHdr::Chat as u32;
 const HTLC_HDR_CHAT_CREATE: u32 = ClientHdr::ChatCreate as u32;
 const HTLC_HDR_CHAT_INVITE: u32 = ClientHdr::ChatInvite as u32;
 const HTLC_HDR_CHAT_JOIN: u32 = ClientHdr::ChatJoin as u32;
@@ -117,7 +118,7 @@ pub unsafe extern "C" fn hx_send_chat(
     cid: u32,
     style: u16,
 ) {
-    send_chat(htlc, str_, cid, style, None);
+    send_chat(htlc, str_, cid, style, None, None);
 }
 
 /// `void hx_send_chat_with_media (htlc, str, cid, style, media_id,
@@ -151,16 +152,38 @@ pub unsafe extern "C" fn hx_send_chat_with_media(
     let media = field(media_id, media_id_len)
         .zip(field(mime.cast(), mime_len))
         .filter(|_| hx_conn_has_cap(htlc.cast(), HTLC_CAP_INLINE_MEDIA) != glib::ffi::GFALSE);
-    send_chat(htlc, str_, cid, style, media);
+    send_chat(htlc, str_, cid, style, media, None);
 }
 
-/// A chat line, with the picture `media` names (its handle and type).
+/// Line `text` in chat `cid` as `style`, answering the line `reply` names
+/// where the connection's login takes a reply to it; otherwise, and on a
+/// server without replies, it goes as a plain line.
+///
+/// # Safety
+/// `htlc` is NULL or a valid `htlc_conn *`; main thread only.
+pub unsafe fn send_chat_line(
+    htlc: *mut c_void,
+    text: &CStr,
+    cid: u32,
+    style: u16,
+    reply: Option<&Target>,
+) {
+    if htlc.is_null() {
+        return;
+    }
+    let reply = reply.filter(|t| crate::recv::replies::targets(htlc).is_some_and(|k| k.takes(t)));
+    send_chat(htlc, text.as_ptr(), cid, style, None, reply);
+}
+
+/// A chat line, with the picture `media` names (its handle and type), and
+/// the line `reply` names.
 unsafe fn send_chat(
     htlc: *mut c_void,
     str_: *const c_char,
     cid: u32,
     style: u16,
     media: Option<(&[u8], &[u8])>,
+    reply: Option<&Target>,
 ) {
     // hlwrite_chunks dereferences htlc (htlc->trans, htlc->fd); a NULL would
     // crash there. Guard here — every sender does.
@@ -168,28 +191,10 @@ unsafe fn send_chat(
         return;
     }
     with_wire(htlc, str_, glib::ffi::GTRUE, |wire| {
-        let mut chunks = [HxChunk::EMPTY; 5];
-        let mut scratch = [0u8; 8];
-        let req = ChatRequest {
-            cid,
-            style,
-            body: wire,
-        };
-        let mut hc = build::build_chat_chunks(&req, &mut chunks, &mut scratch);
-        if hc == 0 {
+        let Some(req) = hxrequest::chat::say(wire, cid, style, media, reply) else {
             return;
-        }
-        if let Some((id, mime)) = media {
-            for (tag, data) in [(tag::CHAT_MEDIA_ID, id), (tag::CHAT_MEDIA_TYPE, mime)] {
-                chunks[hc] = HxChunk {
-                    tag,
-                    len: data.len() as u16,
-                    data: data.as_ptr(),
-                };
-                hc += 1;
-            }
-        }
-        hlwrite_chunks(htlc, HTLC_HDR_CHAT, 0, chunks.as_ptr(), hc as c_int);
+        };
+        req.with_hx_chunks(|c| hlwrite_chunks(htlc, req.opcode, 0, c.as_ptr(), c.len() as c_int));
     });
 }
 

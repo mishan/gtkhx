@@ -121,6 +121,8 @@ pub mod chat_view;
 pub mod chat_output;
 // Reacting to a lobby line: its chips, its menu with the emoji chooser, and who reacted.
 mod reactions;
+// The "Replying to …" bar over the public chat's input, and the reply it holds.
+mod reply_bar;
 // The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
 // gtkhx_chat_tabs_* C ABI chat.c / gtkutil.c + chat.rs use.
 pub mod chat_tabs;

@@ -679,6 +679,28 @@ pub(crate) fn line_on(
     limits.takes(&target(view, id)).then_some(id)
 }
 
+/// How a reply names the lobby line drawn on `row`, and what it quotes,
+/// where `targets` take a reply to it: a kept line or one nobody keeps
+/// alike, since a reply's target is never looked up. A private chat's
+/// lines are none yet.
+pub(crate) fn reply_target(
+    view: &RotulusView,
+    row: MessageId,
+    targets: &hxproto::replies::Targets,
+) -> Option<(Target, Quote)> {
+    if cid_of(view) != 0 {
+        return None;
+    }
+    // SAFETY: as for `output`, which this does not make where there is none.
+    let out = unsafe { view.data::<RefCell<Output>>(OUTPUT) }?;
+    let out = unsafe { out.as_ref() }.borrow();
+    let (&key, line) = out.lines.lines.iter().find(|(_, l)| l.row == row)?;
+    let target = lobby_target(key);
+    targets
+        .takes(&target)
+        .then(|| line.said.clone().map(|q| (target, q)))?
+}
+
 /// The user wants the chip `key` on `row` on, or off, or (`None`) the
 /// other way round; `limits` are the login's. A line reached by no chip of
 /// GtkHx's is none of these.
@@ -1177,6 +1199,7 @@ fn debug(line: &str) {
 /// Empty `view` and forget what it drew.
 pub(crate) fn clear(view: &RotulusView) {
     view.clear();
+    crate::reply_bar::cancel(view);
     *output(view).borrow_mut() = Output::default();
 }
 
@@ -2408,6 +2431,126 @@ pub(crate) mod tests {
         });
         draw_live(&view, None, || draw_prose(&view, b"two\nrows"));
         assert_eq!(due_quotes(&view), Some(vec![2]));
+    }
+
+    /// A row's menu offers Reply where the login takes a reply to its
+    /// line, kept or not, and the view has a bar; reacting where it takes
+    /// reactions; both, or neither, where the menu is the view's own.
+    pub(crate) fn check_a_rows_menu_offers_what_the_login_agreed() {
+        use crate::reactions::{actions, Action};
+        use gtkhx_core::conn::{hx_conn_free, hx_conn_new};
+        use hxproto::reactions::{Limits, TARGETS_LINES};
+        use hxproto::replies::Targets;
+        let (lobby, unbarred, room) = (view(), view(), view());
+        // As `hear` keeps it, without hearing what would send.
+        unsafe { room.set_data(HEARD, 7u32) };
+        let input = gtk::TextView::new();
+        let mut bars = Vec::new();
+        for v in [&lobby, &unbarred, &room] {
+            draw_history(v, &[entry(5, 0, "bob", "hello\nall")], false);
+            draw_live(v, Some(&entry(6, EPHEMERAL, "carol", "hi")), || {
+                say(v, "carol", "hi")
+            });
+            if v != &unbarred {
+                bars.push(crate::reply_bar::build(v, input.upcast_ref()));
+            }
+        }
+        let row = |v: &RotulusView, space, id| output(v).borrow().lines.row(space, id).unwrap();
+        let reacts = Limits {
+            targets: TARGETS_LINES,
+            max_keys: None,
+            max_per_user: None,
+        };
+        let (lines, notices) = (Targets(1 << 1), Targets(1 << 4));
+        let both = Targets(lines.0 | notices.0);
+        let bob = || Quote::new("bob", "hello all");
+        let reply = |t: Target, q| Action::Reply(t, q);
+        let (kept, own) = (
+            Target::Line { channel: 0, id: 5 },
+            Target::Ephemeral { chat: 0, id: 6 },
+        );
+        let c = hx_conn_new();
+        for (case, v, space, id, replies, reactions, want) in [
+            ("neither", &lobby, Space::History, 5, None, None, vec![]),
+            (
+                "replies alone",
+                &lobby,
+                Space::History,
+                5,
+                Some(&both),
+                None,
+                vec![reply(kept.clone(), bob())],
+            ),
+            (
+                "reactions alone",
+                &lobby,
+                Space::History,
+                5,
+                None,
+                Some(&reacts),
+                vec![Action::React],
+            ),
+            (
+                "both",
+                &lobby,
+                Space::History,
+                5,
+                Some(&both),
+                Some(&reacts),
+                vec![reply(kept, bob()), Action::React],
+            ),
+            (
+                "a kept line, kind 4 alone",
+                &lobby,
+                Space::History,
+                5,
+                Some(&notices),
+                None,
+                vec![],
+            ),
+            (
+                "a line nobody keeps",
+                &lobby,
+                Space::Ephemeral,
+                6,
+                Some(&notices),
+                Some(&reacts),
+                vec![reply(own, Quote::new("carol", "hi"))],
+            ),
+            (
+                "a line nobody keeps, kind 1 alone",
+                &lobby,
+                Space::Ephemeral,
+                6,
+                Some(&lines),
+                None,
+                vec![],
+            ),
+            (
+                "a view with no bar",
+                &unbarred,
+                Space::History,
+                5,
+                Some(&both),
+                None,
+                vec![],
+            ),
+            (
+                "a private chat's line",
+                &room,
+                Space::History,
+                5,
+                Some(&both),
+                None,
+                vec![],
+            ),
+        ] {
+            // SAFETY: a live connection.
+            let got = unsafe { actions(v, row(v, space, id), c.cast(), replies, reactions) };
+            assert_eq!(got, want, "{case}");
+        }
+        // SAFETY: not used again.
+        unsafe { hx_conn_free(c) };
     }
 
     #[test]

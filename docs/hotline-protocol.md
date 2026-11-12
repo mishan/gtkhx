@@ -1409,6 +1409,16 @@ is an answer cut short, and any other refusal stops quotes for the connect. hxne
 Notification (718), which GtkHx never asks for, to the Rust handlers where the session
 has replies or reactions, which drop it.
 
+A lobby line is answered from its row's menu (the pointer's, or Menu or Shift+F10 on a
+row reached from the keyboard), which offers Reply where the login takes the kind that
+names it: a kept line kind 1, a line nobody keeps kind 4 under chat 0. A bar over the
+input then says who and what is answered, and is the input's accessible description
+while it shows; its button or Escape in the input cancels it. The next line said as chat
+carries 0x0F21, checked against the login's kinds again as it goes; a server's command,
+a client's `/command`, and a line sent with a picture go without it and leave the reply
+for the next line. Sending, a cleared view (a connect, `/clear`) and the window closing
+let go of it. The line's own header is drawn from its echo, as anyone's.
+
 ### Reactions
 
 Capability bit 19, a draft (Capabilities-Reactions.md) that is not adopted, confirmed
