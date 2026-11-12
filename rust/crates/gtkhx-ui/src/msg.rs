@@ -149,8 +149,13 @@ impl<K: Copy + Eq + Hash, V> Drawn<K, V> {
         if self.rows.contains_key(&key) {
             return;
         }
+        // In row order: a sent message is named only once its answer comes,
+        // which can be after a later one was drawn.
+        let at = self
+            .order
+            .partition_point(|k| self.rows[k].first.0 < first.0);
         self.rows.insert(key, Drawing { first, row, of });
-        self.order.push_back(key);
+        self.order.insert(at, key);
         // Each takes a row at least, so past that many the oldest is gone.
         while max_rows != 0 && self.order.len() > max_rows {
             if let Some(gone) = self.order.pop_front() {
@@ -2191,6 +2196,11 @@ pub(crate) mod tests {
             all.drew(n, row(u64::from(n)), (), 0);
         }
         assert_eq!(held(&all), [true; 3], "no limit");
+        let mut late = Drawn::<u8, ()>::default();
+        late.drew(2, row(2), (), 2);
+        late.drew(1, row(1), (), 2);
+        late.drew(3, row(3), (), 2);
+        assert_eq!(held(&late), [false, true, true], "named after a later one");
     }
 
     #[test]
