@@ -114,7 +114,9 @@ what it needs to know about Hotline. Every chat output is built by
 
 - **What never changes** (`setup`): a click on the view leaves the focus
   in the input box beside it, while the keyboard reaches the view by Tab
-  from the subject above it (its links, nicks and context menu); the
+  from the subject above it (its links, nicks and context menu); in the
+  input, Tab and Shift+Tab are nick completion, so Ctrl+Shift+Tab is what
+  leaves it, for the view or the reply bar's Cancel button; the
   indented two-column layout with a draggable separator; the maximum
   gutter width; the grouping gap; the link schemes; the avatar resolver;
   and the two link handlers.
@@ -190,6 +192,7 @@ structure. A lookup that misses stays 0.
 | `speaker-menu` | `users.c::user_popup_show`, the same menu the Users window and the private-chat sidebars pop |
 | `load-more` | fetch the next page of chat history |
 | `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
+| `reply-activated` | on the public chat, where the session has replies: a reply's header clicked, or Enter or Space on it, goes to the line it answers (`chat_output.rs`), focus going with it only from the keyboard |
 | `reaction-activated` | on the public chat, each private chat and each conversation, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
 | `reaction-menu` | likewise, on a kept line's emoji chip: who reacted with it; a server emoji's placeholder is left to `row-menu` |
 | `row-menu` | on the public chat, each private chat and each conversation: on a lobby line where the session has replies and the login takes its kind, "Reply" first, which shows the bar over the input (`reply_bar`); where the session has reactions, on a kept line, an instant message or a stored private message, the quick reactions, "Add Reaction…" and, on a line, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), and where it has any chips and the account holds access bit 22, "Clear Reactions…", which asks first; then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |

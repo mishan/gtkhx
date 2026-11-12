@@ -1403,8 +1403,9 @@ page is on its way. Until the quote comes, and where none can (a line nobody kee
 message"; a line taken away, "message removed"; and one by someone the user ignores, by
 the nick they go by now, "a message you've hidden". The answer is no page of history: it
 is drawn nowhere but in headers, and moves no cursor. Its refusal is told to nobody,
-since the user never asked for it: "Slow down." (hxd-ng's words for the history rate,
-with no code) is asked again once a second later and then left for the next request, as
+since the user never asked for it: "Slow down." (hxd-ng's words for the history rate;
+its reason field beside them, 0x0F2A, is not passed on by the session, which gives a
+refusal's words alone) is asked again once a second later and then left for the next request, as
 is an answer cut short, and any other refusal stops quotes for the connect. hxnet hands a
 Notification (718), which GtkHx never asks for, to the Rust handlers where the session
 has replies or reactions, which drop it.
@@ -1418,6 +1419,16 @@ carries 0x0F21, checked against the login's kinds again as it goes; a server's c
 a client's `/command`, and a line sent with a picture go without it and leave the reply
 for the next line. Sending, a cleared view (a connect, `/clear`) and the window closing
 let go of it. The line's own header is drawn from its echo, as anyone's.
+
+A header clicked, or Enter or Space on one, goes to the line it answers: scrolled to and
+drawn on a tint of the selection's color for a few seconds or until the next key or
+click in the view, with focus moved to it only from the keyboard. A kept line not drawn
+is paged back to, 200 lines a page before the oldest drawn (or the newest page, before
+any), up to five pages a jump, then a toast says to choose the reply again to go on. A
+jump toasts and asks nothing where no page could hold the line: one nobody keeps, one 700
+by id left out or answered as taken away, and one newer than the oldest history drawn,
+which the scrollback let go of. A quote still being asked for is waited for first, and
+a refused page ends the jump with its refusal's own toast.
 
 ### Reactions
 

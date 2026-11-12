@@ -209,20 +209,21 @@ fn page(cid: u32, has_more: bool) -> Emitted {
 #[test]
 fn a_failed_history_request_ends_its_chats_wait_and_a_refusal_is_shown() {
     let refused = Some("Not here.");
-    // (older, the reason, what the view gets)
+    // (older, the reason, what the view gets). A refused page leaves more
+    // to load, so a "Load older" row stays, and a page of none that says
+    // so is a refusal.
     let cases = [
         (
             false,
             refused,
-            vec![page(3, false), Emitted::RequestFailed("Not here.".into())],
+            vec![page(3, true), Emitted::RequestFailed("Not here.".into())],
         ),
-        // A refused "Load older" leaves more to load: its row stays.
         (
             true,
             refused,
             vec![page(3, true), Emitted::RequestFailed("Not here.".into())],
         ),
-        (false, None, vec![page(3, false)]),
+        (false, None, vec![page(3, true)]),
         (true, Some(CUT_SHORT), vec![page(3, true)]),
     ];
     for (older, reason, want) in cases {

@@ -55,6 +55,7 @@ fn display_backed() {
     crate::chat_output::tests::check_a_quote_asked_for_heads_its_replies();
     crate::chat_output::tests::check_a_line_taken_away_is_quoted_as_removed();
     crate::chat_output::tests::check_a_trimmed_reply_asks_for_no_quote();
+    crate::chat_output::tests::check_a_reply_header_goes_to_its_line();
     crate::chat_output::tests::check_a_rows_menu_offers_what_the_login_agreed();
     crate::chat_input::tests::check_a_reply_goes_with_the_next_line_said();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();

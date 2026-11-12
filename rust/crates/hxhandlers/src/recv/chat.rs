@@ -284,8 +284,9 @@ pub unsafe fn history(
 }
 
 /// A request the session said failed. One for history ends its chat's
-/// wait with an empty page: a refused "Load older" keeps its row, to be
-/// tried again, and the fetch at login has nothing to show. The server's
+/// wait with an empty page that says there is more, which no answer
+/// does: a refused "Load older" keeps its row, to be tried again, the
+/// fetch at login has nothing to show, and a jump to a line stops. The server's
 /// reason, when it gave one, is `request-failed`, for the view to show;
 /// but one for lines by id, which the user never asked for, goes to the
 /// `replies` signal and is shown to nobody.
@@ -299,7 +300,7 @@ pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>)
             quotes: Some(asked),
             ..
         }) => return super::replies::refused(htlc, cid, asked, reason),
-        Some(asked) => history(htlc, trans, asked.cid, &[], asked.older),
+        Some(asked) => history(htlc, trans, asked.cid, &[], true),
         None => {}
     }
     if let Some(reason) = reason.filter(|r| *r != CUT_SHORT) {

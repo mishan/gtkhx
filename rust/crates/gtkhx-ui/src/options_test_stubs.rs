@@ -99,8 +99,17 @@ pub unsafe extern "C" fn gtkhx_theme_names_end() {}
 
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_dialog_add_close_shortcuts(_dialog: *mut c_void) {}
+thread_local! {
+    /// The toasts shown, for a check to take.
+    pub(crate) static TOASTS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 #[no_mangle]
-pub unsafe extern "C" fn toolbar_show_toast(_text: *const c_char) {}
+pub unsafe extern "C" fn toolbar_show_toast(text: *const c_char) {
+    let text = std::ffi::CStr::from_ptr(text)
+        .to_string_lossy()
+        .into_owned();
+    TOASTS.with_borrow_mut(|t| t.push(text));
+}
 #[no_mangle]
 pub unsafe extern "C" fn toolbar_refresh_bookmarks() {}
 

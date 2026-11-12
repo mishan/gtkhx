@@ -207,6 +207,11 @@ impl Quotes {
             .map(|f| f.ids.clone())
     }
 
+    /// Whether line `id` is to be asked for, or is being.
+    pub fn pending(&self, id: u64) -> bool {
+        self.wanted.contains(&id) || self.flight.as_ref().is_some_and(|f| f.ids.contains(&id))
+    }
+
     fn hold(&mut self, id: u64, q: Quoted) {
         if self.held.insert(id, q).is_none() {
             self.order.push_back(id);
@@ -217,6 +222,125 @@ impl Quotes {
             };
             self.held.remove(&old);
         }
+    }
+}
+
+/// The most pages of history one jump asks for before it stops and says
+/// so; choosing the reply again goes on from there.
+pub const JUMP_PAGES: u32 = 5;
+
+/// The lines a jump's page asks for: hxd-ng's largest page.
+pub const JUMP_PAGE: u16 = 200;
+
+/// Why a jump stopped short of the line a reply answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Short {
+    /// A line nobody keeps, no longer drawn here.
+    Gone,
+    /// Not kept, or not for this reader, which a server does not tell
+    /// apart.
+    Unavailable,
+    Removed,
+    /// Newer than the oldest history drawn, so a live line the scrollback
+    /// let go of, or one never drawn: no older page holds it.
+    Scrolled,
+    /// Older than [`JUMP_PAGES`] pages reach.
+    Further,
+}
+
+/// What a jump does next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Go to the line's row.
+    Reveal,
+    /// Ask for the line's quote, whose answer may say no page holds it.
+    Ask,
+    /// Wait for what is on its way: a page, or the line's quote.
+    Wait,
+    /// Ask for the page before history line `before`, or the newest page
+    /// at 0.
+    Page {
+        before: u64,
+    },
+    Say(Short),
+}
+
+/// What a view knows when a jump takes a step.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Seen<'a> {
+    /// The line's row is drawn.
+    pub drawn: bool,
+    pub quote: Option<&'a Quoted>,
+    /// Its quote is to be asked for, or is being.
+    pub asking: bool,
+    /// A page of history is on its way.
+    pub paging: bool,
+    /// The oldest history line drawn; 0 before any.
+    pub oldest: u64,
+    /// The last page drawn said there is more.
+    pub more: bool,
+}
+
+/// A jump from a reply to the line it answers: line `id`, kept in history
+/// or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Jump {
+    pub id: u64,
+    pub kept: bool,
+    /// It was asked for from the keyboard, so focus goes with it.
+    pub keyboard: bool,
+    pages: u32,
+    asked: bool,
+}
+
+impl Jump {
+    pub fn new(id: u64, kept: bool, keyboard: bool) -> Jump {
+        Jump {
+            id,
+            kept,
+            keyboard,
+            pages: 0,
+            asked: false,
+        }
+    }
+
+    /// The next step from what the view knows now; a page asked for here
+    /// is one of [`JUMP_PAGES`].
+    pub fn next(&mut self, v: &Seen) -> Step {
+        if v.drawn {
+            return Step::Reveal;
+        }
+        if !self.kept {
+            return Step::Say(Short::Gone);
+        }
+        match v.quote {
+            Some(Quoted::Removed) => return Step::Say(Short::Removed),
+            // A history page would draw it, but quotes keep an ignored
+            // user's words out of sight, and so does a jump.
+            Some(Quoted::Unavailable | Quoted::Hidden) => return Step::Say(Short::Unavailable),
+            Some(Quoted::Later) if !self.asked => {
+                self.asked = true;
+                return Step::Ask;
+            }
+            _ => {}
+        }
+        if v.asking || v.paging {
+            return Step::Wait;
+        }
+        if v.oldest != 0 && self.id >= v.oldest {
+            return Step::Say(match self.pages {
+                0 => Short::Scrolled,
+                _ => Short::Unavailable,
+            });
+        }
+        if (self.pages > 0 || v.oldest != 0) && !v.more {
+            return Step::Say(Short::Unavailable);
+        }
+        if self.pages == JUMP_PAGES {
+            return Step::Say(Short::Further);
+        }
+        self.pages += 1;
+        Step::Page { before: v.oldest }
     }
 }
 
@@ -328,5 +452,176 @@ mod tests {
         assert_eq!(q.get(2), Some(&line("a", "hi")));
         q.want(1);
         assert_eq!(q.next(|_| false), Some(vec![1]));
+    }
+
+    /// Each step from what the view knows: the line's row if it is drawn,
+    /// a stop wherever no page can hold it, a wait for what is on its way,
+    /// and otherwise the page before the oldest drawn.
+    #[test]
+    fn a_jump_goes_to_its_line_or_says_why_not() {
+        let (removed, unavailable, hidden) = (Quoted::Removed, Quoted::Unavailable, Quoted::Hidden);
+        let held = line("a", "hi");
+        let v = Seen {
+            oldest: 100,
+            more: true,
+            ..Seen::default()
+        };
+        let drawn = Seen { drawn: true, ..v };
+        let none = Seen::default();
+        // (case, line, kept, pages already, seen, step)
+        for (case, id, kept, pages, seen, want) in [
+            ("drawn", 50, true, 0, drawn, Step::Reveal),
+            ("drawn, kept by nobody", 50, false, 0, drawn, Step::Reveal),
+            ("kept by nobody", 50, false, 0, v, Step::Say(Short::Gone)),
+            (
+                "removed",
+                50,
+                true,
+                0,
+                Seen {
+                    quote: Some(&removed),
+                    ..v
+                },
+                Step::Say(Short::Removed),
+            ),
+            (
+                "left out by id",
+                50,
+                true,
+                0,
+                Seen {
+                    quote: Some(&unavailable),
+                    ..v
+                },
+                Step::Say(Short::Unavailable),
+            ),
+            (
+                "an ignored user's",
+                50,
+                true,
+                0,
+                Seen {
+                    quote: Some(&hidden),
+                    ..v
+                },
+                Step::Say(Short::Unavailable),
+            ),
+            (
+                "its quote on its way",
+                50,
+                true,
+                0,
+                Seen { asking: true, ..v },
+                Step::Wait,
+            ),
+            (
+                "a page on its way",
+                50,
+                true,
+                0,
+                Seen { paging: true, ..v },
+                Step::Wait,
+            ),
+            (
+                "newer than history drawn",
+                150,
+                true,
+                0,
+                v,
+                Step::Say(Short::Scrolled),
+            ),
+            (
+                "paged past it",
+                150,
+                true,
+                1,
+                v,
+                Step::Say(Short::Unavailable),
+            ),
+            (
+                "no more history",
+                50,
+                true,
+                0,
+                Seen { more: false, ..v },
+                Step::Say(Short::Unavailable),
+            ),
+            ("no page drawn", 50, true, 0, none, Step::Page { before: 0 }),
+            (
+                "an empty page drawn",
+                50,
+                true,
+                1,
+                none,
+                Step::Say(Short::Unavailable),
+            ),
+            ("older", 50, true, 0, v, Step::Page { before: 100 }),
+            (
+                "older, quoted",
+                50,
+                true,
+                0,
+                Seen {
+                    quote: Some(&held),
+                    ..v
+                },
+                Step::Page { before: 100 },
+            ),
+            (
+                "as far as a jump goes",
+                50,
+                true,
+                JUMP_PAGES,
+                v,
+                Step::Say(Short::Further),
+            ),
+        ] {
+            let mut j = Jump {
+                pages,
+                ..Jump::new(id, kept, false)
+            };
+            assert_eq!(j.next(&seen), want, "{case}");
+        }
+    }
+
+    /// A quote put off for the rate is asked for once by a jump, which
+    /// waits for its answer and pages on whatever it is.
+    #[test]
+    fn a_jump_asks_once_for_a_quote_put_off() {
+        let later = Quoted::Later;
+        let v = Seen {
+            quote: Some(&later),
+            oldest: 100,
+            more: true,
+            ..Seen::default()
+        };
+        let mut j = Jump::new(50, true, false);
+        assert_eq!(j.next(&v), Step::Ask);
+        assert_eq!(j.next(&Seen { asking: true, ..v }), Step::Wait);
+        assert_eq!(j.next(&v), Step::Page { before: 100 });
+    }
+
+    /// A jump pages back from the newest page so far, and says so.
+    #[test]
+    fn a_jump_pages_back_so_far() {
+        let mut j = Jump::new(1, true, false);
+        let mut asked = Vec::new();
+        let mut oldest = 0;
+        loop {
+            let v = Seen {
+                oldest,
+                more: true,
+                ..Seen::default()
+            };
+            match j.next(&v) {
+                Step::Page { before } => asked.push(before),
+                step => {
+                    assert_eq!(step, Step::Say(Short::Further));
+                    break;
+                }
+            }
+            oldest = 1200 - 200 * asked.len() as u64;
+        }
+        assert_eq!(asked, [0, 1000, 800, 600, 400]);
     }
 }
