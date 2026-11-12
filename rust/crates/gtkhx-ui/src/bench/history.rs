@@ -69,6 +69,7 @@ fn entries(n: u32) -> Vec<hxsession::HistoryEntry> {
             nick: NICKS[i as usize % NICKS.len()].into(),
             text: line_of(i),
             reactions: None,
+            reply_to: None,
         })
         .collect()
 }

@@ -116,6 +116,9 @@ pub enum ConnectionState {
 }
 
 /// One event from the actor.
+// Most events are the session's, so boxing that variant would allocate for
+// nearly every one to save a few hundred bytes on the rest.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Event {
     /// The actor's connection-lifecycle state changed. Fires

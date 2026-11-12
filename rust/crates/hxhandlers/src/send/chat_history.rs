@@ -1,5 +1,6 @@
 //! The chat-history extension's request (GET_CHAT_HISTORY, 700): the fetch
-//! that follows the login, and a page older than what a chat shows. Sent
+//! that follows the login, a page older than what a chat shows, and under
+//! the Replies draft, the lines a view's replies answer, by id. Sent
 //! only where the server agreed to chat history — anywhere else it earns a
 //! refusal every time — with its reply expected by the session, which hands
 //! it on as an event (`recv::chat::history`).
@@ -9,7 +10,7 @@ use std::os::raw::{c_int, c_void};
 use glib::ffi::{gboolean, GFALSE, GTRUE};
 use hxproto::build::HxChunk;
 
-use crate::recv::chat::{history_forget, history_requested};
+use crate::recv::chat::{history_forget, history_requested, quotes_requested};
 
 /// `HTLC_CAP_CHAT_HISTORY` (bit 4, hotline.h).
 const HTLC_CAP_CHAT_HISTORY: u64 = 0x0010;
@@ -81,6 +82,33 @@ pub unsafe extern "C" fn hx_chat_history_fetch_older(
         n => n,
     };
     fetch(htlc, cid, before, 0, limit)
+}
+
+/// Chat `cid`'s lines `ids`, 1 to `hxproto::replies::MAX_IDS` of them,
+/// for the quotes of the replies a view draws, where the server agreed to
+/// chat history and to replies. Their answer is no page: the `replies`
+/// signal tells it, and it moves no cursor. Whether it was sent.
+///
+/// # Safety
+/// `htlc` is NULL or a live connection; main thread.
+pub unsafe fn quotes(htlc: *mut c_void, cid: u32, ids: &[u64]) -> bool {
+    let has = |cap| hx_conn_has_cap(htlc.cast(), cap) != 0;
+    if htlc.is_null() || !has(HTLC_CAP_CHAT_HISTORY) || !has(hxsession::cap::REPLIES) {
+        return false;
+    }
+    let Some(req) = hxrequest::chat::history_ids(cid, ids) else {
+        return false;
+    };
+    let line = format!("request: cid={cid} ids={ids:?}");
+    if let Ok(line) = std::ffi::CString::new(line) {
+        debug_log_str(c"chat-history".as_ptr(), line.as_ptr());
+    }
+    let trans = super::expect_next(htlc, hxsession::Expect::ChatHistory { cid });
+    quotes_requested(htlc, trans, cid, ids.to_vec());
+    req.with_hx_chunks(|chunks| {
+        hlwrite_chunks(htlc, req.opcode, 0, chunks.as_ptr(), chunks.len() as c_int)
+    });
+    true
 }
 
 unsafe fn fetch(htlc: *mut c_void, cid: u32, before: u64, after: u64, limit: u16) -> gboolean {

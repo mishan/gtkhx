@@ -52,11 +52,12 @@ const MAX_SUBJECT: usize = 255;
 pub(crate) const CUT_SHORT: &str = "the server's reply was cut short";
 
 /// A history request in flight: its chat, and whether it asked for a page
-/// older than what the chat shows.
-#[derive(Clone, Copy)]
+/// older than what the chat shows, or for lines by id, for the quotes of
+/// the replies a view draws.
 struct HistoryAsked {
     cid: u32,
     older: bool,
+    quotes: Option<Vec<u64>>,
 }
 
 thread_local! {
@@ -69,19 +70,31 @@ thread_local! {
 /// A history request for chat `cid` goes out on `trans`; `older` when it
 /// asks for a page before what the chat shows.
 pub(crate) fn history_requested(htlc: *mut c_void, trans: u32, cid: u32, older: bool) {
-    HISTORY_PENDING.with(|p| {
-        p.borrow_mut()
-            .insert((htlc as usize, trans), HistoryAsked { cid, older })
-    });
+    let asked = HistoryAsked {
+        cid,
+        older,
+        quotes: None,
+    };
+    HISTORY_PENDING.with(|p| p.borrow_mut().insert((htlc as usize, trans), asked));
+}
+
+/// A request for chat `cid`'s lines `ids` goes out on `trans`.
+pub(crate) fn quotes_requested(htlc: *mut c_void, trans: u32, cid: u32, ids: Vec<u64>) {
+    let asked = HistoryAsked {
+        cid,
+        older: false,
+        quotes: Some(ids),
+    };
+    HISTORY_PENDING.with(|p| p.borrow_mut().insert((htlc as usize, trans), asked));
 }
 
 /// Whether the first page of chat `cid`'s history since the login is on
 /// its way.
 pub fn first_page_pending(htlc: *mut c_void, cid: u32) -> bool {
     HISTORY_PENDING.with(|p| {
-        p.borrow()
-            .iter()
-            .any(|(&(h, _), a)| h == htlc as usize && a.cid == cid && !a.older)
+        p.borrow().iter().any(|(&(h, _), a)| {
+            h == htlc as usize && a.cid == cid && !a.older && a.quotes.is_none()
+        })
     })
 }
 
@@ -221,7 +234,8 @@ pub(crate) unsafe fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: 
 
 /// A page of chat `cid`'s history, the reply to the request on `trans`:
 /// the `chat-history-batch` signal. The newest line seen moves the cursor a
-/// reconnect to the same server catches up from.
+/// reconnect to the same server catches up from. Lines asked for by id
+/// are no page: they go to the `replies` signal alone.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -232,7 +246,13 @@ pub unsafe fn history(
     entries: &[HistoryEntry],
     has_more: bool,
 ) {
-    history_answered(htlc, trans);
+    if let Some(HistoryAsked {
+        quotes: Some(asked),
+        ..
+    }) = history_answered(htlc, trans)
+    {
+        return super::replies::quoted(htlc, cid, asked, entries, has_more);
+    }
     for e in entries {
         debug_trace(
             c"chat-history",
@@ -266,13 +286,21 @@ pub unsafe fn history(
 /// A request the session said failed. One for history ends its chat's
 /// wait with an empty page: a refused "Load older" keeps its row, to be
 /// tried again, and the fetch at login has nothing to show. The server's
-/// reason, when it gave one, is `request-failed`, for the view to show.
+/// reason, when it gave one, is `request-failed`, for the view to show;
+/// but one for lines by id, which the user never asked for, goes to the
+/// `replies` signal and is shown to nobody.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
 pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>) {
-    if let Some(asked) = history_answered(htlc, trans) {
-        history(htlc, trans, asked.cid, &[], asked.older);
+    match history_answered(htlc, trans) {
+        Some(HistoryAsked {
+            cid,
+            quotes: Some(asked),
+            ..
+        }) => return super::replies::refused(htlc, cid, asked, reason),
+        Some(asked) => history(htlc, trans, asked.cid, &[], asked.older),
+        None => {}
     }
     if let Some(reason) = reason.filter(|r| *r != CUT_SHORT) {
         let reason = c_text(reason);
@@ -305,6 +333,17 @@ pub(crate) mod test_env {
             cid: u32,
             ids: Vec<u64>,
             has_more: bool,
+        },
+        Quotes {
+            cid: u32,
+            asked: Vec<u64>,
+            ids: Vec<u64>,
+            has_more: bool,
+        },
+        QuotesRefused {
+            cid: u32,
+            asked: Vec<u64>,
+            slow: bool,
         },
     }
 

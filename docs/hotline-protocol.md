@@ -1277,6 +1277,7 @@ bitmap.
 | 9 | 0x0200 | Modern dates | Capabilities.md |
 | 10 | 0x0400 | Video (only together with bit 2) | hxd-ng `docs/capabilities-video.md` |
 | 17 | 0x00020000 | Structured chat (a draft, not adopted) | Capabilities-Structured-Chat.md |
+| 18 | 0x00040000 | Replies (a draft, not adopted; only beside bits 1 and 17) | Capabilities-Replies.md |
 | 19 | 0x00080000 | Reactions (a draft, not adopted; only beside bits 1 and 17) | Capabilities-Reactions.md |
 
 With **modern dates**, dates use the real year as the base instead of 1904, which
@@ -1376,6 +1377,38 @@ entry rather than split out of the formatted text, which cuts a nick at 13 colum
 emote or a server's line is drawn as formatted; and a line is GtkHx's own by user ID
 rather than by nick.
 
+### Replies
+
+Capability bit 18, a draft (Capabilities-Replies.md) that is not adopted, confirmed only
+beside bits 1 and 17. A line or a message names the one it answers in field 0x0F21, the
+draft's packed target (as Reactions' 0x0F24 names what it is about), on Send Chat (105)
+and on what relays it; a Chat History entry, live on 106 or paged on 700, carries it as
+sub-field 0x0020. The Login reply says which kinds of target the server keeps replies to
+(0x0F22, `1 << kind`), and a server that echoes the bit without it keeps none. Get Chat
+History (700) also takes up to 50 line ids (0x0F20, repeated) in place of its cursors, and
+answers the lobby's lines among them, ascending, a line taken away as its tombstone and
+one the reader may not read or that does not exist left out alike, with has-more set where
+it left the highest out for the frame. Implemented by hxd-ng, which keeps the reference as
+sent and never looks a target up, so the formatted text of a line is the same with or
+without one.
+
+GtkHx offers it only in a build with hxnet's `replies` feature, which brings
+`structured-chat` with it; without it the login is what it was. In the lobby, a line that
+answers another is drawn under a header quoting it, live and from history: from the row
+of the line it answers where the view drew it, and otherwise, for a kept line, from 700
+by id, asked once the draw that found it is done, a page's replies or a burst of live
+ones in one request of at most 50, one request in flight a view, and not while the first
+page is on its way. Until the quote comes, and where none can (a line nobody keeps, kind
+4, which no request can fetch; one the answer left out), the header says "earlier
+message"; a line taken away, "message removed"; and one by someone the user ignores, by
+the nick they go by now, "a message you've hidden". The answer is no page of history: it
+is drawn nowhere but in headers, and moves no cursor. Its refusal is told to nobody,
+since the user never asked for it: "Slow down." (hxd-ng's words for the history rate,
+with no code) is asked again once a second later and then left for the next request, as
+is an answer cut short, and any other refusal stops quotes for the connect. hxnet hands a
+Notification (718), which GtkHx never asks for, to the Rust handlers where the session
+has replies or reactions, which drop it.
+
 ### Reactions
 
 Capability bit 19, a draft (Capabilities-Reactions.md) that is not adopted, confirmed
@@ -1396,9 +1429,8 @@ line's chips: from its history entry, and then from what a Reaction Changed says
 change that arrives while the first page of history is on its way, for a line the page
 then draws, may predate what the page says, so those lines are asked after again with
 Get Reactions once it is drawn. A server's own emoji, which GtkHx cannot draw, is a
-placeholder chip named by its id. hxnet hands 711, and the Notification (718) a server
-may send beside it, to the Rust handlers only where the session has reactions, and the
-replies to 710 and 712 by their trans.
+placeholder chip named by its id. hxnet hands 711 to the Rust handlers only where the
+session has reactions, and the replies to 710 and 712 by their trans.
 
 A private chat's kept lines take reactions as the lobby's do. hxd-ng shows a room to a
 classic client as a private chat under the room's id (a `/join` to its system account

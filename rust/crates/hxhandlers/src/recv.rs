@@ -22,6 +22,7 @@ pub mod login;
 pub mod msg;
 pub mod news;
 pub mod reactions;
+pub mod replies;
 pub mod user;
 pub mod xfer;
 
@@ -92,6 +93,7 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             from,
             text,
             media,
+            ..
         } => msg::message(htlc, *uid, from, text, media.as_ref()),
         Event::Broadcast { uid, from, text } => msg::broadcast(htlc, *uid, from, text),
         Event::Disconnecting(text) => msg::parting(htlc, text),
@@ -169,6 +171,7 @@ pub(crate) unsafe fn forget(htlc: *mut c_void, login: bool) {
     crate::media::forget(htlc);
     friends::forget(htlc);
     reactions::forget(htlc);
+    replies::forget(htlc);
     #[cfg(feature = "voice")]
     crate::voice::forget(htlc);
 }

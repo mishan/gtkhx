@@ -37,6 +37,9 @@ structured-chat = []
 # Offer the Reactions draft (capability bit 19) at login, which the draft
 # allows only beside bit 17. Off for the same reasons as bit 17.
 reactions = ["structured-chat"]
+# Offer the Replies draft (capability bit 18) at login, which the draft
+# allows only beside bit 17. Off for the same reasons as bit 17.
+replies = ["structured-chat"]
 
 [dependencies]
 hxproto = { workspace = true }

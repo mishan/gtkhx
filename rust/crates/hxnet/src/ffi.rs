@@ -1063,9 +1063,10 @@ pub(crate) unsafe fn parse_proxy_arg(
 
 /// The capabilities a connect offers: what C asks for, and in a build
 /// with each feature, the messaging extension's friend family (bit 6,
-/// `messaging`), Structured Chat (bit 17, `structured-chat`) and Reactions
-/// (bit 19, `reactions`), whose handlers are all Rust's. Never the
-/// messenger session (bit 8): GtkHx is a whole client, not a messenger.
+/// `messaging`), Structured Chat (bit 17, `structured-chat`), Replies (bit
+/// 18, `replies`) and Reactions (bit 19, `reactions`), whose handlers are
+/// all Rust's. Never the messenger session (bit 8): GtkHx is a whole
+/// client, not a messenger.
 fn offered(caps: u16) -> u64 {
     let mut caps = u64::from(caps);
     if cfg!(feature = "messaging") {
@@ -1073,6 +1074,9 @@ fn offered(caps: u16) -> u64 {
     }
     if cfg!(feature = "structured-chat") {
         caps |= hxsession::cap::STRUCTURED_CHAT;
+    }
+    if cfg!(feature = "replies") {
+        caps |= hxsession::cap::REPLIES;
     }
     if cfg!(feature = "reactions") {
         caps |= hxsession::cap::REACTIONS;
@@ -3071,15 +3075,21 @@ mod tests {
     }
 
     /// What C asks for goes out as it is unless a build asks for a draft,
-    /// so an old server is sent today's bytes; and Reactions only in a build
-    /// with `reactions`, always beside Structured Chat.
+    /// so an old server is sent today's bytes; and Replies and Reactions
+    /// each only in a build with its feature, always beside Structured
+    /// Chat.
     #[test]
     fn a_draft_bit_is_offered_only_by_a_build_with_its_feature() {
         let asked = 0x001b;
         let caps = offered(asked);
-        let reactions = caps & hxsession::cap::REACTIONS != 0;
-        assert_eq!(reactions, cfg!(feature = "reactions"));
-        assert!(!reactions || caps & hxsession::cap::STRUCTURED_CHAT != 0);
+        for (bit, built) in [
+            (hxsession::cap::REPLIES, cfg!(feature = "replies")),
+            (hxsession::cap::REACTIONS, cfg!(feature = "reactions")),
+        ] {
+            let on = caps & bit != 0;
+            assert_eq!(on, built, "{bit:#x}");
+            assert!(!on || caps & hxsession::cap::STRUCTURED_CHAT != 0);
+        }
         if !cfg!(feature = "messaging") && !cfg!(feature = "structured-chat") {
             assert_eq!(caps, u64::from(asked));
         }

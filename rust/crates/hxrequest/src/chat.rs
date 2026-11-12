@@ -20,3 +20,14 @@ pub fn history(cid: u32, before: u64, after: u64, limit: u16) -> Request {
     Request::from_built(ClientHdr::GetChatHistory as u32, &chunks, hc)
         .expect("a history request always has its channel")
 }
+
+/// GET_CHAT_HISTORY (700) under the Replies draft: chat `cid`'s lines
+/// `ids`, by id; `None` for none or more than
+/// [`hxproto::replies::MAX_IDS`].
+pub fn history_ids(cid: u32, ids: &[u64]) -> Option<Request> {
+    const MOST: usize = hxproto::replies::MAX_IDS;
+    let mut chunks = [HxChunk::EMPTY; 1 + MOST];
+    let mut scratch = [0u8; 4 + 8 * MOST];
+    let hc = build::build_get_chat_history_ids_chunks(cid, ids, &mut chunks, &mut scratch);
+    Request::from_built(ClientHdr::GetChatHistory as u32, &chunks, hc)
+}

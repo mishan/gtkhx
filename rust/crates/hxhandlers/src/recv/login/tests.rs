@@ -71,6 +71,8 @@ const REACTIONS: hxproto::reactions::Limits = hxproto::reactions::Limits {
     max_per_user: None,
 };
 
+const REPLIES: hxproto::replies::Targets = hxproto::replies::Targets(0x12);
+
 /// A server that said everything, then one that said nothing, on the same
 /// connection: nothing of the first outlives the second's reply but our
 /// uid, which only a server that names it changes.
@@ -81,7 +83,11 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         version: 200,
         name: Some("Janus".into()),
         uid: Some(42),
-        caps: cap::TEXT_ENCODING | cap::INLINE_MEDIA | cap::STRUCTURED_CHAT | cap::REACTIONS,
+        caps: cap::TEXT_ENCODING
+            | cap::INLINE_MEDIA
+            | cap::STRUCTURED_CHAT
+            | cap::REPLIES
+            | cap::REACTIONS,
         media: LimitsAdvertisement {
             max_bytes: Some(262_144),
             chunk_size: Some(60_000),
@@ -92,6 +98,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         video: vec![CAMERA],
         messaging: None,
         reactions: Some(REACTIONS),
+        replies: Some(REPLIES),
     };
     let bare = ServerInfo {
         version: 0,
@@ -104,6 +111,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         video: vec![],
         messaging: None,
         reactions: None,
+        replies: None,
     };
     unsafe {
         logged_in(h.cast(), &full);
@@ -119,6 +127,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         assert_eq!(video(h, 1), Some((1280, 1_500_000)));
         assert_eq!(video(h, 2), None);
         assert_eq!(super::super::reactions::limits(h.cast()), Some(REACTIONS));
+        assert_eq!(super::super::replies::targets(h.cast()), Some(REPLIES));
         assert_eq!(emitted(), [Emitted::LoggedIn(Some("Janus".into()))]);
 
         logged_in(h.cast(), &bare);
@@ -131,6 +140,7 @@ fn the_reply_lands_on_the_connection_and_tells_the_view() {
         assert_eq!(hx_conn_history_max_days(h), 0);
         assert_eq!(video(h, 1), None);
         assert_eq!(super::super::reactions::limits(h.cast()), None);
+        assert_eq!(super::super::replies::targets(h.cast()), None);
         assert_eq!(emitted(), [Emitted::LoggedIn(None)]);
         hx_conn_free(h);
     }
@@ -178,6 +188,7 @@ fn a_server_that_confirmed_bit_6_is_asked_for_the_roster_and_its_requests() {
             video: vec![],
             messaging,
             reactions: None,
+            replies: None,
         };
         unsafe { logged_in(h.cast(), &info) };
         let opcodes: Vec<u32> = crate::send::friends::tests::sent()
@@ -218,6 +229,7 @@ fn a_login_lists_only_the_first_page_of_its_requests() {
             ..Limits::default()
         }),
         reactions: None,
+        replies: None,
     };
     unsafe { logged_in(h.cast(), &info) };
     let (_, trans, _) = crate::send::friends::tests::sent().remove(0);

@@ -33,6 +33,8 @@
 //!   our presence and typing go out.
 //! - [`reactions`] — a line's reactions as shown: what the server said,
 //!   under what the user has asked for and not had answered.
+//! - [`replies`] — the quotes a view's reply headers draw, and those it
+//!   asks the server for by id.
 //!
 //! `conversation` and `chat_members` lived in `gtkhx-ui` until the step 3
 //! consolidation, because the chat-model re-think (ROADMAP M4b.5) landed them
@@ -55,3 +57,4 @@ pub mod member;
 pub mod news;
 pub mod pm;
 pub mod reactions;
+pub mod replies;
