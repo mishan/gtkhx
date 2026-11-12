@@ -608,18 +608,23 @@ pub(crate) mod tests {
             Some(input.upcast_ref())
         );
 
+        // The line a jump marked goes with the bar.
+        let marked = view.append(rotulus::view::plain_message("marked"));
+        view.set_spotlight(Some(marked));
         for (case, line, want) in [
             ("a server command", "/away", ("chat", "/away")),
             ("a client command", "/me waves", ("command", "me waves")),
         ] {
             assert_eq!(sent(&input, line), (want.0, want.1.into(), None), "{case}");
             assert!(bar.is_visible(), "{case}: kept");
+            assert_eq!(view.spotlight(), Some(marked), "{case}: kept");
         }
         assert_eq!(
             sent(&input, "//exec yes"),
             ("chat", "/exec yes".into(), Some(to.clone()))
         );
         assert!(!bar.is_visible(), "sent");
+        assert_eq!(view.spotlight(), None, "sent");
         assert_eq!(sent(&input, "and"), ("chat", "and".into(), None));
 
         let escape = || on_escape(&input);
