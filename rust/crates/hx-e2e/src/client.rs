@@ -6,6 +6,7 @@ use hxnet::lifecycle::{
     run_hope_lifecycle, run_plaintext_lifecycle, HopeOpenRequest, PlaintextOpenRequest,
 };
 use hxnet::{Command, Connection, ConnectionHandle, Event, Frame};
+use hxproto::messages::ClientHdr;
 use hxproto::parse::HeaderDecoded;
 use hxproto::wire::ChunkIter;
 use hxrequest::Request;
@@ -272,7 +273,12 @@ impl Client {
             .map_err(|e| format!("{}: {e}", server.name))?;
         // Agree as a user would, and wait for the login to settle before
         // sending anything: hlservd hangs up on a request before then.
+        // Settled means the agree has gone out, not that the server has
+        // acted on it: hxd-ng acks it and only then joins the session, so
+        // a line another client said meanwhile would never reach this one.
+        // A request sent after the agree is answered once it has joined.
         let mut login_events = Vec::new();
+        let mut joined = None;
         rt.block_on(async {
             tokio::time::timeout(REPLY_TIMEOUT, async {
                 loop {
@@ -284,7 +290,26 @@ impl Client {
                             };
                             let _ = handle.send(agree).await;
                         }
-                        Some(Event::State(hxnet::ConnectionState::LoginReady)) => return Ok(()),
+                        Some(Event::State(hxnet::ConnectionState::LoginReady)) => {
+                            let trans = session
+                                .lock()
+                                .expect("the session lock is never held across a panic")
+                                .take_trans();
+                            let list = Request {
+                                opcode: ClientHdr::UserGetList as u32,
+                                chunks: Vec::new(),
+                            };
+                            let _ = handle.send(Command::WriteFrame(list.pack(trans))).await;
+                            joined = Some(trans);
+                        }
+                        Some(Event::Frame(f)) if joined.is_some_and(|t| is_reply(&f, t)) => {
+                            return Ok(())
+                        }
+                        Some(Event::Session(hxsession::Event::Reply { trans, .. }))
+                            if joined == Some(trans) =>
+                        {
+                            return Ok(())
+                        }
                         Some(Event::Session(e)) => login_events.push(e),
                         Some(Event::Frame(_) | Event::State(_)) => continue,
                         Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
