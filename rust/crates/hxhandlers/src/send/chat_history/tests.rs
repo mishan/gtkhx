@@ -58,18 +58,31 @@ pub(crate) unsafe fn hlwrite_chunks(
 
 const HTLC: *mut c_void = std::ptr::dangling_mut::<c_void>();
 
+/// Which fetch a case makes.
+#[derive(Debug, Clone, Copy)]
+enum Fetch {
+    Initial,
+    Older { cid: u32, before: u64 },
+    Before { before: u64, limit: u16 },
+}
+
 #[test]
 fn each_fetch_asks_for_what_it_should() {
     let channel = |cid: u32| (tag::CHANNEL_ID, cid.to_be_bytes().to_vec());
     let limit = |n: u16| (tag::HISTORY_LIMIT, n.to_be_bytes().to_vec());
+    let before = |id: u64| (tag::HISTORY_BEFORE, id.to_be_bytes().to_vec());
+    let older = Fetch::Older {
+        cid: 3,
+        before: 1000,
+    };
     // (cap, newest line seen, which fetch, what goes out)
     let cases = [
-        (false, 0, None, None),
-        (true, 0, None, Some(vec![channel(0), limit(50)])),
+        (false, 0, Fetch::Initial, None),
+        (true, 0, Fetch::Initial, Some(vec![channel(0), limit(50)])),
         (
             true,
             5000,
-            None,
+            Fetch::Initial,
             Some(vec![
                 channel(0),
                 (tag::HISTORY_AFTER, 5000u64.to_be_bytes().to_vec()),
@@ -78,35 +91,73 @@ fn each_fetch_asks_for_what_it_should() {
         (
             true,
             5000,
-            Some((3, 1000)),
-            Some(vec![
-                channel(3),
-                (tag::HISTORY_BEFORE, 1000u64.to_be_bytes().to_vec()),
-                limit(50),
-            ]),
+            older,
+            Some(vec![channel(3), before(1000), limit(50)]),
         ),
-        (false, 0, Some((3, 1000)), None),
+        (false, 0, older, None),
+        (
+            true,
+            5000,
+            Fetch::Before {
+                before: 1000,
+                limit: 200,
+            },
+            Some(vec![channel(0), before(1000), limit(200)]),
+        ),
+        (
+            true,
+            0,
+            Fetch::Before {
+                before: 0,
+                limit: 200,
+            },
+            Some(vec![channel(0), limit(200)]),
+        ),
+        (
+            false,
+            0,
+            Fetch::Before {
+                before: 1000,
+                limit: 200,
+            },
+            None,
+        ),
     ];
-    for (cap, newest, older, want) in cases {
+    for (cap, newest, fetch, want) in cases {
         CAPS.with(|c| c.set(if cap { HTLC_CAP_CHAT_HISTORY } else { 0 }));
         NEWEST.with(|c| c.set(newest));
         SENT.with(|s| *s.borrow_mut() = None);
         crate::send::expected::take();
+        crate::recv::chat::history_forget(HTLC);
         let sent = unsafe {
-            match older {
-                None => hx_chat_history_fetch_initial(HTLC),
-                Some((cid, before)) => hx_chat_history_fetch_older(HTLC, cid, before),
+            match fetch {
+                Fetch::Initial => hx_chat_history_fetch_initial(HTLC) != GFALSE,
+                Fetch::Older { cid, before } => {
+                    hx_chat_history_fetch_older(HTLC, cid, before) != GFALSE
+                }
+                Fetch::Before { before, limit } => fetch_before(HTLC, 0, before, limit),
             }
         };
-        let what = format!("cap {cap}, newest {newest}, older {older:?}");
-        assert_eq!(sent != GFALSE, want.is_some(), "{what}");
+        let what = format!("cap {cap}, newest {newest}, {fetch:?}");
+        assert_eq!(sent, want.is_some(), "{what}");
         assert_eq!(SENT.with(|s| s.borrow_mut().take()), want, "{what}");
-        let cid = older.map_or(0, |o| o.0);
+        let (cid, first) = match fetch {
+            Fetch::Initial => (0, true),
+            Fetch::Older { cid, .. } => (cid, false),
+            Fetch::Before { before, .. } => (0, before == 0),
+        };
         let expected = crate::send::expected::take();
-        if sent != GFALSE {
+        if sent {
             assert_eq!(
                 expected,
                 [(1, hxsession::Expect::ChatHistory { cid })],
+                "{what}"
+            );
+            // The newest page is the chat's first since the login, which
+            // live lines wait for.
+            assert_eq!(
+                crate::recv::chat::first_page_pending(HTLC, cid),
+                first,
                 "{what}"
             );
         } else {
@@ -125,6 +176,7 @@ fn a_null_connection_sends_nothing() {
             hx_chat_history_fetch_older(std::ptr::null_mut(), 0, 1),
             GFALSE
         );
+        assert!(!fetch_before(std::ptr::null_mut(), 0, 1, 200));
     }
     assert!(SENT.with(|s| s.borrow().is_none()));
 }

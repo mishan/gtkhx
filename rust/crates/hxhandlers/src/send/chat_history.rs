@@ -74,14 +74,21 @@ pub unsafe extern "C" fn hx_chat_history_fetch_older(
     cid: u32,
     before: u64,
 ) -> gboolean {
-    if htlc.is_null() {
-        return GFALSE;
-    }
     let limit = match initial_lines() {
         0 => ASKED_PAGE,
         n => n,
     };
-    fetch(htlc, cid, before, 0, limit)
+    fetch_before(htlc, cid, before, limit).into()
+}
+
+/// The page of chat `cid`'s `limit` lines before line `before`, or at 0
+/// the newest, which is then the chat's first page since the login.
+/// Whether it was sent.
+///
+/// # Safety
+/// `htlc` is NULL or a live connection; main thread.
+pub unsafe fn fetch_before(htlc: *mut c_void, cid: u32, before: u64, limit: u16) -> bool {
+    !htlc.is_null() && fetch(htlc, cid, before, 0, limit) != GFALSE
 }
 
 /// Chat `cid`'s lines `ids`, 1 to `hxproto::replies::MAX_IDS` of them,

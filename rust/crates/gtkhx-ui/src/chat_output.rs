@@ -24,7 +24,8 @@
 //! found it is done (`hxmodel::replies`). Until the quote comes, and where
 //! it never can, the header says it is an earlier message, so a row's
 //! height stays as it was drawn and a screen reader hears at once that it
-//! is a reply.
+//! is a reply. A header activated goes to the line it answers, paging back
+//! through history for a kept line not drawn, a few pages at a time.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -36,11 +37,12 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 use hxmodel::reactions::{LineReactions, Next, Shown};
-use hxmodel::replies::{Quote, Quoted, Refused};
+use hxmodel::replies::{Jump, Quote, Quoted, Refused, Seen, Short, Step};
 use hxproto::reactions::{Key, Mine, Summary, INVALID_KEY};
 use hxproto::target::Target;
 use hxsession::HistoryEntry;
 use rotulus::ffi::{RotulusRun, RotulusSpeaker};
+use rotulus::view::RowMark;
 use rotulus::{LoadDirection, RotulusView};
 use rotulus_layout::{ColorRef, MessageId, Reaction, Reply};
 
@@ -51,6 +53,10 @@ use hxmodel::conversation::{hx_chat_media_table, hx_chat_member_model, hx_chat_v
 
 use crate::msg::Msg;
 use crate::tr::{tr, tr_argv, trn_argv};
+#[cfg(not(test))]
+use hxhandlers::send::chat_history as history;
+#[cfg(test)]
+use tests::history;
 
 /// Palette slots (rotulus.h's `ROTULUS_PAL_*`).
 const PAL_MUTED: i16 = 37;
@@ -110,6 +116,8 @@ struct LineRegistry {
     /// The rows of replies whose header waits for what their target says,
     /// by the target as the wire names it.
     waiting: HashMap<Target, Vec<MessageId>>,
+    /// What each reply row answers, for a jump from its header.
+    replies: HashMap<MessageId, Target>,
 }
 
 /// A line's row, and the reactions shown under it.
@@ -197,6 +205,7 @@ impl LineRegistry {
                 rows.retain(|&r| r != row);
                 !rows.is_empty()
             });
+            self.replies.remove(&row);
         }
     }
 
@@ -220,7 +229,8 @@ struct Output {
     oldest: u64,
     /// "Load older" was asked for and its page has not come.
     loading: bool,
-    /// The opening divider of the history, which older pages go above.
+    /// The topmost row of the history, which an older page goes above:
+    /// the first page's opening divider, then each older page's first row.
     anchor: *mut c_void,
     /// The "Load older" row, or the one saying it is on its way.
     load_older: *mut c_void,
@@ -233,6 +243,10 @@ struct Output {
     quotes: hxmodel::replies::Quotes,
     /// Asking for them waits on the main loop's next idle.
     asking: bool,
+    /// The jump from a reply to the line it answers under way.
+    jump: Option<Jump>,
+    /// Counts spotlights, so that a timer clears only its own.
+    spotlit: u64,
 }
 
 /// The most lines [`Output::missed`] keeps.
@@ -269,6 +283,7 @@ fn hear(view: &RotulusView, cid: u32) {
     }
     unsafe { view.set_data(HEARD, cid) };
     crate::reactions::hear(view);
+    hear_replies(view);
     view.connect_local("load-more", false, move |args| {
         let view = args[0].get::<RotulusView>().ok()?;
         if args[1].get::<LoadDirection>().ok()? == LoadDirection::Older {
@@ -276,6 +291,38 @@ fn hear(view: &RotulusView, cid: u32) {
         }
         None
     });
+}
+
+/// Hear the activations of `view`'s reply headers, and what moves on from
+/// the line one went to.
+fn hear_replies(view: &RotulusView) {
+    view.connect_closure(
+        "reply-activated",
+        false,
+        glib::closure_local!(|view: RotulusView, m: RowMark, keyboard: bool| {
+            jump(&view, m.0, keyboard);
+        }),
+    );
+    // The next press in the view, of a key or a button, is the user moving
+    // on from the line a jump marked; the press that jumps comes first.
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(|keys, _, _, _| {
+        if let Some(view) = keys.widget().and_downcast::<RotulusView>() {
+            unspot(&view);
+        }
+        glib::Propagation::Proceed
+    });
+    view.add_controller(keys);
+    let clicks = gtk::GestureClick::new();
+    clicks.set_button(0);
+    clicks.set_propagation_phase(gtk::PropagationPhase::Capture);
+    clicks.connect_pressed(|g, _, _, _| {
+        if let Some(view) = g.widget().and_downcast::<RotulusView>() {
+            unspot(&view);
+        }
+    });
+    view.add_controller(clicks);
 }
 
 /// The chat `view` shows: the public chat's, 0, until it is heard.
@@ -808,6 +855,7 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
             Row::of(rotulus::ffi::ROW_LOAD_OLDER, &[muted(&text)]).put(view, Some(out.anchor));
     }
     let at = (older && !out.anchor.is_null()).then_some(out.anchor);
+    let mut top = None;
     let mut drawn = Vec::new();
     for e in entries {
         // A line taken away since it was drawn still gets its tombstone.
@@ -841,6 +889,7 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
             ..Row::of(rotulus::ffi::ROW_HISTORY, &[muted(&body)])
         }
         .put(view, at);
+        top = top.or((!row.is_null()).then_some(row));
         if let Some(row) = mark(row).filter(|_| e.message_id != 0 && e.flags & DELETED == 0) {
             let r = out.lines.history(e.message_id, row);
             if let Some((s, m)) = &e.reactions {
@@ -849,6 +898,9 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
             }
             drawn.push((row, e));
         }
+    }
+    if let Some(top) = top.filter(|_| at.is_some()) {
+        out.anchor = top;
     }
     drop(out);
     for (row, e) in drawn {
@@ -963,6 +1015,7 @@ fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
     };
     let quote = {
         let mut out = output(view).borrow_mut();
+        out.lines.replies.insert(row, target.clone());
         let drawn = out.lines.lines.get(&key).and_then(|l| l.said.clone());
         if drawn.is_none() {
             out.lines
@@ -990,6 +1043,7 @@ fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
     };
     if !view.set_reply(row, Some(reply)) {
         let mut out = output(view).borrow_mut();
+        out.lines.replies.remove(&row);
         if let Some(rows) = out.lines.waiting.get_mut(target) {
             rows.retain(|&r| r != row);
             if rows.is_empty() {
@@ -1038,14 +1092,15 @@ fn ask(view: &RotulusView) {
     if htlc.is_null() || hxhandlers::recv::chat::first_page_pending(htlc, 0) {
         return;
     }
-    let Some(ids) = due_quotes(view) else {
-        return;
-    };
-    // SAFETY: main thread; the dock's connection is live.
-    if !unsafe { hxhandlers::send::chat_history::quotes(htlc, 0, &ids) } {
-        let r = output(view).borrow_mut().quotes.refused(false);
-        settled(view, r);
+    if let Some(ids) = due_quotes(view) {
+        // SAFETY: main thread; the dock's connection is live.
+        if !unsafe { history::quotes(htlc, 0, &ids) } {
+            let r = output(view).borrow_mut().quotes.refused(false);
+            settled(view, r);
+        }
     }
+    // A jump waiting for a quote nothing asks for any more goes on.
+    jump_on(view);
 }
 
 /// What lines asked for by id hold now: the replies waiting for them are
@@ -1080,6 +1135,7 @@ fn quoted(view: &RotulusView, now: Vec<(u64, Quoted)>) {
 fn settled(view: &RotulusView, r: Refused) {
     if let Refused::Settled(now) = r {
         quoted(view, now);
+        jump_on(view);
     }
 }
 
@@ -1128,6 +1184,7 @@ unsafe fn replies(htlc: *mut c_void, e: &gtkhx_core::replies::Event) {
                 .collect();
             let now = output(&view).borrow_mut().quotes.answered(got, *has_more);
             quoted(&view, now);
+            jump_on(&view);
             ask_soon(&view);
         }
         Event::Refused { slow, .. } => {
@@ -1145,12 +1202,132 @@ unsafe fn replies(htlc: *mut c_void, e: &gtkhx_core::replies::Event) {
                     return;
                 };
                 // SAFETY: main thread; the dock's connection is live.
-                if !unsafe { hxhandlers::send::chat_history::quotes(htlc, 0, &ids) } {
+                if !unsafe { history::quotes(htlc, 0, &ids) } {
                     let r = output(&view).borrow_mut().quotes.refused(false);
                     settled(&view, r);
                 }
             });
         }
+    }
+}
+
+// ---- the jump --------------------------------------------------------------
+
+/// How long a line a jump went to stays marked, unless the user moves on.
+const SPOTLIGHT: Duration = Duration::from_secs(4);
+
+/// The header of the reply on `row` was activated, from the keyboard or
+/// not: go to the line it answers, in place of any jump under way.
+fn jump(view: &RotulusView, row: MessageId, keyboard: bool) {
+    let key = {
+        let out = output(view).borrow();
+        out.lines.replies.get(&row).and_then(lobby_line)
+    };
+    let Some((space, id)) = key else {
+        return;
+    };
+    output(view).borrow_mut().jump = Some(Jump::new(id, space == Space::History, keyboard));
+    jump_on(view);
+}
+
+/// Take the jump under way a step further, from what the view knows now.
+fn jump_on(view: &RotulusView) {
+    let htlc = htlc_of(view);
+    let mut out = output(view).borrow_mut();
+    let Some(mut j) = out.jump.take() else {
+        return;
+    };
+    let space = if j.kept {
+        Space::History
+    } else {
+        Space::Ephemeral
+    };
+    let row = out.lines.row(space, j.id);
+    let first_page = !htlc.is_null() && hxhandlers::recv::chat::first_page_pending(htlc, 0);
+    let step = j.next(&Seen {
+        drawn: row.is_some(),
+        quote: out.quotes.get(j.id),
+        asking: out.quotes.pending(j.id),
+        paging: out.loading || first_page,
+        oldest: out.oldest,
+        more: !out.load_older.is_null(),
+    });
+    match step {
+        Step::Reveal => {
+            out.spotlit += 1;
+            let spotlit = out.spotlit;
+            drop(out);
+            let row = row.unwrap();
+            if !view.reveal(row, j.keyboard) {
+                return crate::reactions::toast(&short(Short::Scrolled));
+            }
+            view.set_spotlight(Some(row));
+            let view = view.downgrade();
+            glib::timeout_add_local_once(SPOTLIGHT, move || {
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                if output(&view).borrow().spotlit == spotlit {
+                    view.set_spotlight(None);
+                }
+            });
+        }
+        Step::Wait => out.jump = Some(j),
+        Step::Ask => {
+            out.quotes.want(j.id);
+            out.jump = Some(j);
+            drop(out);
+            ask_soon(view);
+        }
+        Step::Page { before } => {
+            use hxmodel::replies::JUMP_PAGE;
+            // A send that fails writes to this view as it closes the
+            // connection.
+            drop(out);
+            // SAFETY: main thread; a NULL or closed connection sends nothing.
+            if !unsafe { history::fetch_before(htlc, 0, before, JUMP_PAGE) } {
+                return crate::reactions::toast(&short(Short::Unavailable));
+            }
+            let mut out = output(view).borrow_mut();
+            out.jump = Some(j);
+            // The newest page is a first page, drawn as one.
+            if before != 0 {
+                loading_older(view, &mut out);
+            }
+        }
+        Step::Say(why) => {
+            drop(out);
+            crate::reactions::toast(&short(why));
+        }
+    }
+}
+
+/// A page of history was drawn; a refused one ends the jump under way,
+/// whose refusal is told as the page's.
+fn landed(view: &RotulusView, refused: bool) {
+    if refused {
+        output(view).borrow_mut().jump = None;
+    }
+    jump_on(view);
+}
+
+/// Let go of the line a jump marked.
+fn unspot(view: &RotulusView) {
+    if view.spotlight().is_some() {
+        view.set_spotlight(None);
+    }
+}
+
+/// Why a jump did not reach its line, as the user is told.
+fn short(why: Short) -> String {
+    match why {
+        Short::Gone => tr("That message isn't in this window any more."),
+        Short::Unavailable => tr("That message can't be shown."),
+        Short::Removed => tr("That message was removed."),
+        Short::Scrolled => tr("That message is no longer in the scrollback."),
+        Short::Further => tr(
+            "That message is further back than GtkHx loads at once. Choose the reply again to keep going.",
+        ),
     }
 }
 
@@ -1182,9 +1359,7 @@ fn load_older(view: &RotulusView, cid: u32) {
     }
     let htlc = crate::chat_view::conn_of(view).map_or(std::ptr::null_mut(), crate::dock::htlc_for);
     // SAFETY: main thread; a NULL or closed connection sends nothing.
-    if unsafe { hxhandlers::send::chat_history::hx_chat_history_fetch_older(htlc, cid, oldest) }
-        == 0
-    {
+    if unsafe { history::hx_chat_history_fetch_older(htlc, cid, oldest) } == 0 {
         return;
     }
     loading_older(view, &mut output(view).borrow_mut());
@@ -1553,6 +1728,7 @@ pub extern "C" fn gtkhx_chat_output_install() {
         gtkhx_core::session::connect_chat_history(|htlc, cid, entries, has_more| unsafe {
             if let Some(view) = view_of(htlc, cid) {
                 let missed = draw_history(&view, entries, has_more);
+                landed(&view, entries.is_empty() && has_more);
                 ask_soon(&view);
                 let lines: Vec<Target> = missed.into_iter().map(|id| target(&view, id)).collect();
                 hxhandlers::send::reactions::refresh(htlc, &lines);
@@ -1581,6 +1757,34 @@ pub extern "C" fn gtkhx_chat_output_install() {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// The history requests, recorded: a page as its line and limit, and
+    /// none other sent.
+    pub(crate) mod history {
+        use std::cell::RefCell;
+        use std::ffi::c_void;
+
+        thread_local! {
+            pub(crate) static PAGES: RefCell<Vec<(u64, u16)>> = const { RefCell::new(Vec::new()) };
+        }
+
+        pub(crate) unsafe fn fetch_before(_: *mut c_void, _: u32, before: u64, limit: u16) -> bool {
+            PAGES.with_borrow_mut(|p| p.push((before, limit)));
+            true
+        }
+
+        pub(crate) unsafe fn quotes(_: *mut c_void, _: u32, _: &[u64]) -> bool {
+            false
+        }
+
+        pub(crate) unsafe fn hx_chat_history_fetch_older(
+            _: *mut c_void,
+            _: u32,
+            _: u64,
+        ) -> glib::ffi::gboolean {
+            glib::ffi::GFALSE
+        }
+    }
 
     fn entry(message_id: u64, flags: u16, nick: &str, text: &str) -> HistoryEntry {
         HistoryEntry {
@@ -1706,11 +1910,9 @@ pub(crate) mod tests {
 
         loading_older(&view, &mut output(&view).borrow_mut());
         draw_history(&view, &[entry(7, 0, "eve", "seven")], false);
-        // Every older page goes just above the first page's divider, so a
-        // third page lands below the second.
         assert_eq!(
             rows(&view),
-            older(&format!("{page}{}<eve> seven\n", day(7)))
+            older(&format!("{}<eve> seven\n{page}", day(7)))
         );
     }
 
@@ -2431,6 +2633,74 @@ pub(crate) mod tests {
         });
         draw_live(&view, None, || draw_prose(&view, b"two\nrows"));
         assert_eq!(due_quotes(&view), Some(vec![2]));
+    }
+
+    /// A click on a reply's header, the signal as Rotulus sends it, goes to
+    /// the line it answers where the view drew it, and marks it; and says
+    /// why not where no page can hold the line: one nobody keeps, one taken
+    /// away, and one newer than the oldest history drawn.
+    pub(crate) fn check_a_reply_header_goes_to_its_line() {
+        let view = view();
+        hear_replies(&view);
+        let notice = |id| Target::Ephemeral { chat: 0, id };
+        draw_history(
+            &view,
+            &[
+                entry(4, 0, "alice", "four"),
+                reply(5, 0, "yes", kept(4)),
+                reply(6, 0, "and that", kept(2)),
+                reply(7, 0, "hello", notice(19)),
+                reply(8, 0, "late", kept(30)),
+                reply(9, 0, "older", kept(1)),
+            ],
+            true,
+        );
+        assert_eq!(due_quotes(&view), Some(vec![1, 2, 30]));
+        let now = output(&view).borrow_mut().quotes.answered(
+            vec![
+                (1, Quoted::Line(Quote::new("eve", "one"))),
+                (2, Quoted::Removed),
+                (30, Quoted::Line(Quote::new("x", "y"))),
+            ],
+            false,
+        );
+        quoted(&view, now);
+        let row = |id| {
+            output(&view)
+                .borrow()
+                .lines
+                .row(Space::History, id)
+                .unwrap()
+        };
+        let activate = |id| {
+            crate::options_test_stubs::TOASTS.with_borrow_mut(Vec::clear);
+            view.emit_by_name::<()>("reply-activated", &[&RowMark(row(id)), &false]);
+            crate::options_test_stubs::TOASTS.with_borrow_mut(std::mem::take)
+        };
+        assert_eq!(activate(5), Vec::<String>::new());
+        assert_eq!(view.spotlight(), Some(row(4)));
+        view.set_spotlight(None);
+        for (id, said) in [
+            (6, "That message was removed."),
+            (7, "That message isn't in this window any more."),
+            (8, "That message is no longer in the scrollback."),
+        ] {
+            assert_eq!(activate(id), [said], "reply {id}");
+            assert_eq!(view.spotlight(), None, "reply {id}");
+        }
+
+        // A line older than any drawn: the page before the oldest, under
+        // "Loading", and the line's row once it is drawn.
+        history::PAGES.with_borrow_mut(Vec::clear);
+        assert_eq!(activate(9), Vec::<String>::new());
+        assert_eq!(history::PAGES.with_borrow_mut(std::mem::take), [(4, 200)]);
+        assert!(rows(&view).contains("Loading older messages..."));
+        assert_eq!(activate(9), Vec::<String>::new(), "a page on its way");
+        assert!(history::PAGES.with_borrow(Vec::is_empty));
+        assert!(output(&view).borrow().jump.is_some());
+        draw_history(&view, &[entry(1, 0, "eve", "one")], false);
+        landed(&view, false);
+        assert_eq!(view.spotlight(), Some(row(1)));
     }
 
     /// A row's menu offers Reply where the login takes a reply to its

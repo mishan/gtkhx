@@ -21,8 +21,9 @@ use gtkhx_core::session::{gtkhx_session_emit_replies, gtkhx_session_get_default}
 #[cfg(test)]
 use tests::{gtkhx_session_emit_replies, gtkhx_session_get_default};
 
-/// How hxd-ng refuses a Get Chat History past its rate, with no code to
-/// say so.
+/// How hxd-ng refuses a Get Chat History past its rate. Its reason code
+/// beside the words never reaches GtkHx: the session gives a refusal's
+/// words alone.
 pub(crate) const SLOW_DOWN: &str = "Slow down.";
 
 thread_local! {

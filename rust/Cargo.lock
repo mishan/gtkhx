@@ -875,7 +875,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1310,7 +1310,7 @@ dependencies = [
  "gobject-sys 0.22.9",
  "libc",
  "system-deps 9.0.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2489,7 +2489,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3379,7 +3379,7 @@ dependencies = [
 [[package]]
 name = "rotulus"
 version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=a02dd0d22570c6a21de8781d0008607727e2f436#a02dd0d22570c6a21de8781d0008607727e2f436"
+source = "git+https://github.com/mishan/rotulus.git?rev=0d2cd32f9211b1d652619292409154f240276e1a#0d2cd32f9211b1d652619292409154f240276e1a"
 dependencies = [
  "glib 0.22.10",
  "gtk4",
@@ -3392,12 +3392,12 @@ dependencies = [
 [[package]]
 name = "rotulus-layout"
 version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=a02dd0d22570c6a21de8781d0008607727e2f436#a02dd0d22570c6a21de8781d0008607727e2f436"
+source = "git+https://github.com/mishan/rotulus.git?rev=0d2cd32f9211b1d652619292409154f240276e1a#0d2cd32f9211b1d652619292409154f240276e1a"
 
 [[package]]
 name = "rotulus-mirc"
 version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=a02dd0d22570c6a21de8781d0008607727e2f436#a02dd0d22570c6a21de8781d0008607727e2f436"
+source = "git+https://github.com/mishan/rotulus.git?rev=0d2cd32f9211b1d652619292409154f240276e1a#0d2cd32f9211b1d652619292409154f240276e1a"
 dependencies = [
  "rotulus-layout",
 ]
@@ -3437,7 +3437,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3778,7 +3778,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4208,7 +4208,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
