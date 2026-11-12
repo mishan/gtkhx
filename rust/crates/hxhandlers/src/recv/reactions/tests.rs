@@ -9,7 +9,7 @@ use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
 use super::*;
 use crate::recv::friends::tests::{fields, frame};
 use crate::send::friends::tests::{sent, woken, Conn};
-use crate::send::reactions::{pace, react, refresh, retry, who, withdraw};
+use crate::send::reactions::{clear, pace, react, refresh, retry, who, withdraw};
 use hxproto::structured_chat::NOT_ALLOWED;
 use std::time::{Duration, Instant};
 
@@ -390,7 +390,7 @@ fn a_send_reaction_reply_says_what_was_made_or_why_not() {
     };
     let no = |reason: Option<u16>, error: Option<&str>| Event::Refused {
         target: line(1),
-        key: thumbs(),
+        key: Some(thumbs()),
         reason,
         error: error.map(Into::into),
     };
@@ -475,6 +475,77 @@ fn a_send_reaction_reply_says_what_was_made_or_why_not() {
     let [(trans, _)] = reacted_to()[..] else {
         panic!("not asked again")
     };
+    unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
+    assert_eq!(told(), [no(Some(RATE_LIMITED), None)], "twice");
+}
+
+#[test]
+fn a_clear_goes_without_a_key_and_its_reply_leaves_the_line_holding_nothing_or_says_why_not() {
+    let refused = |trans: u32, list: &[(u16, &[u8])]| frame(TASK, trans, true, fields(list));
+    let not_allowed = NOT_ALLOWED.to_be_bytes();
+    let no = |reason: Option<u16>, error: Option<&str>| Event::Refused {
+        target: line(1),
+        key: None,
+        reason,
+        error: error.map(Into::into),
+    };
+    for (case, answer, want) in [
+        (
+            "made",
+            frame(TASK, 0, false, fields(&[])),
+            vec![now(1, None)],
+        ),
+        (
+            "refused with a code and words",
+            refused(
+                0,
+                &[(tag::CHAT_REASON, &not_allowed), (tag::TASK_ERROR, b"No.")],
+            ),
+            vec![no(Some(NOT_ALLOWED), Some("No."))],
+        ),
+    ] {
+        let c = conn(AGREED, lines());
+        sent();
+        told();
+        assert!(unsafe { clear(c.0, line(1)) });
+        let [(710, trans, f)] = &sent()[..] else {
+            panic!("{case}: not sent")
+        };
+        assert_eq!(
+            f[..],
+            [(tag::TARGET, packed(1)), (tag::REACTION_ACTION, vec![0, 3])],
+            "{case}"
+        );
+        unsafe { reply(c.0, *trans, &answer) };
+        assert_eq!(told(), want, "{case}");
+    }
+
+    // Told to slow down, it is asked again once, a second on, before what
+    // else waits; told so again, it is refused.
+    let c = conn(AGREED, lines());
+    // From the burst: one gone at this address may have spent some.
+    crate::send::reactions::forget(c.0);
+    sent();
+    woken();
+    told();
+    unsafe { clear(c.0, line(1)) };
+    for id in 2..=11 {
+        unsafe { react(c.0, line(id), thumbs(), true) };
+    }
+    let slow = RATE_LIMITED.to_be_bytes();
+    let (trans, _) = reacted_to()[0];
+    unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
+    assert_eq!((told(), reacted_to()), (vec![], vec![]), "at once");
+    let at = *woken().last().expect("no timer");
+    assert!(
+        at >= Instant::now() + Duration::from_millis(900),
+        "not a second on"
+    );
+    unsafe { pace(c.0, at) };
+    let [(trans, ref first)] = reacted_to()[..] else {
+        panic!("not asked again alone")
+    };
+    assert_eq!(*first, line(1), "not first");
     unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
     assert_eq!(told(), [no(Some(RATE_LIMITED), None)], "twice");
 }

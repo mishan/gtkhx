@@ -555,6 +555,13 @@ pub(crate) fn emoji_on(view: &RotulusView, id: u64) -> Vec<String> {
         .collect()
 }
 
+/// Whether a moderator may be offered to clear history line `id`: it
+/// shows a chip, a server emoji's placeholder among them.
+pub(crate) fn clearable(view: &RotulusView, id: u64) -> bool {
+    let out = output(view).borrow();
+    (out.lines.lines.get(&(Space::History, id))).is_some_and(|l| !l.reactions.shown().is_empty())
+}
+
 /// What [`want`] and [`answered`] leave to do.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Then {
@@ -1117,8 +1124,14 @@ pub extern "C" fn gtkhx_chat_output_install() {
                     reason,
                     error,
                 } => {
-                    refused(&view, *id, key);
-                    crate::reactions::toast(&crate::reactions::refusal(*reason, error.as_deref()));
+                    let text = match key {
+                        Some(key) => {
+                            refused(&view, *id, key);
+                            crate::reactions::refusal(*reason, error.as_deref())
+                        }
+                        None => crate::reactions::clear_refusal(*reason, error.as_deref()),
+                    };
+                    crate::reactions::toast(&text);
                 }
                 _ => {}
             }
@@ -1684,6 +1697,59 @@ pub(crate) mod tests {
         draw_history(&view, &[seeded], false);
         assert_eq!(emoji_on(&view, 4), ["\u{1F44D}"]);
         assert_eq!(emoji_on(&view, 5), [""; 0], "a line not drawn");
+    }
+
+    /// A line showing a chip, a server emoji's placeholder alone among
+    /// them, is offered to clear to an account that may disconnect users
+    /// and to no other, and once cleared has nothing more to clear.
+    pub(crate) fn check_a_moderator_is_offered_to_clear_a_line_with_chips() {
+        use gtkhx_core::conn::{hx_conn_free, hx_conn_new, hx_conn_set_access};
+        let view = view();
+        let held = |id, key| HistoryEntry {
+            reactions: Some((
+                Summary {
+                    entries: vec![(key, 1)],
+                },
+                Mine::default(),
+            )),
+            ..entry(id, 0, "a", "")
+        };
+        let page = [
+            held(4, Key::Server(3)),
+            held(5, Key::Emoji("\u{1F44D}".into())),
+            entry(6, 0, "a", ""),
+        ];
+        draw_history(&view, &page, false);
+        // Bit 22, and bit 9 alone.
+        let conn = |access: [u8; 8]| {
+            let c = hx_conn_new();
+            // SAFETY: a live connection.
+            unsafe { hx_conn_set_access(c, access.as_ptr()) };
+            c
+        };
+        let (moderator, reader) = (
+            conn([0, 0, 0x02, 0, 0, 0, 0, 0]),
+            conn([0, 0x40, 0, 0, 0, 0, 0, 0]),
+        );
+        // SAFETY: both connections are live until freed below.
+        let clears = |c: *mut gtkhx_core::conn::HtlcConn, id| unsafe {
+            crate::reactions::clears(c.cast(), &view, id)
+        };
+        for (case, c, id, want) in [
+            ("a placeholder alone", moderator, 4, true),
+            ("an emoji", moderator, 5, true),
+            ("no chips", moderator, 6, false),
+            ("a line not drawn", moderator, 7, false),
+            ("not a moderator", reader, 5, false),
+        ] {
+            assert_eq!(clears(c, id), want, "{case}");
+        }
+        reacted(&view, 5, None, false);
+        assert!(!clears(moderator, 5), "cleared");
+        // SAFETY: neither is used again.
+        for c in [moderator, reader] {
+            unsafe { hx_conn_free(c) };
+        }
     }
 
     #[test]

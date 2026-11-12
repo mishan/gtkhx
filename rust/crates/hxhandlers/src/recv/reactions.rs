@@ -46,6 +46,9 @@ pub(crate) enum Asked {
         add: bool,
         again: bool,
     },
+    /// Send Reaction, a moderator's clearing every reaction on `target`;
+    /// `again` once it has been asked to slow down.
+    Clear { target: Target, again: bool },
 }
 
 /// The login on `htlc` said `limits` beside bit 19, or nothing.
@@ -122,7 +125,9 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
 ///
 /// A Send Reaction's says the reaction was made, with the key's count
 /// after, or why not; the first time it is asked to slow down, nothing
-/// more goes for a second and the view decides whether to ask again.
+/// more goes for a second and the view decides whether to ask again. A
+/// clear made leaves the line holding nothing; one asked to slow down is
+/// asked again, since the user confirmed it.
 ///
 /// A Get Reactions' says what each target asked after holds, in the order
 /// asked, none for one it left out, and where it asked after a key, who
@@ -140,6 +145,16 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
     let reason = field(tag::CHAT_REASON)
         .filter(|_| refused)
         .and_then(|c| u16::try_from(c.as_uint()).ok());
+    let refuse = |target, key| {
+        let error = field(tag::TASK_ERROR).map(|c| String::from_utf8_lossy(c.data).into_owned());
+        let e = Event::Refused {
+            target,
+            key,
+            reason,
+            error,
+        };
+        tell(htlc, e);
+    };
     match what {
         Asked::Get(targets) if refused => {
             if reason == Some(TOO_MANY_TARGETS) && targets.len() > 1 {
@@ -195,19 +210,22 @@ pub(crate) unsafe fn reply(htlc: *mut c_void, trans: u32, frame: &[u8]) {
             crate::send::reactions::slow(htlc, std::time::Instant::now());
             tell(htlc, Event::PutOff { target, key, add });
         }
-        Asked::Send { target, key, .. } if refused => {
-            let error =
-                field(tag::TASK_ERROR).map(|c| String::from_utf8_lossy(c.data).into_owned());
-            tell(
-                htlc,
-                Event::Refused {
-                    target,
-                    key,
-                    reason,
-                    error,
-                },
-            );
+        Asked::Clear {
+            target,
+            again: false,
+        } if reason == Some(RATE_LIMITED) => {
+            crate::send::reactions::slow(htlc, std::time::Instant::now());
+            crate::send::reactions::clear_on(htlc, target, true);
         }
+        Asked::Send { target, key, .. } if refused => refuse(target, Some(key)),
+        Asked::Clear { target, .. } if refused => refuse(target, None),
+        Asked::Clear { target, .. } => tell(
+            htlc,
+            Event::Now {
+                target,
+                reactions: None,
+            },
+        ),
         Asked::Send {
             target, key, add, ..
         } => {

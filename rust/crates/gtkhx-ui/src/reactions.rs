@@ -2,18 +2,20 @@
 //! Reactions draft, capability bit 19): a click on a chip, or the row's
 //! menu, with a few emoji to react with at once and GTK's emoji chooser
 //! for any other, and who reacted with each emoji, from the menu or a
-//! chip's own. What the line holds is `chat_output`'s; a refusal is told
-//! as a toast.
+//! chip's own; a moderator's menu clears the line's reactions. What the
+//! line holds is `chat_output`'s; a refusal is told as a toast.
 //!
 //! Without reactions no row is anyone's here, and the view's own menu
 //! opens as before.
 
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::{gdk, glib};
 use gtk4 as gtk;
+use gtkhx_core::conn::hx_conn_access_has;
 use hxproto::reactions::{Key, INVALID_KEY, TOO_MANY_KEYS, TOO_MANY_OF_YOURS};
 use hxproto::structured_chat::{INVALID_TARGET, NOT_ALLOWED, NO_SUCH_TARGET, RATE_LIMITED};
 use hxproto::target::Target;
+use libadwaita as adw;
 use rotulus::view::RowMark;
 use rotulus::RotulusView;
 use rotulus_layout::MessageId;
@@ -21,7 +23,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 
-use crate::chat_output::{emoji_on, line_on, refresh_if_stale, then, want, Then};
+use crate::chat_output::{clearable, emoji_on, line_on, refresh_if_stale, then, want, Then};
 use crate::tr::{tr, tr_argv, trn_argv};
 
 /// How many emoji the menu offers at once.
@@ -44,6 +46,53 @@ pub(crate) fn refusal(reason: Option<u16>, error: Option<&str>) -> String {
             str::to_owned,
         ),
     }
+}
+
+/// What the user is told of a refusal of their clear: as [`refusal`], but
+/// in a clear's words where the server says it is not theirs to make.
+pub(crate) fn clear_refusal(reason: Option<u16>, error: Option<&str>) -> String {
+    match reason {
+        Some(NOT_ALLOWED) => tr("You can't clear reactions there."),
+        _ => refusal(reason, error),
+    }
+}
+
+/// Disconnect users, the draft's example of a right to clear by.
+const HL_ACCESS_DISCONNECT_USERS: i32 = 22;
+
+/// Whether `view`'s line `id` is offered to clear on `htlc`: it shows a
+/// chip and the account may disconnect users. That is a hint, not the
+/// gate: a server that says otherwise refuses it.
+///
+/// # Safety
+/// `htlc` is a live connection.
+pub(crate) unsafe fn clears(htlc: *mut c_void, view: &RotulusView, id: u64) -> bool {
+    hx_conn_access_has(htlc.cast(), HL_ACCESS_DISCONNECT_USERS) != 0 && clearable(view, id)
+}
+
+/// Ask whether to clear every reaction on line `id`, and on yes, clear it
+/// on `conn` if it is still connected as it was.
+fn clear(view: &RotulusView, conn: crate::dock::Bound, id: u64) {
+    // TRANSLATORS: asked of a moderator before every reaction on a chat
+    // line is taken away, everyone's.
+    let dialog = adw::AlertDialog::new(Some(&tr("Clear every reaction on this line?")), None);
+    dialog.add_response("cancel", &tr("_Cancel"));
+    // TRANSLATORS: the button that clears a chat line's reactions.
+    dialog.add_response("clear", &tr("_Clear"));
+    dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    // SAFETY: a live dialog.
+    unsafe {
+        crate::ffi::gtkhx_dialog_add_close_shortcuts(dialog.upcast_ref::<gtk::Widget>().as_ptr())
+    };
+    dialog.connect_response(Some("clear"), move |_, _| {
+        if let Some(htlc) = crate::dock::live_htlc(conn) {
+            // SAFETY: main thread; a live connection.
+            unsafe { hxhandlers::send::reactions::clear(htlc, Target::Line { channel: 0, id }) };
+        }
+    });
+    dialog.present(Some(view));
 }
 
 /// Why a chip for one of the server's own emoji does nothing: without the
@@ -149,8 +198,9 @@ fn items() -> gtk::Box {
 }
 
 /// `row`'s menu at `x`, `y`: the quick emoji, "Add Reaction…" for the
-/// chooser, "Who Reacted…" where it has emoji chips, and the view's own
-/// Copy and Select All. Whether `row` is a line one can react to.
+/// chooser, "Who Reacted…" where it has emoji chips, "Clear Reactions…"
+/// for a moderator where it has any, and the view's own Copy and Select
+/// All. Whether `row` is a line one can react to.
 fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
     let Some((htlc, limits)) = session(view) else {
         return false;
@@ -186,6 +236,14 @@ fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
         item(&items, &popover, view, &tr("Who Reacted…"), move |v| {
             reacted_with(v, row, &emoji, x, y)
         });
+    }
+    // SAFETY: as for `session`.
+    if unsafe { clears(htlc, view, id) } {
+        let conn = crate::dock::bind(crate::dock::conn_key(htlc));
+        // TRANSLATORS: in a chat line's menu, for a moderator; asks before
+        // taking away every reaction on the line.
+        let label = tr("Clear Reactions…");
+        item(&items, &popover, view, &label, move |v| clear(v, conn, id));
     }
     items.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     // This menu stands in for the view's own, so it keeps what that offers.

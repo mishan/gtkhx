@@ -49,6 +49,7 @@ fn display_backed() {
     crate::chat_output::tests::check_a_chip_clicked_asks_for_it_and_shows_it();
     crate::chat_output::tests::check_a_line_told_of_is_fresh_again();
     crate::chat_output::tests::check_who_reacted_lists_emoji_alone();
+    crate::chat_output::tests::check_a_moderator_is_offered_to_clear_a_line_with_chips();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
