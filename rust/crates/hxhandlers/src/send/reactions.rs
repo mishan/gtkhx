@@ -14,7 +14,7 @@ use std::os::raw::{c_int, c_void};
 use std::time::{Duration, Instant};
 
 use hxmodel::reactions::same;
-use hxproto::reactions::{Key, ADD, REMOVE};
+use hxproto::reactions::{Key, ADD, CLEAR, REMOVE};
 use hxproto::target::Target;
 use hxrequest::reactions::{self as req, MAX_TARGETS};
 use hxrequest::Request;
@@ -92,6 +92,28 @@ unsafe fn ask(htlc: *mut c_void, target: Target, key: Key, add: bool, again: boo
         },
         again,
     );
+    true
+}
+
+/// A moderator's clearing every reaction on `target`, a line. Whether the
+/// wire can carry it.
+///
+/// # Safety
+/// See [`react`].
+pub unsafe fn clear(htlc: *mut c_void, target: Target) -> bool {
+    clear_on(htlc, target, false)
+}
+
+/// A clear, before the rest waiting `again`, as after the server said to
+/// slow down.
+///
+/// # Safety
+/// See [`react`].
+pub(crate) unsafe fn clear_on(htlc: *mut c_void, target: Target, again: bool) -> bool {
+    let Some(r) = req::send(&target, CLEAR, None, None) else {
+        return false;
+    };
+    queue(htlc, r, Asked::Clear { target, again }, again);
     true
 }
 

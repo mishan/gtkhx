@@ -11,7 +11,8 @@ use hxmodel::reactions::LineReactions;
 use hxnet::Event;
 use hxproto::messages::tag;
 use hxproto::reactions::{
-    parse_changed, parse_got, Group, Key, Mine, Summary, ADD, INVALID_KEY, REMOVE, TARGETS_LINES,
+    parse_changed, parse_got, Group, Key, Mine, Summary, ADD, CLEAR, INVALID_KEY, REMOVE,
+    TARGETS_LINES,
 };
 use hxproto::structured_chat::NOT_ALLOWED;
 use hxproto::target::Target;
@@ -89,19 +90,23 @@ fn react(c: &mut Client, target: &Target, action: u16) -> u32 {
 }
 
 /// Wait for `c` to be told in Reaction Changed that `target` holds `want`,
-/// skipping what else it is told; a Reaction Changed arriving whole, as a
-/// frame, fails the test.
-fn told(c: &mut Client, target: &Target, want: (Summary, Mine)) {
+/// or that it was cleared, skipping what else it is told; a Reaction
+/// Changed arriving whole, as a frame, fails the test.
+fn told(c: &mut Client, target: &Target, want: Option<(Summary, Mine)>) {
     loop {
         match c.next_event().unwrap_or_else(|e| panic!("no 711: {e}")) {
             Event::Session(hxsession::Event::Unhandled { opcode: 711, frame }) => {
                 for g in parse_changed(ChunkIter::over_message(&frame, frame.len())) {
-                    match g {
-                        Group::Summary {
-                            target: t,
-                            summary,
-                            mine,
-                        } if t == *target && (&summary, &mine) == (&want.0, &want.1) => return,
+                    match (g, &want) {
+                        (
+                            Group::Summary {
+                                target: t,
+                                summary,
+                                mine,
+                            },
+                            Some(want),
+                        ) if t == *target && (&summary, &mine) == (&want.0, &want.1) => return,
+                        (Group::Cleared { target: t }, None) if t == *target => return,
                         _ => {}
                     }
                 }
@@ -161,9 +166,9 @@ fn a_reaction_reaches_every_reader_that_asked_and_the_history() {
         let line = say(&mut a, &unique_name("react to this"));
 
         assert_eq!(react(&mut a, &line, ADD), 1, "{}", s.name);
-        told(&mut b, &line, (summary(1), Mine::default()));
+        told(&mut b, &line, Some((summary(1), Mine::default())));
         assert_eq!(react(&mut b, &line, ADD), 2, "{}", s.name);
-        told(&mut a, &line, (summary(2), Mine(vec![0])));
+        told(&mut a, &line, Some((summary(2), Mine(vec![0]))));
 
         // A line said once the others were told reaches the plain reader
         // after any Reaction Changed sent to it with theirs.
@@ -228,7 +233,7 @@ fn a_reaction_reaches_every_reader_that_asked_and_the_history() {
         );
 
         assert_eq!(react(&mut a, &line, REMOVE), 1, "{}", s.name);
-        told(&mut b, &line, (summary(1), Mine(vec![0])));
+        told(&mut b, &line, Some((summary(1), Mine(vec![0]))));
     }
 }
 
@@ -247,6 +252,37 @@ fn a_reaction_the_server_will_not_take_says_why() {
             let r = who.request(&req::send(&line, ADD, Some(&key), None).unwrap());
             assert!(r.is_error(), "{}: {key:?} taken", s.name);
             assert_eq!(reason(&r), Some(code), "{}: {}", s.name, r.error_text());
+        }
+    }
+}
+
+/// A moderator clears a line two others reacted to, and each of them is
+/// told it was; one who is not a moderator is refused with the draft's
+/// code.
+#[test]
+fn a_moderator_clears_a_line_and_nobody_else_may() {
+    for s in servers_with(&[Cap::Reactions]) {
+        let mut a = reactor(s, "react-a");
+        let mut b = reactor(s, "react-b");
+        let mut moderator = reactor(s, "react-mod");
+        let line = say(&mut a, &unique_name("clear this"));
+        react(&mut a, &line, ADD);
+        assert_eq!(react(&mut b, &line, ADD), 2, "{}", s.name);
+        let clear = req::send(&line, CLEAR, None, None).unwrap();
+
+        let r = a.request(&clear);
+        assert!(r.is_error(), "{}: a reader cleared it", s.name);
+        assert_eq!(
+            reason(&r),
+            Some(NOT_ALLOWED),
+            "{}: {}",
+            s.name,
+            r.error_text()
+        );
+        let r = moderator.request(&clear);
+        assert!(!r.is_error(), "{}: {}", s.name, r.error_text());
+        for c in [&mut a, &mut b] {
+            told(c, &line, None);
         }
     }
 }

@@ -25,11 +25,12 @@ pub enum Event {
     /// The server said to slow down: the view asks again with
     /// `send::reactions::retry` where the user still wants it.
     PutOff { target: Target, key: Key, add: bool },
-    /// It was refused, with the draft's `reason` code and the server's own
-    /// `error` text where each was given.
+    /// The reaction with `key`, or with none a moderator's clear, was
+    /// refused, with the draft's `reason` code and the server's own `error`
+    /// text where each was given.
     Refused {
         target: Target,
-        key: Key,
+        key: Option<Key>,
         reason: Option<u16>,
         error: Option<String>,
     },

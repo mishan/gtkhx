@@ -1424,6 +1424,16 @@ tells changes only for a channel's newest lines (hxd-ng's live window), so openi
 line's menu asks after that line alone where it was last drawn, said (by 700, 711 or 712)
 or asked after over a minute ago and a window's worth of lines GtkHx drew are newer.
 
+A moderator's line menu offers "Clear Reactions…" where the line has chips and the
+account holds access bit 22 (disconnect users), the draft's example of who may; the bit
+is a hint, and a server that holds otherwise refuses it `NotAllowed`, told as "You can't
+clear reactions there." Once confirmed, it is a Send Reaction with the clear action (3)
+and no key, in the same queue as every 710, asked again once a second later where
+refused `RateLimited`, since the user confirmed it. Its success empties the line's chips,
+as the Reaction Changed's cleared group does for everyone else, leaving the user's own
+reactions asked for since. The draft has no reason field: hxd-ng records a classic clear
+with a fixed reason, and GtkHx sends none.
+
 ### Messaging
 
 Capability bits 6, 7 and 8, access bit 58,

@@ -181,7 +181,7 @@ structure. A lookup that misses stays 0.
 | `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
 | `reaction-activated` | on the public chat, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
 | `reaction-menu` | likewise, on a lobby line's emoji chip: who reacted with it; a server emoji's placeholder is left to `row-menu` |
-| `row-menu` | likewise, on a lobby line: the quick reactions, "Add Reaction…" and, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
+| `row-menu` | likewise, on a lobby line: the quick reactions, "Add Reaction…" and, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), and where it has any chips and the account holds access bit 22, "Clear Reactions…", which asks first; then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
 
 `link-activated` and `link-menu` are connected in `chat_view.rs`, above.
 
