@@ -794,6 +794,13 @@ fn draw_history(view: &RotulusView, entries: &[HistoryEntry], has_more: bool) ->
         {
             continue;
         }
+        if e.flags & DELETED != 0 {
+            let Output { lines, quotes, .. } = &mut *out;
+            if let Some(line) = lines.lines.get_mut(&(Space::History, e.message_id)) {
+                line.said = None;
+                quotes.removed(e.message_id);
+            }
+        }
         let (nick, text) = (c_str(&e.nick), c_str(&e.text));
         let (gutter, body) = if e.flags & DELETED != 0 {
             (None, "[message removed]".to_owned())
@@ -969,11 +976,15 @@ fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
     }
 }
 
-/// The quotes to ask for next, those the view has drawn since aside.
+/// The quotes to ask for next, those the view has drawn since, or no
+/// longer holds a reply to, aside.
 fn due_quotes(view: &RotulusView) -> Option<Vec<u64>> {
     let mut out = output(view).borrow_mut();
     let Output { lines, quotes, .. } = &mut *out;
-    quotes.next(|id| lines.row(Space::History, id).is_some())
+    quotes.next(|id| {
+        let target = Target::Line { channel: 0, id };
+        lines.row(Space::History, id).is_some() || !lines.waiting.contains_key(&target)
+    })
 }
 
 /// Ask for the quotes the view wants once the main loop is idle, so that
@@ -2363,6 +2374,35 @@ pub(crate) mod tests {
         });
         assert_eq!(headers(&view), [one, removed, EARLIER, one, one]);
         assert_eq!(due_quotes(&view), None);
+    }
+
+    /// A line drawn live and then shown taken away by a page is quoted as
+    /// removed, not as what it said.
+    pub(crate) fn check_a_line_taken_away_is_quoted_as_removed() {
+        let view = view();
+        draw_live(&view, Some(&entry(3, 0, "alice", "oops")), || {
+            say(&view, "alice", "oops")
+        });
+        draw_history(&view, &[entry(3, DELETED, "", "")], false);
+        draw_live(&view, Some(&reply(4, 0, "what", kept(3))), || {
+            say(&view, "bob", "what")
+        });
+        assert_eq!(headers(&view), ["replying to a message: message removed"]);
+    }
+
+    /// A reply the scrollback let go of before its quote was asked for
+    /// asks for it no more.
+    pub(crate) fn check_a_trimmed_reply_asks_for_no_quote() {
+        let view = view();
+        view.set_max_rows(3);
+        draw_live(&view, Some(&reply(10, 0, "a", kept(1))), || {
+            say(&view, "bob", "a")
+        });
+        draw_live(&view, Some(&reply(11, 0, "b", kept(2))), || {
+            say(&view, "bob", "b")
+        });
+        draw_live(&view, None, || draw_prose(&view, b"two\nrows"));
+        assert_eq!(due_quotes(&view), Some(vec![2]));
     }
 
     #[test]

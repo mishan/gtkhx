@@ -116,10 +116,10 @@ impl Quotes {
     }
 
     /// The next request: the lowest wanted ids, up to [`MAX_IDS`] of them,
-    /// those `drawn` since they were wanted aside. None while one is in
+    /// those `needless` since they were wanted aside. None while one is in
     /// flight or once a refusal has stopped them.
-    pub fn next(&mut self, drawn: impl Fn(u64) -> bool) -> Option<Vec<u64>> {
-        self.wanted.retain(|&id| !drawn(id));
+    pub fn next(&mut self, needless: impl Fn(u64) -> bool) -> Option<Vec<u64>> {
+        self.wanted.retain(|&id| !needless(id));
         if self.flight.is_some() || self.stopped || self.wanted.is_empty() {
             return None;
         }
@@ -192,6 +192,11 @@ impl Quotes {
             self.hold(*id, q.clone());
         }
         Refused::Settled(now)
+    }
+
+    /// Line `id` was taken away, as a page of history says.
+    pub fn removed(&mut self, id: u64) {
+        self.hold(id, Quoted::Removed);
     }
 
     /// The request put off by [`Refused::Retry`], to send again.

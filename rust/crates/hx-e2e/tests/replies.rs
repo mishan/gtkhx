@@ -120,15 +120,17 @@ fn a_reply_reaches_the_session_live_and_in_history() {
 
         let classic = unique_name("from classic");
         say(&mut a, &classic, Some(&line));
+        // Heard before the ng line is said, which `heard` would pass over.
+        let mut replies = vec![heard(&mut b, &classic)];
         let mut ng = Ng::login_with(NG, "react-mod", "react-mod", json!({ "replies": true }))
             .unwrap_or_else(|e| panic!("{e}"));
         let from_ng = unique_name("from ng");
         ng.ok("chat", json!({ "text": from_ng, "re": { "line": first } }))
             .unwrap_or_else(|e| panic!("{}: {e}", s.name));
+        replies.push(heard(&mut b, &from_ng));
         let mut ids = Vec::new();
-        for text in [&classic, &from_ng] {
-            let e = heard(&mut b, text);
-            assert_eq!(e.reply_to.as_ref(), Some(&line), "{}: {text}", s.name);
+        for e in replies {
+            assert_eq!(e.reply_to.as_ref(), Some(&line), "{}: {}", s.name, e.text);
             ids.push(e.message_id);
         }
 
