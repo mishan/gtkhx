@@ -12,9 +12,9 @@ use hxnet::Event;
 use hxproto::messages::tag;
 use hxproto::reactions::{
     parse_changed, parse_got, Group, Key, Mine, Summary, ADD, CLEAR, INVALID_KEY, REMOVE,
-    TARGETS_LINES,
+    TARGETS_EPHEMERAL, TARGETS_LINES,
 };
-use hxproto::structured_chat::NOT_ALLOWED;
+use hxproto::structured_chat::{NOT_ALLOWED, NO_SUCH_TARGET};
 use hxproto::target::Target;
 use hxproto::wire::ChunkIter;
 use hxrequest::reactions as req;
@@ -24,6 +24,10 @@ use hxsession::{Expect, Handled, HistoryEntry};
 
 const OFFER: u64 = CAP_TEXT_ENCODING | CHAT_HISTORY | STRUCTURED_CHAT | REACTIONS;
 const THUMBS: &str = "\u{1F44D}";
+/// A live line's entry flag: its id is its chat's own count's.
+const EPHEMERAL: u16 = 0x0008;
+/// The rig's room, as `tests/hxd-ng/conf/rooms.toml` numbers it.
+const ROOM: u32 = 2754100983;
 
 fn thumbs() -> Key {
     Key::Emoji(THUMBS.into())
@@ -54,23 +58,55 @@ fn reactor(s: &'static Server, login: &str) -> Client {
 
 /// Say `text` in the lobby; the line, as its id names it.
 fn say(c: &mut Client, text: &str) -> Target {
+    let e = heard_said(c, 0, text);
+    assert_eq!(e.flags & EPHEMERAL, 0, "an id the history did not give");
+    Target::Line {
+        channel: 0,
+        id: e.message_id,
+    }
+}
+
+/// Say `text` in chat `cid`, 0 the lobby: the line's entry, from its echo.
+fn heard_said(c: &mut Client, cid: u32, text: &str) -> HistoryEntry {
+    let mut chunks = vec![(tag::BODY, text.as_bytes().to_vec())];
+    if cid != 0 {
+        chunks.push((tag::CHAT_ID, cid.to_be_bytes().to_vec()));
+    }
     c.send(&Request {
         opcode: 105,
-        chunks: vec![(tag::BODY, text.as_bytes().to_vec())],
+        chunks,
     });
+    heard_line(c, cid, text)
+}
+
+/// The entry of the line `text` that `c` hears in chat `cid`.
+fn heard_line(c: &mut Client, cid: u32, text: &str) -> HistoryEntry {
     loop {
-        if let Event::Session(hxsession::Event::Chat { line: Some(e), .. }) =
-            c.next_event().unwrap_or_else(|e| panic!("{e}"))
+        if let Event::Session(hxsession::Event::Chat {
+            cid: at,
+            line: Some(e),
+            ..
+        }) = c.next_event().unwrap_or_else(|e| panic!("{e}"))
         {
-            if e.text == text {
-                assert_eq!(e.flags & 0x0008, 0, "an id the history did not give");
-                return Target::Line {
-                    channel: 0,
-                    id: e.message_id,
-                };
+            if at == cid && e.text == text {
+                return e;
             }
         }
     }
+}
+
+/// Join chat `cid`, as accepting its invitation does.
+fn join(c: &mut Client, cid: u32) {
+    let r = c.request(&Request {
+        opcode: 115,
+        chunks: vec![(tag::CHAT_ID, cid.to_be_bytes().to_vec())],
+    });
+    assert!(
+        !r.is_error(),
+        "{}: joining {cid}: {}",
+        c.server().name,
+        r.error_text()
+    );
 }
 
 fn reason(r: &Reply) -> Option<u16> {
@@ -323,5 +359,79 @@ fn a_reaction_is_refused_where_the_logins_limits_say() {
                 }
             }
         }
+    }
+}
+
+/// A room's line, which the classic wire shows as a private chat under the
+/// room's chat id, is named kind 4 under that id: a reaction to it is
+/// counted, told to the room's other members in that kind and read back
+/// so. A private chat's line carries an id of the chat's own count, which
+/// GtkHx offers no reaction to, and which the server keeps no line under.
+#[test]
+fn a_rooms_line_is_kind_4_under_its_chat_id() {
+    for s in servers_with(&[Cap::Reactions]) {
+        let mut a = reactor(s, "react-a");
+        let mut b = reactor(s, "react-b");
+        let limits = a.server_info().reactions.unwrap();
+        assert_ne!(
+            limits.targets & TARGETS_EPHEMERAL,
+            0,
+            "{}: no kind 4",
+            s.name
+        );
+        for c in [&mut a, &mut b] {
+            join(c, ROOM);
+        }
+        let text = unique_name("in the room");
+        let e = heard_said(&mut a, ROOM, &text);
+        assert_eq!(e.flags & EPHEMERAL, 0, "{}: a room's line not kept", s.name);
+        let line = Target::Ephemeral {
+            chat: ROOM,
+            id: e.message_id,
+        };
+        assert_eq!(react(&mut a, &line, ADD), 1, "{}", s.name);
+        told(&mut b, &line, Some((summary(1), Mine::default())));
+        let r = b.request(&req::get(std::slice::from_ref(&line), None).unwrap());
+        let [g] = &parse_got(ChunkIter::over_message(&r.raw, r.raw.len()))[..] else {
+            panic!("{}: not one group: {}", s.name, r.error_text())
+        };
+        assert_eq!((&g.target, &g.summary), (&line, &summary(1)), "{}", s.name);
+
+        let mut guest = chatter(s, "", OFFER);
+        let a_uid = a.server_info().uid.expect("react-a's uid");
+        let r = guest.request(&Request {
+            opcode: 112,
+            chunks: vec![(tag::UID, a_uid.to_be_bytes().to_vec())],
+        });
+        assert!(!r.is_error(), "{}: {}", s.name, r.error_text());
+        let cid = u32::from_be_bytes(r.chunk(tag::CHAT_ID).unwrap().try_into().unwrap());
+        join(&mut a, cid);
+        let text = unique_name("between us");
+        guest.send(&Request {
+            opcode: 105,
+            chunks: vec![
+                (tag::BODY, text.as_bytes().to_vec()),
+                (tag::CHAT_ID, cid.to_be_bytes().to_vec()),
+            ],
+        });
+        let e = heard_line(&mut a, cid, &text);
+        assert_ne!(
+            e.flags & EPHEMERAL,
+            0,
+            "{}: a private chat's line kept",
+            s.name
+        );
+        let unkept = Target::Ephemeral {
+            chat: cid,
+            id: e.message_id,
+        };
+        let r = a.request(&req::send(&unkept, ADD, Some(&thumbs()), None).unwrap());
+        assert_eq!(
+            reason(&r),
+            Some(NO_SUCH_TARGET),
+            "{}: {}",
+            s.name,
+            r.error_text()
+        );
     }
 }

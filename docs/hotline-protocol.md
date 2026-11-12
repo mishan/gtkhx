@@ -1391,7 +1391,7 @@ a server that echoes the bit without it offers none. Refusals carry the draft fa
 reason code (0x0F2A). Implemented by hxd-ng.
 
 GtkHx offers it only in a build with hxnet's `reactions` feature, which brings
-`structured-chat` with it; without it the login is what it was. It shows each lobby
+`structured-chat` with it; without it the login is what it was. It shows each kept
 line's chips: from its history entry, and then from what a Reaction Changed says. A
 change that arrives while the first page of history is on its way, for a line the page
 then draws, may predate what the page says, so those lines are asked after again with
@@ -1400,7 +1400,16 @@ placeholder chip named by its id. hxnet hands 711, and the Notification (718) a 
 may send beside it, to the Rust handlers only where the session has reactions, and the
 replies to 710 and 712 by their trans.
 
-A click on a lobby line's chip, or Enter on it, makes that reaction or takes it back; the
+A private chat's kept lines take reactions as the lobby's do. hxd-ng shows a room to a
+classic client as a private chat under the room's id (a `/join` to its system account
+brings the invitation), and the room's lines carry history ids; GtkHx names such a line
+as the Replies draft has a client name any line seen under a chat id, kind 4 with that
+chat id, where the login offers kind 4, and hears it back in that kind. A line whose id
+is its chat's own count (`is_ephemeral`), such as a true private chat's, which hxd-ng
+keeps nowhere, takes none: kind 4 cannot say which count its id is from, so GtkHx
+offers no reaction there, nor on the lobby's own such lines.
+
+A click on a line's chip, or Enter on it, makes that reaction or takes it back; the
 line's menu offers a few emoji at once (`chat.emoji.quick_reactions`, the last used first)
 and GTK's emoji chooser, whose pick is sent fully qualified. The chip changes at once:
 each line keeps what the server last said apart from the reactions asked for and not yet

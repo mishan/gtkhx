@@ -69,8 +69,11 @@ lists it as a part after the text. `conf/accounts/` has three accounts:
 Public chat's history is kept (`[history]`, in the inbox's database), and
 the Structured Chat and Reactions drafts are on, so the chat suite's
 history tests run here and the reactions suite has lines to react to.
-`conf/rooms.toml` holds one room, and `[rooms] announce = false` keeps
-the lobby notice to classic clients off.
+`conf/rooms.toml` holds one room, which every account that reads chat
+may join, and `[rooms] announce = false` keeps the lobby notice to
+classic clients off. The reactions suite joins it with Join Chat (115)
+by its id, as accepting an invitation does; the rig has no `[system]`
+account to send `/join` to.
 
 The voice section's `advertise` line is rewritten at every start by
 `entrypoint.sh` to the host's own addresses. hxd-ng is ICE-lite and

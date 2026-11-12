@@ -3,7 +3,7 @@
 //! its emit, and the requests asked again, through the send doubles. Frames
 //! are built as a server builds them.
 
-use hxproto::reactions::{Key, Mine, Summary, TARGETS_LINES};
+use hxproto::reactions::{Key, Mine, Summary, TARGETS_EPHEMERAL, TARGETS_LINES};
 use hxsession::cap::{REACTIONS, STRUCTURED_CHAT, TEXT_ENCODING};
 
 use super::*;
@@ -41,6 +41,15 @@ fn lines() -> Option<Limits> {
     })
 }
 
+/// Lines, and a room's lines as a private chat's, kind 4.
+fn rooms() -> Option<Limits> {
+    Some(Limits {
+        targets: TARGETS_LINES | TARGETS_EPHEMERAL,
+        max_keys: None,
+        max_per_user: None,
+    })
+}
+
 /// A connection agreed to `caps`, its login having said `limits`.
 fn conn(caps: u64, limits: Option<Limits>) -> Conn {
     let c = Conn::with_caps(caps);
@@ -50,6 +59,11 @@ fn conn(caps: u64, limits: Option<Limits>) -> Conn {
 
 fn line(id: u64) -> Target {
     Target::Line { channel: 0, id }
+}
+
+/// Line `id` of the room shown as private chat `chat`.
+fn room(chat: u32, id: u64) -> Target {
+    Target::Ephemeral { chat, id }
 }
 
 fn packed(id: u64) -> Vec<u8> {
@@ -71,8 +85,13 @@ fn summary(n: u32) -> Vec<u8> {
 /// What line `id` holds now: a thumbs up `n` times, ours among them or
 /// not, or nothing.
 fn now(id: u64, held: Option<(u32, bool)>) -> Event {
+    now_on(line(id), held)
+}
+
+/// [`now`], of `target`.
+fn now_on(target: Target, held: Option<(u32, bool)>) -> Event {
     Event::Now {
-        target: line(id),
+        target,
         reactions: held.map(|(n, ours)| {
             let summary = Summary {
                 entries: vec![(Key::Emoji(THUMBS.into()), n)],
@@ -113,6 +132,9 @@ fn a_reaction_changed_tells_each_line_it_names_where_the_session_has_reactions()
             (tag::REACTION_MINE, &[1, 0]),
             (tag::TARGET, &packed(2)),
             (tag::REACTION_ACTION, &[0, 3]),
+            (tag::TARGET, &room(9, 1).pack().unwrap()),
+            (tag::REACTION_ACTION, &[0, 4]),
+            (tag::REACTION_SUMMARY, &summary(3)),
             (tag::TARGET, &im),
             (tag::REACTION_ACTION, &[0, 1]),
             (tag::REACTION_KEY, &key),
@@ -125,7 +147,11 @@ fn a_reaction_changed_tells_each_line_it_names_where_the_session_has_reactions()
             "reactions",
             conn(AGREED, lines()),
             711,
-            vec![now(1, Some((2, true))), now(2, None)],
+            vec![
+                now(1, Some((2, true))),
+                now(2, None),
+                now_on(room(9, 1), Some((3, false))),
+            ],
         ),
         ("a notification", conn(AGREED, lines()), 718, vec![]),
         ("the bit without the kinds", conn(AGREED, None), 711, vec![]),
@@ -143,10 +169,10 @@ fn a_reaction_changed_tells_each_line_it_names_where_the_session_has_reactions()
 
 #[test]
 fn a_get_reactions_reply_tells_each_line_asked_after_in_order() {
-    let c = conn(AGREED, lines());
+    let c = conn(AGREED, rooms());
     sent();
     told();
-    unsafe { refresh(c.0, &[line(1), line(2), line(3)]) };
+    unsafe { refresh(c.0, &[line(1), line(2), room(9, 3)]) };
     let [(trans, 3)] = asked_after()[..] else {
         panic!("not one request after three lines")
     };
@@ -155,7 +181,7 @@ fn a_get_reactions_reply_tells_each_line_asked_after_in_order() {
         trans,
         false,
         fields(&[
-            (tag::TARGET, &packed(3)),
+            (tag::TARGET, &room(9, 3).pack().unwrap()),
             (tag::REACTION_SUMMARY, &summary(1)),
             (tag::TARGET, &packed(1)),
             (tag::REACTION_SUMMARY, &summary(4)),
@@ -169,7 +195,7 @@ fn a_get_reactions_reply_tells_each_line_asked_after_in_order() {
         [
             now(1, Some((4, true))),
             now(2, None),
-            now(3, Some((1, false)))
+            now_on(room(9, 3), Some((1, false)))
         ]
     );
     unsafe { reply(c.0, trans, &f) };
@@ -382,67 +408,71 @@ fn reactions_go_at_the_drafts_rate_and_one_waiting_may_be_taken_back() {
 #[test]
 fn a_send_reaction_reply_says_what_was_made_or_why_not() {
     let refused = |trans: u32, list: &[(u16, &[u8])]| frame(TASK, trans, true, fields(list));
-    let acted = |n: u32, add: bool| Event::Acted {
-        target: line(1),
+    let acted = |t: &Target, n: u32, add: bool| Event::Acted {
+        target: t.clone(),
         key: thumbs(),
         add,
         count: Some(n),
     };
-    let no = |reason: Option<u16>, error: Option<&str>| Event::Refused {
-        target: line(1),
+    let no = |t: &Target, reason: Option<u16>, error: Option<&str>| Event::Refused {
+        target: t.clone(),
         key: Some(thumbs()),
         reason,
         error: error.map(Into::into),
     };
     let not_allowed = NOT_ALLOWED.to_be_bytes();
-    for (case, add, answer, want) in [
-        (
-            "made, with the count after",
-            true,
-            frame(
-                TASK,
-                0,
+    // A lobby line, and a room's, kind 4 under its chat id.
+    for t in [line(1), room(9, 1)] {
+        for (case, add, answer, want) in [
+            (
+                "made, with the count after",
+                true,
+                frame(
+                    TASK,
+                    0,
+                    false,
+                    fields(&[(tag::REACTION_COUNT, &[0, 0, 0, 3])]),
+                ),
+                vec![acted(&t, 3, true)],
+            ),
+            (
+                "taken back",
                 false,
-                fields(&[(tag::REACTION_COUNT, &[0, 0, 0, 3])]),
+                frame(
+                    TASK,
+                    0,
+                    false,
+                    fields(&[(tag::REACTION_COUNT, &[0, 0, 0, 0])]),
+                ),
+                vec![acted(&t, 0, false)],
             ),
-            vec![acted(3, true)],
-        ),
-        (
-            "taken back",
-            false,
-            frame(
-                TASK,
-                0,
-                false,
-                fields(&[(tag::REACTION_COUNT, &[0, 0, 0, 0])]),
+            (
+                "refused with a code and words",
+                true,
+                refused(
+                    0,
+                    &[(tag::CHAT_REASON, &not_allowed), (tag::TASK_ERROR, b"No.")],
+                ),
+                vec![no(&t, Some(NOT_ALLOWED), Some("No."))],
             ),
-            vec![acted(0, false)],
-        ),
-        (
-            "refused with a code and words",
-            true,
-            refused(
-                0,
-                &[(tag::CHAT_REASON, &not_allowed), (tag::TASK_ERROR, b"No.")],
+            (
+                "refused with words alone",
+                true,
+                refused(0, &[(tag::TASK_ERROR, b"Server error.")]),
+                vec![no(&t, None, Some("Server error."))],
             ),
-            vec![no(Some(NOT_ALLOWED), Some("No."))],
-        ),
-        (
-            "refused with words alone",
-            true,
-            refused(0, &[(tag::TASK_ERROR, b"Server error.")]),
-            vec![no(None, Some("Server error."))],
-        ),
-    ] {
-        let c = conn(AGREED, lines());
-        sent();
-        told();
-        unsafe { react(c.0, line(1), thumbs(), add) };
-        let [(trans, _)] = reacted_to()[..] else {
-            panic!("{case}: not sent")
-        };
-        unsafe { reply(c.0, trans, &answer) };
-        assert_eq!(told(), want, "{case}");
+        ] {
+            let c = conn(AGREED, rooms());
+            sent();
+            told();
+            unsafe { react(c.0, t.clone(), thumbs(), add) };
+            let [(trans, ref named)] = reacted_to()[..] else {
+                panic!("{case}: not sent")
+            };
+            assert_eq!(*named, t, "{case}");
+            unsafe { reply(c.0, trans, &answer) };
+            assert_eq!(told(), want, "{case}");
+        }
     }
 
     // Told to slow down, the view hears it put off, and nothing goes for a
@@ -476,7 +506,7 @@ fn a_send_reaction_reply_says_what_was_made_or_why_not() {
         panic!("not asked again")
     };
     unsafe { reply(c.0, trans, &refused(trans, &[(tag::CHAT_REASON, &slow)])) };
-    assert_eq!(told(), [no(Some(RATE_LIMITED), None)], "twice");
+    assert_eq!(told(), [no(&line(1), Some(RATE_LIMITED), None)], "twice");
 }
 
 #[test]

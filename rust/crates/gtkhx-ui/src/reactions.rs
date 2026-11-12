@@ -1,5 +1,6 @@
-//! Reacting to a lobby line, where the session has reactions (the
-//! Reactions draft, capability bit 19): a click on a chip, or the row's
+//! Reacting to a line, the lobby's or a private chat's (a room, on
+//! hxd-ng), where the session has reactions (the Reactions draft,
+//! capability bit 19): a click on a chip, or the row's
 //! menu, with a few emoji to react with at once and GTK's emoji chooser
 //! for any other, and who reacted with each emoji, from the menu or a
 //! chip's own; a moderator's menu clears the line's reactions. What the
@@ -14,7 +15,6 @@ use gtk4 as gtk;
 use gtkhx_core::conn::hx_conn_access_has;
 use hxproto::reactions::{Key, INVALID_KEY, TOO_MANY_KEYS, TOO_MANY_OF_YOURS};
 use hxproto::structured_chat::{INVALID_TARGET, NOT_ALLOWED, NO_SUCH_TARGET, RATE_LIMITED};
-use hxproto::target::Target;
 use libadwaita as adw;
 use rotulus::view::RowMark;
 use rotulus::RotulusView;
@@ -23,7 +23,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 
-use crate::chat_output::{clearable, emoji_on, line_on, refresh_if_stale, then, want, Then};
+use crate::chat_output::{
+    clearable, emoji_on, line_on, refresh_if_stale, target, then, want, Then,
+};
 use crate::tr::{tr, tr_argv, trn_argv};
 
 /// How many emoji the menu offers at once.
@@ -86,10 +88,11 @@ fn clear(view: &RotulusView, conn: crate::dock::Bound, id: u64) {
     unsafe {
         crate::ffi::gtkhx_dialog_add_close_shortcuts(dialog.upcast_ref::<gtk::Widget>().as_ptr())
     };
+    let line = target(view, id);
     dialog.connect_response(Some("clear"), move |_, _| {
         if let Some(htlc) = crate::dock::live_htlc(conn) {
             // SAFETY: main thread; a live connection.
-            unsafe { hxhandlers::send::reactions::clear(htlc, Target::Line { channel: 0, id }) };
+            unsafe { hxhandlers::send::reactions::clear(htlc, line.clone()) };
         }
     });
     dialog.present(Some(view));
@@ -335,7 +338,7 @@ fn who(view: &RotulusView, row: MessageId, emoji: &str, x: f64, y: f64) -> bool 
     if !emoji_on(view, id).iter().any(|e| e == emoji) {
         return false;
     }
-    let line = Target::Line { channel: 0, id };
+    let line = target(view, id);
     // SAFETY: as for `session`.
     let ask = unsafe { hxhandlers::send::reactions::who(htlc, line, Key::Emoji(emoji.into())) };
     // A server names up to a hundred.
@@ -461,8 +464,8 @@ fn rows(list: &gtk::ListBox, lines: &[Who]) {
     }
 }
 
-/// Hear the chips clicked and the rows' menus asked for in `view`, the
-/// public chat's.
+/// Hear the chips clicked and the rows' menus asked for in `view`, a
+/// chat's.
 pub(crate) fn hear(view: &RotulusView) {
     view.connect_closure(
         "reaction-activated",
