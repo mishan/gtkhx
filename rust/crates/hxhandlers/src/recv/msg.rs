@@ -7,10 +7,13 @@
 //! `GtkhxSession` signal each one becomes.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 
 use gtkhx_core::boxed::msg::msg_event_new;
+use gtkhx_core::session::PmId;
 use hxmodel::chat_members::HxMemberInfo;
 
 use super::chat::{c_text, public_members};
@@ -21,7 +24,8 @@ use gtkhx_core::boxed::msg::hx_msg_event_free;
 use gtkhx_core::conn::{hx_conn_name, hx_conn_uid};
 #[cfg(not(test))]
 use gtkhx_core::session::{
-    gtkhx_session_emit_broadcast, gtkhx_session_emit_msg, gtkhx_session_get_default,
+    gtkhx_session_emit_broadcast, gtkhx_session_emit_msg, gtkhx_session_emit_msg_answered,
+    gtkhx_session_get_default,
 };
 #[cfg(not(test))]
 use hxmodel::chat_members::{hx_member_model_get_ignore, hx_member_model_get_info};
@@ -52,6 +56,7 @@ pub(crate) unsafe fn message(
     from: &str,
     text: &str,
     media: Option<&hxsession::ChatMedia>,
+    pm_id: Option<PmId>,
 ) {
     let Some(sender) = heard(htlc, uid) else {
         return;
@@ -74,8 +79,46 @@ pub(crate) unsafe fn message(
     };
     let shortcodes = gtkhx_text_emoji_shortcodes_enabled() != 0;
     let ev = msg_event_new(uid, &from, text, media, own, shortcodes);
-    gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, ev.cast());
+    gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, ev.cast(), pm_id.as_ref());
     hx_msg_event_free(ev);
+}
+
+thread_local! {
+    /// The private messages sent and not yet answered, by connection and
+    /// trans.
+    static SENDING: RefCell<HashSet<(usize, u32)>> = RefCell::new(HashSet::new());
+}
+
+/// A private message goes out on `trans`.
+pub(crate) fn sending(htlc: *mut c_void, trans: u32) {
+    SENDING.with_borrow_mut(|s| s.insert((htlc as usize, trans)));
+}
+
+/// The request on `trans` went, the server naming it `pm_id`: where it was
+/// a private message, the `msg-answered` signal.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn sent(htlc: *mut c_void, trans: u32, pm_id: Option<PmId>) {
+    if SENDING.with_borrow_mut(|s| s.remove(&(htlc as usize, trans))) {
+        gtkhx_session_emit_msg_answered(gtkhx_session_get_default(), htlc, trans, pm_id.as_ref());
+    }
+}
+
+/// The request on `trans` was refused: where it was a private message,
+/// answered with no reference, so the view lets go of it. What the server
+/// said is told as before.
+///
+/// # Safety
+/// See [`sent`].
+pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32) {
+    sent(htlc, trans, None);
+}
+
+/// A closed connection answers nothing more, and a new login numbers its
+/// requests afresh.
+pub(crate) fn forget(htlc: *mut c_void) {
+    SENDING.with_borrow_mut(|s| s.retain(|(h, _)| *h != htlc as usize));
 }
 
 /// A broadcast: dropped when its sender is ignored, and otherwise the
@@ -133,6 +176,12 @@ pub(crate) mod test_env {
             is_self: bool,
             /// The id of the picture the message carries.
             media: Option<Vec<u8>>,
+            pm_id: Option<gtkhx_core::session::PmId>,
+        },
+        Answered {
+            htlc: usize,
+            trans: u32,
+            pm_id: Option<gtkhx_core::session::PmId>,
         },
         Broadcast {
             name: Option<String>,
@@ -171,6 +220,7 @@ use doubles::*;
 mod doubles {
     use super::test_env::{self, Emitted};
     use gtkhx_core::boxed::msg::HxMsgEvent;
+    use gtkhx_core::session::PmId;
     use hxmodel::chat_members::HxMemberInfo;
     use std::ffi::CStr;
     use std::os::raw::{c_char, c_int, c_void};
@@ -182,7 +232,12 @@ mod doubles {
     pub unsafe fn gtkhx_session_get_default() -> *mut c_void {
         std::ptr::null_mut()
     }
-    pub unsafe fn gtkhx_session_emit_msg(_s: *mut c_void, h: *mut c_void, ev: *mut c_void) {
+    pub unsafe fn gtkhx_session_emit_msg(
+        _s: *mut c_void,
+        h: *mut c_void,
+        ev: *mut c_void,
+        pm_id: Option<&PmId>,
+    ) {
         let e = &*(ev as *const HxMsgEvent);
         test_env::EMITTED.with(|c| {
             c.borrow_mut().push(Emitted::Msg {
@@ -195,6 +250,21 @@ mod doubles {
                     .media
                     .as_ref()
                     .map(|m| std::slice::from_raw_parts(m.id, m.id_len).to_vec()),
+                pm_id: pm_id.copied(),
+            })
+        });
+    }
+    pub unsafe fn gtkhx_session_emit_msg_answered(
+        _s: *mut c_void,
+        h: *mut c_void,
+        trans: u32,
+        pm_id: Option<&PmId>,
+    ) {
+        test_env::EMITTED.with(|c| {
+            c.borrow_mut().push(Emitted::Answered {
+                htlc: h as usize,
+                trans,
+                pm_id: pm_id.copied(),
             })
         });
     }

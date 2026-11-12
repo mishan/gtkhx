@@ -1613,7 +1613,7 @@ extern void output_user_info (guint16 uid, const char *nam, const char *info,
 /* Forward declarations for the file-local view functions the
  * Phase 3 adapter handlers below call. The functions themselves
  * are defined later in this file; the extern-linkage ones
- * (output_chat_subject, output_news_*, msg_output_from_event, etc.) are
+ * (output_chat_subject, output_news_*, etc.) are
  * already declared in their respective headers. */
 /* Agreement window ported to Rust (gtkhx-ui, agreement.rs). */
 extern void gtkhx_show_agreement (session *sess, const char *agreement,
@@ -1667,24 +1667,6 @@ on_chat_invitation_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)user_data;
     output_chat_invitation (htlc, (guint32)cid, (char *)name);
     gtkhx_notify_pchat_invite (htlc, (guint32)cid, (const char *)name);
-}
-
-static void
-on_msg_signal (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event_p,
-               gpointer user_data)
-{
-    HxMsgEvent *event = event_p;
-    (void)emitter;
-    (void)user_data;
-    if (!event || !sess_from_htlc (htlc)) {
-        return;
-    }
-    /* Render and notify are gated together on purpose. msg_output_from_event
-     * drops a message it cannot route, and notifying about one that was
-     * never shown would leave a desktop notification pointing at a
-     * conversation the user cannot open. */
-    msg_output_from_event (htlc, event);
-    gtkhx_notify_msg (htlc, event);
 }
 
 /* "logged-in" — the server accepted the login, and its version, caps and
@@ -2176,7 +2158,6 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_chat_invitation_signal), NULL);
     g_signal_connect (emitter, "request-failed",
                       G_CALLBACK (on_request_failed_signal), NULL);
-    g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
     g_signal_connect (emitter, "broadcast", G_CALLBACK (on_broadcast_signal),
                       NULL);
     g_signal_connect (emitter, "logged-in", G_CALLBACK (on_logged_in_signal),

@@ -19,6 +19,15 @@ fn msg(uid: u16, name: &str, body: &str, is_self: bool) -> Emitted {
         body: body.into(),
         is_self,
         media: None,
+        pm_id: None,
+    }
+}
+
+fn answered(trans: u32, pm_id: Option<PmId>) -> Emitted {
+    Emitted::Answered {
+        htlc: HTLC,
+        trans,
+        pm_id,
     }
 }
 
@@ -29,8 +38,8 @@ fn a_message_is_the_msg_signal_on_its_connection() {
     test_env::reset();
     test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
     unsafe {
-        message(htlc(), 42, "alice", "hi :tada:", None);
-        message(htlc(), 7, "misha", "echo", None);
+        message(htlc(), 42, "alice", "hi :tada:", None, None);
+        message(htlc(), 7, "misha", "echo", None, None);
     }
     assert_eq!(
         test_env::emitted(),
@@ -51,11 +60,51 @@ fn a_message_s_picture_rides_on_the_signal() {
         height: None,
         bytes: None,
     };
-    unsafe { message(htlc(), 42, "alice", "[image]", Some(&png)) };
+    unsafe { message(htlc(), 42, "alice", "[image]", Some(&png), None) };
     let Emitted::Msg { media, .. } = &test_env::emitted()[0] else {
         panic!("no msg signal");
     };
     assert_eq!(media.as_deref(), Some(&[0xAB, 0xCD][..]));
+}
+
+#[test]
+fn a_message_s_reference_rides_on_the_signal() {
+    test_env::reset();
+    let stored = (true, [4; 16]);
+    unsafe { message(htlc(), 42, "alice", "hi", None, Some(stored)) };
+    let Emitted::Msg { pm_id, .. } = &test_env::emitted()[0] else {
+        panic!("no msg signal");
+    };
+    assert_eq!(*pm_id, Some(stored));
+}
+
+/// A private message sent is answered once: with the reference the server
+/// named it by, or with none where it named none or refused it. What else
+/// the session answers, a broadcast or another connection's message, is no
+/// message sent here, and neither is one sent before the connection went.
+#[test]
+fn a_message_sent_is_answered_once() {
+    test_env::reset();
+    let stored = Some((true, [4; 16]));
+    let other = 0xBEEF as *mut c_void;
+    unsafe {
+        for trans in [1, 2, 3, 4] {
+            sending(htlc(), trans);
+        }
+        sent(htlc(), 1, stored);
+        sent(htlc(), 1, stored);
+        failed(htlc(), 2);
+        sent(other, 3, stored);
+        sent(htlc(), 9, None);
+        failed(htlc(), 9);
+        sent(htlc(), 3, None);
+        forget(htlc());
+        sent(htlc(), 4, stored);
+    }
+    assert_eq!(
+        test_env::emitted(),
+        [answered(1, stored), answered(2, None), answered(3, None)]
+    );
 }
 
 #[test]
@@ -65,8 +114,8 @@ fn a_message_the_server_left_unnamed_is_named_for_its_sender() {
     test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
     test_env::MEMBER.with(|c| *c.borrow_mut() = Some(("bob".into(), 0)));
     unsafe {
-        message(htlc(), 7, "", "to myself", None);
-        message(htlc(), 5, "", "from bob", None);
+        message(htlc(), 7, "", "to myself", None, None);
+        message(htlc(), 5, "", "from bob", None, None);
     }
     assert_eq!(
         test_env::emitted(),
@@ -108,7 +157,7 @@ fn what_an_ignored_user_sends_is_dropped() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(true));
     unsafe {
-        message(htlc(), 42, "alice", "hi", None);
+        message(htlc(), 42, "alice", "hi", None, None);
         broadcast(htlc(), 42, "alice", "hi");
     }
     assert_eq!(test_env::emitted(), []);

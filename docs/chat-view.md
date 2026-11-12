@@ -164,9 +164,10 @@ Where the session has reactions, a kept line's reaction chips are set on
 its row by that id, from its history entry and then from the `reactions`
 signal ([hotline-protocol.md](hotline-protocol.md), "Reactions"), in the
 lobby and in a private chat (a room, on hxd-ng) alike, each view's registry
-its own; a line under its chat's own count takes none. A friend's
-conversation (`msg.rs`) keeps each instant message's last row by its guid,
-which is where its chips go.
+its own; a line under its chat's own count takes none. A conversation
+(`msg.rs`) keeps each message's rows by what names it, an instant
+message's guid or a private message's reference, and a reactable one's
+chips go under the last.
 Where the session has replies, each registered line also keeps what a
 reply to it quotes, and a lobby reply's row gets its header with
 `set_reply`, by its mark: quoted from the registry, or from the view's
@@ -189,9 +190,9 @@ structure. A lookup that misses stays 0.
 | `speaker-menu` | `users.c::user_popup_show`, the same menu the Users window and the private-chat sidebars pop |
 | `load-more` | fetch the next page of chat history |
 | `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
-| `reaction-activated` | on the public chat, each private chat and each friend's conversation, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
+| `reaction-activated` | on the public chat, each private chat and each conversation, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
 | `reaction-menu` | likewise, on a kept line's emoji chip: who reacted with it; a server emoji's placeholder is left to `row-menu` |
-| `row-menu` | likewise, on a kept line or an instant message: the quick reactions, "Add Reaction…" and, on a line, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), and where it has any chips and the account holds access bit 22, "Clear Reactions…", which asks first; then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
+| `row-menu` | likewise, on a kept line, an instant message or a stored private message: the quick reactions, "Add Reaction…" and, on a line, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), and where it has any chips and the account holds access bit 22, "Clear Reactions…", which asks first; then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
 
 `link-activated` and `link-menu` are connected in `chat_view.rs`, above.
 

@@ -9,7 +9,6 @@
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_void};
-use std::ptr;
 
 use glib::translate::IntoGlibPtr;
 use gtk::prelude::*;
@@ -229,8 +228,8 @@ unsafe extern "C" fn uploaded(htlc: *mut c_void, r: *const UploadResult, upload:
         Target::Message(uid) => {
             let id = std::slice::from_raw_parts(r.media_id, r.media_id_len);
             let mime = std::slice::from_raw_parts(r.media_type.cast::<u8>(), r.media_type_len);
-            hxhandlers::send::msg::send_msg_with_media(htlc, uid, CAPTION, id, mime);
-            echo(htlc, uid, r);
+            let trans = hxhandlers::send::msg::send_msg_with_media(htlc, uid, CAPTION, id, mime);
+            echo(htlc, uid, trans, r);
         }
     }
     toast(&tr1("Sent %s", &upload.name));
@@ -239,10 +238,7 @@ unsafe extern "C" fn uploaded(htlc: *mut c_void, r: *const UploadResult, upload:
 /// A server sends a private message to its recipient only, so the sender's
 /// window shows its own: the picture fetched by the handle, as the
 /// recipient's is.
-unsafe fn echo(htlc: *mut c_void, uid: u16, r: &UploadResult) {
-    let Some(output) = crate::msg::echo(htlc, uid, c"") else {
-        return;
-    };
+unsafe fn echo(htlc: *mut c_void, uid: u16, trans: Option<u32>, r: &UploadResult) {
     let media = HxChatMedia {
         id: r.media_id.cast_mut(),
         id_len: r.media_id_len,
@@ -255,12 +251,7 @@ unsafe fn echo(htlc: *mut c_void, uid: u16, r: &UploadResult) {
         height_present: r.height_present,
         bytes_present: r.bytes_present,
     };
-    crate::inline_media_row::hx_inline_media_row_append(
-        output.as_ptr(),
-        ptr::null_mut(),
-        &media,
-        htlc,
-    );
+    crate::msg::echo_picture(htlc, uid, trans, &media);
 }
 
 /// What to tell the user of a refused upload: the error code's reading,

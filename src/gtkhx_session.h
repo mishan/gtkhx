@@ -96,13 +96,6 @@ void gtkhx_session_emit_gif_icon_data (GtkhxSession *self,
                                        struct htlc_conn *htlc, guint16 uid,
                                        gconstpointer gif, guint len);
 
-/* The "msg" (private message) signal payload is a boxed HxMsgEvent
- * for the same reason "chat" carries an HxChatEvent: every
- * subscriber gets the same UTF-8-sanitised, self-classified view
- * of the message. */
-void gtkhx_session_emit_msg (GtkhxSession *self, struct htlc_conn *htlc,
-                             HxMsgEvent *event);
-
 /* "self-updated" (htlc *) — our own access bits / uid were (re)parsed
  * from a SELFINFO reply. Toolbar-button sensitivity depends on the
  * access bitmap, so the view refreshes it off this signal. */

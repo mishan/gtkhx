@@ -134,12 +134,26 @@ pub unsafe extern "C" fn hx_inline_media_row_append(
     media: *const HxChatMedia,
     htlc: *mut c_void,
 ) {
+    append(view, table, media, htlc);
+}
+
+/// As [`hx_inline_media_row_append`]: the row's mark, NULL where none was
+/// drawn.
+///
+/// # Safety
+/// As [`hx_inline_media_row_append`].
+pub(crate) unsafe fn append(
+    view: *mut gtk::ffi::GtkWidget,
+    table: *mut c_void,
+    media: *const HxChatMedia,
+    htlc: *mut c_void,
+) -> *mut c_void {
     if view.is_null() || media.is_null() {
-        return;
+        return ptr::null_mut();
     }
     let widget: gtk::Widget = from_glib_none(view);
     let Ok(view) = widget.downcast::<RotulusView>() else {
-        return;
+        return ptr::null_mut();
     };
     let table = if table.is_null() {
         view_table(&view, htlc)
@@ -155,7 +169,7 @@ pub unsafe extern "C" fn hx_inline_media_row_append(
         (m.width_present != 0 && m.height_present != 0).then_some((m.width, m.height)),
         (m.bytes_present != 0).then_some(m.bytes),
     ));
-    rotulus::ffi::rotulus_view_append_media(
+    let row = rotulus::ffi::rotulus_view_append_media(
         view.upcast_ref::<gtk::Widget>().to_glib_none().0,
         ptr::null_mut(),
         placeholder.as_ptr(),
@@ -165,7 +179,7 @@ pub unsafe extern "C" fn hx_inline_media_row_append(
 
     // A server without the extension never answers the fetch.
     if inline_media_cap_ok(htlc) == 0 || m.id_len == 0 || m.id_len > 65535 {
-        return;
+        return row;
     }
     let fetch = Box::into_raw(Box::new(Fetch {
         view: view.downgrade(),
@@ -175,6 +189,7 @@ pub unsafe extern "C" fn hx_inline_media_row_append(
     if inline_media_download_start(htlc, m.id, m.id_len, on_fetched, fetch.cast()).is_null() {
         drop(Box::from_raw(fetch));
     }
+    row
 }
 
 /// The fetch landed: decode it, or leave the placeholder up for the dialog
