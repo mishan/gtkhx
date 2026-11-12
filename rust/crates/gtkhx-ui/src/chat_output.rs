@@ -1117,7 +1117,23 @@ unsafe fn reactions(htlc: *mut c_void, e: &gtkhx_core::reactions::Event) {
     let Some((cid, id)) = line_of(target) else {
         return;
     };
-    let Some(view) = view_of(htlc, cid) else {
+    let view = view_of(htlc, cid);
+    // The user hears why their own act was refused even once the chat it
+    // was in has closed.
+    if let Event::Refused {
+        key, reason, error, ..
+    } = e
+    {
+        let text = match key {
+            Some(key) => {
+                view.inspect(|v| refused(v, id, key));
+                crate::reactions::refusal(*reason, error.as_deref())
+            }
+            None => crate::reactions::clear_refusal(*reason, error.as_deref()),
+        };
+        return crate::reactions::toast(&text);
+    }
+    let Some(view) = view else {
         return;
     };
     match e {
@@ -1137,19 +1153,7 @@ unsafe fn reactions(htlc: *mut c_void, e: &gtkhx_core::reactions::Event) {
                 hxhandlers::send::reactions::retry(htlc, target.clone(), key.clone(), *add);
             }
         }
-        Event::Refused {
-            key, reason, error, ..
-        } => {
-            let text = match key {
-                Some(key) => {
-                    refused(&view, id, key);
-                    crate::reactions::refusal(*reason, error.as_deref())
-                }
-                None => crate::reactions::clear_refusal(*reason, error.as_deref()),
-            };
-            crate::reactions::toast(&text);
-        }
-        Event::Who { .. } => {}
+        Event::Refused { .. } | Event::Who { .. } => {}
     }
 }
 
