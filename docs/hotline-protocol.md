@@ -1462,8 +1462,10 @@ Capability bits 6, 7 and 8, access bit 58,
 [Capabilities-Messaging.md](https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Messaging.md).
 A buddy-list instant-messaging layer: transactions 800–821 for roster, presence, message
 delivery and acknowledgment, typing, file offers with relayed or direct transfer, and
-call invitations; limit fields 0x0620–0x0622. Neither GtkHx nor hxd-ng implements it;
-hxd-ng keeps its allocations reserved.
+call invitations; limit fields 0x0620–0x0622. GtkHx and hxd-ng implement its friend
+family on bit 6 (roster, presence, instant messages, receipts and typing), GtkHx only in
+a build with `gtkhx-ffi/messaging` ([messaging.md](messaging.md)); neither implements file
+offers or calls.
 
 ### GIF icons
 
