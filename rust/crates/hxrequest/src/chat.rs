@@ -1,9 +1,36 @@
 //! Chat requests.
 
-use hxproto::build::{self, GetChatHistoryRequest, HxChunk};
-use hxproto::messages::ClientHdr;
+use hxproto::build::{self, ChatRequest, GetChatHistoryRequest, HxChunk};
+use hxproto::messages::{tag, ClientHdr};
+use hxproto::target::Target;
 
 use crate::Request;
+
+/// CHAT (105): `body`, already encoded for the wire, in chat `cid` (0 for
+/// the public chat) as `style`, with the picture `media` names (its handle
+/// and type) and the line `reply` answers. `None` for a body past a field's
+/// length, or a reply that has no packed form.
+pub fn say(
+    body: &[u8],
+    cid: u32,
+    style: u16,
+    media: Option<(&[u8], &[u8])>,
+    reply: Option<&Target>,
+) -> Option<Request> {
+    let mut chunks = [HxChunk::EMPTY; 3];
+    let mut scratch = [0u8; 6];
+    let req = ChatRequest { cid, style, body };
+    let hc = build::build_chat_chunks(&req, &mut chunks, &mut scratch);
+    let mut r = Request::from_built(ClientHdr::Chat as u32, &chunks, hc)?;
+    if let Some((id, mime)) = media {
+        r.chunks.push((tag::CHAT_MEDIA_ID, id.to_vec()));
+        r.chunks.push((tag::CHAT_MEDIA_TYPE, mime.to_vec()));
+    }
+    if let Some(t) = reply {
+        r.chunks.push((tag::REPLY_TO, t.pack()?));
+    }
+    Some(r)
+}
 
 /// GET_CHAT_HISTORY (700): up to `limit` lines of chat `cid`, older than line
 /// `before` or newer than line `after`; a cursor or limit of 0 is left out.

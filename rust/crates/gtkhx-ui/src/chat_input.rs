@@ -10,6 +10,8 @@
 //!   - **Shift+Return** → newline (let the view's default insert run).
 //!   - **Return** → record the line in history, dispatch it
 //!     (`route_line`: chat, a server command, or a client `/command`), clear.
+//!     A line said as chat answers the line the reply bar holds.
+//!   - **Escape** → cancel a pending reply (`reply_bar`), and only then.
 //!   - **Tab / Shift+Tab** → nick completion against the chat's membership
 //!     (the C `tab_nick_comp` core — kept in C so the tested completer + the
 //!     ambiguous-list `hx_printf` stay put).
@@ -22,15 +24,17 @@
 //! the controller's (widget's) lifetime, so there's no per-keystroke lookup
 //! back into the C view struct.
 
-use std::ffi::{c_char, c_void};
+use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
 
 use glib::translate::{from_glib_borrow, from_glib_none};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
+use hxproto::target::Target;
 
 use crate::tr::tr;
+use hxhandlers::send::chat::send_chat_line;
 use hxmodel::chat_members::{hx_input_history_down, hx_input_history_record, hx_input_history_up};
 use hxmodel::conversation::hx_chat_member_model;
 
@@ -38,7 +42,6 @@ extern "C" {
     // gtkhx_ui_bridge.c, always compiled — unlike voice_bridge.c's
     // hx_session_htlc, which is gated on HAVE_VOICE.
     fn gtkhx_session_htlc(sess: *mut c_void) -> *mut c_void;
-    fn hx_send_chat(htlc: *mut c_void, s: *mut c_char, cid: u32, style: u16);
     fn hx_command(htlc: *mut c_void, s: *mut c_char, cid: u32);
 
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
@@ -74,6 +77,8 @@ const SERVER_COMMANDS: &[&str] = &[
 #[derive(Debug, PartialEq)]
 enum Route<'a> {
     Chat(&'a [u8]),
+    /// A command the server runs, sent as chat.
+    Server(&'a [u8]),
     Command(&'a [u8]),
 }
 
@@ -88,8 +93,10 @@ fn route_line(line: &[u8]) -> Option<Route<'_>> {
                 .split(u8::is_ascii_whitespace)
                 .next()
                 .unwrap_or_default();
-            if word.is_empty() || SERVER_COMMANDS.iter().any(|c| c.as_bytes() == word) {
+            if word.is_empty() {
                 Some(Route::Chat(line))
+            } else if SERVER_COMMANDS.iter().any(|c| c.as_bytes() == word) {
+                Some(Route::Server(line))
             } else {
                 Some(Route::Command(rest))
             }
@@ -98,13 +105,24 @@ fn route_line(line: &[u8]) -> Option<Route<'_>> {
     }
 }
 
-/// Sends a line from `buffer_cbytes` wherever `route_line` says. Every route
-/// is a tail of the line, so the buffer's own NUL ends it for C too.
-unsafe fn dispatch_line(htlc: *mut c_void, line: &[u8], cid: u32) {
+/// Sends a line from `buffer_cbytes`, typed in `input`, wherever
+/// `route_line` says: to `chat`, answering the line `input`'s reply bar
+/// holds where it is said as chat, or to `command`. A server's command, or
+/// a client's, leaves the reply for the next line.
+fn dispatch_line(
+    input: &gtk::TextView,
+    line: &[u8],
+    chat: impl FnOnce(&CStr, Option<&Target>),
+    command: impl FnOnce(&CStr),
+) {
     let text = line.strip_suffix(&[0]).unwrap_or(line);
+    // Every route is a tail of the line, so the buffer's own NUL ends it.
+    let tail =
+        |s: &[u8]| CStr::from_bytes_until_nul(&line[text.len() - s.len()..]).unwrap_or_default();
     match route_line(text) {
-        Some(Route::Chat(s)) => hx_send_chat(htlc, s.as_ptr().cast_mut().cast(), cid, 0),
-        Some(Route::Command(s)) => hx_command(htlc, s.as_ptr().cast_mut().cast(), cid),
+        Some(Route::Chat(s)) => chat(tail(s), crate::reply_bar::take(input).as_ref()),
+        Some(Route::Server(s)) => chat(tail(s), None),
+        Some(Route::Command(s)) => command(tail(s)),
         None => {}
     }
 }
@@ -362,13 +380,20 @@ fn on_key(
                 // The input's own connection, which a line typed just as the
                 // focus moves to another tab still belongs to.
                 let htlc = gtkhx_session_htlc(sess);
-                dispatch_line(htlc, &line, cid);
+                dispatch_line(
+                    view,
+                    &line,
+                    |s, reply| send_chat_line(htlc, s, cid, 0, reply),
+                    |s| hx_command(htlc, s.as_ptr().cast_mut(), cid),
+                );
             }
             let (mut s, mut e) = (buf.start_iter(), buf.end_iter());
             buf.delete(&mut s, &mut e);
             view.set_editable(true);
             glib::Propagation::Stop
         }
+
+        Key::Escape => on_escape(view),
 
         Key::Tab | Key::ISO_Left_Tab => {
             let reverse =
@@ -447,6 +472,15 @@ fn on_key(
     }
 }
 
+/// Escape in `input` cancels a pending reply, and only then is taken: it
+/// is otherwise whoever's else.
+fn on_escape(input: &gtk::TextView) -> glib::Propagation {
+    match crate::reply_bar::escape(input) {
+        true => glib::Propagation::Stop,
+        false => glib::Propagation::Proceed,
+    }
+}
+
 /// Set once on the input `GtkTextView` after its controller is installed, so a
 /// repeat `gtkhx_chat_input_attach` is a no-op instead of stacking controllers.
 const ATTACHED_KEY: &str = "gtkhx-chat-input-attached";
@@ -514,8 +548,109 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{route_line, Route};
+pub(crate) mod tests {
+    use super::{dispatch_line, on_escape, route_line, Route};
+    use gtk::glib;
+    use gtk::prelude::*;
+    use gtk4 as gtk;
+    use hxmodel::replies::Quote;
+    use hxproto::target::Target;
+    use rotulus::RotulusView;
+
+    fn text(s: &std::ffi::CStr) -> String {
+        s.to_string_lossy().into_owned()
+    }
+
+    /// Where `line` typed in `input` goes: to chat, with the line it
+    /// answers, or to a command.
+    fn sent(input: &gtk::TextView, line: &str) -> (&'static str, String, Option<Target>) {
+        let mut line = line.as_bytes().to_vec();
+        line.push(0);
+        let got = std::cell::RefCell::new(None);
+        dispatch_line(
+            input,
+            &line,
+            |s, reply| *got.borrow_mut() = Some(("chat", text(s), reply.cloned())),
+            |s| *got.borrow_mut() = Some(("command", text(s), None)),
+        );
+        got.into_inner().expect("sent nowhere")
+    }
+
+    /// Reply shows the bar over the input, which takes the keyboard; the
+    /// next line said as chat answers the line, and the bar goes. Escape,
+    /// the bar's button, a cleared view and a closed window let go of it;
+    /// a server's or a client's command keeps it for the next line; and
+    /// Reply on another row replaces it.
+    pub(crate) fn check_a_reply_goes_with_the_next_line_said() {
+        use crate::reply_bar;
+        let view = RotulusView::new();
+        let input = gtk::TextView::new();
+        let bar = reply_bar::build(&view, input.upcast_ref());
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        column.append(&view);
+        column.append(&bar);
+        column.append(&input);
+        let window = gtk::Window::new();
+        window.set_child(Some(&column));
+        window.present();
+        let label = bar.first_child().and_downcast::<gtk::Label>().unwrap();
+        let cancel = bar.last_child().and_downcast::<gtk::Button>().unwrap();
+
+        let to = Target::Line { channel: 0, id: 5 };
+        let quote = Quote::new("bob", "has anyone <tried> it");
+        let start = |to: &Target| reply_bar::start(&view, to.clone(), &quote);
+        assert!(!bar.is_visible());
+        start(&to);
+        assert!(bar.is_visible());
+        assert_eq!(label.text(), "Replying to bob: has anyone <tried> it");
+        assert_eq!(
+            gtk::prelude::GtkWindowExt::focus(&window).as_ref(),
+            Some(input.upcast_ref())
+        );
+
+        for (case, line, want) in [
+            ("a server command", "/away", ("chat", "/away")),
+            ("a client command", "/me waves", ("command", "me waves")),
+        ] {
+            assert_eq!(sent(&input, line), (want.0, want.1.into(), None), "{case}");
+            assert!(bar.is_visible(), "{case}: kept");
+        }
+        assert_eq!(
+            sent(&input, "//exec yes"),
+            ("chat", "/exec yes".into(), Some(to.clone()))
+        );
+        assert!(!bar.is_visible(), "sent");
+        assert_eq!(sent(&input, "and"), ("chat", "and".into(), None));
+
+        let escape = || on_escape(&input);
+        start(&to);
+        assert_eq!(escape(), glib::Propagation::Stop, "pending");
+        assert!(!bar.is_visible(), "escaped");
+        assert_eq!(escape(), glib::Propagation::Proceed, "nothing pending");
+
+        let other = Target::Ephemeral { chat: 0, id: 2 };
+        start(&to);
+        start(&other);
+        assert_eq!(sent(&input, "y"), ("chat", "y".into(), Some(other)));
+
+        let clicked = || cancel.emit_clicked();
+        let cleared = || crate::chat_output::clear(&view);
+        for (case, end) in [
+            ("the button", &clicked as &dyn Fn()),
+            ("a cleared view", &cleared),
+        ] {
+            start(&to);
+            end();
+            assert!(!bar.is_visible(), "{case}");
+            assert_eq!(sent(&input, "x"), ("chat", "x".into(), None), "{case}");
+        }
+
+        start(&to);
+        window.destroy();
+        drop((window, column, bar, label, cancel));
+        assert!(!reply_bar::offered(&view), "closed");
+        assert_eq!(sent(&input, "x"), ("chat", "x".into(), None), "closed");
+    }
 
     #[test]
     fn lines_route_to_chat_server_or_client() {
@@ -527,9 +662,9 @@ mod tests {
             ("/exec ls ~", Some(Route::Command(b"exec ls ~"))),
             ("/exec", Some(Route::Command(b"exec"))),
             ("//exec ls ~", Some(Route::Chat(b"/exec ls ~"))),
-            ("/away", Some(Route::Chat(b"/away"))),
-            ("/visible on", Some(Route::Chat(b"/visible on"))),
-            ("/away\nback soon", Some(Route::Chat(b"/away\nback soon"))),
+            ("/away", Some(Route::Server(b"/away"))),
+            ("/visible on", Some(Route::Server(b"/visible on"))),
+            ("/away\nback soon", Some(Route::Server(b"/away\nback soon"))),
             // A server command matches as a whole word, not as a prefix.
             ("/a b", Some(Route::Command(b"a b"))),
             ("/awayx", Some(Route::Command(b"awayx"))),

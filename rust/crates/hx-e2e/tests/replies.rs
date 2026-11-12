@@ -2,15 +2,14 @@
 //! line answers, as the session reads it from the line's entry, live and
 //! in a page of history, and the lines a page's replies answer, asked for
 //! by id with `hxrequest::chat::history_ids` and read as the session reads
-//! the answer. The replies themselves are said by scripted clients, on
-//! the classic wire and on the ng one.
+//! the answer. A reply on the classic wire is said with GtkHx's own
+//! request, `hxrequest::chat::say`, and on the ng one by a scripted client.
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
 use hx_e2e::ng::Ng;
 use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
-use hxproto::messages::tag;
 use hxproto::target::Target;
 use hxrequest::Request;
 use hxsession::cap::{CHAT_HISTORY, REPLIES, STRUCTURED_CHAT};
@@ -47,14 +46,9 @@ fn replier(s: &'static Server, login: &str) -> Client {
     c
 }
 
-/// Say `text` in the lobby, answering `to` if anything.
+/// Say `text` in the lobby, answering `to` if anything, as GtkHx does.
 fn say(c: &mut Client, text: &str, to: Option<&Target>) {
-    let mut chunks = vec![(tag::BODY, text.as_bytes().to_vec())];
-    chunks.extend(to.map(|t| (tag::REPLY_TO, t.pack().unwrap())));
-    c.send(&Request {
-        opcode: 105,
-        chunks,
-    });
+    c.send(&hxrequest::chat::say(text.as_bytes(), 0, 0, None, to).unwrap());
 }
 
 /// The entry of the lobby line `text` that `c` hears.
@@ -121,7 +115,16 @@ fn a_reply_reaches_the_session_live_and_in_history() {
         let classic = unique_name("from classic");
         say(&mut a, &classic, Some(&line));
         // Heard before the ng line is said, which `heard` would pass over.
-        let mut replies = vec![heard(&mut b, &classic)];
+        let mut replies = vec![heard(&mut b, &classic), heard(&mut a, &classic)];
+        // A server never looks a reply's line up, so one nobody keeps is
+        // relayed by any id.
+        let notice = Target::Ephemeral { chat: 0, id: 1 };
+        let to_notice = unique_name("to a notice");
+        say(&mut a, &to_notice, Some(&notice));
+        for (who, c) in [("the sender", &mut a), ("another", &mut b)] {
+            let e = heard(c, &to_notice);
+            assert_eq!(e.reply_to.as_ref(), Some(&notice), "{}: {who}", s.name);
+        }
         let mut ng = Ng::login_with(NG, "react-mod", "react-mod", json!({ "replies": true }))
             .unwrap_or_else(|e| panic!("{e}"));
         let from_ng = unique_name("from ng");
