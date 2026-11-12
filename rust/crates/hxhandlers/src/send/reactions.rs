@@ -62,7 +62,7 @@ thread_local! {
 /// # Safety
 /// Main thread; `htlc` is a live connection.
 pub unsafe fn react(htlc: *mut c_void, target: Target, key: Key, add: bool) -> bool {
-    ask(htlc, target, key, add, false)
+    ask(htlc, target, None, key, add, false)
 }
 
 /// Ask again, before the rest waiting, what the server said to slow down
@@ -71,14 +71,51 @@ pub unsafe fn react(htlc: *mut c_void, target: Target, key: Key, add: bool) -> b
 /// # Safety
 /// See [`react`].
 pub unsafe fn retry(htlc: *mut c_void, target: Target, key: Key, add: bool) -> bool {
-    ask(htlc, target, key, add, true)
+    ask(htlc, target, None, key, add, true)
+}
+
+/// The user's reaction with `key` on `target`, an instant message in the
+/// conversation with `with`, made (`add`) or taken back. Whether the wire
+/// can carry it.
+///
+/// # Safety
+/// See [`react`].
+pub unsafe fn react_im(
+    htlc: *mut c_void,
+    target: Target,
+    with: &[u8],
+    key: Key,
+    add: bool,
+) -> bool {
+    ask(htlc, target, Some(with), key, add, false)
+}
+
+/// As [`retry`], for [`react_im`].
+///
+/// # Safety
+/// See [`react`].
+pub unsafe fn retry_im(
+    htlc: *mut c_void,
+    target: Target,
+    with: &[u8],
+    key: Key,
+    add: bool,
+) -> bool {
+    ask(htlc, target, Some(with), key, add, true)
 }
 
 /// # Safety
 /// See [`react`].
-unsafe fn ask(htlc: *mut c_void, target: Target, key: Key, add: bool, again: bool) -> bool {
+unsafe fn ask(
+    htlc: *mut c_void,
+    target: Target,
+    with: Option<&[u8]>,
+    key: Key,
+    add: bool,
+    again: bool,
+) -> bool {
     let action = if add { ADD } else { REMOVE };
-    let Some(r) = req::send(&target, action, Some(&key), None) else {
+    let Some(r) = req::send(&target, action, Some(&key), with) else {
         return false;
     };
     queue(

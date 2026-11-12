@@ -486,7 +486,7 @@ const SERVER_EMOJI: &str = "server-emoji:";
 /// The chips `shown` draws: an emoji as itself, which a screen reader
 /// names; one of the server's own, which GtkHx cannot draw, as a
 /// placeholder named by its id.
-fn chips(shown: &[Shown]) -> Vec<Reaction> {
+pub(crate) fn chips(shown: &[Shown]) -> Vec<Reaction> {
     let chip = |s: &Shown| {
         let (key, text, label) = match &s.key {
             Key::Emoji(e) => (e.clone(), None, None),
@@ -592,15 +592,47 @@ pub(crate) fn clearable(view: &RotulusView, id: u64) -> bool {
     (out.lines.lines.get(&(Space::History, id))).is_some_and(|l| !l.reactions.shown().is_empty())
 }
 
-/// What [`want`] and [`answered`] leave to do.
+/// What [`want`] and [`answered`] leave to do, to the line `T` names, or
+/// to another row reacted to as a line is.
 #[derive(Debug, PartialEq)]
-pub(crate) enum Then {
+pub(crate) enum Then<T = u64> {
     /// Ask for `key` on the line, an add or not.
-    Send(u64, Key, bool),
+    Send(T, Key, bool),
     /// Take back the request for `key` on the line, if it is still to go.
-    Withdraw(u64, Key),
+    Withdraw(T, Key),
     /// Tell the user why not.
     Say(String),
+}
+
+/// The chip `key` as a key to ask for, or why not: a server emoji's
+/// placeholder is none GtkHx may send.
+pub(crate) fn chip_key<T>(key: &str) -> Result<Key, Then<T>> {
+    match key.starts_with(SERVER_EMOJI) {
+        true => Err(Then::Say(crate::reactions::server_emoji())),
+        false => Ok(Key::Emoji(key.to_owned())),
+    }
+}
+
+/// The user wants `key` on `r`, which `row` names, on, off, or (`None`)
+/// the other way round; `limits` are the login's. What is left to do.
+pub(crate) fn wanted<T>(
+    r: &mut LineReactions,
+    row: T,
+    key: Key,
+    on: Option<bool>,
+    limits: &hxproto::reactions::Limits,
+) -> Option<Then<T>> {
+    let on = on.unwrap_or_else(|| !r.mine(&key));
+    if on && !r.mine(&key) {
+        if let Some(code) = r.refusal(&key, limits.max_keys, limits.max_per_user) {
+            return Some(Then::Say(crate::reactions::refusal(Some(code), None)));
+        }
+    }
+    match r.want(key.clone(), on) {
+        Next::Send(add) => Some(Then::Send(row, key, add)),
+        Next::Withdraw => Some(Then::Withdraw(row, key)),
+        Next::Nothing => None,
+    }
 }
 
 /// The kept line drawn on `row`, where `limits` take reactions to it. A
@@ -613,7 +645,9 @@ pub(crate) fn line_on(
     row: MessageId,
     limits: &hxproto::reactions::Limits,
 ) -> Option<u64> {
-    let id = output(view).borrow().lines.history_on(row)?;
+    // SAFETY: as for `output`, which this does not make where there is none.
+    let out = unsafe { view.data::<RefCell<Output>>(OUTPUT) }?;
+    let id = unsafe { out.as_ref() }.borrow().lines.history_on(row)?;
     limits.takes(&target(view, id)).then_some(id)
 }
 
@@ -628,24 +662,11 @@ pub(crate) fn want(
     limits: &hxproto::reactions::Limits,
 ) -> Option<Then> {
     let id = line_on(view, row, limits)?;
-    if key.starts_with(SERVER_EMOJI) {
-        return Some(Then::Say(crate::reactions::server_emoji()));
-    }
-    let key = Key::Emoji(key.to_owned());
-    let next = redraw(view, id, |r| {
-        let on = on.unwrap_or_else(|| !r.mine(&key));
-        let refusal = on && !r.mine(&key);
-        match refusal.then(|| r.refusal(&key, limits.max_keys, limits.max_per_user)) {
-            Some(Some(code)) => Err(code),
-            _ => Ok(r.want(key.clone(), on)),
-        }
-    })?;
-    match next {
-        Err(code) => Some(Then::Say(crate::reactions::refusal(Some(code), None))),
-        Ok(Next::Send(add)) => Some(Then::Send(id, key, add)),
-        Ok(Next::Withdraw) => Some(Then::Withdraw(id, key)),
-        Ok(Next::Nothing) => None,
-    }
+    let key = match chip_key(key) {
+        Ok(key) => key,
+        Err(say) => return Some(say),
+    };
+    redraw(view, id, |r| wanted(r, id, key, on, limits))?
 }
 
 /// The request for `key` on line `id` that `add`ed or not was made, with
@@ -1112,8 +1133,12 @@ unsafe fn reactions(htlc: *mut c_void, e: &gtkhx_core::reactions::Event) {
         Event::Now { target, .. }
         | Event::Acted { target, .. }
         | Event::PutOff { target, .. }
-        | Event::Refused { target, .. } => target,
+        | Event::Refused { target, .. }
+        | Event::Changed { target, .. } => target,
     };
+    if let Target::Im { guid, .. } = target {
+        return crate::msg::reacted(htlc, guid, e);
+    }
     let Some((cid, id)) = line_of(target) else {
         return;
     };
@@ -1153,7 +1178,7 @@ unsafe fn reactions(htlc: *mut c_void, e: &gtkhx_core::reactions::Event) {
                 hxhandlers::send::reactions::retry(htlc, target.clone(), key.clone(), *add);
             }
         }
-        Event::Refused { .. } | Event::Who { .. } => {}
+        Event::Refused { .. } | Event::Who { .. } | Event::Changed { .. } => {}
     }
 }
 

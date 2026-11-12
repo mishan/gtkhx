@@ -10,13 +10,15 @@ use hx_e2e::{servers_with, unique_name, Cap, Client, Reply, Server};
 use hxmodel::reactions::LineReactions;
 use hxnet::Event;
 use hxproto::messages::tag;
+use hxproto::messaging::{RosterState, CAP_MESSAGING};
 use hxproto::reactions::{
     parse_changed, parse_got, Group, Key, Mine, Summary, ADD, CLEAR, INVALID_KEY, REMOVE,
-    TARGETS_EPHEMERAL, TARGETS_LINES,
+    TARGETS_EPHEMERAL, TARGETS_IMS, TARGETS_LINES,
 };
 use hxproto::structured_chat::{NOT_ALLOWED, NO_SUCH_TARGET};
 use hxproto::target::Target;
 use hxproto::wire::ChunkIter;
+use hxrequest::messaging as im;
 use hxrequest::reactions as req;
 use hxrequest::Request;
 use hxsession::cap::{CHAT_HISTORY, REACTIONS, STRUCTURED_CHAT};
@@ -432,6 +434,137 @@ fn a_rooms_line_is_kind_4_under_its_chat_id() {
             "{}: {}",
             s.name,
             r.error_text()
+        );
+    }
+}
+
+/// `login` with reactions and the friend family, its session handling
+/// `handled`.
+fn messenger(s: &'static Server, login: &str, handled: Handled) -> Client {
+    let offer = OFFER | CAP_MESSAGING;
+    let c = Client::login_handling(s, login, Some(login), offer, handled, "hx-e2e")
+        .unwrap_or_else(|e| panic!("{e}"));
+    let limits = c.server_info().reactions;
+    assert!(
+        limits.is_some_and(|l| l.targets & TARGETS_IMS != 0),
+        "{login}: no reactions on instant messages: {limits:?}"
+    );
+    c
+}
+
+/// `a` and `b` made friends, whatever an earlier run left between them.
+fn befriend(a: &mut Client, a_login: &str, b: &mut Client, b_login: &str) {
+    for (c, other) in [(&mut *a, b_login), (&mut *b, a_login)] {
+        // Undoing nothing is refused, which is as good.
+        c.request(&im::unblock(other.as_bytes()).unwrap());
+        c.request(&im::remove_friend(other.as_bytes()).unwrap());
+    }
+    // Each asks the other, which is a friendship from sessions that
+    // understand message requests, as listing them says: a request to
+    // someone who removed the asker would be held, never told to them.
+    let mut state = None;
+    for (c, other) in [(&mut *a, b_login), (&mut *b, a_login)] {
+        c.request(&im::message_requests(None).unwrap());
+        let r = c.request(&im::add_friend(other.as_bytes(), None, true).unwrap());
+        state = r.chunk(tag::ROSTER_STATE).map(<[u8]>::to_vec);
+    }
+    assert_eq!(
+        state,
+        Some(RosterState::Accepted.wire().to_be_bytes().to_vec())
+    );
+}
+
+/// A message id no earlier run sent.
+fn guid() -> [u8; 16] {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    now.to_be_bytes()
+}
+
+/// The change `c` is told in Reaction Changed of `target`, skipping what
+/// else it is told, and failing on one told before `before` is answered.
+fn change(c: &mut Client, target: &Target, before: Option<u32>) -> (bool, Key, Vec<u8>) {
+    let mut answered = before.is_none();
+    loop {
+        match c.next_event().unwrap_or_else(|e| panic!("no 711: {e}")) {
+            Event::Session(hxsession::Event::Reply { trans, .. }) if Some(trans) == before => {
+                answered = true
+            }
+            Event::Session(hxsession::Event::Unhandled { opcode: 711, frame }) => {
+                for g in parse_changed(ChunkIter::over_message(&frame, frame.len())) {
+                    if let Group::Change {
+                        target: t,
+                        add,
+                        key,
+                        from: Some(from),
+                    } = g
+                    {
+                        if t == *target {
+                            assert!(answered, "told before Get Roster's reply");
+                            return (add, key, from);
+                        }
+                    }
+                }
+            }
+            Event::Frame(f) if f.header.type_ == 711 => panic!("711 came as a frame"),
+            _ => {}
+        }
+    }
+}
+
+/// A reaction to an instant message goes with the conversation's other
+/// party, is answered with no count, and is told to that party as a change
+/// naming who made it; one made while the party was away is told once it
+/// is back, after Get Roster's reply.
+#[test]
+fn an_instant_messages_reaction_reaches_its_other_party() {
+    for s in servers_with(&[Cap::Reactions, Cap::Messaging]) {
+        let mut a = messenger(s, "react-a", Handled::USERS);
+        let mut b = messenger(s, "react-b", Handled::NONE);
+        befriend(&mut a, "react-a", &mut b, "react-b");
+        let g = guid();
+        let sent = b.request(&im::im_send(b"react-a", &g, b"react to this", true).unwrap());
+        assert!(!sent.is_error(), "{}: {}", s.name, sent.error_text());
+        let bs = Target::Im {
+            guid: g,
+            sender: b"react-b".to_vec(),
+        };
+        let react = |c: &mut Client, emoji: &str| {
+            let key = Key::Emoji(emoji.into());
+            let r = c.request(&req::send(&bs, ADD, Some(&key), Some(b"react-b")).unwrap());
+            assert!(!r.is_error(), "{}: {}", s.name, r.error_text());
+            assert_eq!(r.chunk(tag::REACTION_COUNT), None, "{}: a count", s.name);
+        };
+        react(&mut a, THUMBS);
+        let from_a = b"react-a".to_vec();
+        assert_eq!(
+            change(&mut b, &bs, None),
+            (true, thumbs(), from_a.clone()),
+            "{}",
+            s.name
+        );
+
+        let uid = b.server_info().uid.expect("react-b's uid");
+        drop(b);
+        loop {
+            match a.next_event().unwrap_or_else(|e| panic!("{e}")) {
+                Event::Session(hxsession::Event::UserLeft { uid: gone, .. }) if gone == uid => {
+                    break
+                }
+                _ => {}
+            }
+        }
+        let party = "\u{1F389}";
+        react(&mut a, party);
+        let mut b = messenger(s, "react-b", Handled::NONE);
+        let roster = b.send(&im::roster());
+        assert_eq!(
+            change(&mut b, &bs, Some(roster)),
+            (true, Key::Emoji(party.into()), from_a),
+            "{}",
+            s.name
         );
     }
 }

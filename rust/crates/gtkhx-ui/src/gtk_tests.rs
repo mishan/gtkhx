@@ -52,6 +52,7 @@ fn display_backed() {
     crate::chat_output::tests::check_a_moderator_is_offered_to_clear_a_line_with_chips();
     crate::chat_output::tests::check_a_private_chats_kept_line_is_kind_4();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
+    crate::msg::tests::check_an_instant_messages_chips_are_its_parties();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();

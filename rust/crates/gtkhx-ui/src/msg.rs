@@ -13,10 +13,14 @@
 //! than a uid (`friends` opens it and hands it what the friend family
 //! says): it goes as instant messages, each marked with how far it has got,
 //! says when the friend is typing, and tells them what has been read once
-//! it is shown.
+//! it is shown. Where the session has reactions (the Reactions draft,
+//! capability bit 19) and they take an instant message's, each one there
+//! takes chips under its last row, reacted to as a chat line is
+//! (`reactions`); what the friend reacts with is told change by change,
+//! and kept with the conversation, since the server keeps none of it.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr};
 use std::rc::{Rc, Weak};
 
@@ -28,12 +32,19 @@ use gtk::prelude::*;
 use gtk4 as gtk;
 
 use gtkhx_core::boxed::msg::HxMsgEvent;
-use gtkhx_core::conn::{generation, hx_conn_has_cap, hx_conn_name, hx_conn_sess, hx_conn_uid};
+use gtkhx_core::conn::{
+    generation, hx_conn_has_cap, hx_conn_login, hx_conn_name, hx_conn_sess, hx_conn_uid,
+};
 use gtkhx_core::messaging::{with_roster, Delivery, Guid, Im};
 use hxmodel::friends::{self, TheirTyping, Typing};
 use hxmodel::pm::{self, Conversation, Conversations, Peer};
+use hxmodel::reactions::ImReactions;
 use hxproto::messaging::CAP_MESSAGING;
+use hxproto::target::Target;
+use rotulus::RotulusView;
+use rotulus_layout::MessageId;
 
+use crate::chat_output::Then;
 use crate::chat_tabs;
 use crate::dock::{self, ConnKey};
 use crate::tr::{tr, tr1};
@@ -92,6 +103,76 @@ struct ImState {
     sent: HashMap<Guid, Sent>,
     /// What arrived and is not shown yet, to tell its sender once it is.
     unread: Vec<Guid>,
+    ims: Ims,
+}
+
+/// A conversation's instant messages, by id: where each is drawn, and whose
+/// it is.
+#[derive(Default)]
+struct Ims {
+    rows: HashMap<Guid, ImRow>,
+    /// Oldest first.
+    order: VecDeque<Guid>,
+}
+
+struct ImRow {
+    /// The message's first row.
+    first: MessageId,
+    /// Its last, which its chips go under.
+    row: MessageId,
+    /// Who sent it, by Login: the friend, or our own account.
+    sender: Vec<u8>,
+    reactions: ImReactions,
+}
+
+impl Ims {
+    /// Instant message `guid`, `sender`'s, was drawn on the rows from
+    /// `first` to `row`, in a view that keeps `max_rows`. One drawn again
+    /// keeps its first rows.
+    fn drew(&mut self, guid: Guid, sender: &[u8], rows: (MessageId, MessageId), max_rows: usize) {
+        if self.rows.contains_key(&guid) {
+            return;
+        }
+        let ((first, row), sender) = (rows, sender.to_vec());
+        let reactions = ImReactions::default();
+        self.rows.insert(
+            guid,
+            ImRow {
+                first,
+                row,
+                sender,
+                reactions,
+            },
+        );
+        self.order.push_back(guid);
+        // Each takes a row at least, so past that many the oldest is gone.
+        while max_rows != 0 && self.order.len() > max_rows {
+            if let Some(gone) = self.order.pop_front() {
+                self.rows.remove(&gone);
+            }
+        }
+    }
+
+    /// The message `row` is one of: a view numbers its rows in the order
+    /// they are drawn, and a message's are drawn together.
+    fn on(&self, row: MessageId) -> Option<Guid> {
+        let of = |r: &ImRow| (r.first.0..=r.row.0).contains(&row.0);
+        self.rows.iter().find(|(_, r)| of(r)).map(|(g, _)| *g)
+    }
+
+    /// How the Reactions draft names message `guid`.
+    fn target(&self, guid: &Guid) -> Option<Target> {
+        let sender = self.rows.get(guid)?.sender.clone();
+        Some(Target::Im {
+            guid: *guid,
+            sender,
+        })
+    }
+
+    fn forget(&mut self, guid: &Guid) {
+        self.rows.remove(guid);
+        self.order.retain(|g| g != guid);
+    }
 }
 
 struct Sent {
@@ -175,6 +256,9 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
         conn,
     );
     let output: gtk::Widget = from_glib_none(raw);
+    if let (Peer::Login(_), Some(view)) = (peer, output.downcast_ref::<RotulusView>()) {
+        crate::reactions::hear(view);
+    }
     let adjustment: Option<gtk::Adjustment> =
         from_glib_none(rotulus::ffi::rotulus_view_get_vadjustment(raw));
     let vscroll = gtk::Scrollbar::new(gtk::Orientation::Vertical, adjustment.as_ref());
@@ -455,14 +539,17 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
         &first,
         Some(&delivery_words(Delivery::Sending)),
     );
+    let mut last = mark;
     for rest in lines {
-        rotulus::ffi::rotulus_view_append_text(
+        last = rotulus::ffi::rotulus_view_append_text(
             wptr(&view),
             rest.as_ptr().cast(),
             rest.len() as i32,
             stamp,
         );
     }
+    let own = CStr::from_ptr(hx_conn_login(htlc.cast())).to_bytes();
+    drew_im(win, guid, own, (mark, last));
     let sent = Sent {
         mark: mark as usize,
         line: first,
@@ -729,24 +816,41 @@ unsafe fn render(
 }
 
 /// Draw a message into `win`: its first row as `line`, the rest as text.
+/// Its first and last rows' marks.
 ///
 /// # Safety
 /// Main thread.
-unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) {
+unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) -> (*mut c_void, *mut c_void) {
+    let (mut first, mut last) = (std::ptr::null_mut(), std::ptr::null_mut());
     let Some(view) = win.output.upgrade() else {
-        return;
+        return (first, last);
     };
     for (i, text) in pm::rows(body).enumerate() {
-        if i == 0 {
-            line.put(&view, None, text, None);
+        last = if i == 0 {
+            first = line.put(&view, None, text, None);
+            first
         } else {
             rotulus::ffi::rotulus_view_append_text(
                 wptr(&view),
                 text.as_ptr().cast(),
                 text.len() as i32,
                 line.stamp,
-            );
-        }
+            )
+        };
+    }
+    (first, last)
+}
+
+/// Instant message `guid`, `sender`'s, was drawn in `win` on the `rows`
+/// from the first mark to the last.
+fn drew_im(win: &MsgWin, guid: Guid, sender: &[u8], rows: (*mut c_void, *mut c_void)) {
+    let view = win.output.upgrade().and_downcast::<RotulusView>();
+    if let (Some(view), false) = (view, rows.0.is_null() || rows.1.is_null()) {
+        let rows = (MessageId(rows.0 as u64), MessageId(rows.1 as u64));
+        win.im
+            .borrow_mut()
+            .ims
+            .drew(guid, sender, rows, view.max_rows());
     }
 }
 
@@ -779,7 +883,8 @@ pub(crate) unsafe fn im(htlc: *mut c_void, m: &Im, quiet: bool) {
     // Whoever sent it, no bidi override or invisible character of theirs
     // reaches the transcript or the desktop.
     let body = friends::plain_text(&m.body);
-    draw(&win, &line, &body);
+    let rows = draw(&win, &line, &body);
+    drew_im(&win, m.guid, &m.from, rows);
     show_typing(&win, false);
     chat_tabs::set_attention_msg(htlc, &peer, true);
     win.im.borrow_mut().unread.push(m.guid);
@@ -825,6 +930,189 @@ pub(crate) unsafe fn delivered(htlc: *mut c_void, to: &[u8], guid: &Guid, d: Del
     }
 }
 
+/// The friend's conversation `view` shows.
+fn shown_in(view: &RotulusView) -> Option<Rc<MsgWin>> {
+    let conn = crate::chat_view::conn_of(view)?;
+    let shows = |w: &Rc<MsgWin>| {
+        w.output
+            .upgrade()
+            .is_some_and(|o| &o == view.upcast_ref::<gtk::Widget>())
+    };
+    of_conn(conn).into_iter().find(shows)
+}
+
+/// The instant message drawn on `row` of `view`, where `limits` take
+/// reactions to one.
+pub(crate) fn im_on(
+    view: &RotulusView,
+    row: MessageId,
+    limits: &hxproto::reactions::Limits,
+) -> Option<Guid> {
+    let win = shown_in(view)?;
+    im_in(&win, row, limits)
+}
+
+fn im_in(win: &MsgWin, row: MessageId, limits: &hxproto::reactions::Limits) -> Option<Guid> {
+    let ims = &win.im.borrow().ims;
+    let guid = ims.on(row)?;
+    limits.takes(&ims.target(&guid)?).then_some(guid)
+}
+
+/// As `chat_output::want`, for instant message `guid` in `view`.
+pub(crate) fn want(
+    view: &RotulusView,
+    guid: Guid,
+    key: &str,
+    on: Option<bool>,
+    limits: &hxproto::reactions::Limits,
+) -> Option<Then<Guid>> {
+    let win = shown_in(view)?;
+    want_in(&win, guid, key, on, limits)
+}
+
+fn want_in(
+    win: &MsgWin,
+    guid: Guid,
+    key: &str,
+    on: Option<bool>,
+    limits: &hxproto::reactions::Limits,
+) -> Option<Then<Guid>> {
+    let key = match crate::chat_output::chip_key(key) {
+        Ok(key) => key,
+        Err(say) => return Some(say),
+    };
+    // The login's caps are a line's: a server keeps nothing of an instant
+    // message's to hold them to.
+    let uncapped = hxproto::reactions::Limits {
+        max_keys: None,
+        max_per_user: None,
+        ..*limits
+    };
+    redraw(win, &guid, |r| {
+        crate::chat_output::wanted(&mut r.shown, guid, key, on, &uncapped)
+    })?
+}
+
+/// Draw instant message `guid`'s chips again, after `change` to its
+/// reactions; what it returns. One whose row has gone is let go of.
+fn redraw<T>(win: &MsgWin, guid: &Guid, change: impl FnOnce(&mut ImReactions) -> T) -> Option<T> {
+    let view = win.output.upgrade()?.downcast::<RotulusView>().ok()?;
+    let (row, chips, done) = {
+        let mut im = win.im.borrow_mut();
+        let r = im.ims.rows.get_mut(guid)?;
+        let done = change(&mut r.reactions);
+        let chips = crate::chat_output::chips(&r.reactions.shown.shown());
+        (r.row, chips, done)
+    };
+    if !view.set_reactions(row, chips) {
+        win.im.borrow_mut().ims.forget(guid);
+    }
+    Some(done)
+}
+
+/// Do what [`want`] left to do in `view`, on `htlc`.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn then(htlc: *mut c_void, view: &RotulusView, t: Then<Guid>) {
+    if let Some(win) = shown_in(view) {
+        act(htlc, &win, t);
+    }
+}
+
+/// # Safety
+/// See [`then`].
+unsafe fn act(htlc: *mut c_void, win: &MsgWin, t: Then<Guid>) {
+    use hxhandlers::send::reactions as send;
+    let (guid, key) = match &t {
+        Then::Send(g, k, _) | Then::Withdraw(g, k) => (*g, k.clone()),
+        Then::Say(text) => return crate::reactions::toast(text),
+    };
+    let (Peer::Login(with), Some(target)) = (&win.peer, win.im.borrow().ims.target(&guid)) else {
+        return;
+    };
+    let gone = match t {
+        Then::Send(_, _, add) => {
+            let sent = send::react_im(htlc, target, with, key.clone(), add);
+            if !sent {
+                let invalid = Some(hxproto::reactions::INVALID_KEY);
+                crate::reactions::toast(&crate::reactions::refusal(invalid, None));
+            }
+            !sent
+        }
+        _ => send::withdraw(htlc, &target, &key),
+    };
+    if gone {
+        redraw(win, &guid, |r| r.shown.refused(&key));
+    }
+}
+
+/// What the `reactions` signal said of instant message `guid` on `htlc`.
+///
+/// # Safety
+/// Main thread; `htlc` is a live connection.
+pub(crate) unsafe fn reacted(htlc: *mut c_void, guid: &Guid, e: &gtkhx_core::reactions::Event) {
+    use gtkhx_core::reactions::Event;
+    let holds = |w: &Rc<MsgWin>| w.im.borrow().ims.rows.contains_key(guid);
+    // A change is the other party's, so in the conversation with them.
+    let win = match e {
+        Event::Changed { from, .. } => find(dock::conn_key(htlc), &Peer::Login(from.clone())),
+        _ => of_conn(dock::conn_key(htlc)).into_iter().find(holds),
+    };
+    // The user hears why their own act was refused even once the
+    // conversation it was in has closed.
+    if let Event::Refused {
+        key, reason, error, ..
+    } = e
+    {
+        if let (Some(win), Some(key)) = (&win, key) {
+            redraw(win, guid, |r| r.shown.refused(key));
+        }
+        return crate::reactions::toast(&crate::reactions::refusal(*reason, error.as_deref()));
+    }
+    let Some(win) = win else {
+        return;
+    };
+    match e {
+        Event::PutOff { target, key, add } => {
+            let again = redraw(&win, guid, |r| r.shown.put_off(key)) == Some(true);
+            if let (true, Peer::Login(with)) = (again, &win.peer) {
+                hxhandlers::send::reactions::retry_im(
+                    htlc,
+                    target.clone(),
+                    with,
+                    key.clone(),
+                    *add,
+                );
+            }
+        }
+        _ => {
+            if let Some(t) = heard(&win, guid, e) {
+                act(htlc, &win, t);
+            }
+        }
+    }
+}
+
+/// What a change of instant message `guid`'s in `win`, or the answer to
+/// our own, leaves to do: ask for what the user has wanted since.
+fn heard(win: &MsgWin, guid: &Guid, e: &gtkhx_core::reactions::Event) -> Option<Then<Guid>> {
+    use gtkhx_core::reactions::Event;
+    match e {
+        Event::Changed { key, add, from, .. } => {
+            redraw(win, guid, |r| r.told(key, *add, from));
+            None
+        }
+        Event::Acted {
+            key, add, count, ..
+        } => {
+            let again = redraw(win, guid, |r| r.shown.answered(key, *add, *count))??;
+            Some(Then::Send(*guid, key.clone(), again))
+        }
+        _ => None,
+    }
+}
+
 /// `htlc`'s connection changed state: what was sent on an earlier connect
 /// will hear no more, but for what was still being sent, which the
 /// roster's own forgetting fails.
@@ -838,6 +1126,16 @@ pub(crate) unsafe fn forget_sent(htlc: *mut c_void) {
             .borrow_mut()
             .sent
             .retain(|_, s| s.connect == connect || s.at == Delivery::Sending);
+        unanswered(&win);
+    }
+}
+
+/// The reactions asked for in `win` and not answered never will be: the
+/// connection's requests went with it.
+fn unanswered(win: &MsgWin) {
+    let guids: Vec<Guid> = win.im.borrow().ims.rows.keys().copied().collect();
+    for guid in guids {
+        redraw(win, &guid, |r| r.shown.settle());
     }
 }
 
@@ -1306,8 +1604,153 @@ pub unsafe extern "C" fn hx_msg_configure(sess: *mut c_void) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use super::*;
     use super::{friend_markup, info_markup};
+
+    /// A friend's conversation with bob in `view`, as `create` files one.
+    fn bobs(view: &RotulusView) -> MsgWin {
+        MsgWin {
+            conn: 0,
+            peer: Peer::Login(b"bob".to_vec()),
+            model: RefCell::new(Conversation::new("bob")),
+            content: Default::default(),
+            output: view.upcast_ref::<gtk::Widget>().downgrade(),
+            input: Default::default(),
+            info_image: Default::default(),
+            info_label: Default::default(),
+            typing: Default::default(),
+            im: RefCell::default(),
+            shown_in: RefCell::default(),
+        }
+    }
+
+    /// Draw `text` in `view` as a row: its mark.
+    fn row(view: &RotulusView, text: &str) -> MessageId {
+        let w = view.upcast_ref::<gtk::Widget>().as_ptr();
+        // SAFETY: a live view.
+        let p = unsafe {
+            rotulus::ffi::rotulus_view_append_text(w, text.as_ptr().cast(), text.len() as i32, 0)
+        };
+        MessageId(p as u64)
+    }
+
+    /// An instant message's chips go under its last row: what the friend
+    /// reacts with as each change says, and ours at once as asked, held to
+    /// no cap of a line's, kept once answered, and let go of where the
+    /// connection went before the answer; a placeholder is none to ask
+    /// for. Any of its rows is the message's; a row of no message, and a
+    /// session that takes no instant message's reactions, is none of this.
+    /// Each message is named by who sent it.
+    pub(crate) fn check_an_instant_messages_chips_are_its_parties() {
+        use gtkhx_core::reactions::Event;
+        use hxproto::reactions::{Key, Limits, TARGETS_IMS, TARGETS_LINES};
+        let up = "\u{1F44D}";
+        let key = Key::Emoji(up.into());
+        let takes = |targets| Limits {
+            targets,
+            max_keys: None,
+            max_per_user: None,
+        };
+        let view = RotulusView::new();
+        let win = bobs(&view);
+        let (theirs, ours) = ([1; 16], [2; 16]);
+        let mark = |row: MessageId| row.0 as *mut c_void;
+        let first = row(&view, "hi");
+        let last = row(&view, "there");
+        drew_im(&win, theirs, b"bob", (mark(first), mark(last)));
+        let mine = row(&view, "hello");
+        drew_im(&win, ours, b"alice", (mark(mine), mark(mine)));
+        let notice = row(&view, "no message");
+        let shown = |row| {
+            (view.reactions_of(row).into_iter())
+                .map(|r| (r.key, r.count, r.mine))
+                .collect::<Vec<_>>()
+        };
+        let ups = |n, mine| vec![(up.to_owned(), n, mine)];
+        let changed = |add| Event::Changed {
+            target: win.im.borrow().ims.target(&theirs).unwrap(),
+            key: key.clone(),
+            add,
+            from: b"bob".to_vec(),
+        };
+
+        assert_eq!(heard(&win, &theirs, &changed(true)), None);
+        assert_eq!((shown(last), shown(first)), (ups(1, false), vec![]));
+        let ims = takes(TARGETS_IMS);
+        // Held to no cap of a line's.
+        let capped = Limits {
+            max_keys: Some(0),
+            max_per_user: Some(0),
+            ..ims
+        };
+        let send = Some(Then::Send(theirs, key.clone(), true));
+        assert_eq!(want_in(&win, theirs, up, None, &capped), send);
+        assert_eq!(shown(last), ups(2, true));
+        // A connection's requests go with it, so this one's answer never
+        // comes, and the next click asks again.
+        unanswered(&win);
+        assert_eq!(shown(last), ups(1, false));
+        assert_eq!(want_in(&win, theirs, up, None, &ims), send);
+        assert_eq!(shown(last), ups(2, true));
+        let acted = Event::Acted {
+            target: win.im.borrow().ims.target(&theirs).unwrap(),
+            key: key.clone(),
+            add: true,
+            count: None,
+        };
+        assert_eq!(heard(&win, &theirs, &acted), None);
+        assert_eq!(heard(&win, &theirs, &changed(false)), None);
+        assert_eq!(shown(last), ups(1, true));
+        assert_eq!(
+            want_in(&win, theirs, "server-emoji:9", None, &ims),
+            Some(Then::Say(crate::reactions::server_emoji()))
+        );
+
+        for (row, guid) in [(first, theirs), (last, theirs), (mine, ours)] {
+            assert_eq!(im_in(&win, row, &ims), Some(guid));
+        }
+        for (case, row, limits) in [
+            ("no message's row", notice, &ims),
+            ("lines alone", last, &takes(TARGETS_LINES)),
+        ] {
+            assert_eq!(im_in(&win, row, limits), None, "{case}");
+        }
+        let named = |g| win.im.borrow().ims.target(&g);
+        assert_eq!(
+            (named(theirs), named(ours)),
+            (
+                Some(Target::Im {
+                    guid: theirs,
+                    sender: b"bob".to_vec()
+                }),
+                Some(Target::Im {
+                    guid: ours,
+                    sender: b"alice".to_vec()
+                })
+            )
+        );
+    }
+
+    /// A conversation keeps each message's rows once, its first, and lets
+    /// the oldest go once there are more than the view keeps rows.
+    #[test]
+    fn a_conversation_keeps_what_its_view_can_still_show() {
+        let mut ims = Ims::default();
+        let row = |n| (MessageId(n), MessageId(n));
+        ims.drew([1; 16], b"bob", row(1), 2);
+        ims.drew([1; 16], b"bob", row(9), 2);
+        assert_eq!(ims.on(MessageId(9)), None, "drawn again");
+        ims.drew([2; 16], b"bob", row(2), 2);
+        ims.drew([3; 16], b"bob", row(3), 2);
+        let held = |ims: &Ims| [1, 2, 3].map(|n| ims.on(MessageId(n)).is_some());
+        assert_eq!(held(&ims), [false, true, true]);
+        let mut all = Ims::default();
+        for n in 1..=3 {
+            all.drew([n; 16], b"bob", row(u64::from(n)), 0);
+        }
+        assert_eq!(held(&all), [true; 3], "no limit");
+    }
 
     #[test]
     fn a_friends_pane_says_what_their_entry_does() {

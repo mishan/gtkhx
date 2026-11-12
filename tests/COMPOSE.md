@@ -155,8 +155,9 @@ after. hxd-ng's messaging needs
 the moderation trail, reports and bans in its `messages.db` rather than
 the news database.
 Its `react-*` accounts likewise react, beside `[history]` and
-`[reactions]`, for the reactions suite, in the lobby and in the one room
-`[rooms]` holds, which they join by its id.
+`[reactions]`, for the reactions suite, in the lobby, in the one room
+`[rooms]` holds, which they join by its id, and on the instant messages
+`react-a` and `react-b` send each other as friends.
 hlservd's `admin` has no password until one is set, and until then logs
 in only from the machine running the server, which host networking makes
 every test connection; its flood ban is off for loopback

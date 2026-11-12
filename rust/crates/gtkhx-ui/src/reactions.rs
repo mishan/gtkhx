@@ -1,10 +1,11 @@
 //! Reacting to a line, the lobby's or a private chat's (a room, on
-//! hxd-ng), where the session has reactions (the Reactions draft,
-//! capability bit 19): a click on a chip, or the row's
+//! hxd-ng), or to an instant message, where the session has reactions (the
+//! Reactions draft, capability bit 19): a click on a chip, or the row's
 //! menu, with a few emoji to react with at once and GTK's emoji chooser
-//! for any other, and who reacted with each emoji, from the menu or a
-//! chip's own; a moderator's menu clears the line's reactions. What the
-//! line holds is `chat_output`'s; a refusal is told as a toast.
+//! for any other, and who reacted to a line with each emoji, from the menu
+//! or a chip's own; a moderator's menu clears the line's reactions. What a
+//! line holds is `chat_output`'s, and an instant message `msg`'s, which
+//! nobody can ask the server after; a refusal is told as a toast.
 //!
 //! Without reactions no row is anyone's here, and the view's own menu
 //! opens as before.
@@ -125,6 +126,15 @@ fn react(view: &RotulusView, row: MessageId, key: &str, on: Option<bool>) -> boo
     let Some((htlc, limits)) = session(view) else {
         return false;
     };
+    if let Some(guid) = crate::msg::im_on(view, row, &limits) {
+        let t = crate::msg::want(view, guid, key, on, &limits);
+        let refused = matches!(t, Some(Then::Say(_)));
+        if let Some(t) = t {
+            // SAFETY: as for `session`.
+            unsafe { crate::msg::then(htlc, view, t) };
+        }
+        return refused;
+    }
     let t = want(view, row, key, on, &limits);
     let refused = matches!(t, Some(Then::Say(_)));
     if let Some(t) = t {
@@ -201,18 +211,22 @@ fn items() -> gtk::Box {
 }
 
 /// `row`'s menu at `x`, `y`: the quick emoji, "Add Reaction…" for the
-/// chooser, "Who Reacted…" where it has emoji chips, "Clear Reactions…"
-/// for a moderator where it has any, and the view's own Copy and Select
-/// All. Whether `row` is a line one can react to.
+/// chooser, on a line "Who Reacted…" where it has emoji chips and "Clear
+/// Reactions…" for a moderator where it has any, and the view's own Copy
+/// and Select All. Whether `row` is a line or an instant message one can
+/// react to.
 fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
     let Some((htlc, limits)) = session(view) else {
         return false;
     };
-    let Some(id) = line_on(view, row, &limits) else {
+    let line = line_on(view, row, &limits);
+    if line.is_none() && crate::msg::im_on(view, row, &limits).is_none() {
         return false;
-    };
-    // SAFETY: as for `session`.
-    unsafe { refresh_if_stale(view, htlc, id) };
+    }
+    if let Some(id) = line {
+        // SAFETY: as for `session`.
+        unsafe { refresh_if_stale(view, htlc, id) };
+    }
     let popover = gtk::Popover::new();
     let items = items();
     let quick = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -232,7 +246,7 @@ fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
     item(&items, &popover, view, &tr("Add Reaction…"), move |v| {
         chooser(v, row, x, y)
     });
-    let emoji = emoji_on(view, id);
+    let emoji = line.map(|id| emoji_on(view, id)).unwrap_or_default();
     if !emoji.is_empty() {
         // TRANSLATORS: in a chat line's menu; lists the emoji the line has
         // been reacted with, to see who reacted with one.
@@ -241,7 +255,7 @@ fn menu(view: &RotulusView, row: MessageId, x: f64, y: f64) -> bool {
         });
     }
     // SAFETY: as for `session`.
-    if unsafe { clears(htlc, view, id) } {
+    if let Some(id) = line.filter(|&id| unsafe { clears(htlc, view, id) }) {
         let conn = crate::dock::bind(crate::dock::conn_key(htlc));
         // TRANSLATORS: in a chat line's menu, for a moderator; asks before
         // taking away every reaction on the line.

@@ -1409,6 +1409,19 @@ is its chat's own count (`is_ephemeral`), such as a true private chat's, which h
 keeps nowhere, takes none: kind 4 cannot say which count its id is from, so GtkHx
 offers no reaction there, nor on the lobby's own such lines.
 
+An instant message takes reactions where the login offers kind 2, which hxd-ng does only
+beside bit 6, so a build offers it with gtkhx-ffi's `messaging` feature as well. It is
+named by its guid and its sender's Login, the friend's or our own account's, and a 710
+carries the conversation's other party (0x0600); the reply has no count. A server keeps
+none of it to be read back: the other party hears each change as a 711 change group naming
+who made it, and one made while it was away after its next Get Roster's reply, once what
+waited for it has been handed over. So each friend's conversation keeps what it was told,
+under each message's last row, a key counted once a reactor, with ours as our own requests
+made them, and keeps it across a reconnect as it keeps the messages; a change to a message
+it no longer shows is dropped. A reaction from another session of ours is never told
+here, since the draft tells the other party alone. Such a message's chips and menu are a
+line's, but for who reacted, which needs a 712, and the moderator's clear.
+
 A click on a line's chip, or Enter on it, makes that reaction or takes it back; the
 line's menu offers a few emoji at once (`chat.emoji.quick_reactions`, the last used first)
 and GTK's emoji chooser, whose pick is sent fully qualified. The chip changes at once:
@@ -1449,8 +1462,10 @@ Capability bits 6, 7 and 8, access bit 58,
 [Capabilities-Messaging.md](https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Messaging.md).
 A buddy-list instant-messaging layer: transactions 800–821 for roster, presence, message
 delivery and acknowledgment, typing, file offers with relayed or direct transfer, and
-call invitations; limit fields 0x0620–0x0622. Neither GtkHx nor hxd-ng implements it;
-hxd-ng keeps its allocations reserved.
+call invitations; limit fields 0x0620–0x0622. GtkHx and hxd-ng implement its friend
+family on bit 6 (roster, presence, instant messages, receipts and typing), GtkHx only in
+a build with `gtkhx-ffi/messaging` ([messaging.md](messaging.md)); neither implements file
+offers or calls.
 
 ### GIF icons
 
