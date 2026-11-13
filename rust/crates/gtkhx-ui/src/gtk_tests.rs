@@ -22,10 +22,6 @@ use libadwaita as adw;
 
 #[test]
 fn display_backed() {
-    // Without an accessibility bus, as in a sealed session, GTK falls back
-    // to its test context, which has no announce for the chat view to call
-    // as the keyboard reaches a row.
-    std::env::set_var("GTK_A11Y", "none");
     assert!(
         gtk::init().is_ok(),
         "no display: run under xvfb-run with GDK_BACKEND=x11"

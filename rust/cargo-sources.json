@@ -5556,30 +5556,30 @@
   {
     "type": "git",
     "url": "https://github.com/mishan/rotulus.git",
-    "commit": "ee7a473562deaf2f09194408a14044e874ebd430",
-    "dest": "cargo/git/rotulus-ee7a473562de/rotulus"
+    "commit": "b7949c0031dedce697863b32bedb3c289d07dab7",
+    "dest": "cargo/git/rotulus-b7949c0031de/rotulus"
   },
   {
     "type": "inline",
     "contents": "{\"package\": null, \"files\": {}}",
-    "dest": "cargo/git/rotulus-ee7a473562de/rotulus/crates/rotulus",
+    "dest": "cargo/git/rotulus-b7949c0031de/rotulus/crates/rotulus",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "inline",
     "contents": "{\"package\": null, \"files\": {}}",
-    "dest": "cargo/git/rotulus-ee7a473562de/rotulus/crates/rotulus-layout",
+    "dest": "cargo/git/rotulus-b7949c0031de/rotulus/crates/rotulus-layout",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "inline",
     "contents": "{\"package\": null, \"files\": {}}",
-    "dest": "cargo/git/rotulus-ee7a473562de/rotulus/crates/rotulus-mirc",
+    "dest": "cargo/git/rotulus-b7949c0031de/rotulus/crates/rotulus-mirc",
     "dest-filename": ".cargo-checksum.json"
   },
   {
     "type": "inline",
-    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"/run/build/gtkhx/cargo/vendor\"\n\n[source.\"git+https://github.com/mishan/hx-libs.git?rev=51301be7a5e2df7ec033c05d1245375439ef010d\"]\ngit = \"https://github.com/mishan/hx-libs.git\"\nrev = \"51301be7a5e2df7ec033c05d1245375439ef010d\"\nreplace-with = \"vendored-git-0\"\n\n[source.vendored-git-0]\ndirectory = \"/run/build/gtkhx/cargo/git/hx-libs-51301be7a5e2/hx-libs/crates\"\n\n[source.\"git+https://github.com/mishan/rotulus.git?rev=ee7a473562deaf2f09194408a14044e874ebd430\"]\ngit = \"https://github.com/mishan/rotulus.git\"\nrev = \"ee7a473562deaf2f09194408a14044e874ebd430\"\nreplace-with = \"vendored-git-1\"\n\n[source.vendored-git-1]\ndirectory = \"/run/build/gtkhx/cargo/git/rotulus-ee7a473562de/rotulus/crates\"\n",
+    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"/run/build/gtkhx/cargo/vendor\"\n\n[source.\"git+https://github.com/mishan/hx-libs.git?rev=51301be7a5e2df7ec033c05d1245375439ef010d\"]\ngit = \"https://github.com/mishan/hx-libs.git\"\nrev = \"51301be7a5e2df7ec033c05d1245375439ef010d\"\nreplace-with = \"vendored-git-0\"\n\n[source.vendored-git-0]\ndirectory = \"/run/build/gtkhx/cargo/git/hx-libs-51301be7a5e2/hx-libs/crates\"\n\n[source.\"git+https://github.com/mishan/rotulus.git?rev=b7949c0031dedce697863b32bedb3c289d07dab7\"]\ngit = \"https://github.com/mishan/rotulus.git\"\nrev = \"b7949c0031dedce697863b32bedb3c289d07dab7\"\nreplace-with = \"vendored-git-1\"\n\n[source.vendored-git-1]\ndirectory = \"/run/build/gtkhx/cargo/git/rotulus-b7949c0031de/rotulus/crates\"\n",
     "dest": "cargo",
     "dest-filename": "config.toml"
   }
