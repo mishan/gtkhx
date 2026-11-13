@@ -57,6 +57,8 @@ fn display_backed() {
     crate::chat_output::tests::check_a_trimmed_reply_asks_for_no_quote();
     crate::chat_output::tests::check_a_reply_header_goes_to_its_line();
     crate::chat_output::tests::check_a_private_chats_reply_is_quoted_from_its_window();
+    crate::chat_output::tests::check_a_spotlit_line_scrolled_out_of_view_is_let_go();
+    crate::chat_output::tests::check_r_replies_to_the_row_the_keyboard_is_on();
     crate::chat_output::tests::check_a_rows_menu_offers_what_the_login_agreed();
     crate::chat_input::tests::check_a_reply_goes_with_the_next_line_said();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
