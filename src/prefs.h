@@ -76,7 +76,6 @@ struct gtkhx_prefs {
     unsigned char markdown;
     unsigned char word_wrap;
     unsigned char track_case;
-    unsigned char old_nickcompletion;
     unsigned char outrate_limit;
     unsigned char inrate_limit;
 

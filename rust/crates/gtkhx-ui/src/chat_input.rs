@@ -12,9 +12,9 @@
 //!     (`route_line`: chat, a server command, or a client `/command`), clear.
 //!     A line said as chat answers the line the reply bar holds.
 //!   - **Escape** → cancel a pending reply (`reply_bar`), and only then.
-//!   - **Tab / Shift+Tab** → nick completion against the chat's membership
-//!     (the C `tab_nick_comp` core — kept in C so the tested completer + the
-//!     ambiguous-list `hx_printf` stay put).
+//!   - **Tab / Shift+Tab** → nick completion against the chat's membership,
+//!     an ambiguous prefix's candidates listed in that chat once a run of
+//!     Tabs (`complete_nick`).
 //!   - **Up / Down** → history navigation (the Rust `InputHistory` owns the
 //!     draft snapshot), but only from the edge of the draft — see
 //!     `HISTORY_NAV_KEY`.
@@ -27,7 +27,7 @@
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
 
-use glib::translate::{from_glib_borrow, from_glib_none};
+use glib::translate::{from_glib_borrow, from_glib_full, from_glib_none, IntoGlib};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
@@ -35,7 +35,9 @@ use hxproto::target::Target;
 
 use crate::tr::tr;
 use hxhandlers::send::chat::send_chat_line;
-use hxmodel::chat_members::{hx_input_history_down, hx_input_history_record, hx_input_history_up};
+use hxmodel::chat_members::{
+    hx_input_history_down, hx_input_history_record, hx_input_history_up, hx_nick_complete,
+};
 use hxmodel::conversation::hx_chat_member_model;
 
 extern "C" {
@@ -45,14 +47,7 @@ extern "C" {
     fn hx_command(htlc: *mut c_void, s: *mut c_char, cid: u32);
 
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
-    fn tab_nick_comp(
-        sess: *mut c_void,
-        member_model: *mut c_void,
-        text: *mut c_char,
-        reverse: glib::ffi::gboolean,
-        pos: i32,
-        entry: *mut gtk::ffi::GtkWidget,
-    ) -> i32;
+    fn gtkhx_prefs_get_bool(name: *const c_char) -> std::ffi::c_int;
 
     fn create_connect_window(btn: *mut gtk::ffi::GtkWidget, data: *mut c_void);
 }
@@ -127,8 +122,8 @@ fn dispatch_line(
     }
 }
 
-/// The whole buffer as a NUL-terminated, mutable byte buffer — the C send /
-/// completion paths take `char*` and may tokenise in place (strtok), so the
+/// The whole buffer as a NUL-terminated, mutable byte buffer — the C send
+/// paths take `char*` and may tokenise in place (strtok), so the
 /// backing storage must be writable and outlive the call.
 fn buffer_cbytes(buf: &gtk::TextBuffer) -> Vec<u8> {
     let text = buf.text(&buf.start_iter(), &buf.end_iter(), false);
@@ -163,6 +158,73 @@ fn history_nav(buf: &gtk::TextBuffer) -> bool {
 
 fn set_history_nav(buf: &gtk::TextBuffer, on: bool) {
     unsafe { buf.set_data(HISTORY_NAV_KEY, on) };
+}
+
+/// The candidates a Tab last listed, until the input is edited. A Tab
+/// finding the same ones with nothing typed since would only list them
+/// again.
+const LISTED_KEY: &str = "gtkhx-chat-input-listed";
+
+fn listed(buf: &gtk::TextBuffer) -> Option<String> {
+    unsafe {
+        buf.data::<Option<String>>(LISTED_KEY)
+            .and_then(|p| p.as_ref().clone())
+    }
+}
+
+fn forget_listing_on_edit(buf: &gtk::TextBuffer) {
+    buf.connect_changed(|buf| unsafe { buf.set_data::<Option<String>>(LISTED_KEY, None) });
+}
+
+/// Complete the nick at the caret in `buf`, the input of chat `cid` on
+/// `sess`, against that chat's members, listing an ambiguous prefix's
+/// candidates there unless the last Tab listed the same.
+///
+/// # Safety
+/// `sess` is the live session the input belongs to.
+unsafe fn complete_nick(buf: &gtk::TextBuffer, sess: *mut c_void, cid: u32, reverse: bool) {
+    let chat = chat_with_cid(sess, cid);
+    if chat.is_null() {
+        return;
+    }
+    let old_style = gtkhx_prefs_get_bool(crate::cs(crate::options::cfg::OLD_NICKCOMP).as_ptr());
+    let text = buffer_cbytes(buf);
+    let (mut out, mut caret, mut info) = (ptr::null_mut(), -1, ptr::null_mut());
+    if hx_nick_complete(
+        hx_chat_member_model(chat.cast()),
+        text.as_ptr().cast(),
+        buf.cursor_position() as usize,
+        reverse.into_glib(),
+        ':'.into(),
+        old_style,
+        &mut out,
+        &mut caret,
+        &mut info,
+    ) == glib::ffi::GFALSE
+    {
+        return;
+    }
+    let (out, info): (String, Option<String>) = (from_glib_full(out), from_glib_full(info));
+    let again = listed(buf);
+    buf.set_text(&out);
+    match caret {
+        -1 => buf.place_cursor(&buf.end_iter()),
+        at => buf.place_cursor(&buf.iter_at_offset(at)),
+    }
+    if let Some(names) = info {
+        if again.as_ref() != Some(&names) {
+            let names = crate::cs(&names);
+            gtkhx_core::session::gtkhx_session_emit_chat_log_line(
+                gtkhx_core::session::gtkhx_session_get_default(),
+                gtkhx_session_htlc(sess),
+                cid,
+                ptr::null(),
+                0,
+                names.as_ptr(),
+            );
+        }
+        buf.set_data(LISTED_KEY, Some(names));
+    }
 }
 
 /// Wrap the selection in `delim`, or unwrap it if it is already
@@ -398,24 +460,7 @@ fn on_key(
         Key::Tab | Key::ISO_Left_Tab => {
             let reverse =
                 keyval == Key::ISO_Left_Tab || state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
-            let mut text = buffer_cbytes(&buf);
-            unsafe {
-                let chat = chat_with_cid(sess, cid);
-                let mm = if chat.is_null() {
-                    ptr::null_mut()
-                } else {
-                    hx_chat_member_model(chat.cast())
-                };
-                // tab_nick_comp rewrites the buffer + caret itself.
-                tab_nick_comp(
-                    sess,
-                    mm,
-                    text.as_mut_ptr() as *mut c_char,
-                    reverse as glib::ffi::gboolean,
-                    point,
-                    view.as_ptr() as *mut gtk::ffi::GtkWidget,
-                );
-            }
+            unsafe { complete_nick(&buf, sess, cid, reverse) };
             view.grab_focus();
             glib::Propagation::Stop
         }
@@ -532,6 +577,8 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
     });
     tv.add_controller(ctrl);
 
+    forget_listing_on_edit(&tv.buffer());
+
     // Any caret move ends a history-navigation session. `mark-set` on
     // the insert mark rather than a key handler, because clicking into
     // the draft has to end it too, and a key handler would never see
@@ -574,6 +621,86 @@ pub(crate) mod tests {
             |s| *got.borrow_mut() = Some(("command", text(s), None)),
         );
         got.into_inner().expect("sent nowhere")
+    }
+
+    /// Tab lists an ambiguous prefix's candidates in the chat the input
+    /// belongs to, a private chat's in its own, and once: a Tab or Shift+Tab
+    /// with nothing typed since lists nothing, while one after an edit, on
+    /// another word or after someone joins lists them.
+    pub(crate) fn check_tab_lists_the_candidates_once() {
+        use gtkhx_core::conn::{hx_conn_new, hx_conn_set_sess};
+        use hxmodel::chat_members::hx_member_model_upsert;
+        use hxmodel::conversation::{hx_chat_member_model, hx_conversation_new};
+        use std::ffi::{c_void, CStr};
+        let cid = 5;
+        let (sess, chat): (*mut c_void, _) = unsafe {
+            let htlc = hx_conn_new();
+            hx_conn_set_sess(htlc, htlc.cast());
+            let chat = hx_conversation_new(cid);
+            crate::options_test_stubs::chats().lock().unwrap().push((
+                htlc as usize,
+                cid,
+                chat as usize,
+            ));
+            (htlc.cast(), chat)
+        };
+        let join = |uid, nick: &CStr| unsafe {
+            hx_member_model_upsert(hx_chat_member_model(chat), uid, nick.as_ptr(), 0, 0, 0)
+        };
+        for (uid, nick) in [(1, c"alan"), (2, c"alice"), (3, c"bob"), (4, c"bea")] {
+            join(uid, nick);
+        }
+        let listed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let session: glib::Object = unsafe {
+            glib::translate::from_glib_none(
+                gtkhx_core::session::gtkhx_session_get_default()
+                    .cast::<glib::gobject_ffi::GObject>(),
+            )
+        };
+        let heard = session.connect_local("chat-log-line", false, {
+            let listed = listed.clone();
+            move |args| {
+                if args[1].get::<*mut c_void>().ok() == Some(sess) {
+                    let body = args[5].get::<*mut c_void>().unwrap();
+                    let body = unsafe { CStr::from_ptr(body.cast()) };
+                    let line = (
+                        args[2].get::<u32>().unwrap(),
+                        body.to_str().unwrap().to_owned(),
+                    );
+                    listed.borrow_mut().push(line);
+                }
+                None
+            }
+        });
+        let buf = gtk::TextBuffer::new(None);
+        super::forget_listing_on_edit(&buf);
+        let tab = |reverse| {
+            unsafe { super::complete_nick(&buf, sess, cid, reverse) };
+            (
+                buf.text(&buf.start_iter(), &buf.end_iter(), false)
+                    .to_string(),
+                listed.take(),
+            )
+        };
+        let candidates = vec![(cid, "alan alice".to_owned())];
+        buf.set_text("a");
+        assert_eq!(tab(false), ("al".into(), candidates.clone()), "first Tab");
+        assert_eq!(tab(false), ("al".into(), vec![]), "again");
+        assert_eq!(tab(true), ("al".into(), vec![]), "Shift+Tab");
+        buf.insert_at_cursor("i");
+        let (mut i, mut end) = (buf.iter_at_offset(2), buf.end_iter());
+        buf.delete(&mut i, &mut end);
+        assert_eq!(tab(false), ("al".into(), candidates), "after an edit");
+        join(5, c"alfred");
+        let candidates = vec![(cid, "alan alfred alice".to_owned())];
+        assert_eq!(tab(false), ("al".into(), candidates.clone()), "a join");
+        buf.set_text("al b");
+        buf.place_cursor(&buf.iter_at_offset(2));
+        assert_eq!(tab(false), ("al b".into(), candidates), "two words");
+        buf.place_cursor(&buf.end_iter());
+        let other = vec![(cid, "bea bob".to_owned())];
+        assert_eq!(tab(false), ("al b".into(), other), "the other word");
+        session.disconnect(heard);
     }
 
     /// Reply shows the bar over the input, which takes the keyboard; the

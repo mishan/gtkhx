@@ -139,12 +139,6 @@ extern void hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj);
 extern void gtkhx_chat_input_attach (GtkWidget *view, session *sess,
                                      guint32 cid, void *history);
 
-/* Nick-completion core, called from the Rust input handler. Rewrites the
- * entry buffer + caret with the completion against `member_model`. `pos` is
- * the caret's char offset; `reverse` steps the Tab-cycle backwards. */
-extern int tab_nick_comp (session *sess, void *member_model, char *text,
-                          gboolean reverse, int pos, GtkWidget *entry);
-
 extern void hx_chat_user (struct htlc_conn *htlc, guint16 uid);
 extern void hx_invite_user (struct htlc_conn *htlc, guint16 uid, guint32 cid);
 extern void hx_chat_join (struct htlc_conn *htlc, guint32 cid);

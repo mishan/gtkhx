@@ -6,7 +6,7 @@
 //! fed by the `user_create` / `_delete` / `_change` / `users_clear` fan-out in
 //! `users.c` — which fires on every wire event regardless of whether a
 //! user-list view is open, so the model is reliably populated even when no view
-//! exists. `chat.c::tab_nick_comp` reads the model for the chat an input
+//! exists. GtkHx's chat input reads the model for the chat an input
 //! belongs to through [`hx_nick_complete`], retiring ~250 lines of C buffer
 //! manipulation in favour of the tested Rust `complete` (and completing
 //! private-chat inputs against their own participants, not the public list).
@@ -331,8 +331,9 @@ pub unsafe extern "C" fn hx_member_model_get_at(
 }
 
 /// `gboolean hx_nick_complete(void *model, const char *input, gsize cursor,
-/// gboolean reverse, gunichar suffix, char **out_text, int *out_cursor,
-/// char **out_info)` — the tested M1 nick completion over the model's members.
+/// gboolean reverse, gunichar suffix, gboolean old_style, char **out_text,
+/// int *out_cursor, char **out_info)` — the tested M1 nick completion over
+/// the model's members.
 ///
 /// On a result, returns TRUE and fills: `out_text` (a `g_malloc`'d new buffer
 /// for the whole input), `out_cursor` (char offset, or -1 for end), and

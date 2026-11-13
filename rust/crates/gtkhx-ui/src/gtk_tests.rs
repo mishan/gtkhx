@@ -65,6 +65,7 @@ fn display_backed() {
     crate::chat_output::tests::check_r_replies_to_the_row_the_keyboard_is_on();
     crate::chat_output::tests::check_a_rows_menu_offers_what_the_login_agreed();
     crate::chat_input::tests::check_a_reply_goes_with_the_next_line_said();
+    crate::chat_input::tests::check_tab_lists_the_candidates_once();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
     crate::msg::tests::check_an_instant_messages_chips_are_its_parties();
     crate::msg::tests::check_a_messages_reply_is_quoted_from_its_conversation();

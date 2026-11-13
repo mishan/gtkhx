@@ -139,7 +139,7 @@ mod updates;
 #[cfg(test)]
 mod gtk_tests;
 // The chat / pchat input GtkTextView key handler (was chat_input_key_pressed).
-// Exports gtkhx_chat_input_attach; keeps tab_nick_comp in C.
+// Exports gtkhx_chat_input_attach.
 pub mod chat_input;
 // The incoming chat-invitation dialog (was output_chat_invitation +
 // chat_invite_response). Join/Decline via the hxhandlers::send::chat Rust senders.
