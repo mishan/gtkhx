@@ -47,10 +47,10 @@ sound_on_chat (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event,
 
 static void
 sound_on_msg (GtkhxSession *emitter, struct htlc_conn *htlc, gpointer event,
-              gpointer pm_id, gpointer user_data)
+              gpointer of, gpointer user_data)
 {
     (void)emitter;
-    (void)pm_id;
+    (void)of;
     (void)user_data;
     /* The chime is app-global: one speaker, one alert, whichever server the
      * message came from. The connection is here so a per-connection mute

@@ -54,6 +54,8 @@ use glib::translate::{from_glib, FromGlibPtrNone, IntoGlib, ToGlibPtrMut};
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
+use hxproto::target::Target;
+
 // ----------------------------------------------------------------------
 // Boxed-type GType accessors, defined in the sibling `boxed` module.
 //
@@ -170,12 +172,12 @@ mod imp {
                     Signal::builder("gif-icon-data")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER, Type::U32])
                         .build(),
-                    // msg: (htlc*, HxMsgEvent, pm_id*). The connection is
+                    // msg: (htlc*, HxMsgEvent, of*). The connection is
                     // not a convenience here — the event's uid is only
                     // unique *within* a connection, so without it two
                     // servers' user 5 are the same person and their private
-                    // messages land in one window. pm_id is the message's
-                    // reference, Rust's alone, NULL where it has none; read
+                    // messages land in one window. of is the message's
+                    // reference and what it answers, Rust's alone; read
                     // through `connect_msg`.
                     Signal::builder("msg")
                         .param_types([Type::POINTER, msg_event_type(), Type::POINTER])
@@ -709,6 +711,10 @@ unsafe fn pm_id_of(v: &glib::Value) -> Option<PmId> {
     p.as_ref().copied()
 }
 
+/// What the `msg` signal carries beside a message: its reference, and the
+/// message it answers.
+type MsgOf = (Option<PmId>, Option<Target>);
+
 /// # Safety
 /// `self_` valid; `event` a valid `HxMsgEvent*` (or NULL).
 pub unsafe fn gtkhx_session_emit_msg(
@@ -716,19 +722,22 @@ pub unsafe fn gtkhx_session_emit_msg(
     htlc: *mut c_void,
     event: *mut c_void,
     pm_id: Option<&PmId>,
+    reply_to: Option<&Target>,
 ) {
+    let of: MsgOf = (pm_id.copied(), reply_to.cloned());
     let v = [
         ptr_value(htlc),
         boxed_value(hx_msg_event_get_type(), event),
-        pm_id_value(pm_id),
+        ptr_value((&of as *const MsgOf).cast()),
     ];
     emit(self_, "msg", &v);
 }
 
-/// Hear the `msg` signal: the connection, the message, and its reference.
+/// Hear the `msg` signal: the connection, the message, its reference, and
+/// what it answers.
 pub fn connect_msg<F>(f: F) -> glib::SignalHandlerId
 where
-    F: Fn(*mut c_void, &crate::boxed::msg::HxMsgEvent, Option<PmId>) + 'static,
+    F: Fn(*mut c_void, &crate::boxed::msg::HxMsgEvent, Option<PmId>, Option<&Target>) + 'static,
 {
     let obj: glib::Object = unsafe {
         glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
@@ -740,10 +749,12 @@ where
                 glib::translate::ToGlibPtr::to_glib_none(&args[2]).0,
             )
         };
-        // SAFETY: the emit passes an event of this type, and a reference
-        // that outlives it.
-        if let Some(e) = unsafe { (event as *const crate::boxed::msg::HxMsgEvent).as_ref() } {
-            f(htlc, e, unsafe { pm_id_of(&args[3]) });
+        let of = args[3].get::<*mut c_void>().unwrap_or(std::ptr::null_mut()) as *const MsgOf;
+        // SAFETY: the emit passes an event of this type, and what it
+        // carries beside it, both outliving it.
+        let e = unsafe { (event as *const crate::boxed::msg::HxMsgEvent).as_ref() };
+        if let (Some(e), Some((pm_id, reply_to))) = (e, unsafe { of.as_ref() }) {
+            f(htlc, e, *pm_id, reply_to.as_ref());
         }
         None
     })
@@ -1535,29 +1546,33 @@ mod tests {
         assert_eq!(*got.borrow(), [7, 0, 8, 9]);
     }
 
-    /// A message's reference rides beside it, and beside an answer's trans;
-    /// none is none.
+    /// A message's reference and what it answers ride beside it, and the
+    /// reference beside an answer's trans; none is none.
     #[test]
     fn a_messages_reference_rides_beside_it() {
         let stored: PmId = (true, [4; 16]);
-        type Heard = Vec<(u32, Option<PmId>)>;
+        let re = Target::Pm {
+            stored: true,
+            reference: [5; 16],
+        };
+        type Heard = Vec<(u32, Option<PmId>, Option<Target>)>;
         let got: Rc<std::cell::RefCell<Heard>> = Rc::default();
         let g = got.clone();
-        let heard = connect_msg(move |htlc, e, pm_id| {
+        let heard = connect_msg(move |htlc, e, pm_id, reply_to| {
             assert_eq!((htlc as usize, e.uid), (0x1234, 5));
-            g.borrow_mut().push((0, pm_id));
+            g.borrow_mut().push((0, pm_id, reply_to.cloned()));
         });
         let g = got.clone();
         let answered = connect_msg_answered(move |htlc, trans, pm_id| {
             assert_eq!(htlc as usize, 0x1234);
-            g.borrow_mut().push((trans, pm_id));
+            g.borrow_mut().push((trans, pm_id, None));
         });
         let default = gtkhx_session_get_default();
         let htlc = 0x1234 as *mut c_void;
         let e = crate::boxed::msg::msg_event_new(5, "bob", "hi", None, b"", false);
         unsafe {
-            gtkhx_session_emit_msg(default, htlc, e.cast(), Some(&stored));
-            gtkhx_session_emit_msg(default, htlc, e.cast(), None);
+            gtkhx_session_emit_msg(default, htlc, e.cast(), Some(&stored), Some(&re));
+            gtkhx_session_emit_msg(default, htlc, e.cast(), None, None);
             gtkhx_session_emit_msg_answered(default, htlc, 7, Some(&stored));
             gtkhx_session_emit_msg_answered(default, htlc, 8, None);
             crate::boxed::msg::hx_msg_event_free(e);
@@ -1568,7 +1583,12 @@ mod tests {
         default.disconnect(answered);
         assert_eq!(
             *got.borrow(),
-            [(0, Some(stored)), (0, None), (7, Some(stored)), (8, None)]
+            [
+                (0, Some(stored), Some(re)),
+                (0, None, None),
+                (7, Some(stored), None),
+                (8, None, None)
+            ]
         );
     }
 
@@ -1635,7 +1655,7 @@ mod tests {
         // A NULL boxed payload is fine here: g_value_set_boxed on NULL stays
         // NULL, and what this pins is the leading connection argument.
         unsafe {
-            gtkhx_session_emit_msg(raw, 0xBEEF as *mut c_void, std::ptr::null_mut(), None);
+            gtkhx_session_emit_msg(raw, 0xBEEF as *mut c_void, std::ptr::null_mut(), None, None);
         }
         assert_eq!(got.get(), 0xBEEF);
     }

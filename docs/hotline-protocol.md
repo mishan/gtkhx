@@ -418,7 +418,7 @@ Field numbers are listed in [Fields](#fields).
 | 105 | Send Chat | C→S | 101, 109 (1 = emote), 114 (absent or 0 = public chat) | **no reply** | Privilege 10. The server formats the line: `\r` + the name right-aligned in 13 columns + `:  ` + text, or `\r *** name text` for an emote. Text is capped at 8192 bytes; the official client refuses to send more than 2048. |
 | 106 | Chat Message | S→C | | 101 (formatted, starts with CR), 114 for a private chat | Sent to clients with privilege 9. |
 | 107 | Login | C→S | 105, 106, 160; 1.2 clients add 102, 104 | 160, 161, 162 | See [Session lifecycle](#session-lifecycle). |
-| 108 | Send Instant Message | C→S | 103 (target), 113, 101 (≤ 4096), optional 214 | empty; 0x0F23 under Replies or Reactions | Privilege 40. Options: 1 user message, 2 refuse-message notice, 3 refuse-chat notice, 4 automatic response. Delivered to the target as 104. Since 1.5.1 the server answers for a target who refuses messages or has an automatic response. |
+| 108 | Send Instant Message | C→S | 103 (target), 113, 101 (≤ 4096), optional 214; 0x0F21 under Replies | empty; 0x0F23 under Replies or Reactions | Privilege 40. Options: 1 user message, 2 refuse-message notice, 3 refuse-chat notice, 4 automatic response. Delivered to the target as 104. Since 1.5.1 the server answers for a target who refuses messages or has an automatic response. |
 | 109 | Show Agreement | S→C | | 101, or 154 = 1, or nothing | The official client also accepts banner fields 151–153 here; the 1.9 server uses 122 instead. |
 | 110 | Disconnect User | C→S | 103, 113 (1 = also temporary ban, 2 = also permanent ban), 101 (ban reason) | empty | Privilege 22. Refused for a target with privilege 23. |
 | 111 | Disconnect Message | S→C | | 101 | Sent only when the server's operator quits politely. |
@@ -1447,9 +1447,19 @@ Send (810), which hxd-ng relays on IM Deliver (811), live or after Get Roster's 
 message that answers another is headed, on its first row, with the first row of the one it
 answers, found among the conversation's messages by guid alone, so a Login spelled
 otherwise does not lose it. No server keeps an instant message to be fetched, so one the
-conversation does not hold reads "earlier message", and a jump to it says it isn't in this
-window any more. One sent is headed as it is drawn, since nothing echoes it. A connect lets
+conversation does not hold reads "earlier message", and a jump to it says it can't be
+shown. One sent is headed as it is drawn, since nothing echoes it. A connect lets
 go of a pending reply; a message to someone it cannot reach leaves it for the next.
+
+A private message's conversation answers a stored message likewise where the login takes
+kind 5, which hxd-ng offers where it has an inbox. The message is named by the reference
+(0x0F23) its 104 carried, or the reply to the 108 that sent it, and only one whose flag
+says the server stores it, so our own is answerable once that reply comes; the next
+message sent carries 0x0F21 on Send Instant Msg (108), which hxd-ng relays on the 104. A
+header is drawn from the conversation's own messages by reference, and otherwise reads
+"earlier message": nothing is asked of a server for another's mail. The conversation keeps
+its references and headers across a reconnect, as a stored reference lasts; a connect
+lets go only of a pending reply.
 
 ### Reactions
 
