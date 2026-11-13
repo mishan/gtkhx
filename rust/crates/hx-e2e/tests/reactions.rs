@@ -170,7 +170,7 @@ fn history(c: &mut Client) -> Vec<HistoryEntry> {
             Event::Session(hxsession::Event::ChatHistory { trans, entries, .. }) if trans == t => {
                 return entries
             }
-            Event::Session(hxsession::Event::Failed { trans, reason }) if trans == t => {
+            Event::Session(hxsession::Event::Failed { trans, reason, .. }) if trans == t => {
                 panic!("history refused: {reason:?}")
             }
             _ => {}
@@ -609,7 +609,7 @@ fn a_stored_messages_reaction_reaches_its_other_party() {
                 Event::Session(hxsession::Event::MessageSent { trans, pm_id }) if trans == t => {
                     break pm_id
                 }
-                Event::Session(hxsession::Event::Failed { trans, reason }) if trans == t => {
+                Event::Session(hxsession::Event::Failed { trans, reason, .. }) if trans == t => {
                     panic!("{}: refused: {reason:?}", s.name)
                 }
                 _ => {}

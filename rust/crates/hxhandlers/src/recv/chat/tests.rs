@@ -229,14 +229,14 @@ fn a_failed_history_request_ends_its_chats_wait_and_a_refusal_is_shown() {
     for (older, reason, want) in cases {
         test_env::reset();
         history_requested(HTLC, 9, 3, older);
-        unsafe { failed(HTLC, 9, reason) };
+        unsafe { failed(HTLC, 9, None, reason) };
         assert_eq!(test_env::emitted(), want, "older {older}, {reason:?}");
         // Answered once.
-        unsafe { failed(HTLC, 9, None) };
+        unsafe { failed(HTLC, 9, None, None) };
         assert_eq!(test_env::emitted(), []);
     }
     // A refusal of anything else is only shown.
-    unsafe { failed(HTLC, 11, refused) };
+    unsafe { failed(HTLC, 11, None, refused) };
     assert_eq!(
         test_env::emitted(),
         [Emitted::RequestFailed("Not here.".into())]
@@ -264,25 +264,31 @@ fn quotes_reach_the_replies_signal_and_leave_the_cursor() {
 }
 
 /// A refused request for lines by id is told to the view, which asked,
-/// and never shown, whatever the server said; slow where it said to slow
-/// down.
+/// and never shown, whatever the server said; slow where its reason code
+/// says the rate, whatever its words.
 #[test]
 fn a_refused_quotes_request_is_told_to_the_view_alone() {
-    for (reason, slow) in [
-        (Some("Slow down."), true),
-        (Some(CUT_SHORT), true),
-        (Some("You are not allowed to read chat history."), false),
-        (None, false),
+    use hxproto::structured_chat::{NOT_ALLOWED, RATE_LIMITED};
+    for (code, reason, slow) in [
+        (Some(RATE_LIMITED), None, true),
+        (None, Some("Slow down."), false),
+        (None, Some(CUT_SHORT), true),
+        (
+            Some(NOT_ALLOWED),
+            Some("You are not allowed to read chat history."),
+            false,
+        ),
+        (None, None, false),
     ] {
         test_env::reset();
         quotes_requested(HTLC, 9, 0, vec![4]);
-        unsafe { failed(HTLC, 9, reason) };
+        unsafe { failed(HTLC, 9, code, reason) };
         let want = Emitted::QuotesRefused {
             cid: 0,
             asked: vec![4],
             slow,
         };
-        assert_eq!(test_env::emitted(), [want], "{reason:?}");
+        assert_eq!(test_env::emitted(), [want], "{code:?} {reason:?}");
     }
 }
 
@@ -304,7 +310,7 @@ fn a_new_connection_forgets_what_the_last_one_asked() {
     test_env::reset();
     history_requested(HTLC, 9, 3, true);
     history_forget(HTLC);
-    unsafe { failed(HTLC, 9, None) };
+    unsafe { failed(HTLC, 9, None, None) };
     assert_eq!(test_env::emitted(), []);
 }
 

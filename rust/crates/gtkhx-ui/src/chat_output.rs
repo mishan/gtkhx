@@ -946,21 +946,26 @@ fn lobby_target((space, id): (Space, u64)) -> Target {
     }
 }
 
-/// A reply's header: `q`'s nick in the color its own lines are drawn in.
-fn quoting(view: &RotulusView, q: &Quote) -> Reply {
+/// The color `nick`'s own lines in `view` are drawn in.
+pub(crate) fn nick_color(view: &RotulusView, nick: &str) -> ColorRef {
     let own = crate::chat_view::conn_of(view)
         .map(crate::dock::htlc_for)
         .filter(|h| !h.is_null())
         // SAFETY: main thread; a connection the dock holds is live.
         .map(|h| unsafe { own_nick(h) })
         .unwrap_or_default();
-    let nick = q.nick.as_bytes();
+    let nick = nick.as_bytes();
     // SAFETY: the nick is read for the call.
     let color =
         unsafe { hx_chat_nick_color(nick.as_ptr().cast(), nick.len(), (nick == own).into()) };
+    u8::try_from(color).map_or(ColorRef::Default, ColorRef::Palette)
+}
+
+/// A reply's header: `q`'s nick in the color its own lines are drawn in.
+fn quoting(view: &RotulusView, q: &Quote) -> Reply {
     Reply::Quote {
         nick: q.nick.clone(),
-        color: u8::try_from(color).map_or(ColorRef::Default, ColorRef::Palette),
+        color: nick_color(view, &q.nick),
         excerpt: q.excerpt.clone(),
     }
 }

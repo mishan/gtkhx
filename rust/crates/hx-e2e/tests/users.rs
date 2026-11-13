@@ -79,7 +79,7 @@ fn listed(c: &mut Client, nick: &str) -> Vec<User> {
                 hxsession::Event::UserList { trans, users, .. } if *trans == t => {
                     Some(users.clone())
                 }
-                hxsession::Event::Failed { trans, reason } if *trans == t => {
+                hxsession::Event::Failed { trans, reason, .. } if *trans == t => {
                     panic!("the user list was refused: {reason:?}")
                 }
                 _ => None,
@@ -283,7 +283,7 @@ fn ask<T>(
     heard(
         c,
         |e| match e {
-            hxsession::Event::Failed { trans, reason } if *trans == t => {
+            hxsession::Event::Failed { trans, reason, .. } if *trans == t => {
                 Some(Err(reason.clone().unwrap_or_default()))
             }
             e => got(e).map(Ok),

@@ -51,7 +51,7 @@ fn guest(server: &'static Server, who: &str) -> (Client, u16) {
 fn until<T>(c: &mut Client, mut want: impl FnMut(&Event) -> Option<T>) -> T {
     loop {
         let e = c.next_event().unwrap_or_else(|e| panic!("{e}"));
-        if let Event::Session(hxsession::Event::Failed { trans, reason }) = &e {
+        if let Event::Session(hxsession::Event::Failed { trans, reason, .. }) = &e {
             panic!("{}: trans {trans} refused: {reason:?}", c.server().name);
         }
         if let Some(t) = want(&e) {

@@ -78,7 +78,7 @@ fn history_reply(c: &mut Client, ask: &Request) -> (Vec<HistoryEntry>, bool) {
                 has_more,
                 ..
             }) if trans == t => return (entries, has_more),
-            Event::Session(hxsession::Event::Failed { trans, reason }) if trans == t => {
+            Event::Session(hxsession::Event::Failed { trans, reason, .. }) if trans == t => {
                 panic!("history refused: {reason:?}")
             }
             _ => {}

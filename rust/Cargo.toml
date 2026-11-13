@@ -87,14 +87,14 @@ rust-version = "1.92"
 # v4_16 is what makes the view implement GtkAccessibleText, so a screen
 # reader can read the transcript, and reports where the text is on screen,
 # for magnifiers.
-rotulus = { git = "https://github.com/mishan/rotulus.git", rev = "0d2cd32f9211b1d652619292409154f240276e1a", features = ["v4_16"] }
-rotulus-layout = { git = "https://github.com/mishan/rotulus.git", rev = "0d2cd32f9211b1d652619292409154f240276e1a" }
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "13d0fd00ce3d2ebe7f067d21d8f8649ea1f441fe" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "13d0fd00ce3d2ebe7f067d21d8f8649ea1f441fe" }
-hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "13d0fd00ce3d2ebe7f067d21d8f8649ea1f441fe" }
-hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "13d0fd00ce3d2ebe7f067d21d8f8649ea1f441fe" }
-hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "13d0fd00ce3d2ebe7f067d21d8f8649ea1f441fe" }
-hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "13d0fd00ce3d2ebe7f067d21d8f8649ea1f441fe" }
+rotulus = { git = "https://github.com/mishan/rotulus.git", rev = "9e9af02c31e0ef3debb087b1043d9fd3b2992795", features = ["v4_16"] }
+rotulus-layout = { git = "https://github.com/mishan/rotulus.git", rev = "9e9af02c31e0ef3debb087b1043d9fd3b2992795" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
+hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
+hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
+hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
 glib = "0.22"
 gio = "0.22"
 gtk4 = "0.11"

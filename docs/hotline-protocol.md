@@ -1403,22 +1403,22 @@ page is on its way. Until the quote comes, and where none can (a line nobody kee
 message"; a line taken away, "message removed"; and one by someone the user ignores, by
 the nick they go by now, "a message you've hidden". The answer is no page of history: it
 is drawn nowhere but in headers, and moves no cursor. Its refusal is told to nobody,
-since the user never asked for it: "Slow down." (hxd-ng's words for the history rate;
-its reason field beside them, 0x0F2A, is not passed on by the session, which gives a
-refusal's words alone) is asked again once a second later and then left for the next request, as
-is an answer cut short, and any other refusal stops quotes for the connect. hxnet hands a
-Notification (718), which GtkHx never asks for, to the Rust handlers where the session
-has replies or reactions, which drop it.
+since the user never asked for it: one for the rate, by its reason code (0x0F2A,
+`RateLimited`, whatever its words), is asked again once a second later and then left for
+the next request, as is an answer cut short, and any other refusal stops quotes for the
+connect. hxnet hands a Notification (718), which GtkHx never asks for, to the Rust
+handlers where the session has replies or reactions, which drop it.
 
 A lobby line is answered from its row's menu (the pointer's, or Menu or Shift+F10 on a
 row reached from the keyboard), which offers Reply where the login takes the kind that
 names it: a kept line kind 1, a line nobody keeps kind 4 under chat 0. A bar over the
-input then says who and what is answered, and is the input's accessible description
-while it shows; its button or Escape in the input cancels it. The next line said as chat
-carries 0x0F21, checked against the login's kinds again as it goes; a server's command,
-a client's `/command`, and a line sent with a picture go without it and leave the reply
-for the next line. Sending, a cleared view (a connect, `/clear`) and the window closing
-let go of it. The line's own header is drawn from its echo, as anyone's.
+input then says who and what is answered, the nick in the color the view draws it in
+(Rotulus's `text_color`) where that reads on the window, and is the input's accessible
+description while it shows; its button or Escape in the input cancels it. The next line
+said as chat carries 0x0F21, checked against the login's kinds again as it goes; a
+server's command, a client's `/command`, and a line sent with a picture go without it and
+leave the reply for the next line. Sending, a cleared view (a connect, `/clear`) and the
+window closing let go of it. The line's own header is drawn from its echo, as anyone's.
 
 A header clicked, or Enter or Space on one, goes to the line it answers: scrolled to and
 drawn on a tint of the selection's color until the next key or click in the view, the
