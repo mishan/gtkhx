@@ -18,14 +18,17 @@
 //! room is shown as a private chat whose lines carry history ids.
 //!
 //! Where the session has replies (the Replies draft, capability bit 18), a
-//! lobby line that answers another is drawn under a header quoting it:
-//! from the line's own row where this view drew it, and otherwise from the
-//! server, which is asked for a kept line by its id once the draw that
-//! found it is done (`hxmodel::replies`). Until the quote comes, and where
+//! line that answers another is drawn under a header quoting it: from the
+//! line's own row where this view drew it, and otherwise, in the lobby,
+//! from the server, which is asked for a kept line by its id once the draw
+//! that found it is done (`hxmodel::replies`). A private chat's reply, a
+//! room's on hxd-ng, is quoted from its window alone, since hxd-ng's Get
+//! Chat History answers the lobby alone. Until the quote comes, and where
 //! it never can, the header says it is an earlier message, so a row's
 //! height stays as it was drawn and a screen reader hears at once that it
 //! is a reply. A header activated goes to the line it answers, paging back
-//! through history for a kept line not drawn, a few pages at a time.
+//! through the lobby's history for a kept line not drawn, a few pages at a
+//! time.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -724,23 +727,19 @@ pub(crate) fn line_on(
     limits.takes(&target(view, id)).then_some(id)
 }
 
-/// How a reply names the lobby line drawn on `row`, and what it quotes,
-/// where `targets` take a reply to it: a kept line or one nobody keeps
-/// alike, since a reply's target is never looked up. A private chat's
-/// lines are none yet.
+/// How a reply names the line drawn on `row`, and what it quotes, where
+/// `targets` take a reply to it: a kept line or one nobody keeps alike,
+/// since a reply's target is never looked up.
 pub(crate) fn reply_target(
     view: &RotulusView,
     row: MessageId,
     targets: &hxproto::replies::Targets,
 ) -> Option<(Target, Quote)> {
-    if cid_of(view) != 0 {
-        return None;
-    }
     // SAFETY: as for `output`, which this does not make where there is none.
     let out = unsafe { view.data::<RefCell<Output>>(OUTPUT) }?;
     let out = unsafe { out.as_ref() }.borrow();
     let (&key, line) = out.lines.lines.iter().find(|(_, l)| l.row == row)?;
-    let target = lobby_target(key);
+    let target = reply_to(cid_of(view), key);
     targets
         .takes(&target)
         .then(|| line.said.clone().map(|q| (target, q)))?
@@ -928,21 +927,26 @@ fn quote_of(e: &HistoryEntry) -> Quote {
     Quote::new(&nick, c_str(&e.text))
 }
 
-/// The lobby's line a reply's `target` names: a kept line by its history
-/// id, and one nobody keeps by the chat's own count.
-fn lobby_line(target: &Target) -> Option<(Space, u64)> {
+/// The lines of chat `cid` a reply's `target` may name, the first of them
+/// drawn being the one: in the lobby, a kept line by its history id and one
+/// nobody keeps by the chat's own count; in a private chat, kind 4 under
+/// its id, whose id may be from either count, a kept line's first.
+fn named(cid: u32, target: &Target) -> Vec<(Space, u64)> {
     match *target {
-        Target::Line { channel: 0, id } => Some((Space::History, id)),
-        Target::Ephemeral { chat: 0, id } => Some((Space::Ephemeral, id)),
-        _ => None,
+        Target::Line { channel: 0, id } if cid == 0 => vec![(Space::History, id)],
+        Target::Ephemeral { chat: 0, id } if cid == 0 => vec![(Space::Ephemeral, id)],
+        Target::Ephemeral { chat, id } if chat == cid => {
+            vec![(Space::History, id), (Space::Ephemeral, id)]
+        }
+        _ => Vec::new(),
     }
 }
 
-/// How a reply names the lobby's line `key`.
-fn lobby_target((space, id): (Space, u64)) -> Target {
-    match space {
-        Space::History => Target::Line { channel: 0, id },
-        Space::Ephemeral => Target::Ephemeral { chat: 0, id },
+/// How a reply names chat `cid`'s line `key`.
+fn reply_to(cid: u32, (space, id): (Space, u64)) -> Target {
+    match (cid, space) {
+        (0, Space::History) => Target::Line { channel: 0, id },
+        (chat, _) => Target::Ephemeral { chat, id },
     }
 }
 
@@ -995,9 +999,8 @@ fn quotable(view: &RotulusView, key: (Space, u64), e: &HistoryEntry) {
             return;
         };
         line.said.get_or_insert(q.clone());
-        let lobby = cid_of(view) == 0;
-        let rows = lobby.then(|| out.lines.waiting.remove(&lobby_target(key)));
-        rows.flatten().unwrap_or_default()
+        let rows = out.lines.waiting.remove(&reply_to(cid_of(view), key));
+        rows.unwrap_or_default()
     };
     let reply = quoting(view, &q);
     for row in rows {
@@ -1006,20 +1009,22 @@ fn quotable(view: &RotulusView, key: (Space, u64), e: &HistoryEntry) {
 }
 
 /// Head `row`, entry `e`'s, with the line it answers, where it is a reply
-/// to a lobby line: quoted from the view's own row of it, or from what the
-/// server said of it; and until then, or where nothing can be said, as an
-/// earlier message, a kept line asked for by id once the draw is done.
+/// to a line of this view's chat: quoted from the view's own row of it, or
+/// from what the server said of a lobby line; and until then, or where
+/// nothing can be said, as an earlier message, a kept lobby line asked for
+/// by id once the draw is done.
 fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
-    let Some(target) = e.reply_to.as_ref().filter(|_| cid_of(view) == 0) else {
+    let Some(target) = e.reply_to.as_ref() else {
         return;
     };
-    let Some(key) = lobby_line(target) else {
+    let keys = named(cid_of(view), target);
+    if keys.is_empty() {
         return;
-    };
+    }
     let quote = {
         let mut out = output(view).borrow_mut();
         out.lines.replies.insert(row, target.clone());
-        let drawn = out.lines.lines.get(&key).and_then(|l| l.said.clone());
+        let drawn = (keys.iter()).find_map(|k| out.lines.lines.get(k).and_then(|l| l.said.clone()));
         if drawn.is_none() {
             out.lines
                 .waiting
@@ -1027,10 +1032,9 @@ fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
                 .or_default()
                 .push(row);
         }
-        match (drawn, key) {
+        match (drawn, target) {
             (Some(q), _) => Ok(q),
-            (None, (Space::Ephemeral, _)) => Err(None),
-            (None, (Space::History, id)) => match out.quotes.get(id).cloned() {
+            (None, &Target::Line { channel: 0, id }) => match out.quotes.get(id).cloned() {
                 Some(Quoted::Line(q)) => Ok(q),
                 Some(q @ (Quoted::Removed | Quoted::Hidden | Quoted::Unavailable)) => Err(Some(q)),
                 Some(Quoted::Later) | None => {
@@ -1038,6 +1042,7 @@ fn head(view: &RotulusView, row: MessageId, e: &HistoryEntry) {
                     Err(None)
                 }
             },
+            (None, _) => Err(None),
         }
     };
     let reply = match &quote {
@@ -1219,14 +1224,15 @@ unsafe fn replies(htlc: *mut c_void, e: &gtkhx_core::replies::Event) {
 /// The header of the reply on `row` was activated, from the keyboard or
 /// not: go to the line it answers, in place of any jump under way.
 fn jump(view: &RotulusView, row: MessageId, keyboard: bool) {
-    let key = {
-        let out = output(view).borrow();
-        out.lines.replies.get(&row).and_then(lobby_line)
-    };
-    let Some((space, id)) = key else {
+    let target = output(view).borrow().lines.replies.get(&row).cloned();
+    let Some(target) = target else {
         return;
     };
-    output(view).borrow_mut().jump = Some(Jump::new(id, space == Space::History, keyboard));
+    let kept = matches!(target, Target::Line { .. });
+    let Some(&(_, id)) = named(cid_of(view), &target).first() else {
+        return;
+    };
+    output(view).borrow_mut().jump = Some(Jump::new(id, kept, keyboard));
     jump_on(view);
 }
 
@@ -1237,12 +1243,12 @@ fn jump_on(view: &RotulusView) {
     let Some(mut j) = out.jump.take() else {
         return;
     };
-    let space = if j.kept {
-        Space::History
-    } else {
-        Space::Ephemeral
+    let (cid, id) = (cid_of(view), j.id);
+    let target = match j.kept {
+        true => Target::Line { channel: 0, id },
+        false => Target::Ephemeral { chat: cid, id },
     };
-    let row = out.lines.row(space, j.id);
+    let row = (named(cid, &target).into_iter()).find_map(|(space, id)| out.lines.row(space, id));
     let first_page = !htlc.is_null() && hxhandlers::recv::chat::first_page_pending(htlc, 0);
     let step = j.next(&Seen {
         drawn: row.is_some(),
@@ -2693,6 +2699,79 @@ pub(crate) mod tests {
         assert_eq!(view.spotlight(), Some(row(1)));
     }
 
+    /// A private chat's reply, a room's on hxd-ng, names its line kind 4
+    /// under the chat's id: quoted from the window's own row of it, a kept
+    /// line's before one under the chat's own count, and an earlier message
+    /// until the window draws it, which nothing asks the server for; one
+    /// naming a lobby line or another chat has no header. Its header goes
+    /// to a line the window drew, and says it has gone where it did not.
+    pub(crate) fn check_a_private_chats_reply_is_quoted_from_its_window() {
+        let room = view();
+        // As `hear` keeps it, without hearing what would send.
+        unsafe { room.set_data(HEARD, 7u32) };
+        hear_replies(&room);
+        let to = |id| Target::Ephemeral { chat: 7, id };
+        let live = |e: HistoryEntry| {
+            let (nick, text) = (e.nick.clone(), e.text.clone());
+            draw_live(&room, Some(&e), || say(&room, &nick, &text));
+        };
+        live(entry(5, 0, "alice", "kept"));
+        live(entry(5, EPHEMERAL, "carol", "own"));
+        live(entry(6, EPHEMERAL, "dave", "only own"));
+        for e in [
+            reply(10, 0, "a", to(5)),
+            reply(11, 0, "b", to(6)),
+            reply(12, 0, "c", to(1)),
+            reply(13, 0, "d", kept(5)),
+            reply(14, 0, "e", Target::Ephemeral { chat: 8, id: 5 }),
+            reply(15, 0, "f", to(20)),
+        ] {
+            live(e);
+        }
+        assert_eq!(
+            headers(&room),
+            [
+                "replying to alice: kept",
+                "replying to dave: only own",
+                EARLIER,
+                EARLIER
+            ]
+        );
+        live(entry(20, 0, "erin", "late"));
+        assert_eq!(
+            headers(&room),
+            [
+                "replying to alice: kept",
+                "replying to dave: only own",
+                EARLIER,
+                "replying to erin: late"
+            ]
+        );
+        assert_eq!(due_quotes(&room), None);
+
+        let row = |space, id| output(&room).borrow().lines.row(space, id).unwrap();
+        let activate = |id| {
+            crate::options_test_stubs::TOASTS.with_borrow_mut(Vec::clear);
+            room.emit_by_name::<()>(
+                "reply-activated",
+                &[&RowMark(row(Space::History, id)), &false],
+            );
+            crate::options_test_stubs::TOASTS.with_borrow_mut(std::mem::take)
+        };
+        history::PAGES.with_borrow_mut(Vec::clear);
+        assert_eq!(activate(10), Vec::<String>::new());
+        assert_eq!(room.spotlight(), Some(row(Space::History, 5)));
+        assert_eq!(activate(11), Vec::<String>::new());
+        assert_eq!(room.spotlight(), Some(row(Space::Ephemeral, 6)));
+        room.set_spotlight(None);
+        assert_eq!(
+            activate(12),
+            ["That message isn't in this window any more."]
+        );
+        assert_eq!(room.spotlight(), None);
+        assert!(history::PAGES.with_borrow(Vec::is_empty));
+    }
+
     /// A row's menu offers Reply where the login takes a reply to its
     /// line, kept or not, and the view has a bar; reacting where it takes
     /// reactions; both, or neither, where the menu is the view's own.
@@ -2796,11 +2875,32 @@ pub(crate) mod tests {
                 vec![],
             ),
             (
-                "a private chat's line",
+                "a room's kept line",
                 &room,
                 Space::History,
                 5,
-                Some(&both),
+                Some(&notices),
+                None,
+                vec![reply(Target::Ephemeral { chat: 7, id: 5 }, bob())],
+            ),
+            (
+                "a room's line under its own count",
+                &room,
+                Space::Ephemeral,
+                6,
+                Some(&notices),
+                None,
+                vec![reply(
+                    Target::Ephemeral { chat: 7, id: 6 },
+                    Quote::new("carol", "hi"),
+                )],
+            ),
+            (
+                "a room's kept line, kind 1 alone",
+                &room,
+                Space::History,
+                5,
+                Some(&lines),
                 None,
                 vec![],
             ),

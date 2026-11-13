@@ -1430,6 +1430,14 @@ one 700 by id left out or answered as taken away, and one newer than the oldest 
 drawn, which the scrollback let go of. A quote still being asked for is waited for
 first, and a refused page ends the jump with its refusal's own toast.
 
+A private chat, which is how hxd-ng shows a room, does the same within its window. Its
+lines are named kind 4 under the chat's id, whichever count a line's id is from, and the
+reply goes on Send Chat with the chat's id as any line there does. Since hxd-ng's 700
+answers the lobby alone, a header quotes only what the window drew, a kept line's row
+before one under the chat's own count: a reply to a line said before the user joined reads
+"earlier message", and nothing is asked for. A jump goes only to a line the window still
+holds; otherwise a toast says it isn't in this window any more.
+
 ### Reactions
 
 Capability bit 19, a draft (Capabilities-Reactions.md) that is not adopted, confirmed

@@ -319,6 +319,9 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     // Chat column: output over input, under the subject bar.
     let vstack = gtk::Box::new(gtk::Orientation::Vertical, 4);
     vstack.append(&outputframe);
+    if let Some(view) = output.downcast_ref::<rotulus::RotulusView>() {
+        vstack.append(&crate::reply_bar::build(view, &input));
+    }
     vstack.append(&inputframe);
 
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
