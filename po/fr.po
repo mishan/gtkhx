@@ -3101,6 +3101,12 @@ msgstr "Préférences GtkHx"
 msgid "Preferences"
 msgstr "Préférences"
 
+#. TRANSLATORS: %s is the private chat's name, as its tab shows it:
+#. its subject, or who else is in it.
+#: rust/crates/gtkhx-ui/src/pchat.rs:219
+msgid "Private chat message: %s"
+msgstr "Message de discussion privée : %s"
+
 #: rust/crates/gtkhx-ui/src/preview_notice.rs:62
 msgid "Too Large to Preview"
 msgstr "Trop volumineux pour l'aperçu"

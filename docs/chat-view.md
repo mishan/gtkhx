@@ -46,7 +46,7 @@ the widget's, and the compose box highlights markdown with the parser the
 view renders it with; two copies could disagree on both.
 
 The two come from crates.io with a caret requirement
-(`rotulus = "0.3.0"`). Between releases GtkHx may instead pin a commit of
+(`rotulus = "0.3.1"`). Between releases GtkHx may instead pin a commit of
 rotulus's `main` by git `rev` (section 4), since the crates' version number
 on `main` does not change between releases and a version requirement
 cannot tell `main` from the release. **No GtkHx release goes out while the
@@ -112,8 +112,9 @@ what it needs to know about Hotline. Every chat output is built by
 - **What never changes** (`setup`): a click on the view leaves the focus
   in the input box beside it, while the keyboard reaches the view by Tab
   from the subject above it (its links, nicks and context menu); in the
-  input, Tab and Shift+Tab are nick completion, so Ctrl+Shift+Tab is what
-  leaves it, for the view or the reply bar's Cancel button; the
+  input, Tab and Shift+Tab are nick completion, so Ctrl+Tab and
+  Ctrl+Shift+Tab are what leave it, the latter for the view or the reply
+  bar's Cancel button, however many conversations are open; the
   indented two-column layout with a draggable separator; the maximum
   gutter width; the grouping gap; the link schemes; the avatar resolver;
   and the two link handlers.
