@@ -102,7 +102,7 @@ fn sections() -> Vec<(String, Option<String>, Vec<Row>)> {
                     tr("Larger, smaller and normal text"),
                 ),
                 (
-                    &["<Control>Tab", "<Control><Shift>Tab"],
+                    &["<Control>Page_Down", "<Control>Page_Up"],
                     tr("Next and previous tab"),
                 ),
                 (&["<Control>f"], tr("Find")),

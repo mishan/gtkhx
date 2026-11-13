@@ -38,6 +38,9 @@ fn display_backed() {
     crate::emoji::tests::check_chooser_is_built_on_first_open();
     crate::users_view::tests::check_rows_land_in_one_batch();
     crate::pchat::tests::check_a_rename_retitles_the_tabs();
+    crate::pchat::tests::check_the_input_is_named_for_its_tab();
+    crate::pchat::tests::check_the_split_leaves_f6_alone();
+    crate::chat_tabs::tests::check_focus_and_pane_keys_are_left_alone();
     crate::users_view::tests::check_avatars_stay_with_their_connection();
     crate::updates::tests::check_banner_starts_hidden();
     crate::chat_output::tests::check_older_pages_go_above_the_first();
@@ -66,6 +69,7 @@ fn display_backed() {
     crate::msg::tests::check_an_instant_messages_chips_are_its_parties();
     crate::msg::tests::check_a_messages_reply_is_quoted_from_its_conversation();
     crate::msg::tests::check_a_stored_messages_chips_are_the_servers();
+    crate::msg::tests::check_tab_leaves_the_input();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();

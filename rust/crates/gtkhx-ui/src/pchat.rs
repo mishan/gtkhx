@@ -23,7 +23,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
 
-use crate::tr::tr;
+use crate::tr::{tr, tr1};
 
 /// Opaque C `struct gtkhx_chat *` / `struct chat *` / `struct htlc_conn *`.
 type Gchat = c_void;
@@ -208,6 +208,31 @@ unsafe fn add_tab(htlc: *mut c_void, chat: *mut c_void, content: &impl IsA<gtk::
     retitle(htlc, None);
 }
 
+/// Name a private chat's input for its tab, whatever the tab is retitled
+/// to, so it is told apart from the public chat's and from another's.
+fn name_input(page: &libadwaita::TabPage, input: &gtk::Widget) {
+    let input = input.downgrade();
+    let name = move |page: &libadwaita::TabPage| {
+        if let Some(input) = input.upgrade() {
+            // TRANSLATORS: %s is the private chat's name, as its tab shows it:
+            // its subject, or who else is in it.
+            let label = tr1("Private chat message: %s", &page.title());
+            input.update_property(&[gtk::accessible::Property::Label(&label)]);
+        }
+    };
+    name(page);
+    page.connect_title_notify(name);
+}
+
+/// Let F6 and Shift+F6 through `paned` to the dock, which steps between its
+/// panes with them from anywhere, rather than between the paned's sides.
+fn leave_f6_to_the_dock(paned: &gtk::Paned) {
+    paned.connect_cycle_child_focus(|paned, _| {
+        paned.stop_signal_emission_by_name("cycle-child-focus");
+        false
+    });
+}
+
 /// `htlc`'s chat `cid`, or NULL.
 ///
 /// # Safety
@@ -345,6 +370,7 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     crate::users_view::name_pchat(hx_gchat_userlist(gchat), &output);
 
     let hpane = gtk::Paned::new(gtk::Orientation::Horizontal);
+    leave_f6_to_the_dock(&hpane);
     hpane.set_start_child(Some(&vbox));
     hpane.set_end_child(Some(&user_sidebar));
     hpane.set_position(435);
@@ -355,6 +381,9 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     hx_gchat_set_window(gchat, wptr(&hpane));
 
     add_tab(htlc, chat, &hpane);
+    if let Some(page) = crate::chat_tabs::find_pchat(htlc, cid) {
+        name_input(&page, &input);
+    }
     gtkhx_chat_tabs_raise_pchat(htlc, cid);
     init_keyaccel(wptr(&hpane));
     input.grab_focus();
@@ -368,6 +397,58 @@ pub(crate) mod tests {
     use gtkhx_core::conn::{hx_conn_new, hx_conn_set_sess, hx_conn_set_uid};
     use hxmodel::chat_members::hx_member_model_upsert;
     use hxmodel::conversation::{hx_conversation_new, HxConversation};
+
+    /// F6 and Shift+F6 in a private chat are not the split's, which would
+    /// keep the focus in the chat, but go on, to the dock.
+    pub(crate) fn check_the_split_leaves_f6_alone() {
+        use gtk::gdk::{Key, ModifierType as M};
+
+        let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
+        leave_f6_to_the_dock(&paned);
+        let (start, end) = (gtk::Button::new(), gtk::Button::new());
+        paned.set_start_child(Some(&start));
+        paned.set_end_child(Some(&end));
+        let window = gtk::Window::new();
+        window.set_child(Some(&paned));
+        window.present();
+        let press = |key, state| crate::chat_tabs::tests::press(&paned, key, state);
+        for state in [M::empty(), M::SHIFT_MASK] {
+            start.grab_focus();
+            assert_eq!(press(Key::F6, state), (true, false), "F6 with {state:?}");
+            let focus = gtk::prelude::GtkWindowExt::focus(&window);
+            assert_eq!(
+                focus.as_ref(),
+                Some(start.upcast_ref()),
+                "F6 with {state:?}"
+            );
+        }
+        window.destroy();
+    }
+
+    /// A private chat's input is named for its tab, and renamed with it.
+    pub(crate) fn check_the_input_is_named_for_its_tab() {
+        let view = libadwaita::TabView::new();
+        let input = gtk::TextView::new();
+        let page = view.append(&input);
+        page.set_title("bob");
+        name_input(&page, input.upcast_ref());
+        let named = |label: &str| {
+            let label = crate::cs(label);
+            // Safety: a live widget, and the label as the C string its
+            // varargs take.
+            let err = unsafe {
+                gtk::ffi::gtk_test_accessible_check_property(
+                    input.as_ptr().cast(),
+                    gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL,
+                    label.as_ptr(),
+                )
+            };
+            assert!(err.is_null(), "{}", unsafe { crate::cstr(err) });
+        };
+        named("Private chat message: bob");
+        page.set_title("Lobby");
+        named("Private chat message: Lobby");
+    }
 
     /// A rename is heard with the public chat alone, and still reaches the
     /// tabs of private chats named for the renamed member, those alike told

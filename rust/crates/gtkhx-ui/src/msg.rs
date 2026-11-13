@@ -374,7 +374,7 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
         from_glib_none(rotulus::ffi::rotulus_view_get_vadjustment(raw));
     let vscroll = gtk::Scrollbar::new(gtk::Orientation::Vertical, adjustment.as_ref());
 
-    let input = gtk::TextView::new();
+    let input = new_input();
     gtkhx_apply_input_font(wptr(&input));
     gtkhx_apply_input_style(wptr(&input));
     input.set_editable(true);
@@ -532,6 +532,12 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     input.grab_focus();
 
     Some(win)
+}
+
+/// A conversation's input, which Tab and Shift+Tab leave, as they do a
+/// form's text field, rather than typing a tab into the message.
+fn new_input() -> gtk::TextView {
+    gtk::TextView::builder().accepts_tab(false).build()
 }
 
 /// The input's keys. Return sends, Shift+Return is a newline, Up and Down
@@ -2073,6 +2079,39 @@ pub unsafe extern "C" fn hx_msg_configure(sess: *mut c_void) {
 pub(crate) mod tests {
     use super::*;
     use super::{friend_markup, info_markup};
+
+    /// Tab and Shift+Tab move the focus out of a conversation's input either
+    /// way, typing nothing.
+    pub(crate) fn check_tab_leaves_the_input() {
+        use gdk::{Key, ModifierType as M};
+        use glib::translate::IntoGlib;
+        let input = new_input();
+        let (before, after) = (gtk::Button::new(), gtk::Button::new());
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        column.append(&before);
+        column.append(&input);
+        column.append(&after);
+        let window = gtk::Window::new();
+        window.set_child(Some(&column));
+        window.present();
+        // A key as the input's controllers have it, ours and GTK's own.
+        let press = |key: Key, state: M| {
+            (input.observe_controllers().iter::<glib::Object>())
+                .filter_map(|c| c.ok()?.downcast::<gtk::EventControllerKey>().ok())
+                .any(|c| c.emit_by_name::<bool>("key-pressed", &[&key.into_glib(), &0u32, &state]))
+        };
+        for (key, state, lands) in [
+            (Key::Tab, M::empty(), &after),
+            (Key::ISO_Left_Tab, M::SHIFT_MASK, &before),
+        ] {
+            input.grab_focus();
+            press(key, state);
+            let focus = gtk::prelude::GtkWindowExt::focus(&window);
+            assert_eq!(focus.as_ref(), Some(lands.upcast_ref()), "{key:?}");
+        }
+        assert_eq!(whole(&input.buffer()), "");
+        window.destroy();
+    }
 
     /// A friend's conversation with bob in `view`, as `create` files one.
     fn bobs(view: &RotulusView) -> MsgWin {

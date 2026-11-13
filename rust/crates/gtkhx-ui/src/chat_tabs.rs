@@ -211,6 +211,25 @@ fn on_selected_page_changed(view: &adw::TabView) {
     dock::set_needs_attention(dock::ID_CHAT, false);
 }
 
+/// A tab view that leaves Ctrl+Tab and Ctrl+Shift+Tab to the focus, and
+/// Ctrl+Shift+Page Up and Page Down to the dock.
+///
+/// Ctrl+Tab is how GTK leaves a text view, and how the keyboard leaves a
+/// chat input, whose Tab completes a nick; Ctrl+Shift+Page Up and Page Down
+/// move the pane in front along its strip. While on screen with two tabs,
+/// the view would take them window-wide. Ctrl+Page Up and Page Down still
+/// switch tabs, and a drag moves one.
+fn new_view() -> adw::TabView {
+    let view = adw::TabView::new();
+    view.remove_shortcuts(
+        adw::TabViewShortcuts::CONTROL_TAB
+            | adw::TabViewShortcuts::CONTROL_SHIFT_TAB
+            | adw::TabViewShortcuts::CONTROL_SHIFT_PAGE_UP
+            | adw::TabViewShortcuts::CONTROL_SHIFT_PAGE_DOWN,
+    );
+    view
+}
+
 /// Build (once per connection) and return `htlc`'s tab view as a borrowed
 /// `GtkWidget*` (transfer none — the module keeps the owning ref). Idempotent
 /// for a given connection.
@@ -223,7 +242,7 @@ pub extern "C" fn gtkhx_chat_tabs_init(htlc: *mut c_void) -> *mut gtk::ffi::GtkW
         return v.as_ptr() as *mut gtk::ffi::GtkWidget;
     }
 
-    let view = adw::TabView::new();
+    let view = new_view();
     view.connect_close_page(on_close_page);
     view.connect_selected_page_notify(on_selected_page_changed);
     // A drop must not be answered with nothing; see conn_tabs' on_create_window.
@@ -389,7 +408,7 @@ pub(crate) fn add_msg(
     true
 }
 
-fn find_pchat(htlc: *mut c_void, cid: u32) -> Option<adw::TabPage> {
+pub(crate) fn find_pchat(htlc: *mut c_void, cid: u32) -> Option<adw::TabPage> {
     STATE.with(|s| s.borrow().pchat.get(&(conn_key(htlc), cid)).cloned())
 }
 
@@ -631,6 +650,70 @@ pub(crate) mod tests {
         let page = find_pchat(htlc, cid).expect("a tab to close");
         view(conn_key(htlc)).expect("a view").close_page(&page);
         retitle_soon(conn_key(htlc));
+    }
+
+    /// `key` as `widget`'s own shortcuts have it: whether one is bound to
+    /// it, and whether one took it.
+    pub(crate) fn press(
+        widget: &impl IsA<gtk::Widget>,
+        key: gtk::gdk::Key,
+        state: gtk::gdk::ModifierType,
+    ) -> (bool, bool) {
+        fn matches(
+            t: &gtk::ShortcutTrigger,
+            key: gtk::gdk::Key,
+            state: gtk::gdk::ModifierType,
+        ) -> bool {
+            if let Some(t) = t.downcast_ref::<gtk::KeyvalTrigger>() {
+                t.keyval() == key && t.modifiers() == state
+            } else if let Some(t) = t.downcast_ref::<gtk::AlternativeTrigger>() {
+                matches(&t.first(), key, state) || matches(&t.second(), key, state)
+            } else {
+                false
+            }
+        }
+        let controllers = widget.observe_controllers();
+        let bound: Vec<gtk::Shortcut> = (controllers.iter::<glib::Object>())
+            .filter_map(|c| c.ok()?.downcast::<gtk::ShortcutController>().ok())
+            .flat_map(|c| c.iter::<glib::Object>().flatten().collect::<Vec<_>>())
+            .filter_map(|s| s.downcast::<gtk::Shortcut>().ok())
+            .filter(|s| s.trigger().is_some_and(|t| matches(&t, key, state)))
+            .collect();
+        let took = bound.iter().any(|s| {
+            s.action().is_some_and(|a| {
+                a.activate(
+                    gtk::ShortcutActionFlags::empty(),
+                    widget,
+                    s.arguments().as_ref(),
+                )
+            })
+        });
+        (!bound.is_empty(), took)
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab are left to the focus, and
+    /// Ctrl+Shift+Page Up and Page Down to the dock, however many tabs are
+    /// open, and Ctrl+Page Down still switches them.
+    pub(crate) fn check_focus_and_pane_keys_are_left_alone() {
+        use gtk::gdk::{Key, ModifierType as M};
+
+        let view = new_view();
+        let first = view.append(&gtk::TextView::new());
+        let second = view.append(&gtk::TextView::new());
+        view.set_selected_page(&first);
+        let press = |key, state| press(&view, key, state);
+        for (key, state) in [
+            (Key::Tab, M::CONTROL_MASK),
+            (Key::Tab, M::CONTROL_MASK | M::SHIFT_MASK),
+            (Key::Page_Up, M::CONTROL_MASK | M::SHIFT_MASK),
+            (Key::Page_Down, M::CONTROL_MASK | M::SHIFT_MASK),
+        ] {
+            assert_eq!(press(key, state), (true, false), "{key:?} with {state:?}");
+            assert_eq!(view.selected_page().as_ref(), Some(&first));
+            assert_eq!(view.page_position(&first), 0);
+        }
+        assert_eq!(press(Key::Page_Down, M::CONTROL_MASK), (true, true));
+        assert_eq!(view.selected_page().as_ref(), Some(&second));
     }
 
     /// Move the first page of `htlc`'s view to the end, as a drag would.
