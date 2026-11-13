@@ -87,8 +87,8 @@ rust-version = "1.92"
 # v4_16 is what makes the view implement GtkAccessibleText, so a screen
 # reader can read the transcript, and reports where the text is on screen,
 # for magnifiers.
-rotulus = { git = "https://github.com/mishan/rotulus.git", rev = "9e9af02c31e0ef3debb087b1043d9fd3b2992795", features = ["v4_16"] }
-rotulus-layout = { git = "https://github.com/mishan/rotulus.git", rev = "9e9af02c31e0ef3debb087b1043d9fd3b2992795" }
+rotulus = { git = "https://github.com/mishan/rotulus.git", rev = "ee7a473562deaf2f09194408a14044e874ebd430", features = ["v4_16"] }
+rotulus-layout = { git = "https://github.com/mishan/rotulus.git", rev = "ee7a473562deaf2f09194408a14044e874ebd430" }
 hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
 hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
 hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }

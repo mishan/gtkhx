@@ -95,6 +95,7 @@ fn sections() -> Vec<(String, Option<String>, Vec<Row>)> {
                     tr("Bold, italic, code"),
                 ),
                 (&["<Control>u"], tr("Clear the input")),
+                (&["r"], tr("Reply to the line the keyboard is on")),
                 (&["Page_Up", "Page_Down"], tr("Scroll the chat")),
                 (
                     &["<Control>plus", "<Control>minus", "<Control>0"],

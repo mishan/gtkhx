@@ -305,14 +305,16 @@ pub(crate) fn hear_replies(view: &RotulusView) {
         }),
     );
     // The next press in the view, of a key or a button, is the user moving
-    // on from the line a jump marked; the press that jumps comes first.
+    // on from the line a jump marked; the press that jumps comes first. R
+    // on the row the keyboard is on replies to it, before the view sees R.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-    keys.connect_key_pressed(|keys, _, _, _| {
-        if let Some(view) = keys.widget().and_downcast::<RotulusView>() {
-            unspot(&view);
-        }
-        glib::Propagation::Proceed
+    keys.connect_key_pressed(|keys, key, _, state| {
+        let Some(view) = keys.widget().and_downcast::<RotulusView>() else {
+            return glib::Propagation::Proceed;
+        };
+        unspot(&view);
+        crate::reactions::reply_key(&view, key, state).into()
     });
     view.add_controller(keys);
     let clicks = gtk::GestureClick::new();
@@ -324,6 +326,19 @@ pub(crate) fn hear_replies(view: &RotulusView) {
         }
     });
     view.add_controller(clicks);
+    // So is scrolling the line entirely out of sight.
+    view.connect_closure(
+        "visible-rows-changed",
+        false,
+        glib::closure_local!(|view: RotulusView| {
+            if view
+                .spotlight()
+                .is_some_and(|row| !view.is_row_visible(row))
+            {
+                view.set_spotlight(None);
+            }
+        }),
+    );
 }
 
 /// The chat `view` shows: the public chat's, 0, until it is heard.
@@ -2778,6 +2793,190 @@ pub(crate) mod tests {
         );
         assert_eq!(room.spotlight(), None);
         assert!(history::PAGES.with_borrow(Vec::is_empty));
+    }
+
+    fn last(view: &RotulusView) -> MessageId {
+        mark(unsafe { rotulus::ffi::rotulus_view_get_last(raw(view)) }).unwrap()
+    }
+
+    /// Runs the main loop for `ms`, its frames and idles with it.
+    fn spin(ms: u64) {
+        let done = std::rc::Rc::new(std::cell::Cell::new(false));
+        let d = done.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || d.set(true));
+        while !done.get() {
+            glib::MainContext::default().iteration(true);
+        }
+    }
+
+    /// A jump's mark stays on its line through the reveal's own scroll,
+    /// told late or after its frame, and while any of the line shows; it
+    /// goes once the line is scrolled entirely out of view.
+    pub(crate) fn check_a_spotlit_line_scrolled_out_of_view_is_let_go() {
+        let view = view();
+        hear_replies(&view);
+        // As a chat window gives its view, for the scrollbar beside it.
+        let adj = gtk::Adjustment::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        view.set_vadjustment(Some(&adj));
+        let window = gtk::Window::new();
+        window.set_default_size(400, 200);
+        window.set_child(Some(&view));
+        window.present();
+        let rows: Vec<_> = (0..100)
+            .map(|i| {
+                say(&view, "al", &format!("line {i}"));
+                last(&view)
+            })
+            .collect();
+        spin(100);
+        assert!(!view.is_row_visible(rows[10]), "a line out of view");
+        reveal(&view, rows[10], false);
+        view.emit_by_name::<()>("visible-rows-changed", &[]);
+        assert_eq!(view.spotlight(), Some(rows[10]), "told before its frame");
+        spin(100);
+        assert_eq!(view.spotlight(), Some(rows[10]), "after its frame");
+        while view.is_row_visible(rows[10]) {
+            adj.set_value(adj.value() + 1.0);
+        }
+        adj.set_value(adj.value() - 1.0);
+        spin(100);
+        assert_eq!(view.spotlight(), Some(rows[10]), "a pixel of it in view");
+        adj.set_value(adj.value() + 1.0);
+        spin(100);
+        assert_eq!(view.spotlight(), None, "none of it");
+        window.destroy();
+    }
+
+    /// R, or Shift+R, and no other modifier, on the row the keyboard is
+    /// on, starts a reply as its menu's Reply does, where that offers one;
+    /// any other key or chord, a row offering no Reply, "Load older", and a
+    /// view without the keyboard leave the key to the view. Any key lets go
+    /// of a jump's mark, R too.
+    pub(crate) fn check_r_replies_to_the_row_the_keyboard_is_on() {
+        use crate::reactions::replied;
+        use gtk::gdk::{Key, ModifierType as M};
+        use gtk::glib::translate::IntoGlib;
+        use hxproto::replies::Targets;
+        let view = view();
+        hear_replies(&view);
+        let input = gtk::TextView::new();
+        let bar = crate::reply_bar::build(&view, input.upcast_ref());
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        column.append(&view);
+        column.append(&bar);
+        column.append(&input);
+        let window = gtk::Window::new();
+        window.set_default_size(400, 300);
+        window.set_child(Some(&column));
+        window.present();
+        draw_history(&view, &[entry(5, 0, "bob", "hello")], true);
+        say(&view, "", "a notice");
+        let notice = last(&view);
+        spin(100);
+        let bob = output(&view).borrow().lines.row(Space::History, 5).unwrap();
+        let more = MessageId(output(&view).borrow().load_older as u64);
+        let focus = |row: Option<MessageId>| match row {
+            Some(row) if row == more => {
+                gtk::prelude::GtkWindowExt::set_focus(&window, None::<&gtk::Widget>);
+                while view.focus_row() != Some(more) {
+                    assert!(view.child_focus(gtk::DirectionType::TabForward));
+                }
+            }
+            Some(row) => assert!(view.reveal(row, true)),
+            None => gtk::prelude::GtkWindowExt::set_focus(&window, None::<&gtk::Widget>),
+        };
+        let lines = Targets(1 << 1);
+        for (case, on, key, state, replies, want) in [
+            ("r", Some(bob), Key::r, M::empty(), Some(&lines), true),
+            (
+                "Shift+R",
+                Some(bob),
+                Key::R,
+                M::SHIFT_MASK,
+                Some(&lines),
+                true,
+            ),
+            (
+                "R with Caps Lock",
+                Some(bob),
+                Key::R,
+                M::LOCK_MASK,
+                Some(&lines),
+                true,
+            ),
+            (
+                "another letter",
+                Some(bob),
+                Key::e,
+                M::empty(),
+                Some(&lines),
+                false,
+            ),
+            (
+                "Ctrl+R",
+                Some(bob),
+                Key::r,
+                M::CONTROL_MASK,
+                Some(&lines),
+                false,
+            ),
+            ("Alt+R", Some(bob), Key::r, M::ALT_MASK, Some(&lines), false),
+            (
+                "Super+R",
+                Some(bob),
+                Key::r,
+                M::SUPER_MASK,
+                Some(&lines),
+                false,
+            ),
+            ("no replies", Some(bob), Key::r, M::empty(), None, false),
+            (
+                "kind 4 alone",
+                Some(bob),
+                Key::r,
+                M::empty(),
+                Some(&Targets(1 << 4)),
+                false,
+            ),
+            (
+                "a notice",
+                Some(notice),
+                Key::r,
+                M::empty(),
+                Some(&lines),
+                false,
+            ),
+            (
+                "load older",
+                Some(more),
+                Key::r,
+                M::empty(),
+                Some(&lines),
+                false,
+            ),
+            ("no focus", None, Key::r, M::empty(), Some(&lines), false),
+        ] {
+            bar.set_visible(false);
+            focus(on);
+            assert_eq!(replied(&view, key, state, replies), want, "{case}");
+            assert_eq!(bar.is_visible(), want, "{case}: the bar");
+            assert_eq!(input.has_focus(), want, "{case}: the input");
+        }
+
+        // As GTK hands the view a key: R lets go of the mark, and with no
+        // connection to take a reply, is left to the view.
+        focus(Some(bob));
+        view.set_spotlight(Some(bob));
+        let keys: Vec<_> = (view.observe_controllers().into_iter())
+            .filter_map(|c| c.ok()?.downcast::<gtk::EventControllerKey>().ok())
+            .collect();
+        for c in &keys {
+            let taken: bool =
+                c.emit_by_name("key-pressed", &[&Key::r.into_glib(), &0u32, &M::empty()]);
+            assert!(!taken);
+        }
+        assert_eq!(view.spotlight(), None);
+        window.destroy();
     }
 
     /// A row's menu offers Reply where the login takes a reply to its

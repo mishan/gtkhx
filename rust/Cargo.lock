@@ -3379,7 +3379,7 @@ dependencies = [
 [[package]]
 name = "rotulus"
 version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=9e9af02c31e0ef3debb087b1043d9fd3b2992795#9e9af02c31e0ef3debb087b1043d9fd3b2992795"
+source = "git+https://github.com/mishan/rotulus.git?rev=ee7a473562deaf2f09194408a14044e874ebd430#ee7a473562deaf2f09194408a14044e874ebd430"
 dependencies = [
  "glib 0.22.10",
  "gtk4",
@@ -3392,12 +3392,12 @@ dependencies = [
 [[package]]
 name = "rotulus-layout"
 version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=9e9af02c31e0ef3debb087b1043d9fd3b2992795#9e9af02c31e0ef3debb087b1043d9fd3b2992795"
+source = "git+https://github.com/mishan/rotulus.git?rev=ee7a473562deaf2f09194408a14044e874ebd430#ee7a473562deaf2f09194408a14044e874ebd430"
 
 [[package]]
 name = "rotulus-mirc"
 version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=9e9af02c31e0ef3debb087b1043d9fd3b2992795#9e9af02c31e0ef3debb087b1043d9fd3b2992795"
+source = "git+https://github.com/mishan/rotulus.git?rev=ee7a473562deaf2f09194408a14044e874ebd430#ee7a473562deaf2f09194408a14044e874ebd430"
 dependencies = [
  "rotulus-layout",
 ]

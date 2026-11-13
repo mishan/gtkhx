@@ -247,10 +247,7 @@ pub(crate) unsafe fn actions(
     reactions: Option<&hxproto::reactions::Limits>,
 ) -> Vec<Action> {
     let mut actions = Vec::new();
-    let reply = replies.filter(|_| crate::reply_bar::offered(view));
-    let reply = reply
-        .and_then(|t| reply_target(view, row, t).or_else(|| crate::msg::reply_on(view, row, t)));
-    if let Some((target, quote)) = reply {
+    if let Some((target, quote)) = reply_of(view, row, replies) {
         actions.push(Action::Reply(target, quote));
     }
     let Some(limits) = reactions else {
@@ -269,6 +266,48 @@ pub(crate) unsafe fn actions(
         actions.push(Action::Clear(id));
     }
     actions
+}
+
+/// How a reply names `row`'s line or message, and what it quotes, where
+/// the view has a bar and `replies`, the login's, take a reply to it.
+fn reply_of(
+    view: &RotulusView,
+    row: MessageId,
+    replies: Option<&Targets>,
+) -> Option<(Target, Quote)> {
+    let replies = replies.filter(|_| crate::reply_bar::offered(view))?;
+    reply_target(view, row, replies).or_else(|| crate::msg::reply_on(view, row, replies))
+}
+
+/// [`replied`], with the login's targets.
+pub(crate) fn reply_key(view: &RotulusView, key: gdk::Key, state: gdk::ModifierType) -> bool {
+    // SAFETY: main thread; the connection is live.
+    let replies = conn(view).and_then(|htlc| unsafe { hxhandlers::recv::replies::targets(htlc) });
+    replied(view, key, state, replies.as_ref())
+}
+
+/// `key` with `state` was pressed in `view`: R, with or without Shift, on
+/// the row the keyboard is on starts a reply to it as its menu's Reply
+/// does, where that offers one. Whether it did.
+pub(crate) fn replied(
+    view: &RotulusView,
+    key: gdk::Key,
+    state: gdk::ModifierType,
+    replies: Option<&Targets>,
+) -> bool {
+    use gdk::ModifierType as M;
+    let chord = M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK | M::META_MASK | M::HYPER_MASK;
+    if !matches!(key, gdk::Key::r | gdk::Key::R) || state.intersects(chord) {
+        return false;
+    }
+    let Some((target, quote)) = view
+        .focus_row()
+        .and_then(|row| reply_of(view, row, replies))
+    else {
+        return false;
+    };
+    crate::reply_bar::start(view, target, &quote);
+    true
 }
 
 /// `row`'s menu at `x`, `y`, with what [`actions`] offers, and the view's

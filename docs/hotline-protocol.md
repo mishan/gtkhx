@@ -1411,7 +1411,8 @@ handlers where the session has replies or reactions, which drop it.
 
 A lobby line is answered from its row's menu (the pointer's, or Menu or Shift+F10 on a
 row reached from the keyboard), which offers Reply where the login takes the kind that
-names it: a kept line kind 1, a line nobody keeps kind 4 under chat 0. A bar over the
+names it: a kept line kind 1, a line nobody keeps kind 4 under chat 0; R on such a row
+does the same. A bar over the
 input then says who and what is answered, the nick in the color the view draws it in
 (Rotulus's `text_color`) where that reads on the window, and is the input's accessible
 description while it shows; its button or Escape in the input cancels it. The next line
@@ -1422,7 +1423,8 @@ window closing let go of it. The line's own header is drawn from its echo, as an
 
 A header clicked, or Enter or Space on one, goes to the line it answers: scrolled to and
 drawn on a tint of the selection's color until the next key or click in the view, the
-next jump or a line sent, with focus moved to it only from the keyboard. A kept line not
+next jump, a line sent or a scroll that leaves none of it in view, with focus moved to it
+only from the keyboard. A kept line not
 drawn is paged back to, 200 lines a page before the oldest drawn (or the newest page,
 before any), up to five pages a jump, then a toast says to choose the reply again to go
 on. A jump toasts and asks nothing where no page could hold the line: one nobody keeps,
