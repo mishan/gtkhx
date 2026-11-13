@@ -177,6 +177,8 @@ or in the lobby from the view's quotes of lines asked for by id
 (`hxmodel::replies`), or an unavailable
 header until then; the rows waiting on a target are headed again as it is
 drawn or answered ([hotline-protocol.md](hotline-protocol.md), "Replies").
+A conversation keeps what each instant message's first row quotes beside
+its rows, and heads a reply's first row from that alone.
 The reply bar over the input draws the nick it quotes in the color a
 header does, as the view would draw it now (`text_color`). Rotulus makes
 that color read on the view's background, but the bar sits on the
@@ -203,10 +205,10 @@ structure. A lookup that misses stays 0.
 | `speaker-menu` | `users.c::user_popup_show`, the same menu the Users window and the private-chat sidebars pop |
 | `load-more` | fetch the next page of chat history |
 | `media-activated` | the inline media click-to-view dialog ([inline-media.md](inline-media.md)) |
-| `reply-activated` | on the public chat and each private chat, where the session has replies: a reply's header clicked, or Enter or Space on it, goes to the line it answers (`chat_output.rs`), focus going with it only from the keyboard |
+| `reply-activated` | on the public chat, each private chat and each conversation, where the session has replies: a reply's header clicked, or Enter or Space on it, goes to the line or instant message it answers (`chat_output.rs`, `msg.rs`), focus going with it only from the keyboard |
 | `reaction-activated` | on the public chat, each private chat and each conversation, where the session has reactions: the chip's reaction made or taken back (`reactions.rs`) |
 | `reaction-menu` | likewise, on a kept line's emoji chip: who reacted with it; a server emoji's placeholder is left to `row-menu` |
-| `row-menu` | on the public chat, each private chat and each conversation: on a line of the public chat or a private chat where the session has replies and the login takes its kind, "Reply" first, which shows the bar over the input (`reply_bar`); where the session has reactions, on a kept line, an instant message or a stored private message, the quick reactions, "Add Reaction…" and, on a line, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), and where it has any chips and the account holds access bit 22, "Clear Reactions…", which asks first; then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
+| `row-menu` | on the public chat, each private chat and each conversation: on a line of the public chat or a private chat, or an instant message, where the session has replies and the login takes its kind, "Reply" first, which shows the bar over the input (`reply_bar`); where the session has reactions, on a kept line, an instant message or a stored private message, the quick reactions, "Add Reaction…" and, on a line, where it has emoji chips, "Who Reacted…" (its emoji to choose from, or who reacted at once where there is one), and where it has any chips and the account holds access bit 22, "Clear Reactions…", which asks first; then Copy (with a selection) and Select All, in place of the view's own menu, which a click on the selection still opens; any other row is left the view's own |
 
 `link-activated` and `link-menu` are connected in `chat_view.rs`, above.
 

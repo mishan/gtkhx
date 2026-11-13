@@ -157,7 +157,9 @@ the news database.
 Its `react-*` accounts likewise react, beside `[history]` and
 `[reactions]`, for the reactions suite, in the lobby, in the one room
 `[rooms]` holds, which they join by its id, and on the instant messages
-`react-a` and `react-b` send each other as friends.
+`react-a` and `react-b` send each other as friends; and reply there for
+the replies suite, `react-a` befriending `react-mod` on the hotline-ng
+port too.
 hlservd's `admin` has no password until one is set, and until then logs
 in only from the machine running the server, which host networking makes
 every test connection; its flood ban is off for loopback

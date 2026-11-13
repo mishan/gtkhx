@@ -1,11 +1,11 @@
-//! The "Replying to …" bar over a chat's input, where the session has
-//! replies (the Replies draft, capability bit 18): Reply in a row's menu
-//! shows it with who said the line and what, and the next line typed and
-//! sent as chat names that line. Its button or Escape in the input cancels
-//! it; the view cleared (at a connect, or by `/clear`), the window closing,
-//! and the line sent let go of it. A line
-//! the scrollback lets go of meanwhile is still the one answered: the
-//! reply names it, not its row.
+//! The "Replying to …" bar over a chat's input, or a friend's
+//! conversation's, where the session has replies (the Replies draft,
+//! capability bit 18): Reply in a row's menu shows it with who said the
+//! line or message and what, and the next line said as chat, or message
+//! sent, names it. Its button or Escape in the input cancels it; a connect,
+//! a chat's view cleared by `/clear`, the window closing, and what is sent
+//! let go of it. A line the scrollback lets go of meanwhile is
+//! still the one answered: the reply names it, not its row.
 //!
 //! While it shows, the input's accessible description is its text, so a
 //! screen reader says what is being answered on each arrival in the input.

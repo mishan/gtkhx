@@ -1438,6 +1438,17 @@ before one under the chat's own count: a reply to a line said before the user jo
 "earlier message", and nothing is asked for. A jump goes only to a line the window still
 holds; otherwise a toast says it isn't in this window any more.
 
+A friend's conversation answers an instant message the same way where the login takes kind
+2, which hxd-ng offers only beside bit 6. The message is named by its guid and its sender's
+Login, the friend's or our own account's, and the next message sent carries 0x0F21 on IM
+Send (810), which hxd-ng relays on IM Deliver (811), live or after Get Roster's reply. A
+message that answers another is headed, on its first row, with the first row of the one it
+answers, found among the conversation's messages by guid alone, so a Login spelled
+otherwise does not lose it. No server keeps an instant message to be fetched, so one the
+conversation does not hold reads "earlier message", and a jump to it says it isn't in this
+window any more. One sent is headed as it is drawn, since nothing echoes it. A connect lets
+go of a pending reply; a message to someone it cannot reach leaves it for the next.
+
 ### Reactions
 
 Capability bit 19, a draft (Capabilities-Reactions.md) that is not adopted, confirmed
