@@ -998,7 +998,7 @@ user_create (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
 
     /* Feed this chat's authoritative membership model before
      * any view gate, so it stays populated even when the chat has no user-list
-     * view open. Read by tab_nick_comp for input in this chat. */
+     * view open. Read by nick completion for input in this chat. */
     if (hx_chat_member_model (chat)) {
         hx_member_model_upsert (hx_chat_member_model (chat), uid, nam, icon,
                                 color, nick_color);

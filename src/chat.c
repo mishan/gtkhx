@@ -333,7 +333,7 @@ chats_init (session *sess)
      * chat_with_cid(sess, 0) is always non-NULL. */
     chat_new (sess, 0);
     /* The authoritative public-chat membership model.
-     * Created once, fed by the users.c fan-out, read by tab_nick_comp. */
+     * Created once, fed by the users.c fan-out, read by nick completion. */
 
     /* Route user-clicks on a private-chat tab's X through pchat_close
      * (which sends hx_part_chat and tears down the view). Idempotent.
@@ -346,7 +346,7 @@ chat_new (session *sess, guint32 cid)
 {
     /* The conversation is a Rust HxConversation handle — it creates its own
      * authoritative membership model (fed by the users.c fan-out, read by
-     * tab_nick_comp / the user-list view / rcv.c old-state lookups). */
+     * nick completion / the user-list view / rcv.c old-state lookups). */
     struct chat *chat = hx_conversation_new (cid);
     hx_chats_insert (sess->chats, cid, chat);
     return chat;
@@ -516,58 +516,6 @@ inline_media_chat_activated (GtkWidget *view, guint token, gpointer data)
         view, gtkhx_chat_view_session (view)->htlc, m->id, m->id_len, m->mime,
         m->width_present ? m->width : 0, m->height_present ? m->height : 0,
         m->bytes_present ? m->bytes : 0);
-}
-
-/* Nick completion. The C tab_nick_comp / tab_nick_comp_next / nick_comp_chng /
- * public_chat_users_sorted machinery (~250 lines of raw-buffer + GSList work)
- * moved to Rust: the tested hxmodel::chat::complete over the
- * authoritative membership model for the chat the input belongs to (each
- * struct chat's member_model), reached via hx_nick_complete. The Rust version
- * also fixes two latent C bugs the old code had — Tab-cycling that computed the
- * next nick then discarded it, and mid-buffer caret math that landed one char
- * inside the name. (The old code always completed against the public chat;
- * private-chat inputs now complete against their own participants.)
- *
- * `pos` is a char offset (the GtkTextBuffer insert mark). `reverse` steps the
- * Tab-cycle backwards (Shift+Tab). */
-int
-tab_nick_comp (session *sess, void *member_model, char *text, gboolean reverse,
-               int pos, GtkWidget *entry)
-{
-    char *ctext = NULL, *cinfo = NULL;
-    int ccursor = -1;
-
-    if (!member_model) {
-        return 0;
-    }
-    if (!hx_nick_complete (member_model, text, (gsize)pos, reverse,
-                           (gunichar)':', gtkhx_prefs.old_nickcompletion,
-                           &ctext, &ccursor, &cinfo)) {
-        return 0;
-    }
-
-    /* Ambiguous prefix → echo the candidate list to chat output (the Rust
-     * completer returns it space-joined, case-insensitively sorted, with no
-     * trailing space). */
-    if (cinfo) {
-        hx_printf (sess->htlc, 0, "%s", cinfo);
-        g_free (cinfo);
-    }
-    if (ctext) {
-        GtkTextBuffer *ebuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (entry));
-        gtk_text_buffer_set_text (ebuf, ctext, -1);
-        if (ccursor >= 0) {
-            GtkTextIter it;
-            int total = gtk_text_buffer_get_char_count (ebuf);
-            if (ccursor > total) {
-                ccursor = total;
-            }
-            gtk_text_buffer_get_iter_at_offset (ebuf, &it, ccursor);
-            gtk_text_buffer_place_cursor (ebuf, &it);
-        }
-        g_free (ctext);
-    }
-    return 0;
 }
 
 /* configure-event is gone in GTK 4. Window size for the

@@ -60,18 +60,6 @@ extern gboolean hx_member_model_get_at (void *model, guint index,
  * pchat?" gate). */
 extern gboolean hx_member_model_contains (void *model, guint16 uid);
 
-/* Nick-complete the token at `cursor` (a char offset) in `input` against the
- * model's members. On a result returns TRUE and fills *out_text (a g_malloc'd
- * replacement for the whole buffer), *out_cursor (char offset, or -1 for end),
- * and *out_info (a g_malloc'd space-joined candidate list to echo, or NULL).
- * The caller g_free's *out_text / *out_info. Returns FALSE (outputs untouched)
- * when there's nothing to complete. `suffix` is the nick-completion suffix
- * char (a gunichar; ':' by default). */
-extern gboolean hx_nick_complete (void *model, const char *input, gsize cursor,
-                                  gboolean reverse, gunichar suffix,
-                                  gboolean old_style, char **out_text,
-                                  int *out_cursor, char **out_info);
-
 G_END_DECLS
 
 #endif /* HX_CHAT_MEMBERS_H */
