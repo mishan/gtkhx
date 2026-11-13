@@ -294,9 +294,9 @@ fn hear(view: &RotulusView, cid: u32) {
     });
 }
 
-/// Hear the activations of `view`'s reply headers, and what moves on from
-/// the line one went to.
-fn hear_replies(view: &RotulusView) {
+/// Hear the activations of `view`'s reply headers, a chat's or a
+/// conversation's, and what moves on from the line one went to.
+pub(crate) fn hear_replies(view: &RotulusView) {
     view.connect_closure(
         "reply-activated",
         false,
@@ -966,7 +966,7 @@ pub(crate) fn nick_color(view: &RotulusView, nick: &str) -> ColorRef {
 }
 
 /// A reply's header: `q`'s nick in the color its own lines are drawn in.
-fn quoting(view: &RotulusView, q: &Quote) -> Reply {
+pub(crate) fn quoting(view: &RotulusView, q: &Quote) -> Reply {
     Reply::Quote {
         nick: q.nick.clone(),
         color: nick_color(view, &q.nick),
@@ -975,7 +975,7 @@ fn quoting(view: &RotulusView, q: &Quote) -> Reply {
 }
 
 /// The header of a reply whose target the view could not quote itself.
-fn unquoted(q: Option<&Quoted>) -> Reply {
+pub(crate) fn unquoted(q: Option<&Quoted>) -> Reply {
     Reply::Unavailable(match q {
         // TRANSLATORS: a reply's header, where the line it answers has
         // been taken away.
@@ -1224,6 +1224,9 @@ unsafe fn replies(htlc: *mut c_void, e: &gtkhx_core::replies::Event) {
 /// The header of the reply on `row` was activated, from the keyboard or
 /// not: go to the line it answers, in place of any jump under way.
 fn jump(view: &RotulusView, row: MessageId, keyboard: bool) {
+    if crate::msg::jump(view, row, keyboard) {
+        return;
+    }
     let target = output(view).borrow().lines.replies.get(&row).cloned();
     let Some(target) = target else {
         return;
@@ -1261,12 +1264,7 @@ fn jump_on(view: &RotulusView) {
     match step {
         Step::Reveal => {
             drop(out);
-            let row = row.unwrap();
-            if !view.reveal(row, j.keyboard) {
-                return crate::reactions::toast(&short(Short::Scrolled));
-            }
-            // Marked until the user moves on, however long reading it takes.
-            view.set_spotlight(Some(row));
+            reveal(view, row.unwrap(), j.keyboard);
         }
         Step::Wait => out.jump = Some(j),
         Step::Ask => {
@@ -1307,6 +1305,16 @@ fn landed(view: &RotulusView, refused: bool) {
     jump_on(view);
 }
 
+/// Go to the line drawn on `row`, focus going with it only from the
+/// `keyboard`, and mark it.
+pub(crate) fn reveal(view: &RotulusView, row: MessageId, keyboard: bool) {
+    if !view.reveal(row, keyboard) {
+        return crate::reactions::toast(&short(Short::Scrolled));
+    }
+    // Marked until the user moves on, however long reading it takes.
+    view.set_spotlight(Some(row));
+}
+
 /// Let go of the line a jump marked.
 pub(crate) fn unspot(view: &RotulusView) {
     if view.spotlight().is_some() {
@@ -1315,7 +1323,7 @@ pub(crate) fn unspot(view: &RotulusView) {
 }
 
 /// Why a jump did not reach its line, as the user is told.
-fn short(why: Short) -> String {
+pub(crate) fn short(why: Short) -> String {
     match why {
         Short::Gone => tr("That message isn't in this window any more."),
         Short::Unavailable => tr("That message can't be shown."),
@@ -2498,7 +2506,7 @@ pub(crate) mod tests {
     }
 
     /// The headers a screen reader is read of `view`, in order.
-    fn headers(view: &RotulusView) -> Vec<String> {
+    pub(crate) fn headers(view: &RotulusView) -> Vec<String> {
         (spoken(view).lines())
             .filter_map(|l| l.find("replying to").map(|i| l[i..].to_owned()))
             .collect()

@@ -179,6 +179,7 @@ fn an_instant_message_is_told_and_acknowledged_as_delivered() {
             guid,
             body: "lunch?\nnow".into(),
             sent_at: 1_700_000_000,
+            reply_to: None,
         })]
     );
     let (opcode, ack_trans, acked) = sent().remove(0);
@@ -202,10 +203,48 @@ fn an_instant_message_is_told_and_acknowledged_as_delivered() {
     assert_eq!((told(), sent()), (vec![], vec![]));
 }
 
+/// An instant message names the one it answers where the session has
+/// replies; elsewhere the field is no part of it.
+#[test]
+fn an_instant_message_answers_another_where_the_session_has_replies() {
+    use hxproto::replies::Targets;
+    let to = Target::Im {
+        guid: [1; 16],
+        sender: b"bob".to_vec(),
+    };
+    let packed = to.pack().unwrap();
+    for (case, caps, want) in [
+        ("with replies", hxsession::cap::REPLIES, Some(to.clone())),
+        ("without", 0, None),
+    ] {
+        let c = Conn::with_caps(CAP_MESSAGING | caps);
+        crate::recv::replies::agreed(c.0, Some(Targets(1 << 2)));
+        let im = frame(
+            811,
+            0,
+            false,
+            fields(&[
+                (tag::FRIEND_LOGIN, b"alice"),
+                (tag::MESSAGE_GUID, &[9; 16]),
+                (tag::MESSAGE_BODY, b"yes"),
+                (tag::REPLY_TO, &packed),
+            ]),
+        );
+        unsafe { pushed(c.0, 811, &im) };
+        crate::recv::replies::forget(c.0);
+        sent();
+        let got = told().into_iter().find_map(|e| match e {
+            Event::Im(m) => Some(m.reply_to),
+            _ => None,
+        });
+        assert_eq!(got, Some(want), "{case}");
+    }
+}
+
 #[test]
 fn a_sent_message_moves_on_with_its_answer_and_its_receipts() {
     let c = messenger();
-    let guid = unsafe { crate::send::friends::im(c.0, b"bob", "hi").unwrap() };
+    let guid = unsafe { crate::send::friends::im(c.0, b"bob", "hi", None).unwrap() };
     let (_, trans, _) = sent().remove(0);
     let queued = [0, ReasonCode::OfflineQueued.wire() as u8];
     unsafe {
@@ -250,7 +289,7 @@ fn a_sent_message_moves_on_with_its_answer_and_its_receipts() {
 #[test]
 fn a_refusal_says_why_and_fails_the_message_it_answers() {
     let c = messenger();
-    let guid = unsafe { crate::send::friends::im(c.0, b"zed", "hi").unwrap() };
+    let guid = unsafe { crate::send::friends::im(c.0, b"zed", "hi", None).unwrap() };
     let (_, trans, _) = sent().remove(0);
     let why = [0, ReasonCode::NotFriends.wire() as u8];
     let refusal = frame(
@@ -375,7 +414,7 @@ fn a_reply_that_cannot_be_read_is_said_to_be_none() {
 #[test]
 fn a_connection_closing_lets_go_of_its_roster_and_its_requests() {
     let c = messenger();
-    let guid = unsafe { crate::send::friends::im(c.0, b"bob", "hi").unwrap() };
+    let guid = unsafe { crate::send::friends::im(c.0, b"bob", "hi", None).unwrap() };
     let trans = unsafe { crate::send::friends::roster(c.0).unwrap() };
     unsafe {
         pushed(
@@ -565,7 +604,7 @@ fn ending_an_approval_lists_the_requests_again_and_a_clearing_says_what_went() {
 #[test]
 fn a_message_held_as_a_request_is_said_to_be() {
     let c = messenger();
-    let guid = unsafe { crate::send::friends::im(c.0, b"zed", "hi").unwrap() };
+    let guid = unsafe { crate::send::friends::im(c.0, b"zed", "hi", None).unwrap() };
     let (_, trans, _) = sent().remove(0);
     let requested = [0, ReasonCode::Requested.wire() as u8];
     let answer = frame(

@@ -525,7 +525,7 @@ fn an_instant_messages_reaction_reaches_its_other_party() {
         let mut b = messenger(s, "react-b", Handled::NONE);
         befriend(&mut a, "react-a", &mut b, "react-b");
         let g = guid();
-        let sent = b.request(&im::im_send(b"react-a", &g, b"react to this", true).unwrap());
+        let sent = b.request(&im::im_send(b"react-a", &g, b"react to this", true, None).unwrap());
         assert!(!sent.is_error(), "{}: {}", s.name, sent.error_text());
         let bs = Target::Im {
             guid: g,

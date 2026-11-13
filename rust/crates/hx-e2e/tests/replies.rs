@@ -5,7 +5,8 @@
 //! the answer. A reply on the classic wire is said with GtkHx's own
 //! request, `hxrequest::chat::say`, and on the ng one by a scripted client.
 //! A room's line and a private chat's are answered as kind 4 under the
-//! chat's id.
+//! chat's id, and an instant message as kind 2, with
+//! `hxrequest::messaging::im_send`.
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
@@ -13,7 +14,9 @@ use hx_e2e::ng::Ng;
 use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
 use hxproto::messages::tag;
+use hxproto::messaging::{RosterState, CAP_MESSAGING};
 use hxproto::target::Target;
+use hxrequest::messaging as im;
 use hxrequest::Request;
 use hxsession::cap::{CHAT_HISTORY, REPLIES, STRUCTURED_CHAT};
 use hxsession::{Expect, Handled, HistoryEntry};
@@ -263,5 +266,139 @@ fn a_reply_in_a_room_or_a_private_chat_is_kind_4() {
         let cid = u32::from_be_bytes(r.chunk(tag::CHAT_ID).unwrap().try_into().unwrap());
         join(&mut a, cid);
         answer_in(s, cid, false, &mut guest, &mut a);
+    }
+}
+
+/// `login` with replies and the friend family, with replies to instant
+/// messages.
+fn messenger(s: &'static Server, login: &str) -> Client {
+    let offer = OFFER | CAP_MESSAGING;
+    let c = Client::login_handling(s, login, Some(login), offer, Handled::NONE, "hx-e2e")
+        .unwrap_or_else(|e| panic!("{e}"));
+    let targets = c.server_info().replies;
+    let any = Target::Im {
+        guid: [0; 16],
+        sender: login.as_bytes().to_vec(),
+    };
+    assert!(
+        targets.is_some_and(|t| t.takes(&any)),
+        "{login}: no replies to instant messages: {targets:?}"
+    );
+    c
+}
+
+/// `a` and `b` made friends, whatever an earlier run left between them.
+fn befriend(a: &mut Client, a_login: &str, b: &mut Client, b_login: &str) {
+    for (c, other) in [(&mut *a, b_login), (&mut *b, a_login)] {
+        // Undoing nothing is refused, which is as good.
+        c.request(&im::unblock(other.as_bytes()).unwrap());
+        c.request(&im::remove_friend(other.as_bytes()).unwrap());
+    }
+    // Each asks the other, which is a friendship from sessions that
+    // understand message requests, as listing them says.
+    let mut state = None;
+    for (c, other) in [(&mut *a, b_login), (&mut *b, a_login)] {
+        c.request(&im::message_requests(None).unwrap());
+        let r = c.request(&im::add_friend(other.as_bytes(), None, true).unwrap());
+        state = r.chunk(tag::ROSTER_STATE).map(<[u8]>::to_vec);
+    }
+    assert_eq!(
+        state,
+        Some(RosterState::Accepted.wire().to_be_bytes().to_vec())
+    );
+}
+
+/// A message id no earlier run sent, a version 4 UUID as the ng wire
+/// writes one.
+fn guid() -> [u8; 16] {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let mut g = now.to_be_bytes();
+    g[6] = 0x40 | (g[6] & 0x0f);
+    g[8] = 0x80 | (g[8] & 0x3f);
+    g
+}
+
+/// `guid` as the ng wire writes it.
+fn uuid(guid: &[u8; 16]) -> String {
+    let hex: String = guid.iter().map(|b| format!("{b:02x}")).collect();
+    let at = [0, 8, 12, 16, 20, 32];
+    let parts: Vec<&str> = at.windows(2).map(|w| &hex[w[0]..w[1]]).collect();
+    parts.join("-")
+}
+
+/// `c` sends `to` the instant message `text` under `guid`, answering the
+/// message `reply` names, with GtkHx's own request.
+fn send_im(c: &mut Client, to: &str, guid: &[u8; 16], text: &str, reply: Option<&Target>) {
+    let r = c.request(&im::im_send(to.as_bytes(), guid, text.as_bytes(), true, reply).unwrap());
+    assert!(!r.is_error(), "{text}: {}", r.error_text());
+}
+
+/// What the IM Deliver (811) of message `guid` that `c` hears answers.
+fn im_answers(c: &mut Client, guid: &[u8; 16]) -> Option<Target> {
+    let field = |f: &[u8], t| {
+        hxproto::wire::ChunkIter::over_message(f, f.len())
+            .find(|c| c.tag == t)
+            .map(|c| c.data.to_vec())
+    };
+    loop {
+        if let Event::Session(hxsession::Event::Unhandled { opcode: 811, frame }) =
+            c.next_event().unwrap_or_else(|e| panic!("no 811: {e}"))
+        {
+            if field(&frame, tag::MESSAGE_GUID).as_deref() == Some(&guid[..]) {
+                return Target::parse(&field(&frame, tag::REPLY_TO)?);
+            }
+        }
+    }
+}
+
+/// A reply to an instant message, said with GtkHx's own request, reaches
+/// the conversation's other party as kind 2 naming the message it answers,
+/// by its id and its sender's Login, as one from the ng wire does.
+#[test]
+fn an_instant_messages_reply_is_kind_2() {
+    for s in servers_with(&[Cap::Replies, Cap::Messaging]) {
+        let mut a = messenger(s, "react-a");
+        let mut b = messenger(s, "react-b");
+        befriend(&mut a, "react-a", &mut b, "react-b");
+        let (asked, answer) = (guid(), guid());
+        send_im(&mut b, "react-a", &asked, "lunch?", None);
+        assert_eq!(im_answers(&mut a, &asked), None, "{}", s.name);
+        let bs = Target::Im {
+            guid: asked,
+            sender: b"react-b".to_vec(),
+        };
+        send_im(&mut a, "react-b", &answer, "yes", Some(&bs));
+        assert_eq!(im_answers(&mut b, &answer), Some(bs), "{}", s.name);
+
+        let params = json!({ "messaging": true, "replies": true });
+        let mut ng =
+            Ng::login_with(NG, "react-mod", "react-mod", params).unwrap_or_else(|e| panic!("{e}"));
+        a.request(&im::unblock(b"react-mod").unwrap());
+        a.request(&im::remove_friend(b"react-mod").unwrap());
+        a.request(&im::message_requests(None).unwrap());
+        let _ = ng.ok("friend_add", json!({ "login": "react-a" }));
+        let r = a.request(&im::add_friend(b"react-mod", None, true).unwrap());
+        assert_eq!(
+            r.chunk(tag::ROSTER_STATE),
+            Some(&RosterState::Accepted.wire().to_be_bytes()[..]),
+            "{}",
+            s.name
+        );
+        let ours = guid();
+        send_im(&mut a, "react-mod", &ours, "from classic", None);
+        let theirs = guid();
+        let re = json!({ "im": { "login": "react-a", "guid": uuid(&ours) } });
+        let sent =
+            json!({ "to_login": "react-a", "guid": uuid(&theirs), "text": "from ng", "re": re });
+        ng.ok("msg", sent)
+            .unwrap_or_else(|e| panic!("{}: {e}", s.name));
+        let named = Target::Im {
+            guid: ours,
+            sender: b"react-a".to_vec(),
+        };
+        assert_eq!(im_answers(&mut a, &theirs), Some(named), "{}", s.name);
     }
 }

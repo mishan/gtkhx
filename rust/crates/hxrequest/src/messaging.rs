@@ -11,8 +11,9 @@
 //! Login, or a field longer than its u16 length allows.
 
 use hxproto::build::HxChunk;
-use hxproto::messages::ClientHdr;
+use hxproto::messages::{tag, ClientHdr};
 use hxproto::messaging::{self as m, AckType, PresenceState, RequestAction, TypingState, GUID_LEN};
+use hxproto::target::Target;
 
 use crate::Request;
 
@@ -101,17 +102,29 @@ pub fn set_presence(
     })
 }
 
-/// IM_SEND (810): `body` to `to`, under the `guid` its receipts name.
-pub fn im_send(to: &[u8], guid: &[u8; GUID_LEN], body: &[u8], utf8: bool) -> Option<Request> {
+/// IM_SEND (810): `body` to `to`, under the `guid` its receipts name,
+/// answering the message `reply` names. `None` also for a reply that has
+/// no packed form.
+pub fn im_send(
+    to: &[u8],
+    guid: &[u8; GUID_LEN],
+    body: &[u8],
+    utf8: bool,
+    reply: Option<&Target>,
+) -> Option<Request> {
     let body = hxtext::for_wire(body, utf8, true);
     let send = m::ImSend {
         to,
         guid,
         content: m::ImContent::Plain(&body),
     };
-    built(ClientHdr::ImSend, |c, s| {
+    let mut r = built(ClientHdr::ImSend, |c, s| {
         m::build_im_send_chunks(&send, c, s)
-    })
+    })?;
+    if let Some(t) = reply {
+        r.chunks.push((tag::REPLY_TO, t.pack()?));
+    }
+    Some(r)
 }
 
 /// IM_ACK (812): `sender`'s message `guid` was delivered, or read.

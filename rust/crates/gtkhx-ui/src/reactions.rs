@@ -7,10 +7,10 @@
 //! clears the line's reactions. What a line holds is `chat_output`'s, and
 //! a message's `msg`'s; a refusal is told as a toast.
 //!
-//! The row's menu is also where a lobby or private chat's line is replied
-//! to, where the session has replies (capability bit 18), through `reply_bar`. With
-//! neither, no row is anyone's here, and the view's own menu opens as
-//! before.
+//! The row's menu is also where a lobby or private chat's line, or an
+//! instant message, is replied to, where the session has replies
+//! (capability bit 18), through `reply_bar`. With neither, no row is
+//! anyone's here, and the view's own menu opens as before.
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
@@ -233,9 +233,9 @@ pub(crate) enum Action {
 
 /// What `row` offers on `htlc`, whose login took `replies` and
 /// `reactions`: Reply where the view has a bar and a reply to the row's
-/// line is taken; and where the row is a line or message one can react
-/// to, reacting, on a line "Who Reacted…" where it has emoji chips and
-/// "Clear Reactions…" for a moderator where it has any.
+/// line or message is taken; and where the row is a line or message one
+/// can react to, reacting, on a line "Who Reacted…" where it has emoji
+/// chips and "Clear Reactions…" for a moderator where it has any.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -248,7 +248,9 @@ pub(crate) unsafe fn actions(
 ) -> Vec<Action> {
     let mut actions = Vec::new();
     let reply = replies.filter(|_| crate::reply_bar::offered(view));
-    if let Some((target, quote)) = reply.and_then(|t| reply_target(view, row, t)) {
+    let reply = reply
+        .and_then(|t| reply_target(view, row, t).or_else(|| crate::msg::reply_on(view, row, t)));
+    if let Some((target, quote)) = reply {
         actions.push(Action::Reply(target, quote));
     }
     let Some(limits) = reactions else {

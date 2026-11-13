@@ -21,6 +21,15 @@
 //! private message the server stored takes them likewise, by the reference
 //! it named the message by, and what it holds is the server's to say, as a
 //! line's is.
+//!
+//! Where the session has replies (the Replies draft, capability bit 18) and
+//! they take an instant message's, Reply in a message's menu shows the bar
+//! over a friend's conversation's input (`reply_bar`), and the next message
+//! sent answers it. A message that answers another of the conversation's is
+//! drawn under a header quoting that one's first row, found by its id alone,
+//! or saying it is an earlier message where the conversation no longer
+//! holds it; nothing is asked of the server, which keeps no instant message
+//! to be read back. The header goes to the message it quotes.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -45,6 +54,7 @@ use gtkhx_core::session::PmId;
 use hxmodel::friends::{self, TheirTyping, Typing};
 use hxmodel::pm::{self, Conversation, Conversations, Peer};
 use hxmodel::reactions::{ImReactions, LineReactions};
+use hxmodel::replies::{Quote, Short};
 use hxproto::messaging::CAP_MESSAGING;
 use hxproto::target::Target;
 use rotulus::RotulusView;
@@ -178,9 +188,12 @@ impl<K: Copy + Eq + Hash, V> Drawn<K, V> {
 }
 
 /// An instant message: who sent it, by Login, the friend or our own
-/// account, and its reactions.
+/// account, what a reply to it quotes, the message it answers, and its
+/// reactions.
 struct ImMsg {
     sender: Vec<u8>,
+    said: Quote,
+    re: Option<Guid>,
     reactions: ImReactions,
 }
 
@@ -332,6 +345,7 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     let output: gtk::Widget = from_glib_none(raw);
     if let Some(view) = output.downcast_ref::<RotulusView>() {
         crate::reactions::hear(view);
+        crate::chat_output::hear_replies(view);
     }
     let adjustment: Option<gtk::Adjustment> =
         from_glib_none(rotulus::ffi::rotulus_view_get_vadjustment(raw));
@@ -431,6 +445,11 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     if let Some(typing) = &typing {
         vpane.append(typing);
     }
+    // Instant messages alone: a private message is named by the reference
+    // a server stored it under.
+    if let (Peer::Login(_), Some(view)) = (peer, output.downcast_ref::<RotulusView>()) {
+        vpane.append(&crate::reply_bar::build(view, input.upcast_ref()));
+    }
     vpane.append(&inputframe);
     vpane.set_margin_start(5);
     vpane.set_margin_end(5);
@@ -491,7 +510,8 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
 }
 
 /// The input's keys. Return sends, Shift+Return is a newline, Up and Down
-/// walk what was sent, and Ctrl+K opens Connect.
+/// walk what was sent, Escape cancels a reply and only then is taken, and
+/// Ctrl+K opens Connect.
 fn attach_keys(input: &gtk::TextView, win: Weak<MsgWin>) {
     use gdk::{Key, ModifierType};
 
@@ -519,6 +539,8 @@ fn attach_keys(input: &gtk::TextView, win: Weak<MsgWin>) {
         } else if key == Key::Return {
             win.model.borrow_mut().history.record(&whole(&buf));
             send(&win, &buf);
+            return glib::Propagation::Stop;
+        } else if key == Key::Escape && crate::reply_bar::escape(&view) {
             return glib::Propagation::Stop;
         } else if key == Key::Up {
             let shown = win.model.borrow_mut().history.up(&whole(&buf));
@@ -574,9 +596,10 @@ unsafe fn reaches(htlc: *mut c_void, login: &[u8]) -> bool {
         && with_roster(htlc, |r| r.requests.served || friends::is_friend(r, login))
 }
 
-/// An instant message to `login`, shown marked as it goes; to someone it
-/// cannot reach, a note that it did not go, since the server would refuse
-/// it.
+/// An instant message to `login`, answering the message the reply bar holds
+/// where the login takes it, shown marked as it goes; to someone it cannot
+/// reach, a note that it did not go, since the server would refuse it, and
+/// the reply left for the next.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
@@ -589,7 +612,12 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
         );
         return;
     }
-    let Some(guid) = hxhandlers::send::friends::im(htlc, login, text) else {
+    let targets = hxhandlers::recv::replies::targets(htlc);
+    let reply = win.input.upgrade().and_then(|i| crate::reply_bar::take(&i));
+    // A target the wire cannot carry would refuse the message whole.
+    let reply = reply.filter(|t| targets.is_some_and(|k| k.takes(t)) && t.pack().is_some());
+    let reply = reply.as_ref();
+    let Some(guid) = hxhandlers::send::friends::im(htlc, login, text, reply) else {
         return;
     };
     // hxd-ng takes a reply to someone waiting with a request as approving
@@ -626,8 +654,10 @@ unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
             stamp,
         );
     }
+    let re = head(win, mark, reply);
     let own = CStr::from_ptr(hx_conn_login(htlc.cast())).to_bytes();
-    drew_im(win, guid, own, (mark, last));
+    let said = Quote::new(&String::from_utf8_lossy(nick), &first);
+    drew_im(win, guid, own, said, re, (mark, last));
     let sent = Sent {
         mark: mark as usize,
         line: first,
@@ -1015,16 +1045,86 @@ unsafe fn draw(win: &MsgWin, line: &Line<'_>, body: &str) -> Rows {
     (first, last)
 }
 
-/// Instant message `guid`, `sender`'s, was drawn in `win` on `rows`.
-fn drew_im(win: &MsgWin, guid: Guid, sender: &[u8], rows: Rows) {
+/// Instant message `guid`, `sender`'s, which a reply quotes as `said` and
+/// which answers `re`, was drawn in `win` on `rows`.
+fn drew_im(win: &MsgWin, guid: Guid, sender: &[u8], said: Quote, re: Option<Guid>, rows: Rows) {
     let view = win.output.upgrade().and_downcast::<RotulusView>();
     if let (Some(view), Some(rows)) = (view, marks(rows)) {
-        let sender = sender.to_vec();
         let of = ImMsg {
-            sender,
+            sender: sender.to_vec(),
+            said,
+            re,
             reactions: ImReactions::default(),
         };
         win.ims.borrow_mut().drew(guid, rows, of, view.max_rows());
+    }
+}
+
+/// Head the message whose first row is `row` with the instant message `to`
+/// names, where it names one: quoted from that message's first row where
+/// the conversation holds it, by its id alone, so a Login spelled otherwise
+/// does not lose it; and otherwise as an earlier message, which nothing can
+/// fetch. The message it answers.
+fn head(win: &MsgWin, row: *mut c_void, to: Option<&Target>) -> Option<Guid> {
+    let &Target::Im { guid, .. } = to? else {
+        return None;
+    };
+    let view = win.output.upgrade().and_downcast::<RotulusView>()?;
+    let said = win.ims.borrow().rows.get(&guid).map(|r| r.of.said.clone());
+    let reply = match &said {
+        Some(q) => crate::chat_output::quoting(&view, q),
+        None => crate::chat_output::unquoted(None),
+    };
+    view.set_reply(MessageId(row as u64), Some(reply));
+    Some(guid)
+}
+
+/// How a reply names the instant message drawn on `row` of `view`, and
+/// what it quotes, where `targets` take a reply to it.
+pub(crate) fn reply_on(
+    view: &RotulusView,
+    row: MessageId,
+    targets: &hxproto::replies::Targets,
+) -> Option<(Target, Quote)> {
+    let win = shown_in(view)?;
+    reply_in(&win, row, targets)
+}
+
+fn reply_in(
+    win: &MsgWin,
+    row: MessageId,
+    targets: &hxproto::replies::Targets,
+) -> Option<(Target, Quote)> {
+    let guid = win.ims.borrow().on(row)?;
+    let target = win.target(Msg::Im(guid)).filter(|t| targets.takes(t))?;
+    let said = win.ims.borrow().rows.get(&guid)?.of.said.clone();
+    Some((target, said))
+}
+
+/// The header of the reply on `row` of `view` was activated, from the
+/// keyboard or not: go to the message it answers, where `view` is a
+/// conversation's. Whether it is.
+pub(crate) fn jump(view: &RotulusView, row: MessageId, keyboard: bool) -> bool {
+    let Some(win) = shown_in(view) else {
+        return false;
+    };
+    jump_in(&win, view, row, keyboard);
+    true
+}
+
+/// [`jump`] in `win`: to the message the reply on `row` answers where the
+/// conversation holds it, and otherwise told that it isn't there.
+fn jump_in(win: &MsgWin, view: &RotulusView, row: MessageId, keyboard: bool) {
+    let to = {
+        let ims = win.ims.borrow();
+        let Some(re) = ims.on(row).and_then(|m| ims.rows[&m].of.re) else {
+            return;
+        };
+        ims.rows.get(&re).map(|r| r.first)
+    };
+    match to {
+        Some(to) => crate::chat_output::reveal(view, to, keyboard),
+        None => crate::reactions::toast(&crate::chat_output::short(Short::Gone)),
     }
 }
 
@@ -1058,7 +1158,9 @@ pub(crate) unsafe fn im(htlc: *mut c_void, m: &Im, quiet: bool) {
     // reaches the transcript or the desktop.
     let body = friends::plain_text(&m.body);
     let rows = draw(&win, &line, &body);
-    drew_im(&win, m.guid, &m.from, rows);
+    let re = head(&win, rows.0, m.reply_to.as_ref());
+    let said = Quote::new(&name, pm::rows(&body).next().unwrap_or_default());
+    drew_im(&win, m.guid, &m.from, said, re, rows);
     show_typing(&win, false);
     chat_tabs::set_attention_msg(htlc, &peer, true);
     win.im.borrow_mut().unread.push(m.guid);
@@ -1370,7 +1472,8 @@ fn due(win: &MsgWin, m: Msg, now: Instant) -> Option<Target> {
 
 /// `htlc`'s connection changed state: what was sent on an earlier connect
 /// will hear no more, but for what was still being sent, which the
-/// roster's own forgetting fails.
+/// roster's own forgetting fails; and a reply pending is let go of, as a
+/// chat's is.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
@@ -1383,6 +1486,9 @@ pub(crate) unsafe fn forget_sent(htlc: *mut c_void) {
             .retain(|_, s| s.connect == connect || s.at == Delivery::Sending);
         win.sending.borrow_mut().retain(|_, s| s.1 == connect);
         unanswered(&win);
+        if let Some(view) = win.output.upgrade().and_downcast::<RotulusView>() {
+            crate::reply_bar::cancel(&view);
+        }
     }
 }
 
@@ -1973,9 +2079,24 @@ pub(crate) mod tests {
         let mark = |row: MessageId| row.0 as *mut c_void;
         let first = row(&view, "hi");
         let last = row(&view, "there");
-        drew_im(&win, theirs, b"bob", (mark(first), mark(last)));
+        let said = |text| Quote::new("bob", text);
+        drew_im(
+            &win,
+            theirs,
+            b"bob",
+            said("hi"),
+            None,
+            (mark(first), mark(last)),
+        );
         let mine = row(&view, "hello");
-        drew_im(&win, ours, b"alice", (mark(mine), mark(mine)));
+        drew_im(
+            &win,
+            ours,
+            b"alice",
+            said("hello"),
+            None,
+            (mark(mine), mark(mine)),
+        );
         let notice = row(&view, "no message");
         let shown = |row| {
             (view.reactions_of(row).into_iter())
@@ -2045,6 +2166,87 @@ pub(crate) mod tests {
                     sender: b"alice".to_vec()
                 })
             )
+        );
+    }
+
+    /// A message that answers another of the conversation's is headed with
+    /// that one's first row, found by its id whatever the Login is spelled,
+    /// and as an earlier message where the conversation does not hold it;
+    /// a target of no instant message heads nothing. Its header goes to the
+    /// message it answers, or says it isn't there. Any row of a message
+    /// offers a reply to it, where the login takes kind 2.
+    pub(crate) fn check_an_instant_messages_reply_is_quoted_from_its_conversation() {
+        use hxproto::replies::Targets;
+        let view = RotulusView::new();
+        let win = bobs(&view);
+        let mark = |row: MessageId| row.0 as *mut c_void;
+        let (theirs, gone) = ([1; 16], [9; 16]);
+        let to = |guid, sender: &[u8]| Target::Im {
+            guid,
+            sender: sender.to_vec(),
+        };
+        let (first, last) = (row(&view, "hi"), row(&view, "there"));
+        let said = Quote::new("bob", "hi");
+        drew_im(
+            &win,
+            theirs,
+            b"bob",
+            said.clone(),
+            None,
+            (mark(first), mark(last)),
+        );
+        let mut replies = Vec::new();
+        for (n, target) in [
+            (2, to(theirs, b"BOB")),
+            (3, to(gone, b"bob")),
+            (4, Target::Line { channel: 0, id: 1 }),
+        ] {
+            let r = row(&view, "re");
+            let re = head(&win, mark(r), Some(&target));
+            drew_im(
+                &win,
+                [n; 16],
+                b"alice",
+                Quote::new("alice", "re"),
+                re,
+                (mark(r), mark(r)),
+            );
+            replies.push(r);
+        }
+        assert_eq!(
+            crate::chat_output::tests::headers(&view),
+            [
+                "replying to bob: hi",
+                "replying to a message: earlier message"
+            ]
+        );
+
+        let toasts = || crate::options_test_stubs::TOASTS.with_borrow_mut(std::mem::take);
+        toasts();
+        jump_in(&win, &view, replies[0], false);
+        assert_eq!((view.spotlight(), toasts()), (Some(first), vec![]));
+        view.set_spotlight(None);
+        jump_in(&win, &view, replies[1], false);
+        assert_eq!(
+            (view.spotlight(), toasts()),
+            (
+                None,
+                vec!["That message isn't in this window any more.".to_owned()]
+            )
+        );
+
+        let ims = Targets(1 << 2);
+        for at in [first, last] {
+            assert_eq!(
+                reply_in(&win, at, &ims),
+                Some((to(theirs, b"bob"), said.clone()))
+            );
+        }
+        assert_eq!(reply_in(&win, first, &Targets(1 << 1)), None, "lines alone");
+        assert_eq!(
+            reply_in(&win, row(&view, "notice"), &ims),
+            None,
+            "no message's row"
         );
     }
 

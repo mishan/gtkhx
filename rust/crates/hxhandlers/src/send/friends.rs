@@ -16,6 +16,7 @@ use std::time::Instant;
 use gtkhx_core::conn::hx_conn_has_cap;
 use gtkhx_core::messaging::{with_roster, with_roster_mut, Guid, Requests};
 use hxproto::messaging::{AckType, PresenceState, RequestAction, CAP_MESSAGING};
+use hxproto::target::Target;
 use hxrequest::messaging as req;
 use hxrequest::Request;
 use hxsession::cap;
@@ -214,13 +215,16 @@ pub unsafe fn clear_requests(
     send_served(htlc, Some(req::clear_requests(since, before)), Asked::Clear)
 }
 
-/// An instant message to `to`, and the id its receipts will name.
+/// An instant message to `to`, answering the message `reply` names where
+/// the connection's login takes a reply to it, and the id its receipts
+/// will name.
 ///
 /// # Safety
 /// See [`login`].
-pub unsafe fn im(htlc: *mut c_void, to: &[u8], body: &str) -> Option<Guid> {
+pub unsafe fn im(htlc: *mut c_void, to: &[u8], body: &str, reply: Option<&Target>) -> Option<Guid> {
     let guid = new_guid()?;
-    let r = req::im_send(to, &guid, body.as_bytes(), utf8(htlc));
+    let reply = reply.filter(|t| crate::recv::replies::targets(htlc).is_some_and(|k| k.takes(t)));
+    let r = req::im_send(to, &guid, body.as_bytes(), utf8(htlc), reply);
     send(htlc, r, Some(Asked::Im(guid)))?;
     with_roster_mut(htlc, |m| m.sending(guid, to));
     Some(guid)

@@ -173,7 +173,13 @@ fn an_instant_message_carries_its_receipts_and_typing() {
     guid.copy_from_slice(&now.to_be_bytes());
     let sent = ok(
         &mut a,
-        req::im_send(b"friend-d", &guid, "lunch?\n\u{1f35c}".as_bytes(), true),
+        req::im_send(
+            b"friend-d",
+            &guid,
+            "lunch?\n\u{1f35c}".as_bytes(),
+            true,
+            None,
+        ),
     );
     assert!(
         matches!(reason(&sent), None | Some(ReasonCode::Ok)),
@@ -240,7 +246,7 @@ fn a_block_hides_the_blocker_until_it_is_lifted() {
     let hidden = b.request(&req::find_user(b"friend-e").unwrap());
     assert!(hidden.is_error());
     assert_eq!(reason(&hidden), Some(ReasonCode::AccountNotFound));
-    let refused = b.request(&req::im_send(b"friend-e", &[1; 16], b"hello?", true).unwrap());
+    let refused = b.request(&req::im_send(b"friend-e", &[1; 16], b"hello?", true, None).unwrap());
     assert!(refused.is_error());
 
     ok(&mut a, req::unblock(b"friend-f"));
@@ -364,7 +370,7 @@ fn guid() -> [u8; 16] {
 /// `body` to `to`: its id, and what the send was answered.
 fn im(c: &mut Client, to: &str, body: &str) -> ([u8; 16], Reply) {
     let g = guid();
-    let r = c.request(&req::im_send(to.as_bytes(), &g, body.as_bytes(), true).unwrap());
+    let r = c.request(&req::im_send(to.as_bytes(), &g, body.as_bytes(), true, None).unwrap());
     (g, r)
 }
 

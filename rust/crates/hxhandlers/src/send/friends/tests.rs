@@ -94,7 +94,7 @@ fn nothing_goes_where_the_server_did_not_confirm_bit_6() {
     let c = Conn::with_caps(cap::TEXT_ENCODING);
     unsafe {
         assert_eq!(roster(c.0), None);
-        assert_eq!(im(c.0, b"bob", "hi"), None);
+        assert_eq!(im(c.0, b"bob", "hi", None), None);
         assert_eq!(typing(c.0, b"bob", true), None);
     }
     assert_eq!(sent(), []);
@@ -143,8 +143,8 @@ fn a_message_goes_with_a_fresh_id_its_receipts_will_name() {
     let c = Conn::with_caps(CAP_MESSAGING | cap::TEXT_ENCODING);
     let (a, b) = unsafe {
         (
-            im(c.0, b"bob", "one").unwrap(),
-            im(c.0, b"bob", "two").unwrap(),
+            im(c.0, b"bob", "one", None).unwrap(),
+            im(c.0, b"bob", "two", None).unwrap(),
         )
     };
     assert_ne!(a, b);
@@ -158,6 +158,37 @@ fn a_message_goes_with_a_fresh_id_its_receipts_will_name() {
     assert!(fields.contains(&(0x0606, b"one".to_vec())));
     let held = gtkhx_core::messaging::with_roster(c.0, |r| r.delivery(&a));
     assert_eq!(held, Some(gtkhx_core::messaging::Delivery::Sending));
+}
+
+/// A message answers another only where the login agreed to replies and
+/// takes a reply to an instant message; anywhere else it goes plain.
+#[test]
+fn a_reply_names_its_message_only_where_the_login_takes_it() {
+    use hxproto::replies::Targets;
+    const TAG_REPLY_TO: u16 = 0x0f21;
+    let to = Target::Im {
+        guid: [1; 16],
+        sender: b"bob".to_vec(),
+    };
+    for (case, caps, targets, carried) in [
+        ("an instant message", cap::REPLIES, Some(1 << 2), true),
+        ("a kind not taken", cap::REPLIES, Some(1 << 1), false),
+        ("no target kinds", cap::REPLIES, None, false),
+        ("bit 18 not agreed", 0, Some(1 << 2), false),
+    ] {
+        sent();
+        let c = Conn::with_caps(CAP_MESSAGING | caps);
+        crate::recv::replies::agreed(c.0, targets.map(Targets));
+        unsafe { im(c.0, b"bob", "yes", Some(&to)).unwrap() };
+        crate::recv::replies::forget(c.0);
+        let (_, _, fields) = sent().remove(0);
+        let reply = fields.iter().find(|(t, _)| *t == TAG_REPLY_TO);
+        assert_eq!(
+            reply.map(|(_, d)| d.clone()),
+            carried.then(|| to.pack().unwrap()),
+            "{case}"
+        );
+    }
 }
 
 #[test]

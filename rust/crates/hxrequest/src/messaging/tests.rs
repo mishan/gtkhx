@@ -9,6 +9,10 @@ fn each_request_goes_as_the_extension_has_it() {
         chunks: chunks.iter().map(|(t, d)| (*t, d.to_vec())).collect(),
     };
     let guid = [7u8; GUID_LEN];
+    let answered = Target::Im {
+        guid: [1; GUID_LEN],
+        sender: b"bob".to_vec(),
+    };
     for (got, want) in [
         (roster(), req(800, &[])),
         (
@@ -53,8 +57,21 @@ fn each_request_goes_as_the_extension_has_it() {
             req(808, &[(0x0650, &[0, 1])]),
         ),
         (
-            im_send(b"bob", &guid, b"a\nb", true).unwrap(),
+            im_send(b"bob", &guid, b"a\nb", true, None).unwrap(),
             req(810, &[(0x0600, b"bob"), (0x0605, &guid), (0x0606, b"a\nb")]),
+        ),
+        // A reply names the message it answers by its packed target.
+        (
+            im_send(b"bob", &guid, b"yes", true, Some(&answered)).unwrap(),
+            req(
+                810,
+                &[
+                    (0x0600, b"bob"),
+                    (0x0605, &guid),
+                    (0x0606, b"yes"),
+                    (0x0F21, &[&[2][..], &[1; GUID_LEN], &[3], b"bob"].concat()),
+                ],
+            ),
         ),
         (
             im_ack(&guid, AckType::Read, b"bob").unwrap(),
@@ -104,9 +121,16 @@ fn each_request_goes_as_the_extension_has_it() {
 #[test]
 fn text_goes_in_the_connections_encoding() {
     // Mac Roman, with a body's line ending; UTF-8 as typed.
-    let sent = im_send(b"bob", &[0; GUID_LEN], "caf\u{e9}\n".as_bytes(), false).unwrap();
+    let sent = im_send(
+        b"bob",
+        &[0; GUID_LEN],
+        "caf\u{e9}\n".as_bytes(),
+        false,
+        None,
+    )
+    .unwrap();
     assert_eq!(sent.chunk(0x0606), Some(&b"caf\x8e\r"[..]));
-    let sent = im_send(b"bob", &[0; GUID_LEN], "caf\u{e9}\n".as_bytes(), true).unwrap();
+    let sent = im_send(b"bob", &[0; GUID_LEN], "caf\u{e9}\n".as_bytes(), true, None).unwrap();
     assert_eq!(sent.chunk(0x0606), Some("caf\u{e9}\n".as_bytes()));
     assert_eq!(login("j\u{f6}rg".as_bytes(), false), b"j\x9arg");
 }
@@ -115,7 +139,15 @@ fn text_goes_in_the_connections_encoding() {
 fn what_the_wire_cannot_carry_is_refused() {
     assert_eq!(add_friend(b"", None, true), None);
     assert_eq!(
-        im_send(b"bob", &[0; GUID_LEN], &vec![b'x'; 65536], true),
+        im_send(b"bob", &[0; GUID_LEN], &vec![b'x'; 65536], true, None),
+        None
+    );
+    let nobodys = Target::Im {
+        guid: [1; GUID_LEN],
+        sender: Vec::new(),
+    };
+    assert_eq!(
+        im_send(b"bob", &[0; GUID_LEN], b"yes", true, Some(&nobodys)),
         None
     );
     assert_eq!(

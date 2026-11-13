@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 
 use hxproto::messaging::{AckType, PresenceState, ReasonCode, RosterEntry, RosterState, GUID_LEN};
+use hxproto::target::Target;
 
 pub mod requests;
 
@@ -211,6 +212,8 @@ pub struct Im {
     pub body: String,
     /// When it was sent, in Unix seconds.
     pub sent_at: u64,
+    /// The message it answers, where the session has replies.
+    pub reply_to: Option<Target>,
 }
 
 /// What the `messaging` signal tells the view.

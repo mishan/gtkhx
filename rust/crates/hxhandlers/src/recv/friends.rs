@@ -21,9 +21,11 @@ use hxproto::messaging::{
     ReasonCode, RequestAction, TypingState, CAP_MESSAGING,
 };
 use hxproto::parse::Header;
+use hxproto::target::Target;
 use hxproto::wire::{Chunk, ChunkIter};
 
 use super::chat::c_text;
+use super::replies;
 
 #[cfg(not(test))]
 use gtkhx_core::session::{gtkhx_session_emit_messaging, gtkhx_session_get_default};
@@ -334,7 +336,7 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
             }
             Err(e) => log(&format!("presence change: {e:?}")),
         },
-        o if o == hdr(ServerHdr::ImDeliver) => match im(frame) {
+        o if o == hdr(ServerHdr::ImDeliver) => match im(frame, replies::targets(htlc).is_some()) {
             Some(m) => {
                 crate::send::friends::delivered(htlc, &m.guid, &m.from);
                 tell(htlc, &Event::Im(m));
@@ -382,8 +384,9 @@ pub(crate) unsafe fn pushed(htlc: *mut c_void, opcode: u32, frame: &[u8]) {
 }
 
 /// An IM Deliver (811), where it carries what one must: its sender, its
-/// id and its text.
-fn im(frame: &[u8]) -> Option<Im> {
+/// id and its text; and the message it answers, where the session has
+/// `replies`.
+fn im(frame: &[u8], replies: bool) -> Option<Im> {
     let from = field(frame, tag::FRIEND_LOGIN).filter(|l| !l.is_empty())?;
     let guid = Guid::try_from(field(frame, tag::MESSAGE_GUID)?).ok()?;
     let body = hxproto::text::to_utf8(field(frame, tag::MESSAGE_BODY)?);
@@ -395,6 +398,7 @@ fn im(frame: &[u8]) -> Option<Im> {
         guid,
         body: lf(&body),
         sent_at,
+        reply_to: (replies.then(|| Target::parse(field(frame, tag::REPLY_TO)?))).flatten(),
     })
 }
 

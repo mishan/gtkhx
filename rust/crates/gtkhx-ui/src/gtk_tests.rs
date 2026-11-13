@@ -61,6 +61,7 @@ fn display_backed() {
     crate::chat_input::tests::check_a_reply_goes_with_the_next_line_said();
     crate::reactions::tests::check_who_reacted_says_who_once_answered();
     crate::msg::tests::check_an_instant_messages_chips_are_its_parties();
+    crate::msg::tests::check_an_instant_messages_reply_is_quoted_from_its_conversation();
     crate::msg::tests::check_a_stored_messages_chips_are_the_servers();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
