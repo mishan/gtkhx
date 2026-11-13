@@ -12,6 +12,7 @@ pub mod files;
 pub mod icon;
 pub mod media;
 pub mod messaging;
+pub mod msg;
 pub mod news;
 pub mod path;
 pub mod reactions;

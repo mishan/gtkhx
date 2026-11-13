@@ -596,13 +596,7 @@ fn a_stored_messages_reaction_reaches_its_other_party() {
         let mut outsider = writer(s, "react-mod");
         let text = unique_name("react to this message");
         let to = b.server_info().uid.expect("react-b's uid");
-        let message = Request {
-            opcode: 108,
-            chunks: vec![
-                (tag::UID, to.to_be_bytes().to_vec()),
-                (tag::BODY, text.as_bytes().to_vec()),
-            ],
-        };
+        let message = hxrequest::msg::send(to, text.as_bytes(), None, None).unwrap();
         let t = a.send_expecting(&message, Some(Expect::Message));
         let sent = loop {
             match a.next_event().unwrap_or_else(|e| panic!("{e}")) {

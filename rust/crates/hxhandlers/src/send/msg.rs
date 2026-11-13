@@ -3,8 +3,6 @@
 use std::ffi::{c_char, CStr};
 use std::os::raw::{c_int, c_void};
 
-use hxproto::build::{build_msg_chunks, HxChunk, MsgRequest};
-use hxproto::messages::{tag, ClientHdr};
 use hxproto::target::Target;
 use hxsession::Expect;
 
@@ -26,7 +24,8 @@ pub unsafe extern "C" fn hx_send_msg(htlc: *mut c_void, uid: u16, msg: *const c_
 
 /// As [`hx_send_msg`], answering the message `reply` names where the
 /// connection's login takes a reply to it: the trans it went on, whose
-/// answer the `msg-answered` signal tells, where it went.
+/// answer the `msg-answered` signal tells, where it went. A reply the
+/// wire cannot carry refuses the message whole, as an instant message's.
 ///
 /// # Safety
 /// As [`hx_send_msg`].
@@ -66,43 +65,16 @@ unsafe fn send(
     if htlc.is_null() {
         return None;
     }
-    let reply = reply.and_then(Target::pack);
     super::chat::with_wire(htlc, msg, glib::ffi::GTRUE, |body| {
-        let mut chunks = [HxChunk::EMPTY; 5];
-        let mut scratch = [0u8; 2];
-        let mut hc = build_msg_chunks(&MsgRequest { uid, body }, &mut chunks, &mut scratch);
-        if hc == 0 {
-            return None;
-        }
         // A field the wire can't carry drops the picture, as on a chat line.
         let fits = |f: &[u8]| (1..=u16::MAX as usize).contains(&f.len());
-        if let Some((id, mime)) = media.filter(|(id, mime)| fits(id) && fits(mime)) {
-            for (tag, data) in [(tag::CHAT_MEDIA_ID, id), (tag::CHAT_MEDIA_TYPE, mime)] {
-                chunks[hc] = HxChunk {
-                    tag,
-                    len: data.len() as u16,
-                    data: data.as_ptr(),
-                };
-                hc += 1;
-            }
-        }
-        if let Some(r) = &reply {
-            chunks[hc] = HxChunk {
-                tag: tag::REPLY_TO,
-                len: r.len() as u16,
-                data: r.as_ptr(),
-            };
-            hc += 1;
-        }
+        let media = media.filter(|(id, mime)| fits(id) && fits(mime));
+        let req = hxrequest::msg::send(uid, body, media, reply)?;
         let trans = super::expect_next(htlc, Expect::Message);
         crate::recv::msg::sending(htlc, trans);
-        hlwrite_chunks(
-            htlc.cast(),
-            ClientHdr::Msg as u32,
-            0,
-            chunks.as_ptr(),
-            hc as c_int,
-        );
+        req.with_hx_chunks(|c| {
+            hlwrite_chunks(htlc.cast(), req.opcode, 0, c.as_ptr(), c.len() as c_int)
+        });
         Some(trans)
     })
 }
@@ -113,6 +85,7 @@ use tests::hlwrite_chunks;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hxproto::build::HxChunk;
     use std::cell::RefCell;
 
     /// A request as written: its opcode, and each field's tag and data.
@@ -197,30 +170,34 @@ mod tests {
         }
     }
 
+    /// A picture goes after the text; one with a field the wire can't
+    /// carry is left behind and the text goes alone.
     #[test]
-    fn a_message_carries_its_picture_after_its_text() {
-        crate::send::expected::take();
-        let _ = unsafe {
-            send_msg_with_media(
-                std::ptr::dangling_mut(),
-                42,
-                c"[image]",
-                b"h1",
-                b"image/png",
-            )
-        };
-        assert_eq!(crate::send::expected::take(), [(1, Expect::Message)]);
-        assert_eq!(
-            SENT.with(|s| s.take()),
-            [(
-                108,
-                vec![
-                    (0x67, vec![0, 42]),
-                    (0x65, b"[image]".to_vec()),
-                    (0x0202, b"h1".to_vec()),
-                    (0x0201, b"image/png".to_vec()),
-                ]
-            )]
-        );
+    fn a_message_carries_its_picture_only_where_the_wire_can() {
+        let past = vec![b'x'; usize::from(u16::MAX) + 1];
+        let picture = vec![(0x0202, b"h1".to_vec()), (0x0201, b"image/png".to_vec())];
+        for (case, id, mime, carried) in [
+            ("a picture", &b"h1"[..], &b"image/png"[..], true),
+            ("an empty handle", b"", b"image/png", false),
+            ("an empty type", b"h1", b"", false),
+            ("a handle past a field", &past, b"image/png", false),
+            ("a type past a field", b"h1", &past, false),
+        ] {
+            crate::send::expected::take();
+            SENT.with(|s| s.take());
+            let trans =
+                unsafe { send_msg_with_media(std::ptr::dangling_mut(), 42, c"[image]", id, mime) };
+            assert_eq!(trans, Some(1), "{case}");
+            assert_eq!(
+                crate::send::expected::take(),
+                [(1, Expect::Message)],
+                "{case}"
+            );
+            let mut want = vec![(0x67, vec![0, 42]), (0x65, b"[image]".to_vec())];
+            if carried {
+                want.extend(picture.clone());
+            }
+            assert_eq!(SENT.with(|s| s.take()), [(108, want)], "{case}");
+        }
     }
 }

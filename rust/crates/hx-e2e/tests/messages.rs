@@ -7,7 +7,6 @@
 use hx_e2e::client::CAP_TEXT_ENCODING;
 use hx_e2e::{servers_with, unique_name, Client, Server};
 use hxnet::Event;
-use hxproto::messages::tag;
 use hxrequest::Request;
 use hxsession::{Expect, Handled};
 
@@ -72,13 +71,8 @@ fn uid_of(c: &mut Client, nick: &str) -> u16 {
 /// refused: the user list asked for after it is answered after it, so
 /// nothing by then means it worked.
 fn message(c: &mut Client, uid: u16, text: &str) -> Option<String> {
-    let t = c.send_expecting(
-        &request(
-            108,
-            &[(tag::UID, &uid.to_be_bytes()), (tag::BODY, text.as_bytes())],
-        ),
-        Some(Expect::Message),
-    );
+    let m = hxrequest::msg::send(uid, text.as_bytes(), None, None).unwrap();
+    let t = c.send_expecting(&m, Some(Expect::Message));
     let list = c.send_expecting(&request(300, &[]), Some(Expect::UserList));
     until(c, |e| match e {
         hxsession::Event::Failed { trans, reason, .. } if *trans == t => {
@@ -113,13 +107,7 @@ fn a_message_arrives_as_an_event() {
 fn a_message_to_no_one_is_refused() {
     for s in servers_with(&[]) {
         let (mut a, _) = member(s, "", "mr");
-        let to_no_one = request(
-            108,
-            &[
-                (tag::UID, &0xfff0u16.to_be_bytes()),
-                (tag::BODY, b"anyone?"),
-            ],
-        );
+        let to_no_one = hxrequest::msg::send(0xfff0, b"anyone?", None, None).unwrap();
         let t = a.send_expecting(&to_no_one, Some(Expect::Message));
         let reason = until(&mut a, |e| match e {
             hxsession::Event::Failed { trans, reason, .. } if *trans == t => Some(reason.clone()),
@@ -161,13 +149,8 @@ fn a_message_to_ourselves_comes_back_from_us() {
         let (mut a, na) = member(s, "", "me");
         let me = uid_of(&mut a, &na);
         let text = format!("note to {na}");
-        let t = a.send_expecting(
-            &request(
-                108,
-                &[(tag::UID, &me.to_be_bytes()), (tag::BODY, text.as_bytes())],
-            ),
-            Some(Expect::Message),
-        );
+        let m = hxrequest::msg::send(me, text.as_bytes(), None, None).unwrap();
+        let t = a.send_expecting(&m, Some(Expect::Message));
         let list = a.send_expecting(&request(300, &[]), Some(Expect::UserList));
         let mut echo = None;
         until(&mut a, |e| match e {

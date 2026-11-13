@@ -331,18 +331,9 @@ fn uid_of(c: &mut Client, nick: &str) -> u16 {
     }
 }
 
-/// A private message to `uid` carrying `m`, as
-/// `hxhandlers::send::msg::send_msg_with_media` sends it.
+/// A private message to `uid` carrying `m`.
 fn message_with(uid: u16, text: &str, m: &ChatMedia) -> Request {
-    Request {
-        opcode: 108,
-        chunks: vec![
-            (tag::UID, uid.to_be_bytes().to_vec()),
-            (tag::BODY, text.as_bytes().to_vec()),
-            (tag::CHAT_MEDIA_ID, m.id.clone()),
-            (tag::CHAT_MEDIA_TYPE, m.mime.clone()),
-        ],
-    }
+    hxrequest::msg::send(uid, text.as_bytes(), Some((&m.id, &m.mime)), None).unwrap()
 }
 
 /// The recipient is sent the picture, and it and the sender may both fetch
