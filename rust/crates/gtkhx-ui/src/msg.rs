@@ -385,8 +385,11 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     input.set_top_margin(4);
     input.set_bottom_margin(4);
 
-    // Recipient info pane: icon, and the name over its status.
-    let info_image = gtk::Image::new();
+    // Recipient info pane: icon, and the name over its status, which says
+    // whose icon it is.
+    let info_image = gtk::Image::builder()
+        .accessible_role(gtk::AccessibleRole::Presentation)
+        .build();
     info_image.set_pixel_size(32);
     info_image.set_size_request(32, 32);
     let info_label = gtk::Label::new(None);
