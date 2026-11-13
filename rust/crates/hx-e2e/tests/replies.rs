@@ -7,7 +7,7 @@
 //! A room's line and a private chat's are answered as kind 4 under the
 //! chat's id, an instant message as kind 2, with
 //! `hxrequest::messaging::im_send`, and a stored private message as kind 5
-//! on a Send Instant Msg (108) as GtkHx's carries it.
+//! with `hxrequest::msg::send`.
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
@@ -416,21 +416,10 @@ fn writer(s: &'static Server, login: &str, caps: u64, handled: Handled) -> Clien
 }
 
 /// `c` sends `uid` the private message `text`, answering the message
-/// `reply` names as GtkHx's Send Instant Msg (108) carries it: the
-/// reference the server stored it under.
+/// `reply` names, and the reference the server stored it under.
 fn send_pm(c: &mut Client, uid: u16, text: &str, reply: Option<&Target>) -> Option<PmId> {
-    let mut chunks = vec![
-        (tag::UID, uid.to_be_bytes().to_vec()),
-        (tag::BODY, text.as_bytes().to_vec()),
-    ];
-    chunks.extend(reply.map(|t| (tag::REPLY_TO, t.pack().unwrap())));
-    let t = c.send_expecting(
-        &Request {
-            opcode: 108,
-            chunks,
-        },
-        Some(Expect::Message),
-    );
+    let m = hxrequest::msg::send(uid, text.as_bytes(), None, reply).unwrap();
+    let t = c.send_expecting(&m, Some(Expect::Message));
     loop {
         match c.next_event().unwrap_or_else(|e| panic!("{e}")) {
             Event::Session(hxsession::Event::MessageSent { trans, pm_id }) if trans == t => {
