@@ -971,8 +971,7 @@ fn upload_from(
     // The FILP header and the data fork's marker, then the data.
     let whole = 133 + len;
     let req = files::put(dir.as_bytes(), name, whole as u32, resume).unwrap();
-    let r = c.request(&req);
-    ok(c, &r, "an upload");
+    let r = granted(c, &req, "an upload");
     let put = hxproto::parse::parse_file_put_reply(&r.raw, r.raw.len());
     let from = u64::from(put.data_pos);
     let (h, abort) = open_transfer(c, put.ref_, whole - from, false);
