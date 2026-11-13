@@ -20,6 +20,7 @@ fn msg(uid: u16, name: &str, body: &str, is_self: bool) -> Emitted {
         is_self,
         media: None,
         pm_id: None,
+        reply_to: None,
     }
 }
 
@@ -38,8 +39,8 @@ fn a_message_is_the_msg_signal_on_its_connection() {
     test_env::reset();
     test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
     unsafe {
-        message(htlc(), 42, "alice", "hi :tada:", None, None);
-        message(htlc(), 7, "misha", "echo", None, None);
+        message(htlc(), 42, "alice", "hi :tada:", None, None, None);
+        message(htlc(), 7, "misha", "echo", None, None, None);
     }
     assert_eq!(
         test_env::emitted(),
@@ -60,7 +61,7 @@ fn a_message_s_picture_rides_on_the_signal() {
         height: None,
         bytes: None,
     };
-    unsafe { message(htlc(), 42, "alice", "[image]", Some(&png), None) };
+    unsafe { message(htlc(), 42, "alice", "[image]", Some(&png), None, None) };
     let Emitted::Msg { media, .. } = &test_env::emitted()[0] else {
         panic!("no msg signal");
     };
@@ -68,14 +69,21 @@ fn a_message_s_picture_rides_on_the_signal() {
 }
 
 #[test]
-fn a_message_s_reference_rides_on_the_signal() {
+fn a_message_s_reference_and_what_it_answers_ride_on_the_signal() {
     test_env::reset();
     let stored = (true, [4; 16]);
-    unsafe { message(htlc(), 42, "alice", "hi", None, Some(stored)) };
-    let Emitted::Msg { pm_id, .. } = &test_env::emitted()[0] else {
+    let re = Target::Pm {
+        stored: true,
+        reference: [5; 16],
+    };
+    unsafe { message(htlc(), 42, "alice", "hi", None, Some(stored), Some(&re)) };
+    let Emitted::Msg {
+        pm_id, reply_to, ..
+    } = &test_env::emitted()[0]
+    else {
         panic!("no msg signal");
     };
-    assert_eq!(*pm_id, Some(stored));
+    assert_eq!((*pm_id, reply_to.clone()), (Some(stored), Some(re)));
 }
 
 /// A private message sent is answered once: with the reference the server
@@ -114,8 +122,8 @@ fn a_message_the_server_left_unnamed_is_named_for_its_sender() {
     test_env::OWN_NAME.with(|c| *c.borrow_mut() = "misha".into());
     test_env::MEMBER.with(|c| *c.borrow_mut() = Some(("bob".into(), 0)));
     unsafe {
-        message(htlc(), 7, "", "to myself", None, None);
-        message(htlc(), 5, "", "from bob", None, None);
+        message(htlc(), 7, "", "to myself", None, None, None);
+        message(htlc(), 5, "", "from bob", None, None, None);
     }
     assert_eq!(
         test_env::emitted(),
@@ -157,7 +165,7 @@ fn what_an_ignored_user_sends_is_dropped() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(true));
     unsafe {
-        message(htlc(), 42, "alice", "hi", None, None);
+        message(htlc(), 42, "alice", "hi", None, None, None);
         broadcast(htlc(), 42, "alice", "hi");
     }
     assert_eq!(test_env::emitted(), []);

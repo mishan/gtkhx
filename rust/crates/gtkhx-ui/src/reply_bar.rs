@@ -1,4 +1,4 @@
-//! The "Replying to …" bar over a chat's input, or a friend's
+//! The "Replying to …" bar over a chat's input, or a
 //! conversation's, where the session has replies (the Replies draft,
 //! capability bit 18): Reply in a row's menu shows it with who said the
 //! line or message and what, and the next line said as chat, or message

@@ -5,8 +5,9 @@
 //! the answer. A reply on the classic wire is said with GtkHx's own
 //! request, `hxrequest::chat::say`, and on the ng one by a scripted client.
 //! A room's line and a private chat's are answered as kind 4 under the
-//! chat's id, and an instant message as kind 2, with
-//! `hxrequest::messaging::im_send`.
+//! chat's id, an instant message as kind 2, with
+//! `hxrequest::messaging::im_send`, and a stored private message as kind 5
+//! on a Send Instant Msg (108) as GtkHx's carries it.
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
@@ -400,5 +401,159 @@ fn an_instant_messages_reply_is_kind_2() {
             sender: b"react-a".to_vec(),
         };
         assert_eq!(im_answers(&mut a, &theirs), Some(named), "{}", s.name);
+    }
+}
+
+/// A private message's reference: whether the server stores it, and its
+/// bytes.
+type PmId = (bool, [u8; 16]);
+
+/// `login` offering `caps`, its session handling what `handled` says.
+fn writer(s: &'static Server, login: &str, caps: u64, handled: Handled) -> Client {
+    let nick: String = unique_name(login).chars().take(31).collect();
+    Client::login_handling(s, login, Some(login), caps, handled, &nick)
+        .unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// `c` sends `uid` the private message `text`, answering the message
+/// `reply` names as GtkHx's Send Instant Msg (108) carries it: the
+/// reference the server stored it under.
+fn send_pm(c: &mut Client, uid: u16, text: &str, reply: Option<&Target>) -> Option<PmId> {
+    let mut chunks = vec![
+        (tag::UID, uid.to_be_bytes().to_vec()),
+        (tag::BODY, text.as_bytes().to_vec()),
+    ];
+    chunks.extend(reply.map(|t| (tag::REPLY_TO, t.pack().unwrap())));
+    let t = c.send_expecting(
+        &Request {
+            opcode: 108,
+            chunks,
+        },
+        Some(Expect::Message),
+    );
+    loop {
+        match c.next_event().unwrap_or_else(|e| panic!("{e}")) {
+            Event::Session(hxsession::Event::MessageSent { trans, pm_id }) if trans == t => {
+                return pm_id
+            }
+            Event::Session(hxsession::Event::Failed { trans, reason, .. }) if trans == t => {
+                panic!("{text}: refused: {reason:?}")
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The private message `text` that `c` hears: who sent it, its reference,
+/// and what it answers.
+fn pm_heard(c: &mut Client, text: &str) -> (u16, Option<PmId>, Option<Target>) {
+    loop {
+        if let Event::Session(hxsession::Event::Message {
+            uid,
+            text: t,
+            pm_id,
+            reply_to,
+            ..
+        }) = c.next_event().unwrap_or_else(|e| panic!("{e}"))
+        {
+            if t == text {
+                return (uid, pm_id, reply_to);
+            }
+        }
+    }
+}
+
+/// A reply to a stored private message names it kind 5 by the reference
+/// the server stored it under, the one its sender was answered with and
+/// its recipient handed: GtkHx's reply reaches the other party so, and a
+/// reply from the ng wire reaches GtkHx so, as one from GtkHx reaches the
+/// ng wire. A session without bit 18 hears the reply's text alone.
+#[test]
+fn a_private_messages_reply_is_kind_5() {
+    for s in servers_with(&[Cap::Replies]) {
+        let mut a = writer(s, "react-a", OFFER, Handled::MSG);
+        let mut b = writer(s, "react-b", OFFER, Handled::MSG);
+        let any = Target::Pm {
+            stored: true,
+            reference: [0; 16],
+        };
+        let targets = a.server_info().replies;
+        assert!(
+            targets.is_some_and(|t| t.takes(&any)),
+            "{}: no replies to stored messages: {targets:?}",
+            s.name
+        );
+        let (a_uid, b_uid) = (a.server_info().uid.unwrap(), b.server_info().uid.unwrap());
+        let asked = unique_name("lunch?");
+        let sent = send_pm(&mut a, b_uid, &asked, None);
+        let (_, got, re) = pm_heard(&mut b, &asked);
+        assert_eq!((got, re), (sent, None), "{}", s.name);
+        let Some((true, reference)) = sent else {
+            panic!("{}: not named as stored: {sent:?}", s.name)
+        };
+        let to = Target::Pm {
+            stored: true,
+            reference,
+        };
+        let answer = unique_name("yes");
+        send_pm(&mut b, a_uid, &answer, Some(&to));
+        assert_eq!(pm_heard(&mut a, &answer).2, Some(to.clone()), "{}", s.name);
+
+        let mut period = writer(s, "react-mod", CAP_TEXT_ENCODING, Handled::NONE);
+        let again = unique_name("yes again");
+        send_pm(&mut b, period.server_info().uid.unwrap(), &again, Some(&to));
+        let tags: Vec<u16> = loop {
+            let e = period
+                .next_event()
+                .unwrap_or_else(|e| panic!("no 104: {e}"));
+            if let Event::Frame(f) = e {
+                let body = f.body.windows(again.len()).any(|w| w == again.as_bytes());
+                if f.header.type_ == 104 && body {
+                    break (hxproto::wire::ChunkIter::at(&f.body, 0))
+                        .map(|c| c.tag)
+                        .collect();
+                }
+            }
+        };
+        assert!(!tags.contains(&tag::REPLY_TO), "{}: {tags:x?}", s.name);
+
+        let mut ng = Ng::login_with(NG, "react-mod", "react-mod", json!({ "replies": true }))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let theirs = unique_name("from ng");
+        let ok = ng
+            .ok("msg", json!({ "to": a_uid, "text": theirs }))
+            .unwrap_or_else(|e| panic!("{}: {e}", s.name));
+        let (ng_uid, got, _) = pm_heard(&mut a, &theirs);
+        let Some((true, reference)) = got else {
+            panic!("{}: not named as stored: {got:?}", s.name)
+        };
+        let ours = unique_name("from classic");
+        let to_ng = Target::Pm {
+            stored: true,
+            reference,
+        };
+        let ours_ref = send_pm(&mut a, ng_uid, &ours, Some(&to_ng));
+        let inbox = ng
+            .ok("inbox", json!({}))
+            .unwrap_or_else(|e| panic!("{}: {e}", s.name));
+        let row = inbox["messages"]
+            .as_array()
+            .and_then(|m| m.iter().find(|m| m["text"] == json!(ours)));
+        let re = row.map(|m| m["re"].clone());
+        assert_eq!(re, Some(json!({ "pm": ok["ref"] })), "{}", s.name);
+        let ours_ng = row.map(|m| m["ref"].clone());
+
+        let Some((true, reference)) = ours_ref else {
+            panic!("{}: not named as stored: {ours_ref:?}", s.name)
+        };
+        let replied = unique_name("from ng, in reply");
+        let re = json!({ "pm": ours_ng });
+        ng.ok("msg", json!({ "to": a_uid, "text": replied, "re": re }))
+            .unwrap_or_else(|e| panic!("{}: {e}", s.name));
+        let to_ours = Target::Pm {
+            stored: true,
+            reference,
+        };
+        assert_eq!(pm_heard(&mut a, &replied).2, Some(to_ours), "{}", s.name);
     }
 }

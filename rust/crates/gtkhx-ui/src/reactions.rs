@@ -8,9 +8,9 @@
 //! a message's `msg`'s; a refusal is told as a toast.
 //!
 //! The row's menu is also where a lobby or private chat's line, or an
-//! instant message, is replied to, where the session has replies
-//! (capability bit 18), through `reply_bar`. With neither, no row is
-//! anyone's here, and the view's own menu opens as before.
+//! instant or stored private message, is replied to, where the session
+//! has replies (capability bit 18), through `reply_bar`. With neither, no
+//! row is anyone's here, and the view's own menu opens as before.
 
 use adw::prelude::*;
 use gtk::{gdk, glib};

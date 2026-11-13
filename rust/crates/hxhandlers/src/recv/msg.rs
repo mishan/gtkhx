@@ -15,6 +15,7 @@ use std::os::raw::c_void;
 use gtkhx_core::boxed::msg::msg_event_new;
 use gtkhx_core::session::PmId;
 use hxmodel::chat_members::HxMemberInfo;
+use hxproto::target::Target;
 
 use super::chat::{c_text, public_members};
 
@@ -43,10 +44,11 @@ unsafe fn heard(htlc: *mut c_void, uid: u16) -> Option<Option<HxMemberInfo>> {
     Some((hx_member_model_get_info(members, uid, &mut info) != 0).then_some(info))
 }
 
-/// A private message: dropped when its sender is ignored, and otherwise the
-/// `msg` signal. A server can leave the sender's name out (mhxd, on a
-/// message to ourselves); it is ours for our own uid, else the roster's, so
-/// the window has a name and our own echo reads as ours.
+/// A private message, named `pm_id` and answering `reply_to`: dropped when
+/// its sender is ignored, and otherwise the `msg` signal. A server can
+/// leave the sender's name out (mhxd, on a message to ourselves); it is
+/// ours for our own uid, else the roster's, so the window has a name and
+/// our own echo reads as ours.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
@@ -57,6 +59,7 @@ pub(crate) unsafe fn message(
     text: &str,
     media: Option<&hxsession::ChatMedia>,
     pm_id: Option<PmId>,
+    reply_to: Option<&Target>,
 ) {
     let Some(sender) = heard(htlc, uid) else {
         return;
@@ -79,7 +82,13 @@ pub(crate) unsafe fn message(
     };
     let shortcodes = gtkhx_text_emoji_shortcodes_enabled() != 0;
     let ev = msg_event_new(uid, &from, text, media, own, shortcodes);
-    gtkhx_session_emit_msg(gtkhx_session_get_default(), htlc, ev.cast(), pm_id.as_ref());
+    gtkhx_session_emit_msg(
+        gtkhx_session_get_default(),
+        htlc,
+        ev.cast(),
+        pm_id.as_ref(),
+        reply_to,
+    );
     hx_msg_event_free(ev);
 }
 
@@ -177,6 +186,7 @@ pub(crate) mod test_env {
             /// The id of the picture the message carries.
             media: Option<Vec<u8>>,
             pm_id: Option<gtkhx_core::session::PmId>,
+            reply_to: Option<hxproto::target::Target>,
         },
         Answered {
             htlc: usize,
@@ -237,6 +247,7 @@ mod doubles {
         h: *mut c_void,
         ev: *mut c_void,
         pm_id: Option<&PmId>,
+        reply_to: Option<&hxproto::target::Target>,
     ) {
         let e = &*(ev as *const HxMsgEvent);
         test_env::EMITTED.with(|c| {
@@ -251,6 +262,7 @@ mod doubles {
                     .as_ref()
                     .map(|m| std::slice::from_raw_parts(m.id, m.id_len).to_vec()),
                 pm_id: pm_id.copied(),
+                reply_to: reply_to.cloned(),
             })
         });
     }
