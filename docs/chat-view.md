@@ -45,15 +45,12 @@ news views find links with GtkHx's `Linkifier` while the chat view uses
 the widget's, and the compose box highlights markdown with the parser the
 view renders it with; two copies could disagree on both.
 
-Normally the two come from crates.io with a caret requirement
-(`rotulus = "0.2.2"`). For now they are instead a git dependency on the
-rotulus repository, pinned by `rev` to a commit of its `main`: the reply
-headers and reaction chips GtkHx is building on are merged there but not
-yet released. The crates' version number on `main` does not change
-between releases, so a version requirement cannot tell `main` from the
-release. **No GtkHx release goes out while the pin is a git revision**: a
-release depends only on released widget code. When Rotulus releases
-them, GtkHx moves back to crates.io (section 4).
+The two come from crates.io with a caret requirement
+(`rotulus = "0.3.0"`). Between releases GtkHx may instead pin a commit of
+rotulus's `main` by git `rev` (section 4), since the crates' version number
+on `main` does not change between releases and a version requirement
+cannot tell `main` from the release. **No GtkHx release goes out while the
+pin is a git revision**: a release depends only on released widget code.
 
 The workspace pin turns on rotulus's `v4_16` feature, which GtkHx's GTK
 floor allows: it is what makes the view implement `GtkAccessibleText`, and

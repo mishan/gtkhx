@@ -3378,8 +3378,9 @@ dependencies = [
 
 [[package]]
 name = "rotulus"
-version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=b7949c0031dedce697863b32bedb3c289d07dab7#b7949c0031dedce697863b32bedb3c289d07dab7"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "433a7a03a3fc7bf6c8adb74a35a8d6cef99a385dcd526aaa60e93f7469f51c42"
 dependencies = [
  "glib 0.22.10",
  "gtk4",
@@ -3391,13 +3392,15 @@ dependencies = [
 
 [[package]]
 name = "rotulus-layout"
-version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=b7949c0031dedce697863b32bedb3c289d07dab7#b7949c0031dedce697863b32bedb3c289d07dab7"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9ed532e2d25ea499071a9c71cea541a8692191558137b6f4d56cfb9c3b5960"
 
 [[package]]
 name = "rotulus-mirc"
-version = "0.2.2"
-source = "git+https://github.com/mishan/rotulus.git?rev=b7949c0031dedce697863b32bedb3c289d07dab7#b7949c0031dedce697863b32bedb3c289d07dab7"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b26c2feec2ba3a050b4e78e98983a71f165083f16bc264ed397b618c52e58aeb"
 dependencies = [
  "rotulus-layout",
 ]
