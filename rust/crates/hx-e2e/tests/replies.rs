@@ -4,12 +4,15 @@
 //! by id with `hxrequest::chat::history_ids` and read as the session reads
 //! the answer. A reply on the classic wire is said with GtkHx's own
 //! request, `hxrequest::chat::say`, and on the ng one by a scripted client.
+//! A room's line and a private chat's are answered as kind 4 under the
+//! chat's id.
 #![cfg(feature = "rig")]
 
 use hx_e2e::client::CAP_TEXT_ENCODING;
 use hx_e2e::ng::Ng;
 use hx_e2e::{servers_with, unique_name, Cap, Client, Server};
 use hxnet::Event;
+use hxproto::messages::tag;
 use hxproto::target::Target;
 use hxrequest::Request;
 use hxsession::cap::{CHAT_HISTORY, REPLIES, STRUCTURED_CHAT};
@@ -21,6 +24,10 @@ const OFFER: u64 = CAP_TEXT_ENCODING | CHAT_HISTORY | STRUCTURED_CHAT | REPLIES;
 const NG: &str = "127.0.0.1:5525";
 /// A history entry's flag: the line was taken away.
 const DELETED: u16 = 0x0004;
+/// A live line's entry flag: its id is its chat's own count's.
+const EPHEMERAL: u16 = 0x0008;
+/// The rig's room, as `tests/hxd-ng/conf/rooms.toml` numbers it.
+const ROOM: u32 = 2754100983;
 
 /// `login` (its password is its name) offering `caps`, its session
 /// handling chat.
@@ -48,23 +55,42 @@ fn replier(s: &'static Server, login: &str) -> Client {
 
 /// Say `text` in the lobby, answering `to` if anything, as GtkHx does.
 fn say(c: &mut Client, text: &str, to: Option<&Target>) {
-    c.send(&hxrequest::chat::say(text.as_bytes(), 0, 0, None, to).unwrap());
+    say_in(c, 0, text, to);
+}
+
+/// Say `text` in chat `cid`, 0 the lobby, answering `to` if anything.
+fn say_in(c: &mut Client, cid: u32, text: &str, to: Option<&Target>) {
+    c.send(&hxrequest::chat::say(text.as_bytes(), cid, 0, None, to).unwrap());
 }
 
 /// The entry of the lobby line `text` that `c` hears.
 fn heard(c: &mut Client, text: &str) -> HistoryEntry {
+    heard_in(c, 0, text)
+}
+
+/// The entry of the line `text` that `c` hears in chat `cid`.
+fn heard_in(c: &mut Client, cid: u32, text: &str) -> HistoryEntry {
     loop {
         if let Event::Session(hxsession::Event::Chat {
-            cid: 0,
+            cid: at,
             line: Some(e),
             ..
         }) = c.next_event().unwrap_or_else(|e| panic!("{e}"))
         {
-            if e.text == text {
+            if at == cid && e.text == text {
                 return e;
             }
         }
     }
+}
+
+/// Join chat `cid`, as accepting its invitation does.
+fn join(c: &mut Client, cid: u32) {
+    let r = c.request(&Request {
+        opcode: 115,
+        chunks: vec![(tag::CHAT_ID, cid.to_be_bytes().to_vec())],
+    });
+    assert!(!r.is_error(), "joining {cid}: {}", r.error_text());
 }
 
 /// The answer to a Get Chat History for the lobby, as GtkHx expects it.
@@ -179,5 +205,63 @@ fn lines_asked_for_by_id_answer_a_pages_quotes() {
         ];
         assert_eq!(got, want, "{}", s.name);
         assert!(!has_more, "{}", s.name);
+    }
+}
+
+/// `to` says a line in chat `cid` and `from` answers it, as kind 4 under
+/// the chat's id: a kept line where `kept`, else one under the chat's own
+/// count. The reply reaches them both with that target.
+fn answer_in(s: &Server, cid: u32, kept: bool, to: &mut Client, from: &mut Client) {
+    let text = unique_name("answer this");
+    say_in(to, cid, &text, None);
+    let e = heard_in(from, cid, &text);
+    assert_eq!(e.flags & EPHEMERAL == 0, kept, "{}: chat {cid}", s.name);
+    let line = Target::Ephemeral {
+        chat: cid,
+        id: e.message_id,
+    };
+    let targets = from.server_info().replies;
+    assert!(
+        targets.is_some_and(|t| t.takes(&line)),
+        "{}: no kind 4",
+        s.name
+    );
+    let reply = unique_name("in reply");
+    say_in(from, cid, &reply, Some(&line));
+    for (who, c) in [("the sender", from), ("another", to)] {
+        let e = heard_in(c, cid, &reply);
+        let got = e.reply_to.as_ref();
+        assert_eq!(got, Some(&line), "{}: chat {cid}, {who}", s.name);
+    }
+}
+
+/// A reply in a room, which the classic wire shows as a private chat under
+/// the room's id, and in a private chat names its line kind 4 under the
+/// chat's id, a room's kept line and a private chat's line under the
+/// chat's own count alike, and reaches the chat's members and its sender
+/// so.
+#[test]
+fn a_reply_in_a_room_or_a_private_chat_is_kind_4() {
+    for s in servers_with(&[Cap::Replies]) {
+        let mut a = replier(s, "react-a");
+        let mut b = replier(s, "react-b");
+        for c in [&mut a, &mut b] {
+            join(c, ROOM);
+        }
+        answer_in(s, ROOM, true, &mut a, &mut b);
+
+        // A guest may open a private chat, which the rig's accounts may not.
+        let nick: String = unique_name("guest").chars().take(31).collect();
+        let mut guest = Client::login_handling(s, "", None, OFFER, Handled::CHAT, &nick)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let uid = a.server_info().uid.expect("react-a's uid");
+        let r = guest.request(&Request {
+            opcode: 112,
+            chunks: vec![(tag::UID, uid.to_be_bytes().to_vec())],
+        });
+        assert!(!r.is_error(), "{}: {}", s.name, r.error_text());
+        let cid = u32::from_be_bytes(r.chunk(tag::CHAT_ID).unwrap().try_into().unwrap());
+        join(&mut a, cid);
+        answer_in(s, cid, false, &mut guest, &mut a);
     }
 }

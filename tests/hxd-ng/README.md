@@ -72,7 +72,7 @@ with Structured Chat, so the chat suite's history tests run here and the
 reactions and replies suites have lines to react and reply to.
 `conf/rooms.toml` holds one room, which every account that reads chat
 may join, and `[rooms] announce = false` keeps the lobby notice to
-classic clients off. The reactions suite joins it with Join Chat (115)
+classic clients off. The reactions and replies suites join it with Join Chat (115)
 by its id, as accepting an invitation does; the rig has no `[system]`
 account to send `/join` to.
 
