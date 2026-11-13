@@ -635,14 +635,41 @@ pub(crate) mod tests {
         palette[usize::from(i)] = gtk::gdk::RGBA::WHITE;
         view.set_palette(&palette);
         start(&to);
-        style.set_color_scheme(libadwaita::ColorScheme::Default);
-        assert_eq!(drawn(), [], "a nick the bar can't show in its color");
+        let on_light = drawn();
         let bold = (label.layout().attributes().unwrap().attributes())
             .into_iter()
             .filter(|a| a.type_() == gtk::pango::AttrType::Weight)
             .map(|a| (a.start_index(), a.end_index()))
             .collect::<Vec<_>>();
+        // And does on a dark window, which the shown bar follows.
+        style.set_color_scheme(libadwaita::ColorScheme::ForceDark);
+        while glib::MainContext::default().iteration(false) {}
+        let on_dark = drawn();
+        // And a new theme's palette, once the theme says it changed.
+        palette[usize::from(i)] = gtk::gdk::RGBA::new(1.0, 1.0, 0.0, 1.0);
+        view.set_palette(&palette);
+        let theme: glib::Object = unsafe {
+            glib::translate::from_glib_none(
+                crate::options_test_stubs::gtkhx_theme_get_default()
+                    .cast::<glib::gobject_ffi::GObject>(),
+            )
+        };
+        theme.emit_by_name::<()>("changed", &[]);
+        while glib::MainContext::default().iteration(false) {}
+        let themed = drawn();
+        style.set_color_scheme(libadwaita::ColorScheme::Default);
+        assert_eq!(on_light, [], "a nick the bar can't show in its color");
         assert_eq!(bold, [(at, at + 3)], "still bold");
+        assert_eq!(
+            on_dark,
+            [(at..at + 3, [255; 3])],
+            "followed to a dark window"
+        );
+        assert_eq!(
+            themed,
+            [(at..at + 3, [255, 255, 0])],
+            "followed a new theme"
+        );
         assert_eq!(label.text(), "Replying to bob: has anyone <tried> it");
         assert_eq!(
             gtk::prelude::GtkWindowExt::focus(&window).as_ref(),

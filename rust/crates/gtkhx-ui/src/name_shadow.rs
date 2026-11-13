@@ -23,31 +23,33 @@ use libadwaita as adw;
 /// large text and interface elements.
 const MIN_CONTRAST: f64 = 3.0;
 
-/// libadwaita's view background, light and dark, which a theme that leaves
-/// lists to the system keeps.
-const ADW_VIEW_BG: [[f64; 3]; 2] = [
-    [1.0, 1.0, 1.0],
+/// sRGB `0xrrggbb` in 0..1.
+const fn rgb(c: u32) -> [f64; 3] {
     [
-        0x1d as f64 / 255.0,
-        0x1d as f64 / 255.0,
-        0x20 as f64 / 255.0,
-    ],
+        (c >> 16 & 0xff) as f64 / 255.0,
+        (c >> 8 & 0xff) as f64 / 255.0,
+        (c & 0xff) as f64 / 255.0,
+    ]
+}
+
+/// libadwaita's view background, light and dark, which a theme that leaves
+/// lists to the system keeps: before 1.7, and since.
+const ADW_VIEW_BG: [[[f64; 3]; 2]; 2] = [
+    [rgb(0xffffff), rgb(0x1e1e1e)],
+    [rgb(0xffffff), rgb(0x1d1d20)],
 ];
 
 /// libadwaita's window background, light and dark, which a window left
-/// untinted keeps.
-const ADW_WINDOW_BG: [[f64; 3]; 2] = [
-    [
-        0xfa as f64 / 255.0,
-        0xfa as f64 / 255.0,
-        0xfb as f64 / 255.0,
-    ],
-    [
-        0x22 as f64 / 255.0,
-        0x22 as f64 / 255.0,
-        0x26 as f64 / 255.0,
-    ],
+/// untinted keeps: before 1.7, and since.
+const ADW_WINDOW_BG: [[[f64; 3]; 2]; 2] = [
+    [rgb(0xfafafa), rgb(0x242424)],
+    [rgb(0xfafafb), rgb(0x222226)],
 ];
+
+/// Which of those the running libadwaita paints.
+fn adw_since_1_7() -> usize {
+    usize::from(adw::minor_version() >= 7)
+}
 
 /// How much of the accent libadwaita mixes into a selected row.
 const SELECTED_ACCENT: f64 = 0.25;
@@ -240,7 +242,7 @@ fn list_backgrounds() -> (f64, f64) {
     let bg = match chrome(CHROME_VIEW) {
         Some(_) if chat_bg.alpha > 0.0 => [chat_bg.red, chat_bg.green, chat_bg.blue].map(f64::from),
         Some(view) if tint => view,
-        _ => ADW_VIEW_BG[dark as usize],
+        _ => ADW_VIEW_BG[adw_since_1_7()][dark as usize],
     };
     let accent = chrome(CHROME_ACCENT).filter(|_| tint).unwrap_or_else(|| {
         let a = style.accent_color_rgba();
@@ -273,7 +275,7 @@ fn tinted() -> bool {
 pub(crate) fn window_luminance() -> f64 {
     let dark = adw::StyleManager::default().is_dark();
     let bg = (chrome(CHROME_WINDOW, dark.into()).filter(|_| tinted()))
-        .unwrap_or(ADW_WINDOW_BG[usize::from(dark)]);
+        .unwrap_or(ADW_WINDOW_BG[adw_since_1_7()][usize::from(dark)]);
     rel_luminance(bg[0], bg[1], bg[2])
 }
 

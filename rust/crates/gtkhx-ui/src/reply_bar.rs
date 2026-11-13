@@ -10,14 +10,16 @@
 //! While it shows, the input's accessible description is its text, so a
 //! screen reader says what is being answered on each arrival in the input.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::glib;
+use gtk::glib::translate::from_glib_none;
 use gtk::prelude::*;
 use gtk4 as gtk;
 use hxmodel::replies::Quote;
 use hxproto::target::Target;
+use libadwaita as adw;
 use rotulus::RotulusView;
 
 use crate::name_shadow;
@@ -31,9 +33,16 @@ struct Bar {
     view: glib::WeakRef<RotulusView>,
     /// The line the next one said answers.
     to: RefCell<Option<Target>>,
+    /// What the bar says of it.
+    quote: RefCell<Option<Quote>>,
 }
 
 const KEY: &str = "gtkhx-reply-bar";
+
+extern "C" {
+    // gtkhx_theme.c
+    fn gtkhx_theme_get_default() -> *mut std::ffi::c_void;
+}
 
 fn of(w: &impl IsA<glib::Object>) -> Option<Rc<Bar>> {
     // SAFETY: the key is only ever set to an Rc<Bar>, on the main thread.
@@ -65,6 +74,7 @@ pub(crate) fn build(view: &RotulusView, input: &gtk::Widget) -> gtk::Box {
         input: input.downgrade(),
         view: view.downgrade(),
         to: RefCell::new(None),
+        quote: RefCell::new(None),
     });
     // SAFETY: the key is only ever set to an Rc<Bar>, on the main thread.
     unsafe {
@@ -80,9 +90,44 @@ pub(crate) fn build(view: &RotulusView, input: &gtk::Widget) -> gtk::Box {
             }
         }
     });
+    // The palette, the window's background and the contrast asked on it
+    // can change while the bar shows; drawn again once the theme's own
+    // handlers have applied the change. A switch to or from high contrast
+    // is the theme's "changed" too.
+    let weak = Rc::downgrade(&state);
+    let changed = move || {
+        let weak = weak.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(state) = weak.upgrade().filter(|s| s.to.borrow().is_some()) {
+                draw(&state);
+            }
+        });
+    };
+    let style: glib::Object = adw::StyleManager::default().upcast();
+    // SAFETY: the theme is a singleton that lives as long as the process.
+    let theme: glib::Object = unsafe { from_glib_none(gtkhx_theme_get_default().cast()) };
+    let notified = Cell::new(Some([
+        (
+            style.clone(),
+            style.connect_notify_local(Some("dark"), {
+                let changed = changed.clone();
+                move |_, _| changed()
+            }),
+        ),
+        (
+            theme.clone(),
+            theme.connect_local("changed", false, move |_| {
+                changed();
+                None
+            }),
+        ),
+    ]));
     // The input is C's, and can outlive the bar it was described by.
     let weak = Rc::downgrade(&state);
     bar.connect_destroy(move |_| {
+        for (object, id) in notified.take().into_iter().flatten() {
+            object.disconnect(id);
+        }
         if let Some(input) = weak.upgrade().and_then(|s| s.input.upgrade()) {
             input.reset_property(gtk::AccessibleProperty::Description);
         }
@@ -101,25 +146,38 @@ pub(crate) fn start(view: &RotulusView, target: Target, quote: &Quote) {
     let Some(state) = of(view) else {
         return;
     };
-    let (Some(bar), Some(label), Some(input)) = (
-        state.bar.upgrade(),
-        state.label.upgrade(),
-        state.input.upgrade(),
-    ) else {
+    let (Some(bar), Some(input)) = (state.bar.upgrade(), state.input.upgrade()) else {
         return;
     };
     *state.to.borrow_mut() = Some(target);
-    let say = |nick: &str, excerpt: &str| {
-        // TRANSLATORS: over the chat input while a reply is being written:
-        // who said the line it answers (%1$s), and what (%2$s).
-        tr_argv("Replying to %1$s: %2$s", &[nick, excerpt])
+    *state.quote.borrow_mut() = Some(quote.clone());
+    draw(&state);
+    let plain = say(&quote.nick, &quote.excerpt);
+    input.update_property(&[gtk::accessible::Property::Description(&plain)]);
+    bar.set_visible(true);
+    input.grab_focus();
+}
+
+fn say(nick: &str, excerpt: &str) -> String {
+    // TRANSLATORS: over the chat input while a reply is being written:
+    // who said the line it answers (%1$s), and what (%2$s).
+    tr_argv("Replying to %1$s: %2$s", &[nick, excerpt])
+}
+
+/// The bar's label, for the quote it holds, in the colors drawn in now.
+fn draw(state: &Bar) {
+    let (Some(view), Some(label)) = (state.view.upgrade(), state.label.upgrade()) else {
+        return;
+    };
+    let quote = state.quote.borrow();
+    let Some(quote) = quote.as_ref() else {
+        return;
     };
     // Escaped whole, so that a translation holding markup's own characters
     // is shown as written; the nick then goes in bold, in the color the
-    // view draws it in. The color is read once: the bar lasts one line, and
-    // the next Reply reads it again.
+    // view draws it in.
     let marked = glib::markup_escape_text(&say("\u{E000}", "\u{E001}"));
-    let c = view.text_color(crate::chat_output::nick_color(view, &quote.nick));
+    let c = view.text_color(crate::chat_output::nick_color(&view, &quote.nick));
     let nick = glib::markup_escape_text(&quote.nick);
     // Rotulus makes the color read on the view's background, but the bar
     // sits on the window's: one that does not read there is left the bar's.
@@ -136,10 +194,6 @@ pub(crate) fn start(view: &RotulusView, target: Target, quote: &Quote) {
             .replace('\u{E000}', &nick)
             .replace('\u{E001}', &excerpt),
     );
-    let plain = say(&quote.nick, &quote.excerpt);
-    input.update_property(&[gtk::accessible::Property::Description(&plain)]);
-    bar.set_visible(true);
-    input.grab_focus();
 }
 
 /// The contrast the nick must reach, as Rotulus asks of its text: more
@@ -150,7 +204,7 @@ fn min_contrast() -> f64 {
     let Some(settings) = gtk::Settings::default() else {
         return 4.5;
     };
-    let high = libadwaita::StyleManager::default().is_high_contrast();
+    let high = adw::StyleManager::default().is_high_contrast();
     let asked = (settings.find_property("gtk-interface-contrast")).is_some_and(|_| {
         let v = settings.property_value("gtk-interface-contrast");
         glib::EnumValue::from_value(&v).is_some_and(|(_, e)| e.nick() == "more")

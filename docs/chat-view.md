@@ -177,12 +177,15 @@ quotes of lines asked for by id (`hxmodel::replies`), or an unavailable
 header until then; the rows waiting on a target are headed again as it is
 drawn or answered ([hotline-protocol.md](hotline-protocol.md), "Replies").
 The reply bar over the input draws the nick it quotes in the color a
-header does, as the view would draw it now (`text_color`), read once each
-time the bar is shown. Rotulus makes that color read on the view's
-background, but the bar sits on the window's: where it falls short of
-4.5:1 there (7:1 where the desktop asks for more contrast, as Rotulus
-reads it, or libadwaita is in high contrast), the nick is drawn bold in
-the bar's own text color instead.
+header does, as the view would draw it now (`text_color`). Rotulus makes
+that color read on the view's background, but the bar sits on the
+window's (libadwaita's, as the running release paints it, unless the
+theme tints the window): where it falls short of 4.5:1 there (7:1 where
+the desktop asks for more contrast, as Rotulus reads it, or libadwaita
+is in high contrast), the nick is drawn bold in the bar's own text color
+instead. A switch between light and dark, or to or from high contrast,
+and the theme's `changed` (another theme, or the window tint turned on or
+off) draw a showing bar again.
 
 **Speaker identity.** A row's `RotulusSpeaker.key` is the Hotline user id,
 `0` when unknown. It comes from the `HTLS_HDR_CHAT` UID field when the

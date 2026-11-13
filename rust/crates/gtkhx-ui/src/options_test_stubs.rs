@@ -23,7 +23,9 @@
 //! that depends on what one of them returns is testing this file rather than
 //! the client. The values are the blandest ones that keep a page builder on
 //! its ordinary path: every preference is absent, there are no themes, no
-//! icons and no audio devices.
+//! icons and no audio devices. The theme singleton is the one stand-in with
+//! something to observe: its "changed" signal, which a test emits for what
+//! listens to it.
 //!
 //! This mirrors what the C test suite already does — `test_theme_scale`
 //! "provides its own `gtkhx_prefs` instead of linking the GTK-heavy
@@ -94,6 +96,41 @@ pub unsafe extern "C" fn gtkhx_theme_names_display(_i: c_int) -> *const c_char {
 }
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_theme_names_end() {}
+
+mod theme {
+    use gtk4::glib::{self, subclass::prelude::*, subclass::Signal};
+    use std::sync::OnceLock;
+
+    #[derive(Default)]
+    pub struct Imp;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Imp {
+        const NAME: &'static str = "GtkhxTestTheme";
+        type Type = Theme;
+    }
+
+    impl ObjectImpl for Imp {
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
+            SIGNALS.get_or_init(|| vec![Signal::builder("changed").build()])
+        }
+    }
+
+    glib::wrapper! {
+        pub struct Theme(ObjectSubclass<Imp>);
+    }
+}
+
+/// The theme singleton: its "changed" signal, with no theme behind it.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_theme_get_default() -> *mut c_void {
+    use glib::prelude::*;
+    thread_local! {
+        static THEME: theme::Theme = glib::Object::new();
+    }
+    THEME.with(|t| t.upcast_ref::<glib::Object>().as_ptr().cast())
+}
 
 // ---- chrome (gtkutil.c, toolbar.c) --------------------------------------
 
