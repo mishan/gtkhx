@@ -441,6 +441,51 @@ pub(crate) fn keep_tabs_in_bar(bar: &libadwaita::TabBar) {
     bar.add_controller(legacy);
 }
 
+/// Name each of a tab bar's tabs for its page's title, and keep it so.
+///
+/// libadwaita labels a tab by the title it shows, and a pinned tab hides its
+/// title to show its icon alone, which leaves a screen reader nothing to say
+/// for it. A page has no accessible name of its own to set, so the name goes
+/// on the tab widget the bar made for it, found by its `page`, in place of
+/// that label; the bar has made it by the time `page-attached` reaches a
+/// handler connected after the bar's view.
+pub(crate) fn name_tabs(bar: &libadwaita::TabBar) {
+    use gtk4::prelude::*;
+
+    fn name(w: &gtk4::Widget) {
+        if w.type_().name() == "AdwTab" {
+            let page = w
+                .find_property("page")
+                .and_then(|_| w.property::<Option<libadwaita::TabPage>>("page"));
+            if let Some(page) = page {
+                w.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+                w.update_property(&[gtk4::accessible::Property::Label(&page.title())]);
+            }
+            return;
+        }
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            name(&c);
+            child = c.next_sibling();
+        }
+    }
+    let Some(view) = bar.view() else {
+        return;
+    };
+    let weak = bar.downgrade();
+    let sync = move || {
+        if let Some(bar) = weak.upgrade() {
+            name(bar.upcast_ref());
+        }
+    };
+    sync();
+    view.connect_page_attached(move |_, page, _| {
+        let retitled = sync.clone();
+        page.connect_title_notify(move |_| retitled());
+        sync();
+    });
+}
+
 /// C `char*` → owned `String` (empty on NULL). UTF-8 lossy.
 ///
 /// # Safety
@@ -521,5 +566,56 @@ mod wheel_tests {
 
         // Nothing at all is not a step, and must not claim the event.
         assert_eq!(wheel_direction(0.0, 0.0), None);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tab_tests {
+    use gtk4 as gtk;
+    use gtk4::prelude::*;
+    use libadwaita as adw;
+
+    /// A pinned tab, which shows no title, is named for its page's title
+    /// rather than labeled by the one it hides, and follows it when it
+    /// changes.
+    pub(crate) fn check_a_pinned_tab_is_named_for_its_title() {
+        let view = adw::TabView::new();
+        let bar = adw::TabBar::new();
+        bar.set_view(Some(&view));
+        super::name_tabs(&bar);
+        let page = view.append_pinned(&gtk::Box::new(gtk::Orientation::Vertical, 0));
+        page.set_title("Chat");
+
+        fn find_tab(w: &gtk::Widget) -> Option<gtk::Widget> {
+            if w.type_().name() == "AdwTab" {
+                return Some(w.clone());
+            }
+            std::iter::successors(w.first_child(), |c| c.next_sibling()).find_map(|c| find_tab(&c))
+        }
+        let tab = find_tab(bar.upcast_ref()).expect("the bar made a tab for the page");
+        let named = |label: &str| {
+            let label = crate::cs(label);
+            // Safety: a live widget, and the label as the C string its
+            // varargs take.
+            let err = unsafe {
+                gtk::ffi::gtk_test_accessible_check_property(
+                    tab.as_ptr().cast(),
+                    gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL,
+                    label.as_ptr(),
+                )
+            };
+            assert!(err.is_null(), "{}", unsafe { crate::cstr(err) });
+            // Safety: a live widget.
+            let labeled = unsafe {
+                gtk::ffi::gtk_test_accessible_has_relation(
+                    tab.as_ptr().cast(),
+                    gtk::ffi::GTK_ACCESSIBLE_RELATION_LABELLED_BY,
+                )
+            };
+            assert_eq!(labeled, 0, "labeled by a title it hides");
+        };
+        named("Chat");
+        page.set_title("Lobby");
+        named("Lobby");
     }
 }
