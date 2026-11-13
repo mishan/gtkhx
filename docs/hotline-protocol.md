@@ -1421,14 +1421,14 @@ for the next line. Sending, a cleared view (a connect, `/clear`) and the window 
 let go of it. The line's own header is drawn from its echo, as anyone's.
 
 A header clicked, or Enter or Space on one, goes to the line it answers: scrolled to and
-drawn on a tint of the selection's color for a few seconds or until the next key or
-click in the view, with focus moved to it only from the keyboard. A kept line not drawn
-is paged back to, 200 lines a page before the oldest drawn (or the newest page, before
-any), up to five pages a jump, then a toast says to choose the reply again to go on. A
-jump toasts and asks nothing where no page could hold the line: one nobody keeps, one 700
-by id left out or answered as taken away, and one newer than the oldest history drawn,
-which the scrollback let go of. A quote still being asked for is waited for first, and
-a refused page ends the jump with its refusal's own toast.
+drawn on a tint of the selection's color until the next key or click in the view, the
+next jump or a line sent, with focus moved to it only from the keyboard. A kept line not
+drawn is paged back to, 200 lines a page before the oldest drawn (or the newest page,
+before any), up to five pages a jump, then a toast says to choose the reply again to go
+on. A jump toasts and asks nothing where no page could hold the line: one nobody keeps,
+one 700 by id left out or answered as taken away, and one newer than the oldest history
+drawn, which the scrollback let go of. A quote still being asked for is waited for
+first, and a refused page ends the jump with its refusal's own toast.
 
 ### Reactions
 

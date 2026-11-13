@@ -27,6 +27,7 @@ struct Bar {
     bar: glib::WeakRef<gtk::Box>,
     label: glib::WeakRef<gtk::Label>,
     input: glib::WeakRef<gtk::Widget>,
+    view: glib::WeakRef<RotulusView>,
     /// The line the next one said answers.
     to: RefCell<Option<Target>>,
 }
@@ -61,6 +62,7 @@ pub(crate) fn build(view: &RotulusView, input: &gtk::Widget) -> gtk::Box {
         bar: bar.downgrade(),
         label: label.downgrade(),
         input: input.downgrade(),
+        view: view.downgrade(),
         to: RefCell::new(None),
     });
     // SAFETY: the key is only ever set to an Rc<Bar>, on the main thread.
@@ -151,10 +153,13 @@ pub(crate) fn escape(input: &impl IsA<gtk::Widget>) -> bool {
 }
 
 /// The line the next chat line from `input` answers, if any, which the bar
-/// then lets go of.
+/// then lets go of, as the view does the line a jump marked.
 pub(crate) fn take(input: &impl IsA<gtk::Widget>) -> Option<Target> {
     let state = of(input.upcast_ref::<gtk::Widget>())?;
     let to = state.to.borrow_mut().take();
     hide(&state);
+    if let Some(view) = state.view.upgrade() {
+        crate::chat_output::unspot(&view);
+    }
     to
 }

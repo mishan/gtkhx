@@ -245,8 +245,6 @@ struct Output {
     asking: bool,
     /// The jump from a reply to the line it answers under way.
     jump: Option<Jump>,
-    /// Counts spotlights, so that a timer clears only its own.
-    spotlit: u64,
 }
 
 /// The most lines [`Output::missed`] keeps.
@@ -1213,9 +1211,6 @@ unsafe fn replies(htlc: *mut c_void, e: &gtkhx_core::replies::Event) {
 
 // ---- the jump --------------------------------------------------------------
 
-/// How long a line a jump went to stays marked, unless the user moves on.
-const SPOTLIGHT: Duration = Duration::from_secs(4);
-
 /// The header of the reply on `row` was activated, from the keyboard or
 /// not: go to the line it answers, in place of any jump under way.
 fn jump(view: &RotulusView, row: MessageId, keyboard: bool) {
@@ -1254,23 +1249,13 @@ fn jump_on(view: &RotulusView) {
     });
     match step {
         Step::Reveal => {
-            out.spotlit += 1;
-            let spotlit = out.spotlit;
             drop(out);
             let row = row.unwrap();
             if !view.reveal(row, j.keyboard) {
                 return crate::reactions::toast(&short(Short::Scrolled));
             }
+            // Marked until the user moves on, however long reading it takes.
             view.set_spotlight(Some(row));
-            let view = view.downgrade();
-            glib::timeout_add_local_once(SPOTLIGHT, move || {
-                let Some(view) = view.upgrade() else {
-                    return;
-                };
-                if output(&view).borrow().spotlit == spotlit {
-                    view.set_spotlight(None);
-                }
-            });
         }
         Step::Wait => out.jump = Some(j),
         Step::Ask => {
@@ -1312,7 +1297,7 @@ fn landed(view: &RotulusView, refused: bool) {
 }
 
 /// Let go of the line a jump marked.
-fn unspot(view: &RotulusView) {
+pub(crate) fn unspot(view: &RotulusView) {
     if view.spotlight().is_some() {
         view.set_spotlight(None);
     }
