@@ -81,7 +81,7 @@ fn message(c: &mut Client, uid: u16, text: &str) -> Option<String> {
     );
     let list = c.send_expecting(&request(300, &[]), Some(Expect::UserList));
     until(c, |e| match e {
-        hxsession::Event::Failed { trans, reason } if *trans == t => {
+        hxsession::Event::Failed { trans, reason, .. } if *trans == t => {
             Some(Some(reason.clone().unwrap_or_default()))
         }
         hxsession::Event::UserList { trans, .. } if *trans == list => Some(None),
@@ -122,7 +122,7 @@ fn a_message_to_no_one_is_refused() {
         );
         let t = a.send_expecting(&to_no_one, Some(Expect::Message));
         let reason = until(&mut a, |e| match e {
-            hxsession::Event::Failed { trans, reason } if *trans == t => Some(reason.clone()),
+            hxsession::Event::Failed { trans, reason, .. } if *trans == t => Some(reason.clone()),
             _ => None,
         });
         assert!(reason.is_some_and(|r| !r.is_empty()), "{}", s.name);
@@ -177,7 +177,7 @@ fn a_message_to_ourselves_comes_back_from_us() {
                 echo = Some((*uid, from.clone()));
                 None
             }
-            hxsession::Event::Failed { trans, reason } if *trans == t => {
+            hxsession::Event::Failed { trans, reason, .. } if *trans == t => {
                 panic!("{}: refused: {reason:?}", s.name)
             }
             hxsession::Event::UserList { trans, .. } if *trans == list => Some(()),

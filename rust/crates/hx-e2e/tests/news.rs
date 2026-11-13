@@ -56,7 +56,7 @@ fn change(c: &mut Client, req: &Request) -> Option<String> {
     let t = c.send_expecting(req, Some(Expect::NewsChange));
     let list = c.send_expecting(&user_list(), Some(Expect::UserList));
     until(c, |e| match e {
-        hxsession::Event::Failed { trans, reason } if *trans == t => {
+        hxsession::Event::Failed { trans, reason, .. } if *trans == t => {
             Some(Some(reason.clone().unwrap_or_default()))
         }
         hxsession::Event::UserList { trans, .. } if *trans == list => Some(None),

@@ -369,6 +369,16 @@ pub unsafe extern "C" fn user_nick_color_rgb(
     std::ptr::null()
 }
 
+/// No theme: every chrome role is left to the system.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_theme_get_chrome_color(
+    _role: c_int,
+    _dark: glib::ffi::gboolean,
+    _out: *mut gtk4::gdk::ffi::GdkRGBA,
+) -> glib::ffi::gboolean {
+    0
+}
+
 // ---- chat.c, for the chats a session holds ----
 
 /// The palette slot a nick is drawn in: the plain nick slot, or ours.

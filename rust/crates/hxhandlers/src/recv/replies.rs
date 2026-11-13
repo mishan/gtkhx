@@ -14,17 +14,13 @@ use std::ffi::c_void;
 use gtkhx_core::conn::hx_conn_has_cap;
 use gtkhx_core::replies::Event;
 use hxproto::replies::Targets;
+use hxproto::structured_chat::RATE_LIMITED;
 use hxsession::HistoryEntry;
 
 #[cfg(not(test))]
 use gtkhx_core::session::{gtkhx_session_emit_replies, gtkhx_session_get_default};
 #[cfg(test)]
 use tests::{gtkhx_session_emit_replies, gtkhx_session_get_default};
-
-/// How hxd-ng refuses a Get Chat History past its rate. Its reason code
-/// beside the words never reaches GtkHx: the session gives a refusal's
-/// words alone.
-pub(crate) const SLOW_DOWN: &str = "Slow down.";
 
 thread_local! {
     /// What each connection's login said beside bit 18.
@@ -76,14 +72,20 @@ pub(crate) unsafe fn quoted(
     gtkhx_session_emit_replies(gtkhx_session_get_default(), htlc, &e);
 }
 
-/// The request for chat `cid`'s lines `asked` was refused, for `reason`;
-/// one cut short, which is no refusal, is told as one for the rate, to be
-/// asked again.
+/// The request for chat `cid`'s lines `asked` was refused, with the
+/// draft's `code` and the server's `reason`; one cut short, which is no
+/// refusal, is told as one for the rate, to be asked again.
 ///
 /// # Safety
 /// Main thread.
-pub(crate) unsafe fn refused(htlc: *mut c_void, cid: u32, asked: Vec<u64>, reason: Option<&str>) {
-    let slow = matches!(reason, Some(SLOW_DOWN | super::chat::CUT_SHORT));
+pub(crate) unsafe fn refused(
+    htlc: *mut c_void,
+    cid: u32,
+    asked: Vec<u64>,
+    code: Option<u16>,
+    reason: Option<&str>,
+) {
+    let slow = code == Some(RATE_LIMITED) || reason == Some(super::chat::CUT_SHORT);
     let e = Event::Refused { cid, asked, slow };
     gtkhx_session_emit_replies(gtkhx_session_get_default(), htlc, &e);
 }

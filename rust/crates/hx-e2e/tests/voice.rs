@@ -47,7 +47,7 @@ fn outcomes(c: &mut Client, ts: &[u32]) -> Vec<Result<(), Option<String>>> {
             Event::Session(S::VoiceDone { trans } | S::VoiceJoined { trans, .. }) => {
                 got.insert(trans, Ok(()));
             }
-            Event::Session(S::Failed { trans, reason }) => {
+            Event::Session(S::Failed { trans, reason, .. }) => {
                 got.insert(trans, Err(reason));
             }
             Event::Frame(f) if ts.iter().any(|&t| hx_e2e::is_reply(&f, t)) => {
@@ -76,7 +76,7 @@ fn a_join_is_answered_with_the_offer_and_the_room() {
                     assert_eq!(cid, 0, "{}", s.name);
                     break (sdp, codec, participants);
                 }
-                Event::Session(hxsession::Event::Failed { trans, reason }) if trans == t => {
+                Event::Session(hxsession::Event::Failed { trans, reason, .. }) if trans == t => {
                     panic!("{}: the join was refused: {reason:?}", s.name)
                 }
                 _ => {}

@@ -132,7 +132,11 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
         } => crate::voice::joined(htlc, *trans, *cid, sdp, codec, participants),
         #[cfg(feature = "voice")]
         Event::VoiceDone { trans } => crate::voice::done(htlc, *trans),
-        Event::Failed { trans, reason } => {
+        Event::Failed {
+            trans,
+            chat_reason,
+            reason,
+        } => {
             msg::failed(htlc, *trans);
             let quiet = user::failed(htlc, *trans, reason.as_deref());
             #[cfg(feature = "voice")]
@@ -140,7 +144,8 @@ pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_v
             let quiet = icon::failed(htlc, *trans, reason.as_deref()) || quiet;
             let quiet = news::failed(htlc, *trans) || quiet;
             let quiet = files::failed(htlc, *trans, reason.as_deref()) || quiet;
-            chat::failed(htlc, *trans, reason.as_deref().filter(|_| !quiet));
+            let reason = reason.as_deref().filter(|_| !quiet);
+            chat::failed(htlc, *trans, *chat_reason, reason);
         }
         // hxnet hands over only the messaging extension's and the
         // Reactions draft's this way, each answering only its own.

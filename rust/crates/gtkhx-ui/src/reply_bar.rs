@@ -20,6 +20,7 @@ use hxmodel::replies::Quote;
 use hxproto::target::Target;
 use rotulus::RotulusView;
 
+use crate::name_shadow;
 use crate::tr::{tr, tr_argv};
 
 /// What a bar holds, kept on its view and on its input alike.
@@ -114,9 +115,21 @@ pub(crate) fn start(view: &RotulusView, target: Target, quote: &Quote) {
         tr_argv("Replying to %1$s: %2$s", &[nick, excerpt])
     };
     // Escaped whole, so that a translation holding markup's own characters
-    // is shown as written; the nick then goes in bold.
+    // is shown as written; the nick then goes in bold, in the color the
+    // view draws it in. The color is read once: the bar lasts one line, and
+    // the next Reply reads it again.
     let marked = glib::markup_escape_text(&say("\u{E000}", "\u{E001}"));
-    let nick = format!("<b>{}</b>", glib::markup_escape_text(&quote.nick));
+    let c = view.text_color(crate::chat_output::nick_color(view, &quote.nick));
+    let nick = glib::markup_escape_text(&quote.nick);
+    // Rotulus makes the color read on the view's background, but the bar
+    // sits on the window's: one that does not read there is left the bar's.
+    let ink = name_shadow::rel_luminance(c.red().into(), c.green().into(), c.blue().into());
+    let nick = if name_shadow::contrast(ink, name_shadow::window_luminance()) >= min_contrast() {
+        let [r, g, b] = [c.red(), c.green(), c.blue()].map(|v| (v * 255.0).round() as u8);
+        format!("<b><span foreground=\"#{r:02x}{g:02x}{b:02x}\">{nick}</span></b>")
+    } else {
+        format!("<b>{nick}</b>")
+    };
     let excerpt = glib::markup_escape_text(&quote.excerpt);
     label.set_markup(
         &marked
@@ -127,6 +140,28 @@ pub(crate) fn start(view: &RotulusView, target: Target, quote: &Quote) {
     input.update_property(&[gtk::accessible::Property::Description(&plain)]);
     bar.set_visible(true);
     input.grab_focus();
+}
+
+/// The contrast the nick must reach, as Rotulus asks of its text: more
+/// when the desktop asks for more, through GTK 4.20's setting or, before
+/// it, a high-contrast theme; and where libadwaita is in high contrast,
+/// which before GTK 4.20 sets neither.
+fn min_contrast() -> f64 {
+    let Some(settings) = gtk::Settings::default() else {
+        return 4.5;
+    };
+    let high = libadwaita::StyleManager::default().is_high_contrast();
+    let asked = (settings.find_property("gtk-interface-contrast")).is_some_and(|_| {
+        let v = settings.property_value("gtk-interface-contrast");
+        glib::EnumValue::from_value(&v).is_some_and(|(_, e)| e.nick() == "more")
+    });
+    let theme = (settings.gtk_theme_name())
+        .is_some_and(|n| n.to_ascii_lowercase().contains("highcontrast"));
+    if asked || theme || high {
+        7.0
+    } else {
+        4.5
+    }
 }
 
 fn hide(state: &Bar) -> bool {

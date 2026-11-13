@@ -599,9 +599,50 @@ pub(crate) mod tests {
         let to = Target::Line { channel: 0, id: 5 };
         let quote = Quote::new("bob", "has anyone <tried> it");
         let start = |to: &Target| reply_bar::start(&view, to.clone(), &quote);
+        let slot = crate::chat_output::nick_color(&view, "bob");
+        let rotulus_layout::ColorRef::Palette(i) = slot else {
+            panic!("{slot:?}")
+        };
+        let mut palette = [gtk::gdk::RGBA::TRANSPARENT; rotulus::view::PALETTE_COLS];
+        palette[usize::from(i)] = gtk::gdk::RGBA::BLUE;
+        view.set_palette(&palette);
+        // The bar's background is the light window's.
+        let style = libadwaita::StyleManager::default();
+        style.set_color_scheme(libadwaita::ColorScheme::ForceLight);
         assert!(!bar.is_visible());
         start(&to);
         assert!(bar.is_visible());
+        assert_eq!(label.text(), "Replying to bob: has anyone <tried> it");
+        let ink = view.text_color(slot);
+        assert_ne!(ink, view.text_color(rotulus_layout::ColorRef::Default));
+        let drawn = || -> Vec<_> {
+            (label.layout().attributes().unwrap().attributes())
+                .into_iter()
+                .filter_map(|a| a.downcast::<gtk::pango::AttrColor>().ok())
+                .filter(|a| a.type_() == gtk::pango::AttrType::Foreground)
+                .map(|a| {
+                    let c = a.color();
+                    let range = a.start_index()..a.end_index();
+                    (range, [c.red(), c.green(), c.blue()].map(|v| v >> 8))
+                })
+                .collect()
+        };
+        let want = [ink.red(), ink.green(), ink.blue()].map(|v| (v * 255.0).round() as u16);
+        let at = "Replying to ".len() as u32;
+        assert_eq!(drawn(), [(at..at + 3, want)], "the nick's color");
+        // White reads on a black view, but not on the bar.
+        palette[rotulus::view::PAL_BG] = gtk::gdk::RGBA::BLACK;
+        palette[usize::from(i)] = gtk::gdk::RGBA::WHITE;
+        view.set_palette(&palette);
+        start(&to);
+        style.set_color_scheme(libadwaita::ColorScheme::Default);
+        assert_eq!(drawn(), [], "a nick the bar can't show in its color");
+        let bold = (label.layout().attributes().unwrap().attributes())
+            .into_iter()
+            .filter(|a| a.type_() == gtk::pango::AttrType::Weight)
+            .map(|a| (a.start_index(), a.end_index()))
+            .collect::<Vec<_>>();
+        assert_eq!(bold, [(at, at + 3)], "still bold");
         assert_eq!(label.text(), "Replying to bob: has anyone <tried> it");
         assert_eq!(
             gtk::prelude::GtkWindowExt::focus(&window).as_ref(),

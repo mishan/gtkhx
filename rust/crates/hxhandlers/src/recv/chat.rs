@@ -293,13 +293,18 @@ pub unsafe fn history(
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub(crate) unsafe fn failed(htlc: *mut c_void, trans: u32, reason: Option<&str>) {
+pub(crate) unsafe fn failed(
+    htlc: *mut c_void,
+    trans: u32,
+    chat_reason: Option<u16>,
+    reason: Option<&str>,
+) {
     match history_answered(htlc, trans) {
         Some(HistoryAsked {
             cid,
             quotes: Some(asked),
             ..
-        }) => return super::replies::refused(htlc, cid, asked, reason),
+        }) => return super::replies::refused(htlc, cid, asked, chat_reason, reason),
         Some(asked) => history(htlc, trans, asked.cid, &[], true),
         None => {}
     }
