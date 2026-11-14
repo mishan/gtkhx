@@ -441,7 +441,8 @@ pub(crate) fn keep_tabs_in_bar(bar: &libadwaita::TabBar) {
     bar.add_controller(legacy);
 }
 
-/// Name each of a tab bar's tabs for its page's title, and keep it so.
+/// Name each of a tab bar's tabs for its page's title, and its lists of tabs
+/// `list` and `pinned_list`, and keep them so.
 ///
 /// libadwaita labels a tab by the title it shows, and a pinned tab hides its
 /// title to show its icon alone, which leaves a screen reader nothing to say
@@ -449,41 +450,110 @@ pub(crate) fn keep_tabs_in_bar(bar: &libadwaita::TabBar) {
 /// on the tab widget the bar made for it, found by its `page`, in place of
 /// that label; the bar has made it by the time `page-attached` reaches a
 /// handler connected after the bar's view.
-pub(crate) fn name_tabs(bar: &libadwaita::TabBar) {
+///
+/// libadwaita shows which tab is selected, and which needs attention, to the
+/// eye alone, so each tab is also marked selected or not, and described as
+/// unread while its page needs attention. The bar keeps its pinned tabs in a
+/// list of their own, hidden from the tree while it is empty, so a strip
+/// with none pinned does not read as two lists, one of them empty.
+///
+/// Each tab is read from its own page, whose notifications cover all of this;
+/// a pin reaches here after the bar has moved the tab between its lists. The
+/// last pinned page leaving notifies nothing of its own, so a page detached
+/// is a change too.
+pub(crate) fn name_tabs(bar: &libadwaita::TabBar, list: &str, pinned_list: &str) {
+    use crate::tr::tr;
+    use gtk4::accessible::{Property, State};
     use gtk4::prelude::*;
 
-    fn name(w: &gtk4::Widget) {
-        if w.type_().name() == "AdwTab" {
-            let page = w
-                .find_property("page")
-                .and_then(|_| w.property::<Option<libadwaita::TabPage>>("page"));
-            if let Some(page) = page {
-                w.reset_relation(gtk4::AccessibleRelation::LabelledBy);
-                w.update_property(&[gtk4::accessible::Property::Label(&page.title())]);
-            }
-            return;
-        }
-        let mut child = w.first_child();
-        while let Some(c) = child {
-            name(&c);
-            child = c.next_sibling();
-        }
-    }
+    /// The page's handler for its notifications, as `page-detached` takes it.
+    const FOLLOWED: &str = "gtkhx-name-tabs-notify";
+
     let Some(view) = bar.view() else {
         return;
     };
-    let weak = bar.downgrade();
+    // TRANSLATORS: what a screen reader adds to a tab whose conversation or
+    // connection has something not yet read.
+    let unread = tr("Unread");
+    let (list, pinned_list) = (list.to_owned(), pinned_list.to_owned());
+    let (weak, weak_view) = (bar.downgrade(), view.downgrade());
     let sync = move || {
-        if let Some(bar) = weak.upgrade() {
-            name(bar.upcast_ref());
+        let (Some(bar), Some(view)) = (weak.upgrade(), weak_view.upgrade()) else {
+            return;
+        };
+        for tab in widgets_of_type(bar.upcast_ref(), "AdwTab") {
+            let page = tab
+                .find_property("page")
+                .and_then(|_| tab.property::<Option<libadwaita::TabPage>>("page"));
+            // A closed tab animates out with no page, under the name and
+            // state it had, in a container of its own; hidden, they never
+            // read as a second tab of that name, selected, or an empty item.
+            // A container given a page again, a drop's placeholder, is shown.
+            let shown = page.is_some();
+            for w in std::iter::once(tab.clone()).chain(tab.parent()) {
+                w.update_state(&[State::Hidden(!shown)]);
+            }
+            let Some(page) = page else {
+                continue;
+            };
+            tab.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+            tab.update_property(&[Property::Label(&page.title())]);
+            tab.update_state(&[State::Selected(Some(page.is_selected()))]);
+            if page.needs_attention() {
+                tab.update_property(&[Property::Description(&unread)]);
+            } else {
+                tab.reset_property(gtk4::AccessibleProperty::Description);
+            }
+        }
+        for b in widgets_of_type(bar.upcast_ref(), "AdwTabBox") {
+            let pinned = b.find_property("pinned").is_some() && b.property::<bool>("pinned");
+            b.update_property(&[Property::Label(if pinned { &pinned_list } else { &list })]);
+            b.update_state(&[State::Hidden(pinned && view.n_pinned_pages() == 0)]);
         }
     };
+    fn unfollow(page: &libadwaita::TabPage) {
+        // Safety: the key is this function's alone, and only `follow` sets
+        // it, to a handler id.
+        if let Some(id) = unsafe { page.steal_data::<gtk4::glib::SignalHandlerId>(FOLLOWED) } {
+            page.disconnect(id);
+        }
+    }
+    let follow = {
+        let sync = sync.clone();
+        move |page: &libadwaita::TabPage| {
+            // A view named twice follows its pages once.
+            unfollow(page);
+            let changed = sync.clone();
+            let id = page.connect_notify_local(None, move |_, _| changed());
+            // Safety: see `unfollow`.
+            unsafe { page.set_data(FOLLOWED, id) };
+        }
+    };
+    for i in 0..view.n_pages() {
+        follow(&view.nth_page(i));
+    }
     sync();
+    let synced = sync.clone();
     view.connect_page_attached(move |_, page, _| {
-        let retitled = sync.clone();
-        page.connect_title_notify(move |_| retitled());
+        follow(page);
+        synced();
+    });
+    view.connect_page_detached(move |_, page, _| {
+        unfollow(page);
         sync();
     });
+}
+
+/// The widgets under `w`, `w` too, whose type is called `type_name`, not
+/// looking inside one.
+fn widgets_of_type(w: &gtk4::Widget, type_name: &str) -> Vec<gtk4::Widget> {
+    use gtk4::prelude::*;
+    if w.type_().name() == type_name {
+        return vec![w.clone()];
+    }
+    std::iter::successors(w.first_child(), |c| c.next_sibling())
+        .flat_map(|c| widgets_of_type(&c, type_name))
+        .collect()
 }
 
 /// C `char*` → owned `String` (empty on NULL). UTF-8 lossy.
@@ -582,7 +652,7 @@ pub(crate) mod tab_tests {
         let view = adw::TabView::new();
         let bar = adw::TabBar::new();
         bar.set_view(Some(&view));
-        super::name_tabs(&bar);
+        super::name_tabs(&bar, "Conversations", "Pinned conversations");
         let page = view.append_pinned(&gtk::Box::new(gtk::Orientation::Vertical, 0));
         page.set_title("Chat");
 
@@ -617,5 +687,242 @@ pub(crate) mod tab_tests {
         named("Chat");
         page.set_title("Lobby");
         named("Lobby");
+    }
+
+    /// `Ok` for a null answer from a `gtk_test_accessible_check_*`, else
+    /// the mismatch it describes.
+    fn checked(err: *mut std::ffi::c_char) -> Result<(), String> {
+        if err.is_null() {
+            return Ok(());
+        }
+        // Safety: a string the check allocated for its caller to free.
+        let msg = unsafe { crate::cstr(err) };
+        unsafe { gtk4::glib::ffi::g_free(err.cast()) };
+        Err(msg)
+    }
+
+    /// Whether `w` holds `state` as `value`.
+    fn state_is(w: &gtk::Widget, state: gtk::ffi::GtkAccessibleState, value: bool) -> bool {
+        // Safety: a live widget, and a boolean state's value as its varargs
+        // take it.
+        checked(unsafe {
+            gtk::ffi::gtk_test_accessible_check_state(
+                w.as_ptr().cast(),
+                state,
+                std::ffi::c_int::from(value),
+            )
+        })
+        .is_ok()
+    }
+
+    /// `w`'s `property`, as `want` or, for `None`, unset.
+    pub(crate) fn assert_property(
+        w: &gtk::Widget,
+        property: gtk::ffi::GtkAccessibleProperty,
+        want: Option<&str>,
+    ) {
+        // Safety: a live widget.
+        let has =
+            unsafe { gtk::ffi::gtk_test_accessible_has_property(w.as_ptr().cast(), property) };
+        let Some(want) = want else {
+            assert_eq!(has, 0, "{} has property {property}", w.type_().name());
+            return;
+        };
+        let want = crate::cs(want);
+        // Safety: a live widget, and the value as the C string its varargs
+        // take.
+        let err = unsafe {
+            gtk::ffi::gtk_test_accessible_check_property(w.as_ptr().cast(), property, want.as_ptr())
+        };
+        if let Err(e) = checked(err) {
+            panic!("{}: {e}", w.type_().name());
+        }
+    }
+
+    /// The tab `bar` made for `page`.
+    pub(crate) fn tab_of(bar: &adw::TabBar, page: &adw::TabPage) -> gtk::Widget {
+        super::widgets_of_type(bar.upcast_ref(), "AdwTab")
+            .into_iter()
+            .find(|t| t.property::<Option<adw::TabPage>>("page").as_ref() == Some(page))
+            .expect("the bar made a tab for the page")
+    }
+
+    /// Every tab of `view`'s pages is marked selected or not as its page is.
+    pub(crate) fn assert_selection(bar: &adw::TabBar, view: &adw::TabView) {
+        let selected = view.selected_page();
+        for page in (0..view.n_pages()).map(|i| view.nth_page(i)) {
+            let want = selected.as_ref() == Some(&page);
+            assert!(
+                state_is(
+                    &tab_of(bar, &page),
+                    gtk::ffi::GTK_ACCESSIBLE_STATE_SELECTED,
+                    want
+                ),
+                "{:?}'s tab not marked selected {want}",
+                page.title()
+            );
+        }
+    }
+
+    /// `bar`'s tab lists are named `list` and `pinned_list`, the pinned one
+    /// hidden as `pinned_hidden` says and the other shown.
+    pub(crate) fn assert_lists(
+        bar: &adw::TabBar,
+        list: &str,
+        pinned_list: &str,
+        pinned_hidden: bool,
+    ) {
+        let boxes = super::widgets_of_type(bar.upcast_ref(), "AdwTabBox");
+        assert_eq!(boxes.len(), 2, "a bar holds a pinned list and the rest");
+        for b in boxes {
+            let pinned = b.property::<bool>("pinned");
+            let name = if pinned { pinned_list } else { list };
+            assert_property(&b, gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL, Some(name));
+            let hidden = pinned_hidden && pinned;
+            assert!(
+                state_is(&b, gtk::ffi::GTK_ACCESSIBLE_STATE_HIDDEN, hidden),
+                "{name} not hidden {hidden}"
+            );
+        }
+    }
+
+    /// How many handlers `page` has for `notify`, of any property.
+    fn notify_handlers(page: &adw::TabPage) -> u32 {
+        use gtk4::glib::{gobject_ffi, translate::ToGlibPtr};
+        let obj: *mut gobject_ffi::GObject =
+            page.upcast_ref::<gtk4::glib::Object>().to_glib_none().0;
+        // Safety: a live object, and a signal every object has; each handler
+        // blocked is unblocked at once.
+        unsafe {
+            let id = gobject_ffi::g_signal_lookup(c"notify".as_ptr(), gobject_ffi::G_TYPE_OBJECT);
+            let matched = gobject_ffi::G_SIGNAL_MATCH_ID;
+            let n = gobject_ffi::g_signal_handlers_block_matched(
+                obj.cast(),
+                matched,
+                id,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            gobject_ffi::g_signal_handlers_unblock_matched(
+                obj.cast(),
+                matched,
+                id,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            n
+        }
+    }
+
+    /// Each strip says which tab is selected, through a tab added and the
+    /// selected one closed, hides a closed tab as it animates out, names its
+    /// lists of tabs, hiding the pinned list while it holds none, the last
+    /// pinned page leaving too, and describes a tab as unread while its page
+    /// needs attention. A page there before the strip was named is followed,
+    /// and one moved within the view is followed once. The chat strip pins
+    /// its public tab first and names its view; the connection strip pins
+    /// none, and its view is never shown.
+    pub(crate) fn check_a_strip_says_what_it_shows() {
+        type Case = (&'static str, &'static str, bool, fn() -> adw::TabView);
+        let cases: [Case; 2] = [
+            (
+                "Conversations",
+                "Pinned conversations",
+                true,
+                crate::chat_tabs::new_view,
+            ),
+            ("Connections", "Connections", false, adw::TabView::new),
+        ];
+        for (list, pinned_list, pin, new_view) in cases {
+            let view = new_view();
+            let bar = adw::TabBar::new();
+            bar.set_view(Some(&view));
+            // On screen and never hidden, so a closed tab animates out
+            // rather than going at once.
+            let window = gtk::Window::new();
+            window.set_child(Some(&bar));
+            bar.set_autohide(false);
+            window.present();
+            let add = |title: &str| {
+                let child = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                let page = if pin && view.n_pages() == 0 {
+                    view.append_pinned(&child)
+                } else {
+                    view.append(&child)
+                };
+                page.set_title(title);
+                page
+            };
+            let first = add("first");
+            // Twice, as a rebuilt panel might name its strip again.
+            super::name_tabs(&bar, list, pinned_list);
+            super::name_tabs(&bar, list, pinned_list);
+            let second = add("second");
+            assert_eq!(view.selected_page().as_ref(), Some(&first), "{list}");
+            assert_selection(&bar, &view);
+            view.set_selected_page(&second);
+            assert_selection(&bar, &view);
+            let third = add("third");
+            assert_selection(&bar, &view);
+            view.set_selected_page(&third);
+            view.close_page(&third);
+            assert_eq!(view.selected_page().as_ref(), Some(&second), "{list}");
+            assert_selection(&bar, &view);
+            let closing: Vec<gtk::Widget> = super::widgets_of_type(bar.upcast_ref(), "AdwTab")
+                .into_iter()
+                .filter(|t| t.property::<Option<adw::TabPage>>("page").is_none())
+                .collect();
+            assert!(!closing.is_empty(), "{list}: no closed tab animating out");
+            for w in closing.iter().flat_map(|t| [Some(t.clone()), t.parent()]) {
+                let w = w.expect("a tab in its container");
+                assert!(
+                    state_is(&w, gtk::ffi::GTK_ACCESSIBLE_STATE_HIDDEN, true),
+                    "{list}: a closed tab's {} still in the tree",
+                    w.type_().name()
+                );
+            }
+
+            if pin {
+                assert_property(
+                    view.upcast_ref(),
+                    gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL,
+                    Some(list),
+                );
+            }
+            assert_lists(&bar, list, pinned_list, !pin);
+            view.set_page_pinned(&first, !pin);
+            assert_lists(&bar, list, pinned_list, pin);
+            assert_selection(&bar, &view);
+            view.set_page_pinned(&first, pin);
+            assert_lists(&bar, list, pinned_list, !pin);
+
+            let unread = |page: &adw::TabPage, want| {
+                assert_property(
+                    &tab_of(&bar, page),
+                    gtk::ffi::GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
+                    want,
+                )
+            };
+            let handlers = notify_handlers(&second);
+            view.transfer_page(&second, &view, view.page_position(&second));
+            assert_eq!(notify_handlers(&second), handlers, "{list}: followed twice");
+            for page in [&first, &second] {
+                unread(page, None);
+                page.set_needs_attention(true);
+                unread(page, Some("Unread"));
+                page.set_needs_attention(false);
+                unread(page, None);
+            }
+
+            view.set_page_pinned(&first, true);
+            assert_lists(&bar, list, pinned_list, false);
+            view.transfer_page(&first, &adw::TabView::new(), 0);
+            assert_lists(&bar, list, pinned_list, true);
+            window.destroy();
+        }
     }
 }

@@ -104,6 +104,9 @@ struct ConnTabs {
     /// moment it is needed, and a connection that has gone answers NULL
     /// instead of handing back a pointer into freed memory.
     tabs: HashMap<ConnKey, adw::TabPage>,
+    /// The title each serial's tab was given, before [`set_tab_title`]
+    /// numbered it.
+    titles: HashMap<ConnKey, String>,
 }
 
 thread_local! {
@@ -150,6 +153,47 @@ fn tab_conn(page: &adw::TabPage) -> Option<ConnKey> {
     // Safety: matched type with `set_tab_conn`; the qdata is owned by the page
     // for its lifetime and copied out immediately.
     unsafe { page.data::<ConnKey>(CONN_KEY).map(|p| *p.as_ref()) }
+}
+
+/// Drop `conn`'s tab from the index.
+fn forget(conn: ConnKey) {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.tabs.remove(&conn);
+        st.titles.remove(&conn);
+    });
+}
+
+/// Title `conn`'s tab `title`, unless that is its title already, numbered
+/// "(2)", "(3)" by the lowest number no other tab shows, so two connections
+/// to one server are told apart. The number stays until the tab's own title
+/// changes: one connection reconnecting or closing renames no other.
+fn set_tab_title(conn: ConnKey, page: &adw::TabPage, title: String) {
+    let others: Option<std::collections::HashSet<String>> = STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        if st.titles.get(&conn) == Some(&title) {
+            return None;
+        }
+        st.titles.insert(conn, title.clone());
+        Some(
+            st.tabs
+                .iter()
+                .filter(|(k, _)| **k != conn)
+                .map(|(_, p)| p.title().into())
+                .collect(),
+        )
+    });
+    let Some(others) = others else {
+        return;
+    };
+    let mut name = title.clone();
+    for n in 2.. {
+        if !others.contains(&name) {
+            break;
+        }
+        name = format!("{title} ({n})");
+    }
+    page.set_title(&name);
 }
 
 /// Show `conn`'s page in every per-connection panel.
@@ -208,9 +252,7 @@ fn on_close_page(view: &adw::TabView, page: &adw::TabPage) -> glib::Propagation 
     if sess.is_null() {
         // The connection is already gone. Its tab shouldn't be here, but
         // taking it away is closer to right than refusing to.
-        STATE.with(|s| {
-            s.borrow_mut().tabs.remove(&conn);
-        });
+        forget(conn);
         view.close_page_finish(page, true);
         return glib::Propagation::Stop;
     }
@@ -283,9 +325,7 @@ fn on_confirm_response(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, 
     // should simply go.
     let sess = unsafe { hx_session_with_serial(conn) };
     if sess.is_null() {
-        STATE.with(|s| {
-            s.borrow_mut().tabs.remove(&conn);
-        });
+        forget(conn);
         view.close_page_finish(page, true);
         return;
     }
@@ -309,9 +349,7 @@ fn finish_close(view: &adw::TabView, page: &adw::TabPage, conn: ConnKey, sess: *
 
     unsafe { hx_session_close(sess) };
 
-    STATE.with(|s| {
-        s.borrow_mut().tabs.remove(&conn);
-    });
+    forget(conn);
     debug(&format!("closed connection {conn}"));
 
     view.close_page_finish(page, true);
@@ -411,6 +449,9 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_new() -> *mut gtk::ffi::GtkWidget {
     bar.set_view(Some(&view));
     crate::wheel_switches_tabs(&bar, &view);
     crate::keep_tabs_in_bar(&bar);
+    // Nothing is pinned here, so the pinned list is hidden.
+    let list = tr("Connections");
+    crate::name_tabs(&bar, &list, &list);
     // The default, set explicitly because the single-connection appearance
     // depends on it: with one page (and none pinned) the bar hides itself, so
     // a session with one connection looks as it did before this existed.
@@ -455,13 +496,12 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_add(sess: *mut c_void, title: *const c_
     // box is the honest placeholder. The content is in the dock.
     let page = view.append(&gtk::Box::new(gtk::Orientation::Vertical, 0));
     let t = crate::cstr(title);
-    let fallback = tr("Connection");
-    page.set_title(if t.is_empty() { &fallback } else { &t });
     set_tab_conn(&page, conn);
 
     STATE.with(|s| {
         s.borrow_mut().tabs.insert(conn, page.clone());
     });
+    set_tab_title(conn, &page, if t.is_empty() { tr("Connection") } else { t });
 
     // `append` selects the page itself when the view was empty, and it does
     // so *before* the two lines above have run — so the notify handler saw a
@@ -514,11 +554,10 @@ pub unsafe extern "C" fn gtkhx_conn_tabs_close(sess: *mut c_void) {
 /// `htlc` is a live connection; `title` is NULL or a valid C string.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_conn_tabs_set_title(htlc: *mut c_void, title: *const c_char) {
-    if let Some(page) = tab_for(dock::conn_key(htlc)) {
-        let t = crate::cstr(title);
-        if !t.is_empty() {
-            page.set_title(&t);
-        }
+    let conn = dock::conn_key(htlc);
+    let t = crate::cstr(title);
+    if let Some(page) = tab_for(conn).filter(|_| !t.is_empty()) {
+        set_tab_title(conn, &page, t);
     }
 }
 
@@ -836,6 +875,61 @@ pub(crate) mod tests {
         assert!(!bar.is_tabs_revealed(), "strip visible at one connection");
         // And the survivor is what the user is left looking at.
         assert_eq!(tab_conn(&view.selected_page().unwrap()), Some(serial_of(a)));
+    }
+
+    /// Connections given one title are numbered by the lowest number free,
+    /// on the tab and so in its name, and keep it while their own title
+    /// does, however others are retitled or closed; a number freed goes to
+    /// the next tab given that title. The strip says which is selected, and
+    /// names its tab lists with the empty pinned one hidden.
+    pub(crate) fn check_alike_connections_are_numbered() {
+        let view = view().expect("strip built by an earlier check");
+        let bar = strip()
+            .and_then(|s| s.first_child())
+            .and_downcast::<adw::TabBar>()
+            .expect("the strip's first child is the tab bar");
+        let open = || {
+            let c = unsafe { hx_conn_new() };
+            crate::options_test_stubs::register_session(c);
+            unsafe { gtkhx_conn_tabs_add(c, c"Same".as_ptr()) };
+            c
+        };
+        let titles = |conns: &[*mut c_void], want: &[&str]| {
+            let pages: Vec<adw::TabPage> = conns
+                .iter()
+                .map(|&c| tab_for(serial_of(c)).expect("a tab"))
+                .collect();
+            let got: Vec<String> = pages.iter().map(|p| p.title().into()).collect();
+            assert_eq!(got, want);
+            for (page, want) in pages.iter().zip(want) {
+                crate::tab_tests::assert_property(
+                    &crate::tab_tests::tab_of(&bar, page),
+                    gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL,
+                    Some(want),
+                );
+            }
+        };
+        let retitle = |c, title: &std::ffi::CStr| unsafe {
+            gtkhx_conn_tabs_set_title(c, title.as_ptr());
+        };
+        let (a, b, c) = (open(), open(), open());
+        titles(&[a, b, c], &["Same", "Same (2)", "Same (3)"]);
+        crate::tab_tests::assert_selection(&bar, &view);
+        crate::tab_tests::assert_lists(&bar, "Connections", "Connections", true);
+
+        retitle(b, c"Other");
+        retitle(c, c"Same");
+        titles(&[a, b, c], &["Same", "Other", "Same (3)"]);
+        unsafe { gtkhx_conn_tabs_close(a) };
+        titles(&[b, c], &["Other", "Same (3)"]);
+        crate::tab_tests::assert_selection(&bar, &view);
+
+        let d = open();
+        retitle(b, c"Same");
+        titles(&[b, c, d], &["Same (2)", "Same (3)", "Same"]);
+        for c in [b, c, d] {
+            unsafe { gtkhx_conn_tabs_close(c) };
+        }
     }
 
     /// Closing the tab of a *live* connection asks first, and the answer is
