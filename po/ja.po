@@ -822,6 +822,15 @@ msgstr "トピックなし"
 msgid "Chat subject"
 msgstr "チャットのトピック"
 
+#: rust/crates/gtkhx-ui/src/chat.rs:178
+#: rust/crates/gtkhx-ui/src/chat_tabs.rs:231
+msgid "Conversations"
+msgstr "会話"
+
+#: rust/crates/gtkhx-ui/src/chat.rs:178
+msgid "Pinned conversations"
+msgstr "ピン留めした会話"
+
 #: rust/crates/gtkhx-ui/src/chat_find.rs:90
 #: rust/crates/gtkhx-ui/src/chat_find.rs:91
 #: rust/crates/gtkhx-ui/src/news.rs:163 rust/crates/gtkhx-ui/src/news.rs:164
@@ -1761,6 +1770,12 @@ msgstr "画像"
 msgctxt "chat picture"
 msgid "click to view"
 msgstr "クリックで表示"
+
+#. TRANSLATORS: what a screen reader adds to a tab whose conversation or
+#. connection has something not yet read.
+#: rust/crates/gtkhx-ui/src/lib.rs:477
+msgid "Unread"
+msgstr "未読"
 
 #: rust/crates/gtkhx-ui/src/media_attach.rs:65
 msgid "Inline media isn't available on this server."
@@ -2735,6 +2750,7 @@ msgstr "エクスポートに失敗しました"
 msgid "Export failed: %s"
 msgstr "エクスポートに失敗しました: %s"
 
+#: rust/crates/gtkhx-ui/src/conn_tabs.rs:453
 #: rust/crates/gtkhx-ui/src/options_connections.rs:878
 #: rust/crates/gtkhx-ui/src/options_window.rs:137
 msgid "Connections"

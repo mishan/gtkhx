@@ -219,7 +219,7 @@ fn on_selected_page_changed(view: &adw::TabView) {
 /// move the pane in front along its strip. While on screen with two tabs,
 /// the view would take them window-wide. Ctrl+Page Up and Page Down still
 /// switch tabs, and a drag moves one.
-fn new_view() -> adw::TabView {
+pub(crate) fn new_view() -> adw::TabView {
     let view = adw::TabView::new();
     view.remove_shortcuts(
         adw::TabViewShortcuts::CONTROL_TAB
@@ -227,6 +227,8 @@ fn new_view() -> adw::TabView {
             | adw::TabViewShortcuts::CONTROL_SHIFT_PAGE_UP
             | adw::TabViewShortcuts::CONTROL_SHIFT_PAGE_DOWN,
     );
+    view.upcast_ref::<gtk::Widget>()
+        .update_property(&[gtk::accessible::Property::Label(&tr("Conversations"))]);
     view
 }
 

@@ -830,6 +830,15 @@ msgstr "Sem assunto"
 msgid "Chat subject"
 msgstr "Assunto da conversa"
 
+#: rust/crates/gtkhx-ui/src/chat.rs:178
+#: rust/crates/gtkhx-ui/src/chat_tabs.rs:231
+msgid "Conversations"
+msgstr "Conversas"
+
+#: rust/crates/gtkhx-ui/src/chat.rs:178
+msgid "Pinned conversations"
+msgstr "Conversas fixadas"
+
 #: rust/crates/gtkhx-ui/src/chat_find.rs:90
 #: rust/crates/gtkhx-ui/src/chat_find.rs:91
 #: rust/crates/gtkhx-ui/src/news.rs:163 rust/crates/gtkhx-ui/src/news.rs:164
@@ -1775,6 +1784,12 @@ msgstr "imagem"
 msgctxt "chat picture"
 msgid "click to view"
 msgstr "clique para ver"
+
+#. TRANSLATORS: what a screen reader adds to a tab whose conversation or
+#. connection has something not yet read.
+#: rust/crates/gtkhx-ui/src/lib.rs:477
+msgid "Unread"
+msgstr "Não lido"
 
 #: rust/crates/gtkhx-ui/src/media_attach.rs:65
 msgid "Inline media isn't available on this server."
@@ -2762,6 +2777,7 @@ msgstr "Falha ao exportar"
 msgid "Export failed: %s"
 msgstr "Falha ao exportar: %s"
 
+#: rust/crates/gtkhx-ui/src/conn_tabs.rs:453
 #: rust/crates/gtkhx-ui/src/options_connections.rs:878
 #: rust/crates/gtkhx-ui/src/options_window.rs:137
 msgid "Connections"

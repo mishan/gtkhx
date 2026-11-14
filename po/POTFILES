@@ -44,6 +44,7 @@ rust/crates/gtkhx-ui/src/friends.rs
 rust/crates/gtkhx-ui/src/icon_picker.rs
 rust/crates/gtkhx-ui/src/inline_media_dialog.rs
 rust/crates/gtkhx-ui/src/inline_media_row.rs
+rust/crates/gtkhx-ui/src/lib.rs
 rust/crates/gtkhx-ui/src/media_attach.rs
 rust/crates/gtkhx-ui/src/media_preview/mod.rs
 rust/crates/gtkhx-ui/src/msg.rs
