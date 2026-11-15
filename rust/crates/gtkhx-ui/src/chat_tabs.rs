@@ -585,10 +585,12 @@ pub extern "C" fn gtkhx_chat_tabs_raise_public() {
 ///
 /// A set is in turn ignored for the connection already selected — see
 /// `gtkhx_conn_tabs_set_attention` — so this doesn't badge the server the
-/// user is looking at because one of its own background chats spoke.
+/// user is looking at because one of its own background chats spoke. Nor
+/// does it flag the tab its strip shows: that conversation is in front of
+/// its connection, and the levels above say where the connection is.
 fn set_page_attention(htlc: *mut c_void, page: Option<adw::TabPage>, state: bool) {
     let Some(page) = page else { return };
-    page.set_needs_attention(state);
+    page.set_needs_attention(state && !page.is_selected());
     dock::set_needs_attention(dock::ID_CHAT, state);
     if state {
         // Safety: `htlc` came in from C as the connection this tab belongs to
@@ -652,6 +654,34 @@ pub(crate) mod tests {
         let page = find_pchat(htlc, cid).expect("a tab to close");
         view(conn_key(htlc)).expect("a view").close_page(&page);
         retitle_soon(conn_key(htlc));
+    }
+
+    /// A conversation that speaks flags its tab unless the tab is the one
+    /// its strip shows.
+    pub(crate) fn check_the_shown_tab_is_not_flagged() {
+        unsafe {
+            let htlc: *mut c_void = gtkhx_core::conn::hx_conn_new().cast();
+            bare_view(htlc);
+            let add = |cid| {
+                let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                let page = gtkhx_chat_tabs_add_pchat(
+                    htlc,
+                    content.upcast_ref::<gtk::Widget>().as_ptr(),
+                    cid,
+                    std::ptr::null(),
+                );
+                from_glib_none::<_, adw::TabPage>(page)
+            };
+            let (shown, behind) = (add(5), add(6));
+            view(conn_key(htlc)).unwrap().set_selected_page(&shown);
+            for cid in [5, 6] {
+                gtkhx_chat_tabs_set_attention_pchat(htlc, cid, glib::ffi::GTRUE);
+            }
+            assert_eq!(
+                (shown.needs_attention(), behind.needs_attention()),
+                (false, true)
+            );
+        }
     }
 
     /// `key` as `widget`'s own shortcuts have it: whether one is bound to

@@ -59,8 +59,8 @@ saved layout records, so it stays when a panel is renamed: Transfers was
 Tasks, and keeps `tasks`.
 
 **Becomes a tab inside the Chat panel:** private chats and private
-messages. New activity flags `needs-attention` on the tab and on the Chat
-panel's tab in the dock.
+messages. New activity flags `needs-attention` on the Chat panel's tab in
+the dock and, unless the strip already shows it, on the tab itself.
 
 **Stays a real window:** Agreement, About, the user editor, the news
 composer, file preview; **Files**, one window per connection

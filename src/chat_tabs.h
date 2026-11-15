@@ -82,10 +82,10 @@ void gtkhx_chat_tabs_raise_pchat (struct htlc_conn *htlc, guint32 cid);
  * caller is a user action and a user can only act on what is on screen. */
 void gtkhx_chat_tabs_raise_public (void);
 
-/* Set / clear the needs-attention indicator on a tab. Also flags
- * the Chat dock panel itself via panel_widget_set_needs_attention
- * when the panel isn't the visible dock tab. Selecting the tab
- * clears the indicator automatically. */
+/* Set / clear the needs-attention indicator on a tab, unless it is
+ * the tab its strip shows. Also flags the Chat dock panel and the
+ * connection's tab, for when either isn't in front. Selecting the
+ * tab clears the indicator. */
 void gtkhx_chat_tabs_set_attention_pchat (struct htlc_conn *htlc, guint32 cid,
                                           gboolean state);
 

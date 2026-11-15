@@ -43,6 +43,7 @@ fn display_backed() {
     crate::pchat::tests::check_the_input_is_named_for_its_tab();
     crate::pchat::tests::check_the_split_leaves_f6_alone();
     crate::chat_tabs::tests::check_focus_and_pane_keys_are_left_alone();
+    crate::chat_tabs::tests::check_the_shown_tab_is_not_flagged();
     crate::users_view::tests::check_avatars_stay_with_their_connection();
     crate::updates::tests::check_banner_starts_hidden();
     crate::chat_output::tests::check_older_pages_go_above_the_first();
