@@ -32,7 +32,7 @@
 //! server, which keeps no instant message to be read back and no message
 //! of another's mailbox. The header goes to the message it quotes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr};
 use std::hash::Hash;
@@ -52,8 +52,10 @@ use gtkhx_core::conn::{
 };
 use gtkhx_core::messaging::{with_roster, Delivery, Guid, Im};
 use gtkhx_core::session::PmId;
+use hxmodel::chat_members::{hx_member_model_count, hx_member_model_get_at, HxMemberInfo};
+use hxmodel::conversation::{hx_chat_cid, hx_chat_member_model};
 use hxmodel::friends::{self, TheirTyping, Typing};
-use hxmodel::pm::{self, Conversation, Conversations, Peer};
+use hxmodel::pm::{self, Conversation, Conversations, Gone, Peer};
 use hxmodel::reactions::{ImReactions, LineReactions};
 use hxmodel::replies::{Quote, Short};
 use hxproto::messaging::CAP_MESSAGING;
@@ -65,6 +67,12 @@ use crate::chat_output::Then;
 use crate::chat_tabs;
 use crate::dock::{self, ConnKey};
 use crate::tr::{tr, tr1};
+// The wire send. A test build leaves it out: it would link the whole send
+// path, which reaches into C.
+#[cfg(not(test))]
+use hxhandlers::send::friends::typing as send_typing;
+#[cfg(test)]
+unsafe fn send_typing(_: *mut c_void, _: &[u8], _: bool) {}
 
 /// `ROTULUS_PAL_NICK_BRACKET` and `ROTULUS_PAL_SELF_BRACKET` (rotulus.h,
 /// pinned in chat.c): the brackets around someone else's nick and around ours.
@@ -86,6 +94,8 @@ extern "C" {
     fn gtkhx_apply_input_style(w: *mut gtk::ffi::GtkWidget);
     // users.c — a status word's color, or NULL for the theme's foreground.
     fn user_color_gdk(color: u16) -> *const gdk::ffi::GdkRGBA;
+    // chat.c
+    fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
     // notify.c / sound.c
     pub(crate) fn gtkhx_notify_send(id: *const c_char, title: *const c_char, body: *const c_char);
     pub(crate) fn play_sound(sound: std::ffi::c_int);
@@ -96,7 +106,13 @@ extern "C" {
 /// conversations are forgotten.
 struct MsgWin {
     conn: ConnKey,
-    peer: Peer,
+    /// Who it is with: `Left` while a peer with a uid is offline, and the
+    /// uid of whoever the user continues it with after.
+    peer: RefCell<Peer>,
+    /// The uid its pictures go to: none while its peer is offline, or for
+    /// a friend.
+    to: Rc<Cell<Option<u16>>>,
+    gone: RefCell<Option<Gone>>,
     model: RefCell<Conversation>,
     content: glib::WeakRef<gtk::Box>,
     output: glib::WeakRef<gtk::Widget>,
@@ -105,6 +121,11 @@ struct MsgWin {
     info_label: glib::WeakRef<gtk::Label>,
     /// A friend's conversation's: who is typing to us.
     typing: glib::WeakRef<gtk::Label>,
+    attach: glib::WeakRef<gtk::Button>,
+    /// The bar offering to go on with someone of the nick of a peer who
+    /// left: what it says, and its button.
+    again: glib::WeakRef<gtk::Label>,
+    go_on: glib::WeakRef<gtk::Button>,
     im: RefCell<ImState>,
     ims: RefCell<Drawn<Guid, ImMsg>>,
     /// The private messages the server named, by the reference it gave.
@@ -242,6 +263,10 @@ pub(crate) enum Msg {
 }
 
 impl MsgWin {
+    fn peer(&self) -> Peer {
+        self.peer.borrow().clone()
+    }
+
     /// How the Reactions draft names message `m`, while it is shown.
     fn target(&self, m: Msg) -> Option<Target> {
         match m {
@@ -407,10 +432,20 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
         l.set_visible(false);
         l
     });
+    let to = Rc::new(Cell::new(match peer {
+        Peer::Uid(uid) => Some(*uid),
+        Peer::Login(_) | Peer::Left(_) => None,
+    }));
+    // An instant message carries text alone.
+    let attach =
+        matches!(peer, Peer::Uid(_)).then(|| crate::media_attach::message_button(htlc, to.clone()));
+    let (again_bar, again, go_on) = again_bar();
 
     let win = Rc::new(MsgWin {
         conn,
-        peer: peer.clone(),
+        peer: RefCell::new(peer.clone()),
+        to,
+        gone: RefCell::default(),
         model: RefCell::new(Conversation::new(name)),
         content: outer_vbox.downgrade(),
         output: output.downgrade(),
@@ -418,6 +453,9 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
         info_image: info_image.downgrade(),
         info_label: info_label.downgrade(),
         typing: typing.as_ref().map(|l| l.downgrade()).unwrap_or_default(),
+        attach: attach.as_ref().map(|b| b.downgrade()).unwrap_or_default(),
+        again: again.downgrade(),
+        go_on: go_on.downgrade(),
         im: RefCell::default(),
         ims: RefCell::default(),
         pms: RefCell::default(),
@@ -428,6 +466,7 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     // Before the emoji typeahead attaches its own, so Return reaches this
     // one first.
     attach_keys(&input, Rc::downgrade(&win));
+    go_on_when_asked(&win);
 
     // Output frame: the transcript and its scrollbar.
     let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -454,11 +493,9 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     let emoji_btn: gtk::Widget = from_glib_none(crate::emoji::hx_emoji_button_new(wptr(&input)));
     emoji_btn.set_valign(gtk::Align::End);
     input_hbox.append(&emoji_btn);
-    // An instant message carries text alone.
-    if let Peer::Uid(uid) = peer {
-        let attach = crate::media_attach::message_button(htlc, *uid);
+    if let Some(attach) = &attach {
         attach.set_valign(gtk::Align::End);
-        input_hbox.append(&attach);
+        input_hbox.append(attach);
     }
     crate::emoji::hx_emoji_typeahead_attach(wptr(&input));
 
@@ -472,6 +509,7 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     if let Some(typing) = &typing {
         vpane.append(typing);
     }
+    vpane.append(&again_bar);
     if let Some(view) = output.downcast_ref::<RotulusView>() {
         vpane.append(&crate::reply_bar::build(view, input.upcast_ref()));
     }
@@ -527,7 +565,8 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     }
 
     refresh_user_info(&win, htlc);
-    chat_tabs::raise_msg(htlc, peer);
+    offline_unless_listed(&win, htlc);
+    chat_tabs::raise_msg(htlc, &win.peer());
     crate::ffi::init_keyaccel(wptr(&outer_vbox));
     input.grab_focus();
 
@@ -568,7 +607,6 @@ fn attach_keys(input: &gtk::TextView, win: Weak<MsgWin>) {
         } else if state.contains(ModifierType::SHIFT_MASK) && key == Key::Return {
             return glib::Propagation::Proceed;
         } else if key == Key::Return {
-            win.model.borrow_mut().history.record(&whole(&buf));
             send(&win, &buf);
             return glib::Propagation::Stop;
         } else if key == Key::Escape && crate::reply_bar::escape(&view) {
@@ -593,17 +631,14 @@ fn attach_keys(input: &gtk::TextView, win: Weak<MsgWin>) {
 
 /// Send what is typed to the conversation's peer, and show it.
 fn send(win: &MsgWin, buf: &gtk::TextBuffer) {
-    let text = whole(buf);
-    let (mut start, mut end) = (buf.start_iter(), buf.end_iter());
-    buf.delete(&mut start, &mut end);
-    if text.is_empty() {
+    let Some((to, text)) = take(win, buf) else {
         return;
-    }
+    };
     let htlc = dock::htlc_for(win.conn);
     if htlc.is_null() {
         return;
     }
-    match &win.peer {
+    match &to {
         Peer::Uid(uid) => {
             let wire = crate::cs(&text.replace('\n', "\r"));
             unsafe {
@@ -617,7 +652,29 @@ fn send(win: &MsgWin, buf: &gtk::TextBuffer) {
             }
         }
         Peer::Login(login) => unsafe { send_im(win, htlc, login, &text) },
+        Peer::Left(_) => {}
     }
+}
+
+/// What is typed, taken out of the input to send and kept for Up, and
+/// whom it goes to: nothing where it is empty, nor to a peer who has left,
+/// which is said instead, the text kept for when the conversation goes on.
+fn take(win: &MsgWin, buf: &gtk::TextBuffer) -> Option<(Peer, String)> {
+    let text = whole(buf);
+    let to = match win.peer() {
+        Peer::Left(_) => None,
+        peer => Some(peer),
+    };
+    if to.is_none() && !text.is_empty() {
+        let name = win.model.borrow().name.clone();
+        notice(win, &tr1("Not sent: %s is offline.", &name));
+        return None;
+    }
+    let (mut start, mut end) = (buf.start_iter(), buf.end_iter());
+    buf.delete(&mut start, &mut end);
+    let to = to.filter(|_| !text.is_empty())?;
+    win.model.borrow_mut().history.record(&text);
+    Some((to, text))
 }
 
 /// Whether `htlc` can send `login` an instant message: a friend, or anyone
@@ -849,7 +906,7 @@ impl Line<'_> {
 /// we started or stopped typing, as that changes. Someone who is not a
 /// friend is told nothing until they are one.
 fn typed(win: &MsgWin, empty: bool) {
-    let Peer::Login(login) = &win.peer else {
+    let Peer::Login(login) = &win.peer() else {
         return;
     };
     let htlc = dock::htlc_for(win.conn);
@@ -858,7 +915,7 @@ fn typed(win: &MsgWin, empty: bool) {
     }
     let change = win.im.borrow_mut().typing.edited(empty);
     if let Some(on) = change {
-        unsafe { hxhandlers::send::friends::typing(htlc, login, on) };
+        unsafe { send_typing(htlc, login, on) };
     }
 }
 
@@ -895,7 +952,7 @@ fn is_focused(win: &MsgWin) -> bool {
 }
 
 fn mark_read(win: &MsgWin) {
-    let Peer::Login(login) = &win.peer else {
+    let Peer::Login(login) = &win.peer() else {
         return;
     };
     if !is_focused(win) {
@@ -1053,7 +1110,11 @@ unsafe fn render(
     let peer = Peer::Uid(uid);
     let win = match find(dock::conn_key(htlc), &peer) {
         Some(win) => win,
-        None => create(htlc, &peer, &name.unwrap_or(c"").to_string_lossy())?,
+        None => create(
+            htlc,
+            &peer,
+            &hxproto::text::to_utf8(name.map_or(&[][..], CStr::to_bytes)),
+        )?,
     };
     // Pango asserts UTF-8, and a vintage server's text is Mac Roman.
     let body = hxproto::text::to_utf8(body.unwrap_or_default());
@@ -1066,7 +1127,7 @@ unsafe fn render(
     };
     let rows = draw(&win, &line, &body);
     if !is_self {
-        chat_tabs::set_attention_msg(htlc, &peer, true);
+        chat_tabs::set_attention_msg(htlc, &win.peer(), true);
     }
     let first = pm::rows(&body).next().unwrap_or_default();
     let said = Quote::new(&String::from_utf8_lossy(line.nick), first);
@@ -1384,7 +1445,7 @@ unsafe fn act(htlc: *mut c_void, win: &MsgWin, t: Then<Msg>) {
     let Some(target) = win.target(m) else {
         return;
     };
-    let gone = match (t, m, &win.peer) {
+    let gone = match (t, m, &win.peer()) {
         (Then::Send(_, _, add), Msg::Im(_), Peer::Login(with)) => {
             refused_unless(send::react_im(htlc, target, with, key.clone(), add))
         }
@@ -1444,7 +1505,7 @@ pub(crate) unsafe fn reacted(htlc: *mut c_void, m: Msg, e: &gtkhx_core::reaction
                 return;
             }
             let (target, key) = (target.clone(), key.clone());
-            match (m, &win.peer) {
+            match (m, &win.peer()) {
                 (Msg::Im(_), Peer::Login(with)) => {
                     hxhandlers::send::reactions::retry_im(htlc, target, with, key, *add);
                 }
@@ -1648,9 +1709,224 @@ pub(crate) unsafe fn friend_changed(htlc: *mut c_void, login: &[u8]) {
 /// `htlc` is a live connection. Main thread.
 pub(crate) unsafe fn friends_changed(htlc: *mut c_void) {
     for win in of_conn(dock::conn_key(htlc)) {
-        if let Peer::Login(login) = &win.peer {
+        if let Peer::Login(login) = &win.peer() {
             friend_changed(htlc, login);
         }
+    }
+}
+
+/// The bar over a conversation's input that offers, once its peer has
+/// left, to go on with someone of their nick who joined since: what it
+/// says, and its button.
+fn again_bar() -> (gtk::Box, gtk::Label, gtk::Button) {
+    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    bar.set_visible(false);
+    let label = gtk::Label::new(None);
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_ellipsize(pango::EllipsizeMode::End);
+    label.set_margin_start(6);
+    bar.append(&label);
+    // TRANSLATORS: beside "<nick> is online again" over a private
+    // message's input: messages go to the one who joined from then on.
+    let go_on = gtk::Button::with_label(&tr("Continue"));
+    bar.append(&go_on);
+    (bar, label, go_on)
+}
+
+fn go_on_when_asked(win: &Rc<MsgWin>) {
+    let weak = Rc::downgrade(win);
+    if let Some(go_on) = win.go_on.upgrade() {
+        go_on.connect_clicked(move |_| {
+            if let Some(win) = weak.upgrade() {
+                unsafe { carry_on(&win) };
+            }
+        });
+    }
+}
+
+/// Show the bar where the conversation has someone to go on with, said
+/// aloud as it appears, and hide it where it has nobody.
+fn show_again(win: &MsgWin) {
+    let (Some(label), Some(go_on)) = (win.again.upgrade(), win.go_on.upgrade()) else {
+        return;
+    };
+    let Some(bar) = label.parent() else {
+        return;
+    };
+    let gone = win.gone.borrow();
+    let Some(gone) = gone.as_ref().filter(|g| g.offered().is_some()) else {
+        return bar.set_visible(false);
+    };
+    // TRANSLATORS: over a private message's input once someone of the
+    // nick of the person it was with, who left the server, joins it.
+    let text = tr1("%s is online again", &gone.nick);
+    label.set_text(&text);
+    // The button alone says nothing of whom it goes on with.
+    go_on.update_property(&[gtk::accessible::Property::Description(&text)]);
+    if !bar.is_visible() {
+        bar.set_visible(true);
+        crate::announce::announce(Some(label.upcast_ref()), &text, false);
+    }
+}
+
+/// Everyone on `htlc`'s server, by uid and nick, in the order they
+/// joined: the public chat's members.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+unsafe fn public_members(htlc: *mut c_void) -> Vec<(u16, String)> {
+    let chat = chat_with_cid(hx_conn_sess(htlc.cast()).cast(), 0);
+    if chat.is_null() {
+        return Vec::new();
+    }
+    let model = hx_chat_member_model(chat.cast());
+    let at = |i| {
+        let mut mi: HxMemberInfo = std::mem::zeroed();
+        (hx_member_model_get_at(model, i, &mut mi) != 0).then(|| {
+            (
+                mi.uid,
+                CStr::from_ptr(mi.name.as_ptr())
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        })
+    };
+    (0..hx_member_model_count(model)).filter_map(at).collect()
+}
+
+/// A conversation opened with a uid the user list no longer holds starts
+/// offline: the uid may be someone else's by the time anything is sent.
+/// An empty list has not been read yet, and says nothing.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+unsafe fn offline_unless_listed(win: &Rc<MsgWin>, htlc: *mut c_void) {
+    let Peer::Uid(uid) = win.peer() else {
+        return;
+    };
+    let members = public_members(htlc);
+    if !members.is_empty() && members.iter().all(|&(u, _)| u != uid) {
+        go_offline(win, htlc);
+    }
+}
+
+/// File `win` as the conversation with `peer`, and its tab with it. A
+/// notification of it as it was would open nothing, or someone else's.
+fn refile(win: &Rc<MsgWin>, htlc: *mut c_void, peer: Peer) {
+    let old = win.peer.replace(peer.clone());
+    withdraw(&chat_tabs::notify_id(win.conn, &old));
+    WINDOWS.with_borrow_mut(|t| {
+        t.remove(win.conn, &old);
+        t.insert(win.conn, peer.clone(), win.clone());
+    });
+    chat_tabs::rekey_msg(htlc, &old, &peer);
+}
+
+/// The conversation's peer left `htlc`'s server, or `htlc` its: it stays
+/// open, says they are offline, and is filed where nothing for its old
+/// uid, which may be anyone's by now, finds it.
+fn go_offline(win: &Rc<MsgWin>, htlc: *mut c_void) {
+    thread_local! {
+        static LEFT: Cell<u32> = const { Cell::new(0) };
+    }
+    if let Peer::Uid(_) = win.peer() {
+        let n = LEFT.with(|n| n.replace(n.get().wrapping_add(1)));
+        refile(win, htlc, Peer::Left(n));
+    }
+    win.to.set(None);
+    let nick = win.model.borrow().name.clone();
+    // Someone of the nick may be on already: a quick reconnect can join
+    // before its old session is let go.
+    let mut gone = Gone::new(nick.clone());
+    let own = unsafe { hx_conn_uid(htlc.cast()) };
+    for (uid, name) in unsafe { public_members(htlc) } {
+        if uid != own {
+            gone.seen(uid, &name);
+        }
+    }
+    *win.gone.borrow_mut() = Some(gone);
+    if let Some(attach) = win.attach.upgrade() {
+        attach.set_sensitive(false);
+    }
+    if let Some(label) = win.info_label.upgrade() {
+        label.set_markup(&format!(
+            "<b>{}</b>\n<small>{}</small>",
+            glib::markup_escape_text(&nick),
+            glib::markup_escape_text(&tr("Offline"))
+        ));
+    }
+    let peer = win.peer();
+    chat_tabs::set_title_msg(htlc, &peer, &title(&peer, &nick));
+    show_again(win);
+}
+
+/// `uid` joined `htlc`'s server as `nick`, or was renamed to it: offered
+/// to each conversation whose peer left under that nick, and to no other.
+fn seen(htlc: *mut c_void, uid: u16, nick: &str) {
+    // Our own row is heard too, on a list's load or a rename of ours.
+    if uid == unsafe { hx_conn_uid(htlc.cast()) } {
+        return;
+    }
+    for win in of_conn(dock::conn_key(htlc)) {
+        if let Some(gone) = win.gone.borrow_mut().as_mut() {
+            gone.seen(uid, nick);
+        }
+        show_again(&win);
+    }
+}
+
+/// `uid` left `htlc`'s server: its conversation is offline, and it is
+/// offered to no other.
+fn left(htlc: *mut c_void, uid: u16) {
+    let conn = dock::conn_key(htlc);
+    if let Some(win) = find(conn, &Peer::Uid(uid)) {
+        go_offline(&win, htlc);
+    }
+    for win in of_conn(conn) {
+        if let Some(gone) = win.gone.borrow_mut().as_mut() {
+            gone.left(uid);
+        }
+        show_again(&win);
+    }
+}
+
+/// `htlc`'s user list was emptied: everyone it had a conversation with by
+/// uid is offline, and offered to none, until they join again.
+fn cleared(htlc: *mut c_void) {
+    for win in of_conn(dock::conn_key(htlc)) {
+        if !matches!(win.peer(), Peer::Login(_)) {
+            go_offline(&win, htlc);
+        }
+    }
+}
+
+/// Continue: the conversation goes on with the one its bar offers, whose
+/// uid it is filed and sent to from now on; where that one has a
+/// conversation of their own already, it is shown instead, the two kept
+/// apart.
+unsafe fn carry_on(win: &Rc<MsgWin>) {
+    let Some(uid) = win.gone.borrow().as_ref().and_then(Gone::offered) else {
+        return;
+    };
+    let htlc = dock::htlc_for(win.conn);
+    if htlc.is_null() {
+        return;
+    }
+    let new = Peer::Uid(uid);
+    if find(win.conn, &new).is_some() {
+        return chat_tabs::raise_msg(htlc, &new);
+    }
+    refile(win, htlc, new);
+    *win.gone.borrow_mut() = None;
+    win.to.set(Some(uid));
+    if let Some(attach) = win.attach.upgrade() {
+        attach.set_sensitive(true);
+    }
+    show_again(win);
+    refresh_user_info(win, htlc);
+    if let Some(input) = win.input.upgrade() {
+        input.grab_focus();
     }
 }
 
@@ -1676,18 +1952,29 @@ pub(crate) unsafe fn notify(htlc: *mut c_void, peer: &Peer, name: &str, body: &s
     gtkhx_notify_send(id.as_ptr(), title.as_ptr(), cbody.as_ptr());
 }
 
-/// Tell the desktop of a private message `htlc` received; not of one of
-/// our own.
+/// Tell the desktop of a private message `htlc` received from `peer`, the
+/// conversation it was shown in; not of one of our own.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
-unsafe fn notify_msg(htlc: *mut c_void, e: &HxMsgEvent) {
+unsafe fn notify_msg(htlc: *mut c_void, e: &HxMsgEvent, peer: &Peer) {
     if e.is_self != 0 {
         return;
     }
     // In the server's encoding, as the transcript reads them.
     let text = |p| hxproto::text::to_utf8(opt_cstr(p).map_or(&[][..], CStr::to_bytes));
-    notify(htlc, &Peer::Uid(e.uid), &text(e.name), &text(e.body));
+    notify(htlc, peer, &text(e.name), &text(e.body));
+}
+
+#[cfg(test)]
+use tests::withdraw;
+
+/// Take back the desktop's notification `id`.
+#[cfg(not(test))]
+fn withdraw(id: &str) {
+    if let Some(app) = gtk::gio::Application::default() {
+        app.withdraw_notification(id);
+    }
 }
 
 /// Draw the info pane from the public chat's entry for the peer, or from
@@ -1696,12 +1983,13 @@ unsafe fn notify_msg(htlc: *mut c_void, e: &HxMsgEvent) {
 /// # Safety
 /// `htlc` is a live connection. Main thread.
 unsafe fn refresh_user_info(win: &MsgWin, htlc: *mut c_void) {
-    let uid = match &win.peer {
+    let uid = match &win.peer() {
         Peer::Uid(uid) => *uid,
         Peer::Login(login) => {
             friend_view(win, htlc, login);
             return;
         }
+        Peer::Left(_) => return,
     };
     if let Some(mi) = crate::friends::member(hx_conn_sess(htlc.cast()).cast(), 0, uid) {
         let name = CStr::from_ptr(mi.name.as_ptr()).to_string_lossy();
@@ -1730,7 +2018,7 @@ unsafe fn friend_view(win: &MsgWin, htlc: *mut c_void, login: &[u8]) {
         .as_ref()
         .map(|f| crate::friends::presence_line(f.presence, f.status.as_deref()));
     label.set_markup(&friend_markup(&name, &login, status.as_deref()));
-    chat_tabs::set_title_msg(htlc, &win.peer, &pm::login_title(&name, &login));
+    chat_tabs::set_title_msg(htlc, &win.peer(), &pm::login_title(&name, &login));
     name_inputs(win, &name);
 }
 
@@ -1793,11 +2081,15 @@ unsafe fn apply_user_view(
     let (Some(label), Some(image)) = (win.info_label.upgrade(), win.info_image.upgrade()) else {
         return;
     };
-    let Peer::Uid(uid) = win.peer else {
+    let Peer::Uid(uid) = win.peer() else {
         return;
     };
+    // Kept, as the nick someone joining is known by should the peer leave.
     let display = match display {
-        Some(d) if !d.is_empty() => d.to_owned(),
+        Some(d) if !d.is_empty() => {
+            win.model.borrow_mut().name = d.to_owned();
+            d.to_owned()
+        }
         _ => win.model.borrow().name.clone(),
     };
     name_widgets(win, htlc, &display);
@@ -1835,7 +2127,8 @@ unsafe fn apply_user_view(
 
 /// Name a conversation's tab, input and transcript for `nick`.
 fn name_widgets(win: &MsgWin, htlc: *mut c_void, nick: &str) {
-    chat_tabs::set_title_msg(htlc, &win.peer, &title(&win.peer, nick));
+    let peer = win.peer();
+    chat_tabs::set_title_msg(htlc, &peer, &title(&peer, nick));
     name_inputs(win, nick);
 }
 
@@ -1843,6 +2136,9 @@ fn name_widgets(win: &MsgWin, htlc: *mut c_void, nick: &str) {
 fn title(peer: &Peer, name: &str) -> String {
     match peer {
         Peer::Uid(uid) => pm::title(name, *uid),
+        // TRANSLATORS: a private message's tab once the person it is with
+        // has left the server.
+        Peer::Left(_) => tr1("%s (offline)", name),
         Peer::Login(login) => {
             pm::login_title(name, &friends::plain_name(&hxproto::text::to_utf8(login)))
         }
@@ -1942,6 +2238,10 @@ unsafe fn received(
         e.is_self != 0,
         false,
     );
+    // A message from a uid already gone is shown offline, and told as such.
+    let peer = shown
+        .as_ref()
+        .map_or(Peer::Uid(e.uid), |(win, ..)| win.peer());
     if let Some((win, (first, last), said)) = shown {
         head(&win, first, reply_to);
         let last = match has_media {
@@ -1952,7 +2252,7 @@ unsafe fn received(
             drew_pm(&win, pm, rows, said);
         }
     }
-    notify_msg(htlc, e);
+    notify_msg(htlc, e, &peer);
 }
 
 /// Hear the private messages the session hands over and the answers to
@@ -1982,6 +2282,48 @@ pub(crate) fn install() {
             }
             None
         });
+        hear_roster();
+    });
+}
+
+/// Hear who joins and leaves the server, and its user list emptied.
+fn hear_roster() {
+    let session: glib::Object = unsafe {
+        from_glib_none(
+            gtkhx_core::session::gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
+        )
+    };
+    let ptr = |args: &[glib::Value], i: usize| {
+        args[i].get::<*mut c_void>().unwrap_or(std::ptr::null_mut())
+    };
+    // The public chat's members are everyone on the server.
+    let public = move |args: &[glib::Value]| {
+        let (htlc, chat) = (ptr(args, 1), ptr(args, 2));
+        let cid = (!chat.is_null()).then(|| unsafe { hx_chat_cid(chat.cast()) });
+        (!htlc.is_null() && cid == Some(0)).then_some(htlc)
+    };
+    let uid = |args: &[glib::Value]| args[3].get::<u32>().unwrap_or(0) as u16;
+    // A rename comes as a change.
+    for signal in ["user-create", "user-change"] {
+        session.connect_local(signal, true, move |args| {
+            if let Some(htlc) = public(args) {
+                let nick = unsafe { opt_cstr(ptr(args, 5).cast()) }.map(CStr::to_string_lossy);
+                seen(htlc, uid(args), nick.as_deref().unwrap_or(""));
+            }
+            None
+        });
+    }
+    session.connect_local("user-delete", true, move |args| {
+        if let Some(htlc) = public(args) {
+            left(htlc, uid(args));
+        }
+        None
+    });
+    session.connect_local("users-clear", true, move |args| {
+        if let Some(htlc) = public(args) {
+            cleared(htlc);
+        }
+        None
     });
 }
 
@@ -2113,6 +2455,330 @@ pub(crate) mod tests {
         window.destroy();
     }
 
+    thread_local! {
+        static WITHDRAWN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Take back notification `id`, as the desktop is asked to.
+    pub(crate) fn withdraw(id: &str) {
+        WITHDRAWN.with_borrow_mut(|w| w.push(id.to_owned()));
+    }
+
+    /// A conversation whose peer leaves the server, or whose connection's
+    /// user list is emptied, stays open saying they are offline, and sends
+    /// nothing. Once someone of their nick joins, a bar offers to continue
+    /// with the latest of them still there, and goes once none is; nothing
+    /// goes to them until Continue, which files the conversation under
+    /// their uid and sends to it from then on, or, where they have a
+    /// conversation already, shows that one and leaves the two apart.
+    pub(crate) fn check_a_conversation_whose_peer_left_goes_on_when_asked() {
+        use gtkhx_core::conn::{hx_conn_new, hx_conn_set_sess};
+        use gtkhx_core::session::{
+            gtkhx_session_emit_user_change, gtkhx_session_emit_user_create,
+            gtkhx_session_emit_user_delete, gtkhx_session_emit_users_clear,
+            gtkhx_session_get_default,
+        };
+        use hxmodel::chat_members::{
+            hx_member_model_clear, hx_member_model_remove, hx_member_model_upsert,
+        };
+        use hxmodel::conversation::{hx_chat_member_model, hx_conversation_new, HxConversation};
+        type Conn = (*mut c_void, *mut HxConversation);
+        hear_roster();
+        // SAFETY: each connection stands in for its own session, as in
+        // pchat's, and it and its public chat live for the rest of the run.
+        unsafe {
+            let session = gtkhx_session_get_default();
+            let connect = || {
+                let htlc = hx_conn_new();
+                let sess: *mut c_void = htlc.cast();
+                hx_conn_set_sess(htlc, sess);
+                crate::options_test_stubs::register_session(sess);
+                let lobby = hx_conversation_new(0);
+                let chats = crate::options_test_stubs::chats();
+                (chats.lock().unwrap()).push((sess as usize, 0, lobby as usize));
+                crate::chat_tabs::tests::bare_view(sess);
+                (sess, lobby) as Conn
+            };
+            // The members change first, as users.c's handlers, ahead of
+            // msg's, change them.
+            let join = |(htlc, lobby): Conn, uid, nick: &CStr| {
+                hx_member_model_upsert(hx_chat_member_model(lobby), uid, nick.as_ptr(), 0, 0, 0);
+                let nick = nick.as_ptr();
+                gtkhx_session_emit_user_create(session, htlc, lobby.cast(), uid, 0, nick, 0, 0, 1);
+            };
+            let rename = |(htlc, lobby): Conn, uid, nick: &CStr| {
+                hx_member_model_upsert(hx_chat_member_model(lobby), uid, nick.as_ptr(), 0, 0, 0);
+                let nick = nick.as_ptr();
+                gtkhx_session_emit_user_change(session, htlc, lobby.cast(), uid, 0, nick, 0, 0);
+            };
+            let leave = |(htlc, lobby): Conn, uid| {
+                hx_member_model_remove(hx_chat_member_model(lobby), uid);
+                gtkhx_session_emit_user_delete(session, htlc, lobby.cast(), uid, 1);
+            };
+            let clear = |(htlc, lobby): Conn| {
+                hx_member_model_clear(hx_chat_member_model(lobby));
+                gtkhx_session_emit_users_clear(session, htlc, lobby.cast());
+            };
+            let tab = |htlc, uid| crate::chat_tabs::find_msg(htlc, &Peer::Uid(uid));
+            let title = |htlc, uid| tab(htlc, uid).map(|p| p.title().to_string());
+            // Whatever the conversation is filed under.
+            let shown = |htlc, win: &MsgWin| {
+                let page = crate::chat_tabs::find_msg(htlc, &win.peer());
+                page.map(|p| p.title().to_string())
+            };
+            let header = |win: &MsgWin| win.info_label.upgrade().unwrap().text().to_string();
+            // What Return would send, and what it leaves in the input.
+            let say = |win: &MsgWin, text: &str| {
+                let buf = win.input.upgrade().unwrap().buffer();
+                buf.set_text(text);
+                (take(win, &buf), whole(&buf))
+            };
+            let to = |uid, text: &str| Some((Peer::Uid(uid), text.to_owned()));
+            let offered = |win: &MsgWin| {
+                let label = win.again.upgrade().unwrap();
+                (label.parent().unwrap().is_visible()).then(|| label.text().to_string())
+            };
+            let said = |win: &MsgWin| {
+                let view = win.output.upgrade().and_downcast::<RotulusView>().unwrap();
+                crate::chat_output::tests::spoken(&view)
+            };
+            let again = Some("bob is online again".to_owned());
+            let withdrawn = || WITHDRAWN.with_borrow_mut(std::mem::take);
+            let go_on = |win: &MsgWin| win.go_on.upgrade().unwrap().emit_clicked();
+
+            for (case, cleared) in [("left", false), ("cleared", true)] {
+                let c = connect();
+                let (htlc, conn) = (c.0, dock::conn_key(c.0));
+                join(c, 5, c"bob");
+                let win = filed(htlc, 5, "bob");
+                assert_eq!(title(htlc, 5).as_deref(), Some("bob (5)"), "{case}");
+                assert_eq!(say(&win, "hi"), (to(5, "hi"), String::new()), "{case}");
+                let view = win.output.upgrade().and_downcast::<RotulusView>().unwrap();
+                let answering = Target::Pm {
+                    stored: true,
+                    reference: [1; 16],
+                };
+                crate::reply_bar::start(&view, answering.clone(), &Quote::new("bob", "hi"));
+                withdrawn();
+
+                if cleared {
+                    clear(c);
+                } else {
+                    leave(c, 5);
+                }
+                assert_eq!(
+                    shown(htlc, &win).as_deref(),
+                    Some("bob (offline)"),
+                    "{case}"
+                );
+                assert_eq!(header(&win), "bob\nOffline", "{case}");
+                assert!(!win.attach.upgrade().unwrap().is_sensitive(), "{case}");
+                assert_eq!(win.to.get(), None, "{case}: the attachment's");
+                let kept = "still there?".to_owned();
+                assert_eq!(say(&win, &kept), (None, kept.clone()), "{case}");
+                assert_eq!(say(&win, &kept).0, None, "{case}");
+                let mut history = std::mem::take(&mut win.model.borrow_mut().history);
+                assert_eq!(history.up(""), Some("hi".to_owned()), "{case}: kept for Up");
+                assert_eq!(history.up(""), None, "{case}: refusals not kept");
+                assert!(said(&win).ends_with("Not sent: bob is offline."), "{case}");
+                let bobs_note = crate::chat_tabs::notify_id(conn, &Peer::Uid(5));
+                assert_eq!(withdrawn(), [bobs_note], "{case}");
+
+                // Bob's uid is someone else's now: what a message from it,
+                // or opening it from the user list, would find is not his,
+                // so it opens a conversation of its own, and its entry and
+                // notifications are that one's.
+                assert!(find(conn, &Peer::Uid(5)).is_none(), "{case}: 5 finds bob's");
+                join(c, 5, c"eve");
+                let eve = filed(htlc, 5, "eve");
+                hx_msg_user_changed(htlc, 5, c"eve".as_ptr(), 0, 0);
+                let fives = find(conn, &Peer::Uid(5)).map(|w| Rc::ptr_eq(&w, &eve));
+                assert_eq!(fives, Some(true), "{case}");
+                assert_eq!(title(htlc, 5).as_deref(), Some("eve (5)"), "{case}");
+                let bobs_tab = crate::chat_tabs::find_msg(htlc, &win.peer());
+                assert_ne!(tab(htlc, 5), bobs_tab, "{case}");
+                let bobs = (shown(htlc, &win), header(&win));
+                let untouched = (Some("bob (offline)".to_owned()), "bob\nOffline".to_owned());
+                assert_eq!(bobs, untouched, "{case}");
+
+                join(c, 9, c"carol");
+                assert_eq!(offered(&win), None, "{case}: another nick");
+                join(c, 8, c"bob");
+                join(c, 12, c"bob");
+                assert_eq!(offered(&win), again, "{case}");
+                assert_eq!(say(&win, "hi").0, None, "{case}: not before Continue");
+                leave(c, 12);
+                assert_eq!(offered(&win), again, "{case}: one is still here");
+                leave(c, 8);
+                assert_eq!(offered(&win), None, "{case}: none is");
+
+                join(c, 8, c"bob");
+                join(c, 12, c"bob");
+                let offline_note = crate::chat_tabs::notify_id(conn, &win.peer());
+                go_on(&win);
+                assert_eq!(withdrawn(), [offline_note], "{case}");
+                let filed_as = |uid| find(conn, &Peer::Uid(uid)).map(|w| Rc::ptr_eq(&w, &win));
+                assert_eq!(
+                    (filed_as(5), filed_as(12)),
+                    (Some(false), Some(true)),
+                    "{case}"
+                );
+                let titles = (title(htlc, 5), title(htlc, 12));
+                let want = (Some("eve (5)".to_owned()), Some("bob (12)".to_owned()));
+                assert_eq!(titles, want, "{case}");
+                let closes_as = tab(htlc, 12).and_then(|p| crate::chat_tabs::tests::peer_of(&p));
+                assert_eq!(closes_as, Some(Peer::Uid(12)), "{case}");
+                assert_eq!(offered(&win), None, "{case}");
+                assert!(win.attach.upgrade().unwrap().is_sensitive(), "{case}");
+                assert_eq!(win.to.get(), Some(12), "{case}: the attachment's");
+                assert_eq!(say(&win, "back"), (to(12, "back"), String::new()), "{case}");
+                let input = win.input.upgrade().unwrap();
+                let reply = crate::reply_bar::take(&input);
+                assert_eq!(reply, Some(answering), "{case}: the reply kept");
+            }
+
+            // A quick reconnect: the new session joins before the old one
+            // leaves, and is offered at once.
+            let c = connect();
+            let conn = dock::conn_key(c.0);
+            join(c, 5, c"bob");
+            let win = filed(c.0, 5, "bob");
+            join(c, 12, c"bob");
+            leave(c, 5);
+            assert_eq!(offered(&win), again, "joined first");
+            go_on(&win);
+            let filed_as_12 = find(conn, &Peer::Uid(12)).map(|w| Rc::ptr_eq(&w, &win));
+            assert_eq!(filed_as_12, Some(true), "joined first");
+
+            // Our own row, as a list's load or a rename of ours tells it, is
+            // never offered.
+            for (case, renamed) in [("our row joins", false), ("our rename", true)] {
+                let c = connect();
+                gtkhx_core::conn::hx_conn_set_uid(c.0.cast(), 2);
+                join(c, 5, c"bob");
+                let win = filed(c.0, 5, "bob");
+                if renamed {
+                    join(c, 2, c"guest");
+                }
+                leave(c, 5);
+                if renamed {
+                    rename(c, 2, c"bob");
+                } else {
+                    join(c, 2, c"bob");
+                }
+                assert_eq!(offered(&win), None, "{case}");
+            }
+
+            // A rename away from the nick is offered no more, and one to it
+            // is, as a join.
+            let c = connect();
+            let conn = dock::conn_key(c.0);
+            join(c, 5, c"bob");
+            let win = filed(c.0, 5, "bob");
+            leave(c, 5);
+            join(c, 8, c"bob");
+            join(c, 9, c"carol");
+            assert_eq!(offered(&win), again, "renames");
+            rename(c, 8, c"mallory");
+            assert_eq!(offered(&win), None, "renamed away");
+            rename(c, 9, c"bob");
+            assert_eq!(offered(&win), again, "renamed to it");
+            go_on(&win);
+            let filed_as_9 = find(conn, &Peer::Uid(9)).map(|w| Rc::ptr_eq(&w, &win));
+            assert_eq!(filed_as_9, Some(true), "renamed to it");
+
+            // One opened with a uid the user list no longer holds starts
+            // offline; a listed one, or one before the list is read, not.
+            for (case, listed, uid, offline) in [
+                ("gone", true, 7, true),
+                ("listed", true, 3, false),
+                ("no list yet", false, 7, false),
+            ] {
+                let c = connect();
+                if listed {
+                    join(c, 3, c"zoe");
+                }
+                let win = filed(c.0, uid, "dave");
+                offline_unless_listed(&win, c.0);
+                let filed_as_uid = find(dock::conn_key(c.0), &Peer::Uid(uid)).is_some();
+                assert_eq!(filed_as_uid, !offline, "{case}");
+                assert_eq!(say(&win, "hi").0.is_none(), offline, "{case}");
+            }
+
+            // The new bob messaged first: Continue shows his conversation.
+            let c = connect();
+            let (htlc, conn) = (c.0, dock::conn_key(c.0));
+            join(c, 5, c"bob");
+            let old = filed(htlc, 5, "bob");
+            leave(c, 5);
+            join(c, 8, c"bob");
+            let new = filed(htlc, 8, "bob");
+            crate::chat_tabs::raise_msg(htlc, &old.peer());
+            old.go_on.upgrade().unwrap().emit_clicked();
+            assert_eq!(crate::chat_tabs::tests::selected(htlc), tab(htlc, 8));
+            for win in [&old, &new] {
+                let filed = find(conn, &win.peer());
+                assert!(filed.is_some_and(|w| Rc::ptr_eq(&w, win)));
+            }
+            assert_ne!(old.peer(), Peer::Uid(8));
+            assert_eq!(shown(htlc, &old).as_deref(), Some("bob (offline)"));
+            assert_eq!(say(&old, "hi").0, None);
+
+            // Its tab closes as the offline conversation it is.
+            let page = crate::chat_tabs::find_msg(htlc, &old.peer()).unwrap();
+            assert_eq!(crate::chat_tabs::tests::peer_of(&page), Some(old.peer()));
+            crate::chat_tabs::tests::close_msg(htlc, &old.peer());
+            assert!(find(conn, &old.peer()).is_none(), "closed");
+            assert!(of_conn(conn).iter().all(|w| !Rc::ptr_eq(w, &old)), "closed");
+        }
+    }
+
+    /// A conversation with `uid` on `htlc` as `create` files one, holding
+    /// the widgets these checks read.
+    unsafe fn filed(htlc: *mut c_void, uid: u16, name: &str) -> Rc<MsgWin> {
+        let view = RotulusView::new();
+        let peer = Peer::Uid(uid);
+        let (bar, again, go_on) = again_bar();
+        let (input, info_label, info_image) =
+            (new_input(), gtk::Label::new(None), gtk::Image::new());
+        let attach = gtk::Button::new();
+        let replying = crate::reply_bar::build(&view, input.upcast_ref());
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        for w in [
+            view.upcast_ref::<gtk::Widget>(),
+            info_image.upcast_ref(),
+            info_label.upcast_ref(),
+            bar.upcast_ref(),
+            replying.upcast_ref(),
+            input.upcast_ref(),
+            attach.upcast_ref(),
+        ] {
+            content.append(w);
+        }
+        let win = Rc::new(MsgWin {
+            conn: dock::conn_key(htlc),
+            to: Rc::new(Cell::new(Some(uid))),
+            model: RefCell::new(Conversation::new(name)),
+            content: content.downgrade(),
+            input: input.downgrade(),
+            info_image: info_image.downgrade(),
+            info_label: info_label.downgrade(),
+            attach: attach.downgrade(),
+            again: again.downgrade(),
+            go_on: go_on.downgrade(),
+            ..with(&view, peer.clone())
+        });
+        go_on_when_asked(&win);
+        assert!(chat_tabs::add_msg(
+            htlc,
+            &content,
+            &peer,
+            &title(&peer, name)
+        ));
+        WINDOWS.with_borrow_mut(|t| t.insert(win.conn, peer, win.clone()));
+        win
+    }
+
     /// A friend's conversation with bob in `view`, as `create` files one.
     fn bobs(view: &RotulusView) -> MsgWin {
         with(view, Peer::Login(b"bob".to_vec()))
@@ -2121,7 +2787,9 @@ pub(crate) mod tests {
     fn with(view: &RotulusView, peer: Peer) -> MsgWin {
         MsgWin {
             conn: 0,
-            peer,
+            peer: RefCell::new(peer),
+            to: Rc::default(),
+            gone: RefCell::default(),
             model: RefCell::new(Conversation::new("bob")),
             content: Default::default(),
             output: view.upcast_ref::<gtk::Widget>().downgrade(),
@@ -2129,6 +2797,9 @@ pub(crate) mod tests {
             info_image: Default::default(),
             info_label: Default::default(),
             typing: Default::default(),
+            attach: Default::default(),
+            again: Default::default(),
+            go_on: Default::default(),
             im: RefCell::default(),
             ims: RefCell::default(),
             pms: RefCell::default(),

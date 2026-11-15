@@ -406,6 +406,12 @@ pub unsafe extern "C" fn user_nick_color_rgb(
     std::ptr::null()
 }
 
+/// A status word's color: the theme's foreground.
+#[no_mangle]
+pub unsafe extern "C" fn user_color_gdk(_color: u16) -> *const c_void {
+    std::ptr::null()
+}
+
 /// No theme: every chrome role is left to the system.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_theme_get_chrome_color(

@@ -27,13 +27,18 @@ pub enum Peer {
     /// The user list names nobody's Login, so the same person may have a
     /// conversation of each kind.
     Login(Vec<u8>),
+    /// Someone who had a uid and has left the server, by a number of the
+    /// conversation's own: their uid may be anyone's by now, and a
+    /// message or a user list entry for it is another conversation's.
+    Left(u32),
 }
 
 /// One open conversation.
 #[derive(Debug, Default)]
 pub struct Conversation {
-    /// The name the conversation was opened with, shown until the user list
-    /// has something better.
+    /// The peer's name: the one the conversation was opened with, then the
+    /// latest the user list gave, which is the nick it offers to go on
+    /// with once they leave.
     pub name: String,
     /// What has been typed into it, for Up and Down.
     pub history: InputHistory,
@@ -106,6 +111,45 @@ impl<V> Conversations<V> {
 
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+}
+
+/// A conversation with a uid whose peer has left the server: the nick it
+/// was with, and the users of that nick who have joined since, latest
+/// last. Its uid may be anyone's by now, so nothing goes to it, and the
+/// conversation goes on with one of those only when asked.
+#[derive(Debug)]
+pub struct Gone {
+    pub nick: String,
+    joined: Vec<u16>,
+}
+
+impl Gone {
+    pub fn new(nick: impl Into<String>) -> Self {
+        Gone {
+            nick: nick.into(),
+            joined: Vec::new(),
+        }
+    }
+
+    /// `uid` is on the server as `nick`, having joined or been renamed:
+    /// offered while that is the nick, in the order first seen so.
+    pub fn seen(&mut self, uid: u16, nick: &str) {
+        if nick != self.nick {
+            self.left(uid);
+        } else if !self.joined.contains(&uid) {
+            self.joined.push(uid);
+        }
+    }
+
+    pub fn left(&mut self, uid: u16) {
+        self.joined.retain(|&u| u != uid);
+    }
+
+    /// Who the conversation may go on with: the latest of its nick to join
+    /// who is still here.
+    pub fn offered(&self) -> Option<u16> {
+        self.joined.last().copied()
     }
 }
 

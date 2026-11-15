@@ -1459,6 +1459,7 @@ msgid "Busy"
 msgstr "Beschäftigt"
 
 #: rust/crates/gtkhx-ui/src/friends.rs:381
+#: rust/crates/gtkhx-ui/src/msg.rs:1856
 msgid "Offline"
 msgstr "Offline"
 
@@ -1795,6 +1796,12 @@ msgstr "zum Ansehen klicken"
 msgid "Unread"
 msgstr "Ungelesen"
 
+#. TRANSLATORS: a picture picked for a private message after the person
+#. it was for left the server.
+#: rust/crates/gtkhx-ui/src/media_attach.rs:60
+msgid "Not sent: they are offline."
+msgstr "Nicht gesendet: Die andere Person ist offline."
+
 #: rust/crates/gtkhx-ui/src/media_attach.rs:65
 msgid "Inline media isn't available on this server."
 msgstr "Inline-Medien sind auf diesem Server nicht verfügbar."
@@ -1940,6 +1947,10 @@ msgstr "Der Server hat aufgehört, die Datei zu senden."
 msgid "The server can only send this file from its start."
 msgstr "Der Server kann diese Datei nur von Anfang an senden."
 
+#: rust/crates/gtkhx-ui/src/msg.rs:670
+msgid "Not sent: %s is offline."
+msgstr "Nicht gesendet: %s ist offline."
+
 #: rust/crates/gtkhx-ui/src/msg.rs:426
 msgid "Not sent: %s is not a friend on this server."
 msgstr "Nicht gesendet: %s ist auf diesem Server kein Freund."
@@ -1980,9 +1991,27 @@ msgstr "(%s)"
 msgid "%s is typing…"
 msgstr "%s schreibt…"
 
+#. TRANSLATORS: beside "<nick> is online again" over a private
+#. message's input: messages go to the one who joined from then on.
+#: rust/crates/gtkhx-ui/src/msg.rs:1732
+msgid "Continue"
+msgstr "Fortsetzen"
+
+#. TRANSLATORS: over a private message's input once someone of the
+#. nick of the person it was with, who left the server, joins it.
+#: rust/crates/gtkhx-ui/src/msg.rs:1763
+msgid "%s is online again"
+msgstr "%s ist wieder online"
+
 #: rust/crates/gtkhx-ui/src/msg.rs:939
 msgid "%s (private message)"
 msgstr "%s (private Nachricht)"
+
+#. TRANSLATORS: a private message's tab once the person it is with
+#. has left the server.
+#: rust/crates/gtkhx-ui/src/msg.rs:2141
+msgid "%s (offline)"
+msgstr "%s (offline)"
 
 #: rust/crates/gtkhx-ui/src/msg.rs:1124
 msgid "Message to %s"
