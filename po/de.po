@@ -1459,7 +1459,7 @@ msgid "Busy"
 msgstr "Beschäftigt"
 
 #: rust/crates/gtkhx-ui/src/friends.rs:381
-#: rust/crates/gtkhx-ui/src/msg.rs:1856
+#: rust/crates/gtkhx-ui/src/msg.rs:1866
 msgid "Offline"
 msgstr "Offline"
 
@@ -1947,7 +1947,7 @@ msgstr "Der Server hat aufgehört, die Datei zu senden."
 msgid "The server can only send this file from its start."
 msgstr "Der Server kann diese Datei nur von Anfang an senden."
 
-#: rust/crates/gtkhx-ui/src/msg.rs:670
+#: rust/crates/gtkhx-ui/src/msg.rs:674
 msgid "Not sent: %s is offline."
 msgstr "Nicht gesendet: %s ist offline."
 
@@ -1993,13 +1993,13 @@ msgstr "%s schreibt…"
 
 #. TRANSLATORS: beside "<nick> is online again" over a private
 #. message's input: messages go to the one who joined from then on.
-#: rust/crates/gtkhx-ui/src/msg.rs:1732
+#: rust/crates/gtkhx-ui/src/msg.rs:1736
 msgid "Continue"
 msgstr "Fortsetzen"
 
 #. TRANSLATORS: over a private message's input once someone of the
 #. nick of the person it was with, who left the server, joins it.
-#: rust/crates/gtkhx-ui/src/msg.rs:1763
+#: rust/crates/gtkhx-ui/src/msg.rs:1767
 msgid "%s is online again"
 msgstr "%s ist wieder online"
 
@@ -2009,7 +2009,7 @@ msgstr "%s (private Nachricht)"
 
 #. TRANSLATORS: a private message's tab once the person it is with
 #. has left the server.
-#: rust/crates/gtkhx-ui/src/msg.rs:2141
+#: rust/crates/gtkhx-ui/src/msg.rs:2149
 msgid "%s (offline)"
 msgstr "%s (offline)"
 

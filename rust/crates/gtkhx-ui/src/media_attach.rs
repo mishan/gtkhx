@@ -167,7 +167,10 @@ unsafe fn loaded(bytes: &glib::Bytes, name: &str, bound: Bound, target: Target) 
         return;
     };
     if let Target::Message(to) = &target {
-        if to.get().is_none() {
+        if !to
+            .get()
+            .is_some_and(|uid| crate::msg::still_here(htlc, uid))
+        {
             return offline();
         }
     }
@@ -239,7 +242,7 @@ unsafe extern "C" fn uploaded(htlc: *mut c_void, r: *const UploadResult, upload:
             r.media_type_len,
         ),
         Target::Message(to) => {
-            let Some(uid) = to.get() else {
+            let Some(uid) = to.get().filter(|&uid| crate::msg::still_here(htlc, uid)) else {
                 return offline();
             };
             let id = std::slice::from_raw_parts(r.media_id, r.media_id_len);

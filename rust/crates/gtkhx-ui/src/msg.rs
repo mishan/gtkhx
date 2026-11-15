@@ -52,9 +52,9 @@ use gtkhx_core::conn::{
 };
 use gtkhx_core::messaging::{with_roster, Delivery, Guid, Im};
 use gtkhx_core::session::PmId;
-use hxmodel::chat_members::{hx_member_model_count, hx_member_model_get_at, HxMemberInfo};
 use hxmodel::conversation::{hx_chat_cid, hx_chat_member_model};
 use hxmodel::friends::{self, TheirTyping, Typing};
+use hxmodel::member::{HxMember, HxMemberModel};
 use hxmodel::pm::{self, Conversation, Conversations, Gone, Peer};
 use hxmodel::reactions::{ImReactions, LineReactions};
 use hxmodel::replies::{Quote, Short};
@@ -565,7 +565,9 @@ unsafe fn create(htlc: *mut c_void, peer: &Peer, name: &str) -> Option<Rc<MsgWin
     }
 
     refresh_user_info(&win, htlc);
-    offline_unless_listed(&win, htlc);
+    if let Peer::Uid(uid) = peer {
+        still_here(htlc, *uid);
+    }
     chat_tabs::raise_msg(htlc, &win.peer());
     crate::ffi::init_keyaccel(wptr(&outer_vbox));
     input.grab_focus();
@@ -661,7 +663,9 @@ fn send(win: &MsgWin, buf: &gtk::TextBuffer) {
 /// which is said instead, the text kept for when the conversation goes on.
 fn take(win: &MsgWin, buf: &gtk::TextBuffer) -> Option<(Peer, String)> {
     let text = whole(buf);
+    let htlc = dock::htlc_for(win.conn);
     let to = match win.peer() {
+        Peer::Uid(uid) if !htlc.is_null() && !unsafe { still_here(htlc, uid) } => None,
         Peer::Left(_) => None,
         peer => Some(peer),
     };
@@ -1770,45 +1774,51 @@ fn show_again(win: &MsgWin) {
     }
 }
 
+/// The public chat's members: everyone on `htlc`'s server. Read whole,
+/// as `HxMemberInfo` cuts a name to C's buffer, and that much of a nick
+/// may be someone else's.
+///
+/// # Safety
+/// `htlc` is a live connection. Main thread.
+unsafe fn public_model(htlc: *mut c_void) -> Option<HxMemberModel> {
+    let chat = chat_with_cid(hx_conn_sess(htlc.cast()).cast(), 0);
+    if chat.is_null() {
+        return None;
+    }
+    let model = hx_chat_member_model(chat.cast());
+    if model.is_null() {
+        return None;
+    }
+    let model: glib::Object = from_glib_none(model as *mut glib::gobject_ffi::GObject);
+    model.downcast().ok()
+}
+
 /// Everyone on `htlc`'s server, by uid and nick, in the order they
-/// joined: the public chat's members.
+/// joined.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
 unsafe fn public_members(htlc: *mut c_void) -> Vec<(u16, String)> {
-    let chat = chat_with_cid(hx_conn_sess(htlc.cast()).cast(), 0);
-    if chat.is_null() {
-        return Vec::new();
-    }
-    let model = hx_chat_member_model(chat.cast());
-    let at = |i| {
-        let mut mi: HxMemberInfo = std::mem::zeroed();
-        (hx_member_model_get_at(model, i, &mut mi) != 0).then(|| {
-            (
-                mi.uid,
-                CStr::from_ptr(mi.name.as_ptr())
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        })
-    };
-    (0..hx_member_model_count(model)).filter_map(at).collect()
+    let members = public_model(htlc).map(|m| m.iter::<HxMember>().flatten().collect());
+    let members: Vec<HxMember> = members.unwrap_or_default();
+    members.iter().map(|m| (m.uid(), m.name())).collect()
 }
 
-/// A conversation opened with a uid the user list no longer holds starts
-/// offline: the uid may be someone else's by the time anything is sent.
-/// An empty list has not been read yet, and says nothing.
+/// Whether `uid` is still on `htlc`'s server as its user list has it: one
+/// the list no longer holds has left, though no part was heard, and is
+/// let go of as a part lets go. An empty list has not been read yet, and
+/// says nothing. A conversation opened, or a message sent, before the list
+/// was read is checked as anything goes out.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
-unsafe fn offline_unless_listed(win: &Rc<MsgWin>, htlc: *mut c_void) {
-    let Peer::Uid(uid) = win.peer() else {
-        return;
-    };
+pub(crate) unsafe fn still_here(htlc: *mut c_void, uid: u16) -> bool {
     let members = public_members(htlc);
-    if !members.is_empty() && members.iter().all(|&(u, _)| u != uid) {
-        go_offline(win, htlc);
+    let gone = !members.is_empty() && members.iter().all(|&(u, _)| u != uid);
+    if gone {
+        left(htlc, uid);
     }
+    !gone
 }
 
 /// File `win` as the conversation with `peer`, and its tab with it. A
@@ -1991,11 +2001,9 @@ unsafe fn refresh_user_info(win: &MsgWin, htlc: *mut c_void) {
         }
         Peer::Left(_) => return,
     };
-    if let Some(mi) = crate::friends::member(hx_conn_sess(htlc.cast()).cast(), 0, uid) {
-        let name = CStr::from_ptr(mi.name.as_ptr()).to_string_lossy();
-        apply_user_view(win, htlc, Some(&name), mi.icon, mi.status, true);
-    } else {
-        apply_user_view(win, htlc, None, 0, 0, false);
+    match public_model(htlc).and_then(|m| m.get(uid)) {
+        Some(m) => apply_user_view(win, htlc, Some(&m.name()), m.icon(), m.status(), true),
+        None => apply_user_view(win, htlc, None, 0, 0, false),
     }
 }
 
@@ -2699,11 +2707,36 @@ pub(crate) mod tests {
                     join(c, 3, c"zoe");
                 }
                 let win = filed(c.0, uid, "dave");
-                offline_unless_listed(&win, c.0);
+                still_here(c.0, uid);
                 let filed_as_uid = find(dock::conn_key(c.0), &Peer::Uid(uid)).is_some();
                 assert_eq!(filed_as_uid, !offline, "{case}");
                 assert_eq!(say(&win, "hi").0.is_none(), offline, "{case}");
             }
+
+            // One opened before the list was read, which then holds no such
+            // uid, goes offline as anything goes out.
+            let c = connect();
+            let win = filed(c.0, 7, "dave");
+            assert_eq!(say(&win, "hi").0, to(7, "hi"), "before the list");
+            join(c, 3, c"zoe");
+            let kept = "again".to_owned();
+            assert_eq!(say(&win, &kept), (None, kept), "the list read");
+            assert!(matches!(win.peer(), Peer::Left(_)), "the list read");
+            assert_eq!(shown(c.0, &win).as_deref(), Some("dave (offline)"));
+
+            // A nick longer than C's buffer once in UTF-8 is matched whole,
+            // not by the part of it that fits.
+            let long = "\u{e9}".repeat(17);
+            let (whole_nick, part) = (crate::cs(&long), crate::cs(&long[..30]));
+            let c = connect();
+            join(c, 5, &whole_nick);
+            let win = filed(c.0, 5, "bob");
+            refresh_user_info(&win, c.0);
+            leave(c, 5);
+            join(c, 8, &part);
+            assert_eq!(offered(&win), None, "its first part");
+            join(c, 9, &whole_nick);
+            assert!(offered(&win).is_some(), "the whole nick");
 
             // The new bob messaged first: Continue shows his conversation.
             let c = connect();
