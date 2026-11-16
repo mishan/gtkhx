@@ -659,26 +659,37 @@ fn send(win: &MsgWin, buf: &gtk::TextBuffer) {
 }
 
 /// What is typed, taken out of the input to send and kept for Up, and
-/// whom it goes to: nothing where it is empty, nor to a peer who has left,
-/// which is said instead, the text kept for when the conversation goes on.
+/// whom it goes to: nothing where it is empty, nor to a peer who has left
+/// or whom the server would refuse an instant message, which is said
+/// instead, the text kept for when it can go.
 fn take(win: &MsgWin, buf: &gtk::TextBuffer) -> Option<(Peer, String)> {
     let text = whole(buf);
     let htlc = dock::htlc_for(win.conn);
-    let to = match win.peer() {
-        Peer::Uid(uid) if !htlc.is_null() && !unsafe { still_here(htlc, uid) } => None,
-        Peer::Left(_) => None,
-        peer => Some(peer),
+    let name = || win.model.borrow().name.clone();
+    let peer = win.peer();
+    let refused = match &peer {
+        Peer::Uid(uid) if !htlc.is_null() && !unsafe { still_here(htlc, *uid) } => {
+            Some(tr1("Not sent: %s is offline.", &name()))
+        }
+        Peer::Left(_) => Some(tr1("Not sent: %s is offline.", &name())),
+        Peer::Login(login) if !htlc.is_null() && !unsafe { reaches(htlc, login) } => {
+            Some(tr1("Not sent: %s is not a friend on this server.", &name()))
+        }
+        _ => None,
     };
-    if to.is_none() && !text.is_empty() {
-        let name = win.model.borrow().name.clone();
-        notice(win, &tr1("Not sent: %s is offline.", &name));
+    if let Some(refused) = refused {
+        if !text.is_empty() {
+            notice(win, &refused);
+        }
         return None;
     }
     let (mut start, mut end) = (buf.start_iter(), buf.end_iter());
     buf.delete(&mut start, &mut end);
-    let to = to.filter(|_| !text.is_empty())?;
+    if text.is_empty() {
+        return None;
+    }
     win.model.borrow_mut().history.record(&text);
-    Some((to, text))
+    Some((peer, text))
 }
 
 /// Whether `htlc` can send `login` an instant message: a friend, or anyone
@@ -705,21 +716,11 @@ unsafe fn reply(win: &MsgWin, htlc: *mut c_void) -> Option<Target> {
 }
 
 /// An instant message to `login`, answering the message the reply bar holds
-/// where the login takes it, shown marked as it goes; to someone it cannot
-/// reach, a note that it did not go, since the server would refuse it, and
-/// the reply left for the next.
+/// where the login takes it, shown marked as it goes.
 ///
 /// # Safety
 /// `htlc` is a live connection. Main thread.
 unsafe fn send_im(win: &MsgWin, htlc: *mut c_void, login: &[u8], text: &str) {
-    if !reaches(htlc, login) {
-        let name = win.model.borrow().name.clone();
-        notice(
-            win,
-            &tr1("Not sent: %s is not a friend on this server.", &name),
-        );
-        return;
-    }
     let reply = reply(win, htlc);
     let reply = reply.as_ref();
     let Some(guid) = hxhandlers::send::friends::im(htlc, login, text, reply) else {
@@ -2470,6 +2471,49 @@ pub(crate) mod tests {
     /// Take back notification `id`, as the desktop is asked to.
     pub(crate) fn withdraw(id: &str) {
         WITHDRAWN.with_borrow_mut(|w| w.push(id.to_owned()));
+    }
+
+    /// An instant message the server would refuse, to someone who is not a
+    /// friend where nobody takes requests, is not sent and stays in the
+    /// input, kept from Up; one the server would take goes.
+    pub(crate) fn check_a_refused_instant_message_keeps_its_draft() {
+        use gtkhx_core::conn::{hx_conn_new, hx_conn_set_caps, hx_conn_set_sess};
+        use gtkhx_core::messaging::with_roster_mut;
+        // SAFETY: the connection stands in for its own session, as in
+        // the checks above, and lives for the rest of the run.
+        unsafe {
+            let conn = hx_conn_new();
+            let htlc: *mut c_void = conn.cast();
+            hx_conn_set_sess(conn, htlc);
+            crate::options_test_stubs::register_session(htlc);
+            let view = RotulusView::new();
+            let input = new_input();
+            let win = MsgWin {
+                conn: dock::conn_key(htlc),
+                input: input.downgrade(),
+                ..bobs(&view)
+            };
+            let say = |text: &str| {
+                let buf = input.buffer();
+                buf.set_text(text);
+                (take(&win, &buf), whole(&buf))
+            };
+            let said = || crate::chat_output::tests::spoken(&view);
+            let refused = "Not sent: bob is not a friend on this server.";
+            let bob = |text: &str| Some((Peer::Login(b"bob".to_vec()), text.to_owned()));
+
+            assert_eq!(say("hi"), (None, "hi".to_owned()), "no messaging");
+            assert!(said().ends_with(refused), "{}", said());
+            hx_conn_set_caps(htlc.cast(), CAP_MESSAGING);
+            assert_eq!(say("hi"), (None, "hi".to_owned()), "not a friend");
+            assert_eq!(
+                win.model.borrow_mut().history.up(""),
+                None,
+                "refusals not kept"
+            );
+            with_roster_mut(htlc, |r| r.requests.served = true);
+            assert_eq!(say("hi"), (bob("hi"), String::new()), "a request");
+        }
     }
 
     /// A conversation whose peer leaves the server, or whose connection's

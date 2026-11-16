@@ -75,6 +75,7 @@ fn display_backed() {
     crate::msg::tests::check_a_stored_messages_chips_are_the_servers();
     crate::msg::tests::check_tab_leaves_the_input();
     crate::msg::tests::check_a_conversation_whose_peer_left_goes_on_when_asked();
+    crate::msg::tests::check_a_refused_instant_message_keeps_its_draft();
     crate::icon_picker::tests::check_banners_fit_the_dialog();
     #[cfg(feature = "voice")]
     crate::users_voice_col::voice_impl::tests::check_header_is_an_icon();
