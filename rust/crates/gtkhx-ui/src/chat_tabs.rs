@@ -428,8 +428,24 @@ pub(crate) fn pchat_cids(htlc: *mut c_void) -> Vec<u32> {
     tabs.into_iter().map(|(_, cid)| cid).collect()
 }
 
-fn find_msg(htlc: *mut c_void, peer: &Peer) -> Option<adw::TabPage> {
+pub(crate) fn find_msg(htlc: *mut c_void, peer: &Peer) -> Option<adw::TabPage> {
     STATE.with(|s| s.borrow().msg.get(&(conn_key(htlc), peer.clone())).cloned())
+}
+
+/// The tab of the conversation with `old` on `htlc` is the one with `new`
+/// now, and closes as it.
+pub(crate) fn rekey_msg(htlc: *mut c_void, old: &Peer, new: &Peer) {
+    let conn = conn_key(htlc);
+    let page = STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        let page = st.msg.remove(&(conn, old.clone()))?;
+        st.msg.insert((conn, new.clone()), page.clone());
+        Some(page)
+    });
+    if let Some((page, mut m)) = page.and_then(|p| meta(&p).map(|m| (p, m))) {
+        m.peer = Some(new.clone());
+        set_meta(&page, m);
+    }
 }
 
 #[no_mangle]
@@ -471,11 +487,13 @@ pub(crate) fn raise_msg(htlc: *mut c_void, peer: &Peer) {
 
 /// The id a notification of a message from `peer` goes by, which
 /// [`open_notified`] reads back: `msg-` with the connection's serial and
-/// the uid, or `im-` with it and the Login in hex.
+/// the uid, `im-` with it and the Login in hex, or `left-` with it and the
+/// number of a conversation whose peer has left.
 pub(crate) fn notify_id(conn: ConnKey, peer: &Peer) -> String {
     match peer {
         Peer::Uid(uid) => format!("msg-{conn}-{uid}"),
         Peer::Login(login) => format!("im-{conn}-{}", hex(login)),
+        Peer::Left(n) => format!("left-{conn}-{n}"),
     }
 }
 
@@ -498,8 +516,9 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 /// `app.open-notified`: clicking a notification opens the conversation it was
 /// about, and brings GtkHx forward either way. The target is the
 /// notification's own id (notify.c, or [`notify_id`]): `chat-`, `pchat-`,
-/// `msg-` or `im-` with the connection's serial and the chat, user or
-/// account, which opens nothing once that conversation has closed; anything
+/// `msg-`, `im-` or `left-` with the connection's serial and the chat,
+/// user, account or offline conversation, which opens nothing once that
+/// conversation has closed or been filed otherwise; anything
 /// else (news, transfers, broadcasts, invitations, friend requests) only
 /// brings the window forward.
 fn open_notified(app: &gtk::Application, id: &str) {
@@ -522,6 +541,9 @@ fn open_notified(app: &gtk::Application, id: &str) {
         (Some("im"), Some(conn)) => n.and_then(unhex).and_then(|login| {
             STATE.with(|s| s.borrow().msg.get(&(conn, Peer::Login(login))).cloned())
         }),
+        (Some("left"), Some(conn)) => n
+            .and_then(|n| n.parse::<u32>().ok())
+            .and_then(|n| STATE.with(|s| s.borrow().msg.get(&(conn, Peer::Left(n))).cloned())),
         _ => None,
     };
     let child = page.as_ref().map(|p| p.child());
@@ -654,6 +676,26 @@ pub(crate) mod tests {
         let page = find_pchat(htlc, cid).expect("a tab to close");
         view(conn_key(htlc)).expect("a view").close_page(&page);
         retitle_soon(conn_key(htlc));
+    }
+
+    /// Close the conversation with `peer`'s tab of a [`bare_view`] as the
+    /// strip does, its teardown the `msg` module's own.
+    pub(crate) fn close_msg(htlc: *mut c_void, peer: &Peer) {
+        let page = find_msg(htlc, peer).expect("a tab to close");
+        let view = view(conn_key(htlc)).expect("a view");
+        let id = view.connect_close_page(on_close_page);
+        view.close_page(&page);
+        view.disconnect(id);
+    }
+
+    /// Whom a conversation's tab closes as.
+    pub(crate) fn peer_of(page: &adw::TabPage) -> Option<Peer> {
+        meta(page)?.peer
+    }
+
+    /// The tab `htlc`'s strip shows.
+    pub(crate) fn selected(htlc: *mut c_void) -> Option<adw::TabPage> {
+        view(conn_key(htlc))?.selected_page()
     }
 
     /// A conversation that speaks flags its tab unless the tab is the one

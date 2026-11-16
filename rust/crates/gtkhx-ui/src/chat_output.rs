@@ -2501,7 +2501,7 @@ pub(crate) mod tests {
     }
 
     /// What a screen reader is read of `view`, a row a line.
-    fn spoken(view: &RotulusView) -> String {
+    pub(crate) fn spoken(view: &RotulusView) -> String {
         use gtk::ffi::{
             gtk_accessible_text_get_type, GtkAccessibleText, GtkAccessibleTextInterface,
         };

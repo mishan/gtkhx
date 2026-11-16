@@ -7,8 +7,9 @@
 //! button made is kept, weakly, so a login or a disconnect can show or hide
 //! them all.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, c_void};
+use std::rc::Rc;
 
 use glib::translate::IntoGlibPtr;
 use gtk::prelude::*;
@@ -30,11 +31,12 @@ const DEFAULT_MAX_BYTES: u32 = 256 * 1024;
 /// What a picture sent alone says to a client without inline media.
 const CAPTION: &std::ffi::CStr = c"[image]";
 
-/// Where a picture goes once it is up.
-#[derive(Clone, Copy)]
+/// Where a picture goes once it is up: a chat, or the uid a conversation's
+/// messages go to as it is then, none while its peer is offline.
+#[derive(Clone)]
 enum Target {
     Chat(u32),
-    Message(u16),
+    Message(Rc<Cell<Option<u16>>>),
 }
 
 extern "C" {
@@ -50,6 +52,12 @@ thread_local! {
 fn toast(text: &str) {
     let text = crate::cs(text);
     unsafe { toolbar_show_toast(text.as_ptr()) };
+}
+
+fn offline() {
+    // TRANSLATORS: a picture picked for a private message after the person
+    // it was for left the server.
+    toast(&tr("Not sent: they are offline."));
 }
 
 unsafe fn has_media(htlc: *mut c_void) -> bool {
@@ -89,7 +97,7 @@ fn button(htlc: *mut c_void, target: Target) -> gtk::Button {
     let btn = crate::icon_button("mail-attachment-symbolic", &tr("Attach Image"));
     btn.set_visible(unsafe { has_media(htlc) });
     let conn = dock::conn_key(htlc);
-    btn.connect_clicked(move |b| pick(b, dock::bind(conn), target));
+    btn.connect_clicked(move |b| pick(b, dock::bind(conn), target.clone()));
     BUTTONS.with_borrow_mut(|v| {
         v.retain(|(w, _)| w.upgrade().is_some());
         v.push((btn.downgrade(), conn));
@@ -158,6 +166,14 @@ unsafe fn loaded(bytes: &glib::Bytes, name: &str, bound: Bound, target: Target) 
     let Some(htlc) = live(bound) else {
         return;
     };
+    if let Target::Message(to) = &target {
+        if !to
+            .get()
+            .is_some_and(|uid| crate::msg::still_here(htlc, uid))
+        {
+            return offline();
+        }
+    }
     let max = max_bytes(htlc);
     if bytes.len() > max as usize {
         toast(&too_large(name, bytes.len() as u64, max));
@@ -225,7 +241,10 @@ unsafe extern "C" fn uploaded(htlc: *mut c_void, r: *const UploadResult, upload:
             r.media_type,
             r.media_type_len,
         ),
-        Target::Message(uid) => {
+        Target::Message(to) => {
+            let Some(uid) = to.get().filter(|&uid| crate::msg::still_here(htlc, uid)) else {
+                return offline();
+            };
             let id = std::slice::from_raw_parts(r.media_id, r.media_id_len);
             let mime = std::slice::from_raw_parts(r.media_type.cast::<u8>(), r.media_type_len);
             let trans = hxhandlers::send::msg::send_msg_with_media(htlc, uid, CAPTION, id, mime);
@@ -294,12 +313,12 @@ pub unsafe extern "C" fn hx_inline_media_attach_button_new(
         .into_glib_ptr()
 }
 
-/// The paperclip for the private messages to `uid` on `htlc`.
+/// The paperclip for the private messages on `htlc` to the uid `to` holds.
 ///
 /// # Safety
 /// Main thread; `htlc` is a live connection.
-pub unsafe fn message_button(htlc: *mut c_void, uid: u16) -> gtk::Button {
-    button(htlc, Target::Message(uid))
+pub unsafe fn message_button(htlc: *mut c_void, to: Rc<Cell<Option<u16>>>) -> gtk::Button {
+    button(htlc, Target::Message(to))
 }
 
 /// `void inline_media_attach_refresh (struct htlc_conn *htlc)` — show or
