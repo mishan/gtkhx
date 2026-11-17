@@ -176,8 +176,9 @@ fn a_refusal_carries_the_servers_reason() {
 }
 
 /// A LOGIN offering the draft bits (17 and up) carries its capabilities in
-/// four bytes, not two. A server must agree to the same low bits either
-/// way, and to the drafts only where it implements them.
+/// four bytes, not two. A server must take the wider field (a classic one
+/// that agrees to nothing still has to log the guest in), agree to the same
+/// other bits either way, and to the drafts only where it implements them.
 #[test]
 fn a_four_byte_capability_field_changes_no_low_bit_agreed() {
     let low = CAPS | hxproto::messaging::CAP_MESSAGING;
@@ -193,7 +194,7 @@ fn a_four_byte_capability_field_changes_no_low_bit_agreed() {
     for s in classic.into_iter().chain(ng) {
         let narrow = Client::guest(s, low).caps();
         let wide = Client::guest(s, low | drafts).caps();
-        assert_eq!(wide & 0xffff, narrow, "{}", s.name);
+        assert_eq!(wide & !drafts, narrow, "{}", s.name);
         let has_drafts = s.has(Cap::StructuredChat) && s.has(Cap::Replies) && s.has(Cap::Reactions);
         let expected = if has_drafts { drafts } else { 0 };
         assert_eq!(wide & drafts, expected, "{}: {wide:#x}", s.name);
