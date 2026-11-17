@@ -69,6 +69,9 @@ jobs:
           python3 tools/flatpak-cargo-generator.py rust/Cargo.lock
           git diff --exit-code rust/cargo-sources.json
 
+      - name: every Rust source is in rust/meson.build
+        run: tools/check-rust-sources.sh
+
       - name: install clang-format (pinned)
         # Pin the exact version the tree was formatted with. clang-format's
         # output drifts between major versions (notably around braced-list

@@ -144,7 +144,8 @@ Rust-owned connection struct), `rotulus.h` (the chat widget's C ABI, which ships
   vendored app-specific symbolic icons (see its README), beside the classic
   `src/pixmaps/`.
 - `tools/` — the gates below (`reformat.sh`, `fix-whitespace.py`, `check-potfiles.sh`,
-  `check-c-growth.sh`, `check-icon-buttons.sh`, `flatpak-cargo-generator.py`),
+  `check-c-growth.sh`, `check-icon-buttons.sh`, `check-rust-sources.sh`,
+  `flatpak-cargo-generator.py`),
   `coverage.sh`, `analyze.sh`, `uibench.sh` (the in-app UI benchmarks — see
   `docs/performance.md`), `isolated-run.sh` (runs a test command sealed off from the
   desktop — see "Before calling anything done"), and the two screenshot tools:
@@ -312,6 +313,7 @@ one CI asks, and any edit after the formatter can undo it.
 tools/reformat.sh --check          # clang-format 21.1.8 (pip), every C file
 python3 tools/fix-whitespace.py --check
 tools/check-icon-buttons.sh        # icon-only buttons have a name
+tools/check-rust-sources.sh        # every Rust source is in rust/meson.build
 tools/check-potfiles.sh            # needs gettext 0.25+ for Rust support
 tools/check-c-growth.sh            # no net lines of C added to src/
 python3 tools/flatpak-cargo-generator.py rust/Cargo.lock \
