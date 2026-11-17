@@ -7,7 +7,8 @@
 //! One per connection, posting to the board it was opened from: the focus
 //! can move to another tab while it is open (a second launch's `--server`,
 //! a tracker connect), and the post still belongs to the first. It closes
-//! with its connection's tab.
+//! with its connection's tab. A reconnect to the same server keeps it
+//! posting; a reconnect to another server leaves it holding the draft.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -48,10 +49,19 @@ fn close_post(conn: ConnKey) {
     }
 }
 
+/// Where `htlc` is connected: host and port.
+fn server_of(htlc: *mut c_void) -> (Vec<u8>, u16) {
+    use gtkhx_core::conn::{hx_conn_serverhost, hx_conn_serverport};
+    unsafe {
+        let host = std::ffi::CStr::from_ptr(hx_conn_serverhost(htlc.cast()));
+        (host.to_bytes().to_vec(), hx_conn_serverport(htlc.cast()))
+    }
+}
+
 /// Read the body, send it, and close. Mirrors `news.c::post_news`: LF→CR, and
 /// a trailing CR is zeroed in place (length unchanged — the historical
 /// behaviour), then handed to `hx_post_news`.
-fn do_post(conn: Bound) {
+fn do_post(conn: Bound, server: &Option<(Vec<u8>, u16)>) {
     let Some((_, tv)) = POST.with_borrow(|p| p.get(&conn.conn()).cloned()) else {
         return;
     };
@@ -68,8 +78,12 @@ fn do_post(conn: Bound) {
         bytes[len - 1] = 0;
     }
     // Not once the connection has gone, or connected to another server; the
-    // window stays, with the draft, rather than throwing it away.
-    let Some(htlc) = dock::live_htlc(conn) else {
+    // window stays, with the draft, rather than throwing it away. A reconnect
+    // to the same server is still the board it was written for.
+    let htlc = dock::live_htlc(conn).or_else(|| {
+        dock::live_htlc(dock::bind(conn.conn())).filter(|&h| Some(server_of(h)) == *server)
+    });
+    let Some(htlc) = htlc else {
         let text = crate::cs(&tr("Not posted: the connection this was for has closed"));
         unsafe { cffi::toolbar_show_toast(text.as_ptr()) };
         return;
@@ -90,6 +104,7 @@ pub unsafe extern "C" fn create_post_window(_widget: *mut gtk::ffi::GtkWidget, d
 
     let conn = dock::bind(dock::key_for_session(data));
     let key = conn.conn();
+    let server = dock::live_htlc(conn).map(server_of);
     // One per connection: re-present rather than stacking a second window.
     if let Some((win, _)) = POST.with_borrow(|p| p.get(&key).cloned()) {
         win.present();
@@ -114,7 +129,8 @@ pub unsafe extern "C" fn create_post_window(_widget: *mut gtk::ffi::GtkWidget, d
     cancel.connect_clicked(move |_| close_post(key));
     let post_btn = gtk::Button::with_mnemonic(&tr("_Post"));
     post_btn.add_css_class("suggested-action");
-    post_btn.connect_clicked(move |_| do_post(conn));
+    let srv = server.clone();
+    post_btn.connect_clicked(move |_| do_post(conn, &srv));
     header.pack_start(&cancel);
     header.pack_end(&post_btn);
     window.set_titlebar(Some(&header));
@@ -155,7 +171,7 @@ pub unsafe extern "C" fn create_post_window(_widget: *mut gtk::ffi::GtkWidget, d
         if (keyval == gtk::gdk::Key::Return || keyval == gtk::gdk::Key::KP_Enter)
             && state.contains(gtk::gdk::ModifierType::CONTROL_MASK)
         {
-            do_post(conn);
+            do_post(conn, &server);
             return glib::Propagation::Stop;
         }
         glib::Propagation::Proceed
