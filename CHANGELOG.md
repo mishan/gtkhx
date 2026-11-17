@@ -27,7 +27,6 @@
   - The tab strips say which tab is selected and which are unread, the pinned public chat's tab is named, and connections sharing a name are numbered
 - macOS
   - The Apple silicon build needs macOS 15 or later, as the Intel build already did
-  - The app's version in Finder is the release's, such as 1.7.0 for 1.7.0b1, rather than 1.7.0-dev
 
 ## 1.6.2
 

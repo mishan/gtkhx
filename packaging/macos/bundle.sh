@@ -319,9 +319,15 @@ echo ">> minimum macOS: $min_os"
 FULL_VERSION="$(sed -n 's/^#define VERSION "\(.*\)"$/\1/p' "$BUILD_DIR/src/config.h")"
 VERSION="${FULL_VERSION%%[!0-9.]*}"
 # A snapshot's version (snapshot-a1b2c3d) has no number; take the project's.
-if [ -z "$VERSION" ]; then
+case "$FULL_VERSION" in
+snapshot-*)
     VERSION="$(awk -F\' '/version *:/ {print $2; exit}' meson.build)"
     VERSION="${VERSION%%[!0-9.]*}"
+    ;;
+esac
+if [ -z "$VERSION" ]; then
+    echo "error: no bundle version in '$FULL_VERSION' ($BUILD_DIR/src/config.h)" >&2
+    exit 1
 fi
 echo ">> version: $FULL_VERSION (bundle version $VERSION)"
 cat > "$APP/Contents/Info.plist" <<PLIST
