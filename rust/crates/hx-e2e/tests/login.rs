@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use hx_e2e::{Cap, Client};
 use hxnet::lifecycle::{
     run_hope_lifecycle, run_plaintext_lifecycle, run_plaintext_tls_lifecycle, HopeOpenRequest,
     PlaintextOpenRequest,
@@ -171,5 +172,30 @@ fn a_refusal_carries_the_servers_reason() {
             Outcome::Ended => assert_eq!(name, "mhxd"),
             other => panic!("{name}: {other:?}"),
         }
+    }
+}
+
+/// A LOGIN offering the draft bits (17 and up) carries its capabilities in
+/// four bytes, not two. A server must agree to the same low bits either
+/// way, and to the drafts only where it implements them.
+#[test]
+fn a_four_byte_capability_field_changes_no_low_bit_agreed() {
+    let low = CAPS | hxproto::messaging::CAP_MESSAGING;
+    let drafts = cap::STRUCTURED_CHAT | cap::REPLIES | cap::REACTIONS;
+    let mut buf = [0; 8];
+    assert_eq!(hxproto::build::capabilities_encode(low, &mut buf).len(), 2);
+    assert_eq!(
+        hxproto::build::capabilities_encode(low | drafts, &mut buf).len(),
+        4
+    );
+    let classic = hx_e2e::servers_with(&[]);
+    let ng = hx_e2e::servers_with(&[Cap::StructuredChat, Cap::Replies, Cap::Reactions]);
+    for s in classic.into_iter().chain(ng) {
+        let narrow = Client::guest(s, low).caps();
+        let wide = Client::guest(s, low | drafts).caps();
+        assert_eq!(wide & 0xffff, narrow, "{}", s.name);
+        let has_drafts = s.has(Cap::StructuredChat) && s.has(Cap::Replies) && s.has(Cap::Reactions);
+        let expected = if has_drafts { drafts } else { 0 };
+        assert_eq!(wide & drafts, expected, "{}: {wide:#x}", s.name);
     }
 }
