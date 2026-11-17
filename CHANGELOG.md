@@ -23,7 +23,7 @@
   - A conversation already in front isn't marked unread when someone speaks in it
   - Fixed the third page of older history landing below the second
 - News
-  - Post News left open while its connection drops and comes back posts once the connection is back on the same server, rather than refusing until it's closed
+  - Post News left open while its connection drops posts when it's back on the same server, rather than refusing until closed
 - Accessibility
   - Ctrl+Tab and Ctrl+Shift+Tab leave a chat input however many conversations are open, and Ctrl+PgUp and Ctrl+PgDn switch between them; F6 leaves a private chat, and Tab leaves a message input
   - The tab strips say which tab is selected and which are unread, the pinned public chat's tab is named, and connections sharing a name are numbered
