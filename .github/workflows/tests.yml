@@ -213,7 +213,7 @@ jobs:
                   --print-errorlogs
               ( cd rust \
                 && ../tools/isolated-run.sh cargo test --workspace \
-                && cargo test -p hxnet --features socks \
+                && cargo test -p hxnet --features socks,messaging,reactions,replies \
                 && cargo test -p hxhandlers --features voice )
               # glycin-v2 (1+ loaders) backend — compile-only lib tests.
               ( cd rust && cargo test -p hx-image-decode --lib \

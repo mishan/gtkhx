@@ -344,6 +344,12 @@ endif
 # gtkhx binary wants it, so the production build turns it on here.
 cargo_features = 'hxbridge/runtime,hxnet/socks'
 
+# The messaging extension's friend family (bit 6) and the Reactions and
+# Replies drafts (bits 18 and 19, which bring Structured Chat, bit 17). Each
+# UI shows only once the server confirms its bit, so a server that doesn't
+# take part sees the classic login, apart from the wider capabilities field.
+cargo_features = cargo_features + ',gtkhx-ffi/messaging,gtkhx-ffi/reactions,gtkhx-ffi/replies'
+
 # Inline-media image decoder backend (docs/image-decoding.md).
 # -Dglycin_compat selects which glycin loader generation hx-image-decode
 # targets, by flipping a cargo feature on that crate:

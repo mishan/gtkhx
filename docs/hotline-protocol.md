@@ -1372,7 +1372,7 @@ counted by the chat itself rather than its history. Implemented by hxd-ng.
 
 The bit is above 15, so offering it makes the Login's capabilities field 4 bytes for
 every server, and GtkHx offers it only in a build with hxnet's `structured-chat`
-feature. In such a build, a line a user said is drawn with the nick and text from its
+feature, which the meson build has through `reactions` and `replies`. In such a build, a line a user said is drawn with the nick and text from its
 entry rather than split out of the formatted text, which cuts a nick at 13 columns; an
 emote or a server's line is drawn as formatted; and a line is GtkHx's own by user ID
 rather than by nick.
@@ -1392,8 +1392,8 @@ it left the highest out for the frame. Implemented by hxd-ng, which keeps the re
 sent and never looks a target up, so the formatted text of a line is the same with or
 without one.
 
-GtkHx offers it only in a build with hxnet's `replies` feature, which brings
-`structured-chat` with it; without it the login is what it was. In the lobby, a line that
+GtkHx offers it only in a build with hxnet's `replies` feature, as the meson build is,
+which brings `structured-chat` with it; without it the login is what it was. In the lobby, a line that
 answers another is drawn under a header quoting it, live and from history: from the row
 of the line it answers where the view drew it, and otherwise, for a kept line, from 700
 by id, asked once the draw that found it is done, a page's replies or a burst of live
@@ -1475,8 +1475,8 @@ as sub-fields 0x0021 and 0x0023. The Login reply says which kinds it takes (0x0F
 a server that echoes the bit without it offers none. Refusals carry the draft family's
 reason code (0x0F2A). Implemented by hxd-ng.
 
-GtkHx offers it only in a build with hxnet's `reactions` feature, which brings
-`structured-chat` with it; without it the login is what it was. It shows each kept
+GtkHx offers it only in a build with hxnet's `reactions` feature, as the meson build is,
+which brings `structured-chat` with it; without it the login is what it was. It shows each kept
 line's chips: from its history entry, and then from what a Reaction Changed says. A
 change that arrives while the first page of history is on its way, for a line the page
 then draws, may predate what the page says, so those lines are asked after again with

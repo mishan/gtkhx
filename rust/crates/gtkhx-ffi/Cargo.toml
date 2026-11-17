@@ -81,17 +81,17 @@ voice = [
 ]
 
 # Offer the messaging extension's friend family at login (hxnet's
-# `messaging`). No meson option turns it on yet.
+# `messaging`). rust/meson.build turns it on.
 messaging = ["hxnet/messaging"]
 
-# Offer the Structured Chat draft at login (hxnet's `structured-chat`). No
-# meson option turns it on yet.
+# Offer the Structured Chat draft at login (hxnet's `structured-chat`).
+# Reactions and Replies bring it, so rust/meson.build turns it on through them.
 structured-chat = ["hxnet/structured-chat"]
 
 # Offer the Reactions draft at login (hxnet's `reactions`), which brings
-# Structured Chat with it. No meson option turns it on yet.
+# Structured Chat with it. rust/meson.build turns it on.
 reactions = ["hxnet/reactions"]
 
 # Offer the Replies draft at login (hxnet's `replies`), which brings
-# Structured Chat with it. No meson option turns it on yet.
+# Structured Chat with it. rust/meson.build turns it on.
 replies = ["hxnet/replies"]
