@@ -54,7 +54,8 @@ workflow passes the version it was given, so a beta says `1.4.1b1`, not
 flatpak-builder takes options from nowhere else.
 
 The macOS `Info.plist` and the Windows executable's numeric version fields
-still take the project version.
+hold only the number, `1.4.1` for `1.4.1b1`, since both platforms define those
+fields as integers.
 
 The Windows and macOS builds check for updates by default (`-Dupdate_check`
 is `auto`), and the manifest passes `enabled`. A Homebrew, MacPorts or MSYS2
