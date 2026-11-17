@@ -312,8 +312,18 @@ if [ -z "$min_os" ]; then
 fi
 echo ">> minimum macOS: $min_os"
 
-# Version from meson if available, else a dev placeholder.
-VERSION="$(awk -F\' '/version *:/ {print $2; exit}' meson.build 2>/dev/null || echo 0.0.0-dev)"
+# The version the build was configured with: -Dbuild_version (a beta's
+# 1.7.0b1), else the project version. Apple defines both version keys as up to
+# three period-separated integers, so they get the number alone; About shows
+# the full version.
+FULL_VERSION="$(sed -n 's/^#define VERSION "\(.*\)"$/\1/p' "$BUILD_DIR/src/config.h")"
+VERSION="${FULL_VERSION%%[!0-9.]*}"
+# A snapshot's version (snapshot-a1b2c3d) has no number; take the project's.
+if [ -z "$VERSION" ]; then
+    VERSION="$(awk -F\' '/version *:/ {print $2; exit}' meson.build)"
+    VERSION="${VERSION%%[!0-9.]*}"
+fi
+echo ">> version: $FULL_VERSION (bundle version $VERSION)"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
