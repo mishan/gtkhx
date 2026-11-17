@@ -16,7 +16,8 @@ The bit is not yet offered by a default build: only a build with
 
 The friend family is capability bit 6 (`CAP_MESSAGING`). hxnet offers it at
 login (`offered` in `hxnet::ffi`) in a build with hxnet's `messaging`
-feature, which `gtkhx-ffi/messaging` turns on; no meson option does yet.
+feature, which `gtkhx-ffi/messaging` turns on, as `rust/meson.build` does for
+every build.
 C's own offer in `network.c` is unchanged. Bit 8, the messenger-only
 session, is never offered: GtkHx is a whole client.
 

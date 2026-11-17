@@ -1,4 +1,28 @@
-## 1.6.3-dev
+## 1.7.0-dev
+
+- Friends, on servers with the messaging extension, such as hxd-ng
+  - A Friends section below the user list holds friend requests to accept or decline, friends online and away, requests you sent and accounts you blocked; Add Friend and Block are in a user's menu
+  - Message a friend even while they're offline: each message says whether it was sent, delivered or read, and the conversation shows when they're typing
+  - Message requests: where the server allows it, someone who isn't your friend can write to you, and what they send waits in Message Requests until you approve, reply, add them as a friend, delete or block them
+- Replies and reactions, on servers that take them, such as hxd-ng
+  - Reply to a line in the public chat, a private chat or a room, or to an instant or private message, from its menu or with R; a reply is headed by the line it answers, and the header takes you to that line, paging back through the history to find it
+  - React to a line or a message with an emoji from its menu, or tap a reaction to add yours; see who reacted, and, as a moderator, clear a line's reactions
+  - A chat line shows the speaker's whole nick, however long, on a server that sends it apart from the text
+- Private chats and messages
+  - A private chat is named for its subject, or for who is in it, rather than by a number, and an invitation says who invited you
+  - A conversation whose other party left reads as offline and sends nothing; when someone of that nick is back, Continue picks the conversation up with them
+  - An instant message the server won't take stays in the input
+- Transfers
+  - A failed transfer stays in the list, saying why, and Start tries it again from what it already has
+  - A transfer that stops making progress fails after a minute rather than hanging, and a failed one is told with a notice naming the file and the reason
+  - An upload the server refuses because it holds a larger file of that name says so, rather than vanishing
+  - A folder download from a server that doesn't count the folder's items ends once it has the folder's size, without waiting a minute more
+- Chat
+  - Tab on a nick several people share lists them once, in the chat you're typing in, rather than on every Tab and in the public chat
+  - A conversation already in front isn't marked unread when someone speaks in it
+- Accessibility
+  - Ctrl+Tab and Ctrl+Shift+Tab leave a chat input however many conversations are open, and Ctrl+PgUp and Ctrl+PgDn switch between them; F6 leaves a private chat, and Tab leaves a message input
+  - The tab strips say which tab is selected and which are unread, the pinned public chat's tab is named, and connections sharing a name are numbered
 
 ## 1.6.2
 

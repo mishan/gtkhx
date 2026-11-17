@@ -1392,7 +1392,7 @@ it left the highest out for the frame. Implemented by hxd-ng, which keeps the re
 sent and never looks a target up, so the formatted text of a line is the same with or
 without one.
 
-GtkHx offers it only in a build with hxnet's `replies` feature, which brings
+GtkHx offers it only in a build with hxnet's `replies` feature (the meson build has it), which brings
 `structured-chat` with it; without it the login is what it was. In the lobby, a line that
 answers another is drawn under a header quoting it, live and from history: from the row
 of the line it answers where the view drew it, and otherwise, for a kept line, from 700
@@ -1475,7 +1475,7 @@ as sub-fields 0x0021 and 0x0023. The Login reply says which kinds it takes (0x0F
 a server that echoes the bit without it offers none. Refusals carry the draft family's
 reason code (0x0F2A). Implemented by hxd-ng.
 
-GtkHx offers it only in a build with hxnet's `reactions` feature, which brings
+GtkHx offers it only in a build with hxnet's `reactions` feature (the meson build has it), which brings
 `structured-chat` with it; without it the login is what it was. It shows each kept
 line's chips: from its history entry, and then from what a Reaction Changed says. A
 change that arrives while the first page of history is on its way, for a line the page
