@@ -26,19 +26,20 @@ crate-type = ["staticlib", "rlib"]
 # tokio-socks tunnel + the SOCKS connect tests are gated.
 socks = ["dep:tokio-socks"]
 # Offer the messaging extension's friend family (capability bit 6) at
-# login. Off until GtkHx shows what it brings; the routing and handlers
-# beneath it are built either way.
+# login. GtkHx's meson build turns it on (gtkhx-ffi/messaging); the
+# routing and handlers beneath it are built either way.
 messaging = []
-# Offer the Structured Chat draft (capability bit 17) at login. Off: until
-# the bit is allocated the draft is for those who choose to try it, and
-# the bit makes the login's capabilities 4 bytes, which every server
-# would be sent. The handlers beneath it are built either way.
+# Offer the Structured Chat draft (capability bit 17) at login. Off by
+# default: the bit is not allocated, and it makes the login's capabilities
+# 4 bytes, which every server is sent. GtkHx's meson build turns it on
+# through reactions and replies, having checked that the rig's servers
+# take the wider field. The handlers beneath it are built either way.
 structured-chat = []
 # Offer the Reactions draft (capability bit 19) at login, which the draft
-# allows only beside bit 17. Off for the same reasons as bit 17.
+# allows only beside bit 17. Off by default, as bit 17 is.
 reactions = ["structured-chat"]
 # Offer the Replies draft (capability bit 18) at login, which the draft
-# allows only beside bit 17. Off for the same reasons as bit 17.
+# allows only beside bit 17. Off by default, as bit 17 is.
 replies = ["structured-chat"]
 
 [dependencies]

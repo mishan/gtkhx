@@ -9,9 +9,6 @@ its Login, an alias for a friend, and the message requests draft (§4
 there) by which someone who is not a friend writes first. The wire is
 hx-libs' `hxproto::messaging`; everything GtkHx adds over it is Rust.
 
-The bit is not yet offered by a default build: only a build with
-`gtkhx-ffi/messaging` asks for it.
-
 ## Negotiation
 
 The friend family is capability bit 6 (`CAP_MESSAGING`). hxnet offers it at
@@ -289,7 +286,6 @@ account that takes none answering `NotFriends`.
 
 ## Open
 
-- Turning the offer on in a default build.
 - An instant message carries text alone: a friend's conversation has no
   attachment button.
 - Of the login reply's messaging limits (`hxproto::messaging::Limits`),

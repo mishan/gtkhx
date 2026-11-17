@@ -338,6 +338,7 @@ tools/isolated-run.sh meson test -C build-novoice --no-suite integration
 cd rust
 cargo clippy --workspace --all-targets \
   --features hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice \
+  --features gtkhx-ffi/messaging,gtkhx-ffi/reactions,gtkhx-ffi/replies \
   -- -D warnings
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --target wasm32-unknown-unknown --no-default-features \
@@ -345,7 +346,7 @@ cargo build --target wasm32-unknown-unknown --no-default-features \
 ../tools/isolated-run.sh cargo test --workspace
 ../tools/isolated-run.sh cargo test -p gtkhx-ui --features voice,hx-image-decode/glycin-v3
 cargo test -p hxhandlers --features voice
-cargo test -p hxnet --features socks
+cargo test -p hxnet --features socks,messaging,reactions,replies
 cargo test -p hx-image-decode --lib --no-default-features --features glycin-v2
 ```
 

@@ -157,7 +157,7 @@ jobs:
 
               # Voice-enabled feature set — mirrors the shipping meson build.
               cargo clippy --workspace --all-targets \
-                --features "hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice" \
+                --features "hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice,gtkhx-ffi/messaging,gtkhx-ffi/reactions,gtkhx-ffi/replies" \
                 -- -D warnings
 
               # Default (voice-off) configuration.
