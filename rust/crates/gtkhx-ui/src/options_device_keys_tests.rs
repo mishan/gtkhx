@@ -132,9 +132,17 @@ pub(crate) fn check_device_keys_page() {
     // and the page waits; then it is listed again.
     let held = std::fs::File::open(root.join(".lock")).unwrap();
     held.lock().unwrap();
-    let release = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        drop(held);
+    // The lock goes when the test has looked, or after a while so that an
+    // import that blocks the main loop fails rather than hangs.
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = std::thread::spawn({
+        let released = released.clone();
+        move || {
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(10));
+            released.store(true, std::sync::atomic::Ordering::SeqCst);
+            drop(held);
+        }
     });
     let ticks = Rc::new(std::cell::Cell::new(0));
     let tick = glib::timeout_add_local(std::time::Duration::from_millis(20), {
@@ -144,17 +152,17 @@ pub(crate) fn check_device_keys_page() {
             glib::ControlFlow::Continue
         }
     });
-    let asked = std::time::Instant::now();
     import_from(&ui, alice_home.clone());
-    while asked.elapsed() < std::time::Duration::from_millis(500) {
+    while ticks.get() < 3 {
         glib::MainContext::default().iteration(true);
     }
     tick.remove();
     assert!(
-        ticks.get() >= 10,
+        !released.load(std::sync::atomic::Ordering::SeqCst),
         "the main loop stopped while the store was held"
     );
     assert!(!page.is_sensitive(), "the page waits for the change");
+    go.send(()).unwrap();
     settle(&page);
     release.join().unwrap();
     assert!(titled(&page, "alice").is_some(), "listed once imported");
