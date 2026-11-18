@@ -22,7 +22,9 @@ use hl_identity::{caps, Bundle, Card, DeviceCert, DeviceKey, Fingerprint};
 use hxproto::messaging::{MAX_DEVICE_CERT_LEN, MAX_USER_CARD_LEN};
 use zeroize::Zeroizing;
 
-use crate::files::{hex, lock, private_dir, sync_dir, temp_beside, unhex32, write_whole, TEMP};
+use crate::files::{
+    hex, lock, private_dir, sync_dir, temp_beside, unhex32, write_whole, STORE_TEMP,
+};
 use crate::proof::SKEW;
 use crate::Error;
 
@@ -175,6 +177,7 @@ impl Store {
             &self.pending_path(&pending.device),
             &seed_file(&key.seed()),
             true,
+            STORE_TEMP,
         )?;
         Ok(pending)
     }
@@ -252,12 +255,12 @@ impl Store {
                 } else {
                     fs::rename(&path, &place)?;
                 }
-            } else if name.starts_with(TEMP) {
+            } else if name.starts_with(STORE_TEMP) {
                 remove_any(&path)?;
             } else if entry.file_type()?.is_dir() {
                 for inner in fs::read_dir(&path)? {
                     let inner = inner?;
-                    if inner.file_name().to_string_lossy().starts_with(TEMP) {
+                    if inner.file_name().to_string_lossy().starts_with(STORE_TEMP) {
                         remove_any(&inner.path())?;
                     }
                 }
@@ -285,9 +288,7 @@ impl Store {
         let (c, k) = check(&key, &cert, &card)?;
         valid(&c, now)?;
         let place = self.root.join(Fingerprint::of(&c.identity).to_string());
-        // Only a whole device stands in the way: what does not read as one
-        // is replaced.
-        if let Ok(kept) = read_device(&place) {
+        if let Some(kept) = kept(&place)? {
             if kept.cert.device != key.public() {
                 return Err(Error::OtherDevice(kept.device()));
             }
@@ -297,11 +298,11 @@ impl Store {
                 });
             }
         }
-        let tmp = temp_beside(&place);
+        let tmp = temp_beside(&place, STORE_TEMP);
         private_dir(&tmp)?;
-        let written = write_whole(&tmp.join(DEVICE_KEY), &seed_file(seed), true)
-            .and_then(|()| write_whole(&tmp.join(CERT), &cert, false))
-            .and_then(|()| write_whole(&tmp.join(CARD), &card, false));
+        let written = write_whole(&tmp.join(DEVICE_KEY), &seed_file(seed), true, STORE_TEMP)
+            .and_then(|()| write_whole(&tmp.join(CERT), &cert, false, STORE_TEMP))
+            .and_then(|()| write_whole(&tmp.join(CARD), &card, false, STORE_TEMP));
         if let Err(e) = written {
             let _ = fs::remove_dir_all(&tmp);
             return Err(e.into());
@@ -326,6 +327,38 @@ impl Store {
             dir: place,
         })
     }
+}
+
+/// The whole device kept at `place`, if there is one. What does not make
+/// one, a file missing or one that does not read as what it should be, is
+/// `None`, for a put to replace. An I/O error is an error: what cannot be
+/// read now may well be a device.
+fn kept(place: &Path) -> Result<Option<Device>, Error> {
+    let file = |name: &str| match fs::read(place.join(name)) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(Error::Io(e)),
+    };
+    let seed = file(DEVICE_KEY)?.map(Zeroizing::new);
+    let (Some(seed), Some(cert_bytes), Some(card_bytes)) = (seed, file(CERT)?, file(CARD)?) else {
+        return Ok(None);
+    };
+    let Some(seed) = std::str::from_utf8(&seed)
+        .ok()
+        .and_then(|t| unhex32(t.trim()))
+    else {
+        return Ok(None);
+    };
+    let Ok((cert, card)) = check(&DeviceKey::from_seed(&seed), &cert_bytes, &card_bytes) else {
+        return Ok(None);
+    };
+    Ok(Some(Device {
+        cert,
+        card,
+        cert_bytes,
+        card_bytes,
+        dir: place.to_owned(),
+    }))
 }
 
 /// The identities' directories in `root`, by the fingerprint each is named.

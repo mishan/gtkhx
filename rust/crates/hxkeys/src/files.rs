@@ -8,9 +8,12 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use zeroize::Zeroizing;
 
-/// The prefix of everything written beside its target before it takes
-/// its place, which whoever next holds the lock may remove.
-pub(crate) const TEMP: &str = ".tmp-";
+/// The prefixes of what is written beside its target before it takes its
+/// place, one for each lock: whoever next holds a lock may remove what
+/// its own writers left, and nothing of another's, even where the two
+/// share a directory.
+pub(crate) const STORE_TEMP: &str = ".tmp-store-";
+pub(crate) const PINS_TEMP: &str = ".tmp-pins-";
 
 pub(crate) fn hex(bytes: &[u8]) -> Zeroizing<String> {
     let mut s = Zeroizing::new(String::with_capacity(bytes.len() * 2));
@@ -52,12 +55,12 @@ pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
     b.create(path)
 }
 
-/// A name beside `path`'s that no other writer is using.
-pub(crate) fn temp_beside(path: &Path) -> PathBuf {
+/// A name beside `path`'s, under `prefix`, that no other writer is using.
+pub(crate) fn temp_beside(path: &Path, prefix: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
     dir_of(path).join(format!(
-        "{TEMP}{}-{}-{}",
+        "{prefix}{}-{}-{}",
         name.unwrap_or_default(),
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
@@ -75,9 +78,15 @@ pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
 
 /// `bytes` at `path`, whole whatever happens part way: written to a
 /// temporary file beside it, synced, and renamed over it. `private`
-/// files are the owner's alone from the moment they exist.
-pub(crate) fn write_whole(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
-    let tmp = temp_beside(path);
+/// files are the owner's alone from the moment they exist. `prefix` is
+/// the writer's lock's.
+pub(crate) fn write_whole(
+    path: &Path,
+    bytes: &[u8],
+    private: bool,
+    prefix: &str,
+) -> io::Result<()> {
+    let tmp = temp_beside(path, prefix);
     let mut opts = OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]

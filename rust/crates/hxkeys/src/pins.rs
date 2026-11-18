@@ -4,8 +4,9 @@
 //! Kept in one TOML file; the decisions are hl-identity's.
 //!
 //! A host is keyed as Get Device Challenge names it, host and port
-//! ([`crate::proof::proof_host`]): a server's plain and TLS listeners are
-//! two hosts, each pinned on the challenge it signed. Every change is
+//! ([`crate::proof::proof_host`]), however it was written: a server's plain
+//! and TLS listeners are two hosts, each pinned on the challenge it
+//! signed, and a host without a port is none. Every change is
 //! made under a lock beside the file, on what the file holds then, so
 //! that two GtkHx processes sharing it lose neither's pins.
 
@@ -18,7 +19,8 @@ use hl_identity::proof::canonical_host;
 use hl_identity::ServerChallenge;
 use serde::{Deserialize, Serialize};
 
-use crate::files::{hex, lock, unhex32, write_whole};
+use crate::files::{hex, lock, unhex32, write_whole, PINS_TEMP};
+use crate::proof::host_key;
 use crate::Error;
 
 const VERSION: u32 = 1;
@@ -73,7 +75,7 @@ impl Pins {
 
     /// What is pinned for `host`, as of the last read of the file.
     pub fn pinned(&self, host: &str) -> Option<&Pin> {
-        self.hosts.get(host)
+        self.hosts.get(&host_key(host)?)
     }
 
     /// Check `challenge`, already read for `host`, against its pin, with
@@ -88,7 +90,7 @@ impl Pins {
         chain: &[B],
         now: u64,
     ) -> Result<Outcome, Error> {
-        for_host(host, challenge)?;
+        let host = &for_host(host, challenge)?;
         let trusted = || Trusted(challenge.clone());
         self.change(host, |pin| match pin {
             None => {
@@ -133,7 +135,7 @@ impl Pins {
         chain: &[B],
         warning: &Warning,
     ) -> Result<Result<Trusted, Warning>, Error> {
-        for_host(host, challenge)?;
+        let host = &for_host(host, challenge)?;
         self.change(host, |pin| {
             let mut pin = pin.cloned().unwrap_or_else(|| first(challenge, Vec::new()));
             if let Warning::Fork { sha256 } = warning {
@@ -152,9 +154,10 @@ impl Pins {
 
     /// Forget `host`, so that the next contact is a first one.
     pub fn forget(&mut self, host: &str) -> Result<(), Error> {
+        let host = host_key(host).ok_or(Error::WrongHost)?;
         let _held = lock(&self.lock_path())?;
         self.hosts = read(&self.path)?;
-        if self.hosts.remove(host).is_some() {
+        if self.hosts.remove(&host).is_some() {
             self.save()?;
         }
         Ok(())
@@ -193,14 +196,15 @@ impl Pins {
                 .collect(),
         };
         let text = toml::to_string(&file).map_err(|e| unreadable(&self.path, e))?;
-        Ok(write_whole(&self.path, text.as_bytes(), false)?)
+        Ok(write_whole(&self.path, text.as_bytes(), false, PINS_TEMP)?)
     }
 }
 
-/// `challenge` was signed for `host`.
-fn for_host(host: &str, challenge: &ServerChallenge) -> Result<(), Error> {
-    match canonical_host(host) {
-        Some(h) if h == challenge.host => Ok(()),
+/// `host`'s key, `challenge` having been signed for it.
+fn for_host(host: &str, challenge: &ServerChallenge) -> Result<String, Error> {
+    let key = host_key(host).ok_or(Error::WrongHost)?;
+    match canonical_host(&key) {
+        Some(h) if h == challenge.host => Ok(key),
         _ => Err(Error::WrongHost),
     }
 }
@@ -215,7 +219,10 @@ fn read(path: &Path) -> Result<BTreeMap<String, Pin>, Error> {
     let mut hosts = BTreeMap::new();
     for h in file.host {
         let pin = h.pin().ok_or_else(|| unreadable(path, &h.host))?;
-        hosts.insert(h.host, pin);
+        let key = host_key(&h.host).ok_or_else(|| unreadable(path, &h.host))?;
+        if hosts.insert(key, pin).is_some() {
+            return Err(unreadable(path, format!("{} twice", h.host)));
+        }
     }
     Ok(hosts)
 }

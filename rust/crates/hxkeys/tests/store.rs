@@ -392,11 +392,11 @@ fn what_a_crash_leaves_is_finished_by_the_next_change() {
     // A device set aside for its replacement, with the replacement never
     // renamed in, a directory being written and a file half written.
     std::fs::rename(root.join(&fp), root.join(format!(".old-{fp}"))).unwrap();
-    std::fs::create_dir(root.join(".tmp-half-1-0")).unwrap();
+    std::fs::create_dir(root.join(".tmp-store-half-1-0")).unwrap();
     // A pending seed long abandoned, one that does not read, and a seed
     // half written.
     let stale = store.begin_device().unwrap();
-    std::fs::write(root.join("pending").join(".tmp-device.key-1-0"), b"x").unwrap();
+    std::fs::write(root.join("pending").join(".tmp-store-device.key-1-0"), b"x").unwrap();
     let stale_path = root.join("pending").join(format!("{}.key", stale.device));
     let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86_400);
     std::fs::File::options()
@@ -425,10 +425,13 @@ fn what_a_crash_leaves_is_finished_by_the_next_change() {
     assert!(
         names
             .iter()
-            .all(|n| !n.starts_with(".tmp-") && !n.starts_with(".old-")),
+            .all(|n| !n.starts_with(".tmp-store-") && !n.starts_with(".old-")),
         "{names:?}"
     );
-    assert!(!root.join("pending").join(".tmp-device.key-1-0").exists());
+    assert!(!root
+        .join("pending")
+        .join(".tmp-store-device.key-1-0")
+        .exists());
     assert_eq!(store.pending().unwrap(), [fresh], "the stale seed gone");
 }
 
@@ -488,4 +491,60 @@ fn imports_from_two_threads_keep_one_whole_device() {
     );
     let store = Store::new(&root);
     assert!(store.get(&id.fingerprint()).unwrap().key().is_ok());
+}
+
+#[test]
+fn what_another_writer_has_under_way_beside_the_store_is_left_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("device-keys");
+    let store = Store::new(&root);
+    // The pins kept in the same directory, part way through a write of
+    // their own, as another lock orders them.
+    std::fs::create_dir_all(&root).unwrap();
+    let theirs = root.join(".tmp-pins-server-keys.toml-1-0");
+    std::fs::write(&theirs, b"half a pin file").unwrap();
+    store.begin_device().unwrap();
+    assert!(theirs.is_file());
+}
+
+#[test]
+fn a_kept_device_that_cannot_be_read_now_is_not_replaced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Store::new(tmp.path().join("device-keys"));
+    let (id, dev) = person(1);
+    let home = hlid_home(
+        tmp.path(),
+        &id,
+        &dev,
+        cert_for(&id, &dev, |_| {}),
+        card_for(&id, "alice"),
+    );
+    store.import_hlid(&home, NOW).unwrap();
+    // Its key, for now, something that reads as an I/O error rather than
+    // as a key that is not one.
+    let entry = tmp
+        .path()
+        .join("device-keys")
+        .join(id.fingerprint().to_string());
+    let key = entry.join("device.key");
+    let saved = std::fs::read(&key).unwrap();
+    std::fs::remove_file(&key).unwrap();
+    std::fs::create_dir(&key).unwrap();
+
+    let other = DeviceKey::from_seed(&[42; 32]);
+    let home = hlid_home(
+        &tmp.path().join("other"),
+        &id,
+        &other,
+        cert_for(&id, &other, |_| {}),
+        card_for(&id, "alice"),
+    );
+    assert!(matches!(store.import_hlid(&home, NOW), Err(Error::Io(_))));
+    std::fs::remove_dir(&key).unwrap();
+    std::fs::write(&key, saved).unwrap();
+    assert_eq!(
+        store.get(&id.fingerprint()).unwrap().device(),
+        dev.fingerprint(),
+        "kept"
+    );
 }

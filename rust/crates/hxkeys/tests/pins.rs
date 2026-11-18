@@ -341,3 +341,67 @@ fn two_processes_sharing_the_file_keep_each_others_pins() {
     let left = Pins::load(&path).unwrap();
     assert!(left.pinned(host).is_none() && left.pinned(other).is_some());
 }
+
+#[test]
+fn a_host_is_one_however_it_is_written_and_each_port_its_own() {
+    let v = vectors("server-handover-vectors.json");
+    let now = v["now"].as_u64().unwrap();
+    let c1 = ServerChallenge::parse(&signed(&v, "challenges", "c1")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("server-keys.toml");
+    let none: &[Vec<u8>] = &[];
+    let mut pins = Pins::load(&path).unwrap();
+    assert!(matches!(
+        pins.check("HL.Example:5700", &c1, none, now).unwrap(),
+        Outcome::Pinned(_)
+    ));
+    assert!(pins.pinned("hl.example:5700").is_some());
+    assert!(matches!(
+        pins.check("hl.example:5700", &c1, none, now).unwrap(),
+        Outcome::Kept(_)
+    ));
+    // A file written by hand in another case reads as the same host.
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("hl.example:5700", "HL.EXAMPLE:5700")).unwrap();
+    let mut pins = Pins::load(&path).unwrap();
+    assert!(pins.pinned("Hl.Example:5700").is_some());
+    pins.forget("HL.example:5700").unwrap();
+    assert!(Pins::load(&path)
+        .unwrap()
+        .pinned("hl.example:5700")
+        .is_none());
+
+    // 80 and 443 are named, and are two hosts; a host without a port, or
+    // that is not one, is none.
+    // Each challenge names the host as signed, its port left off.
+    let c80 = ServerChallenge {
+        host: "hl.example".into(),
+        ..c1.clone()
+    };
+    let c443 = ServerChallenge {
+        server_key: unhex32(str_of(&v["keys"]["k2"], "public_hex")),
+        ..c80.clone()
+    };
+    assert!(matches!(
+        pins.check("hl.example:80", &c80, none, now).unwrap(),
+        Outcome::Pinned(_)
+    ));
+    assert!(matches!(
+        pins.check("hl.example:443", &c443, none, now).unwrap(),
+        Outcome::Pinned(_)
+    ));
+    let pins = Pins::load(&path).unwrap();
+    assert_eq!(pins.pinned("hl.example:80").unwrap().key, c1.server_key);
+    assert_eq!(pins.pinned("hl.example:443").unwrap().key, c443.server_key);
+    let mut pins = pins;
+    for bad in ["hl.example", "hl.example:x", "hl/example:5700"] {
+        assert!(
+            matches!(
+                pins.check(bad, &c1, none, now),
+                Err(hxkeys::Error::WrongHost)
+            ),
+            "{bad}"
+        );
+        assert!(pins.pinned(bad).is_none(), "{bad}");
+    }
+}

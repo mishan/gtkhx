@@ -1,5 +1,10 @@
 //! hl-identity's vectors, read from the checkout of the revision this
 //! workspace pins, so that they are always the pinned one's.
+//!
+//! The checkout is found with `cargo metadata`, offline, which resolves
+//! the whole lockfile, every platform's packages included, where a build
+//! downloads only its own platform's: after `cargo fetch` it needs no
+//! network.
 
 #![allow(dead_code)]
 
@@ -21,7 +26,8 @@ fn hl_identity_dir() -> PathBuf {
         .expect("cargo metadata runs");
     assert!(
         out.status.success(),
-        "{}",
+        "cargo metadata, offline, needs the lockfile's packages for every \
+         platform: run `cargo fetch` once with network\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     let meta: Json = serde_json::from_slice(&out.stdout).unwrap();

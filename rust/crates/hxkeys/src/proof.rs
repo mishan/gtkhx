@@ -30,6 +30,25 @@ pub fn proof_host(host: &str, port: u16) -> Option<String> {
     })
 }
 
+/// `host:port`, as typed or as kept, in [`proof_host`]'s form: what a pin
+/// is kept under. `None` without a port, or for something not a host.
+pub(crate) fn host_key(authority: &str) -> Option<String> {
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(rest) => {
+            let (host, port) = rest.split_once("]:")?;
+            (host, port)
+        }
+        None => {
+            let (host, port) = authority.rsplit_once(':')?;
+            if host.contains(':') {
+                return None;
+            }
+            (host, port)
+        }
+    };
+    proof_host(host, port.parse().ok()?)
+}
+
 /// The challenge a Get Device Challenge for `sent` was answered with, as
 /// a client may sign for it: under the TRTP domain, signed by the key it
 /// names, for that host, and not expired at `now`. Which key that should
