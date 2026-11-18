@@ -28,8 +28,13 @@ hxhope = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time"] }
 # The hotline-ng wire's JSON (`ng`).
 serde_json = "1"
+# How a login's device proof ended.
+hxkeys = { path = "../hxkeys" }
 
 [dev-dependencies]
+# The suite's identities and their devices, in a directory of their own.
+hl-identity = { workspace = true }
+tempfile = "3"
 # What the view makes of a chat line, and how a line goes out to a server
 # that agreed to no text encoding.
 gtkhx-core = { path = "../gtkhx-core" }

@@ -45,6 +45,10 @@ pub enum Cap {
     /// Reactions to lines and messages (the Reactions draft's capability
     /// bit 19), for the rig's `react-*` accounts.
     Reactions,
+    /// Proves a device on the classic wire (capability bit 14) for the
+    /// rig's `device-*` accounts, linked to the device proof suite's
+    /// identities, on its plain and TLS ports.
+    DeviceProof,
     /// Lets the guest download the rig's seed `test.txt` from the root.
     SeedFile,
     /// Lets the guest download the rig's seed `test_folder`, holding
@@ -144,6 +148,7 @@ pub const SERVERS: &[Server] = &[
             Cap::StructuredChat,
             Cap::Replies,
             Cap::Reactions,
+            Cap::DeviceProof,
             Cap::SeedFile,
             Cap::SeedFolder,
         ],

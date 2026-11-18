@@ -38,6 +38,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Notify};
 use tokio::time::Instant;
 
+use crate::device::{Heard, Prover};
 use crate::proto_trace::{trace, Dir};
 use crate::{Command, ConnectionState, Event, Frame, ShutdownReason};
 
@@ -92,14 +93,21 @@ struct Shared {
     /// Wakes the write side: there is something to write.
     to_write: Notify,
     /// Wakes the delivery side: the session has something to say.
-    to_deliver: Notify,
+    to_deliver: Arc<Notify>,
     /// Held while popping events and handing them on, so they reach the
     /// consumer in the session's order whichever side hands them on.
     delivering: tokio::sync::Mutex<()>,
     /// The trans of each request the consumer sent whose reply is Rust's,
     /// and has not had answered.
     rust_asked: Mutex<HashSet<u32>>,
+    /// The connect's device proof, where it has a device to prove.
+    prover: Mutex<Option<Prover>>,
+    /// The challenge's answer, worked out off the actor, waiting to be
+    /// delivered.
+    worked: Arc<Mutex<Option<Worked>>>,
 }
+
+type Worked = Result<Vec<u8>, hxkeys::Proof>;
 
 /// The messaging extension's transactions, both ways.
 fn is_messaging(opcode: u32) -> bool {
@@ -142,6 +150,30 @@ impl Shared {
         self.start.elapsed().as_millis() as u64
     }
 
+    /// `e`, as the connect's proof hears it, where there is one.
+    fn hear(&self, e: hxsession::Event) -> Heard {
+        let mut prover = self.prover.lock().expect("never held across a panic");
+        match prover.as_mut() {
+            Some(p) => p.heard(&mut self.session(), e, unix_now()),
+            None => Heard::Pass(e),
+        }
+    }
+
+    /// The challenge answered off the session, or how the proof ended
+    /// there.
+    fn answered(&self, a: Worked) -> Option<hxkeys::Proof> {
+        let mut prover = self.prover.lock().expect("never held across a panic");
+        prover
+            .as_mut()?
+            .answered(&mut self.session(), a, self.now())
+    }
+
+    /// The login was answered: the proof's first step, where there is one.
+    fn logged_in(&self) -> Option<hxkeys::Proof> {
+        let mut prover = self.prover.lock().expect("never held across a panic");
+        prover.as_mut()?.logged_in(&mut self.session(), unix_now())
+    }
+
     /// Move what the session has queued to the write side; whether there
     /// was anything.
     fn queue_out(&self) -> bool {
@@ -166,6 +198,7 @@ impl Shared {
 pub async fn run<S>(
     stream: S,
     session: SharedSession,
+    prover: Option<Prover>,
     mut cmd_rx: mpsc::Receiver<Command>,
     evt_tx: mpsc::Sender<Event>,
 ) where
@@ -177,9 +210,11 @@ pub async fn run<S>(
         out: Mutex::new(Vec::new()),
         login_sent: Mutex::new(false),
         to_write: Notify::new(),
-        to_deliver: Notify::new(),
+        to_deliver: Arc::new(Notify::new()),
+        worked: Arc::new(Mutex::new(None)),
         delivering: tokio::sync::Mutex::new(()),
         rust_asked: Mutex::new(HashSet::new()),
+        prover: Mutex::new(prover),
     };
     shared.queue_out();
 
@@ -364,7 +399,45 @@ async fn deliver_side(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Shutdown
 async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<ShutdownReason> {
     let _turn = shared.delivering.lock().await;
     loop {
+        let worked = shared
+            .worked
+            .lock()
+            .expect("never held across a panic")
+            .take();
+        if let Some(a) = worked {
+            let ended = shared.answered(a);
+            shared.queue_out();
+            if let Some(p) = ended {
+                if evt_tx.send(Event::DeviceProof(p)).await.is_err() {
+                    return Some(ShutdownReason::HandleDropped);
+                }
+            }
+        }
         let event = shared.session().poll_event()?;
+        let event = match shared.hear(event) {
+            Heard::Pass(e) => e,
+            Heard::Challenge(c) => {
+                // Off the session, the runtime and the delivery: it reads
+                // and writes files, under a lock another GtkHx may hold. Its
+                // answer is delivered when it comes, in its turn.
+                let (worked, wake) = (shared.worked.clone(), shared.to_deliver.clone());
+                tokio::task::spawn_blocking(move || {
+                    let a = c.answer();
+                    *worked.lock().expect("never held across a panic") = Some(a);
+                    wake.notify_one();
+                });
+                continue;
+            }
+            Heard::Taken(ended) => {
+                shared.queue_out();
+                if let Some(p) = ended {
+                    if evt_tx.send(Event::DeviceProof(p)).await.is_err() {
+                        return Some(ShutdownReason::HandleDropped);
+                    }
+                }
+                continue;
+            }
+        };
         let out = match event {
             hxsession::Event::Reply { trans, frame }
                 if shared
@@ -411,7 +484,17 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
                 if evt_tx.send(said).await.is_err() {
                     return Some(ShutdownReason::HandleDropped);
                 }
-                Event::State(ConnectionState::HandshakeDone)
+                let done = Event::State(ConnectionState::HandshakeDone);
+                if evt_tx.send(done).await.is_err() {
+                    return Some(ShutdownReason::HandleDropped);
+                }
+                // A server that proves devices holds the join for it.
+                let ended = shared.logged_in();
+                shared.queue_out();
+                match ended {
+                    Some(p) => Event::DeviceProof(p),
+                    None => continue,
+                }
             }
             hxsession::Event::Ready => Event::State(ConnectionState::LoginReady),
             // A refusal's reason is the consumer's to show; the shutdown
@@ -431,6 +514,14 @@ async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<Shutdo
             return Some(ShutdownReason::HandleDropped);
         }
     }
+}
+
+/// The wall clock, in Unix seconds, which the proof and the server's
+/// challenge are timed by.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 fn closed(why: Closed) -> ShutdownReason {
@@ -584,7 +675,7 @@ mod tests {
             handled,
         );
         let session = Arc::new(Mutex::new(Session::new(cfg, 0)));
-        tokio::spawn(run(near, session.clone(), cmd_rx, evt_tx));
+        tokio::spawn(run(near, session.clone(), None, cmd_rx, evt_tx));
         (
             Server {
                 io: far,
@@ -923,6 +1014,471 @@ mod tests {
             server.send(sent).await;
             drop(server);
             assert_eq!(format!("{:?}", ending(&mut client).await), want);
+        }
+    }
+
+    /// A device proved in the login dance, against a scripted server: the
+    /// challenge, its key checked against the pin, the proof, and the agree
+    /// held until it is settled.
+    mod device {
+        use super::*;
+        use crate::device::{prover, Armed};
+        use hl_identity::{DeviceProof, ServerChallenge, ServerKey};
+        use hxproto::messages::tag;
+        use hxproto::messaging::CAP_DEVICE_PROOF;
+
+        const HOST: &str = "hl.example";
+        const PORT: u16 = 5500;
+        const ASKED: &str = "hl.example:5500";
+        const CHALLENGE: u32 = 1020;
+        const PROVE: u32 = 1021;
+        const TEXT: u64 = hxsession::cap::TEXT_ENCODING;
+
+        fn unix() -> u64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        }
+
+        fn armed(dir: &std::path::Path) -> Armed {
+            crate::device::armed_in(dir)
+        }
+
+        fn start_proving(armed: Armed, host: &str) -> (Server, Client) {
+            let (near, far) = duplex(64 * 1024);
+            let (cmd_tx, cmd_rx) = mpsc::channel(8);
+            let (evt_tx, evt_rx) = mpsc::channel(8);
+            let caps = crate::device::offered(TEXT, Some(&armed));
+            let cfg = config(
+                b"alice",
+                b"pw",
+                b"me",
+                414,
+                hxsession::CLIENT_VERSION,
+                caps,
+                hxsession::Handled::LOGIN,
+            );
+            let session = Arc::new(Mutex::new(Session::new(cfg, 0)));
+            let p = prover(Some(armed), host, PORT);
+            tokio::spawn(run(near, session.clone(), p, cmd_rx, evt_tx));
+            (
+                Server {
+                    io: far,
+                    reader: hxsession::frame::FrameReader::new(),
+                },
+                Client {
+                    cmd: cmd_tx,
+                    session,
+                    events: evt_rx,
+                },
+            )
+        }
+
+        impl Server {
+            /// The next transaction the client sends, whole.
+            async fn next_whole(&mut self) -> hxsession::frame::Transaction {
+                let mut buf = [0u8; 4096];
+                loop {
+                    if let Some(t) = self.reader.next_transaction().unwrap() {
+                        return t;
+                    }
+                    let n = tokio::time::timeout(Duration::from_secs(15), self.io.read(&mut buf))
+                        .await
+                        .expect("the client sent nothing")
+                        .unwrap();
+                    assert!(n > 0, "the client hung up");
+                    self.reader.push(&buf[..n]);
+                }
+            }
+
+            /// Answer the login agreeing to `caps`, with an empty agreement
+            /// after it, as hxd-ng does: the login's caps, as it offered them.
+            async fn log_in(&mut self, caps: u64) -> u64 {
+                self.accept().await;
+                let login = self.next_whole().await;
+                let offered = field(&login, tag::CAPABILITIES)
+                    .map(|c| hxproto::parse::capabilities_decode(&c))
+                    .unwrap_or(0);
+                let mut buf = [0u8; 8];
+                let c = hxproto::build::capabilities_encode(caps, &mut buf);
+                let v = 190u16.to_be_bytes();
+                self.send(&server_says(
+                    TASK,
+                    1,
+                    &[(0x00a0, &v), (tag::CAPABILITIES, c)],
+                ))
+                .await;
+                self.send(&server_says(AGREEMENT, 0, &[(tag::NOAGREEMENT, &[1])]))
+                    .await;
+                offered
+            }
+        }
+
+        fn field(t: &hxsession::frame::Transaction, want: u16) -> Option<Vec<u8>> {
+            hxproto::wire::ChunkIter::over_message(&t.buf, t.buf.len())
+                .find(|c| c.tag == want)
+                .map(|c| c.data.to_vec())
+        }
+
+        fn challenge(key: &ServerKey, host: &str) -> Vec<u8> {
+            ServerChallenge::sign_trtp(key, &[7; 32], host, unix() + 60, None).unwrap()
+        }
+
+        impl Client {
+            /// Events until a device proof's, which is returned; the agree
+            /// must not have gone out before it, which the caller checks.
+            async fn proof(&mut self) -> hxkeys::Proof {
+                loop {
+                    // Longer than the session holds a proof for.
+                    let next = tokio::time::timeout(Duration::from_secs(30), self.events.recv());
+                    match next.await.expect("no event").expect("the actor is gone") {
+                        Event::DeviceProof(p) => return p,
+                        Event::Shutdown(r) => panic!("shut down: {r:?}"),
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn a_device_is_proved_before_the_agree_and_its_key_pinned() {
+            let dir = tempfile::tempdir().unwrap();
+            let a = armed(dir.path());
+            let device = a.device.clone();
+            let (mut server, mut client) = start_proving(a, HOST);
+            let offered = server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+            assert_ne!(offered & CAP_DEVICE_PROOF, 0, "bit 14 offered");
+
+            let ask = server.next_whole().await;
+            assert_eq!(ask.type_, CHALLENGE, "before the agree");
+            assert_eq!(
+                field(&ask, tag::PROOF_HOST).as_deref(),
+                Some(ASKED.as_bytes())
+            );
+            let key = ServerKey::from_seed(&[9; 32]);
+            let c = challenge(&key, ASKED);
+            server
+                .send(&server_says(
+                    TASK,
+                    ask.trans,
+                    &[(tag::SERVER_CHALLENGE, &c)],
+                ))
+                .await;
+
+            let prove = server.next_whole().await;
+            assert_eq!(prove.type_, PROVE, "still before the agree");
+            assert_eq!(
+                field(&prove, tag::DEVICE_CERT).as_deref(),
+                Some(device.cert_bytes())
+            );
+            assert_eq!(
+                field(&prove, tag::USER_CARD).as_deref(),
+                Some(device.card_bytes())
+            );
+            let p = DeviceProof::parse(&field(&prove, tag::DEVICE_PROOF).unwrap()).unwrap();
+            p.check(&[7; 32], &key.public(), ASKED, None, unix(), 300)
+                .unwrap();
+            server.send(&server_says(TASK, prove.trans, &[])).await;
+
+            assert_eq!(
+                client.proof().await,
+                hxkeys::Proof::Proved {
+                    identity: device.identity(),
+                    device: device.device(),
+                    name: "alice".into(),
+                }
+            );
+            assert_eq!(server.next_whole().await.type_, AGREE, "then the agree");
+            let pins = hxkeys::Pins::load(dir.path().join("server-keys.toml")).unwrap();
+            assert_eq!(pins.pinned(ASKED).unwrap().key, key.public());
+        }
+
+        /// What the server says, and how the proof ends: nothing more is
+        /// asked, and the agree follows.
+        #[tokio::test]
+        async fn a_proof_that_ends_short_lets_the_session_join() {
+            #[derive(Debug, Clone, Copy)]
+            enum Case {
+                NoChallenge,
+                Refused,
+                ForAnotherHost,
+                KeyChanged,
+            }
+            for case in [
+                Case::NoChallenge,
+                Case::Refused,
+                Case::ForAnotherHost,
+                Case::KeyChanged,
+            ] {
+                let dir = tempfile::tempdir().unwrap();
+                let a = armed(dir.path());
+                let pinned = ServerKey::from_seed(&[8; 32]);
+                if let Case::KeyChanged = case {
+                    let c = ServerChallenge::parse_trtp(&challenge(&pinned, ASKED)).unwrap();
+                    hxkeys::Pins::load(&a.pins)
+                        .unwrap()
+                        .check(ASKED, &c, &[] as &[Vec<u8>], unix())
+                        .unwrap();
+                }
+                let (mut server, mut client) = start_proving(a, HOST);
+                server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+                let ask = server.next_whole().await;
+                assert_eq!(ask.type_, CHALLENGE, "{case:?}");
+                let key = ServerKey::from_seed(&[9; 32]);
+                let refusal = |trans, text: &[u8]| {
+                    let mut r = server_says(TASK, trans, &[(0x0064, text)]);
+                    r[8..12].copy_from_slice(&1u32.to_be_bytes());
+                    r
+                };
+                match case {
+                    Case::NoChallenge => {
+                        server
+                            .send(&refusal(ask.trans, b"no challenge for that address"))
+                            .await
+                    }
+                    Case::ForAnotherHost => {
+                        let c = challenge(&key, "other.example:5500");
+                        server
+                            .send(&server_says(
+                                TASK,
+                                ask.trans,
+                                &[(tag::SERVER_CHALLENGE, &c)],
+                            ))
+                            .await
+                    }
+                    Case::KeyChanged | Case::Refused => {
+                        let c = challenge(&key, ASKED);
+                        server
+                            .send(&server_says(
+                                TASK,
+                                ask.trans,
+                                &[(tag::SERVER_CHALLENGE, &c)],
+                            ))
+                            .await
+                    }
+                }
+                if let Case::Refused = case {
+                    let prove = server.next_whole().await;
+                    assert_eq!(prove.type_, PROVE);
+                    server
+                        .send(&refusal(prove.trans, b"The device could not be proved."))
+                        .await;
+                }
+                let p = client.proof().await;
+                let ok = match case {
+                    Case::NoChallenge => {
+                        p == hxkeys::Proof::Refused {
+                            reason: Some("no challenge for that address".into()),
+                        }
+                    }
+                    Case::Refused => {
+                        p == hxkeys::Proof::Refused {
+                            reason: Some("The device could not be proved.".into()),
+                        }
+                    }
+                    Case::ForAnotherHost => matches!(p, hxkeys::Proof::NotProved { .. }),
+                    Case::KeyChanged => {
+                        matches!(&p, hxkeys::Proof::KeyChanged { host, .. } if host == ASKED)
+                    }
+                };
+                assert!(ok, "{case:?}: {p:?}");
+                assert_eq!(
+                    server.next_whole().await.type_,
+                    AGREE,
+                    "{case:?}: nothing signed"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn a_host_that_cannot_be_asked_for_asks_nothing() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut server, mut client) = start_proving(armed(dir.path()), "not a host/");
+            server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+            assert!(matches!(
+                client.proof().await,
+                hxkeys::Proof::NotProved { .. }
+            ));
+            assert_eq!(server.next_whole().await.type_, AGREE);
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_server_that_never_answers_is_given_up_on() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut server, mut client) = start_proving(armed(dir.path()), HOST);
+            server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+            assert_eq!(server.next_whole().await.type_, CHALLENGE);
+            assert_eq!(client.proof().await, hxkeys::Proof::TimedOut);
+            assert_eq!(server.next_whole().await.type_, AGREE);
+        }
+
+        impl Server {
+            /// Whether the client sends anything before `wait` is out.
+            async fn quiet_for(&mut self, wait: Duration) -> bool {
+                let mut buf = [0u8; 4096];
+                if self.reader.next_transaction().unwrap().is_some() {
+                    return false;
+                }
+                tokio::time::timeout(wait, self.io.read(&mut buf))
+                    .await
+                    .is_err()
+            }
+        }
+
+        /// The challenge answered once the session has given up on the
+        /// proof: nothing is signed, and one ending is told.
+        #[tokio::test(start_paused = true)]
+        async fn a_challenge_answered_too_late_is_not_answered() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut server, mut client) = start_proving(armed(dir.path()), HOST);
+            server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+            let ask = server.next_whole().await;
+            assert_eq!(ask.type_, CHALLENGE);
+            assert_eq!(client.proof().await, hxkeys::Proof::TimedOut);
+            assert_eq!(server.next_whole().await.type_, AGREE);
+            let key = ServerKey::from_seed(&[9; 32]);
+            let c = challenge(&key, ASKED);
+            server
+                .send(&server_says(
+                    TASK,
+                    ask.trans,
+                    &[(tag::SERVER_CHALLENGE, &c)],
+                ))
+                .await;
+            server
+                .send(&server_says(0x6a, 0, &[(0x0065, b"after")]))
+                .await;
+            loop {
+                match client.next().await {
+                    Event::DeviceProof(p) => panic!("told again: {p:?}"),
+                    Event::Frame(f) if f.header.type_ == 0x6a => break,
+                    _ => {}
+                }
+            }
+            assert!(
+                server.quiet_for(Duration::from_secs(5)).await,
+                "no proof sent"
+            );
+        }
+
+        /// A challenge checked while another GtkHx holds the pins' lock
+        /// holds up neither the main thread's use of the session nor the
+        /// session's own end of the wait; the answer, once it can be made,
+        /// is not sent.
+        // Real time on two threads: the check blocks one, as it would the
+        // runtime's, and the session's wait is the session's own.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn pins_locked_elsewhere_hold_up_neither_the_session_nor_its_wait() {
+            let dir = tempfile::tempdir().unwrap();
+            let held = std::fs::File::create(dir.path().join("server-keys.toml.lock")).unwrap();
+            held.lock().unwrap();
+            let (mut server, mut client) = start_proving(armed(dir.path()), HOST);
+            server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+            let ask = server.next_whole().await;
+            let key = ServerKey::from_seed(&[9; 32]);
+            let c = challenge(&key, ASKED);
+            server
+                .send(&server_says(
+                    TASK,
+                    ask.trans,
+                    &[(tag::SERVER_CHALLENGE, &c)],
+                ))
+                .await;
+            // The main thread numbers a request while the check waits.
+            let session = client.session.clone();
+            let numbered = std::thread::spawn(move || session.lock().unwrap().take_trans());
+            let started = std::time::Instant::now();
+            while !numbered.is_finished() {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "the session is held"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(
+                server.next_whole().await.type_,
+                AGREE,
+                "the wait still ends"
+            );
+            // Nor what reaches the consumer meanwhile.
+            assert_eq!(client.proof().await, hxkeys::Proof::TimedOut);
+            server
+                .send(&server_says(0x6a, 0, &[(0x0065, b"meanwhile")]))
+                .await;
+            let (mut ready, mut line) = (false, false);
+            while !(ready && line) {
+                match client.next().await {
+                    Event::State(ConnectionState::LoginReady) => ready = true,
+                    Event::Frame(f) if f.header.type_ == 0x6a => line = true,
+                    Event::DeviceProof(p) => panic!("told again: {p:?}"),
+                    _ => {}
+                }
+            }
+            held.unlock().unwrap();
+            assert!(
+                server.quiet_for(Duration::from_secs(2)).await,
+                "no proof sent"
+            );
+            server
+                .send(&server_says(0x6a, 0, &[(0x0065, b"after")]))
+                .await;
+            loop {
+                match client.next().await {
+                    Event::DeviceProof(p) => panic!("told again: {p:?}"),
+                    Event::Frame(f) if f.header.type_ == 0x6a => break,
+                    _ => {}
+                }
+            }
+        }
+
+        /// The proof answered once the session has given up on it is not
+        /// told again.
+        #[tokio::test(start_paused = true)]
+        async fn a_proof_answered_too_late_is_not_told() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut server, mut client) = start_proving(armed(dir.path()), HOST);
+            server.log_in(TEXT | CAP_DEVICE_PROOF).await;
+            let ask = server.next_whole().await;
+            let key = ServerKey::from_seed(&[9; 32]);
+            let c = challenge(&key, ASKED);
+            server
+                .send(&server_says(
+                    TASK,
+                    ask.trans,
+                    &[(tag::SERVER_CHALLENGE, &c)],
+                ))
+                .await;
+            let prove = server.next_whole().await;
+            assert_eq!(prove.type_, PROVE);
+            assert_eq!(client.proof().await, hxkeys::Proof::TimedOut);
+            assert_eq!(server.next_whole().await.type_, AGREE);
+            server.send(&server_says(TASK, prove.trans, &[])).await;
+            server
+                .send(&server_says(0x6a, 0, &[(0x0065, b"after")]))
+                .await;
+            loop {
+                match client.next().await {
+                    Event::DeviceProof(p) => panic!("told again: {p:?}"),
+                    Event::Frame(f) if f.header.type_ == 0x6a => break,
+                    _ => {}
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn a_server_that_proves_no_device_is_logged_in_to_as_ever() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut server, mut client) = start_proving(armed(dir.path()), HOST);
+            server.log_in(TEXT).await;
+            assert_eq!(server.next_whole().await.type_, AGREE, "no challenge asked");
+            loop {
+                match client.next().await {
+                    Event::State(ConnectionState::LoginReady) => break,
+                    Event::DeviceProof(p) => panic!("no proof to end: {p:?}"),
+                    _ => {}
+                }
+            }
         }
     }
 }

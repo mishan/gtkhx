@@ -48,6 +48,8 @@ hxproto = { workspace = true }
 # (Zstandard among the compressions it offers); and the AEAD primitives and
 # HOPE's transfer keys, for HTXF.
 hxsession = { workspace = true, features = ["hope", "zstd"] }
+# The device a login proves, and the server keys pinned at first contact.
+hxkeys = { path = "../hxkeys" }
 hxhope.workspace = true
 hxcrypto.workspace = true
 # S0 (xfer_handle module): the struct htxf_conn storage mirror needs libc for the
@@ -126,6 +128,10 @@ tokio-socks = { version = "0.5", default-features = false, features = ["tokio"],
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
 
 [dev-dependencies]
+# A device certified and a server challenge signed, for the device proof's
+# tests, in a directory of their own.
+hl-identity = { workspace = true }
+tempfile = "3"
 # `#[tokio::test]` + `tokio::io::duplex` for in-memory paired
 # AsyncRead/AsyncWrite, and `test-util` for advanced control over
 # the runtime. With `rt-multi-thread` already enabled via the main

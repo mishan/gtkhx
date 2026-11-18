@@ -46,6 +46,7 @@ pub mod banner_http;
 pub mod command;
 pub mod connect;
 pub mod connection;
+pub mod device;
 pub mod event;
 pub mod ffi;
 pub mod frame;

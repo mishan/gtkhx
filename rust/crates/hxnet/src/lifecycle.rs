@@ -43,6 +43,9 @@ pub struct PlaintextOpenRequest {
     /// connects direct. Sourced in C from `GProxyResolver` and parsed by
     /// the FFI; see `connect::ProxyConfig`.
     pub proxy: Option<crate::connect::ProxyConfig>,
+    /// A device to prove between the login reply and the agree, which
+    /// offers capability bit 14; `None` proves nothing.
+    pub device: Option<crate::device::Armed>,
 }
 
 impl PlaintextOpenRequest {
@@ -56,7 +59,7 @@ impl PlaintextOpenRequest {
             &self.name,
             self.icon,
             self.version,
-            self.caps,
+            crate::device::offered(self.caps, self.device.as_ref()),
             handled,
         );
         SharedSession::new(Session::new(cfg, 0).into())
@@ -78,11 +81,13 @@ pub async fn run_plaintext_lifecycle(
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
+    let prover = crate::device::prover(req.device.clone(), &req.host, req.port);
     run_tcp(
         &req.host,
         req.port,
         req.proxy.as_ref(),
         session,
+        prover,
         cmd_rx,
         evt_tx,
     )
@@ -95,6 +100,7 @@ async fn run_tcp(
     port: u16,
     proxy: Option<&crate::connect::ProxyConfig>,
     session: SharedSession,
+    prover: Option<crate::device::Prover>,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
@@ -122,7 +128,7 @@ async fn run_tcp(
         return;
     }
 
-    run_plaintext_over(stream, session, cmd_rx, evt_tx).await;
+    run_plaintext_over(stream, session, prover, cmd_rx, evt_tx).await;
 }
 
 /// Like [`run_plaintext_lifecycle`] but wraps the connected socket in
@@ -222,7 +228,11 @@ pub async fn run_plaintext_tls_lifecycle(
     if let Some(n) = crate::tls::negotiated(&tls) {
         let _ = negotiated.set(n);
     }
-    run_plaintext_over(tls, session, cmd_rx, evt_tx).await;
+    let mut prover = crate::device::prover(req.device.clone(), &req.host, req.port);
+    if let (Some(p), Some(exporter)) = (prover.as_mut(), crate::tls::device_exporter(&tls)) {
+        p.bind(exporter);
+    }
+    run_plaintext_over(tls, session, prover, cmd_rx, evt_tx).await;
 }
 
 /// The post-connect plaintext lifecycle, generic over the transport
@@ -231,6 +241,7 @@ pub async fn run_plaintext_tls_lifecycle(
 async fn run_plaintext_over<S>(
     stream: S,
     session: SharedSession,
+    prover: Option<crate::device::Prover>,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) where
@@ -243,7 +254,7 @@ async fn run_plaintext_over<S>(
     {
         return;
     }
-    crate::session::run(stream, session, cmd_rx, evt_tx).await;
+    crate::session::run(stream, session, prover, cmd_rx, evt_tx).await;
 }
 
 /// Parameters for the HOPE-Secure-Login lifecycle: the plaintext
@@ -268,6 +279,8 @@ pub struct HopeOpenRequest {
     /// Optional SOCKS proxy to tunnel through; `None` connects direct.
     /// See [`PlaintextOpenRequest::proxy`].
     pub proxy: Option<crate::connect::ProxyConfig>,
+    /// See [`PlaintextOpenRequest::device`].
+    pub device: Option<crate::device::Armed>,
 }
 
 impl HopeOpenRequest {
@@ -280,7 +293,7 @@ impl HopeOpenRequest {
             &self.name,
             self.icon,
             self.version,
-            self.caps,
+            crate::device::offered(self.caps, self.device.as_ref()),
             handled,
         );
         // Janus, taking LZ4 under Blowfish, reads nothing a client sends
@@ -325,11 +338,13 @@ pub async fn run_hope_lifecycle(
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
+    let prover = crate::device::prover(req.device.clone(), &req.host, req.port);
     run_tcp(
         &req.host,
         req.port,
         req.proxy.as_ref(),
         session,
+        prover,
         cmd_rx,
         evt_tx,
     )
@@ -401,6 +416,7 @@ mod tests {
             caps: 0,
             trans: 1,
             proxy: None,
+            device: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
@@ -444,6 +460,7 @@ mod tests {
                 }
                 Event::Session(hxsession::Event::LoggedIn(_)) => {}
                 Event::Session(e) => panic!("{e:?}"),
+                Event::DeviceProof(p) => panic!("{p:?}"),
             }
         }
         lifecycle.await.expect("lifecycle task");
@@ -531,6 +548,7 @@ mod tests {
             caps: 0,
             trans: 1,
             proxy: None,
+            device: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
@@ -664,6 +682,7 @@ mod tests {
                     cipher,
                     compression,
                     proxy: None,
+                    device: None,
                 };
                 let session = req.session(Handled::NONE);
                 let login_trans = session.lock().unwrap().login_trans();
@@ -682,6 +701,7 @@ mod tests {
                         Event::State(_) => {}
                         Event::Session(hxsession::Event::LoggedIn(_)) => {}
                         Event::Session(e) => panic!("{what}: {e:?}"),
+                        Event::DeviceProof(p) => panic!("{what}: {p:?}"),
                     }
                 }
                 assert_eq!(frames, [(0x0001_0000, login_trans), (0x6a, 0)], "{what}");
@@ -728,6 +748,7 @@ mod tests {
             caps: 0x001F,
             trans: 1,
             proxy: None,
+            device: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let verify: TlsVerifyFn = Some(Box::new(|fp: &str| {
@@ -792,6 +813,7 @@ mod tests {
             caps: 0,
             trans: 1,
             proxy: None,
+            device: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(
@@ -872,6 +894,7 @@ mod tests {
             caps: 0,
             trans: 1,
             proxy: None,
+            device: None,
         };
         let (handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
 

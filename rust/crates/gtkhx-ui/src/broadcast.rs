@@ -37,7 +37,7 @@ extern "C" {
 }
 
 /// `HX_CHAT_LOG_INFO_COLOR` (gtkhx_log.h, pinned in chat.c): the color of the `[hx]` tag.
-const INFO_COLOR: i32 = 43;
+pub(crate) const INFO_COLOR: i32 = 43;
 
 /// The longest broadcast shown as a toast.
 ///

@@ -2,8 +2,10 @@
 
 use std::time::Duration;
 
+use hxnet::device::Armed;
 use hxnet::lifecycle::{
-    run_hope_lifecycle, run_plaintext_lifecycle, HopeOpenRequest, PlaintextOpenRequest,
+    run_hope_lifecycle, run_plaintext_lifecycle, run_plaintext_tls_lifecycle, HopeOpenRequest,
+    PlaintextOpenRequest,
 };
 use hxnet::{Command, Connection, ConnectionHandle, Event, Frame};
 use hxproto::messages::ClientHdr;
@@ -48,6 +50,28 @@ pub struct Client {
     login: hxsession::ServerInfo,
     /// What the session made of what came before the login settled.
     login_events: Vec<hxsession::Event>,
+    /// How the login's device proof ended, where it had one to end.
+    proofs: Vec<hxkeys::Proof>,
+    /// The TLS version a [`Transport::Tls`] login negotiated.
+    tls: Option<String>,
+}
+
+/// What a login settled with: the reply, what came before it settled, and
+/// how a device proof ended.
+type Settled = (
+    hxsession::ServerInfo,
+    Vec<hxsession::Event>,
+    Vec<hxkeys::Proof>,
+);
+
+/// How a login reaches its server, for [`Client::login_proving`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transport {
+    Plain,
+    /// The server's TLS port, its certificate taken unchecked.
+    Tls,
+    /// HOPE, with this cipher.
+    Hope(hxhope::Cipher),
 }
 
 /// A server's reply to one request: the whole frame, header included, which is
@@ -179,6 +203,7 @@ impl Client {
             caps,
             trans: LOGIN_TRANS,
             proxy: None,
+            device: None,
         };
         let session = req.session(handled | Handled::LOGIN);
         rt.spawn(run_plaintext_lifecycle(
@@ -188,6 +213,120 @@ impl Client {
             evt_tx,
         ));
         Client::settle(server, nick, rt, handle, events, session)
+    }
+
+    /// Log in as `login` with `password`, going by `nick`, dialing `host`
+    /// and `port` over `transport`, with `armed` to prove between the login
+    /// reply and the agree, as production does for a bookmark that proves
+    /// a device. What became of the proof is [`Client::proofs`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn login_proving(
+        server: &'static Server,
+        host: &str,
+        port: u16,
+        login: &str,
+        password: &str,
+        nick: &str,
+        caps: u64,
+        transport: Transport,
+        armed: Armed,
+    ) -> Result<Client, String> {
+        let (rt, handle, events, cmd_rx, evt_tx) = channels()?;
+        let handled = Handled::LOGIN;
+        let negotiated = std::sync::Arc::new(std::sync::OnceLock::new());
+        let session = match transport {
+            Transport::Hope(cipher) => {
+                let req = HopeOpenRequest {
+                    host: host.to_string(),
+                    port,
+                    login: login.as_bytes().to_vec(),
+                    password: password.as_bytes().to_vec(),
+                    name: nick.as_bytes().to_vec(),
+                    icon: 414,
+                    version: hxnet::login::CLIENT_VERSION,
+                    caps,
+                    cipher: Some(cipher),
+                    compression: None,
+                    proxy: None,
+                    device: Some(armed),
+                };
+                let session = req.session(handled);
+                rt.spawn(run_hope_lifecycle(req, session.clone(), cmd_rx, evt_tx));
+                session
+            }
+            Transport::Plain | Transport::Tls => {
+                let req = PlaintextOpenRequest {
+                    host: host.to_string(),
+                    port,
+                    login: login.as_bytes().to_vec(),
+                    password: password.as_bytes().to_vec(),
+                    name: nick.as_bytes().to_vec(),
+                    icon: 414,
+                    version: hxnet::login::CLIENT_VERSION,
+                    caps,
+                    trans: LOGIN_TRANS,
+                    proxy: None,
+                    device: Some(armed),
+                };
+                let session = req.session(handled);
+                if transport == Transport::Tls {
+                    let run = run_plaintext_tls_lifecycle(
+                        req,
+                        session.clone(),
+                        None,
+                        negotiated.clone(),
+                        cmd_rx,
+                        evt_tx,
+                    );
+                    rt.spawn(run);
+                } else {
+                    rt.spawn(run_plaintext_lifecycle(
+                        req,
+                        session.clone(),
+                        cmd_rx,
+                        evt_tx,
+                    ));
+                }
+                session
+            }
+        };
+        let mut client = Client::settle(server, nick, rt, handle, events, session)?;
+        if let Transport::Hope(cipher) = transport {
+            client.require_cipher(cipher)?;
+        }
+        client.tls = negotiated
+            .get()
+            .map(|n: &hxnet::tls::Negotiated| n.version.clone());
+        Ok(client)
+    }
+
+    /// How the login's device proof ended, where it had a device to prove
+    /// and the server agreed to prove it.
+    pub fn proofs(&self) -> &[hxkeys::Proof] {
+        &self.proofs
+    }
+
+    /// The TLS version a [`Transport::Tls`] login negotiated.
+    pub fn tls_version(&self) -> Option<&str> {
+        self.tls.as_deref()
+    }
+
+    /// The login went through HOPE with `cipher`: a server may answer HOPE
+    /// with no cipher at all, and the login would go through unsealed.
+    fn require_cipher(&self, cipher: hxhope::Cipher) -> Result<(), String> {
+        let agreed = self
+            .session
+            .lock()
+            .expect("the session lock is never held across a panic")
+            .negotiated()
+            .and_then(|n| n.cipher);
+        if agreed != Some(cipher) {
+            return Err(format!(
+                "{}: HOPE agreed {agreed:?}, not {cipher:?}",
+                self.server.name
+            ));
+        }
+        Ok(())
     }
 
     /// As [`Client::login_handling`] for the server's guest, logging in
@@ -213,24 +352,12 @@ impl Client {
             cipher: Some(cipher),
             compression: None,
             proxy: None,
+            device: None,
         };
         let session = req.session(handled | Handled::LOGIN);
         rt.spawn(run_hope_lifecycle(req, session.clone(), cmd_rx, evt_tx));
         let client = Client::settle(server, nick, rt, handle, events, session)?;
-        // A server may answer HOPE with no cipher at all, and the login
-        // would go through unsealed.
-        let agreed = client
-            .session
-            .lock()
-            .expect("the session lock is never held across a panic")
-            .negotiated()
-            .and_then(|n| n.cipher);
-        if agreed != Some(cipher) {
-            return Err(format!(
-                "{}: HOPE agreed {agreed:?}, not {cipher:?}",
-                server.name
-            ));
-        }
+        client.require_cipher(cipher)?;
         Ok(client)
     }
 
@@ -244,6 +371,35 @@ impl Client {
         mut events: mpsc::Receiver<Event>,
         session: hxnet::session::SharedSession,
     ) -> Result<Client, String> {
+        match Client::settle_on(server, nick, &rt, &handle, &mut events, &session) {
+            Ok((login, login_events, proofs)) => Ok(Client {
+                server,
+                rt,
+                handle,
+                events,
+                session,
+                login,
+                login_events,
+                proofs,
+                tls: None,
+            }),
+            // Without waiting on what the runtime still runs, a proof's
+            // check blocked on the pins' lock among it.
+            Err(e) => {
+                rt.shutdown_background();
+                Err(e)
+            }
+        }
+    }
+
+    fn settle_on(
+        server: &'static Server,
+        nick: &str,
+        rt: &Runtime,
+        handle: &ConnectionHandle,
+        events: &mut mpsc::Receiver<Event>,
+        session: &hxnet::session::SharedSession,
+    ) -> Result<Settled, String> {
         // What the LOGIN reply said. Not necessarily the first event: a
         // server can broadcast another user's arrival ahead of it.
         let login = rt
@@ -259,7 +415,12 @@ impl Client {
                             ))) => {
                                 return Err(format!("login refused: {}", why.unwrap_or_default()))
                             }
-                            Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
+                            Some(
+                                Event::Frame(_)
+                                | Event::State(_)
+                                | Event::Session(_)
+                                | Event::DeviceProof(_),
+                            ) => continue,
                             Some(Event::Shutdown(r)) => {
                                 return Err(format!("connect failed: {r:?}"))
                             }
@@ -278,6 +439,7 @@ impl Client {
         // a line another client said meanwhile would never reach this one.
         // A request sent after the agree is answered once it has joined.
         let mut login_events = Vec::new();
+        let mut proofs = Vec::new();
         let mut joined = None;
         rt.block_on(async {
             tokio::time::timeout(REPLY_TIMEOUT, async {
@@ -311,6 +473,7 @@ impl Client {
                             return Ok(())
                         }
                         Some(Event::Session(e)) => login_events.push(e),
+                        Some(Event::DeviceProof(p)) => proofs.push(p),
                         Some(Event::Frame(_) | Event::State(_)) => continue,
                         Some(Event::Shutdown(r)) => return Err(format!("{r:?}")),
                         None => return Err("connection closed".to_string()),
@@ -321,15 +484,7 @@ impl Client {
         })
         .map_err(|_| format!("{}: the login never settled", server.name))?
         .map_err(|e| format!("{}: disconnected during login: {e}", server.name))?;
-        Ok(Client {
-            server,
-            rt,
-            handle,
-            events,
-            session,
-            login,
-            login_events,
-        })
+        Ok((login, login_events, proofs))
     }
 
     /// Log in as the server's guest (the empty login), offering `caps`.
@@ -414,7 +569,12 @@ impl Client {
                         {
                             return Ok(Reply::from_raw(frame));
                         }
-                        Some(Event::Frame(_) | Event::State(_) | Event::Session(_)) => continue,
+                        Some(
+                            Event::Frame(_)
+                            | Event::State(_)
+                            | Event::Session(_)
+                            | Event::DeviceProof(_),
+                        ) => continue,
                         Some(Event::Shutdown(r)) => {
                             return Err(format!("{name}: disconnected: {r:?}"));
                         }

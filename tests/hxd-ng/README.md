@@ -56,7 +56,7 @@ testable. It also serves a file-mode banner and a files area holding
 transfer and folder transfer tests. Threaded news is on, with
 attachments: the news test attaches a picture to an article on the
 hotline-ng wire and reads it back over the classic one, where hxd-ng
-lists it as a part after the text. `conf/accounts/` has three accounts:
+lists it as a part after the text. `conf/accounts/` holds these accounts:
 
 - `guest` (the harness's login): voice, `video_chat` and `screen_share`.
 - `novideo` / `novideo`: voice but neither video bit, for the access
@@ -65,6 +65,17 @@ lists it as a part after the text. `conf/accounts/` has three accounts:
 - `react-a`, `react-b` and `react-mod` (each password its login): chat,
   private messages and messaging, and `react-mod` `disconnect_users`, which
   makes it a moderator, for the reactions and replies suites.
+
+- `device-a` and `device-b` (each password its login, and any name, by
+  which the suite tells its sessions apart): linked to the device proof
+  suite's two identities, whose seeds are fixed in
+  `rust/crates/hx-e2e/tests/device_proof.rs`; `device-b`'s device is
+  revoked.
+
+`[identity]` proves devices on the classic wire (capability bit 14) for
+the plain and TLS ports as the suites dial them, `127.0.0.1:5520` and
+`127.0.0.1:5620`. Its server key is made on the first start, in the data
+volume, so a fresh volume is a new key to a client that pinned the old.
 
 Public chat's history is kept (`[history]`, in the inbox's database), and
 the Structured Chat and Reactions drafts are on, and the Replies draft

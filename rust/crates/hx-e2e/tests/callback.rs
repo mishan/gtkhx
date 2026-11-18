@@ -53,8 +53,10 @@ unsafe extern "C" fn on_state(_c: *mut HxnetConnection, state: u32, _u: *mut c_v
 }
 
 unsafe extern "C" fn on_session(_c: *mut HxnetConnection, ev: *const c_void, _u: *mut c_void) {
-    let ev = (*(ev as *const Event)).clone();
-    HEARD.with(|h| h.borrow_mut().push(ev));
+    if let hxnet::ffi::SessionMsg::Session(ev) = &*(ev as *const hxnet::ffi::SessionMsg) {
+        let ev = (*ev).clone();
+        HEARD.with(|h| h.borrow_mut().push(ev));
+    }
 }
 
 /// Wake `ctx` every 100 ms, so a blocking iteration of it gets back to its

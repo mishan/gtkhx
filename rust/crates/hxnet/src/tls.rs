@@ -312,6 +312,21 @@ pub fn negotiated(stream: &TlsStream<TcpStream>) -> Option<Negotiated> {
     Some(Negotiated { version, suite })
 }
 
+/// The TLS 1.3 exporter a device proof is bound to the connection with
+/// (`hxkeys::proof::EXPORTER_LABEL`, an empty context, 32 bytes). `None`
+/// on TLS 1.2, whose exporter binds to the connection only with an
+/// extension the server may not have used, so a proof there is as on a
+/// plain connection.
+pub(crate) fn device_exporter(stream: &TlsStream<TcpStream>) -> Option<[u8; 32]> {
+    use tokio_rustls::rustls::ProtocolVersion;
+    let (_io, conn) = stream.get_ref();
+    if conn.protocol_version()? != ProtocolVersion::TLSv1_3 {
+        return None;
+    }
+    conn.export_keying_material([0u8; 32], hxkeys::proof::EXPORTER_LABEL, Some(&[]))
+        .ok()
+}
+
 pub(crate) fn fingerprint_sha256(der: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;

@@ -389,6 +389,12 @@ mod imp {
                     Signal::builder("replies")
                         .param_types([Type::POINTER, Type::POINTER])
                         .build(),
+                    // device-proof: (htlc*, DeviceProof) -- how the
+                    // connect's device proof ended, Rust's alone. Read
+                    // through `connect_device_proof`.
+                    Signal::builder("device-proof")
+                        .param_types([Type::POINTER, super::DeviceProof::static_type()])
+                        .build(),
                 ]
             })
         }
@@ -511,8 +517,8 @@ unsafe impl Sync for SendPtr {}
 
 // ----------------------------------------------------------------------
 // Emit wrappers, one per signal, with gtkhx_session.h's C ABI but for the
-// Rust-only chat, chat-history-batch, msg, msg-answered, messaging, reactions
-// and replies ones
+// Rust-only chat, chat-history-batch, msg, msg-answered, messaging, reactions,
+// replies and device-proof ones
 // ----------------------------------------------------------------------
 
 /// # Safety
@@ -1221,6 +1227,41 @@ pub unsafe fn gtkhx_session_emit_messaging(
     emit(self_, "messaging", &v);
 }
 
+/// How a device proof ended, as the `device-proof` signal carries it: a
+/// boxed type of its own, so the signal takes nothing else.
+#[derive(Clone, Debug, glib::Boxed)]
+#[boxed_type(name = "GtkhxDeviceProof")]
+pub struct DeviceProof(pub hxkeys::Proof);
+
+/// # Safety
+/// `self_`/`htlc` valid.
+pub unsafe fn gtkhx_session_emit_device_proof(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    proof: &hxkeys::Proof,
+) {
+    let v = [ptr_value(htlc), DeviceProof(proof.clone()).to_value()];
+    emit(self_, "device-proof", &v);
+}
+
+/// Hear the `device-proof` signal: the connection, and how its device
+/// proof ended.
+pub fn connect_device_proof<F>(f: F) -> glib::SignalHandlerId
+where
+    F: Fn(*mut c_void, &hxkeys::Proof) + 'static,
+{
+    let obj: glib::Object = unsafe {
+        glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
+    };
+    obj.connect_local("device-proof", false, move |args| {
+        let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        if let Ok(p) = args[2].get::<&DeviceProof>() {
+            f(htlc, &p.0);
+        }
+        None
+    })
+}
+
 /// Hear the `messaging` signal: the connection, and what moved on.
 pub fn connect_messaging<F>(f: F) -> glib::SignalHandlerId
 where
@@ -1736,6 +1777,36 @@ mod tests {
         unsafe {
             gtkhx_session_emit_connection_state(std::ptr::null_mut(), std::ptr::null_mut(), 1);
         }
+    }
+
+    #[test]
+    fn a_device_proof_reaches_its_listener_as_it_ended() {
+        let got = Rc::new(std::cell::RefCell::new(None));
+        let g = got.clone();
+        let id = connect_device_proof(move |htlc, p| {
+            *g.borrow_mut() = Some((htlc as usize, p.clone()));
+        });
+        let proof = hxkeys::Proof::Refused {
+            reason: Some("The device could not be proved.".into()),
+        };
+        unsafe {
+            gtkhx_session_emit_device_proof(
+                gtkhx_session_get_default(),
+                0x1234 as *mut c_void,
+                &proof,
+            );
+        }
+        let obj: glib::Object = unsafe {
+            glib::Object::from_glib_none(
+                gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject
+            )
+        };
+        obj.disconnect(id);
+        assert_eq!(*got.borrow(), Some((0x1234, proof)));
+        // Typed, so that a pointer to anything else is refused by GLib
+        // before a listener could read it as a proof.
+        let id = glib::subclass::signal::SignalId::lookup("device-proof", obj.type_()).unwrap();
+        assert_eq!(id.query().param_types()[1], DeviceProof::static_type());
     }
 
     #[test]
