@@ -389,11 +389,11 @@ mod imp {
                     Signal::builder("replies")
                         .param_types([Type::POINTER, Type::POINTER])
                         .build(),
-                    // device-proof: (htlc*, proof*) -- how the connect's
-                    // device proof ended: an `hxkeys::Proof`, Rust's alone,
-                    // valid for the emit. Read through `connect_device_proof`.
+                    // device-proof: (htlc*, DeviceProof) -- how the
+                    // connect's device proof ended, Rust's alone. Read
+                    // through `connect_device_proof`.
                     Signal::builder("device-proof")
-                        .param_types([Type::POINTER, Type::POINTER])
+                        .param_types([Type::POINTER, super::DeviceProof::static_type()])
                         .build(),
                 ]
             })
@@ -1227,6 +1227,12 @@ pub unsafe fn gtkhx_session_emit_messaging(
     emit(self_, "messaging", &v);
 }
 
+/// How a device proof ended, as the `device-proof` signal carries it: a
+/// boxed type of its own, so the signal takes nothing else.
+#[derive(Clone, Debug, glib::Boxed)]
+#[boxed_type(name = "GtkhxDeviceProof")]
+pub struct DeviceProof(pub hxkeys::Proof);
+
 /// # Safety
 /// `self_`/`htlc` valid.
 pub unsafe fn gtkhx_session_emit_device_proof(
@@ -1234,10 +1240,7 @@ pub unsafe fn gtkhx_session_emit_device_proof(
     htlc: *mut c_void,
     proof: &hxkeys::Proof,
 ) {
-    let v = [
-        ptr_value(htlc),
-        ptr_value((proof as *const hxkeys::Proof).cast()),
-    ];
+    let v = [ptr_value(htlc), DeviceProof(proof.clone()).to_value()];
     emit(self_, "device-proof", &v);
 }
 
@@ -1251,11 +1254,9 @@ where
         glib::Object::from_glib_none(gtkhx_session_get_default() as *mut glib::gobject_ffi::GObject)
     };
     obj.connect_local("device-proof", false, move |args| {
-        let ptr = |i: usize| args[i].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
-        let (htlc, proof) = (ptr(1), ptr(2) as *const hxkeys::Proof);
-        // SAFETY: the emit passes a proof that outlives it.
-        if let Some(p) = unsafe { proof.as_ref() } {
-            f(htlc, p);
+        let htlc = args[1].get::<*mut c_void>().unwrap_or(std::ptr::null_mut());
+        if let Ok(p) = args[2].get::<&DeviceProof>() {
+            f(htlc, &p.0);
         }
         None
     })
@@ -1802,6 +1803,10 @@ mod tests {
         };
         obj.disconnect(id);
         assert_eq!(*got.borrow(), Some((0x1234, proof)));
+        // Typed, so that a pointer to anything else is refused by GLib
+        // before a listener could read it as a proof.
+        let id = glib::subclass::signal::SignalId::lookup("device-proof", obj.type_()).unwrap();
+        assert_eq!(id.query().param_types()[1], DeviceProof::static_type());
     }
 
     #[test]

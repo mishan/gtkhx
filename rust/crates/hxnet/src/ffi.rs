@@ -932,6 +932,8 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
     on_state: HxnetStateCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
+    // A raw open proves nothing: what was armed goes with it.
+    drop(crate::device::take_armed());
     if host.is_null() || host_len == 0 {
         glib::g_critical!("hxnet", "hxnet_connection_open_tcp: NULL or empty host");
         return std::ptr::null_mut();
@@ -3122,8 +3124,22 @@ mod tests {
         let (host, bad) = (b"127.0.0.1", b"not a proxy");
         // Refused for its host, or for its proxy where it takes one.
         type Open<'a> = (&'a str, Box<dyn Fn() -> *mut HxnetConnection + 'a>);
-        let opens: [Open; 9] = unsafe {
+        let opens: [Open; 10] = unsafe {
             [
+                (
+                    "tcp",
+                    Box::new(|| {
+                        hxnet_connection_open_tcp(
+                            null,
+                            0,
+                            1,
+                            None,
+                            None,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
                 (
                     "plaintext",
                     Box::new(|| {

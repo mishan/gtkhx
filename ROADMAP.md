@@ -208,8 +208,9 @@ only the video tests use it so far. What is left:
 hxd-ng now serves on the classic wire what it first built for Hotline-ng: friends and
 instant messages (the Messaging extension, with message requests beside it), a device key
 proved on any port, and friendships that move with their identity from one server to the
-next. All of it is behind capability bits, and the wire is in hx-libs. GtkHx has none of it
-yet. In order, each stage a branch of its own:
+next. All of it is behind capability bits, and the wire is in hx-libs. GtkHx has the friend
+family, and a device proved in the login dance; the rest is below. In order, each stage a
+branch of its own:
 
 1. **Take the hx-libs revision hxd-ng uses.** `hxproto::messaging` arrives with it, and
    capabilities widen to `u64` in `hxsession` and `hxhope`, which `hxnet`'s session config

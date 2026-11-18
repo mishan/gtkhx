@@ -92,12 +92,13 @@ card, bound on TLS 1.3 to the connection's exporter. Then the session
 settles the proof and the agree goes. How the proof ended reaches the
 consumer as `Event::DeviceProof` (C hands it, through the session
 callback, to `hxhandlers`, which emits `device-proof`): proved, refused
-with the server's reason, a key that is not the one pinned (nothing is
-signed), something on this side that stopped it, or a server too slow to
-answer before the session gives up on it, after which a late answer is
-neither sent nor told. One ending is told a session. The challenge is
-checked and answered off the session's lock and off the runtime, since
-the pins are read and written under a file lock. Whatever the end, the
+with the server's reason, a key or a commitment to the next that is not
+the one pinned (nothing is signed), something on this side that stopped
+it, or no answer before the session's deadline, after which a late
+answer is neither sent nor told. One ending is told a session. The
+challenge is checked and answered off the session's lock, the runtime
+and the delivery of what the server sends, since the pins are read and
+written under a file lock. Whatever the end, the
 session stays logged in, unproved but for the first. Each C open takes
 what was armed for it, refused or not: a reconnect comes back unarmed.
 

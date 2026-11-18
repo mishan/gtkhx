@@ -93,7 +93,7 @@ struct Shared {
     /// Wakes the write side: there is something to write.
     to_write: Notify,
     /// Wakes the delivery side: the session has something to say.
-    to_deliver: Notify,
+    to_deliver: Arc<Notify>,
     /// Held while popping events and handing them on, so they reach the
     /// consumer in the session's order whichever side hands them on.
     delivering: tokio::sync::Mutex<()>,
@@ -102,7 +102,12 @@ struct Shared {
     rust_asked: Mutex<HashSet<u32>>,
     /// The connect's device proof, where it has a device to prove.
     prover: Mutex<Option<Prover>>,
+    /// The challenge's answer, worked out off the actor, waiting to be
+    /// delivered.
+    worked: Arc<Mutex<Option<Worked>>>,
 }
+
+type Worked = Result<Vec<u8>, hxkeys::Proof>;
 
 /// The messaging extension's transactions, both ways.
 fn is_messaging(opcode: u32) -> bool {
@@ -156,9 +161,11 @@ impl Shared {
 
     /// The challenge answered off the session, or how the proof ended
     /// there.
-    fn answered(&self, a: Result<Vec<u8>, hxkeys::Proof>) -> Option<hxkeys::Proof> {
+    fn answered(&self, a: Worked) -> Option<hxkeys::Proof> {
         let mut prover = self.prover.lock().expect("never held across a panic");
-        prover.as_mut()?.answered(&mut self.session(), a)
+        prover
+            .as_mut()?
+            .answered(&mut self.session(), a, self.now())
     }
 
     /// The login was answered: the proof's first step, where there is one.
@@ -203,7 +210,8 @@ pub async fn run<S>(
         out: Mutex::new(Vec::new()),
         login_sent: Mutex::new(false),
         to_write: Notify::new(),
-        to_deliver: Notify::new(),
+        to_deliver: Arc::new(Notify::new()),
+        worked: Arc::new(Mutex::new(None)),
         delivering: tokio::sync::Mutex::new(()),
         rust_asked: Mutex::new(HashSet::new()),
         prover: Mutex::new(prover),
@@ -391,22 +399,33 @@ async fn deliver_side(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Shutdown
 async fn deliver(shared: &Shared, evt_tx: &mpsc::Sender<Event>) -> Option<ShutdownReason> {
     let _turn = shared.delivering.lock().await;
     loop {
+        let worked = shared
+            .worked
+            .lock()
+            .expect("never held across a panic")
+            .take();
+        if let Some(a) = worked {
+            let ended = shared.answered(a);
+            shared.queue_out();
+            if let Some(p) = ended {
+                if evt_tx.send(Event::DeviceProof(p)).await.is_err() {
+                    return Some(ShutdownReason::HandleDropped);
+                }
+            }
+        }
         let event = shared.session().poll_event()?;
         let event = match shared.hear(event) {
             Heard::Pass(e) => e,
             Heard::Challenge(c) => {
-                // Off the session and off the runtime: it reads and writes
-                // files, under a lock another GtkHx may hold.
-                let answered = tokio::task::spawn_blocking(move || c.answer())
-                    .await
-                    .unwrap_or_else(|e| Err(hxkeys::Proof::NotProved { why: e.to_string() }));
-                let ended = shared.answered(answered);
-                shared.queue_out();
-                if let Some(p) = ended {
-                    if evt_tx.send(Event::DeviceProof(p)).await.is_err() {
-                        return Some(ShutdownReason::HandleDropped);
-                    }
-                }
+                // Off the session, the runtime and the delivery: it reads
+                // and writes files, under a lock another GtkHx may hold. Its
+                // answer is delivered when it comes, in its turn.
+                let (worked, wake) = (shared.worked.clone(), shared.to_deliver.clone());
+                tokio::task::spawn_blocking(move || {
+                    let a = c.answer();
+                    *worked.lock().expect("never held across a panic") = Some(a);
+                    wake.notify_one();
+                });
                 continue;
             }
             Heard::Taken(ended) => {
@@ -1382,12 +1401,35 @@ mod tests {
                 AGREE,
                 "the wait still ends"
             );
-            held.unlock().unwrap();
+            // Nor what reaches the consumer meanwhile.
             assert_eq!(client.proof().await, hxkeys::Proof::TimedOut);
+            server
+                .send(&server_says(0x6a, 0, &[(0x0065, b"meanwhile")]))
+                .await;
+            let (mut ready, mut line) = (false, false);
+            while !(ready && line) {
+                match client.next().await {
+                    Event::State(ConnectionState::LoginReady) => ready = true,
+                    Event::Frame(f) if f.header.type_ == 0x6a => line = true,
+                    Event::DeviceProof(p) => panic!("told again: {p:?}"),
+                    _ => {}
+                }
+            }
+            held.unlock().unwrap();
             assert!(
                 server.quiet_for(Duration::from_secs(2)).await,
                 "no proof sent"
             );
+            server
+                .send(&server_says(0x6a, 0, &[(0x0065, b"after")]))
+                .await;
+            loop {
+                match client.next().await {
+                    Event::DeviceProof(p) => panic!("told again: {p:?}"),
+                    Event::Frame(f) if f.header.type_ == 0x6a => break,
+                    _ => {}
+                }
+            }
         }
 
         /// The proof answered once the session has given up on it is not

@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use hl_identity::{cert, Card, DeviceCert, DeviceKey, IdentityKey, ServerKey};
+use hl_identity::{cert, Card, DeviceCert, DeviceKey, Fingerprint, IdentityKey, ServerKey};
 use hx_e2e::client::{Transport, CAP_TEXT_ENCODING};
 use hx_e2e::ng::Ng;
 use hx_e2e::{servers_with, Cap, Client, Server};
@@ -21,11 +21,15 @@ const NG: &str = "127.0.0.1:5525";
 const TLS_PORT: u16 = 5620;
 /// What hxd-ng answers every refused proof with but a clock's.
 const NOT_PROVED: &str = "The device could not be proved.";
+/// And a challenge asked for an address it does not answer as with.
+const NO_CHALLENGE: &str = "This server gives no device challenge for that address.";
 
 /// The suite's identities, by seed: the rig links `device-a` to A and
 /// `device-b` to B, and revokes B's device.
 const A: (u8, u8) = (0x41, 0x61);
 const B: (u8, u8) = (0x42, 0x62);
+/// Another device of B's, which the rig does not revoke.
+const B_UNREVOKED: (u8, u8) = (0x42, 0x63);
 
 fn server() -> Option<&'static Server> {
     servers_with(&[Cap::DeviceProof]).first().copied()
@@ -127,6 +131,9 @@ fn a_device_is_proved_on_every_port_and_shown_to_the_others() {
             other => panic!("{transport:?}: {other:?}"),
         }
         assert_eq!(shown(&n), Some(fingerprint(A)), "{transport:?}");
+        if transport == Transport::Tls {
+            assert_eq!(c.tls_version(), Some("1.3"), "the exporter's");
+        }
         drop(c);
     }
 }
@@ -161,7 +168,35 @@ fn the_server_key_is_pinned_at_first_contact_and_kept_after() {
 #[test]
 fn a_proof_refused_or_not_signed_leaves_the_session_logged_in_unproved() {
     let Some(s) = server() else { return };
-    // A revoked device, said alike with every other refusal.
+    // A revoked device, said alike with every other refusal. The rig
+    // revokes this one, and another device of B's proves on the account:
+    // the refusal is the revocation's.
+    let config = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/hxd-ng/conf/hxd-ng.toml"
+    );
+    let revoked_fp = Fingerprint::of(&DeviceKey::from_seed(&[B.1; 32]).public()).to_string();
+    let rig = std::fs::read_to_string(config).unwrap();
+    assert!(
+        rig.contains(&format!("revoked_devices = [\"{revoked_fp}\"]")),
+        "the rig revokes B's device"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let n = nick();
+    let control = login(
+        s,
+        dir.path(),
+        s.host,
+        Transport::Plain,
+        ("device-b", &n),
+        B_UNREVOKED,
+    );
+    assert!(
+        matches!(control.proofs(), [Proof::Proved { .. }]),
+        "{:?}",
+        control.proofs()
+    );
+    drop(control);
     let dir = tempfile::tempdir().unwrap();
     let n = nick();
     let revoked = login(s, dir.path(), s.host, Transport::Plain, ("device-b", &n), B);
@@ -186,7 +221,7 @@ fn a_proof_refused_or_not_signed_leaves_the_session_logged_in_unproved() {
         A,
     );
     assert!(
-        matches!(elsewhere.proofs(), [Proof::Refused { reason: Some(_) }]),
+        matches!(elsewhere.proofs(), [Proof::Refused { reason: Some(r) }] if r == NO_CHALLENGE),
         "{:?}",
         elsewhere.proofs()
     );

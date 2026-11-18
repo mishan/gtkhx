@@ -35,12 +35,13 @@ pub(crate) fn take_armed() -> Option<Armed> {
     ARMED.with_borrow_mut(Option::take)
 }
 
-/// The capabilities a connect offers: `caps`, and bit 14 where it has a
-/// device to prove with.
+/// The capabilities a connect offers: `caps`, with bit 14 where it has a
+/// device to prove with and never where it has none, since a server that
+/// agrees holds the join for a proof.
 pub(crate) fn offered(caps: u64, device: Option<&Armed>) -> u64 {
     match device {
         Some(_) => caps | hxproto::messaging::CAP_DEVICE_PROOF,
-        None => caps,
+        None => caps & !hxproto::messaging::CAP_DEVICE_PROOF,
     }
 }
 
@@ -204,8 +205,16 @@ impl Prover {
 
     /// The challenge answered, or the proof ended, off the session: send
     /// the answer, unless the session settled the proof meanwhile, which
-    /// it tells as its own.
-    pub(crate) fn answered(&mut self, s: &mut Session, a: Result<Vec<u8>, Proof>) -> Option<Proof> {
+    /// it tells as its own, or its deadline is past at `now_ms`.
+    pub(crate) fn answered(
+        &mut self,
+        s: &mut Session,
+        a: Result<Vec<u8>, Proof>,
+        now_ms: u64,
+    ) -> Option<Proof> {
+        // The session's own clock first, so an answer past its deadline is
+        // not sent however late the session would otherwise notice.
+        s.tick(now_ms);
         if self.over || !s.proving() {
             return None;
         }
@@ -261,5 +270,91 @@ pub(crate) fn armed_in(dir: &std::path::Path) -> Armed {
             .import_hlid(&home, unix)
             .unwrap(),
         pins: dir.join("server-keys.toml"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hxproto::messaging::CAP_DEVICE_PROOF;
+    use hxsession::request::Request;
+
+    const TEXT: u64 = hxsession::cap::TEXT_ENCODING;
+
+    /// Only a connect with a device offers bit 14, whatever its caller asked.
+    #[test]
+    fn bit_14_is_offered_with_a_device_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let armed = armed_in(dir.path());
+        for (caps, device, want) in [
+            (TEXT, Some(&armed), TEXT | CAP_DEVICE_PROOF),
+            (
+                TEXT | CAP_DEVICE_PROOF,
+                Some(&armed),
+                TEXT | CAP_DEVICE_PROOF,
+            ),
+            (TEXT, None, TEXT),
+            (TEXT | CAP_DEVICE_PROOF, None, TEXT),
+        ] {
+            assert_eq!(
+                offered(caps, device),
+                want,
+                "{caps:#x} {}",
+                device.is_some()
+            );
+        }
+    }
+
+    /// A session proving since `0` ms, by a 1.5 server agreeing to bit 14.
+    fn proving() -> Session {
+        let cfg = crate::session::config(
+            b"alice",
+            b"pw",
+            b"me",
+            414,
+            hxsession::CLIENT_VERSION,
+            TEXT | CAP_DEVICE_PROOF,
+            hxsession::Handled::LOGIN,
+        );
+        let mut s = Session::new(cfg, 0);
+        s.take_outgoing();
+        s.feed(hxsession::SERVER_MAGIC, 0);
+        s.take_outgoing();
+        let mut buf = [0u8; 8];
+        let caps = hxproto::build::capabilities_encode(TEXT | CAP_DEVICE_PROOF, &mut buf);
+        let reply = Request {
+            opcode: 0x0001_0000,
+            fields: vec![
+                (0x00a0, 190u16.to_be_bytes().to_vec()),
+                (0x01f0, caps.to_vec()),
+            ],
+        };
+        s.feed(&reply.pack(1).unwrap(), 0);
+        assert!(s.proving());
+        s
+    }
+
+    fn opcodes(s: &mut Session) -> Vec<u32> {
+        let mut r = hxsession::frame::FrameReader::new();
+        r.push(&s.take_outgoing());
+        std::iter::from_fn(|| r.next_transaction().unwrap())
+            .map(|t| t.type_)
+            .collect()
+    }
+
+    /// An answer worked out past the session's deadline is not sent, even
+    /// where the session has not yet been ticked past it.
+    #[test]
+    fn an_answer_past_the_deadline_is_not_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = proving();
+        let mut p = Prover::new(armed_in(dir.path()), "hl.example", 5500);
+        assert_eq!(p.answered(&mut s, Ok(vec![1; 64]), 10_000), None);
+        assert!(!opcodes(&mut s).contains(&1021), "no proof sent");
+        // And one in time is.
+        let mut s = proving();
+        let mut p = Prover::new(armed_in(dir.path()), "hl.example", 5500);
+        assert_eq!(p.answered(&mut s, Ok(vec![1; 64]), 9_999), None);
+        assert_eq!(opcodes(&mut s), [1021]);
     }
 }
