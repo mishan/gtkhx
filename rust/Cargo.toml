@@ -29,6 +29,9 @@ members = [
     "crates/hx-image-decode",
     "crates/feature-unify",
     "crates/hxsound",
+    # The device keys Prove Device proves with, and the server keys pinned
+    # at first contact. Pure Rust over hl-identity, tested headless.
+    "crates/hxkeys",
     # The update check's version ordering, feed and decision. Pure Rust,
     # tested headless; the fetch and the banner live with their callers.
     "crates/hxupdate",
@@ -87,12 +90,13 @@ rust-version = "1.92"
 # for magnifiers.
 rotulus = { version = "0.3.1", features = ["v4_16"] }
 rotulus-layout = "0.3.1"
-hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
-hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
-hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
-hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
-hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
-hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "51301be7a5e2df7ec033c05d1245375439ef010d" }
+hxproto = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
+hxfiles-xfer = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
+hxhfs = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
+hxsession = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
+hxhope = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
+hxcrypto = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
+hl-identity = { git = "https://github.com/mishan/hx-libs.git", rev = "4b1e572bab41b69a88ee89483a7e21937d0b0ddc" }
 glib = "0.22"
 gio = "0.22"
 gtk4 = "0.11"
