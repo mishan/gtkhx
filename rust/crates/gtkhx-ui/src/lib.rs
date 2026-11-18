@@ -40,6 +40,7 @@ mod icon_picker;
 pub mod name_shadow;
 pub mod options;
 mod options_connections;
+mod options_device_keys;
 mod options_identity;
 /// Link-time stubs for the C symbols the Settings pages call, so the page
 /// table can be exercised in a `cargo test` binary. Test builds only.

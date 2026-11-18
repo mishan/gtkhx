@@ -2075,6 +2075,7 @@ dependencies = [
  "gstreamer-base",
  "gtk4",
  "gtkhx-core",
+ "hl-identity",
  "hx-image-decode",
  "hxbookmarks",
  "hxconfig",
@@ -2093,6 +2094,7 @@ dependencies = [
  "libadwaita",
  "rotulus",
  "rotulus-layout",
+ "tempfile",
 ]
 
 [[package]]

@@ -103,3 +103,8 @@ voice = [
     "dep:gstreamer-base",
     "hxhandlers/voice",
 ]
+
+[dev-dependencies]
+# The Device Keys page's devices, certified in a directory of their own.
+hl-identity = { workspace = true }
+tempfile = "3"
