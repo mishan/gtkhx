@@ -22,6 +22,31 @@ use std::fmt;
 
 pub use hl_identity::{Fingerprint, ServerChallenge};
 
+/// How proving a device on one connection ended, as the view is told it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Proof {
+    /// The server took the proof: the session is `identity`'s `device`.
+    Proved {
+        identity: Fingerprint,
+        device: Fingerprint,
+        /// The name the identity's card gives it.
+        name: String,
+    },
+    /// The server refused the challenge or the proof, with its reason
+    /// where it gave one.
+    Refused { reason: Option<String> },
+    /// The server's key for `host` is not the one pinned for it: nothing was
+    /// signed. No served handovers are followed yet.
+    KeyChanged {
+        host: String,
+        warning: hl_identity::handover::Warning,
+    },
+    /// Nothing was signed, for a reason of this side's: `why`.
+    NotProved { why: String },
+    /// The server answered too late, and the session joined unproved.
+    TimedOut,
+}
+
 /// What went wrong with a device, its files, or a pin file.
 #[derive(Debug)]
 pub enum Error {

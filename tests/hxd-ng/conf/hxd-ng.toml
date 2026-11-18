@@ -90,3 +90,21 @@ max_keys = 8
 [rooms]
 file = "/var/lib/hxd-ng/rooms.toml"
 announce = false
+
+# Device proof on the classic wire (capability bit 14), for hx-e2e's
+# device proof suite: the server's key is made on first start in the data
+# volume, the classic hosts are the plain and TLS listeners as the suites
+# dial them, and the two identities are the suite's, fixed seeds, linked to
+# the device-a and device-b accounts. device-b's device is revoked.
+[identity]
+key = "/var/lib/hxd-ng/identity-server.key"
+next_key = "/var/lib/hxd-ng/identity-server.next"
+handovers = "/var/lib/hxd-ng/identity-server.handovers"
+successors = "/var/lib/hxd-ng/identity-successors"
+hosts = ["127.0.0.1:5525"]
+classic_hosts = ["127.0.0.1:5520", "127.0.0.1:5620"]
+allow_list = [
+    "ka9d5daak9a05qhycpg7mq5h5a6wcxcbv3mc5v25jnhxdcp0g720",
+    "62by5qq2sd539d9r836ve1detw86fgvfd3dgw3tnkgzkz82365fg",
+]
+revoked_devices = ["5mxvkvwqdn07jnf4326z0q15ym8wt7z3s1fye3y2472dhy76c9gg"]

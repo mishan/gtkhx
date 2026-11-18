@@ -1,0 +1,17 @@
+# A device proof suite account, linked to the suite's identity B.
+# Its device is revoked (hxd-ng.toml's revoked_devices).
+name = "device-b"
+password = "device-b"
+
+[access]
+read_chat = true
+send_chat = true
+# The suite tells its sessions apart by nick.
+use_any_name = true
+
+[identity]
+fingerprint = "62by5qq2sd539d9r836ve1detw86fgvfd3dgw3tnkgzkz82365fg"
+
+# The suite logs in more often than a person would.
+[extra]
+can_spam = true

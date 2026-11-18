@@ -12,9 +12,11 @@
 
 use std::os::raw::c_void;
 
+use hxnet::ffi::SessionMsg;
 use hxsession::{Closed, Event};
 
 pub mod chat;
+pub mod device;
 pub mod files;
 pub mod friends;
 pub mod icon;
@@ -34,15 +36,20 @@ extern "C" {
 }
 
 /// `void hx_recv_session_event (htlc, ev)` — what the session made of what
-/// the server sent (`hxnet::Event::Session`), on the main thread, for a
+/// the server sent (`hxnet::Event::Session`), or how the connect's device
+/// proof ended (`hxnet::Event::DeviceProof`), on the main thread, for a
 /// connection still open.
 ///
 /// # Safety
-/// `htlc` is a live connection; `ev` points at an `hxsession::Event` for the
-/// call.
+/// `htlc` is a live connection; `ev` points at an `hxnet::ffi::SessionMsg`
+/// for the call.
 #[no_mangle]
 pub unsafe extern "C" fn hx_recv_session_event(htlc: *mut c_void, ev: *const c_void) {
-    match &*(ev as *const Event) {
+    let ev = match &*(ev as *const SessionMsg) {
+        SessionMsg::Session(ev) => *ev,
+        SessionMsg::DeviceProof(proof) => return device::proof(htlc, proof),
+    };
+    match ev {
         Event::Received(frame) => {
             if let Some(h) = hxproto::parse::Header::parse(frame) {
                 // The chunk trace reads from the field count on.

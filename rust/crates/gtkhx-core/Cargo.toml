@@ -23,3 +23,6 @@ hxproto = { workspace = true }
 # Pure Rust too: the session's chat media and history entries, which the
 # boxed types copy out for C.
 hxsession = { workspace = true }
+# Pure Rust too: how a device proof ended, which the `device-proof` signal
+# carries.
+hxkeys = { path = "../hxkeys" }

@@ -2014,6 +2014,7 @@ name = "gtkhx-core"
 version = "0.1.0"
 dependencies = [
  "glib 0.22.10",
+ "hxkeys",
  "hxproto",
  "hxsession",
 ]
@@ -2078,6 +2079,7 @@ dependencies = [
  "hxbookmarks",
  "hxconfig",
  "hxhandlers",
+ "hxkeys",
  "hxmodel",
  "hxnet",
  "hxproto",
@@ -2190,7 +2192,7 @@ dependencies = [
 [[package]]
 name = "hl-identity"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -2246,7 +2248,9 @@ version = "0.1.0"
 dependencies = [
  "glib 0.22.10",
  "gtkhx-core",
+ "hl-identity",
  "hxhope",
+ "hxkeys",
  "hxmodel",
  "hxnet",
  "hxproto",
@@ -2255,6 +2259,7 @@ dependencies = [
  "hxtext",
  "png",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -2308,7 +2313,7 @@ dependencies = [
 [[package]]
 name = "hxcrypto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 dependencies = [
  "blowfish",
  "chacha20poly1305",
@@ -2324,7 +2329,7 @@ dependencies = [
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 dependencies = [
  "sha2",
 ]
@@ -2338,6 +2343,7 @@ dependencies = [
  "gtkhx-core",
  "gtkhx-proto-ffi",
  "hxconfig",
+ "hxkeys",
  "hxmodel",
  "hxnet",
  "hxproto",
@@ -2350,12 +2356,12 @@ dependencies = [
 [[package]]
 name = "hxhfs"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 
 [[package]]
 name = "hxhope"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 dependencies = [
  "flate2",
  "hxcrypto",
@@ -2405,16 +2411,19 @@ dependencies = [
  "async-channel",
  "getrandom 0.3.4",
  "glib 0.22.10",
+ "hl-identity",
  "hxbridge",
  "hxcrypto",
  "hxfiles-xfer",
  "hxhfs",
  "hxhope",
+ "hxkeys",
  "hxproto",
  "hxsession",
  "libc",
  "rustls-native-certs",
  "sha2",
+ "tempfile",
  "tokio",
  "tokio-rustls",
  "tokio-socks",
@@ -2424,7 +2433,7 @@ dependencies = [
 [[package]]
 name = "hxproto"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 
 [[package]]
 name = "hxrequest"
@@ -2438,7 +2447,7 @@ dependencies = [
 [[package]]
 name = "hxsession"
 version = "0.1.0"
-source = "git+https://github.com/mishan/hx-libs.git?rev=24f7310fc61777d5e8d8a26bd13c6c4171079170#24f7310fc61777d5e8d8a26bd13c6c4171079170"
+source = "git+https://github.com/mishan/hx-libs.git?rev=402cb7a9b763925f2fc1d2181f4d03f1671ca396#402cb7a9b763925f2fc1d2181f4d03f1671ca396"
 dependencies = [
  "hxhope",
  "hxproto",

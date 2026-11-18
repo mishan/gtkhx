@@ -78,6 +78,29 @@ Disagree, or closing the window, disconnects. One with nothing to show
 the session answers itself; so does one that says there is none from a
 server that gave no version, which is a 1.5 server keeping that to itself.
 
+### A device proved
+
+A connect with a device to prove (`device::Armed`: an `hxkeys` device
+and the file its server keys are pinned in, on the open request, or
+armed for the next C open with `device::arm`) offers capability bit 14.
+Where the login reply agrees to it, the session holds the agree, and
+with it `LoginReady`, while the actor proves the device (`device.rs`):
+Get Device Challenge for the host as dialed, port included; the
+challenge read for that host, and its key checked against the pin,
+pinned at first contact; Prove Device, with the certificate and the
+card, bound on TLS 1.3 to the connection's exporter. Then the session
+settles the proof and the agree goes. How the proof ended reaches the
+consumer as `Event::DeviceProof` (C hands it, through the session
+callback, to `hxhandlers`, which emits `device-proof`): proved, refused
+with the server's reason, a key that is not the one pinned (nothing is
+signed), something on this side that stopped it, or a server too slow to
+answer before the session gives up on it, after which a late answer is
+neither sent nor told. One ending is told a session. The challenge is
+checked and answered off the session's lock and off the runtime, since
+the pins are read and written under a file lock. Whatever the end, the
+session stays logged in, unproved but for the first. Each C open takes
+what was armed for it, refused or not: a reconnect comes back unarmed.
+
 Every reply reaches C, the session's own included — a refused agree or
 login is dispatched and reported as any refused request is — but those C
 said to expect (`Session::expect`, through `connection_expect`): a

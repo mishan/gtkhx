@@ -22,6 +22,7 @@ hxhandlers = { path = "../hxhandlers" }
 hxsession = { workspace = true }
 # The Files browser reads a finished transfer's size off its handle.
 hxnet = { path = "../hxnet" }
+hxkeys = { path = "../hxkeys" }
 hxmodel = { path = "../hxmodel" }
 hxrequest = { path = "../hxrequest", features = ["c-abi"] }
 hxtext = { path = "../hxtext", features = ["c-abi"] }

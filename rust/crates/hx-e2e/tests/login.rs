@@ -56,6 +56,7 @@ fn log_in(port: u16, login: &str, password: &str, over: Over) -> Outcome {
         caps: CAPS,
         trans: 1,
         proxy: None,
+        device: None,
     };
     match over {
         Over::Plain => {
@@ -87,6 +88,7 @@ fn log_in(port: u16, login: &str, password: &str, over: Over) -> Outcome {
                 cipher,
                 compression: None,
                 proxy: None,
+                device: None,
             };
             let session = req.session(Handled::LOGIN);
             rt.spawn(run_hope_lifecycle(req, session, cmd_rx, evt_tx));

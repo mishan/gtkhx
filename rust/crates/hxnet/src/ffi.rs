@@ -279,7 +279,7 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
                 return HXNET_RECV_SHUTDOWN;
             }
             Ok(Event::State(crate::ConnectionState::LoginReady)) => return HXNET_RECV_READY,
-            Ok(Event::State(_)) | Ok(Event::Session(_)) => continue,
+            Ok(Event::State(_)) | Ok(Event::Session(_)) | Ok(Event::DeviceProof(_)) => continue,
             Err(mpsc::error::TryRecvError::Empty) => return HXNET_RECV_EMPTY,
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 // The actor finished without emitting Shutdown (we
@@ -755,11 +755,18 @@ pub type HxnetEventCallback =
     Option<unsafe extern "C" fn(*mut HxnetConnection, *mut HxnetFrame, *mut c_void)>;
 
 /// C-side callback for what the session made of what the server sent
-/// (`Event::Session`), on the GLib main thread. The event is an
-/// `hxsession::Event`, borrowed for the call: the consumer hands it to
-/// Rust that reads it, and keeps nothing.
+/// (`Event::Session`), and how the connect's device proof ended
+/// (`Event::DeviceProof`), on the GLib main thread. The event is a
+/// [`SessionMsg`], borrowed for the call: the consumer hands it to Rust
+/// that reads it, and keeps nothing.
 pub type HxnetSessionCallback =
     Option<unsafe extern "C" fn(*mut HxnetConnection, *const c_void, *mut c_void)>;
+
+/// What [`HxnetSessionCallback`] hands over.
+pub enum SessionMsg<'a> {
+    Session(&'a hxsession::Event),
+    DeviceProof(&'a hxkeys::Proof),
+}
 
 /// C-side per-shutdown callback. Invoked at most once, on the
 /// GLib main thread, when the actor exits. After this callback
@@ -1163,6 +1170,9 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     on_session: HxnetSessionCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
+    // Taken first, so that an open refused below leaves nothing armed
+    // for the next.
+    let device = crate::device::take_armed();
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
             "hxnet",
@@ -1282,6 +1292,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         caps: offered(caps),
         trans,
         proxy,
+        device,
     };
 
     let session = req.session(
@@ -1358,6 +1369,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
     proxy_uri: *const u8,
     proxy_uri_len: usize,
 ) -> *mut HxnetConnection {
+    // A polling open proves nothing: what was armed goes with it.
+    drop(crate::device::take_armed());
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
             "hxnet",
@@ -1446,6 +1459,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         caps: offered(caps),
         trans,
         proxy,
+        device: None,
     };
     let session = req.session(Handled::NONE);
     let lifecycle_session = session.clone();
@@ -1514,6 +1528,9 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
+    // Taken first, so that an open refused below leaves nothing armed
+    // for the next.
+    let device = crate::device::take_armed();
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
             "hxnet",
@@ -1627,6 +1644,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         caps: offered(caps),
         trans,
         proxy,
+        device,
     };
 
     // Wrap the C verify callback in a Rust closure the lifecycle
@@ -1723,6 +1741,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
     verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
+    // A polling open proves nothing: what was armed goes with it.
+    drop(crate::device::take_armed());
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
             "hxnet",
@@ -1820,6 +1840,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         // SOCKS integration test drives through a proxy). Add one here if a
         // proxied-TLS harness path is ever needed.
         proxy: None,
+        device: None,
     };
     let verify_closure: crate::lifecycle::TlsVerifyFn = verify_cert.map(|cb| {
         let ud = SendUserData(user_data);
@@ -1907,6 +1928,9 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     on_session: HxnetSessionCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
+    // Taken first, so that an open refused below leaves nothing armed
+    // for the next.
+    let device = crate::device::take_armed();
     if host.is_null() || host_len == 0 {
         glib::g_critical!("hxnet", "hxnet_connection_open_hope: NULL or empty host");
         return std::ptr::null_mut();
@@ -2069,6 +2093,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         cipher,
         compression,
         proxy,
+        device,
     };
 
     let session = req.session(
@@ -2144,6 +2169,8 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
     compress_alg: *const u8,
     compress_alg_len: usize,
 ) -> *mut HxnetConnection {
+    // A polling open proves nothing: what was armed goes with it.
+    drop(crate::device::take_armed());
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
             "hxnet",
@@ -2287,6 +2314,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         // param. (Only hxnet_connection_open_plaintext_polling does, for
         // the SOCKS integration test.)
         proxy: None,
+        device: None,
     };
     let session = req.session(Handled::NONE);
     let lifecycle_session = session.clone();
@@ -2462,9 +2490,19 @@ fn wire_callback_state_with_on_state(
         }
         Event::Session(ev) => {
             if let Some(on_session) = cb.on_session {
-                let ev: *const hxsession::Event = &ev;
+                let msg = SessionMsg::Session(&ev);
+                let msg: *const SessionMsg = &msg;
                 unsafe {
-                    on_session(cb.handle_ptr, ev.cast(), cb.user_data);
+                    on_session(cb.handle_ptr, msg.cast(), cb.user_data);
+                }
+            }
+        }
+        Event::DeviceProof(proof) => {
+            if let Some(on_session) = cb.on_session {
+                let msg = SessionMsg::DeviceProof(&proof);
+                let msg: *const SessionMsg = &msg;
+                unsafe {
+                    on_session(cb.handle_ptr, msg.cast(), cb.user_data);
                 }
             }
         }
@@ -3073,6 +3111,230 @@ mod tests {
             assert_eq!(hxnet_connection_take_trans(std::ptr::null_mut()), 0);
         }
     }
+
+    /// A device armed for a C open goes with the open that takes it, even
+    /// one refused before it connects, and a polling open's with it: a
+    /// later connect, a reconnect among them, comes back unarmed.
+    #[test]
+    fn an_armed_device_goes_with_the_open_that_took_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let null = std::ptr::null::<u8>();
+        let (host, bad) = (b"127.0.0.1", b"not a proxy");
+        // Refused for its host, or for its proxy where it takes one.
+        type Open<'a> = (&'a str, Box<dyn Fn() -> *mut HxnetConnection + 'a>);
+        let opens: [Open; 9] = unsafe {
+            [
+                (
+                    "plaintext",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext(
+                            null,
+                            0,
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            null,
+                            0,
+                            None,
+                            None,
+                            None,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
+                (
+                    "plaintext, its proxy",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext(
+                            host.as_ptr(),
+                            host.len(),
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            bad.as_ptr(),
+                            bad.len(),
+                            Some(no_event),
+                            Some(no_shutdown),
+                            None,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
+                (
+                    "plaintext polling",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext_polling(
+                            null, 0, 1, null, 0, null, 0, null, 0, 0, 0, 0, 1, null, 0,
+                        )
+                    }),
+                ),
+                (
+                    "plaintext polling, its proxy",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext_polling(
+                            host.as_ptr(),
+                            host.len(),
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            bad.as_ptr(),
+                            bad.len(),
+                        )
+                    }),
+                ),
+                (
+                    "tls",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext_tls(
+                            null,
+                            0,
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            null,
+                            0,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
+                (
+                    "tls, its proxy",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext_tls(
+                            host.as_ptr(),
+                            host.len(),
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            bad.as_ptr(),
+                            bad.len(),
+                            Some(no_event),
+                            Some(no_shutdown),
+                            None,
+                            None,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
+                (
+                    "tls polling",
+                    Box::new(|| {
+                        hxnet_connection_open_plaintext_tls_polling(
+                            null,
+                            0,
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
+                (
+                    "hope",
+                    Box::new(|| {
+                        hxnet_connection_open_hope(
+                            null,
+                            0,
+                            1,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            0,
+                            0,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            null,
+                            0,
+                            None,
+                            None,
+                            None,
+                            None,
+                            std::ptr::null_mut(),
+                        )
+                    }),
+                ),
+                (
+                    "hope polling",
+                    Box::new(|| {
+                        hxnet_connection_open_hope_polling(
+                            null, 0, 1, null, 0, null, 0, null, 0, 0, 0, 0, null, 0, null, 0,
+                        )
+                    }),
+                ),
+            ]
+        };
+        for (what, open) in &opens {
+            crate::device::arm(Some(crate::device::armed_in(dir.path())));
+            assert!(open().is_null(), "{what}: refused");
+            assert!(crate::device::take_armed().is_none(), "{what}: left armed");
+        }
+    }
+
+    unsafe extern "C" fn no_event(_: *mut HxnetConnection, _: *mut HxnetFrame, _: *mut c_void) {}
+    unsafe extern "C" fn no_shutdown(_: *mut HxnetConnection, _: c_int, _: *mut c_void) {}
 
     /// What C asks for goes out as it is unless a build asks for a draft,
     /// so an old server is sent today's bytes; and Replies and Reactions

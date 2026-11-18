@@ -139,6 +139,10 @@ pub enum Event {
     /// so the two arrive in the order the server sent them.
     Session(hxsession::Event),
 
+    /// How proving the connect's device ended, where it had one and the
+    /// server agreed to prove it.
+    DeviceProof(hxkeys::Proof),
+
     /// The actor has stopped. After this event, the channel
     /// closes; the consumer's `recv` returns `None`. The actor
     /// never emits more events after [`Event::Shutdown`].

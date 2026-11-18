@@ -1,0 +1,16 @@
+# A device proof suite account, linked to the suite's identity A.
+name = "device-a"
+password = "device-a"
+
+[access]
+read_chat = true
+send_chat = true
+# The suite tells its sessions apart by nick.
+use_any_name = true
+
+[identity]
+fingerprint = "ka9d5daak9a05qhycpg7mq5h5a6wcxcbv3mc5v25jnhxdcp0g720"
+
+# The suite logs in more often than a person would.
+[extra]
+can_spam = true
