@@ -72,6 +72,7 @@ pub fn config(
         caps,
         handshake_timeout_ms: crate::HANDSHAKE_TIMEOUT_SECS * 1000,
         agreement_wait_ms: 2_000,
+        proof_timeout_ms: 10_000,
         keepalive_ms: 60_000,
         raw: true,
         handled,

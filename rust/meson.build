@@ -190,6 +190,13 @@ rust_sources = files(
   'crates/hxbookmarks/src/legacy.rs',
   'crates/hxbookmarks/src/hostport.rs',
   'crates/hxbookmarks/Cargo.toml',
+  # Device keys and server-key pins, over hl-identity.
+  'crates/hxkeys/src/lib.rs',
+  'crates/hxkeys/src/files.rs',
+  'crates/hxkeys/src/pins.rs',
+  'crates/hxkeys/src/proof.rs',
+  'crates/hxkeys/src/store.rs',
+  'crates/hxkeys/Cargo.toml',
   'crates/hxconfig/src/lib.rs',
   'crates/hxconfig/src/schema.rs',
   'crates/hxconfig/src/fields.rs',
