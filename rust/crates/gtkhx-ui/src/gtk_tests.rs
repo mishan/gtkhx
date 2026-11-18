@@ -29,6 +29,7 @@ fn display_backed() {
     adw::init().expect("libadwaita init");
 
     crate::options_window::tests::check_every_page_builds();
+    crate::options_device_keys::tests::check_device_keys_page();
     crate::conn_tabs::tests::check_strip_indexes_connections();
     crate::conn_tabs::tests::check_live_connection_asks_before_closing();
     crate::conn_tabs::tests::check_wheel_is_wired_to_the_bar();

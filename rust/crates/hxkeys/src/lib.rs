@@ -20,6 +20,7 @@ pub use store::{Device, Listed, Pending, Store};
 
 use std::fmt;
 
+pub use hl_identity::caps;
 pub use hl_identity::handover::Warning;
 pub use hl_identity::{Fingerprint, ServerChallenge};
 

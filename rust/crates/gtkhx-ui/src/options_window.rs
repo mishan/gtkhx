@@ -62,6 +62,13 @@ fn entries() -> Vec<Entry> {
         },
         Entry {
             section: None,
+            name: "device_keys",
+            title: n_("Device Keys"),
+            icon: "dialog-password-symbolic",
+            draw: crate::options::page_device_keys,
+        },
+        Entry {
+            section: None,
             name: "filexfer",
             title: n_("File Transfers"),
             icon: "folder-download-symbolic",
@@ -344,7 +351,10 @@ fn present(page: Option<&str>) {
 
     let content_tv = adw::ToolbarView::new();
     content_tv.add_top_bar(&adw::HeaderBar::new());
-    content_tv.set_content(Some(&stack));
+    // A page's toasts, such as a command copied: the dialog has none of its own.
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&stack));
+    content_tv.set_content(Some(&toasts));
     let content_page = adw::NavigationPage::new(&content_tv, &tr("General"));
 
     let split = adw::NavigationSplitView::new();
@@ -512,7 +522,9 @@ pub(crate) mod tests {
     /// being a `#[test]` of its own — see there for why the crate gets
     /// exactly one.
     pub(crate) fn check_every_page_builds() {
-        for entry in &entries() {
+        // The Device Keys page would read this user's keys; its own test
+        // builds it on a store of its own.
+        for entry in entries().iter().filter(|e| e.name != "device_keys") {
             let page = adw::PreferencesPage::new();
             page.set_title(entry.title);
             (entry.draw)(&page);

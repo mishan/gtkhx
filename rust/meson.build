@@ -98,6 +98,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/icon_picker.rs',
   'crates/gtkhx-ui/src/options.rs',
   'crates/gtkhx-ui/src/options_connections.rs',
+  'crates/gtkhx-ui/src/options_device_keys.rs',
   'crates/gtkhx-ui/src/options_identity.rs',
   'crates/gtkhx-ui/src/options_test_stubs.rs',
   'crates/gtkhx-ui/src/options_voice.rs',

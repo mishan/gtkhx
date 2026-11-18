@@ -57,6 +57,7 @@ rust/crates/gtkhx-ui/src/news_pictures.rs
 rust/crates/gtkhx-ui/src/news_render.rs
 rust/crates/gtkhx-ui/src/options.rs
 rust/crates/gtkhx-ui/src/options_connections.rs
+rust/crates/gtkhx-ui/src/options_device_keys.rs
 rust/crates/gtkhx-ui/src/options_identity.rs
 rust/crates/gtkhx-ui/src/options_voice.rs
 rust/crates/gtkhx-ui/src/options_window.rs

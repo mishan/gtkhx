@@ -948,6 +948,11 @@ pub(crate) fn page_identity(page: &adw::PreferencesPage) {
     crate::options_identity::build(page);
 }
 
+/// The Device Keys page, from `options_device_keys`.
+pub(crate) fn page_device_keys(page: &adw::PreferencesPage) {
+    crate::options_device_keys::build(page);
+}
+
 /// The Connections page, from `options_connections`.
 pub(crate) fn page_connections(page: &adw::PreferencesPage) {
     crate::options_connections::build(page);
