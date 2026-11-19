@@ -75,6 +75,7 @@ pub(crate) fn install() {
                 host,
                 warning,
                 challenge,
+                pinned,
             } = p
             {
                 crate::key_changed::ask(
@@ -83,6 +84,7 @@ pub(crate) fn install() {
                     host.clone(),
                     (**challenge).clone(),
                     warning.clone(),
+                    pinned.as_deref().cloned(),
                 );
             }
         });

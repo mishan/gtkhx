@@ -48,15 +48,21 @@ fn settle(done: u32) {
     }
 }
 
-/// `then` warned of against `first` pinned for `HOST` in a fresh `pins`.
-fn warned(pins: &std::path::Path, first: &ServerChallenge, then: &ServerChallenge) -> Warning {
+/// `then` warned of against `first` pinned for `HOST` in `pins`, and the
+/// pin it was checked against.
+fn warned(
+    pins: &std::path::Path,
+    first: &ServerChallenge,
+    then: &ServerChallenge,
+) -> (Warning, Option<Pin>) {
     let none: &[Vec<u8>] = &[];
     Pins::load(pins)
         .unwrap()
         .check(HOST, first, none, now())
         .unwrap();
-    match Pins::load(pins).unwrap().check(HOST, then, none, now()) {
-        Ok(Outcome::Warn(w)) => w,
+    let mut checking = Pins::load(pins).unwrap();
+    match checking.check(HOST, then, none, now()) {
+        Ok(Outcome::Warn(w)) => (w, checking.pinned(HOST).cloned()),
         other => panic!("{other:?}"),
     }
 }
@@ -100,7 +106,7 @@ pub(crate) fn check_key_changed() {
     for (heading, first, then, lines, trust) in cases {
         let dir = tempfile::tempdir().unwrap();
         let pins = dir.path().join("server-keys.toml");
-        let warning = warned(&pins, &first, &then);
+        let (warning, shown) = warned(&pins, &first, &then);
         let was = pinned(&pins);
 
         let d = ask(
@@ -109,6 +115,7 @@ pub(crate) fn check_key_changed() {
             HOST.into(),
             then.clone(),
             warning.clone(),
+            shown.clone(),
         );
         assert_eq!(d.heading().as_deref(), Some(heading));
         assert_eq!(d.response_label("trust"), trust, "{heading}");
@@ -132,7 +139,14 @@ pub(crate) fn check_key_changed() {
         );
         assert_eq!(pinned(&pins), was);
 
-        let d = ask(None, pins.clone(), HOST.into(), then.clone(), warning);
+        let d = ask(
+            None,
+            pins.clone(),
+            HOST.into(),
+            then.clone(),
+            warning,
+            shown,
+        );
         let done = DONE.get();
         d.emit_by_name::<()>("response", &[&"trust"]);
         settle(done);
@@ -147,15 +161,16 @@ pub(crate) fn check_key_changed() {
 }
 
 /// A later change to a host asked about is asked about in the same dialog,
-/// and trusting pins that one; a pin changed meanwhile is not written over.
+/// and trusting pins that one; a pin changed after the change was checked
+/// against it, before the dialog or during it, is not written over.
 pub(crate) fn check_one_host_one_dialog() {
     let dir = tempfile::tempdir().unwrap();
     let pins = dir.path().join("server-keys.toml");
     let (c8, c9, c10) = (challenge(8, None), challenge(9, None), challenge(10, None));
-    let w9 = warned(&pins, &c8, &c9);
-    let first = ask(None, pins.clone(), HOST.into(), c9, w9.clone());
-    let w10 = warned(&pins, &c8, &c10);
-    let later = ask(None, pins.clone(), HOST.into(), c10.clone(), w10);
+    let (w9, was) = warned(&pins, &c8, &c9);
+    let first = ask(None, pins.clone(), HOST.into(), c9, w9, was);
+    let (w10, was) = warned(&pins, &c8, &c10);
+    let later = ask(None, pins.clone(), HOST.into(), c10.clone(), w10, was);
     assert_eq!(first, later, "one dialog");
     assert!(later.body().contains(&key(10)), "{}", later.body());
     let done = DONE.get();
@@ -163,24 +178,36 @@ pub(crate) fn check_one_host_one_dialog() {
     settle(done);
     assert_eq!(pinned(&pins).0, c10.server_key, "the later change pinned");
 
-    let dir = tempfile::tempdir().unwrap();
-    let pins = dir.path().join("server-keys.toml");
-    let c9 = challenge(9, None);
-    let w9 = warned(&pins, &c8, &c9);
-    let d = ask(None, pins.clone(), HOST.into(), c9, w9.clone());
     let none: &[Vec<u8>] = &[];
-    let mut meanwhile = Pins::load(&pins).unwrap();
-    let shown = meanwhile.pinned(HOST).cloned();
-    meanwhile
-        .accept(HOST, shown.as_ref(), &c10, none, &w9)
-        .unwrap()
-        .unwrap();
-    let done = DONE.get();
-    d.emit_by_name::<()>("response", &[&"trust"]);
-    settle(done);
-    assert_eq!(
-        pinned(&pins).0,
-        c10.server_key,
-        "the pin made meanwhile kept"
-    );
+    for dialog_first in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let pins = dir.path().join("server-keys.toml");
+        let c9 = challenge(9, None);
+        let (w9, was) = warned(&pins, &c8, &c9);
+        let raise = || {
+            ask(
+                None,
+                pins.clone(),
+                HOST.into(),
+                c9.clone(),
+                w9.clone(),
+                was.clone(),
+            )
+        };
+        let d = dialog_first.then(raise);
+        Pins::load(&pins)
+            .unwrap()
+            .accept(HOST, was.as_ref(), &c10, none, &w9)
+            .unwrap()
+            .unwrap();
+        let d = d.unwrap_or_else(raise);
+        let done = DONE.get();
+        d.emit_by_name::<()>("response", &[&"trust"]);
+        settle(done);
+        assert_eq!(
+            pinned(&pins).0,
+            c10.server_key,
+            "the pin made meanwhile kept, raised first: {dialog_first}"
+        );
+    }
 }

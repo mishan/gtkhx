@@ -40,11 +40,13 @@ pub enum Proof {
     /// The server's key for `host`, or with `Warning::Recommitted` its
     /// commitment to the key after it, is not the one pinned for it:
     /// nothing was signed. No served handovers are followed yet. The user
-    /// may trust `challenge`'s key instead, with [`Pins::accept`].
+    /// may trust `challenge`'s key instead, with [`Pins::accept`] against
+    /// `pinned`, the pin it was checked against.
     KeyChanged {
         host: String,
         warning: Warning,
         challenge: Box<ServerChallenge>,
+        pinned: Option<Box<Pin>>,
     },
     /// Nothing was signed, for a reason of this side's: `why`.
     NotProved { why: String },

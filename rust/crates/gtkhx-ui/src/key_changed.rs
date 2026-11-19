@@ -37,19 +37,18 @@ thread_local! {
     static ASKING: RefCell<HashMap<String, Asking>> = RefCell::new(HashMap::new());
 }
 
-/// Ask whether to trust `challenge`'s key for `host`, whose pin in `pins`
-/// `warning` says it is not, and pin it if so, unless the pin has changed
-/// meanwhile. A host already asked about is asked about this change instead.
+/// Ask whether to trust `challenge`'s key for `host`, which `warning` says
+/// is not `was`, the pin in `pins` it was checked against, and pin it if so,
+/// unless the pin has changed since. A host already asked about is asked
+/// about this change instead.
 pub(crate) fn ask(
     parent: Option<&gtk::Widget>,
     pins: PathBuf,
     host: String,
     challenge: ServerChallenge,
     warning: Warning,
+    was: Option<Pin>,
 ) -> adw::AlertDialog {
-    let was = Pins::load(&pins)
-        .ok()
-        .and_then(|p| p.pinned(&host).cloned());
     let raised = Raised {
         challenge,
         warning,

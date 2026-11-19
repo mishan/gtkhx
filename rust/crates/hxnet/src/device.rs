@@ -129,17 +129,21 @@ impl Challenge {
         let not = |why: String| Proof::NotProved { why };
         let c = read_challenge(&self.bytes, &self.host, self.now)
             .map_err(|e| not(format!("the server's challenge: {e}")))?;
-        let checked = Pins::load(&self.pins)
-            .and_then(|mut pins| pins.check(&self.host, &c, &[] as &[Vec<u8>], self.now))
+        let mut pins = Pins::load(&self.pins).map_err(|e| not(e.to_string()))?;
+        let checked = pins
+            .check(&self.host, &c, &[] as &[Vec<u8>], self.now)
             .map_err(|e| not(e.to_string()))?;
         let trusted = match checked {
             Outcome::Pinned(t) | Outcome::Kept(t) | Outcome::Followed(t) => t,
             Outcome::Warn(warning) => {
+                // As the check read it, under its lock.
+                let pinned = pins.pinned(&self.host).cloned().map(Box::new);
                 return Err(Proof::KeyChanged {
                     host: self.host,
                     warning,
                     challenge: Box::new(c),
-                })
+                    pinned,
+                });
             }
         };
         let key = self.device.key().map_err(|e| not(e.to_string()))?;

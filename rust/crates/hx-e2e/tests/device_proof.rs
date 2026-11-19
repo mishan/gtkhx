@@ -272,18 +272,30 @@ fn a_changed_key_once_trusted_is_proved_with() {
         ("device-a", &nick()),
         A,
     );
-    let (host, warning, challenge) = match changed.proofs() {
+    let (host, warning, challenge, was) = match changed.proofs() {
         [Proof::KeyChanged {
             host,
             warning,
             challenge,
-        }] => (host.clone(), warning.clone(), challenge.clone()),
+            pinned,
+        }] => (
+            host.clone(),
+            warning.clone(),
+            challenge.clone(),
+            pinned.clone(),
+        ),
         other => panic!("{other:?}"),
     };
     drop(changed);
-    let mut kept = hxkeys::Pins::load(&pins).unwrap();
-    let was = kept.pinned(&host).cloned();
-    kept.accept(&host, was.as_ref(), &challenge, &[] as &[Vec<u8>], &warning)
+    hxkeys::Pins::load(&pins)
+        .unwrap()
+        .accept(
+            &host,
+            was.as_deref(),
+            &challenge,
+            &[] as &[Vec<u8>],
+            &warning,
+        )
         .unwrap()
         .unwrap();
     let n = nick();
