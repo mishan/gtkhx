@@ -28,8 +28,10 @@ pub mod bookmark_store;
 pub mod chat_find;
 pub mod cipher_vocab;
 pub mod connect;
+mod device_pick;
 mod device_proof;
 mod identity;
+mod key_changed;
 mod shortcuts;
 // the Settings form: the window and its page table (options_window), the
 // shared row builders and the pages themselves (options), and the two pages

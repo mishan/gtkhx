@@ -23,7 +23,7 @@
 
 use crate::cipher_vocab;
 use crate::ffi as cffi;
-use crate::tr::{tr, tr1};
+use crate::tr::{tr, tr1, tr_argv};
 use crate::{cs, cstr};
 use gtk4 as gtk;
 use libadwaita as adw;
@@ -101,6 +101,7 @@ struct ConnectUi {
     compress: Option<adw::ComboRow>,
     cipher: Option<adw::ComboRow>,
     tls: Option<adw::SwitchRow>,
+    device: Option<crate::device_pick::Picker>,
 }
 
 /// Parameters of a connection's last connect, surviving past hx_htlc_close.
@@ -117,6 +118,8 @@ struct LastConn {
     compress: u8,
     cipher: u8,
     tls: u8,
+    /// The identity whose device proved, or tried to.
+    device_identity: Option<String>,
 }
 
 thread_local! {
@@ -146,6 +149,7 @@ pub(crate) fn note_tracker_connect(server: &str, port: u16, secure: bool, cipher
         compress: 0,
         cipher,
         tls: tls.into(),
+        device_identity: None,
     };
     note(dock::active_key(), params);
 }
@@ -174,6 +178,7 @@ pub unsafe extern "C" fn connect_note_server(
         compress: 0,
         cipher: 0,
         tls: 0,
+        device_identity: None,
     };
     note(dock::conn_key(htlc), params);
 }
@@ -248,7 +253,8 @@ fn entry_matches(bm: &Bookmark, server: &str, port: u16) -> bool {
     bm.server.trim().eq_ignore_ascii_case(server.trim()) && bm_port == port
 }
 
-/// Resolve and arm the identity override for this connect.
+/// Resolve and arm the identity override for this connect, and give back
+/// the saved connections it was resolved from.
 ///
 /// Called from the one funnel every connect path passes through, immediately
 /// before the connect itself — `hx_identity_apply` consumes the override in
@@ -258,18 +264,19 @@ fn entry_matches(bm: &Bookmark, server: &str, port: u16) -> bool {
 /// Arming with an empty nick and `-1` is not a no-op: it is how a transient
 /// connect *clears* any override left armed by an earlier path, so the global
 /// default applies.
-fn arm_identity(identity: Identity, server: &str, port: u16) {
-    let resolved: Option<Bookmark> = match identity {
-        Identity::Entry(bm) => Some(bm.clone()),
+fn arm_identity(identity: Identity, server: &str, port: u16) -> Vec<Bookmark> {
+    let saved: Vec<Bookmark> = match identity {
+        Identity::Entry(bm) => vec![bm.clone()],
         // A read-only lookup, so an unreadable store degrades to "no saved
         // connection matches" — the global default — rather than refusing to
         // connect over a settings-file problem.
         Identity::ByEndpoint => bookmark_store::load()
             .bookmarks
             .into_iter()
-            .find(|bm| entry_matches(bm, server, port)),
+            .filter(|bm| entry_matches(bm, server, port))
+            .collect(),
     };
-    let (nick, icon) = match &resolved {
+    let (nick, icon) = match saved.first() {
         Some(bm) => (
             bm.nick.clone().unwrap_or_default(),
             bm.icon.map(|i| i as c_int).unwrap_or(-1),
@@ -277,6 +284,32 @@ fn arm_identity(identity: Identity, server: &str, port: u16) {
         None => (String::new(), -1),
     };
     unsafe { hx_identity_set_pending_override(cs(&nick).as_ptr(), icon) };
+    saved
+}
+
+/// Which device key a connect proves with. Proving is chosen where the
+/// device is: a saved connection, or the Connect dialog. A link or a
+/// `--server` names an address, never which identity to be there.
+enum Prove {
+    /// The one the saved connection [`Identity`] resolves to names.
+    AsSaved,
+    /// This identity's, or none: the Connect dialog's choice, the last
+    /// connect's, or none for an address alone.
+    With(Option<String>),
+}
+
+/// The device `saved` proves with, for a connect logging in as `login`
+/// where it says: none where no saved connection or more than one is for
+/// its address, or where it logs in as another account than the one saved,
+/// a guest's included.
+fn saved_device(saved: &[Bookmark], login: Option<&str>) -> Option<String> {
+    let [bm] = saved else {
+        return None;
+    };
+    match login {
+        Some(l) if l != bm.login => None,
+        _ => bm.device_identity.clone(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -303,6 +336,7 @@ fn connect_with_args(
     cipher: u8,
     tls: u8,
     identity: Identity,
+    prove: Prove,
     target: Target,
 ) {
     let (mut secure, mut compress, mut cipher) = (secure, compress, cipher);
@@ -339,7 +373,11 @@ fn connect_with_args(
         .map(|c| c.as_ptr())
         .unwrap_or(std::ptr::null());
 
-    arm_identity(identity, server, port);
+    let saved = arm_identity(identity, server, port);
+    let device = match prove {
+        Prove::AsSaved => saved_device(&saved, None),
+        Prove::With(device) => device,
+    };
 
     // Connecting while already connected opens a *new* connection rather than
     // replacing this one. `hx_connect` would otherwise disconnect first —
@@ -373,24 +411,36 @@ fn connect_with_args(
             compress,
             cipher,
             tls,
+            device_identity: device.clone(),
         },
     );
 
     let cserver = cs(server);
     let clogin = cs(login);
     let cpass = cs(pass);
-    unsafe {
-        gtkhx_connect_apply(
-            sess,
-            cserver.as_ptr(),
-            port,
-            clogin.as_ptr(),
-            cpass.as_ptr(),
-            secure as c_char,
-            compress_name,
-            cipher_name,
-            tls as c_char,
-        );
+    let unarmed = crate::device_pick::around(
+        &crate::options_device_keys::store_root(),
+        device.as_deref(),
+        server,
+        port,
+        || unsafe {
+            gtkhx_connect_apply(
+                sess,
+                cserver.as_ptr(),
+                port,
+                clogin.as_ptr(),
+                cpass.as_ptr(),
+                secure as c_char,
+                compress_name,
+                cipher_name,
+                tls as c_char,
+            );
+        },
+    )
+    .err();
+    if let (Some(why), false) = (unarmed, sess.is_null()) {
+        let htlc = unsafe { gtkhx_session_htlc(sess) };
+        crate::device_proof::say(htlc, &tr_argv("device not proved: %s", &[&why]));
     }
 }
 
@@ -416,6 +466,7 @@ pub extern "C" fn connect_reconnect_last() {
                 // Reconnecting to a saved server should look the same as
                 // connecting to it did, nickname included.
                 Identity::ByEndpoint,
+                Prove::With(lc.device_identity.clone()),
                 // The one path that means *this* connection: the banner
                 // belongs to the connection that just dropped, and putting its
                 // server back in a new tab beside the dead one would be a
@@ -684,6 +735,7 @@ fn server_connect(sess: *mut c_void) {
         cipher,
         tls,
         Identity::ByEndpoint,
+        Prove::With(w.device.as_ref().and_then(|p| p.chosen())),
         Target::NewTabIfBusy,
     );
 
@@ -691,6 +743,28 @@ fn server_connect(sess: *mut c_void) {
         dlg.close();
     }
     UI.with_borrow_mut(|ui| *ui = ConnectUi::default());
+}
+
+/// The form's address or login changed: choose the device the saved
+/// connection for them proves with, or none.
+fn choose_saved_device() {
+    let w = widgets();
+    let (Some(address), Some(port), Some(login), Some(device)) =
+        (w.address, w.port, w.login, w.device)
+    else {
+        return;
+    };
+    let server = address.text();
+    let port = match port.text().trim() {
+        "" => 5500,
+        p => atoi_port(p),
+    };
+    let saved: Vec<Bookmark> = bookmark_store::load()
+        .bookmarks
+        .into_iter()
+        .filter(|bm| entry_matches(bm, &server, port))
+        .collect();
+    device.choose(saved_device(&saved, Some(&login.text())).as_deref());
 }
 
 /// Build a NONE-prefixed GtkStringList from a cipher_vocab dropdown model.
@@ -773,6 +847,11 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
     password.set_title(&tr("Password"));
     password.set_activates_default(true);
     account_grp.add(&password);
+    let device = crate::device_pick::Picker::new(&crate::options_device_keys::store_root());
+    account_grp.add(&device.row);
+    for row in [&address, &port, &login] {
+        row.connect_changed(|_| choose_saved_device());
+    }
     content.append(&account_grp);
 
     // --- Connection group ---
@@ -842,6 +921,7 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
             compress: Some(compress.clone()),
             cipher: Some(cipher.clone()),
             tls: Some(tls.clone()),
+            device: Some(device.clone()),
         };
     });
 
@@ -862,6 +942,7 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
                 lc.cipher,
                 lc.tls,
             );
+            device.choose(lc.device_identity.as_deref());
         }
     }
 
@@ -914,6 +995,7 @@ fn save_bookmark_from_form(name: &str) {
         // Carry both across rather than defaulting them away.
         nick: existing.as_ref().and_then(|b| b.nick.clone()),
         icon: existing.as_ref().and_then(|b| b.icon),
+        device_identity: w.device.as_ref().and_then(|p| p.chosen()),
     };
 
     match bookmark_store::upsert(bm) {
@@ -1046,6 +1128,7 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
         // The user picked this entry by name, so it is authoritative even if
         // another entry happens to point at the same address.
         Identity::Entry(&bm),
+        Prove::AsSaved,
         Target::NewTabIfBusy,
     );
 }
@@ -1081,6 +1164,9 @@ fn open_bookmark_preload(name: &str) {
         cipher_byte,
         bm.tls as u8,
     );
+    if let Some(p) = widgets().device {
+        p.choose(bm.device_identity.as_deref());
+    }
 }
 
 /// `void connect_bookmark_name(char *name)` — open the dialog, then preload
@@ -1148,6 +1234,7 @@ pub unsafe extern "C" fn connect_open_server(host: *const c_char, port: u16, log
         0,
         0,
         Identity::ByEndpoint,
+        Prove::With(None),
         Target::NewTabIfBusy,
     );
 }
@@ -1184,6 +1271,7 @@ pub unsafe extern "C" fn connect_open_hotline_url(url: *const c_char) -> glib::f
         // be one this client has saved, it is that server and keeps its
         // nickname.
         Identity::ByEndpoint,
+        Prove::With(None),
         Target::NewTabIfBusy,
     );
     glib::ffi::GTRUE
@@ -1311,8 +1399,38 @@ unsafe fn set_file_error(err: *mut *mut glib::ffi::GError, code: c_int, msg: &st
 
 #[cfg(test)]
 mod tests {
-    use super::entry_matches;
+    use super::{entry_matches, saved_device};
     use hxbookmarks::Bookmark;
+
+    /// A saved connection proves with its device for a connect logging in as
+    /// it does or saying nothing of its login; one logging in as another, a
+    /// guest included, or an address two saved connections share, proves
+    /// with none.
+    #[test]
+    fn a_saved_device_proves_only_for_its_own_account() {
+        let saved = |login: &str, device: &str| Bookmark {
+            login: login.into(),
+            device_identity: Some(device.into()),
+            ..Default::default()
+        };
+        let alice = saved("alice", "A");
+        let cases: [(&[Bookmark], Option<&str>, Option<&str>); 6] = [
+            (&[], None, None),
+            (std::slice::from_ref(&alice), None, Some("A")),
+            (std::slice::from_ref(&alice), Some(""), None),
+            (std::slice::from_ref(&alice), Some("alice"), Some("A")),
+            (std::slice::from_ref(&alice), Some("bob"), None),
+            (&[alice.clone(), saved("alice", "B")], None, None),
+        ];
+        for (saved, login, want) in cases {
+            assert_eq!(
+                saved_device(saved, login).as_deref(),
+                want,
+                "{} saved, as {login:?}",
+                saved.len()
+            );
+        }
+    }
 
     fn entry(server: &str, port: &str) -> Bookmark {
         Bookmark {

@@ -27,7 +27,7 @@ extern "C" {
 }
 
 /// `$XDG_CONFIG_HOME/gtkhx` (honours `GTKHX_PATH`), from the C resolver.
-fn config_dir() -> PathBuf {
+pub(crate) fn config_dir() -> PathBuf {
     PathBuf::from(unsafe { cstr(gtkhx_config_dir()) })
 }
 

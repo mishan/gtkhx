@@ -30,6 +30,11 @@ fn display_backed() {
 
     crate::options_window::tests::check_every_page_builds();
     crate::options_device_keys::tests::check_device_keys_page();
+    crate::device_pick::tests::check_picker();
+    crate::options_connections::tests::check_editor_keeps_its_device();
+    crate::key_changed::tests::check_key_changed();
+    crate::key_changed::tests::check_one_host_one_dialog();
+    crate::encryption_lock::tests::check_proved_badge();
     crate::conn_tabs::tests::check_strip_indexes_connections();
     crate::conn_tabs::tests::check_live_connection_asks_before_closing();
     crate::conn_tabs::tests::check_wheel_is_wired_to_the_bar();

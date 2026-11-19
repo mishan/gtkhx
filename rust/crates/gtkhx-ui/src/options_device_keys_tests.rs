@@ -16,7 +16,12 @@ fn shown() -> adw::AlertDialog {
 
 /// An hlid home in `dir` holding a device of `name`'s identity, certified
 /// with `caps`.
-fn hlid_home(dir: &Path, (seed, device): (u8, u8), name: &str, caps: Option<u64>) -> PathBuf {
+pub(crate) fn hlid_home(
+    dir: &Path,
+    (seed, device): (u8, u8),
+    name: &str,
+    caps: Option<u64>,
+) -> PathBuf {
     let id = IdentityKey::from_seed(&[seed; 32]);
     let dev = DeviceKey::from_seed(&[device; 32]);
     let home = dir.join(format!("hlid-{seed}-{device}"));

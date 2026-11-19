@@ -20,18 +20,46 @@ pub struct Armed {
     pub pins: PathBuf,
 }
 
+/// A device armed for the connect to `host` and `port`.
+#[derive(Debug)]
+pub struct Arming {
+    pub host: String,
+    pub port: u16,
+    pub armed: Armed,
+}
+
+impl Arming {
+    /// The device, for an open to `host` and `port`: none for another,
+    /// which is not the connect it was armed for.
+    pub(crate) fn to(self, host: &str, port: u16) -> Option<Armed> {
+        (self.host == host && self.port == port).then_some(self.armed)
+    }
+}
+
 thread_local! {
-    static ARMED: RefCell<Option<Armed>> = const { RefCell::new(None) };
+    static ARMED: RefCell<Option<Arming>> = const { RefCell::new(None) };
 }
 
-/// Prove with `armed` on the next connect made on this thread, through
-/// the C ABI's opens; `None` disarms.
-pub fn arm(armed: Option<Armed>) {
-    ARMED.with_borrow_mut(|a| *a = armed);
+/// Prove with `armed` on the next connect made on this thread through the
+/// C ABI's opens, if it goes to `host` and `port`.
+pub fn arm(host: &str, port: u16, armed: Armed) {
+    let arming = Arming {
+        host: host.to_owned(),
+        port,
+        armed,
+    };
+    ARMED.with_borrow_mut(|a| *a = Some(arming));
 }
 
-/// What [`arm`] left for this connect, taken.
-pub(crate) fn take_armed() -> Option<Armed> {
+/// Leave nothing armed for the next connect.
+pub fn disarm() {
+    ARMED.with_borrow_mut(|a| *a = None);
+}
+
+/// What [`arm`] left for this connect, taken: the opens', and public for
+/// a caller's tests alone.
+#[doc(hidden)]
+pub fn take_armed() -> Option<Arming> {
     ARMED.with_borrow_mut(Option::take)
 }
 
@@ -101,16 +129,21 @@ impl Challenge {
         let not = |why: String| Proof::NotProved { why };
         let c = read_challenge(&self.bytes, &self.host, self.now)
             .map_err(|e| not(format!("the server's challenge: {e}")))?;
-        let checked = Pins::load(&self.pins)
-            .and_then(|mut pins| pins.check(&self.host, &c, &[] as &[Vec<u8>], self.now))
+        let mut pins = Pins::load(&self.pins).map_err(|e| not(e.to_string()))?;
+        let checked = pins
+            .check(&self.host, &c, &[] as &[Vec<u8>], self.now)
             .map_err(|e| not(e.to_string()))?;
         let trusted = match checked {
             Outcome::Pinned(t) | Outcome::Kept(t) | Outcome::Followed(t) => t,
             Outcome::Warn(warning) => {
+                // As the check read it, under its lock.
+                let pinned = pins.pinned(&self.host).cloned().map(Box::new);
                 return Err(Proof::KeyChanged {
                     host: self.host,
                     warning,
-                })
+                    challenge: Box::new(c),
+                    pinned,
+                });
             }
         };
         let key = self.device.key().map_err(|e| not(e.to_string()))?;
@@ -280,6 +313,21 @@ mod tests {
     use hxsession::request::Request;
 
     const TEXT: u64 = hxsession::cap::TEXT_ENCODING;
+
+    /// A device armed for one connect goes to no other host or port.
+    #[test]
+    fn a_device_armed_for_one_connect_goes_to_no_other() {
+        let dir = tempfile::tempdir().unwrap();
+        for (host, port, goes) in [
+            ("hl.example", 5500, true),
+            ("other.example", 5500, false),
+            ("hl.example", 5600, false),
+        ] {
+            arm("hl.example", 5500, armed_in(dir.path()));
+            let to = take_armed().unwrap().to(host, port);
+            assert_eq!(to.is_some(), goes, "{host}:{port}");
+        }
+    }
 
     /// Only a connect with a device offers bit 14, whatever its caller asked.
     #[test]

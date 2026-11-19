@@ -1279,7 +1279,10 @@ mod tests {
                     }
                     Case::ForAnotherHost => matches!(p, hxkeys::Proof::NotProved { .. }),
                     Case::KeyChanged => {
-                        matches!(&p, hxkeys::Proof::KeyChanged { host, .. } if host == ASKED)
+                        matches!(&p, hxkeys::Proof::KeyChanged { host, challenge, pinned: Some(was), .. }
+                            if host == ASKED
+                                && challenge.server_key == key.public()
+                                && was.key == pinned.public())
                     }
                 };
                 assert!(ok, "{case:?}: {p:?}");

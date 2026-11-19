@@ -240,13 +240,14 @@ branch of its own:
    there first. Then: the key and its certificate, enrolled or imported from `hlid`; the
    proof between the login reply and Agreed, before the user list; and the server's key
    pinned at first contact. Logging in by identity then no longer needs `hlid tunnel`.
-   *Under way.* The device store and the pins (`hxkeys`), and the proof in the login
-   dance, with a line in chat saying how it ended
-   ([docs/rust/networking.md](docs/rust/networking.md), "A device proved"). Still to
-   come: the device picker on bookmarks, arming each C open, since a reconnect comes back
-   unarmed; the Device keys settings; the prompt for a server key that changed; and the
-   end-to-end check that the proof is in before the first announcement, which comes with
-   the hxd-ng change that announces a bit-14 login from a 1.5+ client only at 121 or 304.
+   *Under way.* The device store and the pins (`hxkeys`), and the proof in the login dance,
+   with a line in chat saying how it ended
+   ([docs/rust/networking.md](docs/rust/networking.md), "A device proved"); the Device Keys
+   settings; a device key chosen in the Connect dialog and on a saved connection and armed
+   for each connect, a badge for a connection proved, and the prompt for a server key that
+   changed. Still to come: the end-to-end check that the proof is in before the first
+   announcement, which comes with the hxd-ng change that announces a bit-14 login from a
+   1.5+ client only at 121 or 304.
 5. **Portable friendships** (bit 15, Present Friendships and Get Friendships): friendships
    kept, presented at login, withdrawn, and followed through an identity's rotation.
 

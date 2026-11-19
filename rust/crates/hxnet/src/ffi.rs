@@ -63,8 +63,10 @@
 //! HxnetConnection pointer ever needs to live on more than one
 //! thread.
 
+use std::cell::OnceCell;
 use std::ffi::c_void;
 use std::os::raw::{c_int, c_uint};
+use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use hxbridge::runtime::Runtime;
@@ -118,6 +120,8 @@ pub struct HxnetConnection {
     /// Filled once a TLS handshake completes and its certificate is trusted;
     /// empty on any other transport.
     tls: Arc<OnceLock<crate::tls::Negotiated>>,
+    /// How the connection's device proof ended, once the view is told.
+    proof: Rc<OnceCell<hxkeys::Proof>>,
 }
 
 /// Callback-mode FFI state. Holds the tokio→async_channel pump
@@ -625,6 +629,16 @@ pub unsafe fn connection_encryption(handle: *const HxnetConnection) -> Option<En
         hxhope::Cipher::Blowfish => Some(Encryption::Hope("Blowfish")),
         hxhope::Cipher::ChaCha20Poly1305 => Some(Encryption::Hope("ChaCha20-Poly1305")),
     }
+}
+
+/// How `handle`'s device proof ended, once it has; None for a NULL
+/// handle or a polling one.
+///
+/// # Safety
+///
+/// `handle` is NULL or valid, and this runs on the GLib main thread.
+pub unsafe fn connection_proof(handle: *const HxnetConnection) -> Option<hxkeys::Proof> {
+    handle.as_ref()?.proof.get().cloned()
 }
 
 /// The capabilities the login agreed, of those offered: what the C
@@ -1283,6 +1297,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
+    let device = device.and_then(|a| a.to(&host_str, port));
     let req = crate::lifecycle::PlaintextOpenRequest {
         host: host_str,
         port,
@@ -1478,6 +1493,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         _join: join,
         session: Some(session),
         tls: Default::default(),
+        proof: Default::default(),
     });
     Box::into_raw(handle)
 }
@@ -1635,6 +1651,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
 
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
+    let device = device.and_then(|a| a.to(&host_str, port));
     let req = crate::lifecycle::PlaintextOpenRequest {
         host: host_str,
         port,
@@ -1877,6 +1894,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         _join: join,
         session: Some(session),
         tls,
+        proof: Default::default(),
     });
     Box::into_raw(handle)
 }
@@ -2083,6 +2101,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
 
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
+    let device = device.and_then(|a| a.to(&host_str, port));
     let req = crate::lifecycle::HopeOpenRequest {
         host: host_str,
         port,
@@ -2333,6 +2352,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         _join: join,
         session: Some(session),
         tls: Default::default(),
+        proof: Default::default(),
     });
     Box::into_raw(handle)
 }
@@ -2447,6 +2467,7 @@ fn wire_callback_state_with_on_state(
         }
     };
 
+    let kept: Rc<OnceCell<hxkeys::Proof>> = Default::default();
     let handle_box = Box::new(HxnetConnection {
         cmd,
         events: None,
@@ -2454,6 +2475,7 @@ fn wire_callback_state_with_on_state(
         _join: join,
         session,
         tls: Default::default(),
+        proof: kept.clone(),
     });
     let handle_ptr = Box::into_raw(handle_box);
 
@@ -2500,6 +2522,7 @@ fn wire_callback_state_with_on_state(
             }
         }
         Event::DeviceProof(proof) => {
+            let _ = kept.set(proof.clone());
             if let Some(on_session) = cb.on_session {
                 let msg = SessionMsg::DeviceProof(&proof);
                 let msg: *const SessionMsg = &msg;
@@ -3343,10 +3366,47 @@ mod tests {
             ]
         };
         for (what, open) in &opens {
-            crate::device::arm(Some(crate::device::armed_in(dir.path())));
+            crate::device::arm("127.0.0.1", 1, crate::device::armed_in(dir.path()));
             assert!(open().is_null(), "{what}: refused");
             assert!(crate::device::take_armed().is_none(), "{what}: left armed");
         }
+    }
+
+    /// How a connection's proof ended is kept with it once told, for the
+    /// view to read back.
+    #[test]
+    fn a_connection_keeps_how_its_proof_ended() {
+        let rt = Runtime::global();
+        let (cmd, events, _cmds, tell) = Connection::make_channels();
+        let join = rt.handle().spawn(async {});
+        let h = wire_callback_state_with_on_state(
+            rt,
+            cmd,
+            events,
+            join,
+            Some(no_event),
+            Some(no_shutdown),
+            None,
+            None,
+            std::ptr::null_mut(),
+            None,
+        );
+        assert!(unsafe { connection_proof(h) }.is_none(), "none yet");
+        let fp = hxkeys::Fingerprint([7; 32]);
+        let proved = hxkeys::Proof::Proved {
+            identity: fp,
+            device: fp,
+            name: "alice".into(),
+        };
+        tell.blocking_send(Event::DeviceProof(proved.clone()))
+            .unwrap();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while unsafe { connection_proof(h) }.is_none() {
+            assert!(std::time::Instant::now() < until, "never told");
+            glib::MainContext::default().iteration(false);
+        }
+        assert_eq!(unsafe { connection_proof(h) }, Some(proved));
+        unsafe { hxnet_connection_destroy(h) };
     }
 
     unsafe extern "C" fn no_event(_: *mut HxnetConnection, _: *mut HxnetFrame, _: *mut c_void) {}

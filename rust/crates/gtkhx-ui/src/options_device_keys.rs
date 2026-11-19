@@ -26,11 +26,24 @@ const BUNDLE_MAX: u64 = 64 * 1024;
 /// Where the keys are kept: beside the rest of a profile given with
 /// `GTKHX_PATH`, so that one stays whole, and otherwise in the user's
 /// data directory, apart from the settings a person may copy around.
+#[cfg(not(test))]
 pub(crate) fn store_root() -> PathBuf {
     match std::env::var_os("GTKHX_PATH").filter(|p| !p.is_empty()) {
         Some(profile) => PathBuf::from(profile).join("device-keys"),
         None => glib::user_data_dir().join("gtkhx").join("device-keys"),
     }
+}
+
+/// The server keys pinned for the devices kept at `root`, beside them.
+pub(crate) fn pins_beside(root: &Path) -> PathBuf {
+    root.with_file_name("server-keys.toml")
+}
+
+/// A test's keys are kept in its scratch configuration, never in the
+/// keys of whoever runs it.
+#[cfg(test)]
+pub(crate) fn store_root() -> PathBuf {
+    crate::bookmark_store::config_dir().join("device-keys")
 }
 
 pub(crate) fn build(page: &adw::PreferencesPage) {
@@ -318,14 +331,18 @@ fn summary(d: &Device, now: u64) -> String {
 
 /// What went wrong, in words a person can act on.
 fn plain(f: &Failed) -> String {
-    let e = match f {
-        Failed::Store(e) => e,
+    match f {
+        Failed::Store(e) => plain_error(e),
         Failed::Bundle(err) => {
             // TRANSLATORS: %s is the system's reason.
-            return tr_argv("The bundle could not be read: %s", &[&err.to_string()]);
+            tr_argv("The bundle could not be read: %s", &[&err.to_string()])
         }
-        Failed::BundleTooLarge => return tr("That file is too large to be a certificate bundle."),
-    };
+        Failed::BundleTooLarge => tr("That file is too large to be a certificate bundle."),
+    }
+}
+
+/// What the store refused, in words a person can act on.
+pub(crate) fn plain_error(e: &Error) -> String {
     match e {
         Error::Io(err) => tr_argv(
             // TRANSLATORS: %s is the system's reason.
@@ -353,6 +370,9 @@ fn plain(f: &Failed) -> String {
         ),
         Error::Older { .. } => tr("The device key kept here has a newer certificate."),
         Error::WrongHost => tr("The server's challenge was for another address."),
+        Error::PinChanged => {
+            tr("The server's key was changed here meanwhile. Connect again to see it.")
+        }
     }
 }
 

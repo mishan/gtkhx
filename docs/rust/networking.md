@@ -100,7 +100,15 @@ challenge is checked and answered off the session's lock, the runtime
 and the delivery of what the server sends, since the pins are read and
 written under a file lock. Whatever the end, the
 session stays logged in, unproved but for the first. Each C open takes
-what was armed for it, refused or not: a reconnect comes back unarmed.
+what was armed for it, refused or not, and proves with it only if it
+goes to the host and port it was armed for: a reconnect comes back
+unarmed, so gtkhx-ui arms every connect it makes (`device_pick.rs`),
+with the device the Connect dialog or the saved connection names, or
+none, and disarms after, since a connect can return before any open. A
+key that changed carries the challenge it came in, which the user may
+trust (`key_changed.rs`, `Pins::accept`) for the next connect, and a
+callback connection keeps how its proof ended (`connection_proof`) for
+the header's badge.
 
 Every reply reaches C, the session's own included — a refused agree or
 login is dispatched and reported as any refused request is — but those C

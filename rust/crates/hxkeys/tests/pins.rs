@@ -160,8 +160,15 @@ fn decide(v: &Json, case: &Json, path: &Path) -> Json {
             }
             let before = std::fs::read(path).ok();
             let mut pins = Pins::load(path).unwrap();
+            let was = pins.pinned(host).cloned();
             match pins
-                .accept(host, &challenge, &chain, &Warning::Recommitted)
+                .accept(
+                    host,
+                    was.as_ref(),
+                    &challenge,
+                    &chain,
+                    &Warning::Recommitted,
+                )
                 .unwrap()
             {
                 Ok(t) => {
@@ -249,7 +256,11 @@ fn a_fork_the_user_accepts_is_not_warned_of_again() {
     else {
         panic!("a fork warns");
     };
-    assert!(pins.accept(host, &c1, &stray, &w).unwrap().is_ok());
+    let was = pins.pinned(host).cloned();
+    assert!(pins
+        .accept(host, was.as_ref(), &c1, &stray, &w)
+        .unwrap()
+        .is_ok());
     let mut pins = Pins::load(&path).unwrap();
     assert!(matches!(
         pins.check(host, &c1, &stray, now).unwrap(),
@@ -296,7 +307,7 @@ fn a_challenge_is_checked_only_for_the_host_it_was_signed_for() {
             "{host}"
         );
         assert!(matches!(
-            pins.accept(host, &c1, none, &Warning::Recommitted),
+            pins.accept(host, None, &c1, none, &Warning::Recommitted),
             Err(hxkeys::Error::WrongHost)
         ));
     }
@@ -404,4 +415,44 @@ fn a_host_is_one_however_it_is_written_and_each_port_its_own() {
         );
         assert!(pins.pinned(bad).is_none(), "{bad}");
     }
+}
+
+/// A change accepted once the pin the user was shown has changed is
+/// refused, and changes nothing.
+#[test]
+fn an_accept_is_refused_once_the_pin_it_was_shown_has_changed() {
+    let host = "hl.example:5500";
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let challenge = |seed: u8| {
+        let key = hl_identity::ServerKey::from_seed(&[seed; 32]);
+        let signed = ServerChallenge::sign_trtp(&key, &[1; 32], host, now + 60, None).unwrap();
+        ServerChallenge::parse_trtp(&signed).unwrap()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("server-keys.toml");
+    let none: &[Vec<u8>] = &[];
+    let (c8, c9, c10) = (challenge(8), challenge(9), challenge(10));
+    Pins::load(&path)
+        .unwrap()
+        .check(host, &c8, none, now)
+        .unwrap();
+    let mut pins = Pins::load(&path).unwrap();
+    let Outcome::Warn(w) = pins.check(host, &c9, none, now).unwrap() else {
+        panic!("a changed key warns");
+    };
+    let shown = pins.pinned(host).cloned();
+    Pins::load(&path)
+        .unwrap()
+        .accept(host, shown.as_ref(), &c10, none, &w)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        pins.accept(host, shown.as_ref(), &c9, none, &w),
+        Err(hxkeys::Error::PinChanged)
+    ));
+    let kept = Pins::load(&path).unwrap().pinned(host).unwrap().key;
+    assert_eq!(kept, c10.server_key, "the pin made meanwhile kept");
 }

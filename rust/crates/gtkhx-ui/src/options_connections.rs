@@ -63,6 +63,7 @@ struct Editor {
     icon_row: adw::ActionRow,
     icon_preview: gtk::Picture,
     icon_clear: gtk::Button,
+    device: crate::device_pick::Picker,
     hope_row: adw::SwitchRow,
     tls_row: adw::SwitchRow,
     cipher_row: adw::ComboRow,
@@ -290,6 +291,7 @@ fn form_from_bookmark(e: &Editor, d: &Bookmark) {
 
     set_icon_override(d.icon);
     refresh_icon_row(e);
+    e.device.choose(d.device_identity.as_deref());
 
     e.hope_row.set_active(d.hope);
     e.tls_row.set_active(d.tls);
@@ -319,6 +321,7 @@ fn save_form_as(e: &Editor, name: &str) -> Result<(), String> {
         // equivalent to pressing "Use default".
         nick: Some(e.nick_row.text().to_string()).filter(|t| !t.is_empty()),
         icon: icon_override(),
+        device_identity: e.device.chosen(),
         hope: e.hope_row.is_active(),
         cipher: cipher_vocab::dropdown_to_cipher_byte(e.cipher_row.selected()),
         compress: e.compress_row.selected() as u8,
@@ -662,6 +665,8 @@ fn open_editor(anchor: &gtk::Widget, name: Option<&str>) {
     icon_row.add_suffix(&icon_choose);
     icon_row.add_suffix(&icon_clear);
     identity_group.add(&icon_row);
+    let device = crate::device_pick::Picker::new(&crate::options_device_keys::store_root());
+    identity_group.add(&device.row);
     page.add(&identity_group);
 
     // ---- Transport ----
@@ -743,6 +748,7 @@ fn open_editor(anchor: &gtk::Widget, name: Option<&str>) {
         icon_row,
         icon_preview,
         icon_clear,
+        device,
         hope_row,
         tls_row,
         cipher_row,
@@ -907,4 +913,38 @@ pub(crate) fn build(page: &adw::PreferencesPage) {
     export.connect_activated(|row| on_export_legacy(row.upcast_ref()));
     tools.add(&export);
     page.add(&tools);
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// A saved connection's device is shown in its editor and saved as
+    /// chosen, none included.
+    pub(crate) fn check_editor_keeps_its_device() {
+        let name = "Editor device test";
+        let id = hxkeys::Fingerprint([5; 32]).to_string();
+        bookmark_store::upsert(Bookmark {
+            name: name.into(),
+            server: "hl.example".into(),
+            device_identity: Some(id.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+        let saved = || bookmark_store::find(name).unwrap().unwrap().device_identity;
+
+        open_editor(
+            gtk::Box::new(gtk::Orientation::Vertical, 0).upcast_ref(),
+            Some(name),
+        );
+        let e = editor().expect("open");
+        assert_eq!(e.device.chosen(), Some(id.clone()));
+        save_form_as(&e, name).unwrap();
+        assert_eq!(saved(), Some(id), "kept though not kept here");
+        e.device.choose(None);
+        save_form_as(&e, name).unwrap();
+        assert_eq!(saved(), None);
+        e.dialog.close();
+        bookmark_store::delete(name).unwrap();
+    }
 }
