@@ -79,6 +79,11 @@ pub struct Bookmark {
     /// rather than a sentinel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<u16>,
+
+    /// The fingerprint of the identity whose device key proves on this
+    /// server, in its display form. `None` proves with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_identity: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -350,6 +355,7 @@ mod tests {
             tls: true,
             nick: None,
             icon: None,
+            device_identity: None,
         });
         store.upsert(bm("S2", "b.example"));
 
@@ -482,6 +488,7 @@ mod override_tests {
 
         assert!(!text.contains("nick"), "{text}");
         assert!(!text.contains("icon"), "{text}");
+        assert!(!text.contains("device_identity"), "{text}");
 
         let back: Store = toml::from_str(&text).expect("parse");
         assert_eq!(back.find("Server").unwrap().nick, None);
@@ -494,6 +501,7 @@ mod override_tests {
         store.upsert(Bookmark {
             nick: Some("someone else".into()),
             icon: Some(410),
+            device_identity: Some("fingerprint".into()),
             ..plain()
         });
         let text = toml::to_string_pretty(&store).expect("serialize");
@@ -502,6 +510,7 @@ mod override_tests {
         let bm = back.find("Server").expect("found");
         assert_eq!(bm.nick.as_deref(), Some("someone else"));
         assert_eq!(bm.icon, Some(410));
+        assert_eq!(bm.device_identity.as_deref(), Some("fingerprint"));
     }
 
     #[test]
@@ -542,6 +551,7 @@ mod override_tests {
         let bm = Bookmark {
             nick: Some("someone else".into()),
             icon: Some(410),
+            device_identity: Some("fingerprint".into()),
             ..plain()
         };
         let bytes = legacy::write(&bm);
@@ -551,6 +561,7 @@ mod override_tests {
         back.name = bm.name.clone();
         assert_eq!(back.nick, None);
         assert_eq!(back.icon, None);
+        assert_eq!(back.device_identity, None);
         // Everything the format *does* carry still round-trips.
         assert_eq!(back.server, bm.server);
     }

@@ -39,8 +39,13 @@ pub enum Proof {
     Refused { reason: Option<String> },
     /// The server's key for `host`, or with `Warning::Recommitted` its
     /// commitment to the key after it, is not the one pinned for it:
-    /// nothing was signed. No served handovers are followed yet.
-    KeyChanged { host: String, warning: Warning },
+    /// nothing was signed. No served handovers are followed yet. The user
+    /// may trust `challenge`'s key instead, with [`Pins::accept`].
+    KeyChanged {
+        host: String,
+        warning: Warning,
+        challenge: Box<ServerChallenge>,
+    },
     /// Nothing was signed, for a reason of this side's: `why`.
     NotProved { why: String },
     /// No answer came before this side's deadline, and the session joined
@@ -86,6 +91,8 @@ pub enum Error {
     /// A challenge signed for another host than the one it is checked
     /// for.
     WrongHost,
+    /// The pin a change was accepted against has changed since.
+    PinChanged,
 }
 
 impl fmt::Display for Error {
@@ -107,6 +114,7 @@ impl fmt::Display for Error {
                 write!(f, "a later certificate, issued at {kept_issued}, is kept")
             }
             Error::WrongHost => write!(f, "the challenge is for another host"),
+            Error::PinChanged => write!(f, "the pin has changed since it was shown"),
         }
     }
 }

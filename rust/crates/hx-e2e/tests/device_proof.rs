@@ -248,6 +248,54 @@ fn a_proof_refused_or_not_signed_leaves_the_session_logged_in_unproved() {
     assert_eq!(shown(&n), None, "not proved");
 }
 
+/// A changed key the user trusts, as the key-changed dialog trusts it, is
+/// proved with on the next login.
+#[test]
+fn a_changed_key_once_trusted_is_proved_with() {
+    let Some(s) = server() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let pins = dir.path().join("server-keys.toml");
+    let asked = format!("{}:{}", s.host, s.port);
+    let other = ServerKey::from_seed(&[0x78; 32]);
+    let c = hl_identity::ServerChallenge::sign_trtp(&other, &[1; 32], &asked, unix() + 60, None)
+        .unwrap();
+    let c = hl_identity::ServerChallenge::parse_trtp(&c).unwrap();
+    hxkeys::Pins::load(&pins)
+        .unwrap()
+        .check(&asked, &c, &[] as &[Vec<u8>], unix())
+        .unwrap();
+    let changed = login(
+        s,
+        dir.path(),
+        s.host,
+        Transport::Plain,
+        ("device-a", &nick()),
+        A,
+    );
+    let (host, warning, challenge) = match changed.proofs() {
+        [Proof::KeyChanged {
+            host,
+            warning,
+            challenge,
+        }] => (host.clone(), warning.clone(), challenge.clone()),
+        other => panic!("{other:?}"),
+    };
+    drop(changed);
+    let mut kept = hxkeys::Pins::load(&pins).unwrap();
+    let was = kept.pinned(&host).cloned();
+    kept.accept(&host, was.as_ref(), &challenge, &[] as &[Vec<u8>], &warning)
+        .unwrap()
+        .unwrap();
+    let n = nick();
+    let trusted = login(s, dir.path(), s.host, Transport::Plain, ("device-a", &n), A);
+    assert!(
+        matches!(trusted.proofs(), [Proof::Proved { .. }]),
+        "{:?}",
+        trusted.proofs()
+    );
+    assert_eq!(shown(&n), Some(fingerprint(A)));
+}
+
 /// A server that never agrees to bit 14 is logged in to as ever, no proof
 /// begun or ended, and the name the login goes by reaches it, under HOPE
 /// too.

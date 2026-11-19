@@ -127,16 +127,22 @@ impl Pins {
     /// commitment again, taking no aliases from `chain`, and keeping the
     /// records held (§5.3, §5.4). A fork accepted is not warned of again.
     /// A chain that forks against the records otherwise is refused with
-    /// its own warning, which changes nothing.
+    /// its own warning, which changes nothing. `was` is the pin the user
+    /// was shown, none for none: one that has changed since is refused
+    /// with [`Error::PinChanged`], which changes nothing.
     pub fn accept<B: AsRef<[u8]>>(
         &mut self,
         host: &str,
+        was: Option<&Pin>,
         challenge: &ServerChallenge,
         chain: &[B],
         warning: &Warning,
     ) -> Result<Result<Trusted, Warning>, Error> {
         let host = &for_host(host, challenge)?;
         self.change(host, |pin| {
+            if pin != was {
+                return (None, Err(Error::PinChanged));
+            }
             let mut pin = pin.cloned().unwrap_or_else(|| first(challenge, Vec::new()));
             if let Warning::Fork { sha256 } = warning {
                 if !pin.dismissed.contains(sha256) {
@@ -144,12 +150,12 @@ impl Pins {
                 }
             }
             if let Err(w) = handover::repin(chain, &pin.followed, &pin.dismissed) {
-                return (None, Err(w));
+                return (None, Ok(Err(w)));
             }
             pin.key = challenge.server_key;
             pin.commitment = challenge.next;
-            (Some(pin), Ok(Trusted(challenge.clone())))
-        })
+            (Some(pin), Ok(Ok(Trusted(challenge.clone()))))
+        })?
     }
 
     /// Forget `host`, so that the next contact is a first one.

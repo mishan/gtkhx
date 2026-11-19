@@ -1,7 +1,8 @@
-//! A line in a connection's chat saying how its device proof ended
-//! (`device-proof`).
+//! How a connection's device proof ended (`device-proof`): a line in its
+//! chat, the header's badge, and for a server key that changed, whether to
+//! trust it.
 
-use std::ffi::c_char;
+use std::ffi::{c_char, c_void};
 use std::sync::Once;
 
 use gtkhx_core::session::{
@@ -9,6 +10,7 @@ use gtkhx_core::session::{
 };
 use hxkeys::{Proof, Warning};
 
+use crate::options_device_keys::{pins_beside, store_root};
 use crate::tr::{tr, tr_argv};
 
 extern "C" {
@@ -31,12 +33,13 @@ fn line(p: &Proof) -> String {
         Proof::KeyChanged {
             host,
             warning: Warning::Recommitted,
+            ..
         } => tr_argv(
-            "device not proved: the server at %s names another next key than the one first seen there",
+            "device not proved: the server at %s names another next key than the one pinned for it",
             &[host],
         ),
         Proof::KeyChanged { host, .. } => tr_argv(
-            "device not proved: the server key for %s is not the one first seen there",
+            "device not proved: the server key for %s is not the one pinned for it",
             &[host],
         ),
         Proof::NotProved { why } => tr_argv("device not proved: %s", &[why]),
@@ -45,23 +48,43 @@ fn line(p: &Proof) -> String {
     text.replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
+/// Put `text` in `htlc`'s chat, as the client's own line.
+pub(crate) fn say(htlc: *mut c_void, text: &str) {
+    let line = crate::cs(&(text.to_owned() + "\n"));
+    // SAFETY: called on the main thread for a live connection.
+    unsafe {
+        gtkhx_session_emit_chat_log_line(
+            gtkhx_session_get_default(),
+            htlc,
+            0,
+            INFOPREFIX,
+            crate::broadcast::INFO_COLOR,
+            line.as_ptr(),
+        )
+    };
+}
+
 /// Tell each connection's chat how its proof ended. Once.
 pub(crate) fn install() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         connect_device_proof(|htlc, p| {
-            let line = crate::cs(&(line(p) + "\n"));
-            // SAFETY: the signal names a live connection, on the main thread.
-            unsafe {
-                gtkhx_session_emit_chat_log_line(
-                    gtkhx_session_get_default(),
-                    htlc,
-                    0,
-                    INFOPREFIX,
-                    crate::broadcast::INFO_COLOR,
-                    line.as_ptr(),
-                )
-            };
+            say(htlc, &line(p));
+            crate::encryption_lock::proof_told(htlc);
+            if let Proof::KeyChanged {
+                host,
+                warning,
+                challenge,
+            } = p
+            {
+                crate::key_changed::ask(
+                    crate::key_changed::active_window().as_ref(),
+                    pins_beside(&store_root()),
+                    host.clone(),
+                    (**challenge).clone(),
+                    warning.clone(),
+                );
+            }
         });
     });
 }

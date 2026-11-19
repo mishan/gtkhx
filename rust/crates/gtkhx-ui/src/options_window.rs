@@ -522,9 +522,7 @@ pub(crate) mod tests {
     /// being a `#[test]` of its own — see there for why the crate gets
     /// exactly one.
     pub(crate) fn check_every_page_builds() {
-        // The Device Keys page would read this user's keys; its own test
-        // builds it on a store of its own.
-        for entry in entries().iter().filter(|e| e.name != "device_keys") {
+        for entry in &entries() {
             let page = adw::PreferencesPage::new();
             page.set_title(entry.title);
             (entry.draw)(&page);

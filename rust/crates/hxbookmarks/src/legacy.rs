@@ -73,6 +73,7 @@ pub fn parse(bytes: &[u8]) -> Option<Bookmark> {
         // inventing a field the other side would not understand.
         nick: None,
         icon: None,
+        device_identity: None,
     })
 }
 
@@ -185,6 +186,7 @@ mod tests {
             tls: false,
             nick: None,
             icon: None,
+            device_identity: None,
         }
     }
 

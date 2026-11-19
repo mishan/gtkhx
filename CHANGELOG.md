@@ -4,6 +4,10 @@
   - A Friends section below the user list holds friend requests to accept or decline, friends online and offline, requests you sent and accounts you blocked; Add Friend and Block are in a user's menu
   - Message a friend even while they're offline: each message says whether it was sent, delivered or read, and the conversation shows when they're typing; a message or friend request is announced and chimed as a private message is
   - Message requests: where the server serves them, someone who isn't your friend can write to you, and what they send waits in Message Requests until you approve, reply, add them as a friend, delete or block them. GtkHx accepts message requests the first time each account connects to such a server; Accept Message Requests in the Friends menu turns that off, and Message… writes to someone by their login
+- Device keys, on servers that prove devices, such as hxd-ng
+  - Settings has a Device Keys page, keeping a device key for each of your identities: import one hlid made, or make one here and add the certificate bundle hlid cert writes for it
+  - Choose the device key a connection proves with in the Connect dialog or on a saved connection; once the server takes the proof, a fingerprint beside the title says which identity the connection is proved as
+  - When a server's key is not the one first seen there, GtkHx proves nothing, says so, and asks whether to trust the new key for the next connection
 - Replies and reactions, on servers that take them, such as hxd-ng
   - Reply to a line in the public chat, a private chat or a room, or to an instant or private message, from its menu or with R; a reply is headed by the line it answers, and the header takes you to that line, in the public chat paging back through the history to find it
   - React to a line or a message with an emoji from its menu, or tap a reaction to add yours; on a chat line, see who reacted and, as a moderator, clear its reactions
