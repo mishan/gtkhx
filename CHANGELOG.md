@@ -28,6 +28,8 @@
   - Fixed the third page of older history landing below the second
 - News
   - Post News left open while its connection drops posts when it's back on the same server, rather than refusing until closed
+- Connecting
+  - A wrong password with secure login (HOPE) on says the server's reason, such as "Login failed.", rather than a protocol error
 - Accessibility
   - Ctrl+Tab and Ctrl+Shift+Tab leave a chat input however many conversations are open, and Ctrl+PgUp and Ctrl+PgDn switch between them; F6 leaves a private chat, and Tab leaves a message input
   - The tab strips say which tab is selected and which are unread, the pinned public chat's tab is named, and connections sharing a name are numbered

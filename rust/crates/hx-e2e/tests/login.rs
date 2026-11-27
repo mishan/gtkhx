@@ -177,6 +177,25 @@ fn a_refusal_carries_the_servers_reason() {
     }
 }
 
+/// A HOPE login the server refuses agrees no keys, so the refusal comes
+/// in the clear: read as the server's reason whatever cipher was offered,
+/// not as a transport gone wrong. A login no account has, so no account
+/// the rig shares is held to the failures.
+#[test]
+fn a_refused_hope_login_carries_the_servers_reason() {
+    let nobody = hx_e2e::unique_name("nobody");
+    for cipher in [
+        None,
+        Some(hxhope::Cipher::Blowfish),
+        Some(hxhope::Cipher::ChaCha20Poly1305),
+    ] {
+        match log_in(5520, &nobody, "wrong", Over::Hope(cipher)) {
+            Outcome::Refused(Some(why)) => assert_eq!(why, "Login failed.", "{cipher:?}"),
+            other => panic!("{cipher:?}: {other:?}"),
+        }
+    }
+}
+
 /// A LOGIN offering the draft bits (17 and up) carries its capabilities in
 /// four bytes, not two. A server must take the wider field (a classic one
 /// that agrees to nothing still has to log the guest in), agree to the same
